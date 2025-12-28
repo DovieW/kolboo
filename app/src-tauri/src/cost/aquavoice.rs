@@ -25,7 +25,8 @@ pub fn asr_usd_micros_per_hour(model: &str) -> Option<UsdMicros> {
     let m = model.trim();
 
     Some(match m {
-        "avalon-1" => usd_micros(390_000),
+        // Current dashboard/API model IDs
+        "avalon-v1-en" => usd_micros(390_000),
         _ => return None,
     })
 }
@@ -52,12 +53,12 @@ mod tests {
 
     #[test]
     fn rates_exist_for_known_models() {
-        assert!(asr_usd_micros_per_hour("avalon-1").is_some());
+        assert!(asr_usd_micros_per_hour("avalon-v1-en").is_some());
         assert!(asr_usd_micros_per_hour("unknown").is_none());
     }
 
     #[test]
     fn estimate_zero_is_zero() {
-        assert_eq!(estimate_stt_cost_from_audio_secs("avalon-1", 0.0), Some(0));
+        assert_eq!(estimate_stt_cost_from_audio_secs("avalon-v1-en", 0.0), Some(0));
     }
 }

@@ -4,6 +4,7 @@
 //! allowing easy switching between different speech recognition services.
 
 mod aquavoice;
+mod assemblyai;
 mod deepgram;
 mod groq;
 mod openai;
@@ -13,6 +14,7 @@ mod retry;
 mod whisper;
 
 pub use aquavoice::AquavoiceSttProvider;
+pub use assemblyai::AssemblyAiSttProvider;
 pub use deepgram::DeepgramSttProvider;
 pub use groq::GroqSttProvider;
 pub use openai::OpenAiSttProvider;

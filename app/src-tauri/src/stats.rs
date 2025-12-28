@@ -18,6 +18,7 @@ use crate::cost::aquavoice as aquavoice_cost;
 use crate::cost::gemini as gemini_cost;
 use crate::cost::anthropic as anthropic_cost;
 use crate::cost::deepgram as deepgram_cost;
+use crate::cost::assemblyai as assemblyai_cost;
 use tauri::AppHandle;
 use tauri::{Manager, Emitter};
 use crate::request_log::RequestLogStore;
@@ -95,14 +96,14 @@ impl CostEvent {
 }
 
 fn is_free_tier_call(app: &AppHandle, provider: &str) -> bool {
-    if provider != "groq" {
-        return false;
-    }
-
     #[cfg(desktop)]
     {
         // Default to true, matching UI expectations.
-        return crate::get_setting_from_store(app, "groq_free_tier", true);
+        return match provider {
+            "groq" => crate::get_setting_from_store(app, "groq_free_tier", true),
+            "assemblyai" => crate::get_setting_from_store(app, "assemblyai_free_tier", true),
+            _ => false,
+        };
     }
 
     #[cfg(not(desktop))]
@@ -592,6 +593,16 @@ pub fn emit_cost_events_for_current_request(
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
                     if let Some(micros) = aquavoice_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                        ev.estimated_cost_usd_micros = Some(micros);
+                    }
+                }
+            }
+        }
+
+        if inputs.stt_provider == "assemblyai" {
+            if ev.estimated_cost_usd_micros.is_none() {
+                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                    if let Some(micros) = assemblyai_cost::estimate_stt_cost_from_audio_secs(model, secs) {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }

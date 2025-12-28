@@ -11,7 +11,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link as LinkIcon } from "lucide-react";
 import { configAPI, tauriAPI } from "../../lib/tauri";
-import { useSettings, useUpdateGroqFreeTier } from "../../lib/queries";
+import { LLM_MODELS, STT_MODELS } from "../../lib/modelOptions";
+import {
+  useSettings,
+  useUpdateAssemblyAiFreeTier,
+  useUpdateGroqFreeTier,
+} from "../../lib/queries";
 
 const GLOBAL_ONLY_TOOLTIP =
   "This setting can only be changed in the Default profile";
@@ -33,11 +38,18 @@ const API_KEYS: ApiKeyConfig[] = [
     getKeyUrl: "https://console.groq.com/keys",
   },
   {
+    id: "assemblyai",
+    label: "AssemblyAI",
+    placeholder: "Enter API key",
+    storeKey: "assemblyai_api_key",
+    getKeyUrl: "https://www.assemblyai.com/dashboard/api-keys",
+  },
+  {
     id: "aquavoice",
     label: "Aquavoice (Avalon)",
     placeholder: "Enter API key",
     storeKey: "aquavoice_api_key",
-    getKeyUrl: "https://app.aquavoice.com/api-dashboard?tab=docs",
+    getKeyUrl: "https://app.aquavoice.com/api-dashboard?tab=keys",
   },
   {
     id: "gemini",
@@ -71,6 +83,17 @@ const API_KEYS: ApiKeyConfig[] = [
 
 export const API_KEY_STORE_KEYS = API_KEYS.map((k) => k.storeKey);
 
+function formatProviderModelCounts(providerId: string): string | null {
+  const sttCount = STT_MODELS[providerId]?.length ?? 0;
+  const llmCount = LLM_MODELS[providerId]?.length ?? 0;
+
+  const parts: string[] = [];
+  if (sttCount > 0) parts.push(`${sttCount} STT`);
+  if (llmCount > 0) parts.push(`${llmCount} LLM`);
+  if (parts.length === 0) return null;
+  return parts.join(" / ");
+}
+
 function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
@@ -79,6 +102,7 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 
   const { data: settings } = useSettings();
   const updateGroqFreeTier = useUpdateGroqFreeTier();
+  const updateAssemblyAiFreeTier = useUpdateAssemblyAiFreeTier();
 
   const { data: savedKeyValue } = useQuery({
     queryKey: ["apiKeyValue", config.storeKey],
@@ -126,6 +150,8 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
     trimmedValue.length > 0 &&
     trimmedValue === trimmedSaved;
 
+  const modelCountsLabel = formatProviderModelCounts(config.id);
+
   return (
     <div className="settings-row api-keys-row">
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -154,8 +180,41 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
             </Text>
           </Group>
         )}
+        {config.id === "assemblyai" && (
+          <Group gap={10} align="center" wrap="nowrap" mt={2}>
+            <Switch
+              size="sm"
+              checked={settings?.assemblyai_free_tier ?? true}
+              onChange={(e) =>
+                updateAssemblyAiFreeTier.mutate(e.currentTarget.checked)
+              }
+              aria-label="AssemblyAI free tier"
+            />
+            <Text size="xs" c="var(--text-secondary)" fw={600}>
+              Free tier
+            </Text>
+            <Text
+              size="xs"
+              c="var(--text-muted)"
+              className="settings-description--single-line"
+              style={{ flex: 1 }}
+              title="Assume AssemblyAI calls cost $0 for stats"
+            >
+              Assume AssemblyAI calls cost $0 for stats
+            </Text>
+          </Group>
+        )}
       </div>
       <div className="settings-row-actions">
+        {modelCountsLabel && (
+          <Text
+            size="xs"
+            c="var(--text-muted)"
+            style={{ alignSelf: "center", whiteSpace: "nowrap" }}
+          >
+            {modelCountsLabel}
+          </Text>
+        )}
         <Tooltip label="Get key" withArrow>
           <ActionIcon
             component="a"

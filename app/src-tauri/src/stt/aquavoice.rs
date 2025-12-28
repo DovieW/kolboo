@@ -4,9 +4,9 @@
 //! Docs: https://aquavoice.com/avalon-api
 //!
 //! Implementation notes:
-//! - Uses the OpenAI-compatible `POST /v1/audio/transcriptions` endpoint.
+//! - Uses the OpenAI-compatible `POST /audio/transcriptions` endpoint.
 //! - Auth is via `Authorization: Bearer <api_key>`.
-//! - Model defaults to `avalon-1`.
+//! - Model defaults to `avalon-v1-en`.
 
 use super::{AudioFormat, SttError, SttProvider};
 use async_trait::async_trait;
@@ -25,18 +25,19 @@ pub struct AquavoiceSttProvider {
 }
 
 impl AquavoiceSttProvider {
-    const DEFAULT_BASE_URL: &'static str = "https://api.aqua.sh/v1";
-    // Alternate base URL observed in the wild; used as a best-effort fallback when
-    // the default host presents a TLS certificate for the wrong domain.
-    const FALLBACK_BASE_URL: &'static str = "https://api.aquavoice.com/v1";
-    const DEFAULT_MODEL: &'static str = "avalon-1";
+    // Primary Aquovoice Avalon API base URL.
+    // Observed working endpoint:
+    //   https://api.aquavoice.com/api/v1/audio/transcriptions
+    const DEFAULT_BASE_URL: &'static str = "https://api.aquavoice.com/api/v1";
+    // NOTE: The dashboard API uses `avalon-v1-en` style model identifiers.
+    const DEFAULT_MODEL: &'static str = "avalon-v1-en";
     const PROMPT_MAX_CHARS: usize = 224;
 
     /// Create a new Aquavoice STT provider.
     ///
     /// # Arguments
     /// * `api_key` - Aquavoice API key
-    /// * `model` - Model to use (default: `avalon-1`)
+    /// * `model` - Model to use (default: `avalon-v1-en`)
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
     pub fn new(
         api_key: String,
@@ -51,7 +52,8 @@ impl AquavoiceSttProvider {
         Self {
             client,
             api_key,
-            model: model.unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
+            model: Self::normalize_model(model)
+                .unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
             request_log_store: None,
         }
@@ -68,7 +70,8 @@ impl AquavoiceSttProvider {
         Self {
             client,
             api_key,
-            model: model.unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
+            model: Self::normalize_model(model)
+                .unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
             request_log_store: None,
         }
@@ -85,6 +88,16 @@ impl AquavoiceSttProvider {
 
     fn endpoint(&self) -> String {
         Self::endpoint_for_base_url(Self::DEFAULT_BASE_URL)
+    }
+
+    fn normalize_model(model: Option<String>) -> Option<String> {
+        let raw = model?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        Some(trimmed.to_string())
     }
 
     fn looks_like_tls_hostname_mismatch(err: &reqwest::Error) -> bool {
@@ -109,7 +122,7 @@ impl AquavoiceSttProvider {
                 "This usually indicates the server certificate being presented is not valid for the documented host on this machine. ",
             );
             msg.push_str(
-                "Tambourine Voice will automatically retry via an alternate Aquovoice host. If the problem persists, please check Aquovoice status or contact Aquovoice support.",
+                "If the problem persists, please check Aquovoice status or contact Aquovoice support.",
             );
         }
         msg
@@ -193,49 +206,10 @@ impl SttProvider for AquavoiceSttProvider {
                     return Err(SttError::Timeout);
                 }
 
-                // If the default host is presenting a TLS certificate for the wrong
-                // domain (observed on Windows), try the alternate Aquovoice API host.
-                if Self::looks_like_tls_hostname_mismatch(&e) {
-                    let fallback_endpoint = Self::endpoint_for_base_url(Self::FALLBACK_BASE_URL);
-                    log::warn!(
-                        "Aquovoice STT: TLS/hostname mismatch at {}, retrying via {}",
-                        endpoint,
-                        fallback_endpoint
-                    );
-
-                    if let Some(store) = &self.request_log_store {
-                        store.with_current(|log| {
-                            log.warn(
-                                "Aquovoice STT: TLS/hostname mismatch at api.aqua.sh; retrying via api.aquavoice.com",
-                            );
-                        });
-                    }
-
-                    match self
-                        .client
-                        .post(fallback_endpoint.clone())
-                        .bearer_auth(&self.api_key)
-                        .multipart(make_form()?)
-                        .send()
-                        .await
-                    {
-                        Ok(r) => r,
-                        Err(e2) => {
-                            if e2.is_timeout() {
-                                return Err(SttError::Timeout);
-                            }
-                            return Err(SttError::NetworkMessage(Self::network_error_message(
-                                &fallback_endpoint,
-                                &e2,
-                            )));
-                        }
-                    }
-                } else {
-                    return Err(SttError::NetworkMessage(Self::network_error_message(
-                        &endpoint,
-                        &e,
-                    )));
-                }
+                return Err(SttError::NetworkMessage(Self::network_error_message(
+                    &endpoint,
+                    &e,
+                )));
             }
         };
 
@@ -275,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_provider_creation() {
-        let provider = AquavoiceSttProvider::new("test-key".to_string(), None, None, None);
+        let provider = AquavoiceSttProvider::new("test-key".to_string(), None, None);
         assert_eq!(provider.name(), "aquavoice");
         assert_eq!(provider.model, AquavoiceSttProvider::DEFAULT_MODEL);
     }
@@ -284,11 +258,10 @@ mod tests {
     fn test_provider_with_custom_model() {
         let provider = AquavoiceSttProvider::new(
             "test-key".to_string(),
-            Some("avalon-1".to_string()),
-            None,
+            Some("avalon-v1-en".to_string()),
             None,
         );
-        assert_eq!(provider.model, "avalon-1");
+        assert_eq!(provider.model, "avalon-v1-en");
     }
 
     #[test]

@@ -4,7 +4,12 @@ export type ModelOption = { value: string; label: string };
 // This is intentionally shared between Settings pickers and History filters so
 // they always list the same models.
 export const STT_MODELS: Record<string, ModelOption[]> = {
-  aquavoice: [{ value: "avalon-1", label: "Avalon 1" }],
+  aquavoice: [{ value: "avalon-v1-en", label: "Avalon v1 (English)" }],
+  assemblyai: [
+    { value: "universal", label: "Universal" },
+    { value: "slam-1", label: "Slam-1" },
+    { value: "best", label: "Best (Legacy)" },
+  ],
   groq: [
     { value: "whisper-large-v3-turbo", label: "Whisper Large V3 Turbo" },
     { value: "whisper-large-v3", label: "Whisper Large V3" },
