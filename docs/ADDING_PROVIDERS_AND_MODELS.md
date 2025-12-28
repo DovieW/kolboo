@@ -11,6 +11,61 @@ This guide documents the _exact extension points_.
 
 ---
 
+## Pricing / cost estimation (Stats + Logs)
+
+This app has **two cost surfaces**:
+
+1. **Persistent Stats ledger** (used by the Stats UI)
+   - Cost events are emitted from:
+     - `app/src-tauri/src/stats.rs` (`emit_cost_events_for_current_request`)
+   - Events are written as daily JSONL shards under:
+     - `<app_data_dir>/stats/cost-events-YYYY-MM-DD.jsonl`
+   - Aggregation for the Stats UI happens in:
+     - `app/src-tauri/src/commands/stats.rs`
+
+2. **In-memory Request Logs** (used by the Logs UI)
+   - The active request log is enriched with per-call fields like:
+     - `stt_estimated_cost_usd_micros`, `llm_estimated_cost_usd_micros`
+     - `stt_is_free_tier`, `llm_is_free_tier`
+   - These fields are set as a side-effect of emitting cost events in `stats.rs`.
+
+### Where pricing tables live
+
+Provider pricing tables and estimation helpers live in:
+
+- `app/src-tauri/src/cost/openai.rs`
+- `app/src-tauri/src/cost/groq.rs`
+
+Both modules use **USD micros** (`UsdMicros`):
+
+- $1 USD = 1,000,000 micros
+
+### How estimation works
+
+- **LLM** calls: estimate from token usage in `llm_response_json`.
+  - `stats.rs` parses OpenAI-compatible usage fields (chat completions: `usage.prompt_tokens` / `usage.completion_tokens`).
+- **STT** calls: estimate from audio duration.
+  - `stats.rs` prefers WAV-derived duration (ground truth), and may fall back to provider-reported durations when available.
+  - Providers may have special billing rules (example: Groq STT has a **10s minimum billed length**).
+
+### Adding/updating pricing for a provider
+
+When you add a new provider/model (or change model lists), update **both**:
+
+1. Pricing tables/estimators in `app/src-tauri/src/cost/<provider>.rs`.
+2. Emission wiring in `app/src-tauri/src/stats.rs` so `CostEvent.estimated_cost_usd_micros` is filled.
+
+If `estimated_cost_usd_micros` is `None`, the event will still be recorded, but it won’t count as “priced” in Stats.
+
+### Free tier / $0 calls
+
+Some providers support marking calls as free-tier (e.g. Groq via the `groq_free_tier` store setting).
+
+- If a call is free-tier, emit a priced event with cost set to `0` micros.
+- Stats filtering can then exclude free-tier calls without losing event counts.
+
+---
+
 ## Mental model (how settings flow)
 
 1. UI writes to the Store via `app/src/lib/tauri.ts` helpers.
@@ -40,7 +95,7 @@ If these drift, the provider will silently disappear from dropdowns (because it�
 
 ## Add a new LLM provider
 
-### 1) Backend: implement the provider
+### 1) Backend: implement the provider (LLM)
 
 Create a new file:
 
@@ -63,14 +118,14 @@ Minimum expectations:
 - Make `fn name() -> &'static str` return your provider id
 - Make `fn model() -> &str` return the currently configured model string
 
-### 2) Backend: export the module
+### 2) Backend: export the module (LLM)
 
 Edit `app/src-tauri/src/llm/mod.rs`:
 
 - add `mod <your_provider>;`
 - add `pub use <your_provider>::<YourProviderStructName>;`
 
-### 3) Backend: wire provider creation
+### 3) Backend: wire provider creation (LLM)
 
 Edit `create_llm_provider` in:
 
@@ -84,7 +139,7 @@ This is also where provider-specific knobs are applied (examples already present
 - Gemini: `.with_thinking_budget(config.gemini_thinking_budget)`
 - Anthropic: `.with_thinking_budget(config.anthropic_thinking_budget)`
 
-### 4) Backend: add the provider to “available providers”
+### 4) Backend: add the provider to “available providers” (LLM)
 
 Edit `LLM_PROVIDERS` in:
 
@@ -99,7 +154,7 @@ Notes:
 
 This list drives the UI dropdown via `configAPI.getAvailableProviders()`.
 
-### 5) Backend: include the API key in the aggregated `llm_api_keys` map
+### 5) Backend: include the API key in the aggregated `llm_api_keys` map (LLM)
 
 In `sync_pipeline_config` (`app/src-tauri/src/commands/config.rs`), there is a section:
 
@@ -114,7 +169,7 @@ Add your provider id there, otherwise:
 - the provider may appear in the UI
 - but **per-profile overrides / runtime selection will fail** because the pipeline won’t have the key in `llm_api_keys`.
 
-### 6) Backend: set a default model
+### 6) Backend: set a default model (LLM)
 
 There are _two_ sources of truth to keep aligned:
 
@@ -171,7 +226,7 @@ If your provider has special knobs (like “thinking”), you’ll need:
 
 STT providers follow the same shape, but use the `SttProvider` trait.
 
-### 1) Backend: implement STT provider
+### 1) Backend: implement STT provider (STT)
 
 Create:
 
@@ -187,14 +242,14 @@ Follow patterns in:
 - `app/src-tauri/src/stt/groq.rs`
 - `app/src-tauri/src/stt/deepgram.rs`
 
-### 2) Backend: export module
+### 2) Backend: export module (STT)
 
 Edit `app/src-tauri/src/stt/mod.rs`:
 
 - `mod <your_provider>;`
 - `pub use <your_provider>::<YourProviderStructName>;`
 
-### 3) Backend: wire provider creation
+### 3) Backend: wire provider creation (STT)
 
 Edit `PipelineInner::get_or_create_stt_provider` in:
 
@@ -206,7 +261,7 @@ Also ensure the provider id is included in the **API key aggregation** in `sync_
 
 - `for provider in ["openai", "groq", "deepgram"] { ... }`
 
-### 4) Backend: add to available providers list
+### 4) Backend: add to available providers list (STT)
 
 Edit `STT_PROVIDERS` in:
 
@@ -331,6 +386,8 @@ Why gating matters:
 - [ ] Added API key UI entry (`app/src/components/settings/ApiKeysSettings.tsx`)
 - [ ] Added `LLM_MODELS[provider]` entries (`app/src/lib/modelOptions.ts`)
 - [ ] Set default model in both provider `DEFAULT_MODEL` and `llm/defaults.rs`
+- [ ] Added/updated pricing tables in `app/src-tauri/src/cost/<provider>.rs` (if Stats/Logs should show cost)
+- [ ] Wired cost estimation in `app/src-tauri/src/stats.rs` (emit `estimated_cost_usd_micros`)
 - [ ] If structured outputs supported: implemented + gated + parsed
 
 ---
@@ -345,3 +402,5 @@ Why gating matters:
 - [ ] Added API key UI entry (if cloud)
 - [ ] Added `STT_MODELS[provider]` entries (if applicable)
 - [ ] Updated prompting gates in `PromptSettings.tsx` (if applicable)
+- [ ] Added/updated pricing tables in `app/src-tauri/src/cost/<provider>.rs` (if Stats/Logs should show cost)
+- [ ] Wired cost estimation in `app/src-tauri/src/stats.rs` (emit `estimated_cost_usd_micros`)

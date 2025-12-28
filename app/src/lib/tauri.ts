@@ -122,6 +122,51 @@ export type OpenAiReasoningEffort =
   | "high"
   | "xhigh";
 
+export type CostTimeframe = "24h" | "7d" | "30d" | "90d" | "all";
+
+export interface CostSummary {
+  timeframe: CostTimeframe | string;
+  total_usd_micros: number;
+  events_total: number;
+  events_with_cost: number;
+  earliest_included_at: string | null;
+  latest_included_at: string | null;
+}
+
+export interface ProviderCostTotal {
+  provider: string;
+  total_usd_micros: number;
+  events_total: number;
+  events_with_cost: number;
+}
+
+export interface CostByProvider {
+  timeframe: CostTimeframe | string;
+  providers: ProviderCostTotal[];
+}
+
+export type ModelPricingKind = "stt" | "llm";
+
+export interface SttModelPricing {
+  usd_micros_per_minute?: number | null;
+  usd_micros_per_hour?: number | null;
+  min_billed_secs?: number | null;
+}
+
+export interface LlmModelPricing {
+  input_usd_micros_per_1m: number;
+  cached_input_usd_micros_per_1m?: number | null;
+  output_usd_micros_per_1m: number;
+}
+
+export interface ModelPricing {
+  kind: ModelPricingKind;
+  provider: string;
+  model: string;
+  stt?: SttModelPricing | null;
+  llm?: LlmModelPricing | null;
+}
+
 function normalizeOutputMode(value: unknown): OutputMode {
   if (
     value === "paste" ||
@@ -157,6 +202,10 @@ export interface AppSettings {
   stt_transcription_prompt: string | null;
   llm_provider: string | null;
   llm_model: string | null;
+
+  // Provider-specific knobs
+  // When true, treat Groq usage as free-tier (UI-only for now; kept in settings for future backend usage).
+  groq_free_tier: boolean;
 
   // Optional per-provider reasoning/thinking knobs.
   // These are ignored unless the selected provider/model supports them.
@@ -199,6 +248,13 @@ export interface AppSettings {
   transcription_retention_value: number;
   // If enabled, deleting old transcriptions also deletes their recordings (best-effort).
   transcription_retention_delete_recordings: boolean;
+
+  // Persisted stats retention (usage/cost events).
+  // 0 means keep forever.
+  stats_retention_unit: TranscriptionRetentionUnit;
+  stats_retention_value: number;
+  // Defensive cap for on-disk stats storage.
+  stats_retention_max_bytes: number;
 
   // Request logs retention (in-memory request log history)
   request_logs_retention_mode: RequestLogsRetentionMode;
@@ -359,6 +415,13 @@ function normalizeTranscriptionRetentionDeleteRecordings(
   return typeof value === "boolean" ? value : false;
 }
 
+function normalizeStatsRetentionMaxBytes(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 50_000_000;
+  const rounded = Math.round(value);
+  // 1MB..5GB (defensive)
+  return Math.min(5_000_000_000, Math.max(1_000_000, rounded));
+}
+
 function normalizeRequestLogsRetentionMode(
   value: unknown
 ): RequestLogsRetentionMode {
@@ -509,6 +572,56 @@ export const tauriAPI = {
 
   async onStopRecording(callback: () => void): Promise<UnlistenFn> {
     return listen("recording-stop", callback);
+  },
+
+  async getCostSummary(params: {
+    timeframe: CostTimeframe;
+    kind?: "all" | "stt" | "llm";
+    sttModelKeys?: string[];
+    llmModelKeys?: string[];
+    excludeFreeTier?: boolean;
+  }): Promise<CostSummary> {
+    const kind = params.kind === "all" ? undefined : params.kind;
+    return invoke("get_cost_summary_v2", {
+      params: {
+        timeframe: params.timeframe,
+        kind,
+        sttModelKeys: params.sttModelKeys,
+        llmModelKeys: params.llmModelKeys,
+        excludeFreeTier: params.excludeFreeTier,
+      },
+    });
+  },
+
+  async getCostByProvider(params: {
+    timeframe: CostTimeframe;
+    kind?: "all" | "stt" | "llm";
+    sttModelKeys?: string[];
+    llmModelKeys?: string[];
+    excludeFreeTier?: boolean;
+  }): Promise<CostByProvider> {
+    const kind = params.kind === "all" ? undefined : params.kind;
+    return invoke("get_cost_by_provider_v2", {
+      params: {
+        timeframe: params.timeframe,
+        kind,
+        sttModelKeys: params.sttModelKeys,
+        llmModelKeys: params.llmModelKeys,
+        excludeFreeTier: params.excludeFreeTier,
+      },
+    });
+  },
+
+  async getModelPricing(params: {
+    provider: string;
+    kind: ModelPricingKind;
+    model: string;
+  }): Promise<ModelPricing | null> {
+    return invoke("get_model_pricing", {
+      provider: params.provider,
+      kind: params.kind,
+      model: params.model,
+    });
   },
 
   // Settings API - using store plugin directly
@@ -697,6 +810,7 @@ export const tauriAPI = {
         (await store.get<string | null>("stt_transcription_prompt")) ?? null,
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
+      groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
       openai_reasoning_effort: normalizeOpenAiReasoningEffort(
         await store.get("openai_reasoning_effort")
       ),
@@ -736,7 +850,7 @@ export const tauriAPI = {
       quiet_audio_require_speech:
         (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
 
-      noise_gate_threshold_dbfs: await(async () => {
+      noise_gate_threshold_dbfs: await (async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -775,7 +889,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -797,11 +911,31 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })(),
+      })()),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
+
+      // Stats retention (persisted on disk).
+      ...(await (async () => {
+        const rawUnit = await store.get("stats_retention_unit");
+        const rawValue = await store.get("stats_retention_value");
+
+        const unit = normalizeTranscriptionRetentionUnit(rawUnit ?? "days");
+        const value = normalizeTranscriptionRetentionValue(
+          rawValue ?? 30,
+          unit
+        );
+
+        return {
+          stats_retention_unit: unit,
+          stats_retention_value: value,
+        };
+      })()),
+      stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
+        await store.get("stats_retention_max_bytes")
+      ),
     };
   },
 
@@ -907,6 +1041,12 @@ export const tauriAPI = {
   async updateSTTProvider(provider: string | null): Promise<void> {
     const store = await getStore();
     await store.set("stt_provider", provider);
+    await store.save();
+  },
+
+  async updateGroqFreeTier(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("groq_free_tier", !!enabled);
     await store.save();
   },
 
@@ -1190,6 +1330,28 @@ export const tauriAPI = {
     await store.save();
   },
 
+  async updateStatsRetention(params: {
+    unit: TranscriptionRetentionUnit;
+    value: number;
+    max_bytes?: number;
+  }): Promise<void> {
+    const store = await getStore();
+    const unit = normalizeTranscriptionRetentionUnit(params.unit);
+    const value = normalizeTranscriptionRetentionValue(params.value, unit);
+
+    await store.set("stats_retention_unit", unit);
+    await store.set("stats_retention_value", value);
+
+    if (typeof params.max_bytes === "number") {
+      await store.set(
+        "stats_retention_max_bytes",
+        normalizeStatsRetentionMaxBytes(params.max_bytes)
+      );
+    }
+
+    await store.save();
+  },
+
   async isAudioMuteSupported(): Promise<boolean> {
     return invoke("is_audio_mute_supported");
   },
@@ -1308,6 +1470,12 @@ export const tauriAPI = {
     });
   },
 
+  async onStatsChanged(callback: () => void): Promise<UnlistenFn> {
+    return listen("stats-changed", () => {
+      callback();
+    });
+  },
+
   // Settings sync between windows (main -> overlay)
   async emitSettingsChanged(
     payload: Record<string, unknown> = {}
@@ -1422,9 +1590,12 @@ export interface AudioSettingsTestWavs {
 }
 
 export const audioSettingsTestAPI = {
-  startRecording: () => invoke<void>("pipeline_test_audio_settings_start_recording"),
+  startRecording: () =>
+    invoke<void>("pipeline_test_audio_settings_start_recording"),
   stopRecording: () =>
-    invoke<AudioSettingsTestWavs>("pipeline_test_audio_settings_stop_recording"),
+    invoke<AudioSettingsTestWavs>(
+      "pipeline_test_audio_settings_stop_recording"
+    ),
 };
 
 // ============================================================================
@@ -1491,6 +1662,11 @@ export interface RequestLog {
   error_message: string | null;
   entries: LogEntry[];
 
+  stt_is_free_tier: boolean;
+  llm_is_free_tier: boolean;
+  stt_estimated_cost_usd_micros: number | null;
+  llm_estimated_cost_usd_micros: number | null;
+
   // Optional provider payloads for debugging.
   // Binary audio is redacted and represented with placeholders.
   stt_request_json?: unknown;
@@ -1504,11 +1680,42 @@ export interface RecordingsStats {
   bytes: number;
 }
 
+export interface DataStorageSummary {
+  recordings_count: number;
+  recordings_bytes: number;
+  history_count: number;
+  history_bytes: number;
+  request_logs_count: number;
+  stats_files_count: number;
+  stats_bytes: number;
+  settings_bytes: number;
+  api_keys_set_count: number;
+}
+
 export const logsAPI = {
   getRequestLogs: (limit?: number) =>
     invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 100 }),
 
   clearRequestLogs: () => invoke<void>("clear_request_logs"),
+};
+
+// ============================================================================
+// Data / Danger Zone
+// ============================================================================
+
+export const dataAPI = {
+  getStorageSummary: () =>
+    invoke<DataStorageSummary>("get_data_storage_summary"),
+
+  deleteAllRecordings: () => invoke<number>("recordings_delete_all"),
+
+  deleteAllApiKeys: () => invoke<void>("delete_all_api_keys"),
+
+  deleteAllSettings: () => invoke<void>("delete_all_settings"),
+
+  deleteAllStats: () => invoke<void>("delete_all_stats"),
+
+  deleteAllData: () => invoke<void>("delete_all_data"),
 };
 
 // ============================================================================

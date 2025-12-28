@@ -5,6 +5,7 @@ import {
   audioSettingsTestAPI,
   type CleanupPromptSections,
   configAPI,
+  dataAPI,
   type HotkeyConfig,
   llmAPI,
   logsAPI,
@@ -19,7 +20,99 @@ import {
   type TestLlmRewriteResponse,
   validateHotkeyNotDuplicate,
   type WidgetPosition,
+  type CostTimeframe,
+  type ModelPricingKind,
 } from "./tauri";
+
+export function useModelPricing(
+  provider: string | null,
+  kind: ModelPricingKind,
+  model: string | null
+) {
+  return useQuery({
+    queryKey: ["modelPricing", provider ?? "", kind, model ?? ""],
+    enabled: Boolean(provider) && Boolean(model),
+    queryFn: () =>
+      tauriAPI.getModelPricing({
+        provider: provider ?? "",
+        kind,
+        model: model ?? "",
+      }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+export function useCostSummary(
+  timeframe: CostTimeframe,
+  filters?: {
+    kind?: "all" | "stt" | "llm";
+    sttModelKeys?: string[];
+    llmModelKeys?: string[];
+    excludeFreeTier?: boolean;
+  }
+) {
+  const kind = filters?.kind;
+  const sttModelKeys = (filters?.sttModelKeys ?? []).slice().sort();
+  const llmModelKeys = (filters?.llmModelKeys ?? []).slice().sort();
+  const excludeFreeTier = filters?.excludeFreeTier ?? true;
+
+  return useQuery({
+    queryKey: [
+      "costSummary",
+      timeframe,
+      kind ?? "all",
+      excludeFreeTier ? "exclude_free" : "include_free",
+      sttModelKeys,
+      llmModelKeys,
+    ],
+    queryFn: () =>
+      tauriAPI.getCostSummary({
+        timeframe,
+        kind,
+        sttModelKeys,
+        llmModelKeys,
+        excludeFreeTier,
+      }),
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useCostByProvider(
+  timeframe: CostTimeframe,
+  filters?: {
+    kind?: "all" | "stt" | "llm";
+    sttModelKeys?: string[];
+    llmModelKeys?: string[];
+    excludeFreeTier?: boolean;
+  }
+) {
+  const kind = filters?.kind;
+  const sttModelKeys = (filters?.sttModelKeys ?? []).slice().sort();
+  const llmModelKeys = (filters?.llmModelKeys ?? []).slice().sort();
+  const excludeFreeTier = filters?.excludeFreeTier ?? true;
+
+  return useQuery({
+    queryKey: [
+      "costByProvider",
+      timeframe,
+      kind ?? "all",
+      excludeFreeTier ? "exclude_free" : "include_free",
+      sttModelKeys,
+      llmModelKeys,
+    ],
+    queryFn: () =>
+      tauriAPI.getCostByProvider({
+        timeframe,
+        kind,
+        sttModelKeys,
+        llmModelKeys,
+        excludeFreeTier,
+      }),
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
+  });
+}
 
 export function useTypeText() {
   return useMutation({
@@ -530,6 +623,16 @@ export function useRecordingsStats() {
   });
 }
 
+export function useDataStorageSummary() {
+  return useQuery({
+    queryKey: ["dataStorageSummary"],
+    queryFn: () => dataAPI.getStorageSummary(),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 10000,
+  });
+}
+
 export function useIsAudioMuteSupported() {
   return useQuery({
     queryKey: ["audioMuteSupported"],
@@ -705,6 +808,20 @@ export function useAvailableProviders() {
   });
 }
 
+export function useUpdateGroqFreeTier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateGroqFreeTier(enabled);
+      // Keep the pipeline in sync in case Groq configuration depends on this.
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateSTTProvider() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -747,8 +864,8 @@ export function useUpdateSTTTranscriptionPrompt() {
 }
 
 export function useUpdateLLMProvider() {
-	const queryClient = useQueryClient();
-	return useMutation({
+  const queryClient = useQueryClient();
+  return useMutation({
     mutationFn: async (provider: string | null) => {
       await tauriAPI.updateLLMProvider(provider);
       // Sync the pipeline configuration when LLM provider changes
@@ -761,8 +878,8 @@ export function useUpdateLLMProvider() {
 }
 
 export function useUpdateLLMModel() {
-	const queryClient = useQueryClient();
-	return useMutation({
+  const queryClient = useQueryClient();
+  return useMutation({
     mutationFn: async (model: string | null) => {
       await tauriAPI.updateLLMModel(model);
       // Sync the pipeline configuration when LLM model changes

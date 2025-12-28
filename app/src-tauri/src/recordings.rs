@@ -259,6 +259,46 @@ impl RecordingStore {
         Ok(deleted)
     }
 
+    /// Delete all saved `.wav` recordings.
+    ///
+    /// Returns the number of files deleted.
+    pub fn delete_all_wavs(&self) -> Result<u64, String> {
+        let mut deleted: u64 = 0;
+
+        let entries = fs::read_dir(&self.dir)
+            .map_err(|e| format!("Failed to read recordings dir {}: {}", self.dir.display(), e))?;
+
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                != "wav"
+            {
+                continue;
+            }
+
+            if fs::remove_file(&path).is_ok() {
+                deleted = deleted.saturating_add(1);
+            }
+        }
+
+        // Best-effort: clear existence cache.
+        if let Ok(mut known) = self.known_existing.write() {
+            known.clear();
+        }
+
+        Ok(deleted)
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn directory(&self) -> &Path {
         &self.dir

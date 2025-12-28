@@ -126,6 +126,20 @@ pub struct RequestLog {
     pub stt_duration_ms: Option<u64>,
     /// LLM duration in milliseconds
     pub llm_duration_ms: Option<u64>,
+
+    /// Whether the STT call was treated as free-tier for pricing/cost purposes.
+    #[serde(default)]
+    pub stt_is_free_tier: bool,
+    /// Whether the LLM call was treated as free-tier for pricing/cost purposes.
+    #[serde(default)]
+    pub llm_is_free_tier: bool,
+
+    /// Estimated total STT cost for this request in USD micros.
+    #[serde(default)]
+    pub stt_estimated_cost_usd_micros: Option<u64>,
+    /// Estimated total LLM cost for this request in USD micros.
+    #[serde(default)]
+    pub llm_estimated_cost_usd_micros: Option<u64>,
 }
 
 /// Status of a request
@@ -168,6 +182,11 @@ impl RequestLog {
             total_duration_ms: None,
             stt_duration_ms: None,
             llm_duration_ms: None,
+
+            stt_is_free_tier: false,
+            llm_is_free_tier: false,
+            stt_estimated_cost_usd_micros: None,
+            llm_estimated_cost_usd_micros: None,
         }
     }
 
@@ -381,6 +400,15 @@ impl RequestLogStore {
         }
 
         result
+    }
+
+    /// Return the number of stored logs (including an in-progress current log, if any).
+    pub fn count(&self) -> usize {
+        self.prune();
+
+        let logs = self.logs.lock().unwrap();
+        let current = self.current.lock().unwrap();
+        logs.len() + if current.is_some() { 1 } else { 0 }
     }
 
     /// Clear all logs

@@ -1388,6 +1388,7 @@ export function HistoryFeed() {
                 const p = (llmProviders ?? []).find((x) => x.id === v);
                 setSendModel(p?.default_model ?? p?.models?.[0] ?? null);
               }}
+              renderOption={({ option }) => option.label}
               styles={{
                 input: {
                   backgroundColor: "transparent",
@@ -1413,6 +1414,7 @@ export function HistoryFeed() {
               value={sendModel}
               onChange={(v) => setSendModel(v)}
               searchable
+              renderOption={({ option }) => option.label}
               styles={{
                 input: {
                   backgroundColor: "transparent",

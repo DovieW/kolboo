@@ -1,11 +1,14 @@
 pub mod audio;
 pub mod config;
+pub mod data;
 pub mod history;
 pub mod llm;
 pub mod logs;
 pub mod overlay;
+pub mod pricing;
 pub mod recording;
 pub mod settings;
+pub mod stats;
 pub mod text;
 pub mod windows;
 pub mod whisper;

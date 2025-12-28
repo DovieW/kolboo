@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
-fn get_max_saved_recordings(app: &AppHandle) -> usize {
+pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
     #[cfg(desktop)]
     {
         let default: u64 = 1000;

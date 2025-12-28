@@ -295,6 +295,22 @@ impl HistoryStorage {
         Ok(entries)
     }
 
+    /// Return the number of stored history entries.
+    pub fn count(&self) -> Result<usize, String> {
+        let data = self
+            .data
+            .read()
+            .map_err(|e| format!("Failed to read history: {}", e))?;
+        Ok(data.entries.len())
+    }
+
+    /// Best-effort history file size on disk (bytes).
+    pub fn file_size_bytes(&self) -> u64 {
+        std::fs::metadata(&self.file_path)
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
     /// Delete an entry by ID
     pub fn delete(&self, id: &str) -> Result<bool, String> {
         let deleted = {

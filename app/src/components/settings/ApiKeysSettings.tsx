@@ -1,8 +1,17 @@
-import { ActionIcon, Button, PasswordInput, Tooltip } from "@mantine/core";
+import {
+  ActionIcon,
+  Button,
+  Group,
+  PasswordInput,
+  Switch,
+  Text,
+  Tooltip,
+} from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link as LinkIcon } from "lucide-react";
 import { configAPI, tauriAPI } from "../../lib/tauri";
+import { useSettings, useUpdateGroqFreeTier } from "../../lib/queries";
 
 const GLOBAL_ONLY_TOOLTIP =
   "This setting can only be changed in the Default profile";
@@ -61,6 +70,9 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
   const [isPrefilling, setIsPrefilling] = useState(false);
   const hasHydratedRef = useRef(false);
 
+  const { data: settings } = useSettings();
+  const updateGroqFreeTier = useUpdateGroqFreeTier();
+
   const { data: savedKeyValue } = useQuery({
     queryKey: ["apiKeyValue", config.storeKey],
     queryFn: () => tauriAPI.getApiKey(config.storeKey),
@@ -110,8 +122,32 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 
   return (
     <div className="settings-row api-keys-row">
-      <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <p className="settings-label">{config.label}</p>
+        {config.id === "groq" && (
+          <Group gap={10} align="center" wrap="nowrap" mt={2}>
+            <Switch
+              size="sm"
+              checked={settings?.groq_free_tier ?? true}
+              onChange={(e) =>
+                updateGroqFreeTier.mutate(e.currentTarget.checked)
+              }
+              aria-label="Groq free tier"
+            />
+            <Text size="xs" c="var(--text-secondary)" fw={600}>
+              Free tier
+            </Text>
+            <Text
+              size="xs"
+              c="var(--text-muted)"
+              className="settings-description--single-line"
+              style={{ flex: 1 }}
+              title="Assume Groq calls cost $0 for stats"
+            >
+              Assume Groq calls cost $0 for stats
+            </Text>
+          </Group>
+        )}
       </div>
       <div className="settings-row-actions">
         <Tooltip label="Get key" withArrow>

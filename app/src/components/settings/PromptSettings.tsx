@@ -35,6 +35,7 @@ import {
   useUpdateSTTTimeout,
   useUpdateGeminiThinkingBudget,
   useUpdateGeminiThinkingLevel,
+  useModelPricing,
 } from "../../lib/queries";
 import {
   type CleanupPromptSections,
@@ -59,6 +60,18 @@ const DEFAULT_SECTIONS: CleanupPromptSections = {
 // NOTE: This timeout is used by the Rust pipeline as a transcription request timeout.
 // Keep this default aligned with backend fallbacks so "unset" settings don't lie.
 const DEFAULT_STT_TIMEOUT = 10;
+
+function formatUsdRateFromMicros(micros: number): string {
+  const safeMicros =
+    typeof micros === "number" && Number.isFinite(micros) ? micros : 0;
+  const dollars = safeMicros / 1_000_000;
+
+  if (dollars > 0 && dollars < 0.01) {
+    return `$${dollars.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
+  }
+
+  return `$${dollars.toFixed(2).replace(/\.00$/, "")}`;
+}
 
 type SectionKey = "main" | "advanced" | "dictionary";
 
@@ -515,12 +528,64 @@ export function PromptSettings({
     ? LLM_MODELS[effectiveLlmProvider] ?? []
     : [];
 
+  const selectedSttModelForUi =
+    sttModelOptions.length === 0
+      ? null
+      : isDefaultScope
+      ? settings?.stt_model ?? sttModelOptions[0]?.value ?? null
+      : localProfileSttModel;
+
   const effectiveLlmModel =
     effectiveLlmProvider === null
       ? null
       : activeProfileId === "default"
       ? settings?.llm_model ?? null
       : localProfileLlmModel ?? settings?.llm_model ?? null;
+
+  const selectedLlmModelForUi =
+    llmModelOptions.length === 0
+      ? null
+      : isDefaultScope
+      ? settings?.llm_model ?? llmModelOptions[0]?.value ?? null
+      : localProfileLlmModel;
+
+  const sttPricing = useModelPricing(
+    effectiveSttProvider,
+    "stt",
+    selectedSttModelForUi
+  );
+  const llmPricing = useModelPricing(
+    effectiveLlmProvider,
+    "llm",
+    selectedLlmModelForUi
+  );
+
+  const sttPricingLabel = useMemo(() => {
+    const stt = sttPricing.data?.stt;
+    if (!stt) return null;
+
+    if (typeof stt.usd_micros_per_minute === "number") {
+      return `${formatUsdRateFromMicros(stt.usd_micros_per_minute)}/min`;
+    }
+
+    if (typeof stt.usd_micros_per_hour === "number") {
+      const base = `${formatUsdRateFromMicros(stt.usd_micros_per_hour)}/hr`;
+      const minSecs =
+        typeof stt.min_billed_secs === "number" ? stt.min_billed_secs : null;
+      return minSecs ? `${base} · min ${minSecs}s` : base;
+    }
+
+    return null;
+  }, [sttPricing.data]);
+
+  const llmPricingLabel = useMemo(() => {
+    const llm = llmPricing.data?.llm;
+    if (!llm) return null;
+
+    const input = formatUsdRateFromMicros(llm.input_usd_micros_per_1m);
+    const output = formatUsdRateFromMicros(llm.output_usd_micros_per_1m);
+    return `in ${input} · out ${output} /1M tok`;
+  }, [llmPricing.data]);
 
   // Thinking controls are global settings today (not per-profile), so we only
   // show them in the Default scope.
@@ -1203,13 +1268,18 @@ export function PromptSettings({
                 </ActionIcon>
               </Tooltip>
             )}
+            {sttPricingLabel ? (
+              <Text
+                size="xs"
+                c="dimmed"
+                style={{ whiteSpace: "nowrap", lineHeight: 1 }}
+              >
+                {sttPricingLabel}
+              </Text>
+            ) : null}
             <Select
               data={sttModelOptions}
-              value={
-                isDefaultScope
-                  ? settings?.stt_model ?? sttModelOptions[0]?.value ?? null
-                  : localProfileSttModel
-              }
+              value={selectedSttModelForUi}
               onChange={(value) => {
                 if (!value) return;
                 if (isDefaultScope) {
@@ -1766,6 +1836,15 @@ export function PromptSettings({
                 </ActionIcon>
               </Tooltip>
             )}
+            {llmPricingLabel ? (
+              <Text
+                size="xs"
+                c="dimmed"
+                style={{ whiteSpace: "nowrap", lineHeight: 1 }}
+              >
+                {llmPricingLabel}
+              </Text>
+            ) : null}
             <Select
               data={llmModelOptions}
               value={

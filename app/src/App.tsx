@@ -1,22 +1,34 @@
 import {
+  Accordion,
   ActionIcon,
+  Box,
+  Button,
+  Checkbox,
+  Divider,
+  Group,
+  Indicator,
   Kbd,
   NavLink,
+  Popover,
+  ScrollArea,
+  SegmentedControl,
   Select,
+  Stack,
   Tabs,
   Text,
   Title,
   Tooltip,
 } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BarChart2,
   CircleHelp,
   Cog,
+  Filter,
   FileText,
   Home,
   Plus,
   Settings,
-  Sparkles,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { HistoryFeed } from "./components/HistoryFeed";
@@ -44,10 +56,12 @@ import {
   useSettings,
   useSettingsGuideState,
 } from "./lib/queries";
-import { type HotkeyConfig, tauriAPI } from "./lib/tauri";
+import { listAllLlmModelKeys, listAllSttModelKeys } from "./lib/modelOptions";
+import { type CostTimeframe, type HotkeyConfig, tauriAPI } from "./lib/tauri";
+import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
 import "./styles.css";
 
-type View = "home" | "settings" | "logs";
+type View = "home" | "settings" | "logs" | "usage-stats";
 
 function Sidebar({
   activeView,
@@ -79,6 +93,15 @@ function Sidebar({
             leftSection={<Settings size={20} />}
             active={activeView === "settings"}
             onClick={() => onViewChange("settings")}
+            variant="filled"
+            className="sidebar-nav-link"
+          />
+        </Tooltip>
+        <Tooltip label="Stats" position="right" withArrow>
+          <NavLink
+            leftSection={<BarChart2 size={20} />}
+            active={activeView === "usage-stats"}
+            onClick={() => onViewChange("usage-stats")}
             variant="filled"
             className="sidebar-nav-link"
           />
@@ -173,6 +196,366 @@ function HomeView() {
       <InstructionsCard />
 
       <HistoryFeed />
+    </div>
+  );
+}
+
+function UsageStatsView() {
+  const [activeStatsTab, setActiveStatsTab] = useState<string>("cost");
+  const [timeframe, setTimeframe] = useState<CostTimeframe>("30d");
+  const [filtersOpened, setFiltersOpened] = useState(false);
+
+  const [statsKind, setStatsKind] = useState<StatsKindFilter>("all");
+  const [selectedSttModelKeys, setSelectedSttModelKeys] = useState<string[]>(
+    []
+  );
+  const [selectedLlmModelKeys, setSelectedLlmModelKeys] = useState<string[]>(
+    []
+  );
+
+  // Enabled by default: hide any calls we marked as free-tier.
+  const [excludeFreeTier, setExcludeFreeTier] = useState(true);
+
+  const timeframeOptions: Array<{ value: CostTimeframe; label: string }> = [
+    { value: "24h", label: "Last 24 hours" },
+    { value: "7d", label: "Last 7 days" },
+    { value: "30d", label: "Last 30 days" },
+    { value: "90d", label: "Last 90 days" },
+    { value: "all", label: "All time" },
+  ];
+
+  const sttModelOptions = listAllSttModelKeys();
+  const llmModelOptions = listAllLlmModelKeys();
+
+  const hasAnyModelFilter =
+    selectedSttModelKeys.length > 0 || selectedLlmModelKeys.length > 0;
+
+  const hasNonDefaultFilters =
+    statsKind !== "all" || hasAnyModelFilter || excludeFreeTier !== true;
+
+  return (
+    <div className="main-content">
+      <header className="animate-in" style={{ marginBottom: 20 }}>
+        <Group justify="space-between" align="center" wrap="wrap">
+          <Title order={1} mb={0}>
+            Stats
+          </Title>
+
+          <Group gap={8} align="center" wrap="nowrap">
+            <Popover
+              opened={filtersOpened}
+              onChange={setFiltersOpened}
+              position="bottom-start"
+              shadow="lg"
+              radius="md"
+            >
+              <Popover.Target>
+                <Indicator
+                  disabled={!hasNonDefaultFilters}
+                  size={8}
+                  offset={3}
+                  position="top-end"
+                  color="orange"
+                >
+                  <ActionIcon
+                    variant="default"
+                    size={36}
+                    onClick={() => setFiltersOpened((v) => !v)}
+                    title="Filters"
+                    aria-label="Filters"
+                    styles={{
+                      root: {
+                        backgroundColor: "var(--bg-elevated)",
+                        borderColor: "var(--border-default)",
+                      },
+                    }}
+                  >
+                    <Filter size={16} />
+                  </ActionIcon>
+                </Indicator>
+              </Popover.Target>
+
+              <Popover.Dropdown
+                p={0}
+                w={360}
+                styles={{
+                  dropdown: {
+                    backgroundColor: "var(--bg-elevated)",
+                    borderColor: "var(--border-default)",
+                    color: "var(--text-primary)",
+                  },
+                }}
+              >
+                <Group
+                  justify="space-between"
+                  align="center"
+                  gap={8}
+                  px="xs"
+                  py={10}
+                  wrap="nowrap"
+                  style={{ minHeight: 32 }}
+                >
+                  <Text size="xs" fw={700}>
+                    Filters
+                  </Text>
+                  {hasNonDefaultFilters ? (
+                    <Button
+                      variant="subtle"
+                      size="compact-xs"
+                      color="gray"
+                      onClick={() => {
+                        setStatsKind("all");
+                        setSelectedSttModelKeys([]);
+                        setSelectedLlmModelKeys([]);
+                        setExcludeFreeTier(true);
+                      }}
+                      styles={{ root: { height: 20, padding: "0 6px" } }}
+                    >
+                      Reset
+                    </Button>
+                  ) : (
+                    // Keep header height stable when Reset is hidden
+                    <Box w={44} />
+                  )}
+                </Group>
+
+                <Divider color="var(--border-default)" />
+
+                <Box p="xs">
+                  <SegmentedControl
+                    value={statsKind}
+                    onChange={(value) => setStatsKind(value as StatsKindFilter)}
+                    data={[
+                      { value: "all", label: "All" },
+                      { value: "stt", label: "STT" },
+                      { value: "llm", label: "LLM" },
+                    ]}
+                    size="xs"
+                    fullWidth
+                  />
+                </Box>
+
+                <Box px="xs" pb={10}>
+                  <Checkbox
+                    label={<Text size="xs">Exclude free tier</Text>}
+                    size="xs"
+                    checked={excludeFreeTier}
+                    onChange={(e) =>
+                      setExcludeFreeTier(e.currentTarget.checked)
+                    }
+                    styles={{
+                      body: { alignItems: "center" },
+                      label: {
+                        color: "var(--text-primary)",
+                        paddingLeft: 6,
+                      },
+                    }}
+                  />
+                </Box>
+
+                <Divider color="var(--border-default)" />
+
+                <Box px="xs" py={8}>
+                  <Accordion
+                    multiple
+                    defaultValue={[]}
+                    variant="separated"
+                    radius="md"
+                    chevronPosition="left"
+                    styles={{
+                      item: {
+                        backgroundColor: "transparent",
+                        border: "1px solid var(--border-default)",
+                        overflow: "hidden",
+                      },
+                      control: {
+                        backgroundColor: "transparent",
+                        padding: "6px 10px",
+                      },
+                      chevron: {
+                        color: "var(--text-muted)",
+                      },
+                      panel: {
+                        padding: "0 10px 8px 10px",
+                      },
+                    }}
+                  >
+                    <Accordion.Item value="stt_models">
+                      <Accordion.Control>
+                        <Group justify="space-between" wrap="nowrap" w="100%">
+                          <Text size="xs" fw={600}>
+                            STT models
+                          </Text>
+                          {selectedSttModelKeys.length > 0 ? (
+                            <Button
+                              variant="subtle"
+                              size="compact-xs"
+                              color="gray"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedSttModelKeys([]);
+                              }}
+                              styles={{
+                                root: { height: 20, padding: "0 6px" },
+                              }}
+                            >
+                              Reset
+                            </Button>
+                          ) : null}
+                        </Group>
+                      </Accordion.Control>
+                      <Accordion.Panel>
+                        {sttModelOptions.length === 0 ? (
+                          <Text c="dimmed" size="xs">
+                            No models available.
+                          </Text>
+                        ) : (
+                          <ScrollArea.Autosize
+                            mah={180}
+                            type="auto"
+                            offsetScrollbars
+                          >
+                            <Checkbox.Group
+                              value={selectedSttModelKeys}
+                              onChange={(next) => setSelectedSttModelKeys(next)}
+                            >
+                              <Stack gap={6}>
+                                {sttModelOptions.map((opt) => (
+                                  <Checkbox
+                                    key={opt.key}
+                                    value={opt.key}
+                                    size="xs"
+                                    label={<Text size="xs">{opt.label}</Text>}
+                                    styles={{
+                                      label: { width: "100%" },
+                                      body: { alignItems: "center" },
+                                    }}
+                                  />
+                                ))}
+                              </Stack>
+                            </Checkbox.Group>
+                          </ScrollArea.Autosize>
+                        )}
+                      </Accordion.Panel>
+                    </Accordion.Item>
+
+                    <Accordion.Item value="llm_models">
+                      <Accordion.Control>
+                        <Group justify="space-between" wrap="nowrap" w="100%">
+                          <Text size="xs" fw={600}>
+                            LLM models
+                          </Text>
+                          {selectedLlmModelKeys.length > 0 ? (
+                            <Button
+                              variant="subtle"
+                              size="compact-xs"
+                              color="gray"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedLlmModelKeys([]);
+                              }}
+                              styles={{
+                                root: { height: 20, padding: "0 6px" },
+                              }}
+                            >
+                              Reset
+                            </Button>
+                          ) : null}
+                        </Group>
+                      </Accordion.Control>
+                      <Accordion.Panel>
+                        {llmModelOptions.length === 0 ? (
+                          <Text c="dimmed" size="xs">
+                            No models available.
+                          </Text>
+                        ) : (
+                          <ScrollArea.Autosize
+                            mah={180}
+                            type="auto"
+                            offsetScrollbars
+                          >
+                            <Checkbox.Group
+                              value={selectedLlmModelKeys}
+                              onChange={(next) => setSelectedLlmModelKeys(next)}
+                            >
+                              <Stack gap={6}>
+                                {llmModelOptions.map((opt) => (
+                                  <Checkbox
+                                    key={opt.key}
+                                    value={opt.key}
+                                    size="xs"
+                                    label={<Text size="xs">{opt.label}</Text>}
+                                    styles={{
+                                      label: { width: "100%" },
+                                      body: { alignItems: "center" },
+                                    }}
+                                  />
+                                ))}
+                              </Stack>
+                            </Checkbox.Group>
+                          </ScrollArea.Autosize>
+                        )}
+                      </Accordion.Panel>
+                    </Accordion.Item>
+                  </Accordion>
+                </Box>
+              </Popover.Dropdown>
+            </Popover>
+
+            <Select
+              value={timeframe}
+              onChange={(value) => {
+                const next = (value ?? "30d") as CostTimeframe;
+                setTimeframe(next);
+              }}
+              data={timeframeOptions}
+              renderOption={({ option }) => option.label}
+              allowDeselect={false}
+              searchable={false}
+              w={220}
+              styles={{
+                input: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                  color: "var(--text-primary)",
+                },
+                dropdown: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                },
+                option: {
+                  color: "var(--text-primary)",
+                },
+              }}
+            />
+          </Group>
+        </Group>
+      </header>
+
+      <Tabs
+        value={activeStatsTab}
+        onChange={(value) => {
+          if (!value) return;
+          setActiveStatsTab(value);
+        }}
+        keepMounted={false}
+      >
+        <Tabs.List>
+          <Tabs.Tab value="cost">Cost</Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="cost" pt="md">
+          <CostTab
+            timeframe={timeframe}
+            kind={statsKind}
+            sttModelKeys={selectedSttModelKeys}
+            llmModelKeys={selectedLlmModelKeys}
+            excludeFreeTier={excludeFreeTier}
+          />
+        </Tabs.Panel>
+      </Tabs>
     </div>
   );
 }
@@ -647,12 +1030,38 @@ function AccentColorSync() {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<View>("home");
   const [settingsGuideOpen, setSettingsGuideOpen] = useState(false);
   const didAutoOpenGuideRef = useRef(false);
   const { data: guideState } = useSettingsGuideState();
   const setGuideState = useSetSettingsGuideState();
   const { data: settings } = useSettings();
+
+  // Keep the cost summary cache in sync even when the Stats view isn't mounted.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    tauriAPI
+      .onStatsChanged(() => {
+        queryClient.invalidateQueries({ queryKey: ["costSummary"] });
+        queryClient.invalidateQueries({ queryKey: ["costByProvider"] });
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((e) => {
+        console.warn("Failed to subscribe to stats-changed:", e);
+      });
+
+    return () => {
+      try {
+        unlisten?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, [queryClient]);
 
   useEffect(() => {
     if (didAutoOpenGuideRef.current) return;
@@ -683,6 +1092,8 @@ export default function App() {
             <LogsView />
           </div>
         );
+      case "usage-stats":
+        return <UsageStatsView />;
       default:
         return <HomeView />;
     }

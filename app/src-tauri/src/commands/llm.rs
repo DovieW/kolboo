@@ -11,7 +11,8 @@ use crate::llm::{
 use crate::pipeline::SharedPipeline;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::State;
+use tauri::{AppHandle, State};
+use crate::stats::EventStatus;
 
 /// Error type for LLM commands
 #[derive(Debug, serde::Serialize)]
@@ -406,6 +407,7 @@ pub fn get_llm_providers() -> Vec<LlmProviderInfo> {
 /// the Default profile is used.
 #[tauri::command]
 pub async fn test_llm_rewrite(
+    app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
     transcript: String,
     profile_id: Option<String>,
@@ -477,6 +479,9 @@ pub async fn test_llm_rewrite(
         .await
         .map_err(|e| LlmCommandError::from(e.to_string()))?;
 
+    // Best-effort: emit LLM cost event for the current request log (if any).
+    crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
+
     Ok(TestLlmRewriteResponse {
         output,
         provider_used: provider.name().to_string(),
@@ -490,6 +495,7 @@ pub async fn test_llm_rewrite(
 /// and the transcript bundle as the *user prompt*.
 #[tauri::command]
 pub async fn llm_complete(
+    app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
     args: LlmCompleteArgs,
 ) -> Result<LlmCompleteResponse, LlmCommandError> {
@@ -535,6 +541,9 @@ pub async fn llm_complete(
         .complete(args.system_prompt.as_str(), args.user_prompt.as_str())
         .await
         .map_err(|e| LlmCommandError::from(e.to_string()))?;
+
+    // Best-effort: emit LLM cost event for the current request log (if any).
+    crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
 
     Ok(LlmCompleteResponse {
         output: output.trim().to_string(),

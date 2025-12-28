@@ -11,12 +11,14 @@ mod audio;
 mod audio_capture;
 mod audio_mute;
 mod commands;
+mod cost;
 mod history;
 mod llm;
 mod pipeline;
 mod recordings;
 mod request_log;
 mod settings;
+mod stats;
 mod state;
 mod stt;
 mod vad;
@@ -87,7 +89,7 @@ fn get_setting_from_store<T: serde::de::DeserializeOwned>(
 /// To prevent that, we eagerly seed `settings.json` with defaults for missing/null keys
 /// (without overwriting any existing values).
 #[cfg(desktop)]
-fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{json, Value};
     use tauri_plugin_store::StoreExt;
 
@@ -111,6 +113,8 @@ fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Er
     };
 
     set_if_missing("stt_provider", json!("groq"));
+    // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
+    set_if_missing("groq_free_tier", json!(true));
     set_if_missing("stt_transcription_prompt", json!(null));
     set_if_missing("stt_timeout_seconds", json!(10.0));
     // How many recordings/history items to retain (impacts disk usage).
@@ -131,6 +135,14 @@ fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Er
     set_if_missing("transcription_retention_value", json!(0.0));
     // When deleting old transcriptions, optionally also delete their .wav recordings.
     set_if_missing("transcription_retention_delete_recordings", json!(false));
+
+    // Persisted stats retention (usage/cost events).
+    // These are stored on disk (unlike request logs which are in-memory).
+    // 0 = keep forever.
+    set_if_missing("stats_retention_unit", json!("days"));
+    set_if_missing("stats_retention_value", json!(30.0));
+    // Defensive cap (bytes). The pruning logic enforces this regardless of time settings.
+    set_if_missing("stats_retention_max_bytes", json!(50_000_000u64));
     set_if_missing("overlay_mode", json!("recording_only"));
     set_if_missing("widget_position", json!("bottom-center"));
     set_if_missing("output_mode", json!("paste"));
@@ -778,6 +790,16 @@ fn stop_recording(
 
                             log.complete_success();
                         });
+
+                        // Persist cost/usage stats (best-effort).
+                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                            stats::emit_cost_events_for_current_request(
+                                &app_clone,
+                                stats::EventStatus::Success,
+                                Some(&wav),
+                            );
+                        }
+
                         log_store.complete_current();
                     }
 
@@ -877,6 +899,16 @@ fn stop_recording(
                                 log.warn("Recording cancelled by user");
                                 log.complete_cancelled();
                             });
+
+                            // Persist cost/usage stats (best-effort).
+                            if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                stats::emit_cost_events_for_current_request(
+                                    &app_clone,
+                                    stats::EventStatus::Cancelled,
+                                    Some(&wav),
+                                );
+                            }
+
                             log_store.complete_current();
                         }
 
@@ -907,6 +939,16 @@ fn stop_recording(
                             log.error(format!("Transcription failed: {}", e));
                             log.complete_error(e.to_string());
                         });
+
+                        // Persist cost/usage stats (best-effort).
+                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                            stats::emit_cost_events_for_current_request(
+                                &app_clone,
+                                stats::EventStatus::Error,
+                                Some(&wav),
+                            );
+                        }
+
                         log_store.complete_current();
                     }
 
@@ -1377,6 +1419,13 @@ pub fn run() {
             commands::recording::recordings_open_folder,
             commands::recording::recordings_get_storage_bytes,
             commands::recording::recordings_get_stats,
+            commands::recording::recordings_delete_all,
+            // Danger-zone data operations
+            commands::data::delete_all_api_keys,
+            commands::data::delete_all_settings,
+            commands::data::delete_all_stats,
+            commands::data::get_data_storage_summary,
+            commands::data::delete_all_data,
             // Config commands (replacing Python server)
             commands::config::get_default_sections,
             commands::config::get_available_providers,
@@ -1403,6 +1452,11 @@ pub fn run() {
             // Request logging commands
             commands::logs::get_request_logs,
             commands::logs::clear_request_logs,
+            // Usage/cost stats commands
+            commands::stats::get_cost_summary,
+            commands::stats::get_cost_summary_v2,
+            commands::stats::get_cost_by_provider_v2,
+            commands::pricing::get_model_pricing,
             // Window/process commands (used for per-program prompts)
             commands::windows::list_open_windows,
             commands::windows::get_foreground_process_path,
@@ -1425,8 +1479,21 @@ pub fn run() {
             let recording_store = RecordingStore::new(app_data_dir.clone());
             app.manage(recording_store);
 
-            let history_storage = HistoryStorage::new(app_data_dir);
+            let history_storage = HistoryStorage::new(app_data_dir.clone());
             app.manage(history_storage);
+
+            // Initialize persisted stats store (usage/cost ledger)
+            let stats_store = stats::StatsStore::new(app_data_dir);
+            app.manage(stats_store);
+
+            // Apply stats retention immediately on startup.
+            // This keeps disk usage bounded even if the app is updated after long gaps.
+            {
+                let cfg = stats::read_stats_retention_config(app.handle());
+                if let Some(store) = app.try_state::<stats::StatsStore>() {
+                    let _ = store.prune(cfg);
+                }
+            }
 
             // Apply the configured history retention limit immediately so existing installs
             // don't keep more entries than the UI/backend intend.

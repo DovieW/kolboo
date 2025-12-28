@@ -4,56 +4,19 @@
 //! enabling voice dictation directly from the Tauri app.
 
 use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
+use crate::cost::openai as openai_cost;
+use crate::history::{HistoryStorage, RequestModelInfo};
 use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, SharedPipeline};
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
-use crate::history::{HistoryStorage, RequestModelInfo};
+use crate::stats::{self, CostEvent, CostKind, EventStatus, TokenUsage};
+use crate::commands::history::get_max_saved_recordings;
+use tauri::{AppHandle, Manager, State, Emitter};
 use chrono::{Duration as ChronoDuration, Utc};
-use serde::Serialize;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
-
-fn get_max_saved_recordings(app: &AppHandle) -> usize {
-    #[cfg(desktop)]
-    {
-        let default: u64 = 1000;
-        let raw = app
-            .store("settings.json")
-            .ok()
-            .and_then(|store| store.get("max_saved_recordings"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(default);
-
-        return (raw.clamp(1, 100_000)) as usize;
-    }
-
-    #[cfg(not(desktop))]
-    {
-        1000
-    }
-}
-
-fn get_transcription_retention_days(app: &AppHandle) -> u64 {
-    #[cfg(desktop)]
-    {
-        let raw = app
-            .store("settings.json")
-            .ok()
-            .and_then(|store| store.get("transcription_retention_days"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        // 0..36500 days (~100 years) to avoid nonsense values.
-        return raw.min(36_500);
-    }
-
-    #[cfg(not(desktop))]
-    {
-        0
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 enum TranscriptionRetentionUnit {
@@ -151,6 +114,23 @@ fn get_transcription_retention_delete_recordings(app: &AppHandle) -> bool {
     #[cfg(not(desktop))]
     {
         false
+    }
+}
+
+fn get_transcription_retention_days(app: &AppHandle) -> u64 {
+    #[cfg(desktop)]
+    {
+        return app
+            .store("settings.json")
+            .ok()
+            .and_then(|store| store.get("transcription_retention_days"))
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+            .unwrap_or(0u64);
+    }
+
+    #[cfg(not(desktop))]
+    {
+        0u64
     }
 }
 
@@ -270,6 +250,19 @@ pub fn recording_get_wav_base64(
     let wav = store.load_wav(&request_id).map_err(CommandError::from)?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(wav);
     Ok(Some(encoded))
+}
+
+/// Delete all saved recordings from disk.
+///
+/// Returns the number of `.wav` files deleted.
+#[tauri::command]
+pub fn recordings_delete_all(app: AppHandle) -> Result<u64, CommandError> {
+    let store = app
+        .try_state::<RecordingStore>()
+        .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
+
+    let deleted = store.delete_all_wavs().map_err(CommandError::from)?;
+    Ok(deleted)
 }
 
 /// Open the recordings folder in the OS file manager.
@@ -457,11 +450,21 @@ pub async fn pipeline_stop_and_transcribe(
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
 
+            let wav_bytes = pipeline.clone_last_wav_bytes();
+
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
                     log.error(format!("Transcription failed: {}", e));
                     log.complete_error(e.to_string());
                 });
+
+                // Persist cost/usage stats (best-effort).
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Error,
+                    wav_bytes.as_deref(),
+                );
+
                 log_store.complete_current();
             }
 
@@ -481,7 +484,7 @@ pub async fn pipeline_stop_and_transcribe(
                 active_request_id.as_deref(),
                 app.try_state::<RecordingStore>(),
             ) {
-                if let Some(wav) = pipeline.clone_last_wav_bytes() {
+                if let Some(wav) = wav_bytes {
                     if store.save_wav(req_id, &wav).is_ok() {
                         let _ = store.prune_to_max_files(max_saved_recordings);
                     }
@@ -501,6 +504,11 @@ pub async fn pipeline_stop_and_transcribe(
 
     let final_text = result.final_text.clone();
 
+    // Capture WAV bytes once (used for duration + retry persistence + cost).
+    let wav_bytes = pipeline.clone_last_wav_bytes();
+    let audio_secs_from_wav = wav_bytes.as_deref().and_then(stats::wav_duration_secs);
+    let audio_size_bytes = wav_bytes.as_ref().map(|v| v.len());
+
     // Log success
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
@@ -508,6 +516,20 @@ pub async fn pipeline_stop_and_transcribe(
             log.formatted_transcript = Some(result.final_text.clone());
             log.stt_duration_ms = Some(result.stt_duration_ms);
             log.llm_duration_ms = result.llm_duration_ms;
+
+            // Useful for stats (and for later UI display).
+            let audio_secs = audio_secs_from_wav.or_else(|| {
+                if log.stt_provider == "openai" {
+                    log.stt_response_json
+                        .as_ref()
+                        .and_then(stats::parse_openai_stt_duration_secs_from_response_json)
+                } else {
+                    None
+                }
+            });
+
+            log.audio_duration_secs = audio_secs.map(|s| s as f32);
+            log.audio_size_bytes = audio_size_bytes;
 
             // Use the provider instance's model (includes provider defaults) so the UI can show
             // the real model used even if no explicit model override was configured.
@@ -558,6 +580,14 @@ pub async fn pipeline_stop_and_transcribe(
 
             log.complete_success();
         });
+
+        // Persist cost/usage stats (best-effort).
+        crate::stats::emit_cost_events_for_current_request(
+            &app,
+            EventStatus::Success,
+            wav_bytes.as_deref(),
+        );
+
         log_store.complete_current();
     }
 
@@ -566,7 +596,7 @@ pub async fn pipeline_stop_and_transcribe(
         active_request_id.as_deref(),
         app.try_state::<RecordingStore>(),
     ) {
-        if let Some(wav) = pipeline.clone_last_wav_bytes() {
+        if let Some(wav) = wav_bytes {
             if store.save_wav(req_id, &wav).is_ok() {
                 let _ = store.prune_to_max_files(max_saved_recordings);
             }
@@ -668,6 +698,10 @@ pub async fn pipeline_retry_transcription(
                     log.error(format!("Retry transcription failed: {}", e));
                     log.complete_error(e.to_string());
                 });
+
+                // Persist cost/usage stats (best-effort).
+                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, Some(wav.as_slice()));
+
                 log_store.complete_current();
             }
 
@@ -706,6 +740,10 @@ pub async fn pipeline_retry_transcription(
             log.stt_duration_ms = Some(result.stt_duration_ms);
             log.llm_duration_ms = result.llm_duration_ms;
 
+            // Useful for stats (and for later UI display).
+            log.audio_duration_secs = stats::wav_duration_secs(wav.as_slice()).map(|s| s as f32);
+            log.audio_size_bytes = Some(wav.len());
+
             if result.llm_attempted() {
                 log.llm_provider = result.llm_provider_used.clone();
                 log.llm_model = result.llm_model_used.clone();
@@ -718,6 +756,10 @@ pub async fn pipeline_retry_transcription(
             ));
             log.complete_success();
         });
+
+        // Persist cost/usage stats (best-effort).
+        crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, Some(wav.as_slice()));
+
         log_store.complete_current();
     }
 
@@ -914,6 +956,11 @@ pub async fn pipeline_dictate(
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
 
+            // Best-effort: persist cost/usage stats even when dictate fails.
+            // (This flow is commonly used by the global hotkey / toggle path.)
+            let wav_bytes = pipeline.clone_last_wav_bytes();
+            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, wav_bytes.as_deref());
+
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
                     log.error(format!("Transcription failed: {}", e));
@@ -926,6 +973,9 @@ pub async fn pipeline_dictate(
     };
 
     let final_text = result.final_text.clone();
+
+    // Capture WAV bytes once (used for duration + cost).
+    let wav_bytes = pipeline.clone_last_wav_bytes();
 
     // Emit transcript ready event
     let _ = app.emit("pipeline-transcript-ready", &final_text);
@@ -1000,6 +1050,12 @@ pub async fn pipeline_dictate(
 
             log.complete_success();
         });
+
+        // Persist cost/usage stats (best-effort).
+        // NOTE: `pipeline_stop_and_transcribe` and `pipeline_retry_transcription` already do this,
+        // but `pipeline_dictate` is a separate flow used by hotkeys and should also be tracked.
+        crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, wav_bytes.as_deref());
+
         log_store.complete_current();
     }
 
@@ -1014,13 +1070,28 @@ pub async fn pipeline_dictate(
 /// This is primarily used by the settings UI to validate STT provider/model.
 #[tauri::command]
 pub async fn pipeline_test_transcribe_last_audio(
+    app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
     profile_id: Option<String>,
 ) -> Result<String, CommandError> {
-    pipeline
+    // Attempt transcription and persist cost events centrally.
+    let res = pipeline
         .transcribe_last_audio_for_profile(profile_id.as_deref())
-        .await
-        .map_err(CommandError::from)
+        .await;
+
+    match res {
+        Ok(s) => {
+            // Best-effort: emit cost events using the last WAV bytes.
+            let wav = pipeline.clone_last_wav_bytes();
+            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, wav.as_deref());
+            Ok(s)
+        }
+        Err(e) => {
+            let wav = pipeline.clone_last_wav_bytes();
+            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, wav.as_deref());
+            Err(CommandError::from(e))
+        }
+    }
 }
 
 /// Whether there is a previously captured audio buffer available for STT testing.
@@ -1029,7 +1100,7 @@ pub fn pipeline_has_last_audio(pipeline: State<'_, SharedPipeline>) -> Result<bo
     Ok(pipeline.has_last_audio())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AudioSettingsTestWavs {
     pub raw_wav_base64: String,
     pub processed_wav_base64: String,

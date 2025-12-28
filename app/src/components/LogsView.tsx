@@ -66,6 +66,31 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
+function formatUsdFromMicros(micros: number): string {
+  const dollars = micros / 1_000_000;
+
+  let fixed: string;
+  if (dollars >= 10) fixed = dollars.toFixed(2);
+  else if (dollars >= 1) fixed = dollars.toFixed(3);
+  else if (dollars >= 0.1) fixed = dollars.toFixed(4);
+  else fixed = dollars.toFixed(6);
+
+  // Trim trailing zeros for compact chips.
+  fixed = fixed.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+  return `$${fixed}`;
+}
+
+function formatCallPriceLabel(params: {
+  isFreeTier: boolean;
+  estimatedCostUsdMicros: number | null | undefined;
+}): string {
+  if (params.isFreeTier) return "$0 (free)";
+  if (typeof params.estimatedCostUsdMicros === "number") {
+    return formatUsdFromMicros(params.estimatedCostUsdMicros);
+  }
+  return "—";
+}
+
 function getStatusBadge(status: RequestStatus) {
   switch (status) {
     case "success":
@@ -197,6 +222,15 @@ function RequestLogItem({
   const llmMetaLabel = `${llmProviderLabel}${
     log.llm_model ? ` / ${log.llm_model}` : ""
   }`;
+
+  const sttPriceLabel = formatCallPriceLabel({
+    isFreeTier: log.stt_is_free_tier,
+    estimatedCostUsdMicros: log.stt_estimated_cost_usd_micros,
+  });
+  const llmPriceLabel = formatCallPriceLabel({
+    isFreeTier: log.llm_is_free_tier,
+    estimatedCostUsdMicros: log.llm_estimated_cost_usd_micros,
+  });
 
   const rawTranscript = log.raw_transcript?.trim() ? log.raw_transcript : null;
   // Only treat as a "rewrite" if we actually attempted LLM formatting and the output differs.
@@ -354,20 +388,22 @@ function RequestLogItem({
           <Group gap="xs" wrap="wrap">
             {log.stt_duration_ms ? (
               <Badge variant="light" size="sm" color="gray">
-                STT {formatDuration(log.stt_duration_ms)} · {sttMetaLabel}
+                STT {formatDuration(log.stt_duration_ms)} · {sttMetaLabel} ·{" "}
+                {sttPriceLabel}
               </Badge>
             ) : (
               <Badge variant="light" size="sm" color="gray">
-                STT · {sttMetaLabel}
+                STT · {sttMetaLabel} · {sttPriceLabel}
               </Badge>
             )}
             {log.llm_duration_ms ? (
               <Badge variant="light" size="sm" color="gray">
-                LLM {formatDuration(log.llm_duration_ms)} · {llmMetaLabel}
+                LLM {formatDuration(log.llm_duration_ms)} · {llmMetaLabel} ·{" "}
+                {llmPriceLabel}
               </Badge>
             ) : llmAttempted || log.llm_provider ? (
               <Badge variant="light" size="sm" color="gray">
-                LLM · {llmMetaLabel}
+                LLM · {llmMetaLabel} · {llmPriceLabel}
               </Badge>
             ) : null}
           </Group>

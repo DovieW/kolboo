@@ -1,23 +1,39 @@
 import {
   ActionIcon,
+  Button,
   Checkbox,
   Group,
+  Modal,
   NumberInput,
   SegmentedControl,
+  Text,
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { FolderOpen } from "lucide-react";
+import {
+  BarChart2,
+  FileText,
+  FolderOpen,
+  Key,
+  MessageSquare,
+  RotateCcw,
+  Skull,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   useRecordingsStats,
+  useDataStorageSummary,
   useSettings,
   useUpdateMaxSavedRecordings,
   useUpdateTranscriptionRetention,
   useUpdateTranscriptionRetentionDeleteRecordings,
 } from "../../lib/queries";
 import {
+  configAPI,
+  dataAPI,
+  logsAPI,
   recordingsAPI,
   tauriAPI,
   type RewriteProgramPromptProfile,
@@ -53,12 +69,21 @@ export function DataSettings({
     },
   });
 
+  const updateStatsRetention = useMutation({
+    mutationFn: (params: { unit: TranscriptionRetentionUnit; value: number }) =>
+      (tauriAPI as any).updateStatsRetention(params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+
   const updateMaxSavedRecordings = useUpdateMaxSavedRecordings();
   const updateTranscriptionRetention = useUpdateTranscriptionRetention();
   const updateTranscriptionRetentionDeleteRecordings =
     useUpdateTranscriptionRetentionDeleteRecordings();
 
   const recordingsStats = useRecordingsStats();
+  const dataStorageSummary = useDataStorageSummary();
 
   const profiles = settings?.rewrite_program_prompt_profiles ?? [];
   const profile: RewriteProgramPromptProfile | null =
@@ -214,6 +239,51 @@ export function DataSettings({
     };
   })();
 
+  const formatBytes = (bytes: number) => {
+    const b =
+      typeof bytes === "number" && Number.isFinite(bytes)
+        ? Math.max(0, bytes)
+        : 0;
+    if (b < 1024) return `${Math.round(b)} B`;
+    const kb = b / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(1)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(2)} GB`;
+  };
+
+  // ---------------------------------------------------------------------------
+  // Danger zone (destructive actions)
+  // ---------------------------------------------------------------------------
+
+  const [dangerDialog, setDangerDialog] = useState<null | {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    action: () => Promise<void>;
+  }>(null);
+
+  const [dangerRunning, setDangerRunning] = useState(false);
+
+  const runDangerAction = async (action: () => Promise<void>) => {
+    await action();
+
+    // Ensure UI reflects the new reality.
+    queryClient.invalidateQueries({ queryKey: ["settings"] });
+    queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
+    queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
+    queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
+    queryClient.invalidateQueries({ queryKey: ["history"] });
+  };
+
+  const openDangerDialog = (args: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    action: () => Promise<void>;
+  }) => setDangerDialog(args);
+
   // ---------------------------------------------------------------------------
   // Transcription retention (amount | time)
   // ---------------------------------------------------------------------------
@@ -287,6 +357,36 @@ export function DataSettings({
         value: next.value,
       });
     }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Stats retention (time)
+  // ---------------------------------------------------------------------------
+
+  const statsRetentionUnitFromSettings: TranscriptionRetentionUnit =
+    settings?.stats_retention_unit ?? "days";
+  const statsRetentionValueFromSettings = settings?.stats_retention_value ?? 30;
+
+  const [statsRetentionDraft, setStatsRetentionDraft] = useState<{
+    unit: TranscriptionRetentionUnit;
+    value: number;
+  } | null>(null);
+
+  useEffect(() => {
+    setStatsRetentionDraft(null);
+  }, [statsRetentionUnitFromSettings, statsRetentionValueFromSettings]);
+
+  const statsRetentionUnit =
+    statsRetentionDraft?.unit ?? statsRetentionUnitFromSettings;
+  const statsRetentionValue =
+    statsRetentionDraft?.value ?? statsRetentionValueFromSettings;
+
+  const commitStatsRetention = (next: {
+    unit: TranscriptionRetentionUnit;
+    value: number;
+  }) => {
+    setStatsRetentionDraft(next);
+    updateStatsRetention.mutate(next);
   };
 
   const content = (
@@ -775,6 +875,394 @@ export function DataSettings({
           />
         </Group>
       </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Stats retention</p>
+          <p
+            className="settings-description settings-description--single-line settings-description--tiny"
+            title="Delete persisted usage/cost stats older than this. Set to 0 to keep forever."
+          >
+            Delete usage/cost stats older than this (0 = forever).
+          </p>
+        </div>
+        <Group gap={10} align="center" wrap="wrap">
+          <NumberInput
+            value={statsRetentionValue}
+            onChange={(value) => {
+              const next = typeof value === "number" ? value : 30;
+              commitStatsRetention({
+                unit: statsRetentionUnit,
+                value: next,
+              });
+            }}
+            min={0}
+            max={statsRetentionUnit === "hours" ? 36500 * 24 : 36500}
+            step={statsRetentionUnit === "hours" ? 0.5 : 1}
+            decimalScale={statsRetentionUnit === "hours" ? 2 : 0}
+            clampBehavior="strict"
+            disabled={isProfileScope}
+            styles={{
+              input: {
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                width: 140,
+              },
+            }}
+          />
+
+          <SegmentedControl
+            value={statsRetentionUnit}
+            onChange={(next) => {
+              const nextUnit =
+                next === "hours" ? ("hours" as const) : ("days" as const);
+
+              const current =
+                typeof statsRetentionValue === "number"
+                  ? statsRetentionValue
+                  : 0;
+
+              const nextValue =
+                current === 0
+                  ? 0
+                  : statsRetentionUnit === "days" && nextUnit === "hours"
+                  ? current * 24
+                  : statsRetentionUnit === "hours" && nextUnit === "days"
+                  ? Math.round(current / 24)
+                  : current;
+
+              commitStatsRetention({ unit: nextUnit, value: nextValue });
+            }}
+            data={[
+              { label: "Days", value: "days" },
+              { label: "Hours", value: "hours" },
+            ]}
+            disabled={isProfileScope}
+            styles={{
+              root: {
+                backgroundColor: "var(--bg-elevated)",
+                border: "1px solid var(--border-default)",
+              },
+              label: {
+                color: "var(--text-primary)",
+              },
+            }}
+          />
+        </Group>
+      </div>
+
+      <div
+        style={{
+          marginTop: 16,
+          border: "1px solid rgba(239, 68, 68, 0.20)",
+          borderRadius: 12,
+          padding: 12,
+          background: "rgba(239, 68, 68, 0.05)",
+        }}
+      >
+        <div>
+          <p
+            className="settings-label"
+            style={{ color: "rgba(255, 150, 150, 0.95)" }}
+          >
+            Danger zone
+          </p>
+          <p className="settings-description">
+            Destructive actions (cannot be undone)
+          </p>
+
+          <div
+            style={{
+              marginTop: 8,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gap: 12,
+              alignItems: "start",
+            }}
+          >
+            <div>
+              {dataStorageSummary.isLoading ? (
+                <Text size="xs" c="dimmed">
+                  Calculating what’s stored…
+                </Text>
+              ) : dataStorageSummary.data ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "auto 1fr",
+                    gap: "2px 12px",
+                    alignItems: "baseline",
+                  }}
+                >
+                  <Text size="xs" c="dimmed">
+                    Recordings
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {dataStorageSummary.data.recordings_count} (
+                    {formatBytes(dataStorageSummary.data.recordings_bytes)})
+                  </Text>
+
+                  <Text size="xs" c="dimmed">
+                    Transcriptions
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {dataStorageSummary.data.history_count} (
+                    {formatBytes(dataStorageSummary.data.history_bytes)})
+                  </Text>
+
+                  <Text size="xs" c="dimmed">
+                    Request logs
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {dataStorageSummary.data.request_logs_count}
+                  </Text>
+
+                  <Text size="xs" c="dimmed">
+                    Usage/cost stats
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {dataStorageSummary.data.stats_files_count} files (
+                    {formatBytes(dataStorageSummary.data.stats_bytes)})
+                  </Text>
+
+                  <Text size="xs" c="dimmed">
+                    Settings
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {formatBytes(dataStorageSummary.data.settings_bytes)}
+                  </Text>
+
+                  <Text size="xs" c="dimmed">
+                    API keys saved
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {dataStorageSummary.data.api_keys_set_count} / 5
+                  </Text>
+                </div>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 8,
+                width: "min(560px, 100%)",
+              }}
+            >
+              <Button
+                color="red"
+                variant="outline"
+                size="xs"
+                leftSection={<Trash2 size={14} />}
+                onClick={() => {
+                  openDangerDialog({
+                    title: "Delete recordings",
+                    message:
+                      "This will permanently delete all saved .wav recordings from disk.",
+                    confirmLabel: "Delete recordings",
+                    action: async () => {
+                      await dataAPI.deleteAllRecordings();
+                    },
+                  });
+                }}
+              >
+                Delete recordings
+              </Button>
+
+              <Button
+                color="red"
+                variant="outline"
+                size="xs"
+                leftSection={<MessageSquare size={14} />}
+                onClick={() => {
+                  openDangerDialog({
+                    title: "Delete transcriptions (history)",
+                    message:
+                      "This will permanently delete all saved transcriptions from the History tab.",
+                    confirmLabel: "Delete transcriptions",
+                    action: async () => {
+                      await tauriAPI.clearHistory();
+                      await tauriAPI.emitHistoryChanged();
+                    },
+                  });
+                }}
+              >
+                Delete transcriptions
+              </Button>
+
+              <Button
+                color="red"
+                variant="outline"
+                size="xs"
+                leftSection={<FileText size={14} />}
+                onClick={() => {
+                  openDangerDialog({
+                    title: "Clear request logs",
+                    message:
+                      "This will clear in-memory request logs shown in the Logs tab.",
+                    confirmLabel: "Clear logs",
+                    action: async () => {
+                      await logsAPI.clearRequestLogs();
+                    },
+                  });
+                }}
+              >
+                Clear request logs
+              </Button>
+
+              <Button
+                color="red"
+                variant="outline"
+                size="xs"
+                leftSection={<BarChart2 size={14} />}
+                onClick={() => {
+                  openDangerDialog({
+                    title: "Delete usage/cost stats",
+                    message:
+                      "This will permanently delete persisted usage/cost stats (JSONL shards).",
+                    confirmLabel: "Delete stats",
+                    action: async () => {
+                      await dataAPI.deleteAllStats();
+                    },
+                  });
+                }}
+              >
+                Delete stats
+              </Button>
+
+              <Button
+                color="red"
+                variant="outline"
+                size="xs"
+                leftSection={<Key size={14} />}
+                onClick={() => {
+                  openDangerDialog({
+                    title: "Delete API keys",
+                    message:
+                      "This will remove all stored API keys (OpenAI, Groq, Deepgram, Gemini, Anthropic).",
+                    confirmLabel: "Delete API keys",
+                    action: async () => {
+                      await dataAPI.deleteAllApiKeys();
+                      await configAPI.syncPipelineConfig();
+                    },
+                  });
+                }}
+              >
+                Delete API keys
+              </Button>
+
+              <Button
+                color="red"
+                variant="outline"
+                size="xs"
+                leftSection={<RotateCcw size={14} />}
+                onClick={() => {
+                  openDangerDialog({
+                    title: "Reset settings",
+                    message:
+                      "This will reset all settings back to defaults (including API keys).",
+                    confirmLabel: "Reset settings",
+                    action: async () => {
+                      await dataAPI.deleteAllSettings();
+                      await configAPI.syncPipelineConfig();
+                      await tauriAPI.unregisterShortcuts();
+                      await tauriAPI.registerShortcuts();
+                    },
+                  });
+                }}
+              >
+                Reset settings
+              </Button>
+
+              <Button
+                color="red"
+                variant="filled"
+                size="xs"
+                leftSection={<Skull size={14} />}
+                style={{ gridColumn: "1 / -1" }}
+                onClick={() => {
+                  openDangerDialog({
+                    title: "Delete all data",
+                    message:
+                      "This will delete ALL app data: history, recordings, request logs, persisted stats, and settings (including API keys).",
+                    confirmLabel: "Delete everything",
+                    action: async () => {
+                      await dataAPI.deleteAllData();
+                      await logsAPI.clearRequestLogs();
+                      await configAPI.syncPipelineConfig();
+                      await tauriAPI.unregisterShortcuts();
+                      await tauriAPI.registerShortcuts();
+                    },
+                  });
+                }}
+              >
+                Delete all data
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Modal
+        opened={dangerDialog !== null}
+        onClose={() => {
+          if (dangerRunning) return;
+          setDangerDialog(null);
+        }}
+        title={dangerDialog?.title ?? ""}
+        centered
+        size="sm"
+      >
+        <Text size="sm" mb="md">
+          {dangerDialog?.message ?? ""}
+        </Text>
+
+        <Text size="xs" c="dimmed" mb="md">
+          Tip: if you only want to free up disk space, delete recordings — it's
+          the least destructive option.
+        </Text>
+
+        <Group justify="flex-end" gap="sm">
+          <Button
+            variant="default"
+            disabled={dangerRunning}
+            onClick={() => setDangerDialog(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            loading={dangerRunning}
+            onClick={async () => {
+              const action = dangerDialog?.action;
+              if (!action) return;
+
+              try {
+                setDangerRunning(true);
+                await runDangerAction(action);
+                notifications.show({
+                  title: "Done",
+                  message: "Completed.",
+                  color: "green",
+                });
+                setDangerDialog(null);
+              } catch (e) {
+                notifications.show({
+                  title: "Failed",
+                  message: String(e),
+                  color: "red",
+                });
+              } finally {
+                setDangerRunning(false);
+              }
+            }}
+          >
+            {dangerDialog?.confirmLabel ?? "Confirm"}
+          </Button>
+        </Group>
+      </Modal>
     </>
   );
 
