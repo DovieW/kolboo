@@ -9,9 +9,11 @@ use crate::llm::{
     OpenAiLlmProvider, GeminiLlmProvider,
 };
 use crate::pipeline::SharedPipeline;
+use crate::request_log::RequestLogStore;
 use std::sync::Arc;
+use std::time::Instant;
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use crate::stats::EventStatus;
 
 /// Error type for LLM commands
@@ -198,7 +200,10 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
     }
 }
 
-fn create_llm_provider_without_timeout(config: &LlmConfig) -> Arc<dyn LlmProvider> {
+fn create_llm_provider_without_timeout(
+    config: &LlmConfig,
+    request_log_store: Option<RequestLogStore>,
+) -> Arc<dyn LlmProvider> {
     match config.provider.as_str() {
         "anthropic" => {
             let provider = if let Some(model) = &config.model {
@@ -209,6 +214,7 @@ fn create_llm_provider_without_timeout(config: &LlmConfig) -> Arc<dyn LlmProvide
             Arc::new(
                 provider
                     .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
                     .with_thinking_budget(config.anthropic_thinking_budget),
             )
         }
@@ -218,7 +224,11 @@ fn create_llm_provider_without_timeout(config: &LlmConfig) -> Arc<dyn LlmProvide
             } else {
                 GroqLlmProvider::new(config.api_key.clone())
             };
-            Arc::new(provider.without_timeout())
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
         }
         "gemini" => {
             let provider = if let Some(model) = &config.model {
@@ -230,6 +240,7 @@ fn create_llm_provider_without_timeout(config: &LlmConfig) -> Arc<dyn LlmProvide
             Arc::new(
                 provider
                     .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
                     .with_thinking_budget(config.gemini_thinking_budget)
                     .with_thinking_level(config.gemini_thinking_level.clone()),
             )
@@ -242,7 +253,11 @@ fn create_llm_provider_without_timeout(config: &LlmConfig) -> Arc<dyn LlmProvide
                     .unwrap_or_else(|| "http://localhost:11434".to_string()),
                 config.model.clone(),
             );
-            Arc::new(provider.without_timeout())
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
         }
         _ => {
             // Default to OpenAI
@@ -254,6 +269,7 @@ fn create_llm_provider_without_timeout(config: &LlmConfig) -> Arc<dyn LlmProvide
             Arc::new(
                 provider
                     .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
                     .with_reasoning_effort(config.openai_reasoning_effort.clone()),
             )
         }
@@ -412,6 +428,23 @@ pub async fn test_llm_rewrite(
     transcript: String,
     profile_id: Option<String>,
 ) -> Result<TestLlmRewriteResponse, LlmCommandError> {
+    // Create a dedicated request-log entry for this test action.
+    // This is intentionally *rewrite-only* (no STT step), and is the only way to have
+    // a request log without an STT request/response.
+    let llm_started_at = Instant::now();
+
+    let request_log_store = app
+        .try_state::<RequestLogStore>()
+        .map(|s| s.inner().clone());
+
+    if let Some(store) = request_log_store.as_ref() {
+        store.start_request("rewrite-only".to_string(), None);
+        store.with_current(|log| {
+            log.raw_transcript = Some(transcript.clone());
+            log.info("Test rewrite started");
+        });
+    }
+
     let config = pipeline.config();
 
     // IMPORTANT: This is a *test* endpoint. It intentionally ignores the
@@ -474,19 +507,79 @@ pub async fn test_llm_rewrite(
     };
 
     // This is a *test* endpoint: do not enforce request timeouts.
-    let provider = create_llm_provider_without_timeout(&provider_cfg);
-    let output = format_text(provider.as_ref(), &transcript, &prompts)
-        .await
-        .map_err(|e| LlmCommandError::from(e.to_string()))?;
+    let provider = create_llm_provider_without_timeout(&provider_cfg, request_log_store.clone());
 
-    // Best-effort: emit LLM cost event for the current request log (if any).
-    crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
+    let output_res = format_text(provider.as_ref(), &transcript, &prompts).await;
 
-    Ok(TestLlmRewriteResponse {
-        output,
-        provider_used: provider.name().to_string(),
-        model_used: provider.model().to_string(),
-    })
+    match output_res {
+        Ok(output) => {
+            if let Some(store) = request_log_store.as_ref() {
+                let llm_duration_ms = llm_started_at.elapsed().as_millis() as u64;
+                let provider_used = provider.name().to_string();
+                let model_used = provider.model().to_string();
+
+                store.with_current(|log| {
+                    log.llm_provider = Some(provider_used.clone());
+                    log.llm_model = Some(model_used.clone());
+                    log.formatted_transcript = Some(output.clone());
+                    log.llm_duration_ms = Some(llm_duration_ms);
+                    log.info(format!(
+                        "Test rewrite completed in {}ms ({} -> {} chars)",
+                        llm_duration_ms,
+                        transcript.len(),
+                        output.len()
+                    ));
+                    log.complete_success();
+                });
+
+                // Best-effort: emit LLM cost event for this request log.
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Success,
+                    None,
+                );
+
+                store.complete_current();
+
+                return Ok(TestLlmRewriteResponse {
+                    output,
+                    provider_used,
+                    model_used,
+                });
+            }
+
+            // Best-effort: emit LLM cost event for the current request log (if any).
+            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
+
+            Ok(TestLlmRewriteResponse {
+                output,
+                provider_used: provider.name().to_string(),
+                model_used: provider.model().to_string(),
+            })
+        }
+        Err(e) => {
+            if let Some(store) = request_log_store.as_ref() {
+                let llm_duration_ms = llm_started_at.elapsed().as_millis() as u64;
+                store.with_current(|log| {
+                    log.llm_duration_ms = Some(llm_duration_ms);
+                    log.error(format!("Test rewrite failed: {}", e));
+                    log.complete_error(e.to_string());
+                });
+
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Error,
+                    None,
+                );
+
+                store.complete_current();
+            } else {
+                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
+            }
+
+            Err(LlmCommandError::from(e.to_string()))
+        }
+    }
 }
 
 /// Run a one-off LLM completion with explicit provider/model and explicit prompts.

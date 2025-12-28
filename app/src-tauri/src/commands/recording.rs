@@ -1074,6 +1074,45 @@ pub async fn pipeline_test_transcribe_last_audio(
     pipeline: State<'_, SharedPipeline>,
     profile_id: Option<String>,
 ) -> Result<String, CommandError> {
+    // Create a dedicated request-log entry for this test action.
+    // This is important because it is a standalone STT call (no recording/start step).
+    let stt_started_at = Instant::now();
+
+    if let Some(log_store) = app.try_state::<RequestLogStore>() {
+        let cfg = pipeline.config();
+
+        // Best-effort: pick the *desired* provider/model based on profile overrides.
+        // The pipeline may still fall back to global provider/model if overrides are invalid.
+        let (desired_provider, desired_model) = profile_id
+            .as_deref()
+            .and_then(|id| {
+                if id == "default" {
+                    None
+                } else {
+                    cfg.llm_config
+                        .program_prompt_profiles
+                        .iter()
+                        .find(|p| p.id == id)
+                }
+            })
+            .map(|p| {
+                (
+                    p.stt_provider
+                        .clone()
+                        .unwrap_or_else(|| cfg.stt_provider.clone()),
+                    p.stt_model.clone().or_else(|| cfg.stt_model.clone()),
+                )
+            })
+            .unwrap_or_else(|| (cfg.stt_provider.clone(), cfg.stt_model.clone()));
+
+        log_store.start_request(desired_provider, desired_model);
+        log_store.with_current(|log| {
+            log.llm_provider = None;
+            log.llm_model = None;
+            log.info("Test transcription started");
+        });
+    }
+
     // Attempt transcription and persist cost events centrally.
     let res = pipeline
         .transcribe_last_audio_for_profile(profile_id.as_deref())
@@ -1081,14 +1120,68 @@ pub async fn pipeline_test_transcribe_last_audio(
 
     match res {
         Ok(s) => {
-            // Best-effort: emit cost events using the last WAV bytes.
             let wav = pipeline.clone_last_wav_bytes();
-            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, wav.as_deref());
+
+            if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                let stt_duration_ms = stt_started_at.elapsed().as_millis() as u64;
+                log_store.with_current(|log| {
+                    log.audio_size_bytes = wav.as_ref().map(|b| b.len());
+                    log.raw_transcript = Some(s.clone());
+                    log.formatted_transcript = Some(s.clone());
+                    log.stt_duration_ms = Some(stt_duration_ms);
+                    log.info(format!(
+                        "Test transcription completed in {}ms ({} chars)",
+                        stt_duration_ms,
+                        s.len()
+                    ));
+                    log.complete_success();
+                });
+
+                // Best-effort: emit cost events using the last WAV bytes.
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Success,
+                    wav.as_deref(),
+                );
+
+                log_store.complete_current();
+            } else {
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Success,
+                    wav.as_deref(),
+                );
+            }
+
             Ok(s)
         }
         Err(e) => {
             let wav = pipeline.clone_last_wav_bytes();
-            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, wav.as_deref());
+
+            if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                let stt_duration_ms = stt_started_at.elapsed().as_millis() as u64;
+                log_store.with_current(|log| {
+                    log.audio_size_bytes = wav.as_ref().map(|b| b.len());
+                    log.stt_duration_ms = Some(stt_duration_ms);
+                    log.error(format!("Test transcription failed: {}", e));
+                    log.complete_error(e.to_string());
+                });
+
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Error,
+                    wav.as_deref(),
+                );
+
+                log_store.complete_current();
+            } else {
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Error,
+                    wav.as_deref(),
+                );
+            }
+
             Err(CommandError::from(e))
         }
     }
