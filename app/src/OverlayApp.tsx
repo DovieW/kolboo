@@ -4,11 +4,30 @@ import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useDrag } from "@use-gesture/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { applyAccentColor } from "./lib/accentColor";
 import { useSettings, useTypeText } from "./lib/queries";
 import { type ConnectionState, tauriAPI } from "./lib/tauri";
 import "./app.css";
+
+function readBootAccentColor(): string | null {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const raw = window.localStorage.getItem("tv_accent_color");
+    if (typeof raw !== "string") return null;
+    if (/^#([0-9a-fA-F]{6})$/.test(raw)) return raw;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Pipeline state machine states (matches Rust PipelineState)
@@ -1431,9 +1450,13 @@ function RecordingControl() {
   // Load settings (overlay mode + selected mic)
   const { data: settings } = useSettings();
 
-  useEffect(() => {
-    applyAccentColor(settings?.accent_color);
-  }, [settings?.accent_color]);
+  const bootAccent = useMemo(() => readBootAccentColor(), []);
+
+  // Layout effect prevents a first-paint Tangerine flash on reload.
+  useLayoutEffect(() => {
+    const effectiveAccent = settings ? settings.accent_color : bootAccent;
+    applyAccentColor(effectiveAccent);
+  }, [bootAccent, settings]);
 
   // TanStack Query hooks
   const typeTextMutation = useTypeText();

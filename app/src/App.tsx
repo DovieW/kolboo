@@ -30,7 +30,7 @@ import {
   Plus,
   Settings,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
@@ -62,6 +62,30 @@ import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
 import "./styles.css";
 
 type View = "home" | "settings" | "logs" | "usage-stats";
+
+function readBootGuideState(): "pending" | "skipped" | "completed" | null {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const raw = window.localStorage.getItem("tv_settings_guide_state");
+    if (raw === "pending" || raw === "skipped" || raw === "completed")
+      return raw;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function readBootAccentColor(): string | null {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const raw = window.localStorage.getItem("tv_accent_color");
+    if (typeof raw !== "string") return null;
+    if (/^#([0-9a-fA-F]{6})$/.test(raw)) return raw;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 function Sidebar({
   activeView,
@@ -1022,18 +1046,33 @@ function SettingsViewWithGuideLauncher({
 function AccentColorSync() {
   const { data: settings } = useSettings();
 
-  useEffect(() => {
-    applyAccentColor(settings?.accent_color);
-  }, [settings?.accent_color]);
+  // Read once so Ctrl+R can apply the user's accent immediately, without waiting
+  // for the async Tauri store to hydrate.
+  const bootAccent = useMemo(() => readBootAccentColor(), []);
+
+  // Use layout effect so this runs before paint (avoids a one-frame Tangerine flash).
+  useLayoutEffect(() => {
+    const effectiveAccent = settings ? settings.accent_color : bootAccent;
+    applyAccentColor(effectiveAccent);
+  }, [bootAccent, settings]);
 
   return null;
 }
 
 export default function App() {
   const queryClient = useQueryClient();
-  const [activeView, setActiveView] = useState<View>("home");
-  const [settingsGuideOpen, setSettingsGuideOpen] = useState(false);
-  const didAutoOpenGuideRef = useRef(false);
+
+  const bootGuideState = readBootGuideState();
+  const bootGuideKnown = bootGuideState !== null;
+  const bootShouldAutoOpenGuide = bootGuideState === "pending";
+
+  const [activeView, setActiveView] = useState<View>(() =>
+    bootShouldAutoOpenGuide ? "settings" : "home"
+  );
+  const [settingsGuideOpen, setSettingsGuideOpen] = useState<boolean>(
+    () => bootShouldAutoOpenGuide
+  );
+
   const { data: guideState } = useSettingsGuideState();
   const setGuideState = useSetSettingsGuideState();
   const { data: settings } = useSettings();
@@ -1063,12 +1102,22 @@ export default function App() {
     };
   }, [queryClient]);
 
-  useEffect(() => {
-    if (didAutoOpenGuideRef.current) return;
-    if (!guideState) return;
+  // If we don't have a boot hint yet (first ever run, or storage was cleared),
+  // avoid rendering the Home view for a moment before the guide state arrives.
+  if (!bootGuideKnown && guideState === undefined) {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "#0b0d10",
+        }}
+      />
+    );
+  }
 
+  useEffect(() => {
     if (guideState === "pending") {
-      didAutoOpenGuideRef.current = true;
       setActiveView("settings");
       setSettingsGuideOpen(true);
     }

@@ -634,6 +634,25 @@ export const tauriAPI = {
   async getSettings(): Promise<AppSettings> {
     const store = await getStore();
 
+    // Keep a tiny subset of settings mirrored in localStorage so the UI can apply
+    // critical visuals (accent color) before the async store read completes.
+    // This reduces first-paint flicker on startup.
+    const tryWriteLocalStorage = (key: string, value: string | null) => {
+      try {
+        if (typeof window === "undefined") return;
+        if (!window.localStorage) return;
+        if (value === null) {
+          window.localStorage.removeItem(key);
+        } else {
+          window.localStorage.setItem(key, value);
+        }
+      } catch {
+        // ignore (private mode / disabled storage)
+      }
+    };
+
+    const LOCAL_ACCENT_COLOR_KEY = "tv_accent_color";
+
     const normalizePromptSection = (value: any): PromptSection | null => {
       if (value === null) return null;
       if (!value || typeof value !== "object") return null;
@@ -788,7 +807,7 @@ export const tauriAPI = {
             .filter((p): p is RewriteProgramPromptProfile => p !== null)
         : [];
 
-    return {
+    const settings: AppSettings = {
       toggle_hotkey:
         (await store.get<HotkeyConfig>("toggle_hotkey")) ?? defaultToggleHotkey,
       hold_hotkey:
@@ -949,6 +968,11 @@ export const tauriAPI = {
         await store.get("stats_retention_max_bytes")
       ),
     };
+
+    // Mirror the accent so index.html can apply it synchronously at next launch.
+    tryWriteLocalStorage(LOCAL_ACCENT_COLOR_KEY, settings.accent_color ?? null);
+
+    return settings;
   },
 
   /**
@@ -963,6 +987,19 @@ export const tauriAPI = {
   async updateAccentColor(color: string | null): Promise<void> {
     const store = await getStore();
     const normalized = normalizeHexColor(color);
+
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        const LOCAL_ACCENT_COLOR_KEY = "tv_accent_color";
+        if (!normalized) {
+          window.localStorage.removeItem(LOCAL_ACCENT_COLOR_KEY);
+        } else {
+          window.localStorage.setItem(LOCAL_ACCENT_COLOR_KEY, normalized);
+        }
+      }
+    } catch {
+      // ignore
+    }
 
     if (!normalized) {
       await store.delete("accent_color");
@@ -1409,7 +1446,17 @@ export const tauriAPI = {
   async getSettingsGuideState(): Promise<SettingsGuideState> {
     const store = await getStore();
     const raw = await store.get(SETTINGS_GUIDE_STATE_KEY);
-    return normalizeSettingsGuideState(raw);
+    const state = normalizeSettingsGuideState(raw);
+
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem("tv_settings_guide_state", state);
+      }
+    } catch {
+      // ignore
+    }
+
+    return state;
   },
 
   async setSettingsGuideState(state: SettingsGuideState): Promise<void> {
@@ -1419,6 +1466,14 @@ export const tauriAPI = {
       normalizeSettingsGuideState(state)
     );
     await store.save();
+
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem("tv_settings_guide_state", state);
+      }
+    } catch {
+      // ignore
+    }
 
     // Notify other windows that persisted state changed.
     await emit("settings-changed", { [SETTINGS_GUIDE_STATE_KEY]: state });
