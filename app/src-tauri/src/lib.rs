@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Manager, WindowEvent,
 };
 use tauri_utils::config::BackgroundThrottlingPolicy;
 
@@ -32,7 +32,7 @@ use history::{HistoryStorage, RequestModelInfo};
 use recordings::RecordingStore;
 use request_log::{RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
 use settings::HotkeyConfig;
-use state::AppState;
+use state::{AppState, TrayKeepAlive};
 
 #[cfg(desktop)]
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -148,6 +148,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     set_if_missing("stats_retention_max_bytes", json!(50_000_000u64));
     set_if_missing("overlay_mode", json!("recording_only"));
     set_if_missing("widget_position", json!("bottom-center"));
+    // Whether clicking the window X closes the settings window or hides it to the tray.
+    // - "close_window": destroy the main window (tray will recreate it on demand)
+    // - "minimize_to_tray": keep the main window alive and hide it instead
+    set_if_missing("main_window_close_behavior", json!("close_window"));
     set_if_missing("output_mode", json!("paste"));
     set_if_missing("output_hit_enter", json!(false));
     set_if_missing("playing_audio_handling", json!("mute"));
@@ -1386,6 +1390,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(AppState::default())
+        .manage(TrayKeepAlive::default())
         .invoke_handler(tauri::generate_handler![
             commands::audio::play_audio_cue_preview,
             commands::audio::list_audio_input_devices,
@@ -1476,6 +1481,37 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 ensure_default_settings(app.handle())?;
+            }
+
+            // Configure what happens when the user clicks the X on the main window.
+            // We default to closing (destroying) the window and recreating it from the tray
+            // since this window is mostly for settings.
+            #[cfg(desktop)]
+            {
+                if let Some(main) = app.get_webview_window("main") {
+                    let app_handle = app.handle().clone();
+                    main.on_window_event(move |event| {
+                        if let WindowEvent::CloseRequested { api, .. } = event {
+                            let behavior: String = get_setting_from_store(
+                                &app_handle,
+                                "main_window_close_behavior",
+                                "close_window".to_string(),
+                            );
+
+                            if behavior == "minimize_to_tray" {
+                                log::info!("Main window close requested -> hiding (minimize_to_tray)");
+                                api.prevent_close();
+                                if let Some(w) = app_handle.get_webview_window("main") {
+                                    let _ = w.hide();
+                                }
+                            } else {
+                                log::info!("Main window close requested -> allowing close (close_window)");
+                            }
+                        }
+                    });
+                } else {
+                    log::warn!("Main window not found during setup; tray will recreate it on demand");
+                }
             }
 
             // Initialize history storage
@@ -1791,6 +1827,67 @@ pub fn run() {
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    fn show_main_window(app: &AppHandle, source: &str) {
+        let Some(window) = app.get_webview_window("main") else {
+            log::error!("{source}: main window not found (was it closed?) - recreating");
+
+            // Recreate main window if it was previously closed/destroyed.
+            // NOTE: Creating windows from synchronous event handlers can deadlock on Windows,
+            // so we do it on a separate thread.
+            let app_handle = app.clone();
+            let source = source.to_string();
+            std::thread::spawn(move || {
+                log::info!("{source}: creating main window");
+                match tauri::WebviewWindowBuilder::new(
+                    &app_handle,
+                    "main",
+                    tauri::WebviewUrl::App("index.html".into()),
+                )
+                .title("Tangerine")
+                .inner_size(1280.0, 720.0)
+                .resizable(true)
+                .center()
+                .build()
+                {
+                    Ok(w) => {
+                        let _ = w.unminimize();
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                        log::info!("{source}: main window created and shown");
+                    }
+                    Err(e) => {
+                        log::error!("{source}: failed to create main window: {e}");
+                    }
+                }
+            });
+            return;
+        };
+
+        let visible_before = window.is_visible().ok();
+        log::info!("{source}: attempting to show main window (visible_before={visible_before:?})");
+
+        if let Err(e) = window.unminimize() {
+            log::warn!("{source}: window.unminimize() failed: {e}");
+        }
+        if let Err(e) = window.show() {
+            log::warn!("{source}: window.show() failed: {e}");
+        }
+        // If the window was previously on a disconnected monitor, showing/focusing may succeed
+        // but the window can still be effectively invisible. Centering is a good recovery.
+        if let Err(e) = window.center() {
+            log::warn!("{source}: window.center() failed: {e}");
+        }
+        // A brief always-on-top toggle can help bring the window above other windows on Windows.
+        let _ = window.set_always_on_top(true);
+        if let Err(e) = window.set_focus() {
+            log::warn!("{source}: window.set_focus() failed: {e}");
+        }
+        let _ = window.set_always_on_top(false);
+
+        let visible_after = window.is_visible().ok();
+        log::info!("{source}: done (visible_after={visible_after:?})");
+    }
+
     let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
@@ -1801,19 +1898,18 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon_bytes = include_bytes!("../icons/32x32.png");
     let icon = tauri::image::Image::from_bytes(icon_bytes)?;
 
-    let _tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .icon(icon)
         .icon_as_template(false)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                log::info!("Tray menu: show");
+                show_main_window(app, "tray-menu-show");
             }
             "quit" => {
+                log::info!("Tray menu: quit");
                 // Emit disconnect request to frontend before exiting
                 if let Some(window) = app.get_webview_window("overlay") {
                     let _ = window.emit("request-disconnect", ());
@@ -1825,24 +1921,35 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    if window.is_visible().unwrap_or(false) {
-                        let _ = window.hide();
-                    } else {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+            match event {
+                // On Windows, a double click triggers two `Click` events plus one `DoubleClick`.
+                // If we "toggle" visibility on click, the two clicks cancel each other out and it
+                // looks like double click does nothing.
+                TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
                 }
+                | TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } => {
+                    log::info!("Tray icon: activate (left click/double-click)");
+                    let app = tray.app_handle();
+                    show_main_window(app, "tray-icon-activate");
+                }
+                _ => {}
             }
         })
         .build(app)?;
+
+    // Keep the tray handle alive for the lifetime of the app.
+    // This helps ensure click + menu callbacks keep firing reliably.
+    #[cfg(desktop)]
+    {
+        let keepalive = app.state::<TrayKeepAlive>();
+        keepalive.set(tray);
+    }
 
     Ok(())
 }
@@ -2200,26 +2307,118 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     let paste_last_hotkey: HotkeyConfig =
         get_setting_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last());
 
-    // Convert to shortcuts with validation (fall back to defaults if invalid)
-    let toggle_shortcut = toggle_hotkey.to_shortcut_or_default(HotkeyConfig::default_toggle);
-    let hold_shortcut = hold_hotkey.to_shortcut_or_default(HotkeyConfig::default_hold);
-    let paste_last_shortcut =
-        paste_last_hotkey.to_shortcut_or_default(HotkeyConfig::default_paste_last);
+    // Convert to shortcut strings with validation (fall back to defaults if invalid).
+    // NOTE: We intentionally register each shortcut individually so that a conflict
+    // (e.g. another app already using Ctrl+F3) doesn't prevent the app from starting.
+    let toggle_shortcut_str = toggle_hotkey
+        .to_shortcut()
+        .map(|_| toggle_hotkey.to_shortcut_string())
+        .unwrap_or_else(|e| {
+            log::warn!(
+                "Invalid toggle hotkey in settings store ({}); falling back to default",
+                e
+            );
+            HotkeyConfig::default_toggle().to_shortcut_string()
+        });
+    let hold_shortcut_str = hold_hotkey
+        .to_shortcut()
+        .map(|_| hold_hotkey.to_shortcut_string())
+        .unwrap_or_else(|e| {
+            log::warn!(
+                "Invalid hold hotkey in settings store ({}); falling back to default",
+                e
+            );
+            HotkeyConfig::default_hold().to_shortcut_string()
+        });
+    let paste_last_shortcut_str = paste_last_hotkey
+        .to_shortcut()
+        .map(|_| paste_last_hotkey.to_shortcut_string())
+        .unwrap_or_else(|e| {
+            log::warn!(
+                "Invalid paste-last hotkey in settings store ({}); falling back to default",
+                e
+            );
+            HotkeyConfig::default_paste_last().to_shortcut_string()
+        });
 
     log::info!(
         "Registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}",
-        toggle_hotkey.to_shortcut_string(),
-        hold_hotkey.to_shortcut_string(),
-        paste_last_hotkey.to_shortcut_string()
+        toggle_shortcut_str,
+        hold_shortcut_str,
+        paste_last_shortcut_str
     );
 
-    let shortcuts: Vec<Shortcut> = vec![toggle_shortcut, hold_shortcut, paste_last_shortcut];
+    let shortcut_manager = app.global_shortcut();
 
-    app.global_shortcut()
-        .on_shortcuts(shortcuts, |app, shortcut, event| {
+    // Register each shortcut independently; on failure we log + emit a warning event.
+    let mut failures: Vec<String> = Vec::new();
+
+    let toggle_shortcut =
+        <Shortcut as std::str::FromStr>::from_str(&toggle_shortcut_str).map_err(|e| {
+            failures.push(format!(
+                "Toggle ({}) => failed to parse shortcut: {:?}",
+                toggle_shortcut_str, e
+            ));
+        });
+    if let Ok(toggle_shortcut) = toggle_shortcut {
+        if let Err(e) =
+            shortcut_manager.on_shortcut(toggle_shortcut, |app, shortcut, event| {
+                handle_shortcut_event(app, shortcut, &event);
+            })
+        {
+            failures.push(format!("Toggle ({}) => {}", toggle_shortcut_str, e));
+        }
+    }
+
+    let hold_shortcut =
+        <Shortcut as std::str::FromStr>::from_str(&hold_shortcut_str).map_err(|e| {
+            failures.push(format!(
+                "Hold ({}) => failed to parse shortcut: {:?}",
+                hold_shortcut_str, e
+            ));
+        });
+    if let Ok(hold_shortcut) = hold_shortcut {
+        if let Err(e) = shortcut_manager.on_shortcut(hold_shortcut, |app, shortcut, event| {
             handle_shortcut_event(app, shortcut, &event);
-        })?;
+        }) {
+            failures.push(format!("Hold ({}) => {}", hold_shortcut_str, e));
+        }
+    }
 
-    log::info!("Shortcuts registered successfully");
+    let paste_last_shortcut = <Shortcut as std::str::FromStr>::from_str(&paste_last_shortcut_str)
+        .map_err(|e| {
+            failures.push(format!(
+                "PasteLast ({}) => failed to parse shortcut: {:?}",
+                paste_last_shortcut_str, e
+            ));
+        });
+    if let Ok(paste_last_shortcut) = paste_last_shortcut {
+        if let Err(e) = shortcut_manager.on_shortcut(
+            paste_last_shortcut,
+            |app, shortcut, event| {
+                handle_shortcut_event(app, shortcut, &event);
+            },
+        ) {
+            failures.push(format!("PasteLast ({}) => {}", paste_last_shortcut_str, e));
+        }
+    }
+
+    if failures.is_empty() {
+        log::info!("Shortcuts registered successfully");
+    } else {
+        let details = failures.join("\n");
+        log::warn!(
+            "One or more shortcuts failed to register. The app will continue running, but some hotkeys may not work until you change them in Settings.\n{}",
+            details
+        );
+        emit_system_event(
+            app,
+            "warning",
+            "Some global hotkeys could not be registered",
+            Some(&details),
+        );
+    }
+
+    // Never abort startup due to hotkey registration failures.
     Ok(())
 }

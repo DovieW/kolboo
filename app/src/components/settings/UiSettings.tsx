@@ -17,6 +17,7 @@ import {
   useSettings,
   useUpdateAccentColor,
   useUpdateAudioCue,
+  useUpdateMainWindowCloseBehavior,
   useUpdateOutputHitEnter,
   useUpdateOutputMode,
   useUpdateOverlayMode,
@@ -28,6 +29,7 @@ import {
 import { DEFAULT_ACCENT_HEX, applyAccentColor } from "../../lib/accentColor";
 import type {
   AudioCue,
+  MainWindowCloseBehavior,
   OutputMode,
   OverlayMode,
   PlayingAudioHandling,
@@ -124,6 +126,7 @@ export function UiSettings({
   const updateSoundEnabled = useUpdateSoundEnabled();
   const updateAccentColor = useUpdateAccentColor();
   const updateAudioCue = useUpdateAudioCue();
+  const updateMainWindowCloseBehavior = useUpdateMainWindowCloseBehavior();
   const updatePlayingAudioHandling = useUpdatePlayingAudioHandling();
   const updateOverlayMode = useUpdateOverlayMode();
   const updateWidgetPosition = useUpdateWidgetPosition();
@@ -216,6 +219,9 @@ export function UiSettings({
     : globalOutputHitEnter;
   const outputHitEnterInheriting =
     isProfileScope && isInheriting(profile?.output_hit_enter);
+
+  const mainWindowCloseBehavior: MainWindowCloseBehavior =
+    settings?.main_window_close_behavior ?? "close_window";
 
   const outputFlags = outputModeToFlags(outputMode);
 
@@ -348,6 +354,16 @@ export function UiSettings({
       return;
     }
     updateOutputMode.mutate(nextMode);
+  };
+
+  const handleMainWindowCloseBehaviorChange = (next: string) => {
+    if (isProfileScope) return;
+
+    const behavior = next as MainWindowCloseBehavior;
+    if (behavior !== "close_window" && behavior !== "minimize_to_tray") return;
+    if (behavior === mainWindowCloseBehavior) return;
+
+    updateMainWindowCloseBehavior.mutate(behavior);
   };
 
   return (
@@ -878,6 +894,44 @@ export function UiSettings({
               }}
             />
           )}
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Close button</p>
+          <p className="settings-description">
+            What happens when you close the settings window
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Tooltip
+            label={GLOBAL_ONLY_TOOLTIP}
+            disabled={!isProfileScope}
+            withArrow
+            position="top-start"
+          >
+            <div style={isProfileScope ? { opacity: 0.5 } : undefined}>
+              <SegmentedControl
+                value={mainWindowCloseBehavior}
+                onChange={handleMainWindowCloseBehaviorChange}
+                disabled={isLoading || isProfileScope}
+                data={[
+                  { value: "close_window", label: "Close window" },
+                  { value: "minimize_to_tray", label: "Minimize to tray" },
+                ]}
+                size="sm"
+                radius="md"
+                styles={{
+                  root: {
+                    backgroundColor: "var(--bg-elevated)",
+                    border: "1px solid var(--border-default)",
+                    minWidth: 260,
+                  },
+                }}
+              />
+            </div>
+          </Tooltip>
         </div>
       </div>
     </>

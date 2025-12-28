@@ -183,6 +183,15 @@ function normalizeOutputMode(value: unknown): OutputMode {
   return "paste";
 }
 
+export type MainWindowCloseBehavior = "close_window" | "minimize_to_tray";
+
+function normalizeMainWindowCloseBehavior(
+  value: unknown
+): MainWindowCloseBehavior {
+  if (value === "close_window" || value === "minimize_to_tray") return value;
+  return "close_window";
+}
+
 export interface AppSettings {
   toggle_hotkey: HotkeyConfig;
   hold_hotkey: HotkeyConfig;
@@ -226,6 +235,9 @@ export interface AppSettings {
   widget_position: WidgetPosition;
   output_mode: OutputMode;
   output_hit_enter: boolean;
+
+  /** What the window close button does for the main/settings window. */
+  main_window_close_behavior: MainWindowCloseBehavior;
 
   // Hallucination protection (quiet-audio gate)
   quiet_audio_gate_enabled: boolean;
@@ -870,6 +882,10 @@ export const tauriAPI = {
       output_mode: normalizeOutputMode(await store.get("output_mode")),
       output_hit_enter: (await store.get<boolean>("output_hit_enter")) ?? false,
 
+      main_window_close_behavior: normalizeMainWindowCloseBehavior(
+        await store.get("main_window_close_behavior")
+      ),
+
       quiet_audio_gate_enabled:
         (await store.get<boolean>("quiet_audio_gate_enabled")) ?? true,
       quiet_audio_min_duration_secs:
@@ -1013,6 +1029,18 @@ export const tauriAPI = {
     // Include the new accent in the payload so the overlay can update immediately
     // without waiting for a disk reload.
     await emit("settings-changed", { accent_color: normalized ?? null });
+  },
+
+  async updateMainWindowCloseBehavior(
+    behavior: MainWindowCloseBehavior
+  ): Promise<void> {
+    const store = await getStore();
+    const normalized = normalizeMainWindowCloseBehavior(behavior);
+    await store.set("main_window_close_behavior", normalized);
+    await store.save();
+
+    // Notify other windows (overlay) to refresh cached settings.
+    await emit("settings-changed", { main_window_close_behavior: normalized });
   },
 
   async updateToggleHotkey(hotkey: HotkeyConfig): Promise<void> {

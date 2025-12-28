@@ -211,6 +211,15 @@ pnpm dev           # Start Tauri app in dev mode
 pnpm build         # Build for current platform
 ```
 
+## Troubleshooting
+
+### "HotKey already registered" on startup
+
+If the app fails to start (or hotkeys don\'t work) with an error like `HotKey already registered`, it means the configured shortcut is already in use.
+
+- Make sure there\'s not another Tangerine/Tangerine-voice instance still running (check the system tray and Task Manager).
+- If another app is using the same shortcut, change Tangerine\'s hotkeys in **Settings → Hotkeys** to a combination that isn\'t taken.
+
 ## Configuration
 
 ### Server Configuration (.env)

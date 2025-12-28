@@ -15,6 +15,7 @@ import {
   type OutputMode,
   type PlayingAudioHandling,
   type RewriteProgramPromptProfile,
+  type MainWindowCloseBehavior,
   sttAPI,
   tauriAPI,
   type TestLlmRewriteResponse,
@@ -305,6 +306,17 @@ export function useUpdateAccentColor() {
     },
     onError: (error) => {
       console.error("Update accent color failed:", error);
+    },
+  });
+}
+
+export function useUpdateMainWindowCloseBehavior() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (behavior: MainWindowCloseBehavior) =>
+      tauriAPI.updateMainWindowCloseBehavior(behavior),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
   });
 }
