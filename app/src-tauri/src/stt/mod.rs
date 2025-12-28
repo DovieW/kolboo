@@ -9,6 +9,7 @@ mod deepgram;
 mod groq;
 mod openai;
 mod retry;
+mod speechmatics;
 
 #[cfg(feature = "local-whisper")]
 mod whisper;
@@ -19,6 +20,7 @@ pub use deepgram::DeepgramSttProvider;
 pub use groq::GroqSttProvider;
 pub use openai::OpenAiSttProvider;
 pub use retry::{with_retry, RetryConfig};
+pub use speechmatics::SpeechmaticsSttProvider;
 #[allow(unused_imports)]
 pub use retry::is_retryable_error;
 

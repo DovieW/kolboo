@@ -19,6 +19,7 @@ use crate::cost::gemini as gemini_cost;
 use crate::cost::anthropic as anthropic_cost;
 use crate::cost::deepgram as deepgram_cost;
 use crate::cost::assemblyai as assemblyai_cost;
+use crate::cost::speechmatics as speechmatics_cost;
 use tauri::AppHandle;
 use tauri::{Manager, Emitter};
 use crate::request_log::RequestLogStore;
@@ -102,6 +103,7 @@ fn is_free_tier_call(app: &AppHandle, provider: &str) -> bool {
         return match provider {
             "groq" => crate::get_setting_from_store(app, "groq_free_tier", true),
             "assemblyai" => crate::get_setting_from_store(app, "assemblyai_free_tier", true),
+            "speechmatics" => crate::get_setting_from_store(app, "speechmatics_free_tier", true),
             _ => false,
         };
     }
@@ -603,6 +605,18 @@ pub fn emit_cost_events_for_current_request(
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
                     if let Some(micros) = assemblyai_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                        ev.estimated_cost_usd_micros = Some(micros);
+                    }
+                }
+            }
+        }
+
+        if inputs.stt_provider == "speechmatics" {
+            // Even when marked free-tier, still estimate list-price cost so users can
+            // optionally include free-tier calls in Stats.
+            if ev.estimated_cost_usd_micros.is_none() {
+                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                    if let Some(micros) = speechmatics_cost::estimate_stt_cost_from_audio_secs(model, secs) {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }

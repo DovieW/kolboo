@@ -484,6 +484,10 @@ impl PipelineInner {
                 crate::stt::AssemblyAiSttProvider::new(api_key, model)
                     .with_request_log_store(self.config.request_log_store.clone()),
             ),
+            "speechmatics" => Arc::new(
+                crate::stt::SpeechmaticsSttProvider::new(api_key, model)
+                    .with_request_log_store(self.config.request_log_store.clone()),
+            ),
             "deepgram" => Arc::new(
                 crate::stt::DeepgramSttProvider::new(api_key, model)
                     .with_request_log_store(self.config.request_log_store.clone()),

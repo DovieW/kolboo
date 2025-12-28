@@ -36,6 +36,15 @@ Provider pricing tables and estimation helpers live in:
 - `app/src-tauri/src/cost/openai.rs`
 - `app/src-tauri/src/cost/groq.rs`
 
+Other providers also live under:
+
+- `app/src-tauri/src/cost/<provider>.rs`
+
+If you want the UI to show a per-model price (e.g. “$X / hour” for STT or “$X / 1M tokens” for LLM), wire it through the pricing command:
+
+- Backend: `app/src-tauri/src/commands/pricing.rs` (`get_model_pricing`)
+- Frontend: `app/src/lib/queries.ts` (`useModelPricing`) + `app/src/lib/tauri.ts` (`statsAPI.getModelPricing`)
+
 Both modules use **USD micros** (`UsdMicros`):
 
 - $1 USD = 1,000,000 micros
@@ -64,9 +73,46 @@ Some providers support marking calls as free-tier (e.g. Groq via the `groq_free_
 - If a call is free-tier, emit a priced event with cost set to `0` micros.
 - Stats filtering can then exclude free-tier calls without losing event counts.
 
+#### Adding a new free-tier toggle (end-to-end)
+
+Free-tier is a **settings-store boolean** (e.g. `${provider}_free_tier`) that affects **stats/logging**, not provider availability.
+
+Backend (Rust):
+
+- Seed a default value for missing keys in:
+  - `app/src-tauri/src/lib.rs` → `ensure_default_settings`
+  - (This runs on startup so UI and backend agree on effective defaults.)
+- Tag the cost event as free-tier in:
+  - `app/src-tauri/src/stats.rs` (look for the centralized `is_free_tier_call` logic)
+- Keep estimation behavior consistent:
+  - If free-tier should still show “list price estimate”, emit both `is_free_tier = true` and a non-zero `estimated_cost_usd_micros` (UI can filter).
+  - If free-tier should mean “$0”, set `estimated_cost_usd_micros = Some(0)`.
+
+Frontend (TS/React):
+
+- Add the setting to the typed schema:
+  - `app/src/lib/tauri.ts` (`AppSettings` + normalization default)
+- Add a settings updater:
+  - `app/src/lib/tauri.ts` (e.g. `update<Provider>FreeTier(enabled)`)
+- Add a React Query mutation that updates the store and syncs pipeline config:
+  - `app/src/lib/queries.ts`
+- Add the toggle UI:
+  - Usually `app/src/components/settings/ApiKeysSettings.tsx` (for “account/billing” toggles)
+
 ---
 
 ## Mental model (how settings flow)
+
+On app startup, the backend seeds missing defaults into `settings.json` via:
+
+- `app/src-tauri/src/lib.rs` → `ensure_default_settings`
+
+This prevents “missing key” mismatches between UI defaults and backend runtime fallbacks.
+
+There are two backend “read settings” paths to keep in mind:
+
+- Startup: `app/src-tauri/src/lib.rs` → `initialize_pipeline_from_settings`
+- After UI changes: `app/src-tauri/src/commands/config.rs` → `sync_pipeline_config`
 
 1. UI writes to the Store via `app/src/lib/tauri.ts` helpers.
 2. React Query mutations in `app/src/lib/queries.ts` call:
@@ -89,7 +135,71 @@ That id must match across:
 - Provider creation matches in Rust pipeline: `app/src-tauri/src/pipeline.rs`
 - Any per-provider key aggregation lists inside `sync_pipeline_config`
 
+Also check for **hardcoded maintenance lists** that should include your new provider id/key:
+
+- `app/src-tauri/src/commands/data.rs` → `delete_all_api_keys` (known `*_api_key` keys)
+
 If these drift, the provider will silently disappear from dropdowns (because it’s filtered by “has API key”).
+
+---
+
+## Adding a provider-specific setting (toggle/knob)
+
+If your provider needs **any extra setting** beyond `provider`, `model`, and `${provider}_api_key` (examples: “free tier”, “thinking budget”, “endpoint URL”), treat it as a first-class Store setting.
+
+Minimum plumbing checklist:
+
+1. **Frontend type + default**
+
+    - `app/src/lib/tauri.ts` → extend `AppSettings` and ensure missing keys get a sensible default during `getSettings()`.
+
+2. **Frontend updater**
+
+    - `app/src/lib/tauri.ts` → add an `updateX(...)` function that writes to the Store.
+
+3. **Frontend mutation**
+
+    - `app/src/lib/queries.ts` → add a `useUpdateX(...)` mutation that calls the updater and then `configAPI.syncPipelineConfig()`.
+
+4. **UI control**
+
+    - Add the component to the appropriate settings screen.
+      - Account/provider toggles often live in `app/src/components/settings/ApiKeysSettings.tsx`.
+      - Runtime knobs often live in `app/src/components/settings/ProvidersSettings.tsx` or `PromptSettings.tsx`.
+
+5. **Backend default seeding / migration**
+
+    - `app/src-tauri/src/lib.rs` → `ensure_default_settings`.
+
+6. **Backend consumption**
+
+    - Read the setting in `app/src-tauri/src/commands/config.rs` (`sync_pipeline_config`) and/or
+      `app/src-tauri/src/lib.rs` (`initialize_pipeline_from_settings`) and plumb into `PipelineConfig`.
+
+---
+
+## Request logs (Logs UI) and provider payload debugging
+
+Providers can enrich the active request log with request/response payloads. This is extremely helpful for provider integrations (especially WS/streaming).
+
+Key points:
+
+- The request log store is managed as app state:
+  - `app/src-tauri/src/request_log.rs` (`RequestLogStore`)
+  - wired up in `app/src-tauri/src/lib.rs`
+- The pipeline passes an optional store into providers:
+  - LLM providers commonly implement `with_request_log_store(...)` (see `app/src-tauri/src/pipeline.rs` → `create_llm_provider`)
+  - STT providers should follow the same pattern so they can attach:
+
+    - request JSON
+    - response JSON
+    - intermediate debugging events
+
+If you’re adding a provider and nothing shows up in Logs:
+
+- Verify the store is being preserved across config sync:
+  - `app/src-tauri/src/commands/config.rs` keeps `request_log_store` on the new `PipelineConfig`.
+- Verify your provider accepts the store and writes to it.
 
 ---
 
@@ -388,6 +498,7 @@ Why gating matters:
 - [ ] Set default model in both provider `DEFAULT_MODEL` and `llm/defaults.rs`
 - [ ] Added/updated pricing tables in `app/src-tauri/src/cost/<provider>.rs` (if Stats/Logs should show cost)
 - [ ] Wired cost estimation in `app/src-tauri/src/stats.rs` (emit `estimated_cost_usd_micros`)
+- [ ] If the provider has extra settings: added Store setting plumbing + `ensure_default_settings` seed
 - [ ] If structured outputs supported: implemented + gated + parsed
 
 ---
@@ -404,3 +515,5 @@ Why gating matters:
 - [ ] Updated prompting gates in `PromptSettings.tsx` (if applicable)
 - [ ] Added/updated pricing tables in `app/src-tauri/src/cost/<provider>.rs` (if Stats/Logs should show cost)
 - [ ] Wired cost estimation in `app/src-tauri/src/stats.rs` (emit `estimated_cost_usd_micros`)
+- [ ] If the provider has extra settings (free-tier, endpoints, etc): added Store setting plumbing + `ensure_default_settings` seed
+- [ ] If you added a new `*_api_key`: updated `delete_all_api_keys` (`app/src-tauri/src/commands/data.rs`)

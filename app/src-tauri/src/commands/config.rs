@@ -171,6 +171,7 @@ const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("aquavoice", "Aquavoice (Avalon)", false),
     ("groq", "Groq", false),
     ("assemblyai", "AssemblyAI", false),
+    ("speechmatics", "Speechmatics", false),
     ("deepgram", "Deepgram", false),
     ("whisper", "Local Whisper", true),
 ];
@@ -291,7 +292,14 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
     // Read all available STT API keys (for per-profile provider overrides at runtime)
     let mut stt_api_keys: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for provider in ["openai", "aquavoice", "groq", "assemblyai", "deepgram"] {
+    for provider in [
+        "openai",
+        "aquavoice",
+        "groq",
+        "assemblyai",
+        "speechmatics",
+        "deepgram",
+    ] {
         let key_name = format!("{}_api_key", provider);
         let key: String = app
             .store("settings.json")

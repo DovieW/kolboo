@@ -210,6 +210,9 @@ export interface AppSettings {
   // When true, treat AssemblyAI usage as free-tier for stats filtering.
   assemblyai_free_tier: boolean;
 
+  // When true, treat Speechmatics usage as free-tier for stats filtering.
+  speechmatics_free_tier: boolean;
+
   // Optional per-provider reasoning/thinking knobs.
   // These are ignored unless the selected provider/model supports them.
   openai_reasoning_effort: OpenAiReasoningEffort | null;
@@ -818,6 +821,8 @@ export const tauriAPI = {
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
       assemblyai_free_tier:
         (await store.get<boolean>("assemblyai_free_tier")) ?? true,
+      speechmatics_free_tier:
+        (await store.get<boolean>("speechmatics_free_tier")) ?? true,
       openai_reasoning_effort: normalizeOpenAiReasoningEffort(
         await store.get("openai_reasoning_effort")
       ),
@@ -857,7 +862,7 @@ export const tauriAPI = {
       quiet_audio_require_speech:
         (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
 
-      noise_gate_threshold_dbfs: await (async () => {
+      noise_gate_threshold_dbfs: await(async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -896,7 +901,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -918,14 +923,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })()),
+      })(),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -939,7 +944,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })()),
+      })(),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
@@ -1060,6 +1065,12 @@ export const tauriAPI = {
   async updateAssemblyAiFreeTier(enabled: boolean): Promise<void> {
     const store = await getStore();
     await store.set("assemblyai_free_tier", !!enabled);
+    await store.save();
+  },
+
+  async updateSpeechmaticsFreeTier(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("speechmatics_free_tier", !!enabled);
     await store.save();
   },
 

@@ -30,6 +30,10 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
     { value: "enhanced", label: "Enhanced" },
     { value: "base", label: "Base" },
   ],
+  speechmatics: [
+    { value: "enhanced", label: "Enhanced" },
+    { value: "standard", label: "Standard" },
+  ],
   whisper: [], // Local whisper has its own model management
 };
 

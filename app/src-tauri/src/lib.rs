@@ -115,6 +115,9 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     set_if_missing("stt_provider", json!("groq"));
     // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
     set_if_missing("groq_free_tier", json!(true));
+    // AssemblyAI and Speechmatics toggles (used by stats filtering).
+    set_if_missing("assemblyai_free_tier", json!(true));
+    set_if_missing("speechmatics_free_tier", json!(true));
     set_if_missing("stt_transcription_prompt", json!(null));
     set_if_missing("stt_timeout_seconds", json!(10.0));
     // How many recordings/history items to retain (impacts disk usage).
@@ -1880,7 +1883,14 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     // Read all available STT API keys (for per-profile provider overrides at runtime)
     let mut stt_api_keys: HashMap<String, String> = HashMap::new();
-    for provider in ["openai", "aquavoice", "groq", "deepgram"] {
+    for provider in [
+        "openai",
+        "aquavoice",
+        "groq",
+        "assemblyai",
+        "speechmatics",
+        "deepgram",
+    ] {
         let key_name = format!("{}_api_key", provider);
         let key: String = get_setting_from_store(app, &key_name, String::new());
         if !key.is_empty() {
@@ -1893,6 +1903,8 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         "openai" => get_setting_from_store(app, "openai_api_key", String::new()),
         "aquavoice" => get_setting_from_store(app, "aquavoice_api_key", String::new()),
         "groq" => get_setting_from_store(app, "groq_api_key", String::new()),
+        "assemblyai" => get_setting_from_store(app, "assemblyai_api_key", String::new()),
+        "speechmatics" => get_setting_from_store(app, "speechmatics_api_key", String::new()),
         "deepgram" => get_setting_from_store(app, "deepgram_api_key", String::new()),
         _ => String::new(),
     };

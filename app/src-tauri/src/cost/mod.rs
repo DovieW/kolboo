@@ -5,3 +5,4 @@ pub mod groq;
 pub mod gemini;
 pub mod anthropic;
 pub mod deepgram;
+pub mod speechmatics;

@@ -16,6 +16,7 @@ import {
   useSettings,
   useUpdateAssemblyAiFreeTier,
   useUpdateGroqFreeTier,
+  useUpdateSpeechmaticsFreeTier,
 } from "../../lib/queries";
 
 const GLOBAL_ONLY_TOOLTIP =
@@ -43,6 +44,13 @@ const API_KEYS: ApiKeyConfig[] = [
     placeholder: "Enter API key",
     storeKey: "assemblyai_api_key",
     getKeyUrl: "https://www.assemblyai.com/dashboard/api-keys",
+  },
+  {
+    id: "speechmatics",
+    label: "Speechmatics",
+    placeholder: "Enter API key",
+    storeKey: "speechmatics_api_key",
+    getKeyUrl: "https://portal.speechmatics.com/settings/api-keys",
   },
   {
     id: "aquavoice",
@@ -103,6 +111,7 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
   const { data: settings } = useSettings();
   const updateGroqFreeTier = useUpdateGroqFreeTier();
   const updateAssemblyAiFreeTier = useUpdateAssemblyAiFreeTier();
+  const updateSpeechmaticsFreeTier = useUpdateSpeechmaticsFreeTier();
 
   const { data: savedKeyValue } = useQuery({
     queryKey: ["apiKeyValue", config.storeKey],
@@ -201,6 +210,30 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
               title="Assume AssemblyAI calls cost $0 for stats"
             >
               Assume AssemblyAI calls cost $0 for stats
+            </Text>
+          </Group>
+        )}
+        {config.id === "speechmatics" && (
+          <Group gap={10} align="center" wrap="nowrap" mt={2}>
+            <Switch
+              size="sm"
+              checked={settings?.speechmatics_free_tier ?? true}
+              onChange={(e) =>
+                updateSpeechmaticsFreeTier.mutate(e.currentTarget.checked)
+              }
+              aria-label="Speechmatics free tier"
+            />
+            <Text size="xs" c="var(--text-secondary)" fw={600}>
+              Free tier
+            </Text>
+            <Text
+              size="xs"
+              c="var(--text-muted)"
+              className="settings-description--single-line"
+              style={{ flex: 1 }}
+              title="Assume Speechmatics calls cost $0 for stats"
+            >
+              Assume Speechmatics calls cost $0 for stats
             </Text>
           </Group>
         )}

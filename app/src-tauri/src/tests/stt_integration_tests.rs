@@ -6,7 +6,7 @@
 
 use crate::stt::{
     AudioEncoding, AudioFormat, DeepgramSttProvider, GroqSttProvider, OpenAiSttProvider,
-    SttProvider,
+    SpeechmaticsSttProvider, SttProvider,
 };
 
 #[test]
@@ -25,6 +25,12 @@ fn test_openai_provider_implements_trait() {
 fn test_deepgram_provider_implements_trait() {
     let provider = DeepgramSttProvider::new("test_key".to_string(), None);
     assert_eq!(provider.name(), "deepgram");
+}
+
+#[test]
+fn test_speechmatics_provider_implements_trait() {
+    let provider = SpeechmaticsSttProvider::new("test_key".to_string(), None);
+    assert_eq!(provider.name(), "speechmatics");
 }
 
 #[test]

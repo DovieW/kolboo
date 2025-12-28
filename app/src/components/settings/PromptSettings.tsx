@@ -572,15 +572,23 @@ export function PromptSettings({
     const stt = sttPricing.data?.stt;
     if (!stt) return null;
 
-    if (typeof stt.usd_micros_per_minute === "number") {
-      return `${formatUsdRateFromMicros(stt.usd_micros_per_minute)}/min`;
-    }
+    const minSecs =
+      typeof stt.min_billed_secs === "number" ? stt.min_billed_secs : null;
+
+    const withMinBill = (base: string) =>
+      minSecs ? `${base} · min ${minSecs}s` : base;
 
     if (typeof stt.usd_micros_per_hour === "number") {
       const base = `${formatUsdRateFromMicros(stt.usd_micros_per_hour)}/hr`;
-      const minSecs =
-        typeof stt.min_billed_secs === "number" ? stt.min_billed_secs : null;
-      return minSecs ? `${base} · min ${minSecs}s` : base;
+      return withMinBill(base);
+    }
+
+    // Some providers report pricing as USD/minute. For consistency in the UI,
+    // normalize everything to USD/hour.
+    if (typeof stt.usd_micros_per_minute === "number") {
+      const perHourMicros = Math.round(stt.usd_micros_per_minute * 60);
+      const base = `${formatUsdRateFromMicros(perHourMicros)}/hr`;
+      return withMinBill(base);
     }
 
     return null;

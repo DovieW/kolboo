@@ -7,6 +7,7 @@ use crate::cost::gemini as gemini_cost;
 use crate::cost::anthropic as anthropic_cost;
 use crate::cost::deepgram as deepgram_cost;
 use crate::cost::assemblyai as assemblyai_cost;
+use crate::cost::speechmatics as speechmatics_cost;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SttModelPricing {
@@ -111,6 +112,21 @@ pub fn get_model_pricing(provider: String, kind: String, model: String) -> Optio
 
             if provider_norm == "assemblyai" {
                 let per_hour = assemblyai_cost::asr_usd_micros_per_hour(&model_norm)?;
+                return Some(ModelPricingResponse {
+                    kind: "stt".into(),
+                    provider: provider_norm,
+                    model: model_norm,
+                    stt: Some(SttModelPricing {
+                        usd_micros_per_minute: None,
+                        usd_micros_per_hour: Some(per_hour),
+                        min_billed_secs: None,
+                    }),
+                    llm: None,
+                });
+            }
+
+            if provider_norm == "speechmatics" {
+                let per_hour = speechmatics_cost::asr_usd_micros_per_hour(&model_norm)?;
                 return Some(ModelPricingResponse {
                     kind: "stt".into(),
                     provider: provider_norm,
