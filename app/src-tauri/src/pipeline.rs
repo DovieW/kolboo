@@ -464,6 +464,14 @@ impl PipelineInner {
                 )
                 .with_request_log_store(self.config.request_log_store.clone()),
             ),
+            "aquavoice" => Arc::new(
+                crate::stt::AquavoiceSttProvider::new(
+                    api_key,
+                    model,
+                    self.config.stt_transcription_prompt.clone(),
+                )
+                .with_request_log_store(self.config.request_log_store.clone()),
+            ),
             "groq" => Arc::new(
                 crate::stt::GroqSttProvider::new(
                     api_key,

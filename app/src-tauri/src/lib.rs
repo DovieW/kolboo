@@ -460,7 +460,13 @@ fn start_recording(
                 } else {
                     None
                 };
-                log.llm_model = config.llm_config.model.clone();
+                // Avoid confusing logs: if LLM rewrite is disabled, do not record an LLM model.
+                // (The settings store may still contain a previously-selected model.)
+                log.llm_model = if config.llm_config.enabled {
+                    config.llm_config.model.clone()
+                } else {
+                    None
+                };
                 log.info(format!("Recording started ({})", source));
             });
         }
@@ -1874,7 +1880,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     // Read all available STT API keys (for per-profile provider overrides at runtime)
     let mut stt_api_keys: HashMap<String, String> = HashMap::new();
-    for provider in ["openai", "groq", "deepgram"] {
+    for provider in ["openai", "aquavoice", "groq", "deepgram"] {
         let key_name = format!("{}_api_key", provider);
         let key: String = get_setting_from_store(app, &key_name, String::new());
         if !key.is_empty() {
@@ -1885,6 +1891,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
     // Get the appropriate API key based on provider
     let stt_api_key: String = match stt_provider.as_str() {
         "openai" => get_setting_from_store(app, "openai_api_key", String::new()),
+        "aquavoice" => get_setting_from_store(app, "aquavoice_api_key", String::new()),
         "groq" => get_setting_from_store(app, "groq_api_key", String::new()),
         "deepgram" => get_setting_from_store(app, "deepgram_api_key", String::new()),
         _ => String::new(),

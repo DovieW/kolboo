@@ -105,6 +105,7 @@ pub fn get_data_storage_summary(app: AppHandle) -> Result<DataStorageSummary, St
     let mut api_keys_set_count: u64 = 0;
     for key in [
         "openai_api_key",
+        "aquavoice_api_key",
         "groq_api_key",
         "deepgram_api_key",
         "gemini_api_key",
@@ -158,6 +159,7 @@ pub fn delete_all_api_keys(app: AppHandle) -> Result<(), String> {
     // Known provider keys. (Local providers generally don't use API keys.)
     for key in [
         "openai_api_key",
+        "aquavoice_api_key",
         "groq_api_key",
         "deepgram_api_key",
         "gemini_api_key",

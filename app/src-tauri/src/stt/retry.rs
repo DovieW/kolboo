@@ -48,6 +48,7 @@ impl RetryConfig {
 
 fn is_retryable_error_with_config(error: &SttError, config: &RetryConfig) -> bool {
     match error {
+        SttError::NetworkMessage(_) => true,
         SttError::Network(_) => true,
         SttError::Timeout => true,
         SttError::Api(msg) => {

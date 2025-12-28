@@ -33,6 +33,13 @@ const API_KEYS: ApiKeyConfig[] = [
     getKeyUrl: "https://console.groq.com/keys",
   },
   {
+    id: "aquavoice",
+    label: "Aquavoice (Avalon)",
+    placeholder: "Enter API key",
+    storeKey: "aquavoice_api_key",
+    getKeyUrl: "https://app.aquavoice.com/api-dashboard?tab=docs",
+  },
+  {
     id: "gemini",
     label: "Google AI Studio",
     placeholder: "Enter API key",
@@ -89,7 +96,6 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
     hasHydratedRef.current = true;
   }, [savedKeyValue]);
 
-  // Mutation to save key
   const saveKey = useMutation({
     mutationFn: async (key: string) => {
       await tauriAPI.setApiKey(config.storeKey, key);

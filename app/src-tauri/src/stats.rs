@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::cost::openai as openai_cost;
 use crate::cost::groq as groq_cost;
+use crate::cost::aquavoice as aquavoice_cost;
 use crate::cost::gemini as gemini_cost;
 use crate::cost::anthropic as anthropic_cost;
 use crate::cost::deepgram as deepgram_cost;
@@ -581,6 +582,16 @@ pub fn emit_cost_events_for_current_request(
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
                     if let Some(micros) = deepgram_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                        ev.estimated_cost_usd_micros = Some(micros);
+                    }
+                }
+            }
+        }
+
+        if inputs.stt_provider == "aquavoice" {
+            if ev.estimated_cost_usd_micros.is_none() {
+                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                    if let Some(micros) = aquavoice_cost::estimate_stt_cost_from_audio_secs(model, secs) {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }

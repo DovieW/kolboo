@@ -808,6 +808,8 @@ export const tauriAPI = {
       stt_model: (await store.get<string | null>("stt_model")) ?? null,
       stt_transcription_prompt:
         (await store.get<string | null>("stt_transcription_prompt")) ?? null,
+      aquavoice_base_url:
+        (await store.get<string | null>("aquavoice_base_url")) ?? null,
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
@@ -850,7 +852,7 @@ export const tauriAPI = {
       quiet_audio_require_speech:
         (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
 
-      noise_gate_threshold_dbfs: await (async () => {
+      noise_gate_threshold_dbfs: await(async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -889,7 +891,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -911,14 +913,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })()),
+      })(),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -932,7 +934,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })()),
+      })(),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),

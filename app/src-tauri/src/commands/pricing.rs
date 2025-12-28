@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use crate::cost::groq as groq_cost;
 use crate::cost::openai as openai_cost;
+use crate::cost::aquavoice as aquavoice_cost;
 use crate::cost::gemini as gemini_cost;
 use crate::cost::anthropic as anthropic_cost;
 use crate::cost::deepgram as deepgram_cost;
@@ -86,6 +87,21 @@ pub fn get_model_pricing(provider: String, kind: String, model: String) -> Optio
                     stt: Some(SttModelPricing {
                         usd_micros_per_minute: Some(per_min),
                         usd_micros_per_hour: None,
+                        min_billed_secs: None,
+                    }),
+                    llm: None,
+                });
+            }
+
+            if provider_norm == "aquavoice" {
+                let per_hour = aquavoice_cost::asr_usd_micros_per_hour(&model_norm)?;
+                return Some(ModelPricingResponse {
+                    kind: "stt".into(),
+                    provider: provider_norm,
+                    model: model_norm,
+                    stt: Some(SttModelPricing {
+                        usd_micros_per_minute: None,
+                        usd_micros_per_hour: Some(per_hour),
                         min_billed_secs: None,
                     }),
                     llm: None,

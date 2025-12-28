@@ -3,6 +3,7 @@
 //! This module provides a trait-based abstraction for STT providers,
 //! allowing easy switching between different speech recognition services.
 
+mod aquavoice;
 mod deepgram;
 mod groq;
 mod openai;
@@ -11,6 +12,7 @@ mod retry;
 #[cfg(feature = "local-whisper")]
 mod whisper;
 
+pub use aquavoice::AquavoiceSttProvider;
 pub use deepgram::DeepgramSttProvider;
 pub use groq::GroqSttProvider;
 pub use openai::OpenAiSttProvider;
@@ -56,6 +58,9 @@ pub enum AudioEncoding {
 /// Errors that can occur during STT operations
 #[derive(Debug, thiserror::Error)]
 pub enum SttError {
+    #[error("Network error: {0}")]
+    NetworkMessage(String),
+
     #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
 

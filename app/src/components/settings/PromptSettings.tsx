@@ -452,6 +452,7 @@ export function PromptSettings({
       : null;
 
   const isOpenAiStt = effectiveSttProvider === "openai";
+  const isAquavoiceStt = effectiveSttProvider === "aquavoice";
   const isGroqStt = effectiveSttProvider === "groq";
   const isWhisper1Selected = isOpenAiStt && effectiveSttModel === "whisper-1";
   const isGroqWhisperModel =
@@ -460,14 +461,16 @@ export function PromptSettings({
       Boolean(effectiveSttModel?.includes("whisper")));
 
   const promptMaxChars = 224;
-  const isPrompt224CharLimited = isWhisper1Selected || isGroqWhisperModel;
+  const isPrompt224CharLimited =
+    isWhisper1Selected || isGroqWhisperModel || isAquavoiceStt;
 
   const sttPromptSupported =
     (isOpenAiStt &&
       (effectiveSttModel === "whisper-1" ||
         (Boolean(effectiveSttModel?.includes("transcribe")) &&
           !effectiveSttModel?.includes("diarize")))) ||
-    isGroqWhisperModel;
+    isGroqWhisperModel ||
+    isAquavoiceStt;
 
   const sttPromptDisabledReason = useMemo(() => {
     if (!effectiveSttProvider) {
@@ -482,6 +485,11 @@ export function PromptSettings({
     if (effectiveSttProvider === "groq") {
       const modelLabel = effectiveSttModel ?? "default";
       return `The selected Groq model (${modelLabel}) does not support transcription prompting.`;
+    }
+
+    if (effectiveSttProvider === "aquavoice") {
+      const modelLabel = effectiveSttModel ?? "default";
+      return `The selected Aquovoice model (${modelLabel}) does not support transcription prompting.`;
     }
 
     return "Transcription prompt is only supported for certain models.";
