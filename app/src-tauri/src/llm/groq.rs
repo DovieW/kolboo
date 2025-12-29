@@ -82,21 +82,6 @@ struct ChatRequest {
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatChoice {
-    message: ChatResponseMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatResponseMessage {
-    content: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Debug, Deserialize)]
 struct ErrorResponse {
     error: ErrorDetail,
 }

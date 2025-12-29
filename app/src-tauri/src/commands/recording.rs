@@ -4,12 +4,11 @@
 //! enabling voice dictation directly from the Tauri app.
 
 use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
-use crate::cost::openai as openai_cost;
 use crate::history::{HistoryStorage, RequestModelInfo};
 use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, SharedPipeline};
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
-use crate::stats::{self, CostEvent, CostKind, EventStatus, TokenUsage};
+use crate::stats::{self, EventStatus};
 use crate::commands::history::get_max_saved_recordings;
 use tauri::{AppHandle, Manager, State, Emitter};
 use chrono::{Duration as ChronoDuration, Utc};

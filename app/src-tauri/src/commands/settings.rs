@@ -27,20 +27,6 @@ pub async fn unregister_shortcuts(_app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Helper to read a setting from the store with a default fallback
-#[cfg(desktop)]
-fn get_setting_from_store<T: serde::de::DeserializeOwned>(
-    app: &AppHandle,
-    key: &str,
-    default: T,
-) -> T {
-    app.store("settings.json")
-        .ok()
-        .and_then(|store| store.get(key))
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or(default)
-}
-
 /// Read a hotkey setting from the store.
 ///
 /// Semantics:

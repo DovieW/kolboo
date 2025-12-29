@@ -71,68 +71,6 @@ pub struct LlmCompleteArgs {
     pub user_prompt: String,
 }
 
-fn create_llm_provider(config: &LlmConfig) -> Arc<dyn LlmProvider> {
-    match config.provider.as_str() {
-        "anthropic" => {
-            let provider = if let Some(model) = &config.model {
-                AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                AnthropicLlmProvider::new(config.api_key.clone())
-            };
-            Arc::new(
-                provider
-                    .with_timeout(config.timeout)
-                    .with_thinking_budget(config.anthropic_thinking_budget),
-            )
-        }
-        "groq" => {
-            let provider = if let Some(model) = &config.model {
-                GroqLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GroqLlmProvider::new(config.api_key.clone())
-            };
-            Arc::new(provider.with_timeout(config.timeout))
-        }
-        "gemini" => {
-            let provider = if let Some(model) = &config.model {
-                GeminiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GeminiLlmProvider::new(config.api_key.clone())
-            };
-
-            Arc::new(
-                provider
-                    .with_timeout(config.timeout)
-                    .with_thinking_budget(config.gemini_thinking_budget)
-                    .with_thinking_level(config.gemini_thinking_level.clone()),
-            )
-        }
-        "ollama" => {
-            let provider = OllamaLlmProvider::with_url(
-                config
-                    .ollama_url
-                    .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
-                config.model.clone(),
-            );
-            Arc::new(provider.with_timeout(config.timeout))
-        }
-        _ => {
-            // Default to OpenAI
-            let provider = if let Some(model) = &config.model {
-                OpenAiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                OpenAiLlmProvider::new(config.api_key.clone())
-            };
-            Arc::new(
-                provider
-                    .with_timeout(config.timeout)
-                    .with_reasoning_effort(config.openai_reasoning_effort.clone()),
-            )
-        }
-    }
-}
-
 fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
     // IMPORTANT:
     // This is used for one-off ad-hoc completions (e.g. History "Analyze transcripts" → "Send to LLM").

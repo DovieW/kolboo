@@ -181,18 +181,6 @@ struct ThinkingParam {
 }
 
 #[derive(Debug, Deserialize)]
-struct ContentBlock {
-    #[serde(rename = "type")]
-    content_type: String,
-    text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MessagesResponse {
-    content: Vec<ContentBlock>,
-}
-
-#[derive(Debug, Deserialize)]
 struct ErrorResponse {
     error: ErrorDetail,
 }

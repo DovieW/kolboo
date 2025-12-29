@@ -29,14 +29,6 @@ fn db_to_amp(db: f32) -> f32 {
     10.0_f32.powf(db / 20.0)
 }
 
-fn amp_to_dbfs(amp: f32) -> f32 {
-    if !amp.is_finite() || amp <= 0.0 {
-        f32::NEG_INFINITY
-    } else {
-        20.0 * amp.log10()
-    }
-}
-
 fn downmix_interleaved_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
     let channels = channels.max(1);
     if channels == 1 {

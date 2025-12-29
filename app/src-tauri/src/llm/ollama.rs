@@ -152,16 +152,6 @@ struct ChatOptions {
     num_predict: i32,
 }
 
-#[derive(Debug, Deserialize)]
-struct ChatResponse {
-    message: ChatResponseMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatResponseMessage {
-    content: String,
-}
-
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Deserialize)]
 struct TagsResponse {

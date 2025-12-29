@@ -23,7 +23,6 @@ use crate::cost::speechmatics as speechmatics_cost;
 use tauri::AppHandle;
 use tauri::{Manager, Emitter};
 use crate::request_log::RequestLogStore;
-use crate::recordings::RecordingStore;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
