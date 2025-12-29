@@ -91,7 +91,7 @@ fn get_setting_from_store<T: serde::de::DeserializeOwned>(
 fn get_hotkey_from_store(
     app: &AppHandle,
     key: &str,
-    default_fn: fn() -> HotkeyConfig,
+    default_fn: fn() -> Option<HotkeyConfig>,
 ) -> Option<HotkeyConfig> {
     use serde_json::Value;
 
@@ -101,9 +101,11 @@ fn get_hotkey_from_store(
         .and_then(|store| store.get(key));
 
     match raw {
-        None => Some(default_fn()),
+        None => default_fn(),
         Some(Value::Null) => None,
-        Some(v) => serde_json::from_value::<HotkeyConfig>(v).ok().or_else(|| Some(default_fn())),
+        Some(v) => serde_json::from_value::<HotkeyConfig>(v)
+            .ok()
+            .or_else(|| default_fn()),
     }
 }
 
@@ -202,16 +204,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         serde_json::to_value(HotkeyConfig::default_toggle())?,
         true,
     );
-    set_default(
-        "hold_hotkey",
-        serde_json::to_value(HotkeyConfig::default_hold())?,
-        true,
-    );
-    set_default(
-        "paste_last_hotkey",
-        serde_json::to_value(HotkeyConfig::default_paste_last())?,
-        true,
-    );
+    // Hotkeys: allow explicit null to mean "disabled"; only seed when key is absent.
+    // Hold-to-record and paste-last are disabled by default.
+    set_default("hold_hotkey", json!(null), true);
+    set_default("paste_last_hotkey", json!(null), true);
 
     // VAD settings are used by the pipeline.
     set_default(
@@ -1256,7 +1252,8 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     // - missing => default
     // - null => disabled
     // - invalid => default
-    let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle);
+    let toggle_hotkey =
+        get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
     let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
     let paste_last_hotkey =
         get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
@@ -1270,19 +1267,27 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
             .unwrap_or_else(|_| HotkeyConfig::default_toggle().to_shortcut_string());
         normalize_shortcut_string(&shortcut_str)
     });
-    let hold_shortcut_str: Option<String> = hold_hotkey.map(|hk| {
-        let shortcut_str = hk
-            .to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .unwrap_or_else(|_| HotkeyConfig::default_hold().to_shortcut_string());
-        normalize_shortcut_string(&shortcut_str)
+    let hold_shortcut_str: Option<String> = hold_hotkey.and_then(|hk| {
+        hk.to_shortcut()
+            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid hold hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
     });
-    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.map(|hk| {
-        let shortcut_str = hk
-            .to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .unwrap_or_else(|_| HotkeyConfig::default_paste_last().to_shortcut_string());
-        normalize_shortcut_string(&shortcut_str)
+    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.and_then(|hk| {
+        hk.to_shortcut()
+            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid paste-last hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
     });
 
     // Get audio mute manager if available
@@ -2372,7 +2377,8 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     // - missing => default
     // - null => disabled
     // - invalid => default
-    let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle);
+    let toggle_hotkey =
+        get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
     let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
     let paste_last_hotkey =
         get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
@@ -2391,27 +2397,27 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 HotkeyConfig::default_toggle().to_shortcut_string()
             })
     });
-    let hold_shortcut_str: Option<String> = hold_hotkey.map(|hk| {
+    let hold_shortcut_str: Option<String> = hold_hotkey.and_then(|hk| {
         hk.to_shortcut()
             .map(|_| hk.to_shortcut_string())
-            .unwrap_or_else(|e| {
+            .map_err(|e| {
                 log::warn!(
-                    "Invalid hold hotkey in settings store ({}); falling back to default",
+                    "Invalid hold hotkey in settings store ({}); treating as disabled",
                     e
-                );
-                HotkeyConfig::default_hold().to_shortcut_string()
+                )
             })
+            .ok()
     });
-    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.map(|hk| {
+    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.and_then(|hk| {
         hk.to_shortcut()
             .map(|_| hk.to_shortcut_string())
-            .unwrap_or_else(|e| {
+            .map_err(|e| {
                 log::warn!(
-                    "Invalid paste-last hotkey in settings store ({}); falling back to default",
+                    "Invalid paste-last hotkey in settings store ({}); treating as disabled",
                     e
-                );
-                HotkeyConfig::default_paste_last().to_shortcut_string()
+                )
             })
+            .ok()
     });
 
     log::info!(

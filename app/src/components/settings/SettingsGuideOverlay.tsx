@@ -13,6 +13,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Logo } from "../Logo";
 import { configAPI, type HotkeyConfig, tauriAPI } from "../../lib/tauri";
+import { useSettings } from "../../lib/queries";
 
 type Phase = "welcome" | "guide";
 
@@ -23,13 +24,18 @@ type NavStep = "welcome" | Step;
 const GUIDE_STEPS: Step[] = ["groq", "dictation", "wrapup"];
 const NAV_STEPS: NavStep[] = ["welcome", ...GUIDE_STEPS];
 
-function HotkeyCombo({ config }: { config: HotkeyConfig }) {
+function HotkeyCombo({ config }: { config: HotkeyConfig | null }) {
   const parts = useMemo(() => {
+    if (!config) return null;
     const mods = config.modifiers.map(
       (m) => m.charAt(0).toUpperCase() + m.slice(1)
     );
     return [...mods, config.key];
   }, [config]);
+
+  if (!parts) {
+    return <Kbd className="hotkey-placeholder">Unassigned</Kbd>;
+  }
 
   return (
     <span className="tang-guide-kbd-combo">
@@ -45,18 +51,19 @@ function HotkeyCombo({ config }: { config: HotkeyConfig }) {
 
 export function SettingsGuideOverlay({
   opened,
-  holdHotkey,
   onSkip,
   onFinished,
   onGoHome,
 }: {
   opened: boolean;
-  holdHotkey: HotkeyConfig | null;
   onSkip: () => void;
   onFinished: () => void;
   onGoHome: () => void;
 }) {
   const queryClient = useQueryClient();
+
+  const { data: settings } = useSettings();
+  const toggleHotkey = settings?.toggle_hotkey ?? null;
 
   const welcomeTimersRef = useRef<number[]>([]);
 
@@ -141,6 +148,10 @@ export function SettingsGuideOverlay({
 
   useEffect(() => {
     if (!opened) return;
+
+    // Ensure we show the latest shortcut when the guide opens, even though
+    // the settings query is cached with an infinite stale time.
+    queryClient.invalidateQueries({ queryKey: ["settings"] });
 
     // Reset guide state on open.
     restartWelcomeSequence();
@@ -423,9 +434,22 @@ export function SettingsGuideOverlay({
               <div className="tang-guide-step">
                 <Title order={3}>Voice dictation test</Title>
                 <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
-                  Use your hold-to-record shortcut{" "}
-                  {holdHotkey ? <HotkeyCombo config={holdHotkey} /> : null}.
-                  Hold it while you speak, then release.
+                  {!settings ? (
+                    <>Loading your shortcut…</>
+                  ) : toggleHotkey ? (
+                    <>
+                      Use your toggle recording shortcut{" "}
+                      <HotkeyCombo config={toggleHotkey} />. Press once to start
+                      recording, then press again to stop.
+                    </>
+                  ) : (
+                    <>
+                      Your toggle recording shortcut is{" "}
+                      <HotkeyCombo config={null} />. Set one in Settings →
+                      Hotkeys (recommended: <Kbd>F3</Kbd>), then press it once
+                      to start recording and again to stop.
+                    </>
+                  )}
                 </Text>
 
                 <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>

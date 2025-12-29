@@ -11,16 +11,10 @@ use tauri_plugin_global_shortcut::Shortcut;
 // ============================================================================
 
 /// Default modifiers for all hotkeys
-pub const DEFAULT_HOTKEY_MODIFIERS: &[&str] = &["ctrl", "alt"];
+pub const DEFAULT_HOTKEY_MODIFIERS: &[&str] = &[];
 
-/// Default key for toggle recording (Ctrl+Alt+Space)
-pub const DEFAULT_TOGGLE_KEY: &str = "Space";
-
-/// Default key for hold-to-record (Ctrl+Alt+`)
-pub const DEFAULT_HOLD_KEY: &str = "Backquote";
-
-/// Default key for paste last transcription (Ctrl+Alt+.)
-pub const DEFAULT_PASTE_LAST_KEY: &str = "Period";
+/// Default key for toggle recording (F3)
+pub const DEFAULT_TOGGLE_KEY: &str = "F3";
 
 // ============================================================================
 // DEFAULT VAD SETTINGS - Voice Activity Detection
@@ -79,26 +73,23 @@ impl HotkeyConfig {
         }
     }
 
-    /// Create default hold hotkey config
-    pub fn default_hold() -> Self {
-        Self {
-            modifiers: DEFAULT_HOTKEY_MODIFIERS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            key: DEFAULT_HOLD_KEY.to_string(),
-        }
+    /// Default toggle hotkey as a setting value (Some = enabled).
+    pub fn default_toggle_opt() -> Option<Self> {
+        Some(Self::default_toggle())
     }
 
-    /// Create default paste-last hotkey config
-    pub fn default_paste_last() -> Self {
-        Self {
-            modifiers: DEFAULT_HOTKEY_MODIFIERS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            key: DEFAULT_PASTE_LAST_KEY.to_string(),
-        }
+    /// Default hold-to-record hotkey as a setting value.
+    ///
+    /// Hold-to-record is disabled by default.
+    pub fn default_hold() -> Option<Self> {
+        None
+    }
+
+    /// Default paste-last hotkey as a setting value.
+    ///
+    /// Paste-last is disabled by default.
+    pub fn default_paste_last() -> Option<Self> {
+        None
     }
 
     /// Convert to shortcut string format like "ctrl+alt+Space"

@@ -5,17 +5,11 @@ import type { HotkeyConfig } from "./tauri";
 // These must match the Rust defaults in settings.rs
 // ============================================================================
 
-/** Default modifiers for all hotkeys */
-export const DEFAULT_HOTKEY_MODIFIERS = ["ctrl", "alt"];
+/** Default modifiers for the toggle hotkey (none) */
+export const DEFAULT_HOTKEY_MODIFIERS: string[] = [];
 
-/** Default key for toggle recording (Ctrl+Alt+Space) */
-export const DEFAULT_TOGGLE_KEY = "Space";
-
-/** Default key for hold-to-record (Ctrl+Alt+`) */
-export const DEFAULT_HOLD_KEY = "Backquote";
-
-/** Default key for paste last transcription (Ctrl+Alt+.) */
-export const DEFAULT_PASTE_LAST_KEY = "Period";
+/** Default key for toggle recording (F3) */
+export const DEFAULT_TOGGLE_KEY = "F3";
 
 // ============================================================================
 
@@ -25,14 +19,8 @@ export const DEFAULT_TOGGLE_HOTKEY: HotkeyConfig = {
 	key: DEFAULT_TOGGLE_KEY,
 };
 
-/** Default hold-to-record hotkey config */
-export const DEFAULT_HOLD_HOTKEY: HotkeyConfig = {
-	modifiers: DEFAULT_HOTKEY_MODIFIERS,
-	key: DEFAULT_HOLD_KEY,
-};
+/** Default hold-to-record hotkey config (unset) */
+export const DEFAULT_HOLD_HOTKEY: HotkeyConfig | null = null;
 
-/** Default paste last transcription hotkey config */
-export const DEFAULT_PASTE_LAST_HOTKEY: HotkeyConfig = {
-	modifiers: DEFAULT_HOTKEY_MODIFIERS,
-	key: DEFAULT_PASTE_LAST_KEY,
-};
+/** Default paste last transcription hotkey config (unset) */
+export const DEFAULT_PASTE_LAST_HOTKEY: HotkeyConfig | null = null;

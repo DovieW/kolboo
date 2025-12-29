@@ -181,21 +181,23 @@ export function useSetSettingsGuideState() {
 export function useUpdateToggleHotkey() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (hotkey: HotkeyConfig) => {
+    mutationFn: async (hotkey: HotkeyConfig | null) => {
       // Get current settings for validation
       const settings = await tauriAPI.getSettings();
 
-      // Validate no duplicate
-      const error = validateHotkeyNotDuplicate(
-        hotkey,
-        {
-          toggle: settings.toggle_hotkey,
-          hold: settings.hold_hotkey,
-          paste_last: settings.paste_last_hotkey,
-        },
-        "toggle"
-      );
-      if (error) throw new Error(error);
+      // Validate no duplicate (unless unsetting)
+      if (hotkey) {
+        const error = validateHotkeyNotDuplicate(
+          hotkey,
+          {
+            toggle: settings.toggle_hotkey,
+            hold: settings.hold_hotkey,
+            paste_last: settings.paste_last_hotkey,
+          },
+          "toggle"
+        );
+        if (error) throw new Error(error);
+      }
 
       // Save and re-register
       await tauriAPI.updateToggleHotkey(hotkey);
@@ -211,21 +213,23 @@ export function useUpdateToggleHotkey() {
 export function useUpdateHoldHotkey() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (hotkey: HotkeyConfig) => {
+    mutationFn: async (hotkey: HotkeyConfig | null) => {
       // Get current settings for validation
       const settings = await tauriAPI.getSettings();
 
-      // Validate no duplicate
-      const error = validateHotkeyNotDuplicate(
-        hotkey,
-        {
-          toggle: settings.toggle_hotkey,
-          hold: settings.hold_hotkey,
-          paste_last: settings.paste_last_hotkey,
-        },
-        "hold"
-      );
-      if (error) throw new Error(error);
+      // Validate no duplicate (unless unsetting)
+      if (hotkey) {
+        const error = validateHotkeyNotDuplicate(
+          hotkey,
+          {
+            toggle: settings.toggle_hotkey,
+            hold: settings.hold_hotkey,
+            paste_last: settings.paste_last_hotkey,
+          },
+          "hold"
+        );
+        if (error) throw new Error(error);
+      }
 
       // Save and re-register
       await tauriAPI.updateHoldHotkey(hotkey);
@@ -241,21 +245,23 @@ export function useUpdateHoldHotkey() {
 export function useUpdatePasteLastHotkey() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (hotkey: HotkeyConfig) => {
+    mutationFn: async (hotkey: HotkeyConfig | null) => {
       // Get current settings for validation
       const settings = await tauriAPI.getSettings();
 
-      // Validate no duplicate
-      const error = validateHotkeyNotDuplicate(
-        hotkey,
-        {
-          toggle: settings.toggle_hotkey,
-          hold: settings.hold_hotkey,
-          paste_last: settings.paste_last_hotkey,
-        },
-        "paste_last"
-      );
-      if (error) throw new Error(error);
+      // Validate no duplicate (unless unsetting)
+      if (hotkey) {
+        const error = validateHotkeyNotDuplicate(
+          hotkey,
+          {
+            toggle: settings.toggle_hotkey,
+            hold: settings.hold_hotkey,
+            paste_last: settings.paste_last_hotkey,
+          },
+          "paste_last"
+        );
+        if (error) throw new Error(error);
+      }
 
       // Save and re-register
       await tauriAPI.updatePasteLastHotkey(hotkey);

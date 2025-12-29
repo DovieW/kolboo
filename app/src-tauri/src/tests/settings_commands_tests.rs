@@ -4,25 +4,20 @@ use crate::settings::HotkeyConfig;
 #[test]
 fn test_default_toggle_hotkey() {
     let hotkey = HotkeyConfig::default_toggle();
-    assert_eq!(hotkey.key, "Space");
-    assert!(hotkey.modifiers.contains(&"ctrl".to_string()));
-    assert!(hotkey.modifiers.contains(&"alt".to_string()));
+    assert_eq!(hotkey.key, "F3");
+    assert!(hotkey.modifiers.is_empty());
 }
 
 #[test]
 fn test_default_hold_hotkey() {
     let hotkey = HotkeyConfig::default_hold();
-    assert_eq!(hotkey.key, "Backquote");
-    assert!(hotkey.modifiers.contains(&"ctrl".to_string()));
-    assert!(hotkey.modifiers.contains(&"alt".to_string()));
+    assert!(hotkey.is_none());
 }
 
 #[test]
 fn test_default_paste_last_hotkey() {
     let hotkey = HotkeyConfig::default_paste_last();
-    assert_eq!(hotkey.key, "Period");
-    assert!(hotkey.modifiers.contains(&"ctrl".to_string()));
-    assert!(hotkey.modifiers.contains(&"alt".to_string()));
+    assert!(hotkey.is_none());
 }
 
 #[test]

@@ -31,6 +31,18 @@ export const HotkeyConfigSchema = z.object({
   key: z.string().min(1, "Key is required"),
 });
 
+function normalizeHotkeyConfig(
+  value: unknown,
+  fallback: HotkeyConfig | null
+): HotkeyConfig | null {
+  // Explicit null means "disabled".
+  if (value === null) return null;
+
+  // Missing/invalid means fallback to default.
+  const result = HotkeyConfigSchema.safeParse(value);
+  return result.success ? result.data : fallback;
+}
+
 interface HistoryEntry {
   id: string;
   timestamp: string;
@@ -237,9 +249,9 @@ function normalizeMainWindowCloseBehavior(
 }
 
 export interface AppSettings {
-  toggle_hotkey: HotkeyConfig;
-  hold_hotkey: HotkeyConfig;
-  paste_last_hotkey: HotkeyConfig;
+  toggle_hotkey: HotkeyConfig | null;
+  hold_hotkey: HotkeyConfig | null;
+  paste_last_hotkey: HotkeyConfig | null;
   selected_mic_id: string | null;
   sound_enabled: boolean;
   audio_cue: AudioCue;
@@ -253,6 +265,8 @@ export interface AppSettings {
   stt_model: string | null;
   // Global STT prompt (applies to all transcriptions when supported by the selected provider/model)
   stt_transcription_prompt: string | null;
+  // AquaVoice server override (optional)
+  aquavoice_base_url: string | null;
   llm_provider: string | null;
   llm_model: string | null;
 
@@ -522,22 +536,16 @@ function normalizeRequestLogsRetentionDays(value: unknown): number {
 // Default values - must match Rust defaults
 // ============================================================================
 
-const DEFAULT_HOTKEY_MODIFIERS = ["ctrl", "alt"];
+const DEFAULT_HOTKEY_MODIFIERS: string[] = [];
 
 export const defaultToggleHotkey: HotkeyConfig = {
   modifiers: DEFAULT_HOTKEY_MODIFIERS,
-  key: "Space",
+  key: "F3",
 };
 
-export const defaultHoldHotkey: HotkeyConfig = {
-  modifiers: DEFAULT_HOTKEY_MODIFIERS,
-  key: "Backquote",
-};
+export const defaultHoldHotkey: HotkeyConfig | null = null;
 
-export const defaultPasteLastHotkey: HotkeyConfig = {
-  modifiers: DEFAULT_HOTKEY_MODIFIERS,
-  key: "Period",
-};
+export const defaultPasteLastHotkey: HotkeyConfig | null = null;
 
 // ============================================================================
 // Store helpers
@@ -588,12 +596,15 @@ const HOTKEY_LABELS: Record<HotkeyType, string> = {
  * Create a Zod schema for validating a hotkey doesn't conflict with existing hotkeys
  */
 export function createHotkeyDuplicateSchema(
-  allHotkeys: Record<HotkeyType, HotkeyConfig>,
+  allHotkeys: Record<HotkeyType, HotkeyConfig | null>,
   excludeType: HotkeyType
 ) {
   return HotkeyConfigSchema.superRefine((hotkey, ctx) => {
     for (const [type, existing] of Object.entries(allHotkeys)) {
-      if (type !== excludeType && hotkeyIsSameAs(hotkey, existing)) {
+      if (type === excludeType) continue;
+      if (!existing) continue;
+
+      if (hotkeyIsSameAs(hotkey, existing)) {
         ctx.addIssue({
           code: "custom",
           message: `This shortcut is already used for the ${
@@ -611,14 +622,15 @@ export function createHotkeyDuplicateSchema(
  * Returns error message if invalid, null if valid
  */
 export function validateHotkeyNotDuplicate(
-  newHotkey: HotkeyConfig,
+  newHotkey: HotkeyConfig | null,
   allHotkeys: {
-    toggle: HotkeyConfig;
-    hold: HotkeyConfig;
-    paste_last: HotkeyConfig;
+    toggle: HotkeyConfig | null;
+    hold: HotkeyConfig | null;
+    paste_last: HotkeyConfig | null;
   },
   excludeType: HotkeyType
 ): string | null {
+  if (!newHotkey) return null;
   const schema = createHotkeyDuplicateSchema(allHotkeys, excludeType);
   const result = schema.safeParse(newHotkey);
   if (!result.success) {
@@ -895,13 +907,18 @@ export const tauriAPI = {
         : [];
 
     const settings: AppSettings = {
-      toggle_hotkey:
-        (await store.get<HotkeyConfig>("toggle_hotkey")) ?? defaultToggleHotkey,
-      hold_hotkey:
-        (await store.get<HotkeyConfig>("hold_hotkey")) ?? defaultHoldHotkey,
-      paste_last_hotkey:
-        (await store.get<HotkeyConfig>("paste_last_hotkey")) ??
-        defaultPasteLastHotkey,
+      toggle_hotkey: normalizeHotkeyConfig(
+        await store.get("toggle_hotkey"),
+        defaultToggleHotkey
+      ),
+      hold_hotkey: normalizeHotkeyConfig(
+        await store.get("hold_hotkey"),
+        defaultHoldHotkey
+      ),
+      paste_last_hotkey: normalizeHotkeyConfig(
+        await store.get("paste_last_hotkey"),
+        defaultPasteLastHotkey
+      ),
       selected_mic_id:
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
@@ -1071,8 +1088,9 @@ export const tauriAPI = {
    * Useful for secondary windows (overlay) when another window updates settings.json.
    */
   async reloadSettingsFromDisk(): Promise<void> {
-    const store = await getStore();
-    await store.load();
+    // @tauri-apps/plugin-store doesn't expose an instance reload API.
+    // Recreate the Store instance so future reads come from disk.
+    storeInstance = await Store.load("settings.json");
   },
 
   async updateAccentColor(color: string | null): Promise<void> {
@@ -1118,19 +1136,19 @@ export const tauriAPI = {
     await emit("settings-changed", { main_window_close_behavior: normalized });
   },
 
-  async updateToggleHotkey(hotkey: HotkeyConfig): Promise<void> {
+  async updateToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
     const store = await getStore();
     await store.set("toggle_hotkey", hotkey);
     await store.save();
   },
 
-  async updateHoldHotkey(hotkey: HotkeyConfig): Promise<void> {
+  async updateHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
     const store = await getStore();
     await store.set("hold_hotkey", hotkey);
     await store.save();
   },
 
-  async updatePasteLastHotkey(hotkey: HotkeyConfig): Promise<void> {
+  async updatePasteLastHotkey(hotkey: HotkeyConfig | null): Promise<void> {
     const store = await getStore();
     await store.set("paste_last_hotkey", hotkey);
     await store.save();

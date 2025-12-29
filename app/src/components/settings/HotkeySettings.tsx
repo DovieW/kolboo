@@ -75,15 +75,15 @@ export function HotkeySettings({
     }
   }, [errorMessage, dismissedError]);
 
-  const handleToggleHotkeyChange = (config: HotkeyConfig) => {
+  const handleToggleHotkeyChange = (config: HotkeyConfig | null) => {
     updateToggleHotkey.mutate(config);
   };
 
-  const handleHoldHotkeyChange = (config: HotkeyConfig) => {
+  const handleHoldHotkeyChange = (config: HotkeyConfig | null) => {
     updateHoldHotkey.mutate(config);
   };
 
-  const handlePasteLastHotkeyChange = (config: HotkeyConfig) => {
+  const handlePasteLastHotkeyChange = (config: HotkeyConfig | null) => {
     updatePasteLastHotkey.mutate(config);
   };
 
@@ -104,7 +104,7 @@ export function HotkeySettings({
       <HotkeyInput
         label="Toggle Recording"
         description="Press once to start recording, press again to stop"
-        value={settings?.toggle_hotkey ?? DEFAULT_TOGGLE_HOTKEY}
+        value={settings ? settings.toggle_hotkey : DEFAULT_TOGGLE_HOTKEY}
         onChange={handleToggleHotkeyChange}
         disabled={isLoading || updateToggleHotkey.isPending}
         isRecording={recordingInput === "toggle"}
@@ -116,7 +116,7 @@ export function HotkeySettings({
         <HotkeyInput
           label="Hold to Record"
           description="Hold to record, release to stop"
-          value={settings?.hold_hotkey ?? DEFAULT_HOLD_HOTKEY}
+          value={settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY}
           onChange={handleHoldHotkeyChange}
           disabled={isLoading || updateHoldHotkey.isPending}
           isRecording={recordingInput === "hold"}
@@ -129,7 +129,9 @@ export function HotkeySettings({
         <HotkeyInput
           label="Paste Last Transcription"
           description="Paste your last result"
-          value={settings?.paste_last_hotkey ?? DEFAULT_PASTE_LAST_HOTKEY}
+          value={
+            settings ? settings.paste_last_hotkey : DEFAULT_PASTE_LAST_HOTKEY
+          }
           onChange={handlePasteLastHotkeyChange}
           disabled={isLoading || updatePasteLastHotkey.isPending}
           isRecording={recordingInput === "paste_last"}

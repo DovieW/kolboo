@@ -155,7 +155,11 @@ function Sidebar({
   );
 }
 
-function HotkeyDisplay({ config }: { config: HotkeyConfig }) {
+function HotkeyDisplay({ config }: { config: HotkeyConfig | null }) {
+  if (!config) {
+    return <Kbd className="hotkey-placeholder">Unassigned</Kbd>;
+  }
+
   const parts = [
     ...config.modifiers.map((m) => m.charAt(0).toUpperCase() + m.slice(1)),
     config.key,
@@ -176,10 +180,13 @@ function HotkeyDisplay({ config }: { config: HotkeyConfig }) {
 function InstructionsCard() {
   const { data: settings } = useSettings();
 
-  const toggleHotkey = settings?.toggle_hotkey ?? DEFAULT_TOGGLE_HOTKEY;
-  const holdHotkey = settings?.hold_hotkey ?? DEFAULT_HOLD_HOTKEY;
-  const pasteLastHotkey =
-    settings?.paste_last_hotkey ?? DEFAULT_PASTE_LAST_HOTKEY;
+  const toggleHotkey = settings
+    ? settings.toggle_hotkey
+    : DEFAULT_TOGGLE_HOTKEY;
+  const holdHotkey = settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY;
+  const pasteLastHotkey = settings
+    ? settings.paste_last_hotkey
+    : DEFAULT_PASTE_LAST_HOTKEY;
 
   return (
     <div className="instructions-card animate-in">
@@ -1183,7 +1190,6 @@ export default function App() {
 
       <SettingsGuideOverlay
         opened={settingsGuideOpen}
-        holdHotkey={settings?.hold_hotkey ?? null}
         onSkip={() => {
           setSettingsGuideOpen(false);
           setGuideState.mutate("skipped");
