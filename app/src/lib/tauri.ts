@@ -105,6 +105,13 @@ export interface RewriteProgramPromptProfile {
   llm_provider?: string | null;
   llm_model?: string | null;
 
+  // Per-profile provider-specific thinking/reasoning knobs
+  // (null/undefined means inherit from Default/global settings)
+  openai_reasoning_effort?: OpenAiReasoningEffort | null;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: "minimal" | "low" | "medium" | "high" | null;
+  anthropic_thinking_budget?: number | null;
+
   // Per-profile overrides for UI (Option 1: override-or-inherit)
   // NOTE: These are persisted in settings.json as part of the profile object.
   // The backend may ignore them until it is updated to apply them at runtime.
@@ -394,6 +401,19 @@ function normalizeAnthropicThinkingBudget(value: unknown): number | null {
   // The cookbook notes a minimum budget of 1024 for extended thinking.
   if (n < 1024) return 1024;
   // Defensive cap; actual max varies by model.
+  return Math.min(32768, n);
+}
+
+function normalizeAnthropicThinkingBudgetAllowOff(
+  value: unknown
+): number | null {
+  // For per-profile overrides we want an explicit "off" state even if the
+  // Default/global setting enables thinking. Represent that as 0.
+  if (value == null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const n = Math.trunc(value);
+  if (n <= 0) return 0;
+  if (n < 1024) return 1024;
   return Math.min(32768, n);
 }
 
@@ -767,6 +787,20 @@ export const tauriAPI = {
           : null;
       const llm_model =
         typeof (p as any).llm_model === "string" ? (p as any).llm_model : null;
+
+      const openai_reasoning_effort = normalizeOpenAiReasoningEffort(
+        (p as any).openai_reasoning_effort
+      );
+      const gemini_thinking_budget = normalizeGeminiThinkingBudget(
+        (p as any).gemini_thinking_budget
+      );
+      const gemini_thinking_level = normalizeGeminiThinkingLevel(
+        (p as any).gemini_thinking_level
+      );
+      const anthropic_thinking_budget =
+        normalizeAnthropicThinkingBudgetAllowOff(
+          (p as any).anthropic_thinking_budget
+        );
       const rewrite_llm_enabled =
         typeof (p as any).rewrite_llm_enabled === "boolean"
           ? (p as any).rewrite_llm_enabled
@@ -829,6 +863,10 @@ export const tauriAPI = {
         stt_timeout_seconds,
         llm_provider,
         llm_model,
+        openai_reasoning_effort,
+        gemini_thinking_budget,
+        gemini_thinking_level,
+        anthropic_thinking_budget,
         sound_enabled,
         playing_audio_handling,
         overlay_mode,

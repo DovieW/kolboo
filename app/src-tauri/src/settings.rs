@@ -258,6 +258,17 @@ pub struct RewriteProgramPromptProfile {
     pub llm_provider: Option<String>,
     #[serde(default)]
     pub llm_model: Option<String>,
+
+    // Optional per-profile provider-specific thinking/reasoning knobs.
+    // These are applied at runtime when the profile is active.
+    #[serde(default)]
+    pub openai_reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub gemini_thinking_budget: Option<i64>,
+    #[serde(default)]
+    pub gemini_thinking_level: Option<String>,
+    #[serde(default)]
+    pub anthropic_thinking_budget: Option<i64>,
 }
 
 fn deserialize_program_paths<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>

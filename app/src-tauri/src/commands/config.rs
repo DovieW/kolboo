@@ -459,6 +459,10 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
                 stt_timeout_seconds: p.stt_timeout_seconds,
                 llm_provider: p.llm_provider,
                 llm_model: p.llm_model,
+                openai_reasoning_effort: p.openai_reasoning_effort,
+                gemini_thinking_budget: p.gemini_thinking_budget,
+                gemini_thinking_level: p.gemini_thinking_level,
+                anthropic_thinking_budget: p.anthropic_thinking_budget,
             })
             .collect();
 

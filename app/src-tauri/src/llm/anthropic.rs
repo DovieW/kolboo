@@ -80,7 +80,12 @@ impl AnthropicLlmProvider {
     }
 
     pub fn with_thinking_budget(mut self, budget_tokens: Option<i64>) -> Self {
-        self.thinking_budget_tokens = budget_tokens;
+        // Allow callers (UI/profile overrides) to explicitly disable thinking
+        // by passing 0 (or negative) without producing noisy warnings later.
+        self.thinking_budget_tokens = match budget_tokens {
+            Some(n) if n <= 0 => None,
+            other => other,
+        };
         self
     }
 
@@ -101,6 +106,12 @@ impl AnthropicLlmProvider {
 
     fn effective_thinking(&self) -> Option<ThinkingParam> {
         let budget = self.thinking_budget_tokens?;
+
+        // Defensive: `with_thinking_budget` should already normalize this, but
+        // keep the behavior stable if the struct is constructed differently.
+        if budget <= 0 {
+            return None;
+        }
 
         if !Self::supports_extended_thinking(&self.model) {
             log::warn!(

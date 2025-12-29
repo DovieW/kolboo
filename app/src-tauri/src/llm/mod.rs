@@ -191,6 +191,13 @@ pub struct ProgramPromptProfile {
     pub stt_timeout_seconds: Option<f64>,
     pub llm_provider: Option<String>,
     pub llm_model: Option<String>,
+
+    // Optional per-profile provider-specific thinking/reasoning knobs.
+    // (These override LlmConfig's global knobs when the profile is active.)
+    pub openai_reasoning_effort: Option<String>,
+    pub gemini_thinking_budget: Option<i64>,
+    pub gemini_thinking_level: Option<String>,
+    pub anthropic_thinking_budget: Option<i64>,
 }
 
 impl Default for LlmConfig {

@@ -512,17 +512,37 @@ impl PipelineInner {
         model: Option<String>,
         timeout: Duration,
         ollama_url: Option<String>,
+        openai_reasoning_effort: Option<String>,
+        gemini_thinking_budget: Option<i64>,
+        gemini_thinking_level: Option<String>,
+        anthropic_thinking_budget: Option<i64>,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
         let model_key = model.clone().unwrap_or_else(|| "<default>".to_string());
         let url_key = ollama_url
             .clone()
             .unwrap_or_else(|| "<default-url>".to_string());
+        let openai_effort_key = openai_reasoning_effort
+            .clone()
+            .unwrap_or_else(|| "<default-effort>".to_string());
+        let gemini_budget_key = gemini_thinking_budget
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "<default-budget>".to_string());
+        let gemini_level_key = gemini_thinking_level
+            .clone()
+            .unwrap_or_else(|| "<default-level>".to_string());
+        let anthropic_budget_key = anthropic_thinking_budget
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "<default-budget>".to_string());
         let cache_key = format!(
-            "{}::{}::{}::{}",
+            "{}::{}::{}::{}::{}::{}::{}::{}",
             provider_id,
             model_key,
             timeout.as_secs_f64(),
-            url_key
+            url_key,
+            openai_effort_key,
+            gemini_budget_key,
+            gemini_level_key,
+            anthropic_budget_key
         );
 
         if let Some(p) = self.llm_provider_cache.get(&cache_key) {
@@ -555,6 +575,10 @@ impl PipelineInner {
         cfg.model = model;
         cfg.ollama_url = ollama_url;
         cfg.timeout = timeout;
+        cfg.openai_reasoning_effort = openai_reasoning_effort;
+        cfg.gemini_thinking_budget = gemini_thinking_budget;
+        cfg.gemini_thinking_level = gemini_thinking_level;
+        cfg.anthropic_thinking_budget = anthropic_thinking_budget;
 
         let provider = create_llm_provider(&cfg, self.config.request_log_store.clone());
         self.llm_provider_cache.insert(cache_key, provider.clone());
@@ -1192,11 +1216,33 @@ impl SharedPipeline {
                     .and_then(|p| p.llm_model.clone())
                     .or_else(|| llm_config.model.clone());
 
+                // Resolve effective provider-specific thinking knobs (profile overrides -> global defaults).
+                let effective_openai_reasoning_effort = active_profile
+                    .as_ref()
+                    .and_then(|p| p.openai_reasoning_effort.clone())
+                    .or_else(|| llm_config.openai_reasoning_effort.clone());
+                let effective_gemini_thinking_budget = active_profile
+                    .as_ref()
+                    .and_then(|p| p.gemini_thinking_budget)
+                    .or(llm_config.gemini_thinking_budget);
+                let effective_gemini_thinking_level = active_profile
+                    .as_ref()
+                    .and_then(|p| p.gemini_thinking_level.clone())
+                    .or_else(|| llm_config.gemini_thinking_level.clone());
+                let effective_anthropic_thinking_budget = active_profile
+                    .as_ref()
+                    .and_then(|p| p.anthropic_thinking_budget)
+                    .or(llm_config.anthropic_thinking_budget);
+
                 match inner.get_or_create_llm_provider(
                     desired_llm_provider.as_str(),
                     desired_llm_model.clone(),
                     llm_timeout,
                     llm_config.ollama_url.clone(),
+                    effective_openai_reasoning_effort.clone(),
+                    effective_gemini_thinking_budget,
+                    effective_gemini_thinking_level.clone(),
+                    effective_anthropic_thinking_budget,
                 ) {
                     Ok(p) => Some(p),
                     Err(e) => {
@@ -1219,6 +1265,10 @@ impl SharedPipeline {
                                     llm_config.model.clone(),
                                     llm_timeout,
                                     llm_config.ollama_url.clone(),
+                                    effective_openai_reasoning_effort,
+                                    effective_gemini_thinking_budget,
+                                    effective_gemini_thinking_level,
+                                    effective_anthropic_thinking_budget,
                                 )
                                 .ok()
                         } else {
@@ -1503,11 +1553,33 @@ impl SharedPipeline {
                     .and_then(|p| p.llm_model.clone())
                     .or_else(|| llm_config.model.clone());
 
+                // Resolve effective provider-specific thinking knobs (profile overrides -> global defaults).
+                let effective_openai_reasoning_effort = active_profile
+                    .as_ref()
+                    .and_then(|p| p.openai_reasoning_effort.clone())
+                    .or_else(|| llm_config.openai_reasoning_effort.clone());
+                let effective_gemini_thinking_budget = active_profile
+                    .as_ref()
+                    .and_then(|p| p.gemini_thinking_budget)
+                    .or(llm_config.gemini_thinking_budget);
+                let effective_gemini_thinking_level = active_profile
+                    .as_ref()
+                    .and_then(|p| p.gemini_thinking_level.clone())
+                    .or_else(|| llm_config.gemini_thinking_level.clone());
+                let effective_anthropic_thinking_budget = active_profile
+                    .as_ref()
+                    .and_then(|p| p.anthropic_thinking_budget)
+                    .or(llm_config.anthropic_thinking_budget);
+
                 match inner.get_or_create_llm_provider(
                     desired_llm_provider.as_str(),
                     desired_llm_model.clone(),
                     llm_timeout,
                     llm_config.ollama_url.clone(),
+                    effective_openai_reasoning_effort.clone(),
+                    effective_gemini_thinking_budget,
+                    effective_gemini_thinking_level.clone(),
+                    effective_anthropic_thinking_budget,
                 ) {
                     Ok(p) => Some(p),
                     Err(e) => {
@@ -1530,6 +1602,10 @@ impl SharedPipeline {
                                     llm_config.model.clone(),
                                     llm_timeout,
                                     llm_config.ollama_url.clone(),
+                                    effective_openai_reasoning_effort,
+                                    effective_gemini_thinking_budget,
+                                    effective_gemini_thinking_level,
+                                    effective_anthropic_thinking_budget,
                                 )
                                 .ok()
                         } else {
