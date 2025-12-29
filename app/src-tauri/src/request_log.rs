@@ -86,6 +86,15 @@ pub struct RequestLog {
     pub llm_provider: Option<String>,
     /// LLM model used
     pub llm_model: Option<String>,
+
+    /// Prompt profile id used for this request.
+    ///
+    /// "default" means no per-program profile matched.
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    /// Prompt profile display name used for this request.
+    #[serde(default)]
+    pub profile_name: Option<String>,
     /// Audio duration in seconds
     pub audio_duration_secs: Option<f32>,
     /// Audio file size in bytes
@@ -167,6 +176,8 @@ impl RequestLog {
             stt_model,
             llm_provider: None,
             llm_model: None,
+            profile_id: None,
+            profile_name: None,
             audio_duration_secs: None,
             audio_size_bytes: None,
             sample_rate: None,

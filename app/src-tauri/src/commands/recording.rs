@@ -24,6 +24,36 @@ enum TranscriptionRetentionUnit {
     Hours,
 }
 
+fn resolve_profile_for_foreground_app(cfg: &PipelineConfig) -> (Option<String>, Option<String>) {
+    let profile = crate::pipeline::select_profile_for_foreground_app(&cfg.llm_config);
+
+    if let Some(p) = profile {
+        return (Some(p.id), Some(p.name));
+    }
+
+    // Keep "default" explicit so the UI can always show a chip when desired.
+    (Some("default".to_string()), Some("Default".to_string()))
+}
+
+fn resolve_profile_by_id(cfg: &PipelineConfig, profile_id: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(profile_id) = profile_id else {
+        return (Some("default".to_string()), Some("Default".to_string()));
+    };
+
+    if profile_id == "default" {
+        return (Some("default".to_string()), Some("Default".to_string()));
+    }
+
+    let name = cfg
+        .llm_config
+        .program_prompt_profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .map(|p| p.name.clone());
+
+    (Some(profile_id.to_string()), name)
+}
+
 fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuration> {
     #[cfg(desktop)]
     {
@@ -305,11 +335,14 @@ pub fn pipeline_start_recording(
     // Start request logging
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         let config = pipeline.config();
+        let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
         log_store.start_request(
             config.stt_provider.clone(),
             config.stt_model.clone(),
         );
         log_store.with_current(|log| {
+            log.profile_id = profile_id;
+            log.profile_name = profile_name;
             log.llm_provider = if config.llm_config.enabled {
                 Some(config.llm_config.provider.clone())
             } else {
@@ -358,19 +391,21 @@ pub async fn pipeline_stop_and_transcribe(
         .try_state::<RequestLogStore>()
         .and_then(|store| store.with_current(|log| log.id.clone()));
 
+    let config = pipeline.config();
+    let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
+
     // Capture model info for persistence in history.
-    let model_info = {
-        let config = pipeline.config();
-        RequestModelInfo {
-            stt_provider: Some(config.stt_provider.clone()),
-            stt_model: config.stt_model.clone(),
-            llm_provider: if config.llm_config.enabled {
-                Some(config.llm_config.provider.clone())
-            } else {
-                None
-            },
-            llm_model: config.llm_config.model.clone(),
-        }
+    let model_info = RequestModelInfo {
+        stt_provider: Some(config.stt_provider.clone()),
+        stt_model: config.stt_model.clone(),
+        llm_provider: if config.llm_config.enabled {
+            Some(config.llm_config.provider.clone())
+        } else {
+            None
+        },
+        llm_model: config.llm_config.model.clone(),
+        profile_id: profile_id.clone(),
+        profile_name: profile_name.clone(),
     };
 
     // Create an in-progress history entry so the History view shows a running request.
@@ -423,6 +458,8 @@ pub async fn pipeline_stop_and_transcribe(
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
+            log.profile_id = profile_id.clone();
+            log.profile_name = profile_name.clone();
             log.info("Recording stopped, starting transcription");
         });
     }
@@ -650,9 +687,18 @@ pub async fn pipeline_retry_transcription(
 
     // Start a *new* request log for the retry attempt.
     let config = pipeline.config();
+    let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
+
     let new_request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
         log_store.start_request(config.stt_provider.clone(), config.stt_model.clone())
     });
+
+    if let Some(log_store) = app.try_state::<RequestLogStore>() {
+        log_store.with_current(|log| {
+            log.profile_id = profile_id.clone();
+            log.profile_name = profile_name.clone();
+        });
+    }
 
     // Capture model info for persistence in history.
     let model_info = RequestModelInfo {
@@ -664,6 +710,8 @@ pub async fn pipeline_retry_transcription(
             None
         },
         llm_model: config.llm_config.model.clone(),
+        profile_id: profile_id.clone(),
+        profile_name: profile_name.clone(),
     };
 
     // Create a history entry for the retry attempt.
@@ -912,7 +960,11 @@ pub async fn pipeline_dictate(
 
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
+        let cfg = pipeline.config();
+        let (profile_id, profile_name) = resolve_profile_for_foreground_app(&cfg);
         log_store.with_current(|log| {
+            log.profile_id = profile_id.clone();
+            log.profile_name = profile_name.clone();
             log.info("Recording stopped, starting transcription");
         });
     }
@@ -1081,6 +1133,9 @@ pub async fn pipeline_test_transcribe_last_audio(
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         let cfg = pipeline.config();
 
+        let (profile_id_used, profile_name_used) =
+            resolve_profile_by_id(&cfg, profile_id.as_deref());
+
         // Best-effort: pick the *desired* provider/model based on profile overrides.
         // The pipeline may still fall back to global provider/model if overrides are invalid.
         let (desired_provider, desired_model) = profile_id
@@ -1107,6 +1162,8 @@ pub async fn pipeline_test_transcribe_last_audio(
 
         log_store.start_request(desired_provider, desired_model);
         log_store.with_current(|log| {
+            log.profile_id = profile_id_used;
+            log.profile_name = profile_name_used;
             log.llm_provider = None;
             log.llm_model = None;
             log.info("Test transcription started");

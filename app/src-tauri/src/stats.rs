@@ -404,7 +404,7 @@ pub fn parse_anthropic_usage_from_response_json(v: &JsonValue) -> Option<anthrop
         .and_then(|x| x.as_u64())
         .unwrap_or(0);
 
-    let mut cache_creation_1h_input_tokens = usage
+    let cache_creation_1h_input_tokens = usage
         .get("cache_creation")
         .and_then(|c| c.get("ephemeral_1h_input_tokens"))
         .and_then(|x| x.as_u64())

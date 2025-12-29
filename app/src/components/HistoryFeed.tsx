@@ -146,6 +146,8 @@ interface GroupedHistory {
     timestamp: string;
     status?: "in_progress" | "success" | "error";
     error_message?: string | null;
+    profile_id?: string | null;
+    profile_name?: string | null;
     stt_provider?: string | null;
     stt_model?: string | null;
     llm_provider?: string | null;
@@ -160,6 +162,8 @@ function groupHistoryByDate(
     timestamp: string;
     status?: "in_progress" | "success" | "error";
     error_message?: string | null;
+    profile_id?: string | null;
+    profile_name?: string | null;
     stt_provider?: string | null;
     stt_model?: string | null;
     llm_provider?: string | null;
@@ -1610,6 +1614,19 @@ export function HistoryFeed() {
                     )}
                   </div>
                   <div className="history-actions">
+                    {(() => {
+                      const label =
+                        entry.profile_name ??
+                        (entry.profile_id === "default"
+                          ? "Default"
+                          : entry.profile_id);
+
+                      return label ? (
+                        <Badge size="xs" variant="light" color="gray">
+                          {label}
+                        </Badge>
+                      ) : null;
+                    })()}
                     <ActionIcon
                       variant="subtle"
                       size="sm"

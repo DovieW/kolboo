@@ -656,6 +656,8 @@ fn stop_recording(
         // Capture model info from pipeline config for persistence in history.
         let model_info = {
             let config = pipeline.config();
+            let profile = pipeline::select_profile_for_foreground_app(&config.llm_config);
+
             RequestModelInfo {
                 stt_provider: Some(config.stt_provider.clone()),
                 stt_model: config.stt_model.clone(),
@@ -665,6 +667,8 @@ fn stop_recording(
                     None
                 },
                 llm_model: config.llm_config.model.clone(),
+                profile_id: profile.as_ref().map(|p| p.id.clone()),
+                profile_name: profile.as_ref().map(|p| p.name.clone()),
             }
         };
 

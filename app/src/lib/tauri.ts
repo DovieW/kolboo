@@ -37,6 +37,8 @@ interface HistoryEntry {
   text: string;
   status?: "in_progress" | "success" | "error";
   error_message?: string | null;
+  profile_id?: string | null;
+  profile_name?: string | null;
   stt_provider?: string | null;
   stt_model?: string | null;
   llm_provider?: string | null;
@@ -897,7 +899,7 @@ export const tauriAPI = {
       quiet_audio_require_speech:
         (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
 
-      noise_gate_threshold_dbfs: await(async () => {
+      noise_gate_threshold_dbfs: await (async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -936,7 +938,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -958,14 +960,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })(),
+      })()),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -979,7 +981,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })(),
+      })()),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
@@ -1761,6 +1763,10 @@ export interface RequestLog {
   stt_model: string | null;
   llm_provider: string | null;
   llm_model: string | null;
+
+  profile_id?: string | null;
+  profile_name?: string | null;
+
   raw_transcript: string | null;
   final_text: string | null;
   stt_duration_ms: number | null;

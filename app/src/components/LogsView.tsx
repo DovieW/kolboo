@@ -223,6 +223,17 @@ function RequestLogItem({
     log.llm_model ? ` / ${log.llm_model}` : ""
   }`;
 
+  // Always show a profile badge in request logs.
+  // If the backend didn't populate profile fields (legacy logs), assume Default.
+  const profileLabel = (() => {
+    const name = (log.profile_name ?? "").trim();
+    const id = (log.profile_id ?? "").trim();
+
+    if (name) return name;
+    if (!id || id === "default") return "Default";
+    return id;
+  })();
+
   const sttPriceLabel = formatCallPriceLabel({
     isFreeTier: log.stt_is_free_tier,
     estimatedCostUsdMicros: log.stt_estimated_cost_usd_micros,
@@ -232,15 +243,9 @@ function RequestLogItem({
     estimatedCostUsdMicros: log.llm_estimated_cost_usd_micros,
   });
 
-  const rawTranscript = log.raw_transcript?.trim() ? log.raw_transcript : null;
-  // Only treat as a "rewrite" if we actually attempted LLM formatting and the output differs.
-  const llmRewrite =
-    llmAttempted &&
-    log.final_text?.trim() &&
-    log.raw_transcript &&
-    log.final_text !== log.raw_transcript
-      ? log.final_text
-      : null;
+  const rawTranscriptTrimmed = (log.raw_transcript ?? "").trim();
+  const finalOutputTrimmed = (log.final_text ?? "").trim();
+  const hasAnyTranscriptText = !!(rawTranscriptTrimmed || finalOutputTrimmed);
 
   return (
     <Accordion.Item value={log.id} data-status={log.status}>
@@ -406,6 +411,10 @@ function RequestLogItem({
                 LLM · {llmMetaLabel} · {llmPriceLabel}
               </Badge>
             ) : null}
+
+            <Badge variant="light" size="sm" color="gray">
+              Profile · {profileLabel}
+            </Badge>
           </Group>
 
           {/* Log entries */}
@@ -433,8 +442,8 @@ function RequestLogItem({
 
           {/* Copy full log as JSON for debugging */}
           <Group justify="flex-end" gap={4}>
-            {rawTranscript && (
-              <CopyButton value={rawTranscript}>
+            {hasAnyTranscriptText && (
+              <CopyButton value={rawTranscriptTrimmed}>
                 {({ copied, copy }) => (
                   <Button
                     variant="subtle"
@@ -448,8 +457,8 @@ function RequestLogItem({
                 )}
               </CopyButton>
             )}
-            {llmRewrite && (
-              <CopyButton value={llmRewrite}>
+            {hasAnyTranscriptText && (
+              <CopyButton value={finalOutputTrimmed}>
                 {({ copied, copy }) => (
                   <Button
                     variant="subtle"

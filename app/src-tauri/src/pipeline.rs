@@ -32,7 +32,9 @@ fn normalize_program_path(path: &str) -> String {
     path.replace('/', "\\").to_lowercase()
 }
 
-fn select_profile_for_foreground_app(llm_config: &LlmConfig) -> Option<crate::llm::ProgramPromptProfile> {
+pub(crate) fn select_profile_for_foreground_app(
+    llm_config: &LlmConfig,
+) -> Option<crate::llm::ProgramPromptProfile> {
     let foreground = crate::windows_apps::get_foreground_process_path();
     let Some(foreground) = foreground else {
         return None;
@@ -1109,6 +1111,22 @@ impl SharedPipeline {
 
             let llm_config = inner.config.llm_config.clone();
             let active_profile = select_profile_for_foreground_app(&llm_config);
+
+            // Persist the *actual* profile used for this request into the request log.
+            // Note: picking the profile at transcription time tends to be more accurate than
+            // at recording start (e.g. overlay window can steal focus).
+            if let Some(store) = inner.config.request_log_store.as_ref() {
+                let (profile_id, profile_name) = if let Some(p) = active_profile.as_ref() {
+                    (Some(p.id.clone()), Some(p.name.clone()))
+                } else {
+                    (Some("default".to_string()), Some("Default".to_string()))
+                };
+
+                store.with_current(|log| {
+                    log.profile_id = profile_id;
+                    log.profile_name = profile_name;
+                });
+            }
             let llm_prompts = active_profile
                 .as_ref()
                 .map(|p| p.prompts.clone())

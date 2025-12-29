@@ -31,6 +31,14 @@ pub struct HistoryEntry {
     pub status: HistoryStatus,
     #[serde(default)]
     pub error_message: Option<String>,
+    /// Prompt profile id used for this transcription.
+    ///
+    /// "default" means no per-program profile matched.
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    /// Prompt profile display name used for this transcription.
+    #[serde(default)]
+    pub profile_name: Option<String>,
     /// STT provider used for this transcription (e.g., "groq", "openai").
     #[serde(default)]
     pub stt_provider: Option<String>,
@@ -52,6 +60,8 @@ pub struct RequestModelInfo {
     pub stt_model: Option<String>,
     pub llm_provider: Option<String>,
     pub llm_model: Option<String>,
+    pub profile_id: Option<String>,
+    pub profile_name: Option<String>,
 }
 
 impl HistoryEntry {
@@ -62,6 +72,8 @@ impl HistoryEntry {
             text,
             status: HistoryStatus::Success,
             error_message: None,
+            profile_id: None,
+            profile_name: None,
             stt_provider: None,
             stt_model: None,
             llm_provider: None,
@@ -76,6 +88,8 @@ impl HistoryEntry {
             text: String::new(),
             status: HistoryStatus::InProgress,
             error_message: None,
+            profile_id: model_info.profile_id,
+            profile_name: model_info.profile_name,
             stt_provider: model_info.stt_provider,
             stt_model: model_info.stt_model,
             llm_provider: model_info.llm_provider,

@@ -454,10 +454,17 @@ a:focus-visible {
 
 .history-actions {
 	display: flex;
+	align-items: center;
 	gap: 4px;
 	flex-shrink: 0;
 	opacity: 0;
 	transition: opacity 0.2s ease;
+}
+
+/* When we show a profile chip next to the hover-only buttons, give it a bit of breathing room. */
+.history-actions > .mantine-Badge-root {
+	align-self: center;
+	margin-right: 6px;
 }
 
 .history-item:hover .history-actions {
