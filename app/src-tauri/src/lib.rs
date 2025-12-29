@@ -81,6 +81,32 @@ fn get_setting_from_store<T: serde::de::DeserializeOwned>(
         .unwrap_or(default)
 }
 
+/// Read a hotkey setting from the store.
+///
+/// Semantics:
+/// - missing key => use default
+/// - explicit null => disabled (None)
+/// - invalid value => use default
+#[cfg(desktop)]
+fn get_hotkey_from_store(
+    app: &AppHandle,
+    key: &str,
+    default_fn: fn() -> HotkeyConfig,
+) -> Option<HotkeyConfig> {
+    use serde_json::Value;
+
+    let raw = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get(key));
+
+    match raw {
+        None => Some(default_fn()),
+        Some(Value::Null) => None,
+        Some(v) => serde_json::from_value::<HotkeyConfig>(v).ok().or_else(|| Some(default_fn())),
+    }
+}
+
 /// Ensure settings shown in the UI match what the backend will use.
 ///
 /// The frontend often treats missing keys as "unset" and shows fallback defaults.
@@ -105,129 +131,152 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     };
 
     let mut dirty = false;
-    let mut set_if_missing = |key: &str, value: Value| {
-        if is_missing(store.get(key)) {
+    // Some settings intentionally use explicit null as a meaningful value.
+    // For those keys, we only seed defaults when the key is truly absent.
+    let mut set_default = |key: &str, value: Value, only_if_absent: bool| {
+        let should_set = if only_if_absent {
+            store.get(key).is_none()
+        } else {
+            is_missing(store.get(key))
+        };
+
+        if should_set {
             store.set(key.to_string(), value);
             dirty = true;
         }
     };
 
-    set_if_missing("stt_provider", json!("groq"));
+    set_default("stt_provider", json!("groq"), false);
     // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
-    set_if_missing("groq_free_tier", json!(true));
+    set_default("groq_free_tier", json!(true), false);
     // AssemblyAI and Speechmatics toggles (used by stats filtering).
-    set_if_missing("assemblyai_free_tier", json!(true));
-    set_if_missing("speechmatics_free_tier", json!(true));
-    set_if_missing("stt_transcription_prompt", json!(null));
-    set_if_missing("stt_timeout_seconds", json!(10.0));
+    set_default("assemblyai_free_tier", json!(true), false);
+    set_default("speechmatics_free_tier", json!(true), false);
+    set_default("stt_transcription_prompt", json!(null), false);
+    set_default("stt_timeout_seconds", json!(10.0), false);
     // How many recordings/history items to retain (impacts disk usage).
     // Keep this aligned with the UI default.
-    set_if_missing("max_saved_recordings", json!(1000));
+    set_default("max_saved_recordings", json!(1000), false);
 
     // Request logs retention (in-memory request log history).
     // Keep this aligned with the UI default.
-    set_if_missing("request_logs_retention_mode", json!("amount"));
-    set_if_missing("request_logs_retention_amount", json!(50));
+    set_default("request_logs_retention_mode", json!("amount"), false);
+    set_default("request_logs_retention_amount", json!(50), false);
     // Only used when mode == "time" (days; 0 = forever)
-    set_if_missing("request_logs_retention_days", json!(7));
+    set_default("request_logs_retention_days", json!(7), false);
     // Time-based retention for history/transcriptions. 0 = keep forever.
-    set_if_missing("transcription_retention_days", json!(0));
+    set_default("transcription_retention_days", json!(0), false);
     // New retention keys (unit+value) used by newer UI.
     // Keep legacy days key as well for backward compatibility.
-    set_if_missing("transcription_retention_unit", json!("days"));
-    set_if_missing("transcription_retention_value", json!(0.0));
+    set_default("transcription_retention_unit", json!("days"), false);
+    set_default("transcription_retention_value", json!(0.0), false);
     // When deleting old transcriptions, optionally also delete their .wav recordings.
-    set_if_missing("transcription_retention_delete_recordings", json!(false));
+    set_default("transcription_retention_delete_recordings", json!(false), false);
 
     // Persisted stats retention (usage/cost events).
     // These are stored on disk (unlike request logs which are in-memory).
     // 0 = keep forever.
-    set_if_missing("stats_retention_unit", json!("days"));
-    set_if_missing("stats_retention_value", json!(30.0));
+    set_default("stats_retention_unit", json!("days"), false);
+    set_default("stats_retention_value", json!(30.0), false);
     // Defensive cap (bytes). The pruning logic enforces this regardless of time settings.
-    set_if_missing("stats_retention_max_bytes", json!(50_000_000u64));
-    set_if_missing("overlay_mode", json!("recording_only"));
-    set_if_missing("widget_position", json!("bottom-center"));
+    set_default("stats_retention_max_bytes", json!(50_000_000u64), false);
+    set_default("overlay_mode", json!("recording_only"), false);
+    set_default("widget_position", json!("bottom-center"), false);
     // Whether clicking the window X exits the app or closes the main window to the tray.
     // - "exit_program": exit the application process
     // - "minimize_to_tray": close (destroy) the main window but keep the tray app running
     //   (the tray can recreate the main window on demand)
     // Legacy (migrated by the frontend normalizer):
     // - "close_window": previously meant "destroy the main window (tray can recreate it)".
-    set_if_missing("main_window_close_behavior", json!("minimize_to_tray"));
-    set_if_missing("output_mode", json!("paste"));
-    set_if_missing("output_hit_enter", json!(false));
-    set_if_missing("playing_audio_handling", json!("mute"));
-    set_if_missing("sound_enabled", json!(true));
-    set_if_missing("rewrite_llm_enabled", json!(false));
-    set_if_missing("rewrite_program_prompt_profiles", json!([]));
+    set_default("main_window_close_behavior", json!("minimize_to_tray"), false);
+    set_default("output_mode", json!("paste"), false);
+    set_default("output_hit_enter", json!(false), false);
+    set_default("playing_audio_handling", json!("mute"), false);
+    set_default("sound_enabled", json!(true), false);
+    set_default("rewrite_llm_enabled", json!(false), false);
+    set_default("rewrite_program_prompt_profiles", json!([]), false);
 
-    // Hotkeys: seed explicit defaults so both Rust and UI see the same persisted values.
-    set_if_missing(
+    // Hotkeys: allow explicit null to mean "disabled"; only seed when key is absent.
+    set_default(
         "toggle_hotkey",
         serde_json::to_value(HotkeyConfig::default_toggle())?,
+        true,
     );
-    set_if_missing(
+    set_default(
         "hold_hotkey",
         serde_json::to_value(HotkeyConfig::default_hold())?,
+        true,
     );
-    set_if_missing(
+    set_default(
         "paste_last_hotkey",
         serde_json::to_value(HotkeyConfig::default_paste_last())?,
+        true,
     );
 
     // VAD settings are used by the pipeline.
-    set_if_missing(
+    set_default(
         "vad_settings",
         serde_json::to_value(settings::VadSettings::default())?,
+        false,
     );
 
     // Audio + quiet-recording gating.
-    set_if_missing(
+    set_default(
         "quiet_audio_gate_enabled",
         json!(default_pipeline_config.quiet_audio_gate_enabled),
+        false,
     );
-    set_if_missing(
+    set_default(
         "quiet_audio_min_duration_secs",
         json!(default_pipeline_config.quiet_audio_min_duration_secs),
+        false,
     );
-    set_if_missing(
+    set_default(
         "quiet_audio_rms_dbfs_threshold",
         json!(default_pipeline_config.quiet_audio_rms_dbfs_threshold),
+        false,
     );
-    set_if_missing(
+    set_default(
         "quiet_audio_peak_dbfs_threshold",
         json!(default_pipeline_config.quiet_audio_peak_dbfs_threshold),
+        false,
     );
-    set_if_missing(
+    set_default(
         "quiet_audio_require_speech",
         json!(default_pipeline_config.quiet_audio_require_speech),
+        false,
     );
 
     // Stop-time preprocessing defaults.
-    set_if_missing(
+    set_default(
         "noise_gate_threshold_dbfs",
         json!(default_pipeline_config.noise_gate_threshold_dbfs),
+        false,
     );
-    set_if_missing(
+    set_default(
         "audio_downmix_to_mono",
         json!(default_pipeline_config.audio_downmix_to_mono),
+        false,
     );
-    set_if_missing(
+    set_default(
         "audio_resample_to_16khz",
         json!(default_pipeline_config.audio_resample_to_16khz),
+        false,
     );
-    set_if_missing(
+    set_default(
         "audio_highpass_enabled",
         json!(default_pipeline_config.audio_highpass_enabled),
+        false,
     );
-    set_if_missing(
+    set_default(
         "audio_agc_enabled",
         json!(default_pipeline_config.audio_agc_enabled),
+        false,
     );
-    set_if_missing(
+    set_default(
         "audio_noise_suppression_enabled",
         json!(default_pipeline_config.audio_noise_suppression_enabled),
+        false,
     );
 
     if dirty {
@@ -1203,41 +1252,46 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     // Get shortcut string for comparison (normalized to handle "ctrl" vs "control" differences)
     let shortcut_str = normalize_shortcut_string(&shortcut.to_string());
 
-    // Get configured shortcut strings from store (normalized), with validation fallback
-    let toggle_hotkey: HotkeyConfig =
-        get_setting_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle());
-    let hold_hotkey: HotkeyConfig =
-        get_setting_from_store(app, "hold_hotkey", HotkeyConfig::default_hold());
-    let paste_last_hotkey: HotkeyConfig =
-        get_setting_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last());
+    // Get configured hotkeys from store.
+    // - missing => default
+    // - null => disabled
+    // - invalid => default
+    let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle);
+    let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
+    let paste_last_hotkey =
+        get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
 
-    // Validate hotkeys - if they can't be parsed as shortcuts, use defaults
-    let toggle_shortcut_str = normalize_shortcut_string(
-        &toggle_hotkey
+    // Convert to normalized shortcut strings.
+    // For disabled hotkeys, we keep None so it can never match.
+    let toggle_shortcut_str: Option<String> = toggle_hotkey.map(|hk| {
+        let shortcut_str = hk
             .to_shortcut()
-            .map(|_| toggle_hotkey.to_shortcut_string())
-            .unwrap_or_else(|_| HotkeyConfig::default_toggle().to_shortcut_string()),
-    );
-    let hold_shortcut_str = normalize_shortcut_string(
-        &hold_hotkey
+            .map(|_| hk.to_shortcut_string())
+            .unwrap_or_else(|_| HotkeyConfig::default_toggle().to_shortcut_string());
+        normalize_shortcut_string(&shortcut_str)
+    });
+    let hold_shortcut_str: Option<String> = hold_hotkey.map(|hk| {
+        let shortcut_str = hk
             .to_shortcut()
-            .map(|_| hold_hotkey.to_shortcut_string())
-            .unwrap_or_else(|_| HotkeyConfig::default_hold().to_shortcut_string()),
-    );
-    let paste_last_shortcut_str = normalize_shortcut_string(
-        &paste_last_hotkey
+            .map(|_| hk.to_shortcut_string())
+            .unwrap_or_else(|_| HotkeyConfig::default_hold().to_shortcut_string());
+        normalize_shortcut_string(&shortcut_str)
+    });
+    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.map(|hk| {
+        let shortcut_str = hk
             .to_shortcut()
-            .map(|_| paste_last_hotkey.to_shortcut_string())
-            .unwrap_or_else(|_| HotkeyConfig::default_paste_last().to_shortcut_string()),
-    );
+            .map(|_| hk.to_shortcut_string())
+            .unwrap_or_else(|_| HotkeyConfig::default_paste_last().to_shortcut_string());
+        normalize_shortcut_string(&shortcut_str)
+    });
 
     // Get audio mute manager if available
     let audio_mute_manager = app.try_state::<AudioMuteManager>();
 
     // Compare normalized strings directly
-    let is_toggle = shortcut_str == toggle_shortcut_str;
-    let is_hold = shortcut_str == hold_shortcut_str;
-    let is_paste_last = shortcut_str == paste_last_shortcut_str;
+    let is_toggle = toggle_shortcut_str.as_deref() == Some(shortcut_str.as_str());
+    let is_hold = hold_shortcut_str.as_deref() == Some(shortcut_str.as_str());
+    let is_paste_last = paste_last_shortcut_str.as_deref() == Some(shortcut_str.as_str());
 
     if is_toggle {
         // Toggle mode: action happens on key release (debounced)
@@ -2314,53 +2368,57 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-    // Read hotkeys from store with defaults
-    let toggle_hotkey: HotkeyConfig =
-        get_setting_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle());
-    let hold_hotkey: HotkeyConfig =
-        get_setting_from_store(app, "hold_hotkey", HotkeyConfig::default_hold());
-    let paste_last_hotkey: HotkeyConfig =
-        get_setting_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last());
+    // Read hotkeys from store.
+    // - missing => default
+    // - null => disabled
+    // - invalid => default
+    let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle);
+    let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
+    let paste_last_hotkey =
+        get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
 
     // Convert to shortcut strings with validation (fall back to defaults if invalid).
     // NOTE: We intentionally register each shortcut individually so that a conflict
     // (e.g. another app already using Ctrl+F3) doesn't prevent the app from starting.
-    let toggle_shortcut_str = toggle_hotkey
-        .to_shortcut()
-        .map(|_| toggle_hotkey.to_shortcut_string())
-        .unwrap_or_else(|e| {
-            log::warn!(
-                "Invalid toggle hotkey in settings store ({}); falling back to default",
-                e
-            );
-            HotkeyConfig::default_toggle().to_shortcut_string()
-        });
-    let hold_shortcut_str = hold_hotkey
-        .to_shortcut()
-        .map(|_| hold_hotkey.to_shortcut_string())
-        .unwrap_or_else(|e| {
-            log::warn!(
-                "Invalid hold hotkey in settings store ({}); falling back to default",
-                e
-            );
-            HotkeyConfig::default_hold().to_shortcut_string()
-        });
-    let paste_last_shortcut_str = paste_last_hotkey
-        .to_shortcut()
-        .map(|_| paste_last_hotkey.to_shortcut_string())
-        .unwrap_or_else(|e| {
-            log::warn!(
-                "Invalid paste-last hotkey in settings store ({}); falling back to default",
-                e
-            );
-            HotkeyConfig::default_paste_last().to_shortcut_string()
-        });
+    let toggle_shortcut_str: Option<String> = toggle_hotkey.map(|hk| {
+        hk.to_shortcut()
+            .map(|_| hk.to_shortcut_string())
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "Invalid toggle hotkey in settings store ({}); falling back to default",
+                    e
+                );
+                HotkeyConfig::default_toggle().to_shortcut_string()
+            })
+    });
+    let hold_shortcut_str: Option<String> = hold_hotkey.map(|hk| {
+        hk.to_shortcut()
+            .map(|_| hk.to_shortcut_string())
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "Invalid hold hotkey in settings store ({}); falling back to default",
+                    e
+                );
+                HotkeyConfig::default_hold().to_shortcut_string()
+            })
+    });
+    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.map(|hk| {
+        hk.to_shortcut()
+            .map(|_| hk.to_shortcut_string())
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "Invalid paste-last hotkey in settings store ({}); falling back to default",
+                    e
+                );
+                HotkeyConfig::default_paste_last().to_shortcut_string()
+            })
+    });
 
     log::info!(
         "Registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}",
-        toggle_shortcut_str,
-        hold_shortcut_str,
-        paste_last_shortcut_str
+        toggle_shortcut_str.as_deref().unwrap_or("<disabled>"),
+        hold_shortcut_str.as_deref().unwrap_or("<disabled>"),
+        paste_last_shortcut_str.as_deref().unwrap_or("<disabled>")
     );
 
     let shortcut_manager = app.global_shortcut();
@@ -2368,53 +2426,59 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     // Register each shortcut independently; on failure we log + emit a warning event.
     let mut failures: Vec<String> = Vec::new();
 
-    let toggle_shortcut =
-        <Shortcut as std::str::FromStr>::from_str(&toggle_shortcut_str).map_err(|e| {
-            failures.push(format!(
-                "Toggle ({}) => failed to parse shortcut: {:?}",
-                toggle_shortcut_str, e
-            ));
-        });
-    if let Ok(toggle_shortcut) = toggle_shortcut {
-        if let Err(e) =
-            shortcut_manager.on_shortcut(toggle_shortcut, |app, shortcut, event| {
-                handle_shortcut_event(app, shortcut, &event);
-            })
-        {
-            failures.push(format!("Toggle ({}) => {}", toggle_shortcut_str, e));
+    if let Some(toggle_shortcut_str) = &toggle_shortcut_str {
+        let toggle_shortcut =
+            <Shortcut as std::str::FromStr>::from_str(toggle_shortcut_str).map_err(|e| {
+                failures.push(format!(
+                    "Toggle ({}) => failed to parse shortcut: {:?}",
+                    toggle_shortcut_str, e
+                ));
+            });
+        if let Ok(toggle_shortcut) = toggle_shortcut {
+            if let Err(e) =
+                shortcut_manager.on_shortcut(toggle_shortcut, |app, shortcut, event| {
+                    handle_shortcut_event(app, shortcut, &event);
+                })
+            {
+                failures.push(format!("Toggle ({}) => {}", toggle_shortcut_str, e));
+            }
         }
     }
 
-    let hold_shortcut =
-        <Shortcut as std::str::FromStr>::from_str(&hold_shortcut_str).map_err(|e| {
-            failures.push(format!(
-                "Hold ({}) => failed to parse shortcut: {:?}",
-                hold_shortcut_str, e
-            ));
-        });
-    if let Ok(hold_shortcut) = hold_shortcut {
-        if let Err(e) = shortcut_manager.on_shortcut(hold_shortcut, |app, shortcut, event| {
-            handle_shortcut_event(app, shortcut, &event);
-        }) {
-            failures.push(format!("Hold ({}) => {}", hold_shortcut_str, e));
+    if let Some(hold_shortcut_str) = &hold_shortcut_str {
+        let hold_shortcut =
+            <Shortcut as std::str::FromStr>::from_str(hold_shortcut_str).map_err(|e| {
+                failures.push(format!(
+                    "Hold ({}) => failed to parse shortcut: {:?}",
+                    hold_shortcut_str, e
+                ));
+            });
+        if let Ok(hold_shortcut) = hold_shortcut {
+            if let Err(e) = shortcut_manager.on_shortcut(hold_shortcut, |app, shortcut, event| {
+                handle_shortcut_event(app, shortcut, &event);
+            }) {
+                failures.push(format!("Hold ({}) => {}", hold_shortcut_str, e));
+            }
         }
     }
 
-    let paste_last_shortcut = <Shortcut as std::str::FromStr>::from_str(&paste_last_shortcut_str)
-        .map_err(|e| {
-            failures.push(format!(
-                "PasteLast ({}) => failed to parse shortcut: {:?}",
-                paste_last_shortcut_str, e
-            ));
-        });
-    if let Ok(paste_last_shortcut) = paste_last_shortcut {
-        if let Err(e) = shortcut_manager.on_shortcut(
-            paste_last_shortcut,
-            |app, shortcut, event| {
-                handle_shortcut_event(app, shortcut, &event);
-            },
-        ) {
-            failures.push(format!("PasteLast ({}) => {}", paste_last_shortcut_str, e));
+    if let Some(paste_last_shortcut_str) = &paste_last_shortcut_str {
+        let paste_last_shortcut =
+            <Shortcut as std::str::FromStr>::from_str(paste_last_shortcut_str).map_err(|e| {
+                failures.push(format!(
+                    "PasteLast ({}) => failed to parse shortcut: {:?}",
+                    paste_last_shortcut_str, e
+                ));
+            });
+        if let Ok(paste_last_shortcut) = paste_last_shortcut {
+            if let Err(e) = shortcut_manager.on_shortcut(
+                paste_last_shortcut,
+                |app, shortcut, event| {
+                    handle_shortcut_event(app, shortcut, &event);
+                },
+            ) {
+                failures.push(format!("PasteLast ({}) => {}", paste_last_shortcut_str, e));
+            }
         }
     }
 

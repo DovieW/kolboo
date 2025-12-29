@@ -21,7 +21,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useRecordingsStats,
   useDataStorageSummary,
@@ -30,6 +30,7 @@ import {
   useUpdateTranscriptionRetention,
   useUpdateTranscriptionRetentionDeleteRecordings,
 } from "../../lib/queries";
+import { API_KEY_STORE_KEYS } from "./ApiKeysSettings";
 import {
   configAPI,
   dataAPI,
@@ -84,6 +85,25 @@ export function DataSettings({
 
   const recordingsStats = useRecordingsStats();
   const dataStorageSummary = useDataStorageSummary();
+
+  const apiKeysSavedCount = useQuery({
+    queryKey: ["apiKeysSavedCount"],
+    queryFn: async () => {
+      const results = await Promise.all(
+        API_KEY_STORE_KEYS.map(async (key) => {
+          try {
+            return await tauriAPI.hasApiKey(key);
+          } catch {
+            return false;
+          }
+        })
+      );
+      return results.filter(Boolean).length;
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 10000,
+  });
 
   const profiles = settings?.rewrite_program_prompt_profiles ?? [];
   const profile: RewriteProgramPromptProfile | null =
@@ -275,6 +295,8 @@ export function DataSettings({
     queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
     queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
     queryClient.invalidateQueries({ queryKey: ["history"] });
+    queryClient.invalidateQueries({ queryKey: ["dataStorageSummary"] });
+    queryClient.invalidateQueries({ queryKey: ["apiKeysSavedCount"] });
   };
 
   const openDangerDialog = (args: {
@@ -1037,7 +1059,9 @@ export function DataSettings({
                     API keys saved
                   </Text>
                   <Text size="xs" c="dimmed">
-                    {dataStorageSummary.data.api_keys_set_count} / 5
+                    {(apiKeysSavedCount.data ??
+                      dataStorageSummary.data.api_keys_set_count) ??
+                      0} / {API_KEY_STORE_KEYS.length}
                   </Text>
                 </div>
               ) : null}
