@@ -70,6 +70,11 @@ export function ProfileConfigModal({
   const [localName, setLocalName] = useState<string>("");
   const [localPaths, setLocalPaths] = useState<string[]>([]);
 
+  const programPathInputRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const [pendingProgramPathFocusIndex, setPendingProgramPathFocusIndex] =
+    useState<number | null>(null);
+  const windowPickerSelectRef = useRef<HTMLInputElement>(null);
+
   const [confirmDialog, setConfirmDialog] = useState<null | {
     title: string;
     description?: ReactNode;
@@ -94,10 +99,12 @@ export function ProfileConfigModal({
     if (!selectedProfile) {
       setLocalName("");
       setLocalPaths([]);
+      setPendingProgramPathFocusIndex(null);
       return;
     }
     setLocalName(selectedProfile.name);
     setLocalPaths(selectedProfile.program_paths ?? []);
+    setPendingProgramPathFocusIndex(null);
   }, [selectedProfile]);
 
   const saveProfileMetadata = (
@@ -181,7 +188,6 @@ export function ProfileConfigModal({
 
   const disableAllOverridesForSelectedProfile = () => {
     if (!selectedProfile) return;
-
     const name = selectedProfile.name.trim() || "this profile";
     openConfirmDialog({
       title: `Disable all overrides for ${name}?`,
@@ -237,6 +243,7 @@ export function ProfileConfigModal({
 
   const addEmptyProgramPath = () => {
     if (!selectedProfile) return;
+    setPendingProgramPathFocusIndex(localPaths.length);
     setLocalPaths((prev) => [...prev, ""]);
   };
 
@@ -249,8 +256,52 @@ export function ProfileConfigModal({
   const [windowPickerOpen, setWindowPickerOpen] = useState(false);
   const [windowPickerDropdownOpened, setWindowPickerDropdownOpened] =
     useState(false);
+  const [windowPickerEntered, setWindowPickerEntered] = useState(false);
   const [openWindows, setOpenWindows] = useState<OpenWindowInfo[]>([]);
   const [isLoadingWindows, setIsLoadingWindows] = useState(false);
+
+  useEffect(() => {
+    if (!opened) return;
+    // Don't focus behind other modals.
+    if (windowPickerOpen) return;
+    if (confirmDialog) return;
+    if (pendingProgramPathFocusIndex === null) return;
+
+    const el = programPathInputRefs.current[pendingProgramPathFocusIndex];
+    if (!el) return;
+
+    // Wait a frame to ensure the input is mounted and laid out.
+    requestAnimationFrame(() => {
+      el.focus();
+      try {
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      } catch {
+        // Ignore environments that do not support setSelectionRange.
+      }
+    });
+
+    setPendingProgramPathFocusIndex(null);
+  }, [
+    opened,
+    windowPickerOpen,
+    confirmDialog,
+    localPaths,
+    pendingProgramPathFocusIndex,
+  ]);
+
+  useEffect(() => {
+    if (!windowPickerOpen) return;
+    if (!windowPickerEntered) return;
+    if (isLoadingWindows) return;
+
+    // Open dropdown and focus the Select input after the modal enter transition.
+    // This avoids Mantine mis-positioning the dropdown (it needs layout to be final).
+    setWindowPickerDropdownOpened(true);
+    requestAnimationFrame(() => {
+      windowPickerSelectRef.current?.focus();
+    });
+  }, [windowPickerOpen, windowPickerEntered, isLoadingWindows]);
 
   const windowPickerOptions = useMemo(() => {
     const byPath = new Map<string, OpenWindowInfo>();
@@ -310,6 +361,11 @@ export function ProfileConfigModal({
       if (seen.has(v)) continue;
       seen.add(v);
       deduped.push(v);
+    }
+
+    const focusIndex = deduped.findIndex((p) => p === trimmed);
+    if (focusIndex >= 0) {
+      setPendingProgramPathFocusIndex(focusIndex);
     }
 
     setLocalPaths(deduped);
@@ -397,6 +453,9 @@ export function ProfileConfigModal({
                 wrap="nowrap"
               >
                 <TextInput
+                  ref={(el) => {
+                    programPathInputRefs.current[idx] = el;
+                  }}
                   placeholder="C:\\Program Files\\...\\app.exe"
                   value={path}
                   onChange={(e) =>
@@ -482,12 +541,14 @@ export function ProfileConfigModal({
         onClose={() => {
           setWindowPickerOpen(false);
           setWindowPickerDropdownOpened(false);
+          setWindowPickerEntered(false);
         }}
         title="Pick an open program"
         centered
-        transitionProps={{
-          onEntered: () => setWindowPickerDropdownOpened(true),
-          onExited: () => setWindowPickerDropdownOpened(false),
+        onEnterTransitionEnd={() => setWindowPickerEntered(true)}
+        onExitTransitionEnd={() => {
+          setWindowPickerEntered(false);
+          setWindowPickerDropdownOpened(false);
         }}
       >
         {isLoadingWindows ? (
@@ -496,6 +557,7 @@ export function ProfileConfigModal({
           </Group>
         ) : (
           <Select
+            ref={windowPickerSelectRef}
             searchable
             nothingFoundMessage="No windows found"
             placeholder="Select a window"
