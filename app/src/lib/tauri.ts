@@ -1704,8 +1704,9 @@ export const llmAPI = {
   testLlmRewrite: (params: { transcript: string; profileId?: string | null }) =>
     invoke<TestLlmRewriteResponse>("test_llm_rewrite", {
       transcript: params.transcript,
-      // Rust param name is `profile_id`
-      profile_id: params.profileId ?? null,
+      // IMPORTANT: Tauri command arg mapping uses camelCase in JS.
+      // Rust signature uses `profile_id`, which Tauri maps from `profileId`.
+      profileId: params.profileId ?? null,
     }),
 
   complete: (params: {
@@ -1730,8 +1731,8 @@ export const llmAPI = {
 export const sttAPI = {
   testTranscribeLastAudio: (params: { profileId?: string | null }) =>
     invoke<string>("pipeline_test_transcribe_last_audio", {
-      // Rust param name is `profile_id`
-      profile_id: params.profileId ?? null,
+      // See note above: Rust uses `profile_id`, JS should pass `profileId`.
+      profileId: params.profileId ?? null,
     }),
 
   hasLastAudio: () => invoke<boolean>("pipeline_has_last_audio"),

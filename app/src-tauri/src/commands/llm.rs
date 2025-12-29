@@ -447,32 +447,48 @@ pub async fn test_llm_rewrite(
 
     let config = pipeline.config();
 
-    // IMPORTANT: This is a *test* endpoint. It intentionally ignores the
-    // "Rewrite Transcription" enable toggle so users can validate prompts/
-    // provider/model without changing runtime behavior.
-    let (desired_provider, desired_model, prompts) = if let Some(id) = profile_id {
-        if id != "default" {
-            let profile = config
+    // Resolve the requested profile (if any). For unknown ids we error instead of silently
+    // falling back to Default; this prevents confusing test results.
+    let resolved_profile = profile_id
+        .as_deref()
+        .and_then(|id| if id == "default" { None } else { Some(id) })
+        .map(|id| {
+            config
                 .llm_config
                 .program_prompt_profiles
                 .iter()
                 .find(|p| p.id == id)
-                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))?;
+                .cloned()
+                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))
+        })
+        .transpose()?;
 
-            let provider = profile
-                .llm_provider
-                .clone()
-                .unwrap_or_else(|| config.llm_config.provider.clone());
-            let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
-
-            (provider, model, profile.prompts.clone())
+    // Persist which profile was used into the request log so the Logs UI and raw payloads
+    // are easier to interpret.
+    if let Some(store) = request_log_store.as_ref() {
+        let (used_id, used_name) = if let Some(p) = resolved_profile.as_ref() {
+            (Some(p.id.clone()), Some(p.name.clone()))
         } else {
-            (
-                config.llm_config.provider.clone(),
-                config.llm_config.model.clone(),
-                config.llm_config.prompts.clone(),
-            )
-        }
+            (Some("default".to_string()), Some("Default".to_string()))
+        };
+
+        store.with_current(|log| {
+            log.profile_id = used_id;
+            log.profile_name = used_name;
+        });
+    }
+
+    // IMPORTANT: This is a *test* endpoint. It intentionally ignores the
+    // "Rewrite Transcription" enable toggle so users can validate prompts/
+    // provider/model without changing runtime behavior.
+    let (desired_provider, desired_model, prompts) = if let Some(profile) = resolved_profile.as_ref() {
+        let provider = profile
+            .llm_provider
+            .clone()
+            .unwrap_or_else(|| config.llm_config.provider.clone());
+        let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
+
+        (provider, model, profile.prompts.clone())
     } else {
         (
             config.llm_config.provider.clone(),
@@ -491,16 +507,34 @@ pub async fn test_llm_rewrite(
             .unwrap_or_default()
     };
 
+    // Apply provider-specific thinking/reasoning knobs (profile overrides -> global defaults).
+    let effective_openai_reasoning_effort = resolved_profile
+        .as_ref()
+        .and_then(|p| p.openai_reasoning_effort.clone())
+        .or_else(|| config.llm_config.openai_reasoning_effort.clone());
+    let effective_gemini_thinking_budget = resolved_profile
+        .as_ref()
+        .and_then(|p| p.gemini_thinking_budget)
+        .or(config.llm_config.gemini_thinking_budget);
+    let effective_gemini_thinking_level = resolved_profile
+        .as_ref()
+        .and_then(|p| p.gemini_thinking_level.clone())
+        .or_else(|| config.llm_config.gemini_thinking_level.clone());
+    let effective_anthropic_thinking_budget = resolved_profile
+        .as_ref()
+        .and_then(|p| p.anthropic_thinking_budget)
+        .or(config.llm_config.anthropic_thinking_budget);
+
     let provider_cfg = LlmConfig {
         enabled: true,
         provider: desired_provider,
         api_key,
         model: desired_model,
         ollama_url: config.llm_config.ollama_url.clone(),
-        openai_reasoning_effort: config.llm_config.openai_reasoning_effort.clone(),
-        gemini_thinking_budget: config.llm_config.gemini_thinking_budget,
-        gemini_thinking_level: config.llm_config.gemini_thinking_level.clone(),
-        anthropic_thinking_budget: config.llm_config.anthropic_thinking_budget,
+        openai_reasoning_effort: effective_openai_reasoning_effort,
+        gemini_thinking_budget: effective_gemini_thinking_budget,
+        gemini_thinking_level: effective_gemini_thinking_level,
+        anthropic_thinking_budget: effective_anthropic_thinking_budget,
         prompts: PromptSections::default(),
         program_prompt_profiles: Vec::new(),
         timeout: config.llm_config.timeout,
