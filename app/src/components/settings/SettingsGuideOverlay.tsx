@@ -482,12 +482,6 @@ export function SettingsGuideOverlay({
                     }}
                   />
                 </div>
-
-                <Group justify="flex-end" mt="md">
-                  <Button variant="default" onClick={() => setStep("wrapup")}>
-                    Done
-                  </Button>
-                </Group>
               </div>
             )}
 
