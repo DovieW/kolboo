@@ -49,11 +49,6 @@ pub fn text_token_rates(model: &str) -> Option<TokenRates> {
             cached_input_usd_micros_per_1m: None,
             output_usd_micros_per_1m: usd_micros(790_000),
         },
-        "meta-llama/llama-guard-4-12b" => TokenRates {
-            input_usd_micros_per_1m: usd_micros(200_000),
-            cached_input_usd_micros_per_1m: None,
-            output_usd_micros_per_1m: usd_micros(200_000),
-        },
 
         // OpenAI GPT-OSS
         "openai/gpt-oss-120b" => TokenRates {

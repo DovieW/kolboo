@@ -42,7 +42,6 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
   groq: [
     { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
     { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" },
-    { value: "meta-llama/llama-guard-4-12b", label: "Llama Guard 4 12B" },
     { value: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
     { value: "openai/gpt-oss-20b", label: "GPT-OSS 20B" },
   ],

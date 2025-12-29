@@ -334,7 +334,6 @@ pub fn get_llm_providers() -> Vec<LlmProviderInfo> {
             models: vec![
                 "llama-3.3-70b-versatile".to_string(),
                 "llama-3.1-8b-instant".to_string(),
-                "meta-llama/llama-guard-4-12b".to_string(),
                 "openai/gpt-oss-120b".to_string(),
                 "openai/gpt-oss-20b".to_string(),
             ],
