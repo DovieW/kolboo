@@ -45,6 +45,32 @@ interface HistoryEntry {
   llm_model?: string | null;
 }
 
+export interface HistoryPageQuery {
+  filterText?: string;
+  showFailed?: boolean;
+  showEmptyTranscript?: boolean;
+  selectedSttModelKeys?: string[];
+  selectedLlmModelKeys?: string[];
+  page?: number;
+  pageSize?: number;
+  includeUsageCounts?: boolean;
+}
+
+export interface ModelUsageCount {
+  key: string;
+  count: number;
+}
+
+export interface HistoryPageResult {
+  items: HistoryEntry[];
+  totalAll: number;
+  totalFiltered: number;
+  page: number;
+  pageSize: number;
+  sttModelUsage: ModelUsageCount[];
+  llmModelUsage: ModelUsageCount[];
+}
+
 export interface PromptSection {
   enabled: boolean;
   content: string | null;
@@ -450,7 +476,7 @@ function normalizeRequestLogsRetentionMode(
 
 function normalizeRequestLogsRetentionAmount(value: unknown): number {
   // Keep this modest to avoid runaway memory in the backend.
-  if (typeof value !== "number" || !Number.isFinite(value)) return 10;
+  if (typeof value !== "number" || !Number.isFinite(value)) return 50;
   const rounded = Math.round(value);
   // 1..1000 defensive
   return Math.min(1000, Math.max(1, rounded));
@@ -1534,6 +1560,10 @@ export const tauriAPI = {
     return invoke("get_history", { limit });
   },
 
+  async getHistoryPage(params: HistoryPageQuery): Promise<HistoryPageResult> {
+    return invoke("get_history_page", { params });
+  },
+
   async deleteHistoryEntry(id: string): Promise<boolean> {
     return invoke("delete_history_entry", { id });
   },
@@ -1807,7 +1837,7 @@ export interface DataStorageSummary {
 
 export const logsAPI = {
   getRequestLogs: (limit?: number) =>
-    invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 100 }),
+    invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 50 }),
 
   clearRequestLogs: () => invoke<void>("clear_request_logs"),
 };

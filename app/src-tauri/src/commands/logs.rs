@@ -23,7 +23,7 @@ fn get_setting_from_store<T: serde::de::DeserializeOwned>(
 #[cfg(desktop)]
 fn read_request_logs_retention(app: &AppHandle) -> RequestLogsRetentionConfig {
     let mode: String = get_setting_from_store(app, "request_logs_retention_mode", "amount".into());
-    let amount: u64 = get_setting_from_store(app, "request_logs_retention_amount", 10u64);
+    let amount: u64 = get_setting_from_store(app, "request_logs_retention_amount", 50u64);
     let days: u64 = get_setting_from_store(app, "request_logs_retention_days", 7u64);
 
     let mode = if mode == "time" {

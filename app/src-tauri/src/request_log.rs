@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Default number of request logs to keep (matches UI default)
-const DEFAULT_MAX_LOGS: usize = 10;
+const DEFAULT_MAX_LOGS: usize = 50;
 
 /// Defensive hard cap for request logs kept in memory.
 ///

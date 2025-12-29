@@ -7,6 +7,7 @@ import {
   configAPI,
   dataAPI,
   type HotkeyConfig,
+  type HistoryPageQuery,
   llmAPI,
   logsAPI,
   recordingsAPI,
@@ -766,12 +767,66 @@ export function useHistory(limit?: number) {
   });
 }
 
+// Fetch all history entries (unbounded). Intended for optional features like
+// analysis where full history is required, but shouldn't load by default.
+export function useHistoryAll(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["historyAll"],
+    queryFn: () => tauriAPI.getHistory(undefined),
+    enabled: options?.enabled ?? true,
+  });
+}
+
+export function useHistoryPage(params: HistoryPageQuery) {
+  const filterText = (params.filterText ?? "").toString();
+  const showFailed = params.showFailed ?? true;
+  const showEmptyTranscript = params.showEmptyTranscript ?? false;
+  const selectedSttModelKeys = (params.selectedSttModelKeys ?? [])
+    .slice()
+    .sort();
+  const selectedLlmModelKeys = (params.selectedLlmModelKeys ?? [])
+    .slice()
+    .sort();
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 25;
+  const includeUsageCounts = params.includeUsageCounts ?? true;
+
+  return useQuery({
+    queryKey: [
+      "historyPage",
+      filterText,
+      showFailed,
+      showEmptyTranscript,
+      selectedSttModelKeys,
+      selectedLlmModelKeys,
+      page,
+      pageSize,
+      includeUsageCounts,
+    ],
+    queryFn: () =>
+      tauriAPI.getHistoryPage({
+        filterText,
+        showFailed,
+        showEmptyTranscript,
+        selectedSttModelKeys,
+        selectedLlmModelKeys,
+        page,
+        pageSize,
+        includeUsageCounts,
+      }),
+    // Keep things feeling responsive while typing filters.
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function useAddHistoryEntry() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (text: string) => tauriAPI.addHistoryEntry(text),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
       // Notify other windows about history change
       tauriAPI.emitHistoryChanged();
     },
@@ -784,6 +839,8 @@ export function useDeleteHistoryEntry() {
     mutationFn: (id: string) => tauriAPI.deleteHistoryEntry(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
       // Notify other windows about history change
       tauriAPI.emitHistoryChanged();
     },
@@ -796,6 +853,8 @@ export function useClearHistory() {
     mutationFn: () => tauriAPI.clearHistory(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
       // Notify other windows about history change
       tauriAPI.emitHistoryChanged();
     },
@@ -983,8 +1042,8 @@ export function useUpdateGeminiThinkingLevel() {
 
 // STT Timeout mutation (local settings)
 export function useUpdateSTTTimeout() {
-	const queryClient = useQueryClient();
-	return useMutation({
+  const queryClient = useQueryClient();
+  return useMutation({
     mutationFn: async (timeoutSeconds: number | null) => {
       await tauriAPI.updateSTTTimeout(timeoutSeconds);
       await configAPI.syncPipelineConfig();
@@ -997,21 +1056,21 @@ export function useUpdateSTTTimeout() {
 
 // Request Logs queries and mutations
 export function useRequestLogs(limit?: number) {
-	return useQuery({
-		queryKey: ["requestLogs", limit],
-		queryFn: () => logsAPI.getRequestLogs(limit),
-		refetchInterval: 2000, // Refresh every 2 seconds to show live updates
-	});
+  return useQuery({
+    queryKey: ["requestLogs", limit],
+    queryFn: () => logsAPI.getRequestLogs(limit),
+    refetchInterval: 2000, // Refresh every 2 seconds to show live updates
+  });
 }
 
 export function useClearRequestLogs() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: () => logsAPI.clearRequestLogs(),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
-		},
-	});
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => logsAPI.clearRequestLogs(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
+    },
+  });
 }
 
 // Retry a previous transcription attempt by request id (loads saved audio in backend).
@@ -1021,6 +1080,8 @@ export function useRetryTranscription() {
     mutationFn: (requestId: string) => sttAPI.retryTranscription({ requestId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
       queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
     },
   });

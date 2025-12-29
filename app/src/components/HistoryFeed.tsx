@@ -37,6 +37,7 @@ import {
   ChevronsRight,
   Copy,
   Filter,
+  FileText,
   FolderOpen,
   MessageSquare,
   Pause,
@@ -52,9 +53,12 @@ import { Store } from "@tauri-apps/plugin-store";
 import {
   useClearHistory,
   useDeleteHistoryEntry,
-  useHistory,
+  useHistoryAll,
+  useHistoryPage,
+  useRequestLogs,
   useRecordingsStats,
   useRetryTranscription,
+  useSettings,
 } from "../lib/queries";
 import {
   llmAPI,
@@ -336,14 +340,35 @@ function buildAnalysisPrompt(
   };
 }
 
-export function HistoryFeed() {
+export function HistoryFeed({
+  onJumpToLog,
+}: {
+  onJumpToLog?: (logId: string) => void;
+} = {}) {
   const queryClient = useQueryClient();
-  const { data: history, isLoading, error } = useHistory();
   const recordingsStats = useRecordingsStats();
   const deleteEntry = useDeleteHistoryEntry();
   const clearHistory = useClearHistory();
   const retryMutation = useRetryTranscription();
   const clipboard = useClipboard();
+
+  const { data: settings } = useSettings();
+  const requestLogsLimit = (() => {
+    const fallback = 50;
+    const mode = settings?.request_logs_retention_mode;
+    if (mode === "amount") {
+      const amount = settings?.request_logs_retention_amount;
+      if (typeof amount === "number" && Number.isFinite(amount)) {
+        return Math.max(1, Math.min(200, Math.floor(amount)));
+      }
+    }
+    return fallback;
+  })();
+  const { data: requestLogs } = useRequestLogs(requestLogsLimit);
+  const requestLogIds = useMemo(
+    () => new Set((requestLogs ?? []).map((l) => l.id)),
+    [requestLogs]
+  );
 
   const recordingsGbForTooltip = (() => {
     const bytes = recordingsStats.data?.bytes;
@@ -364,8 +389,9 @@ export function HistoryFeed() {
     useDisclosure(false);
   const [analysisOpened, analysisHandlers] = useDisclosure(false);
   const [filtersOpened, filtersHandlers] = useDisclosure(false);
-  const [sttExpanded, setSttExpanded] = useState(false);
-  const [llmExpanded, setLlmExpanded] = useState(false);
+  const [filtersExpandedSection, setFiltersExpandedSection] = useState<
+    "stt" | "llm" | null
+  >(null);
   const [filterText, setFilterText] = useState("");
   const [page, setPage] = useState(1);
 
@@ -377,6 +403,41 @@ export function HistoryFeed() {
   const [selectedLlmModelKeys, setSelectedLlmModelKeys] = useState<string[]>(
     []
   );
+
+  // Main view: fetch only the current page (server-side filtering + pagination).
+  const {
+    data: historyPage,
+    isLoading,
+    error,
+  } = useHistoryPage({
+    filterText,
+    showFailed,
+    showEmptyTranscript,
+    selectedSttModelKeys,
+    selectedLlmModelKeys,
+    page,
+    pageSize: HISTORY_PAGE_SIZE,
+    includeUsageCounts: true,
+  });
+
+  // Optional: fetch full history only when the analysis modal is opened.
+  const allHistoryQuery = useHistoryAll({ enabled: analysisOpened });
+
+  const pageHistory = historyPage?.items ?? [];
+  const totalHistoryCount = historyPage?.totalAll ?? 0;
+  const totalFilteredCount = historyPage?.totalFiltered ?? 0;
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalFilteredCount / HISTORY_PAGE_SIZE)
+  );
+
+  // Keep local page state aligned with backend clamping.
+  useEffect(() => {
+    const serverPage = historyPage?.page;
+    if (typeof serverPage === "number" && Number.isFinite(serverPage)) {
+      setPage((current) => (current === serverPage ? current : serverPage));
+    }
+  }, [historyPage?.page]);
 
   const [analysisPrompt, setAnalysisPrompt] = useState<string>("");
   const [analysisSystemPrompt, setAnalysisSystemPrompt] = useState<string>("");
@@ -508,6 +569,8 @@ export function HistoryFeed() {
     const setup = async () => {
       unlisten = await tauriAPI.onHistoryChanged(() => {
         queryClient.invalidateQueries({ queryKey: ["history"] });
+        queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+        queryClient.invalidateQueries({ queryKey: ["historyPage"] });
       });
     };
 
@@ -543,6 +606,15 @@ export function HistoryFeed() {
   };
 
   const handleGenerateAnalysisPrompt = () => {
+    if (allHistoryQuery.isLoading) {
+      notifications.show({
+        title: "Analyze transcripts",
+        message: "Loading history…",
+        color: "gray",
+      });
+      return;
+    }
+
     const parsedHours =
       typeof analysisIncludeFromLastHoursInput === "number"
         ? analysisIncludeFromLastHoursInput
@@ -559,7 +631,7 @@ export function HistoryFeed() {
       includedCount,
       totalCount,
       availableTranscriptsCount,
-    } = buildAnalysisPrompt(history ?? [], {
+    } = buildAnalysisPrompt(allHistoryQuery.data ?? [], {
       includeFromLastHours,
       style: analysisPromptStyle,
     });
@@ -573,25 +645,19 @@ export function HistoryFeed() {
 
   const sttModelUsageCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    if (!history) return counts;
-    for (const entry of history) {
-      if (!entry.stt_provider || !entry.stt_model) continue;
-      const key = `${entry.stt_provider}::${entry.stt_model}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const item of historyPage?.sttModelUsage ?? []) {
+      counts.set(item.key, item.count);
     }
     return counts;
-  }, [history]);
+  }, [historyPage?.sttModelUsage]);
 
   const llmModelUsageCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    if (!history) return counts;
-    for (const entry of history) {
-      if (!entry.llm_provider || !entry.llm_model) continue;
-      const key = `${entry.llm_provider}::${entry.llm_model}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const item of historyPage?.llmModelUsage ?? []) {
+      counts.set(item.key, item.count);
     }
     return counts;
-  }, [history]);
+  }, [historyPage?.llmModelUsage]);
 
   const availableSttModelOptions = useMemo(() => listAllSttModelKeys(), []);
   const availableLlmModelOptions = useMemo(() => listAllLlmModelKeys(), []);
@@ -618,84 +684,8 @@ export function HistoryFeed() {
     setSelectedLlmModelKeys([]);
   };
 
-  const filteredHistory = useMemo(() => {
-    if (!history) return [];
-    const query = filterText.trim().toLowerCase();
-
-    return history.filter((entry) => {
-      // 1) Text search (existing behavior)
-      if (query) {
-        const text = (entry.text ?? "").toLowerCase();
-        const status = (entry.status ?? "success").toLowerCase();
-        const err = (entry.error_message ?? "").toLowerCase();
-        const matchesText =
-          text.includes(query) || status.includes(query) || err.includes(query);
-        if (!matchesText) return false;
-      }
-
-      // 2) Show Failed
-      if (!showFailed && (entry.status ?? "success") === "error") {
-        return false;
-      }
-
-      // 3) Show Empty transcript
-      if (
-        !showEmptyTranscript &&
-        (entry.status ?? "success") === "success" &&
-        !entry.text?.trim()
-      ) {
-        return false;
-      }
-
-      // 4) STT model filter
-      if (
-        selectedSttModelKeys.length > 0 &&
-        availableSttModelOptions.length > 0
-      ) {
-        const provider = entry.stt_provider;
-        const model = entry.stt_model;
-        if (!provider || !model) return false;
-        const key = `${provider}::${model}`;
-        if (!selectedSttModelKeys.includes(key)) return false;
-      }
-
-      // 5) LLM model filter (rewrite step)
-      if (
-        selectedLlmModelKeys.length > 0 &&
-        availableLlmModelOptions.length > 0
-      ) {
-        const provider = entry.llm_provider;
-        const model = entry.llm_model;
-        if (!provider || !model) return false;
-        const key = `${provider}::${model}`;
-        if (!selectedLlmModelKeys.includes(key)) return false;
-      }
-
-      return true;
-    });
-  }, [
-    history,
-    filterText,
-    showFailed,
-    showEmptyTranscript,
-    availableSttModelOptions,
-    availableLlmModelOptions,
-    selectedSttModelKeys,
-    selectedLlmModelKeys,
-  ]);
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE)
-  );
-
   const canGoPrev = page > 1;
   const canGoNext = page < totalPages;
-
-  // Keep the current page in bounds as history/filter changes.
-  useEffect(() => {
-    setPage((current) => Math.min(Math.max(1, current), totalPages));
-  }, [totalPages]);
 
   // When the filter changes, reset to page 1 so results are predictable.
   useEffect(() => {
@@ -707,11 +697,6 @@ export function HistoryFeed() {
     selectedSttModelKeys,
     selectedLlmModelKeys,
   ]);
-
-  const pageHistory = useMemo(() => {
-    const start = (page - 1) * HISTORY_PAGE_SIZE;
-    return filteredHistory.slice(start, start + HISTORY_PAGE_SIZE);
-  }, [filteredHistory, page]);
 
   if (isLoading) {
     return (
@@ -745,7 +730,7 @@ export function HistoryFeed() {
     );
   }
 
-  if (!history || history.length === 0) {
+  if (totalHistoryCount === 0) {
     return (
       <div className="animate-in animate-in-delay-2">
         <div className="section-header">
@@ -767,7 +752,6 @@ export function HistoryFeed() {
 
   const groupedHistory = groupHistoryByDate(pageHistory);
 
-  const totalHistoryCount = history?.length ?? 0;
   const isFiltering = filterText.trim().length > 0 || hasActiveFilters;
 
   return (
@@ -951,7 +935,11 @@ export function HistoryFeed() {
             {/* STT Models Section */}
             <Box>
               <UnstyledButton
-                onClick={() => setSttExpanded((v) => !v)}
+                onClick={() =>
+                  setFiltersExpandedSection((current) =>
+                    current === "stt" ? null : "stt"
+                  )
+                }
                 w="100%"
                 py={8}
                 px="xs"
@@ -974,13 +962,16 @@ export function HistoryFeed() {
                 <ChevronDown
                   size={14}
                   style={{
-                    transform: sttExpanded ? "rotate(180deg)" : "rotate(0)",
+                    transform:
+                      filtersExpandedSection === "stt"
+                        ? "rotate(180deg)"
+                        : "rotate(0)",
                     transition: "transform 150ms ease",
                     color: "var(--text-secondary)",
                   }}
                 />
               </UnstyledButton>
-              <Collapse in={sttExpanded}>
+              <Collapse in={filtersExpandedSection === "stt"}>
                 <Box px="xs" pb="xs">
                   {availableSttModelOptions.length === 0 ? (
                     <Text c="dimmed" size="xs">
@@ -1041,7 +1032,11 @@ export function HistoryFeed() {
             {/* LLM Models Section */}
             <Box>
               <UnstyledButton
-                onClick={() => setLlmExpanded((v) => !v)}
+                onClick={() =>
+                  setFiltersExpandedSection((current) =>
+                    current === "llm" ? null : "llm"
+                  )
+                }
                 w="100%"
                 py={8}
                 px="xs"
@@ -1064,13 +1059,16 @@ export function HistoryFeed() {
                 <ChevronDown
                   size={14}
                   style={{
-                    transform: llmExpanded ? "rotate(180deg)" : "rotate(0)",
+                    transform:
+                      filtersExpandedSection === "llm"
+                        ? "rotate(180deg)"
+                        : "rotate(0)",
                     transition: "transform 150ms ease",
                     color: "var(--text-secondary)",
                   }}
                 />
               </UnstyledButton>
-              <Collapse in={llmExpanded}>
+              <Collapse in={filtersExpandedSection === "llm"}>
                 <Box px="xs" pb="xs">
                   {availableLlmModelOptions.length === 0 ? (
                     <Text c="dimmed" size="xs">
@@ -1129,8 +1127,8 @@ export function HistoryFeed() {
         </Popover>
 
         <Text c="dimmed" size="xs" style={{ whiteSpace: "nowrap" }}>
-          {filteredHistory.length} result
-          {filteredHistory.length === 1 ? "" : "s"}
+          {totalFilteredCount} result
+          {totalFilteredCount === 1 ? "" : "s"}
         </Text>
 
         <Group style={{ marginLeft: "auto" }} gap={6}>
@@ -1290,6 +1288,7 @@ export function HistoryFeed() {
                 size="xs"
                 color="orange"
                 onClick={handleGenerateAnalysisPrompt}
+                loading={analysisOpened && allHistoryQuery.isLoading}
               >
                 Generate
               </Button>
@@ -1524,7 +1523,7 @@ export function HistoryFeed() {
         </Stack>
       </Drawer>
 
-      {filteredHistory.length === 0 ? (
+      {totalFilteredCount === 0 ? (
         <div className="empty-state">
           <MessageSquare className="empty-state-icon" />
           {totalHistoryCount === 0 ? (
@@ -1627,6 +1626,19 @@ export function HistoryFeed() {
                         </Badge>
                       ) : null;
                     })()}
+                    {onJumpToLog && requestLogIds.has(entry.id) ? (
+                      <Tooltip label="Jump to log" withArrow>
+                        <ActionIcon
+                          variant="subtle"
+                          size="sm"
+                          color="gray"
+                          onClick={() => onJumpToLog(entry.id)}
+                          aria-label="Jump to log"
+                        >
+                          <FileText size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                    ) : null}
                     <ActionIcon
                       variant="subtle"
                       size="sm"

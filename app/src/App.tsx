@@ -205,7 +205,7 @@ function InstructionsCard() {
   );
 }
 
-function HomeView() {
+function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
   return (
     <div className="main-content">
       <header className="animate-in" style={{ marginBottom: 32 }}>
@@ -219,7 +219,7 @@ function HomeView() {
 
       <InstructionsCard />
 
-      <HistoryFeed />
+      <HistoryFeed onJumpToLog={onJumpToLog} />
     </div>
   );
 }
@@ -1069,6 +1069,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<View>(() =>
     bootShouldAutoOpenGuide ? "settings" : "home"
   );
+  const [logsJumpToId, setLogsJumpToId] = useState<string | null>(null);
   const [settingsGuideOpen, setSettingsGuideOpen] = useState<boolean>(
     () => bootShouldAutoOpenGuide
   );
@@ -1126,7 +1127,14 @@ export default function App() {
   const renderView = () => {
     switch (activeView) {
       case "home":
-        return <HomeView />;
+        return (
+          <HomeView
+            onJumpToLog={(logId) => {
+              setLogsJumpToId(logId);
+              setActiveView("logs");
+            }}
+          />
+        );
       case "settings":
         return (
           <SettingsViewWithGuideLauncher
@@ -1138,13 +1146,23 @@ export default function App() {
       case "logs":
         return (
           <div className="main-content">
-            <LogsView />
+            <LogsView
+              jumpToLogId={logsJumpToId}
+              onJumpHandled={() => setLogsJumpToId(null)}
+            />
           </div>
         );
       case "usage-stats":
         return <UsageStatsView />;
       default:
-        return <HomeView />;
+        return (
+          <HomeView
+            onJumpToLog={(logId) => {
+              setLogsJumpToId(logId);
+              setActiveView("logs");
+            }}
+          />
+        );
     }
   };
 
@@ -1154,6 +1172,7 @@ export default function App() {
       <Sidebar
         activeView={activeView}
         onViewChange={(view) => {
+          setLogsJumpToId(null);
           setActiveView(view);
           if (view === "settings" && guideState === "pending") {
             setSettingsGuideOpen(true);

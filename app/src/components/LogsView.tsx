@@ -1,17 +1,24 @@
 import {
-	Accordion,
-	ActionIcon,
-	Badge,
-	Box,
-	Button,
-	Code,
-	CopyButton,
-	Group,
-	Paper,
-	Stack,
-	Text,
-	Title,
-	Tooltip,
+  Accordion,
+  ActionIcon,
+  Badge,
+  Box,
+  Button,
+  Code,
+  CopyButton,
+  Collapse,
+  Divider,
+  Group,
+  Indicator,
+  NumberInput,
+  Paper,
+  Popover,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+  Tooltip,
+  UnstyledButton,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { listen } from "@tauri-apps/api/event";
@@ -21,17 +28,25 @@ import {
   AlertTriangle,
   Bug,
   CheckCircle,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Clock,
   Copy,
+  Filter,
   Info,
   Loader,
   Pause,
   Play,
+  Search,
   Trash2,
+  X,
   XCircle,
   Zap,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useClearRequestLogs, useRequestLogs } from "../lib/queries";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
 import { LogJsonModal } from "./LogJsonModal";
@@ -498,10 +513,35 @@ function RequestLogItem({
   );
 }
 
-export function LogsView() {
-  const { data: logs } = useRequestLogs(100);
+export function LogsView(
+  props: {
+    jumpToLogId?: string | null;
+    onJumpHandled?: () => void;
+  } = {}
+) {
+  const { jumpToLogId = null, onJumpHandled } = props;
+  const { data: logs } = useRequestLogs(50);
   const clearLogsMutation = useClearRequestLogs();
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([]);
+  const [filterText, setFilterText] = useState("");
+  const [filtersOpened, setFiltersOpened] = useState(false);
+  const [filtersExpandedSection, setFiltersExpandedSection] = useState<
+    "status" | "duration" | null
+  >(null);
+
+  const [openedLogId, setOpenedLogId] = useState<string | null>(null);
+
+  // Status filters (in-progress is always included; these apply to completed logs).
+  const [showSuccess, setShowSuccess] = useState(true);
+  const [showError, setShowError] = useState(true);
+  const [showCancelled, setShowCancelled] = useState(true);
+
+  // Duration filter (seconds). Empty means no bound.
+  const [durationMinSecs, setDurationMinSecs] = useState<string | number>("");
+  const [durationMaxSecs, setDurationMaxSecs] = useState<string | number>("");
+
+  const LOGS_PAGE_SIZE = 25;
+  const [page, setPage] = useState(1);
   const player = useRecordingPlayer({
     onError: (message) => {
       notifications.show({
@@ -522,6 +562,136 @@ export function LogsView() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Jump in from elsewhere (e.g., History): ensure the target log is visible and expanded.
+  useEffect(() => {
+    if (!jumpToLogId) return;
+
+    setFilterText(jumpToLogId);
+    setShowSuccess(true);
+    setShowError(true);
+    setShowCancelled(true);
+    setDurationMinSecs("");
+    setDurationMaxSecs("");
+    setFiltersOpened(false);
+    setFiltersExpandedSection(null);
+    setPage(1);
+    setOpenedLogId(jumpToLogId);
+
+    onJumpHandled?.();
+  }, [jumpToLogId, onJumpHandled]);
+
+  const hasActiveFilters =
+    !showSuccess ||
+    !showError ||
+    !showCancelled ||
+    String(durationMinSecs).trim().length > 0 ||
+    String(durationMaxSecs).trim().length > 0;
+
+  const resetFilters = () => {
+    setShowSuccess(true);
+    setShowError(true);
+    setShowCancelled(true);
+    setDurationMinSecs("");
+    setDurationMaxSecs("");
+  };
+
+  const filteredLogs = useMemo(() => {
+    if (!logs) return [];
+    const query = filterText.trim().toLowerCase();
+
+    const minRaw =
+      typeof durationMinSecs === "number"
+        ? durationMinSecs
+        : Number.parseFloat(durationMinSecs);
+    const maxRaw =
+      typeof durationMaxSecs === "number"
+        ? durationMaxSecs
+        : Number.parseFloat(durationMaxSecs);
+
+    const minMs = Number.isFinite(minRaw) && minRaw >= 0 ? minRaw * 1000 : null;
+    const maxMs = Number.isFinite(maxRaw) && maxRaw >= 0 ? maxRaw * 1000 : null;
+
+    const getTotalDurationMs = (log: RequestLog): number | null => {
+      // In-progress has no ended_at (and should always be included anyway).
+      if (!log.ended_at) return null;
+      const start = Date.parse(log.started_at);
+      const end = Date.parse(log.ended_at);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+      if (end < start) return null;
+      return end - start;
+    };
+
+    return logs.filter((log) => {
+      // Always include in-progress regardless of filters (per requirement).
+      if (log.status === "in_progress") return true;
+
+      // Text search
+      if (query) {
+        const haystack = [
+          log.id,
+          log.error_message ?? "",
+          log.raw_transcript ?? "",
+          log.final_text ?? "",
+        ]
+          .join("\n")
+          .toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+
+      // Status toggles
+      if (!showSuccess && log.status === "success") return false;
+      if (!showError && log.status === "error") return false;
+      if (!showCancelled && log.status === "cancelled") return false;
+
+      // Duration filter
+      if (minMs !== null || maxMs !== null) {
+        const totalMs = getTotalDurationMs(log);
+        // If duration is missing for a completed log, keep it (best-effort).
+        if (typeof totalMs === "number") {
+          if (minMs !== null && totalMs < minMs) return false;
+          if (maxMs !== null && totalMs > maxMs) return false;
+        }
+      }
+
+      return true;
+    });
+  }, [
+    logs,
+    filterText,
+    showSuccess,
+    showError,
+    showCancelled,
+    durationMinSecs,
+    durationMaxSecs,
+  ]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredLogs.length / LOGS_PAGE_SIZE)
+  );
+  const canGoPrev = page > 1;
+  const canGoNext = page < totalPages;
+
+  useEffect(() => {
+    setPage((current) => Math.min(Math.max(1, current), totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [
+    filterText,
+    showSuccess,
+    showError,
+    showCancelled,
+    durationMinSecs,
+    durationMaxSecs,
+  ]);
+
+  const pageLogs = useMemo(() => {
+    const start = (page - 1) * LOGS_PAGE_SIZE;
+    return filteredLogs.slice(start, start + LOGS_PAGE_SIZE);
+  }, [filteredLogs, page]);
 
   return (
     <Stack gap="md" style={{ width: "100%" }}>
@@ -546,6 +716,294 @@ export function LogsView() {
         View detailed logs of voice transcription requests. Logs are stored in
         memory and cleared on app restart.
       </Text>
+
+      {/* Filters + Pagination */}
+      <Group gap={12} align="center" wrap="wrap">
+        <TextInput
+          value={filterText}
+          onChange={(e) => setFilterText(e.currentTarget.value)}
+          placeholder="Filter request logs…"
+          leftSection={<Search size={14} />}
+          rightSection={
+            filterText.trim().length > 0 ? (
+              <ActionIcon
+                variant="subtle"
+                size="sm"
+                color="gray"
+                onClick={() => setFilterText("")}
+                title="Clear filter"
+              >
+                <X size={14} />
+              </ActionIcon>
+            ) : null
+          }
+          styles={{
+            input: {
+              backgroundColor: "transparent",
+              borderColor: "var(--border-default)",
+              color: "var(--text-primary)",
+            },
+          }}
+          size="xs"
+          style={{ width: 260 }}
+        />
+
+        <Popover
+          opened={filtersOpened}
+          onChange={setFiltersOpened}
+          position="bottom-start"
+          shadow="lg"
+          radius="md"
+        >
+          <Popover.Target>
+            <Indicator
+              size={8}
+              color="orange"
+              offset={2}
+              disabled={!hasActiveFilters}
+              processing={hasActiveFilters}
+            >
+              <ActionIcon
+                variant={hasActiveFilters ? "light" : "subtle"}
+                size="sm"
+                color={hasActiveFilters ? "orange" : "gray"}
+                onClick={() => setFiltersOpened((v) => !v)}
+                title="Filter options"
+                aria-label="Filter options"
+              >
+                <Filter size={16} />
+              </ActionIcon>
+            </Indicator>
+          </Popover.Target>
+          <Popover.Dropdown
+            p={0}
+            style={{
+              backgroundColor: "var(--bg-elevated)",
+              border: "1px solid var(--border-default)",
+              width: 300,
+              overflow: "hidden",
+            }}
+          >
+            <Group justify="space-between" p="xs" pb={8}>
+              <Text size="sm" fw={600}>
+                Filters
+              </Text>
+              {hasActiveFilters && (
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  color="gray"
+                  onClick={resetFilters}
+                  styles={{ root: { height: 20, padding: "0 6px" } }}
+                >
+                  Reset
+                </Button>
+              )}
+            </Group>
+
+            <Divider color="var(--border-default)" />
+
+            {/* Status Section */}
+            <Box>
+              <UnstyledButton
+                onClick={() =>
+                  setFiltersExpandedSection((current) =>
+                    current === "status" ? null : "status"
+                  )
+                }
+                w="100%"
+                py={8}
+                px="xs"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Text size="xs" fw={500}>
+                  Status
+                </Text>
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transform:
+                      filtersExpandedSection === "status"
+                        ? "rotate(180deg)"
+                        : "rotate(0)",
+                    transition: "transform 150ms ease",
+                    color: "var(--text-secondary)",
+                  }}
+                />
+              </UnstyledButton>
+              <Collapse in={filtersExpandedSection === "status"}>
+                <Stack gap={0} p="xs" pt={0}>
+                  <Group justify="space-between" py={4}>
+                    <Text size="xs">Show success</Text>
+                    <Button
+                      variant={showSuccess ? "light" : "subtle"}
+                      size="compact-xs"
+                      color={showSuccess ? "green" : "gray"}
+                      onClick={() => setShowSuccess((v) => !v)}
+                    >
+                      {showSuccess ? "On" : "Off"}
+                    </Button>
+                  </Group>
+                  <Group justify="space-between" py={4}>
+                    <Text size="xs">Show errors</Text>
+                    <Button
+                      variant={showError ? "light" : "subtle"}
+                      size="compact-xs"
+                      color={showError ? "red" : "gray"}
+                      onClick={() => setShowError((v) => !v)}
+                    >
+                      {showError ? "On" : "Off"}
+                    </Button>
+                  </Group>
+                  <Group justify="space-between" py={4}>
+                    <Text size="xs">Show cancelled</Text>
+                    <Button
+                      variant={showCancelled ? "light" : "subtle"}
+                      size="compact-xs"
+                      color={showCancelled ? "yellow" : "gray"}
+                      onClick={() => setShowCancelled((v) => !v)}
+                    >
+                      {showCancelled ? "On" : "Off"}
+                    </Button>
+                  </Group>
+                  <Text size="xs" c="dimmed" mt={6}>
+                    In-progress requests are always shown.
+                  </Text>
+                </Stack>
+              </Collapse>
+            </Box>
+
+            <Divider color="var(--border-default)" />
+
+            {/* Duration Section */}
+            <Box>
+              <UnstyledButton
+                onClick={() =>
+                  setFiltersExpandedSection((current) =>
+                    current === "duration" ? null : "duration"
+                  )
+                }
+                w="100%"
+                py={8}
+                px="xs"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Text size="xs" fw={500}>
+                  Duration
+                </Text>
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transform:
+                      filtersExpandedSection === "duration"
+                        ? "rotate(180deg)"
+                        : "rotate(0)",
+                    transition: "transform 150ms ease",
+                    color: "var(--text-secondary)",
+                  }}
+                />
+              </UnstyledButton>
+              <Collapse in={filtersExpandedSection === "duration"}>
+                <Stack gap="xs" p="xs" pt={0}>
+                  <Group grow>
+                    <NumberInput
+                      label="Min (sec)"
+                      value={durationMinSecs}
+                      onChange={setDurationMinSecs}
+                      min={0}
+                      step={0.5}
+                      hideControls
+                      size="xs"
+                      styles={{
+                        input: {
+                          backgroundColor: "transparent",
+                          borderColor: "var(--border-default)",
+                          color: "var(--text-primary)",
+                        },
+                      }}
+                    />
+                    <NumberInput
+                      label="Max (sec)"
+                      value={durationMaxSecs}
+                      onChange={setDurationMaxSecs}
+                      min={0}
+                      step={0.5}
+                      hideControls
+                      size="xs"
+                      styles={{
+                        input: {
+                          backgroundColor: "transparent",
+                          borderColor: "var(--border-default)",
+                          color: "var(--text-primary)",
+                        },
+                      }}
+                    />
+                  </Group>
+                  <Text size="xs" c="dimmed">
+                    Applies to completed requests. In-progress requests are
+                    always included.
+                  </Text>
+                </Stack>
+              </Collapse>
+            </Box>
+          </Popover.Dropdown>
+        </Popover>
+
+        <Text c="dimmed" size="xs" style={{ whiteSpace: "nowrap" }}>
+          {filteredLogs.length} result{filteredLogs.length === 1 ? "" : "s"}
+        </Text>
+
+        <Group style={{ marginLeft: "auto" }} gap={6}>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            color="gray"
+            onClick={() => setPage(1)}
+            disabled={!canGoPrev}
+            title="First page"
+          >
+            <ChevronsLeft size={16} />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            color="gray"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={!canGoPrev}
+            title="Previous page"
+          >
+            <ChevronLeft size={16} />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            color="gray"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={!canGoNext}
+            title="Next page"
+          >
+            <ChevronRight size={16} />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            color="gray"
+            onClick={() => setPage(totalPages)}
+            disabled={!canGoNext}
+            title="Last page"
+          >
+            <ChevronsRight size={16} />
+          </ActionIcon>
+        </Group>
+      </Group>
 
       {/* System Events Panel */}
       {systemEvents.length > 0 && (
@@ -640,9 +1098,15 @@ export function LogsView() {
         </Paper>
       )}
 
-      {logs && logs.length > 0 ? (
-        <Accordion variant="contained" radius="md" chevronPosition="left">
-          {logs.map((log) => (
+      {pageLogs && pageLogs.length > 0 ? (
+        <Accordion
+          variant="contained"
+          radius="md"
+          chevronPosition="left"
+          value={openedLogId}
+          onChange={setOpenedLogId}
+        >
+          {pageLogs.map((log) => (
             <RequestLogItem key={log.id} log={log} player={player} />
           ))}
         </Accordion>
@@ -653,7 +1117,9 @@ export function LogsView() {
             style={{ color: "var(--mantine-color-dimmed)", margin: "0 auto" }}
           />
           <Text size="sm" c="dimmed" mt="sm">
-            No request logs yet. Start a voice transcription to see logs here.
+            {logs && logs.length > 0
+              ? "No matches. Try a different filter."
+              : "No request logs yet. Start a voice transcription to see logs here."}
           </Text>
         </Paper>
       )}

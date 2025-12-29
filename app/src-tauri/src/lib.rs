@@ -127,7 +127,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Request logs retention (in-memory request log history).
     // Keep this aligned with the UI default.
     set_if_missing("request_logs_retention_mode", json!("amount"));
-    set_if_missing("request_logs_retention_amount", json!(10));
+    set_if_missing("request_logs_retention_amount", json!(50));
     // Only used when mode == "time" (days; 0 = forever)
     set_if_missing("request_logs_retention_days", json!(7));
     // Time-based retention for history/transcriptions. 0 = keep forever.
@@ -1406,6 +1406,7 @@ pub fn run() {
             is_audio_mute_supported,
             commands::history::add_history_entry,
             commands::history::get_history,
+            commands::history::get_history_page,
             commands::history::delete_history_entry,
             commands::history::clear_history,
             commands::overlay::resize_overlay,
@@ -1566,7 +1567,7 @@ pub fn run() {
                     "amount".to_string(),
                 );
                 let amount: u64 =
-                    get_setting_from_store(app.handle(), "request_logs_retention_amount", 10u64);
+                    get_setting_from_store(app.handle(), "request_logs_retention_amount", 50u64);
                 let days: u64 =
                     get_setting_from_store(app.handle(), "request_logs_retention_days", 7u64);
 

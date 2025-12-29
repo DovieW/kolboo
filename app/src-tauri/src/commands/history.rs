@@ -1,4 +1,4 @@
-use crate::history::{HistoryEntry, HistoryStorage};
+use crate::history::{HistoryEntry, HistoryPageQuery, HistoryPageResult, HistoryStorage};
 use tauri::{AppHandle, State};
 
 #[cfg(desktop)]
@@ -43,6 +43,18 @@ pub async fn get_history(
     history: State<'_, HistoryStorage>,
 ) -> Result<Vec<HistoryEntry>, String> {
     history.get_all(limit)
+}
+
+/// Get a filtered/paginated slice of history entries.
+///
+/// Returns both the items for the requested page and the total count of filtered
+/// entries so the UI can render correct pagination.
+#[tauri::command]
+pub async fn get_history_page(
+    params: HistoryPageQuery,
+    history: State<'_, HistoryStorage>,
+) -> Result<HistoryPageResult, String> {
+    history.query_page(params)
 }
 
 /// Delete a history entry by ID
