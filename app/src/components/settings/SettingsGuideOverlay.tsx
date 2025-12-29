@@ -133,13 +133,13 @@ export function SettingsGuideOverlay({
     timers.push(window.setTimeout(() => setWelcomeIconVisible(true), 150));
     timers.push(window.setTimeout(() => setWelcomeTextVisible(true), 650));
     // Reveal the Continue button after the title/subtext have faded in,
-    // then held on-screen for ~2s.
+    // then held on-screen briefly.
     if (!welcomeContinueSeen) {
       timers.push(
         window.setTimeout(() => {
           setWelcomeContinueSeen(true);
           setWelcomeContinueVisible(true);
-        }, 2930)
+        }, 1465)
       );
     }
 
@@ -215,11 +215,11 @@ export function SettingsGuideOverlay({
     }
 
     // Match the welcome slide timing: wait for content to be fully faded in (~280ms),
-    // then hold for ~2s before revealing the action.
+    // then hold briefly before revealing the action.
     const t = window.setTimeout(() => {
       setFinishSeen(true);
       setFinishVisible(true);
-    }, 2280);
+    }, 1140);
     return () => window.clearTimeout(t);
   }, [opened, step, finishSeen]);
 
