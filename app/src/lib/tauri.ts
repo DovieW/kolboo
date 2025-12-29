@@ -218,13 +218,22 @@ function normalizeOutputMode(value: unknown): OutputMode {
   return "paste";
 }
 
-export type MainWindowCloseBehavior = "close_window" | "minimize_to_tray";
+// What the window close (X) button does for the main/settings window.
+//
+// NOTE: We previously used "close_window" (destroy the window but keep the tray app running).
+// That option is now treated as legacy and maps to "exit_program".
+export type MainWindowCloseBehavior = "exit_program" | "minimize_to_tray";
 
 function normalizeMainWindowCloseBehavior(
   value: unknown
 ): MainWindowCloseBehavior {
-  if (value === "close_window" || value === "minimize_to_tray") return value;
-  return "close_window";
+  if (value === "minimize_to_tray" || value === "exit_program") return value;
+
+  // Legacy value (kept for backward compatibility)
+  if (value === "close_window") return "minimize_to_tray";
+
+  // Default for unknown/missing values
+  return "minimize_to_tray";
 }
 
 export interface AppSettings {

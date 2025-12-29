@@ -221,7 +221,7 @@ export function UiSettings({
     isProfileScope && isInheriting(profile?.output_hit_enter);
 
   const mainWindowCloseBehavior: MainWindowCloseBehavior =
-    settings?.main_window_close_behavior ?? "close_window";
+    settings?.main_window_close_behavior ?? "minimize_to_tray";
 
   const outputFlags = outputModeToFlags(outputMode);
 
@@ -360,7 +360,7 @@ export function UiSettings({
     if (isProfileScope) return;
 
     const behavior = next as MainWindowCloseBehavior;
-    if (behavior !== "close_window" && behavior !== "minimize_to_tray") return;
+    if (behavior !== "exit_program" && behavior !== "minimize_to_tray") return;
     if (behavior === mainWindowCloseBehavior) return;
 
     updateMainWindowCloseBehavior.mutate(behavior);
@@ -917,7 +917,7 @@ export function UiSettings({
                 onChange={handleMainWindowCloseBehaviorChange}
                 disabled={isLoading || isProfileScope}
                 data={[
-                  { value: "close_window", label: "Close window" },
+                  { value: "exit_program", label: "Exit Program" },
                   { value: "minimize_to_tray", label: "Minimize to tray" },
                 ]}
                 size="sm"

@@ -148,10 +148,13 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     set_if_missing("stats_retention_max_bytes", json!(50_000_000u64));
     set_if_missing("overlay_mode", json!("recording_only"));
     set_if_missing("widget_position", json!("bottom-center"));
-    // Whether clicking the window X closes the settings window or hides it to the tray.
-    // - "close_window": destroy the main window (tray will recreate it on demand)
-    // - "minimize_to_tray": keep the main window alive and hide it instead
-    set_if_missing("main_window_close_behavior", json!("close_window"));
+    // Whether clicking the window X exits the app or closes the main window to the tray.
+    // - "exit_program": exit the application process
+    // - "minimize_to_tray": close (destroy) the main window but keep the tray app running
+    //   (the tray can recreate the main window on demand)
+    // Legacy (migrated by the frontend normalizer):
+    // - "close_window": previously meant "destroy the main window (tray can recreate it)".
+    set_if_missing("main_window_close_behavior", json!("minimize_to_tray"));
     set_if_missing("output_mode", json!("paste"));
     set_if_missing("output_hit_enter", json!(false));
     set_if_missing("playing_audio_handling", json!("mute"));
@@ -1488,9 +1491,8 @@ pub fn run() {
                 ensure_default_settings(app.handle())?;
             }
 
-            // Configure what happens when the user clicks the X on the main window.
-            // We default to closing (destroying) the window and recreating it from the tray
-            // since this window is mostly for settings.
+            // Configure what happens when the user clicks the X on the main/settings window.
+            // Default is to close-to-tray (destroy the window; tray can recreate it).
             #[cfg(desktop)]
             {
                 if let Some(main) = app.get_webview_window("main") {
@@ -1500,18 +1502,22 @@ pub fn run() {
                             let behavior: String = get_setting_from_store(
                                 &app_handle,
                                 "main_window_close_behavior",
-                                "close_window".to_string(),
+                                "minimize_to_tray".to_string(),
                             );
 
-                            if behavior == "minimize_to_tray" {
-                                log::info!("Main window close requested -> hiding (minimize_to_tray)");
+                            if behavior == "exit_program" {
+                                log::info!("Main window close requested -> exiting (exit_program)");
                                 api.prevent_close();
-                                if let Some(w) = app_handle.get_webview_window("main") {
-                                    let _ = w.hide();
-                                }
-                            } else {
-                                log::info!("Main window close requested -> allowing close (close_window)");
+                                app_handle.exit(0);
+                                return;
                             }
+
+                            // RAM-saving behavior: allow the window to be destroyed.
+                            // The tray's Show action will recreate the window if needed.
+                            // Also covers the legacy value "close_window".
+                            log::info!(
+                                "Main window close requested -> closing window (close-to-tray via {behavior})"
+                            );
                         }
                     });
                 } else {
