@@ -198,6 +198,38 @@ export function PromptSettings({
   >(null);
   const rewriteTestStartRef = useRef<number | null>(null);
 
+  const runRewriteTest = () => {
+    setRewriteTestError("");
+    setRewriteTestOutput("");
+    setRewriteTestDurationMs(null);
+    rewriteTestStartRef.current = performance.now();
+
+    testLlmRewrite.mutate(
+      {
+        transcript: rewriteTestInput,
+        profileId: activeProfileId,
+      },
+      {
+        onSuccess: (res) => {
+          const startedAt = rewriteTestStartRef.current;
+          rewriteTestStartRef.current = null;
+          if (typeof startedAt === "number") {
+            setRewriteTestDurationMs(performance.now() - startedAt);
+          }
+          setRewriteTestOutput(res.output);
+        },
+        onError: (err) => {
+          const startedAt = rewriteTestStartRef.current;
+          rewriteTestStartRef.current = null;
+          if (typeof startedAt === "number") {
+            setRewriteTestDurationMs(performance.now() - startedAt);
+          }
+          setRewriteTestError(errorToMessage(err));
+        },
+      }
+    );
+  };
+
   const [sttTestOutput, setSttTestOutput] = useState<string>("");
   const [sttTestError, setSttTestError] = useState<string>("");
   const [sttTestDurationMs, setSttTestDurationMs] = useState<number | null>(
@@ -1988,667 +2020,604 @@ export function PromptSettings({
       ) : null}
 
       {supportsOpenAiThinking && (
-          <div className="settings-row">
-            <div>
-              <p className="settings-label">Thinking</p>
-              <p className="settings-description">
-                Set the reasoning effort for this model.
-              </p>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {!isDefaultScope && openAiReasoningEffortInheriting && (
-                <Tooltip label={INHERIT_TOOLTIP} withArrow>
-                  <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                </Tooltip>
-              )}
-              {!isDefaultScope && !openAiReasoningEffortInheriting && (
-                <Tooltip
-                  label="Disable override (inherit from Default)"
-                  withArrow
-                >
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="sm"
-                    onClick={() =>
-                      openDisableOverrideDialog({
-                        title: "Disable Thinking override?",
-                        onConfirm: () => {
-                          setOpenAiReasoningEffortInheriting(true);
-                          setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
-                          saveProfileMetadata({
-                            openai_reasoning_effort: null,
-                          });
-                        },
-                      })
-                    }
-                  >
-                    <RotateCcw size={14} style={{ opacity: 0.65 }} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-
-              <HintSelect
-                data={openAiThinkingOptions}
-                value={
-                  isDefaultScope
-                    ? settings?.openai_reasoning_effort ?? SELECT_DEFAULT
-                    : localProfileOpenAiReasoningEffort
-                }
-                onChange={(value) => {
-                  if (isDefaultScope) {
-                    handleOpenAiThinkingChange(value);
-                    return;
-                  }
-
-                  if (value == null || value === SELECT_DEFAULT) {
-                    setOpenAiReasoningEffortInheriting(true);
-                    setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
-                    saveProfileMetadata({ openai_reasoning_effort: null });
-                    return;
-                  }
-
-                  setOpenAiReasoningEffortInheriting(false);
-                  setLocalProfileOpenAiReasoningEffort(value);
-                  saveProfileMetadata({
-                    openai_reasoning_effort: value as any,
-                  });
-                }}
-                placeholder="Default"
-                inputStyle={{
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 200,
-                }}
-                renderSelected={({ option, placeholder }) => {
-                  if (!option) {
-                    return (
-                      <Text size="sm" c="dimmed">
-                        {placeholder}
-                      </Text>
-                    );
-                  }
-
-                  if (option.value !== SELECT_DEFAULT) {
-                    return <Text size="sm">{option.label}</Text>;
-                  }
-
-                  const hint = isDefaultScope
-                    ? effectiveLlmModel
-                      ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-                      : "medium"
-                    : settings?.openai_reasoning_effort ??
-                      (effectiveLlmModel
-                        ? openAiDefaultReasoningEffortForModel(
-                            effectiveLlmModel
-                          )
-                        : "medium");
-
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 8,
-                      }}
-                    >
-                      <span style={{ fontSize: 14 }}>{option.label}</span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          opacity: 0.9,
-                          lineHeight: 1,
-                        }}
-                      >
-                        · {hint}
-                      </span>
-                    </div>
-                  );
-                }}
-                renderOption={({ option }) => {
-                  if (option.value !== SELECT_DEFAULT) {
-                    return <Text size="sm">{option.label}</Text>;
-                  }
-
-                  const hint = isDefaultScope
-                    ? effectiveLlmModel
-                      ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-                      : "medium"
-                    : settings?.openai_reasoning_effort ??
-                      (effectiveLlmModel
-                        ? openAiDefaultReasoningEffortForModel(
-                            effectiveLlmModel
-                          )
-                        : "medium");
-
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 8,
-                      }}
-                    >
-                      <span style={{ fontSize: 14 }}>{option.label}</span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          opacity: 0.9,
-                          lineHeight: 1,
-                        }}
-                      >
-                        · {hint}
-                      </span>
-                    </div>
-                  );
-                }}
-              />
-            </div>
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking</p>
+            <p className="settings-description">
+              Set the reasoning effort for this model.
+            </p>
           </div>
-        )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && openAiReasoningEffortInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !openAiReasoningEffortInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking override?",
+                      onConfirm: () => {
+                        setOpenAiReasoningEffortInheriting(true);
+                        setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
+                        saveProfileMetadata({
+                          openai_reasoning_effort: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            <HintSelect
+              data={openAiThinkingOptions}
+              value={
+                isDefaultScope
+                  ? settings?.openai_reasoning_effort ?? SELECT_DEFAULT
+                  : localProfileOpenAiReasoningEffort
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleOpenAiThinkingChange(value);
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setOpenAiReasoningEffortInheriting(true);
+                  setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
+                  saveProfileMetadata({ openai_reasoning_effort: null });
+                  return;
+                }
+
+                setOpenAiReasoningEffortInheriting(false);
+                setLocalProfileOpenAiReasoningEffort(value);
+                saveProfileMetadata({
+                  openai_reasoning_effort: value as any,
+                });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? effectiveLlmModel
+                    ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                    : "medium"
+                  : settings?.openai_reasoning_effort ??
+                    (effectiveLlmModel
+                      ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                      : "medium");
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? effectiveLlmModel
+                    ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                    : "medium"
+                  : settings?.openai_reasoning_effort ??
+                    (effectiveLlmModel
+                      ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                      : "medium");
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {supportsGeminiThinkingLevel && (
-          <div className="settings-row">
-            <div>
-              <p className="settings-label">Thinking Level</p>
-              <p className="settings-description">
-                {isGemini3Pro
-                  ? "Gemini 3 Pro supports low/high (default high)."
-                  : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
-              </p>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {!isDefaultScope && geminiThinkingLevelInheriting && (
-                <Tooltip label={INHERIT_TOOLTIP} withArrow>
-                  <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                </Tooltip>
-              )}
-
-              {!isDefaultScope && !geminiThinkingLevelInheriting && (
-                <Tooltip
-                  label="Disable override (inherit from Default)"
-                  withArrow
-                >
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="sm"
-                    onClick={() =>
-                      openDisableOverrideDialog({
-                        title: "Disable Thinking Level override?",
-                        onConfirm: () => {
-                          setGeminiThinkingLevelInheriting(true);
-                          setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
-                          saveProfileMetadata({ gemini_thinking_level: null });
-                        },
-                      })
-                    }
-                  >
-                    <RotateCcw size={14} style={{ opacity: 0.65 }} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-
-              <HintSelect
-                data={geminiThinkingLevelOptions}
-                value={
-                  isDefaultScope
-                    ? settings?.gemini_thinking_level ?? SELECT_DEFAULT
-                    : localProfileGeminiThinkingLevel
-                }
-                onChange={(value) => {
-                  if (isDefaultScope) {
-                    handleGeminiThinkingLevelChange(value);
-                    return;
-                  }
-
-                  if (value == null || value === SELECT_DEFAULT) {
-                    setGeminiThinkingLevelInheriting(true);
-                    setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
-                    saveProfileMetadata({ gemini_thinking_level: null });
-                    return;
-                  }
-
-                  const v =
-                    value === "minimal" ||
-                    value === "low" ||
-                    value === "medium" ||
-                    value === "high"
-                      ? value
-                      : null;
-                  if (v == null) return;
-
-                  setGeminiThinkingLevelInheriting(false);
-                  setLocalProfileGeminiThinkingLevel(v);
-                  saveProfileMetadata({ gemini_thinking_level: v });
-                }}
-                placeholder="Default"
-                inputStyle={{
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 200,
-                }}
-                renderSelected={({ option, placeholder }) => {
-                  if (!option) {
-                    return (
-                      <Text size="sm" c="dimmed">
-                        {placeholder}
-                      </Text>
-                    );
-                  }
-                  if (option.value !== SELECT_DEFAULT) {
-                    return <Text size="sm">{option.label}</Text>;
-                  }
-
-                  const hint = isDefaultScope
-                    ? "high"
-                    : settings?.gemini_thinking_level ?? "high";
-
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 8,
-                      }}
-                    >
-                      <span style={{ fontSize: 14 }}>{option.label}</span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          opacity: 0.9,
-                          lineHeight: 1,
-                        }}
-                      >
-                        · {hint}
-                      </span>
-                    </div>
-                  );
-                }}
-                renderOption={({ option }) => {
-                  if (option.value !== SELECT_DEFAULT) {
-                    return <Text size="sm">{option.label}</Text>;
-                  }
-
-                  const hint = isDefaultScope
-                    ? "high"
-                    : settings?.gemini_thinking_level ?? "high";
-
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 8,
-                      }}
-                    >
-                      <span style={{ fontSize: 14 }}>{option.label}</span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          opacity: 0.9,
-                          lineHeight: 1,
-                        }}
-                      >
-                        · {hint}
-                      </span>
-                    </div>
-                  );
-                }}
-              />
-            </div>
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking Level</p>
+            <p className="settings-description">
+              {isGemini3Pro
+                ? "Gemini 3 Pro supports low/high (default high)."
+                : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
+            </p>
           </div>
-        )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && geminiThinkingLevelInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+
+            {!isDefaultScope && !geminiThinkingLevelInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking Level override?",
+                      onConfirm: () => {
+                        setGeminiThinkingLevelInheriting(true);
+                        setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
+                        saveProfileMetadata({ gemini_thinking_level: null });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            <HintSelect
+              data={geminiThinkingLevelOptions}
+              value={
+                isDefaultScope
+                  ? settings?.gemini_thinking_level ?? SELECT_DEFAULT
+                  : localProfileGeminiThinkingLevel
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleGeminiThinkingLevelChange(value);
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setGeminiThinkingLevelInheriting(true);
+                  setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
+                  saveProfileMetadata({ gemini_thinking_level: null });
+                  return;
+                }
+
+                const v =
+                  value === "minimal" ||
+                  value === "low" ||
+                  value === "medium" ||
+                  value === "high"
+                    ? value
+                    : null;
+                if (v == null) return;
+
+                setGeminiThinkingLevelInheriting(false);
+                setLocalProfileGeminiThinkingLevel(v);
+                saveProfileMetadata({ gemini_thinking_level: v });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? "high"
+                  : settings?.gemini_thinking_level ?? "high";
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? "high"
+                  : settings?.gemini_thinking_level ?? "high";
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {supportsGeminiThinkingBudget && (
-          <div className="settings-row">
-            <div>
-              <p className="settings-label">Thinking Budget</p>
-              <p className="settings-description">
-                Token budget for Gemini 2.5 thinking.
-              </p>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {!isDefaultScope && geminiThinkingBudgetInheriting && (
-                <Tooltip label={INHERIT_TOOLTIP} withArrow>
-                  <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                </Tooltip>
-              )}
-              {!isDefaultScope && !geminiThinkingBudgetInheriting && (
-                <Tooltip
-                  label="Disable override (inherit from Default)"
-                  withArrow
-                >
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="sm"
-                    onClick={() =>
-                      openDisableOverrideDialog({
-                        title: "Disable Thinking Budget override?",
-                        onConfirm: () => {
-                          setGeminiThinkingBudgetInheriting(true);
-                          setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
-                          saveProfileMetadata({ gemini_thinking_budget: null });
-                        },
-                      })
-                    }
-                  >
-                    <RotateCcw size={14} style={{ opacity: 0.65 }} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-              <HintSelect
-                data={geminiThinkingBudgetOptions}
-                value={
-                  isDefaultScope
-                    ? settings?.gemini_thinking_budget == null
-                      ? SELECT_DEFAULT
-                      : String(settings.gemini_thinking_budget)
-                    : localProfileGeminiThinkingBudget
-                }
-                onChange={(value) => {
-                  if (isDefaultScope) {
-                    handleGeminiThinkingBudgetChange(value);
-                    return;
-                  }
-
-                  if (value == null || value === SELECT_DEFAULT) {
-                    setGeminiThinkingBudgetInheriting(true);
-                    setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
-                    saveProfileMetadata({ gemini_thinking_budget: null });
-                    return;
-                  }
-
-                  const parsed = Number(value);
-                  if (!Number.isFinite(parsed)) return;
-                  const asInt = Math.trunc(parsed);
-                  setGeminiThinkingBudgetInheriting(false);
-                  setLocalProfileGeminiThinkingBudget(String(asInt));
-                  saveProfileMetadata({ gemini_thinking_budget: asInt });
-                }}
-                placeholder="Default"
-                inputStyle={{
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 200,
-                }}
-                renderSelected={({ option, placeholder }) => {
-                  if (!option) {
-                    return (
-                      <Text size="sm" c="dimmed">
-                        {placeholder}
-                      </Text>
-                    );
-                  }
-                  if (option.value !== SELECT_DEFAULT)
-                    return <Text size="sm">{option.label}</Text>;
-
-                  const inherited = settings?.gemini_thinking_budget;
-                  const hint = isDefaultScope
-                    ? "dynamic"
-                    : inherited == null
-                    ? "dynamic"
-                    : inherited === 0
-                    ? "off"
-                    : inherited === -1
-                    ? "dynamic"
-                    : String(inherited);
-
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 8,
-                      }}
-                    >
-                      <span style={{ fontSize: 14 }}>{option.label}</span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          opacity: 0.9,
-                          lineHeight: 1,
-                        }}
-                      >
-                        · {hint}
-                      </span>
-                    </div>
-                  );
-                }}
-                renderOption={({ option }) => {
-                  if (option.value !== SELECT_DEFAULT) {
-                    return <Text size="sm">{option.label}</Text>;
-                  }
-
-                  const inherited = settings?.gemini_thinking_budget;
-                  const hint = isDefaultScope
-                    ? "dynamic"
-                    : inherited == null
-                    ? "dynamic"
-                    : inherited === 0
-                    ? "off"
-                    : inherited === -1
-                    ? "dynamic"
-                    : String(inherited);
-
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: 8,
-                      }}
-                    >
-                      <span style={{ fontSize: 14 }}>{option.label}</span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          opacity: 0.9,
-                          lineHeight: 1,
-                        }}
-                      >
-                        · {hint}
-                      </span>
-                    </div>
-                  );
-                }}
-              />
-            </div>
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking Budget</p>
+            <p className="settings-description">
+              Token budget for Gemini 2.5 thinking.
+            </p>
           </div>
-        )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && geminiThinkingBudgetInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !geminiThinkingBudgetInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking Budget override?",
+                      onConfirm: () => {
+                        setGeminiThinkingBudgetInheriting(true);
+                        setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
+                        saveProfileMetadata({ gemini_thinking_budget: null });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <HintSelect
+              data={geminiThinkingBudgetOptions}
+              value={
+                isDefaultScope
+                  ? settings?.gemini_thinking_budget == null
+                    ? SELECT_DEFAULT
+                    : String(settings.gemini_thinking_budget)
+                  : localProfileGeminiThinkingBudget
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleGeminiThinkingBudgetChange(value);
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setGeminiThinkingBudgetInheriting(true);
+                  setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
+                  saveProfileMetadata({ gemini_thinking_budget: null });
+                  return;
+                }
+
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return;
+                const asInt = Math.trunc(parsed);
+                setGeminiThinkingBudgetInheriting(false);
+                setLocalProfileGeminiThinkingBudget(String(asInt));
+                saveProfileMetadata({ gemini_thinking_budget: asInt });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+                if (option.value !== SELECT_DEFAULT)
+                  return <Text size="sm">{option.label}</Text>;
+
+                const inherited = settings?.gemini_thinking_budget;
+                const hint = isDefaultScope
+                  ? "dynamic"
+                  : inherited == null
+                  ? "dynamic"
+                  : inherited === 0
+                  ? "off"
+                  : inherited === -1
+                  ? "dynamic"
+                  : String(inherited);
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const inherited = settings?.gemini_thinking_budget;
+                const hint = isDefaultScope
+                  ? "dynamic"
+                  : inherited == null
+                  ? "dynamic"
+                  : inherited === 0
+                  ? "off"
+                  : inherited === -1
+                  ? "dynamic"
+                  : String(inherited);
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {supportsAnthropicThinkingBudget && (
-          <div className="settings-row">
-            <div>
-              <p className="settings-label">Thinking</p>
-              <p className="settings-description">
-                Extended thinking level for Claude models.
-              </p>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {!isDefaultScope && anthropicThinkingBudgetInheriting && (
-                <Tooltip label={INHERIT_TOOLTIP} withArrow>
-                  <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                </Tooltip>
-              )}
-              {!isDefaultScope && !anthropicThinkingBudgetInheriting && (
-                <Tooltip
-                  label="Disable override (inherit from Default)"
-                  withArrow
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking</p>
+            <p className="settings-description">
+              Extended thinking level for Claude models.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && anthropicThinkingBudgetInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !anthropicThinkingBudgetInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking override?",
+                      onConfirm: () => {
+                        setAnthropicThinkingBudgetInheriting(true);
+                        setLocalProfileAnthropicThinkingBudget(SELECT_DEFAULT);
+                        saveProfileMetadata({
+                          anthropic_thinking_budget: null,
+                        });
+                      },
+                    })
+                  }
                 >
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="sm"
-                    onClick={() =>
-                      openDisableOverrideDialog({
-                        title: "Disable Thinking override?",
-                        onConfirm: () => {
-                          setAnthropicThinkingBudgetInheriting(true);
-                          setLocalProfileAnthropicThinkingBudget(
-                            SELECT_DEFAULT
-                          );
-                          saveProfileMetadata({
-                            anthropic_thinking_budget: null,
-                          });
-                        },
-                      })
-                    }
-                  >
-                    <RotateCcw size={14} style={{ opacity: 0.65 }} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-              <HintSelect
-                data={anthropicThinkingLevelOptionsWithCustom}
-                value={
-                  isDefaultScope
-                    ? settings?.anthropic_thinking_budget == null
-                      ? SELECT_DEFAULT
-                      : String(settings.anthropic_thinking_budget)
-                    : localProfileAnthropicThinkingBudget
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <HintSelect
+              data={anthropicThinkingLevelOptionsWithCustom}
+              value={
+                isDefaultScope
+                  ? settings?.anthropic_thinking_budget == null
+                    ? SELECT_DEFAULT
+                    : String(settings.anthropic_thinking_budget)
+                  : localProfileAnthropicThinkingBudget
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleAnthropicThinkingBudgetChange(value);
+                  return;
                 }
-                onChange={(value) => {
-                  if (isDefaultScope) {
-                    handleAnthropicThinkingBudgetChange(value);
-                    return;
-                  }
 
-                  if (value == null || value === SELECT_DEFAULT) {
-                    setAnthropicThinkingBudgetInheriting(true);
-                    setLocalProfileAnthropicThinkingBudget(SELECT_DEFAULT);
-                    saveProfileMetadata({ anthropic_thinking_budget: null });
-                    return;
-                  }
+                if (value == null || value === SELECT_DEFAULT) {
+                  setAnthropicThinkingBudgetInheriting(true);
+                  setLocalProfileAnthropicThinkingBudget(SELECT_DEFAULT);
+                  saveProfileMetadata({ anthropic_thinking_budget: null });
+                  return;
+                }
 
-                  const parsed = Number(value);
-                  if (!Number.isFinite(parsed)) return;
-                  const asInt = Math.trunc(parsed);
-                  setAnthropicThinkingBudgetInheriting(false);
-                  setLocalProfileAnthropicThinkingBudget(String(asInt));
-                  saveProfileMetadata({ anthropic_thinking_budget: asInt });
-                }}
-                placeholder="Default"
-                inputStyle={{
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 200,
-                }}
-                renderSelected={({ option, placeholder }) => {
-                  if (!option) {
-                    return (
-                      <Text size="sm" c="dimmed">
-                        {placeholder}
-                      </Text>
-                    );
-                  }
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return;
+                const asInt = Math.trunc(parsed);
+                setAnthropicThinkingBudgetInheriting(false);
+                setLocalProfileAnthropicThinkingBudget(String(asInt));
+                saveProfileMetadata({ anthropic_thinking_budget: asInt });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
 
-                  if (option.value === SELECT_DEFAULT) {
-                    const inheritedBudget = settings?.anthropic_thinking_budget;
-                    const hint = isDefaultScope
-                      ? "off"
-                      : inheritedBudget == null
-                      ? "off"
-                      : formatThinkingBudgetShort(inheritedBudget);
+                if (option.value === SELECT_DEFAULT) {
+                  const inheritedBudget = settings?.anthropic_thinking_budget;
+                  const hint = isDefaultScope
+                    ? "off"
+                    : inheritedBudget == null
+                    ? "off"
+                    : formatThinkingBudgetShort(inheritedBudget);
 
-                    return (
-                      <div
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{option.label}</span>
+                      <span
                         style={{
-                          display: "flex",
-                          alignItems: "baseline",
-                          gap: 8,
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          opacity: 0.9,
+                          lineHeight: 1,
                         }}
                       >
-                        <span style={{ fontSize: 14 }}>{option.label}</span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-muted)",
-                            opacity: 0.9,
-                            lineHeight: 1,
-                          }}
-                        >
-                          · {hint}
-                        </span>
-                      </div>
-                    );
-                  }
+                        · {hint}
+                      </span>
+                    </div>
+                  );
+                }
 
-                  // Closed state: keep it simple (label only) unless it's a custom token budget.
-                  if (option.label.startsWith("Custom")) {
-                    const n = Number(option.value);
-                    const suffix = Number.isFinite(n)
-                      ? formatThinkingBudgetShort(n)
-                      : null;
-                    return (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "baseline",
-                          gap: 8,
-                        }}
-                      >
-                        <Text size="sm">{option.label}</Text>
-                        {suffix && (
-                          <Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
-                            {suffix}
-                          </Text>
-                        )}
-                      </div>
-                    );
-                  }
-
-                  return <Text size="sm">{option.label}</Text>;
-                }}
-                renderOption={({ option }) => {
-                  if (option.value === SELECT_DEFAULT) {
-                    const inheritedBudget = settings?.anthropic_thinking_budget;
-                    const hint = isDefaultScope
-                      ? "off"
-                      : inheritedBudget == null
-                      ? "off"
-                      : formatThinkingBudgetShort(inheritedBudget);
-
-                    return (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "baseline",
-                          gap: 8,
-                        }}
-                      >
-                        <span style={{ fontSize: 14 }}>{option.label}</span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-muted)",
-                            opacity: 0.9,
-                            lineHeight: 1,
-                          }}
-                        >
-                          · {hint}
-                        </span>
-                      </div>
-                    );
-                  }
-
+                // Closed state: keep it simple (label only) unless it's a custom token budget.
+                if (option.label.startsWith("Custom")) {
                   const n = Number(option.value);
                   const suffix = Number.isFinite(n)
                     ? formatThinkingBudgetShort(n)
                     : null;
-
                   return (
                     <div
                       style={{
@@ -2665,11 +2634,68 @@ export function PromptSettings({
                       )}
                     </div>
                   );
-                }}
-              />
-            </div>
+                }
+
+                return <Text size="sm">{option.label}</Text>;
+              }}
+              renderOption={({ option }) => {
+                if (option.value === SELECT_DEFAULT) {
+                  const inheritedBudget = settings?.anthropic_thinking_budget;
+                  const hint = isDefaultScope
+                    ? "off"
+                    : inheritedBudget == null
+                    ? "off"
+                    : formatThinkingBudgetShort(inheritedBudget);
+
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{option.label}</span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          opacity: 0.9,
+                          lineHeight: 1,
+                        }}
+                      >
+                        · {hint}
+                      </span>
+                    </div>
+                  );
+                }
+
+                const n = Number(option.value);
+                const suffix = Number.isFinite(n)
+                  ? formatThinkingBudgetShort(n)
+                  : null;
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <Text size="sm">{option.label}</Text>
+                    {suffix && (
+                      <Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
+                        {suffix}
+                      </Text>
+                    )}
+                  </div>
+                );
+              }}
+            />
           </div>
-        )}
+        </div>
+      )}
 
       <div style={{ marginTop: 16 }}>
         <Accordion variant="separated" radius="md">
@@ -2703,6 +2729,21 @@ export function PromptSettings({
                   onChange={(e) => {
                     setRewriteTestInput(e.currentTarget.value);
                   }}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                      e.preventDefault();
+
+                      const isDisabled =
+                        rewriteTestInput.trim().length === 0 ||
+                        updateCleanupPromptSections.isPending ||
+                        updateRewriteProgramPromptProfiles.isPending ||
+                        updateRewriteLlmEnabled.isPending;
+
+                      if (!isDisabled) {
+                        runRewriteTest();
+                      }
+                    }
+                  }}
                   placeholder="Raw transcript"
                   autosize
                   minRows={3}
@@ -2727,41 +2768,7 @@ export function PromptSettings({
                       updateRewriteProgramPromptProfiles.isPending ||
                       updateRewriteLlmEnabled.isPending
                     }
-                    onClick={() => {
-                      setRewriteTestError("");
-                      setRewriteTestOutput("");
-                      setRewriteTestDurationMs(null);
-                      rewriteTestStartRef.current = performance.now();
-
-                      testLlmRewrite.mutate(
-                        {
-                          transcript: rewriteTestInput,
-                          profileId: activeProfileId,
-                        },
-                        {
-                          onSuccess: (res) => {
-                            const startedAt = rewriteTestStartRef.current;
-                            rewriteTestStartRef.current = null;
-                            if (typeof startedAt === "number") {
-                              setRewriteTestDurationMs(
-                                performance.now() - startedAt
-                              );
-                            }
-                            setRewriteTestOutput(res.output);
-                          },
-                          onError: (err) => {
-                            const startedAt = rewriteTestStartRef.current;
-                            rewriteTestStartRef.current = null;
-                            if (typeof startedAt === "number") {
-                              setRewriteTestDurationMs(
-                                performance.now() - startedAt
-                              );
-                            }
-                            setRewriteTestError(errorToMessage(err));
-                          },
-                        }
-                      );
-                    }}
+                    onClick={runRewriteTest}
                   >
                     Test
                   </Button>
