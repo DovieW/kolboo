@@ -68,7 +68,7 @@ jobs:
           path: .release/windows
 
       - name: Attest build provenance (Windows bundles)
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: .release/windows/**
 
