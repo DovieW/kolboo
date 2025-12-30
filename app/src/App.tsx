@@ -148,7 +148,7 @@ function Sidebar({
           target="_blank"
           rel="noreferrer"
         >
-          v0.2.1
+          v0.2.2
         </a>
       </footer>
     </aside>
