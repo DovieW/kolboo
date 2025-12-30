@@ -1133,25 +1133,6 @@ export default function App() {
     };
   }, [queryClient]);
 
-  // If we don't have a boot hint yet (first ever run, or storage was cleared),
-  // avoid rendering the Home view for a moment before the guide state arrives.
-  if (
-    !bootGuideKnown &&
-    guideState === undefined &&
-    !guideQuery.isError &&
-    !bootGuideFallbackActivated
-  ) {
-    return (
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "#0b0d10",
-        }}
-      />
-    );
-  }
-
   useEffect(() => {
     if (bootGuideKnown) return;
     if (guideState !== undefined) return;
@@ -1202,6 +1183,15 @@ export default function App() {
     }
   }, [guideState]);
 
+  // If we don't have a boot hint yet (first ever run, or storage was cleared),
+  // avoid rendering the Home view for a moment before the guide state arrives.
+  // IMPORTANT: do not early-return before hooks/effects are declared.
+  const shouldShowBootSplash =
+    !bootGuideKnown &&
+    guideState === undefined &&
+    !guideQuery.isError &&
+    !bootGuideFallbackActivated;
+
   const renderView = () => {
     switch (activeView) {
       case "home":
@@ -1243,6 +1233,18 @@ export default function App() {
         );
     }
   };
+
+  if (shouldShowBootSplash) {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "#0b0d10",
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app-layout">
