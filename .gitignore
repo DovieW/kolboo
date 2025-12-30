@@ -41,6 +41,9 @@ Desktop.ini
 *.log
 logs/
 
+# Generated release notes (local)
+RELEASE_NOTES.md
+
 # Testing
 .pytest_cache/
 .coverage

@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  verify:
+    name: Verify versions + generate notes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify versions match (and match tag)
+        run: node .github/scripts/verify-versions.mjs
+
+      - name: Generate release notes from changelog.d
+        run: node .github/scripts/generate-release-notes.mjs RELEASE_NOTES.md
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          if-no-files-found: error
+          path: RELEASE_NOTES.md
+
+  build-windows:
+    name: Build Windows bundles
+    needs: verify
+    uses: ./.github/workflows/windows-build.yml
+    secrets: inherit
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - verify
+      - build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .release
+
+      - name: Download Windows bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-windows.outputs.artifact-name }}
+          path: .release/windows
+
+      - name: Attest build provenance (Windows bundles)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: .release/windows/**
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: .release/RELEASE_NOTES.md
+          files: |
+            .release/windows/**
+          fail_on_unmatched_files: true

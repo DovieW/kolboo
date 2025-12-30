@@ -144,11 +144,11 @@ function Sidebar({
       <footer className="sidebar-footer">
         <a
           className="sidebar-footer-link"
-          href="https://github.com/DovieW/kolboo"
+          href="https://github.com/DovieW/kolboo/releases"
           target="_blank"
           rel="noreferrer"
         >
-          v0.1.0
+          v0.2.0
         </a>
       </footer>
     </aside>
@@ -1015,10 +1015,7 @@ function SettingsViewWithGuideLauncher({
 
         <Tabs.Panel value="ui" pt="md">
           <div className="settings-card">
-            <UiSettings
-              editingProfileId={editingProfileId}
-              onRunSetupGuide={onRunSetupGuide}
-            />
+            <UiSettings editingProfileId={editingProfileId} />
           </div>
         </Tabs.Panel>
 

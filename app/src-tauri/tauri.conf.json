@@ -3,7 +3,7 @@
 	"productName": "Kolboo",
 	"identifier": "com.kolboo.app",
 	"mainBinaryName": "kolboo",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"build": {
 		"beforeDevCommand": "pnpm dev:vite",
 		"devUrl": "http://localhost:5173",
@@ -25,7 +25,8 @@
 			}
 		],
 		"security": {
-			"csp": null
+			"csp": "default-src 'self'; img-src 'self' asset: https: data: blob:; media-src 'self' asset: data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self'; object-src 'none'; base-uri 'self'",
+			"devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src 'self' asset: https: data: blob:; media-src 'self' asset: data: blob:; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173;"
 		}
 	},
 	"bundle": {

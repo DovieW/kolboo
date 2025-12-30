@@ -9,13 +9,13 @@ updates:
     directory: "/app" # Location of package manifests
     schedule:
       interval: "weekly"
-      
+
   - package-ecosystem: "cargo" # See documentation for possible values
     directory: "/app/src-tauri" # Location of package manifests
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "uv" # See documentation for possible values
-    directory: "/server" # Location of package manifests
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: "weekly"

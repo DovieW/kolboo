@@ -1,12 +1,12 @@
 name: Build (Windows)
 
 on:
+  workflow_call:
+    outputs:
+      artifact-name:
+        description: "Name of the uploaded Windows bundle artifact"
+        value: ${{ jobs.build-windows.outputs.artifact-name }}
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
 
 concurrency:
   group: windows-build-${{ github.ref }}
@@ -33,11 +33,19 @@ jobs:
         with:
           node-version: 20
 
+      - name: Read pnpm version (from app/package.json)
+        id: pnpm-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm_version=$(node -p "require('./app/package.json').packageManager.split('@')[1]")
+          echo "pnpm_version=${pnpm_version}" >> "$GITHUB_OUTPUT"
+
       - name: Enable pnpm (Corepack)
         shell: bash
         run: |
           corepack enable
-          corepack prepare pnpm@9.15.5 --activate
+          corepack prepare pnpm@${{ steps.pnpm-version.outputs.pnpm_version }} --activate
           pnpm -v
 
       - name: Get pnpm store directory
@@ -110,8 +118,11 @@ jobs:
 
   build-windows:
     # Build bundles for tags (releases) and manual runs.
-    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_call' }}
     runs-on: windows-latest
+
+    outputs:
+      artifact-name: ${{ steps.artifact-meta.outputs.artifact_name }}
 
     env:
       CARGO_TERM_COLOR: always
@@ -128,11 +139,19 @@ jobs:
         with:
           node-version: 20
 
+      - name: Read pnpm version (from app/package.json)
+        id: pnpm-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm_version=$(node -p "require('./app/package.json').packageManager.split('@')[1]")
+          echo "pnpm_version=${pnpm_version}" >> "$GITHUB_OUTPUT"
+
       - name: Enable pnpm (Corepack)
         shell: bash
         run: |
           corepack enable
-          corepack prepare pnpm@9.15.5 --activate
+          corepack prepare pnpm@${{ steps.pnpm-version.outputs.pnpm_version }} --activate
           pnpm -v
 
       - name: Get pnpm store directory
@@ -192,6 +211,13 @@ jobs:
           pnpm build
 
           sccache --show-stats || true
+
+      - name: Set artifact metadata
+        id: artifact-meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "artifact_name=kolboo-windows-bundles" >> "$GITHUB_OUTPUT"
 
       - name: Upload bundles
         uses: actions/upload-artifact@v4

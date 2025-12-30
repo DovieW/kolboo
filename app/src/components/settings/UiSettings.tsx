@@ -104,7 +104,7 @@ const AUDIO_CUE_OPTIONS: Array<{ value: AudioCue; label: string }> = [
   { value: "maraca", label: "Maraca" },
   { value: "clave", label: "Claves" },
   // Required: current cue should be last in the dropdown.
-  { value: "legacy", label: "Kolboo (Legacy)" },
+  { value: "legacy", label: "Tambourine" },
 ];
 
 function getProfileValue<T>(
@@ -114,13 +114,7 @@ function getProfileValue<T>(
   return profileValue ?? globalValue;
 }
 
-export function UiSettings({
-  editingProfileId,
-  onRunSetupGuide,
-}: {
-  editingProfileId?: string;
-  onRunSetupGuide?: () => void;
-}) {
+export function UiSettings({ editingProfileId }: { editingProfileId?: string }) {
   const { data: settings, isLoading } = useSettings();
   const { data: isAudioMuteSupported } = useIsAudioMuteSupported();
   const updateSoundEnabled = useUpdateSoundEnabled();
@@ -387,34 +381,6 @@ export function UiSettings({
           </Button>
         </Group>
       </Modal>
-
-      {onRunSetupGuide && (
-        <div className="settings-row">
-          <div>
-            <p className="settings-label">Setup guide</p>
-            <p className="settings-description">
-              Re-run the first-time walkthrough
-            </p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Tooltip
-              label={GLOBAL_ONLY_TOOLTIP}
-              disabled={!isProfileScope}
-              withArrow
-            >
-              <span>
-                <Button
-                  variant="default"
-                  disabled={isProfileScope}
-                  onClick={onRunSetupGuide}
-                >
-                  Run setup guide
-                </Button>
-              </span>
-            </Tooltip>
-          </div>
-        </div>
-      )}
 
       <div className="settings-row">
         <div>
