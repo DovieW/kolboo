@@ -6,7 +6,7 @@
 
 Accurate speech-to-text using advanced STT models like Whisper (local or via API).
 
-A fork of Tambourine mainly created so that a standalone python server is not required.
+This is a fork of [Tambourine](https://github.com/kstonekuan/tambourine-voice) mainly created as an alternative which does not require a standalone python server (but ended up with loads more features on top of that).
 
 |||
 |-|-|
