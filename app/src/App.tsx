@@ -1088,6 +1088,13 @@ export default function App() {
   const bootGuideKnown = bootGuideState !== null;
   const bootShouldAutoOpenGuide = bootGuideState === "pending";
 
+  // Safety valve: on some fresh installs, the first attempt to read the Tauri store
+  // (via plugin-store) can error or never resolve until the webview is reloaded.
+  // We should never show an infinite blank/black window; after a short grace
+  // period, fall back to opening the setup guide.
+  const [bootGuideFallbackActivated, setBootGuideFallbackActivated] =
+    useState(false);
+
   const [activeView, setActiveView] = useState<View>(() =>
     bootShouldAutoOpenGuide ? "settings" : "home"
   );
@@ -1096,7 +1103,8 @@ export default function App() {
     () => bootShouldAutoOpenGuide
   );
 
-  const { data: guideState } = useSettingsGuideState();
+  const guideQuery = useSettingsGuideState();
+  const guideState = guideQuery.data;
   const setGuideState = useSetSettingsGuideState();
   const { data: settings } = useSettings();
 
@@ -1127,7 +1135,12 @@ export default function App() {
 
   // If we don't have a boot hint yet (first ever run, or storage was cleared),
   // avoid rendering the Home view for a moment before the guide state arrives.
-  if (!bootGuideKnown && guideState === undefined) {
+  if (
+    !bootGuideKnown &&
+    guideState === undefined &&
+    !guideQuery.isError &&
+    !bootGuideFallbackActivated
+  ) {
     return (
       <div
         style={{
@@ -1138,6 +1151,49 @@ export default function App() {
       />
     );
   }
+
+  useEffect(() => {
+    if (bootGuideKnown) return;
+    if (guideState !== undefined) return;
+    if (guideQuery.isError) return;
+    if (bootGuideFallbackActivated) return;
+
+    const t = window.setTimeout(() => {
+      setBootGuideFallbackActivated(true);
+      // Also seed localStorage so subsequent reloads / first-paint logic can
+      // immediately decide to open the guide.
+      try {
+        window.localStorage?.setItem("tv_settings_guide_state", "pending");
+      } catch {
+        // ignore
+      }
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(t);
+    };
+  }, [
+    bootGuideFallbackActivated,
+    bootGuideKnown,
+    guideQuery.isError,
+    guideState,
+  ]);
+
+  useEffect(() => {
+    // If the guide state failed to load (or timed out), treat it like a first-run
+    // and open the setup guide instead of leaving the user on a blank page.
+    if (bootGuideKnown) return;
+    if (guideState !== undefined) return;
+    if (!guideQuery.isError && !bootGuideFallbackActivated) return;
+
+    setActiveView("settings");
+    setSettingsGuideOpen(true);
+  }, [
+    bootGuideFallbackActivated,
+    bootGuideKnown,
+    guideQuery.isError,
+    guideState,
+  ]);
 
   useEffect(() => {
     if (guideState === "pending") {
