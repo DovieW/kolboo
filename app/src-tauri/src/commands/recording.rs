@@ -385,13 +385,39 @@ pub async fn pipeline_stop_and_transcribe(
     #[cfg(desktop)]
     crate::set_escape_cancel_shortcut_enabled(&app, true);
 
+    let config = pipeline.config();
+    let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
+
     // Try to capture the active request id for history + persistent audio.
-    let active_request_id: Option<String> = app
+    //
+    // In some edge cases (e.g., backend-initiated recordings or unexpected state
+    // resets), request logging may not have been started at recording-start.
+    // For UX consistency, ensure we still create a request log + history entry.
+    let mut active_request_id: Option<String> = app
         .try_state::<RequestLogStore>()
         .and_then(|store| store.with_current(|log| log.id.clone()));
 
-    let config = pipeline.config();
-    let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
+    if active_request_id.is_none() {
+        if let Some(log_store) = app.try_state::<RequestLogStore>() {
+            let id = log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+            log_store.with_current(|log| {
+                log.profile_id = profile_id.clone();
+                log.profile_name = profile_name.clone();
+                log.llm_provider = if config.llm_config.enabled {
+                    Some(config.llm_config.provider.clone())
+                } else {
+                    None
+                };
+                log.llm_model = if config.llm_config.enabled {
+                    config.llm_config.model.clone()
+                } else {
+                    None
+                };
+                log.warn("Request log was missing at stop; started a new request log entry");
+            });
+            active_request_id = Some(id);
+        }
+    }
 
     // Capture model info for persistence in history.
     let model_info = RequestModelInfo {
@@ -490,7 +516,10 @@ pub async fn pipeline_stop_and_transcribe(
 
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
-                    log.error(format!("Transcription failed: {}", e));
+                    log.error_with_details(
+                        format!("Transcription failed: {}", e),
+                        crate::request_log::format_error_chain(&e),
+                    );
                     log.complete_error(e.to_string());
                 });
 
@@ -742,7 +771,10 @@ pub async fn pipeline_retry_transcription(
 
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
-                    log.error(format!("Retry transcription failed: {}", e));
+                    log.error_with_details(
+                        format!("Retry transcription failed: {}", e),
+                        crate::request_log::format_error_chain(&e),
+                    );
                     log.complete_error(e.to_string());
                 });
 
@@ -953,14 +985,67 @@ pub async fn pipeline_dictate(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<String, CommandError> {
+    let max_saved_recordings = get_max_saved_recordings(&app);
+
     // Ensure Escape-to-cancel remains available while we transcribe.
     #[cfg(desktop)]
     crate::set_escape_cancel_shortcut_enabled(&app, true);
 
+    let cfg = pipeline.config();
+    let (profile_id, profile_name) = resolve_profile_for_foreground_app(&cfg);
+
+    // Ensure there is a request log (pipeline_toggle starts one on recording-start,
+    // but other flows can reach here without an active log).
+    let mut active_request_id: Option<String> = app
+        .try_state::<RequestLogStore>()
+        .and_then(|store| store.with_current(|log| log.id.clone()));
+
+    if active_request_id.is_none() {
+        if let Some(log_store) = app.try_state::<RequestLogStore>() {
+            let id = log_store.start_request(cfg.stt_provider.clone(), cfg.stt_model.clone());
+            log_store.with_current(|log| {
+                log.profile_id = profile_id.clone();
+                log.profile_name = profile_name.clone();
+                log.llm_provider = if cfg.llm_config.enabled {
+                    Some(cfg.llm_config.provider.clone())
+                } else {
+                    None
+                };
+                log.llm_model = if cfg.llm_config.enabled {
+                    cfg.llm_config.model.clone()
+                } else {
+                    None
+                };
+                log.warn("Request log was missing at dictate; started a new request log entry");
+            });
+            active_request_id = Some(id);
+        }
+    }
+
+    // Capture model info for persistence in history.
+    let model_info = RequestModelInfo {
+        stt_provider: Some(cfg.stt_provider.clone()),
+        stt_model: cfg.stt_model.clone(),
+        llm_provider: if cfg.llm_config.enabled {
+            Some(cfg.llm_config.provider.clone())
+        } else {
+            None
+        },
+        llm_model: cfg.llm_config.model.clone(),
+        profile_id: profile_id.clone(),
+        profile_name: profile_name.clone(),
+    };
+
+    // Create an in-progress history entry so the History view shows a running request.
+    if let Some(req_id) = active_request_id.as_deref() {
+        if let Some(history) = app.try_state::<HistoryStorage>() {
+            let _ = history.add_request_entry(req_id.to_string(), model_info, max_saved_recordings);
+            let _ = app.emit("history-changed", ());
+        }
+    }
+
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        let cfg = pipeline.config();
-        let (profile_id, profile_name) = resolve_profile_for_foreground_app(&cfg);
         log_store.with_current(|log| {
             log.profile_id = profile_id.clone();
             log.profile_name = profile_name.clone();
@@ -1001,6 +1086,23 @@ pub async fn pipeline_dictate(
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
             let _ = app.emit("pipeline-cancelled", ());
+
+            // Best-effort: mark request as cancelled in logs + history.
+            if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                log_store.with_current(|log| {
+                    log.warn("Recording cancelled by user");
+                    log.complete_cancelled();
+                });
+                log_store.complete_current();
+            }
+
+            if let Some(req_id) = active_request_id.as_deref() {
+                if let Some(history) = app.try_state::<HistoryStorage>() {
+                    let _ = history.complete_request_error(req_id, "Cancelled".to_string());
+                    let _ = app.emit("history-changed", ());
+                }
+            }
+
             return Ok(String::new());
         }
         Err(e) => {
@@ -1014,11 +1116,49 @@ pub async fn pipeline_dictate(
 
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
-                    log.error(format!("Transcription failed: {}", e));
+                    log.error_with_details(
+                        format!("Transcription failed: {}", e),
+                        crate::request_log::format_error_chain(&e),
+                    );
                     log.complete_error(e.to_string());
                 });
                 log_store.complete_current();
             }
+
+            // Persist audio for retry (best-effort)
+            if let (Some(req_id), Some(store)) = (
+                active_request_id.as_deref(),
+                app.try_state::<RecordingStore>(),
+            ) {
+                if let Some(wav) = wav_bytes {
+                    if store.save_wav(req_id, &wav).is_ok() {
+                        let _ = store.prune_to_max_files(max_saved_recordings);
+                    } else if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                        log_store.with_current(|log| {
+                            log.warn("Failed to persist audio for retry");
+                        });
+                    }
+                }
+            }
+
+            // Update history entry with error (keep it visible for retry)
+            if let Some(req_id) = active_request_id.as_deref() {
+                if let Some(history) = app.try_state::<HistoryStorage>() {
+                    let _ = history.complete_request_error(req_id, e.to_string());
+                    let _ = app.emit("history-changed", ());
+                }
+            }
+
+            // Time-based retention (best-effort). Still apply even on failures.
+            apply_transcription_retention(&app);
+
+            // Emit pipeline-error event with request_id so the overlay can show a retry button.
+            let payload = serde_json::json!({
+                "message": e.to_string(),
+                "request_id": active_request_id.clone(),
+            });
+            let _ = app.emit("pipeline-error", payload);
+
             return Err(CommandError::from(e));
         }
     };
@@ -1109,6 +1249,29 @@ pub async fn pipeline_dictate(
 
         log_store.complete_current();
     }
+
+    // Persist audio for retry/playback (best-effort)
+    if let (Some(req_id), Some(store)) = (
+        active_request_id.as_deref(),
+        app.try_state::<RecordingStore>(),
+    ) {
+        if let Some(wav) = wav_bytes.clone() {
+            if store.save_wav(req_id, &wav).is_ok() {
+                let _ = store.prune_to_max_files(max_saved_recordings);
+            }
+        }
+    }
+
+    // Update history entry with success text
+    if let Some(req_id) = active_request_id.as_deref() {
+        if let Some(history) = app.try_state::<HistoryStorage>() {
+            let _ = history.complete_request_success(req_id, final_text.clone());
+            let _ = app.emit("history-changed", ());
+        }
+    }
+
+    // Time-based retention (best-effort). Runs only after a transcription attempt.
+    apply_transcription_retention(&app);
 
     #[cfg(desktop)]
     crate::set_escape_cancel_shortcut_enabled(&app, false);
@@ -1219,7 +1382,10 @@ pub async fn pipeline_test_transcribe_last_audio(
                 log_store.with_current(|log| {
                     log.audio_size_bytes = wav.as_ref().map(|b| b.len());
                     log.stt_duration_ms = Some(stt_duration_ms);
-                    log.error(format!("Test transcription failed: {}", e));
+                    log.error_with_details(
+                        format!("Test transcription failed: {}", e),
+                        crate::request_log::format_error_chain(&e),
+                    );
                     log.complete_error(e.to_string());
                 });
 

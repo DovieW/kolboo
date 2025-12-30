@@ -696,29 +696,54 @@ fn stop_recording(
         let app_clone = app.clone();
         let overlay_mode_clone = overlay_mode.clone();
 
+        // Capture model info from pipeline config for persistence in history.
+        let config = pipeline.config();
+        let profile = pipeline::select_profile_for_foreground_app(&config.llm_config);
+
+        let model_info = RequestModelInfo {
+            stt_provider: Some(config.stt_provider.clone()),
+            stt_model: config.stt_model.clone(),
+            llm_provider: if config.llm_config.enabled {
+                Some(config.llm_config.provider.clone())
+            } else {
+                None
+            },
+            llm_model: config.llm_config.model.clone(),
+            profile_id: profile.as_ref().map(|p| p.id.clone()),
+            profile_name: profile.as_ref().map(|p| p.name.clone()),
+        };
+
         // Capture current request id (for history + retry audio).
-        let request_id: Option<String> = app
+        //
+        // In some edge cases, request logging may not have been started at
+        // recording-start (e.g., hotkey pressed during startup or other state
+        // desync). If so, create a request log now so failures still show up in
+        // Request Logs + History.
+        let mut request_id: Option<String> = app
             .try_state::<RequestLogStore>()
             .and_then(|store| store.with_current(|log| log.id.clone()));
 
-        // Capture model info from pipeline config for persistence in history.
-        let model_info = {
-            let config = pipeline.config();
-            let profile = pipeline::select_profile_for_foreground_app(&config.llm_config);
-
-            RequestModelInfo {
-                stt_provider: Some(config.stt_provider.clone()),
-                stt_model: config.stt_model.clone(),
-                llm_provider: if config.llm_config.enabled {
-                    Some(config.llm_config.provider.clone())
-                } else {
-                    None
-                },
-                llm_model: config.llm_config.model.clone(),
-                profile_id: profile.as_ref().map(|p| p.id.clone()),
-                profile_name: profile.as_ref().map(|p| p.name.clone()),
+        if request_id.is_none() {
+            if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                let id = log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+                log_store.with_current(|log| {
+                    log.profile_id = model_info.profile_id.clone();
+                    log.profile_name = model_info.profile_name.clone();
+                    log.llm_provider = model_info.llm_provider.clone();
+                    // Avoid confusing logs: if LLM rewrite is disabled, do not record an LLM model.
+                    log.llm_model = if config.llm_config.enabled {
+                        model_info.llm_model.clone()
+                    } else {
+                        None
+                    };
+                    log.warn(format!(
+                        "Request log was missing at stop; started a new request log entry ({})",
+                        source
+                    ));
+                });
+                request_id = Some(id);
             }
-        };
+        }
 
         tauri::async_runtime::spawn(async move {
             // Emit transcription started only once the pipeline actually transitions
@@ -1001,7 +1026,10 @@ fn stop_recording(
 
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                         log_store.with_current(|log| {
-                            log.error(format!("Transcription failed: {}", e));
+                            log.error_with_details(
+                                format!("Transcription failed: {}", e),
+                                crate::request_log::format_error_chain(&e),
+                            );
                             log.complete_error(e.to_string());
                         });
 

@@ -11,6 +11,7 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::VecDeque;
+use std::error::Error;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -232,6 +233,12 @@ impl RequestLog {
         self.log(LogLevel::Error, message, None);
     }
 
+    /// Log error message with additional diagnostic details.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn error_with_details(&mut self, message: impl Into<String>, details: impl Into<String>) {
+        self.log(LogLevel::Error, message, Some(details.into()));
+    }
+
     /// Log with details
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn info_with_details(&mut self, message: impl Into<String>, details: impl Into<String>) {
@@ -268,6 +275,26 @@ impl RequestLog {
                 .num_milliseconds() as u64,
         );
     }
+}
+
+/// Format an error with its full causal chain.
+///
+/// This is especially helpful for network/TLS/DNS failures where the top-level
+/// error string can be too generic (e.g., "error sending request for url").
+pub fn format_error_chain(err: &(dyn Error + 'static)) -> String {
+    let mut out = String::new();
+    out.push_str(&err.to_string());
+
+    let mut current: Option<&(dyn Error + 'static)> = err.source();
+    let mut depth: usize = 0;
+    while let Some(src) = current {
+        depth += 1;
+        // Keep the format stable + readable in the UI.
+        out.push_str(&format!("\ncaused by ({}): {}", depth, src));
+        current = src.source();
+    }
+
+    out
 }
 
 /// Thread-safe request log store

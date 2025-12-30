@@ -68,6 +68,7 @@ import {
 } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
 import { listAllLlmModelKeys, listAllSttModelKeys } from "../lib/modelOptions";
+import { formatErrorMessage } from "../lib/formatError";
 
 const HISTORY_FILTERS_STORE_FILE = "ui.json";
 const HISTORY_FILTERS_STORE_KEY = "history_feed_filters_v1";
@@ -599,7 +600,7 @@ export function HistoryFeed({
     } catch (e) {
       notifications.show({
         title: "Recordings",
-        message: String(e),
+        message: formatErrorMessage(e),
         color: "red",
       });
     }
@@ -1482,7 +1483,7 @@ export function HistoryFeed({
                   } catch (e) {
                     notifications.show({
                       title: "Send to LLM",
-                      message: String(e),
+                      message: formatErrorMessage(e),
                       color: "red",
                     });
                   }
@@ -1690,7 +1691,7 @@ export function HistoryFeed({
                           onError: (e) => {
                             notifications.show({
                               title: "Retry failed",
-                              message: String(e),
+                              message: formatErrorMessage(e),
                               color: "red",
                             });
                           },

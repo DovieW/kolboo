@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { recordingsAPI } from "./tauri";
+import { formatErrorMessage } from "./formatError";
 
 class PlaybackTimeoutError extends Error {
   override name = "PlaybackTimeoutError";
@@ -288,7 +289,7 @@ export function useRecordingPlayer(
         }
       } catch (e) {
         setPlayingRequestId(null);
-        onError?.(`Failed to play recording: ${String(e)}`);
+        onError?.(`Failed to play recording: ${formatErrorMessage(e)}`);
       } finally {
         setLoadingRequestId(null);
       }

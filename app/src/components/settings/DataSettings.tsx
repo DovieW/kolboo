@@ -40,6 +40,7 @@ import {
   type RewriteProgramPromptProfile,
   type TranscriptionRetentionUnit,
 } from "../../lib/tauri";
+import { formatErrorMessage } from "../../lib/formatError";
 
 type RequestLogsRetentionMode = "amount" | "time";
 type RetentionMode = "amount" | "time";
@@ -238,7 +239,7 @@ export function DataSettings({
     } catch (e) {
       notifications.show({
         title: "Recordings",
-        message: String(e),
+        message: formatErrorMessage(e),
         color: "red",
       });
     }
@@ -1275,7 +1276,7 @@ export function DataSettings({
               } catch (e) {
                 notifications.show({
                   title: "Failed",
-                  message: String(e),
+                  message: formatErrorMessage(e),
                   color: "red",
                 });
               } finally {
