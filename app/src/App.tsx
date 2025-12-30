@@ -419,10 +419,19 @@ function UsageStatsView() {
                           </Text>
                           {selectedSttModelKeys.length > 0 ? (
                             <Button
+                              component="span"
+                              role="button"
+                              tabIndex={0}
                               variant="subtle"
                               size="compact-xs"
                               color="gray"
                               onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedSttModelKeys([]);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key !== "Enter" && e.key !== " ") return;
                                 e.preventDefault();
                                 e.stopPropagation();
                                 setSelectedSttModelKeys([]);
@@ -479,10 +488,19 @@ function UsageStatsView() {
                           </Text>
                           {selectedLlmModelKeys.length > 0 ? (
                             <Button
+                              component="span"
+                              role="button"
+                              tabIndex={0}
                               variant="subtle"
                               size="compact-xs"
                               color="gray"
                               onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedLlmModelKeys([]);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key !== "Enter" && e.key !== " ") return;
                                 e.preventDefault();
                                 e.stopPropagation();
                                 setSelectedLlmModelKeys([]);

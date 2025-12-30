@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -32,7 +32,7 @@ jobs:
         run: node .github/scripts/generate-release-notes.mjs RELEASE_NOTES.md
 
       - name: Upload release notes artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-notes
           if-no-files-found: error
@@ -53,7 +53,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download release notes
         uses: actions/download-artifact@v4
@@ -68,7 +68,7 @@ jobs:
           path: .release/windows
 
       - name: Attest build provenance (Windows bundles)
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v3
         with:
           subject-path: .release/windows/**
 

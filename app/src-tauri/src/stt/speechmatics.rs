@@ -214,7 +214,7 @@ impl SpeechmaticsSttProvider {
             match m {
                 "RecognitionStarted" => break,
                 "Error" => {
-                    return Err(SttError::Api(text));
+                    return Err(SttError::Api(text.to_string()));
                 }
                 _ => {
                     // Info/Warning/etc.
@@ -262,7 +262,7 @@ impl SpeechmaticsSttProvider {
                                     received_for_log.push(v);
                                 }
                                 "Error" => {
-                                    return Err(SttError::Api(text));
+                                    return Err(SttError::Api(text.to_string()));
                                 }
                                 _ => {
                                     // Ignore (Info/Warning/partials/etc.)
@@ -322,7 +322,7 @@ impl SpeechmaticsSttProvider {
                             break;
                         }
                         "Error" => {
-                            return Err(SttError::Api(text));
+                            return Err(SttError::Api(text.to_string()));
                         }
                         _ => {
                             if received_for_log.len() < 100 {
