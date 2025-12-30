@@ -51,7 +51,7 @@ rodio = { version = "0.21.1", default-features = false, features = [
 env_logger = "0.11.8"
 
 # Audio capture
-cpal = "0.15"
+cpal = "0.17"
 hound = "3.5"  # WAV encoding
 
 # Voice Activity Detection
