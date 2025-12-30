@@ -56,7 +56,7 @@ hound = "3.5"  # WAV encoding
 
 # Voice Activity Detection
 webrtc-vad = "0.4"
-rubato = "0.15"  # High-quality audio resampling
+rubato = "0.16"  # High-quality audio resampling
 
 # Local Whisper (whisper.cpp bindings) - Optional feature
 whisper-rs = { version = "0.14", optional = true }
