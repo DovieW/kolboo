@@ -37,6 +37,7 @@ Confirm these files all match `$VERSION`:
 Also verify the UI displays the new version:
 
 - `app/src/App.tsx` footer version label shows `v$VERSION` (and ideally links to the correct releases page).
+   - Do **not** change the footer URL (keep it pointing at the general Releases page). Only update the displayed version text.
 
 Run the repository’s version consistency script:
 
