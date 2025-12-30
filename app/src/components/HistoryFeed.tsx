@@ -51,7 +51,6 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Store } from "@tauri-apps/plugin-store";
 import {
-  useClearHistory,
   useDeleteHistoryEntry,
   useHistoryAll,
   useHistoryPage,
@@ -62,6 +61,7 @@ import {
 } from "../lib/queries";
 import {
   llmAPI,
+  dataAPI,
   recordingsAPI,
   tauriAPI,
   type LlmProviderInfo,
@@ -349,7 +349,35 @@ export function HistoryFeed({
   const queryClient = useQueryClient();
   const recordingsStats = useRecordingsStats();
   const deleteEntry = useDeleteHistoryEntry();
-  const clearHistory = useClearHistory();
+  const deleteAllHistoryAndRecordings = useMutation({
+    mutationFn: async () => {
+      const deletedRecordings = await dataAPI.deleteAllRecordings();
+      await tauriAPI.clearHistory();
+      await tauriAPI.emitHistoryChanged();
+      return deletedRecordings;
+    },
+    onSuccess: (deletedRecordings) => {
+      queryClient.invalidateQueries({ queryKey: ["history"] });
+      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
+      queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
+
+      notifications.show({
+        title: "History",
+        message: `Deleted transcripts and ${Number(
+          deletedRecordings
+        ).toLocaleString()} recording${deletedRecordings === 1 ? "" : "s"}.`,
+        color: "green",
+      });
+    },
+    onError: (e) => {
+      notifications.show({
+        title: "History",
+        message: formatErrorMessage(e),
+        color: "red",
+      });
+    },
+  });
   const retryMutation = useRetryTranscription();
   const clipboard = useClipboard();
 
@@ -386,6 +414,8 @@ export function HistoryFeed({
       });
     },
   });
+
+  const isDeleteDialogBusy = deleteAllHistoryAndRecordings.isPending;
   const [confirmOpened, { open: openConfirm, close: closeConfirm }] =
     useDisclosure(false);
   const [analysisOpened, analysisHandlers] = useDisclosure(false);
@@ -586,8 +616,8 @@ export function HistoryFeed({
     deleteEntry.mutate(id);
   };
 
-  const handleClearAll = () => {
-    clearHistory.mutate(undefined, {
+  const handleDeleteAll = () => {
+    deleteAllHistoryAndRecordings.mutate(undefined, {
       onSuccess: () => {
         closeConfirm();
       },
@@ -731,26 +761,6 @@ export function HistoryFeed({
     );
   }
 
-  if (totalHistoryCount === 0) {
-    return (
-      <div className="animate-in animate-in-delay-2">
-        <div className="section-header">
-          <span className="section-title section-title--no-accent">
-            History
-          </span>
-        </div>
-        <div className="empty-state">
-          <MessageSquare className="empty-state-icon" />
-          <h4 className="empty-state-title">No dictation history yet</h4>
-          <p className="empty-state-text">
-            Your transcribed text will appear here after you use voice
-            dictation.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const groupedHistory = groupHistoryByDate(pageHistory);
 
   const isFiltering = filterText.trim().length > 0 || hasActiveFilters;
@@ -797,15 +807,15 @@ export function HistoryFeed({
             </Button>
           </Tooltip>
 
-          <Tooltip label="Clear all history" withArrow>
+          <Tooltip label="Delete transcripts and recordings" withArrow>
             <Button
               variant="subtle"
               size="compact-sm"
               color="red"
               px={6}
               onClick={openConfirm}
-              disabled={clearHistory.isPending}
-              aria-label="Clear all history"
+              disabled={deleteAllHistoryAndRecordings.isPending}
+              aria-label="Delete transcripts and recordings"
             >
               <Trash2 size={14} />
             </Button>
@@ -848,22 +858,24 @@ export function HistoryFeed({
             },
           }}
           size="xs"
-          style={{ width: 240 }}
         />
 
         <Popover
           opened={filtersOpened}
-          onChange={(opened) =>
-            opened ? filtersHandlers.open() : filtersHandlers.close()
-          }
-          position="bottom-start"
+          onChange={(opened) => {
+            if (opened) {
+              filtersHandlers.open();
+            } else {
+              filtersHandlers.close();
+            }
+          }}
+          position="bottom-end"
           shadow="lg"
           radius="md"
         >
           <Popover.Target>
             <Indicator
               size={8}
-              color="orange"
               offset={2}
               disabled={!hasActiveFilters}
               processing={hasActiveFilters}
@@ -1178,25 +1190,26 @@ export function HistoryFeed({
 
       <Modal
         opened={confirmOpened}
-        onClose={closeConfirm}
-        title="Clear History"
+        onClose={() => {
+          if (isDeleteDialogBusy) return;
+          closeConfirm();
+        }}
+        title="Delete transcripts and recordings"
         centered
         size="sm"
       >
         <Text size="sm" mb="lg">
-          Are you sure you want to clear all history? This action cannot be
-          undone.
+          This will delete all transcripts in History and all saved .wav
+          recordings from disk. This action cannot be undone.
         </Text>
         <Group justify="flex-end">
-          <Button variant="default" onClick={closeConfirm}>
-            Cancel
-          </Button>
           <Button
             color="red"
-            onClick={handleClearAll}
-            loading={clearHistory.isPending}
+            onClick={handleDeleteAll}
+            loading={deleteAllHistoryAndRecordings.isPending}
+            disabled={false}
           >
-            Clear All
+            Delete transcripts and recordings
           </Button>
         </Group>
       </Modal>
