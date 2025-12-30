@@ -1,8 +1,8 @@
 {
-	"name": "tangerine-voice",
+	"name": "kolboo",
 	"version": "0.1.0",
 	"description": "Customizable AI-powered voice dictation",
-	"packageManager": "pnpm@9.0.0",
+	"packageManager": "pnpm@10.26.2",
 	"scripts": {
 		"dev": "tauri dev",
 		"dev:vite": "vite",

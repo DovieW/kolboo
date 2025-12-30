@@ -1,6 +1,6 @@
 # App Rename Ideas
 
-A brainstorming list of potential new names for the app (currently: **Tambourine Voice**).
+A brainstorming list of potential new names for the app (currently: **Kolboo**).
 
 ## Notes
 
@@ -45,7 +45,7 @@ Greek “voice” is often rendered as **phōnē** (root of “phone”).
 
 Names that fit a desktop/Tauri tool and don’t require explanation.
 
-- **Tambourine** — keeps existing brand DNA, but simpler than “Tambourine Voice.”
+- **Kolboo** — keeps existing brand DNA, but simpler than “Kolboo Voice.”
 - **Pulse** / **Pulsevoice** — waveform/audio feel.
 - **SaySo** — compact and friendly.
 - **SpeakEasy** — fun pun (also a known term).

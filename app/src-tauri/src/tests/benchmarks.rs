@@ -1,4 +1,4 @@
-//! Performance benchmarks for the Tangerine pipeline.
+//! Performance benchmarks for the Kolboo pipeline.
 //!
 //! These benchmarks measure:
 //! - VAD frame processing latency

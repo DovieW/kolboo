@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="app/src-tauri/icons/icon.png" alt="Tangerine" width="128" height="128">
+  <img src="app/src-tauri/icons/icon.png" alt="Kolboo" width="128" height="128">
 </p>
 
-# Tangerine
+# Kolboo
 
 Your personal voice interface into any app. Speak naturally and your words appear wherever your cursor is, powered by customizable AI voice dictation.
 
@@ -25,13 +25,13 @@ Open-source alternative to [Wispr Flow](https://wisprflow.ai) and [Superwhisper]
 
 ## Why?
 
-**Your voice, any app.** Tangerine gives you a universal voice-to-text interface that works everywhere: emails, messages, documents, code editors, terminals. Press a hotkey, speak, and your words are typed at your cursor. No copy-pasting, no app switching, no limitations.
+**Your voice, any app.** Kolboo gives you a universal voice-to-text interface that works everywhere: emails, messages, documents, code editors, terminals. Press a hotkey, speak, and your words are typed at your cursor. No copy-pasting, no app switching, no limitations.
 
 **Speak at the speed of thought.** Typing averages 40-50 wpm, but speaking averages 130-160 wpm. Capture ideas before they slip away, and give your hands a break from the keyboard.
 
-**AI that understands you.** Unlike raw transcription, Tangerine uses AI to format your speech into clean text—removing filler words, adding punctuation, and applying your personal dictionary for technical terms and proper nouns.
+**AI that understands you.** Unlike raw transcription, Kolboo uses AI to format your speech into clean text—removing filler words, adding punctuation, and applying your personal dictionary for technical terms and proper nouns.
 
-**Why not native dictation?** Built-in dictation is not personalized but Tangerine can be customized to your speaking and writing style, and with a personal dictionary for uncommon terms.
+**Why not native dictation?** Built-in dictation is not personalized but Kolboo can be customized to your speaking and writing style, and with a personal dictionary for uncommon terms.
 
 **Why not proprietary tools?** Unlike Wispr Flow or Superwhisper, this project gives you full control and transparency.
 
@@ -76,7 +76,7 @@ Open-source alternative to [Wispr Flow](https://wisprflow.ai) and [Superwhisper]
 - **Voice Shortcuts** - Create custom triggers that expand to full formatted text. Say "insert meeting link" to paste your scheduling URL, or "sign off" for your email signature.
 - **Auto-Learning Dictionary** - Automatically learn new words, names, and terminology from your usage patterns rather than requiring manual dictionary entries.
 - **Observability and Evaluation** - Integrate tooling from Pipecat and other voice agent frameworks to track transcription quality, latency metrics, and formatting accuracy. Use insights to continuously optimize your personal dictation workflow.
-- **Hosted Service** - Optional cloud-hosted backend so you can use Tangerine without running the Python server locally.
+- **Hosted Service** - Optional cloud-hosted backend so you can use Kolboo without running the Python server locally.
 
 ## Architecture
 
@@ -120,13 +120,13 @@ sudo apt-get install libwebkit2gtk-4.1-dev build-essential curl wget file \
 
 ### Microphone Access
 
-When you first use Tangerine, your operating system will prompt you to grant microphone access. Accept this permission to enable voice dictation.
+When you first use Kolboo, your operating system will prompt you to grant microphone access. Accept this permission to enable voice dictation.
 
 ### macOS Accessibility Permissions
 
-On macOS, Tangerine needs accessibility permissions to type text at your cursor position.
+On macOS, Kolboo needs accessibility permissions to type text at your cursor position.
 
-- **Running the built app**: Grant accessibility access to "Tangerine"
+- **Running the built app**: Grant accessibility access to "Kolboo"
 - **Running in development**: Grant accessibility access to the application you run the code from:
   - If running from VS Code: Add "Visual Studio Code"
   - If running from Terminal: Add "Terminal" (or your terminal app like iTerm2)
@@ -217,8 +217,8 @@ pnpm build         # Build for current platform
 
 If the app fails to start (or hotkeys don\'t work) with an error like `HotKey already registered`, it means the configured shortcut is already in use.
 
-- Make sure there\'s not another Tangerine/Tangerine-voice instance still running (check the system tray and Task Manager).
-- If another app is using the same shortcut, change Tangerine\'s hotkeys in **Settings → Hotkeys** to a combination that isn\'t taken.
+- Make sure there\'s not another Kolboo instance still running (check the system tray and Task Manager).
+- If another app is using the same shortcut, change Kolboo\'s hotkeys in **Settings → Hotkeys** to a combination that isn\'t taken.
 
 ## Configuration
 

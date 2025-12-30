@@ -248,7 +248,7 @@ function BackendAudioWave({
     const raw =
       getComputedStyle(document.documentElement)
         .getPropertyValue("--accent-primary")
-        .trim() || "#f97316";
+        .trim() || "#22c55e";
 
     const hex = raw.startsWith("#") ? raw.slice(1) : null;
     if (hex) {
@@ -779,7 +779,7 @@ function AudioWave({
     const raw =
       getComputedStyle(document.documentElement)
         .getPropertyValue("--accent-primary")
-        .trim() || "#f97316";
+        .trim() || "#22c55e";
 
     // Minimal color parsing: supports #rgb/#rrggbb and rgb()/rgba().
     const hex = raw.startsWith("#") ? raw.slice(1) : null;
@@ -1452,7 +1452,7 @@ function RecordingControl() {
 
   const bootAccent = useMemo(() => readBootAccentColor(), []);
 
-  // Layout effect prevents a first-paint Tangerine flash on reload.
+  // Layout effect prevents a first-paint accent flash on reload.
   useLayoutEffect(() => {
     const effectiveAccent = settings ? settings.accent_color : bootAccent;
     applyAccentColor(effectiveAccent);

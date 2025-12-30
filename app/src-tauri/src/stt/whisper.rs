@@ -200,7 +200,7 @@ impl LocalWhisperProvider {
     /// Get the default models directory
     pub fn default_models_dir() -> Option<PathBuf> {
         dirs::data_local_dir().map(|d| {
-            d.join("tangerine-voice").join("models")
+            d.join("kolboo").join("models")
         })
     }
 }

@@ -110,7 +110,7 @@ Entries can be in various formats - interpret flexibly:
 When you hear terms that sound like entries below, use the correct spelling/form.
 
 ### Entries:
-Tangerine
+Kolboo
 LLM
 ant row pick = Anthropic
 Claude

@@ -7,11 +7,11 @@
   <meta name="description" content="Customizable AI-powered voice dictation tool" />
   <script>
     // Apply accent color CSS variables before the module bundle runs.
-    // This avoids a brief flash of the default Tangerine when a custom accent is selected.
+    // This avoids a brief flash of the default accent when a custom accent is selected.
     (function () {
       try {
         var KEY = "tv_accent_color";
-        var DEFAULT = "#f97316";
+        var DEFAULT = "#22c55e";
         var raw = window.localStorage ? window.localStorage.getItem(KEY) : null;
 
         var isValidHex = function (h) {
@@ -90,7 +90,7 @@
       }
     })();
   </script>
-  <title>Tangerine</title>
+  <title>Kolboo</title>
 </head>
 
 <body>

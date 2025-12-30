@@ -15,11 +15,11 @@
 	--text-primary: #ffffff;
 	--text-secondary: #a0a0a0;
 	--text-muted: #666666;
-	/* Tangerine brand accent (overridable at runtime via :root style vars) */
-	--accent-rgb: 249 115 22;
-	--accent-primary: #f97316;
+	/* Default accent (overridable at runtime via :root style vars) */
+	--accent-rgb: 34 197 94;
+	--accent-primary: #22c55e;
 	--accent-glow: rgba(var(--accent-rgb) / 0.18);
-	--accent-hover: #fb923c;
+	--accent-hover: #4ade80;
 	--accent-selection: rgba(var(--accent-rgb) / 0.35);
 
 	/*
@@ -29,7 +29,7 @@
 	*/
 	--toggle-track-off-bg: rgba(255, 255, 255, 0.14);
 	--toggle-track-off-border: rgba(255, 255, 255, 0.18);
-	/* Slight Tangerine tint when ON (readable, but on-brand) */
+	/* Slight accent tint when ON (readable, but on-brand) */
 	--toggle-track-on-bg: rgba(var(--accent-rgb) / 0.38);
 	--toggle-track-on-border: rgba(var(--accent-rgb) / 0.52);
 }
@@ -93,7 +93,7 @@ body {
 		-0.35px 0 0 rgba(255, 255, 255, 0.28);
 }
 
-/* Links: subtle Tangerine accent (avoid looking like a neon sign) */
+/* Links: subtle accent (avoid looking like a neon sign) */
 a {
 	color: rgba(var(--accent-rgb) / 0.92);
 	text-decoration-color: rgba(var(--accent-rgb) / 0.35);
@@ -556,7 +556,7 @@ a:focus-visible {
 	padding-left: 12px;
 }
 
-/* Combobox/Select option hover: faint Tangerine tint */
+/* Combobox/Select option hover: faint accent tint */
 [data-mantine-color-scheme='dark'] .mantine-Combobox-option[data-hovered] {
 	background-color: rgba(var(--accent-rgb) / 0.08);
 }

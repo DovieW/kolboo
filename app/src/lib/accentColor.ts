@@ -1,4 +1,6 @@
-export const DEFAULT_ACCENT_HEX = "#f97316";
+// Default accent for the app when the user has no override.
+// Kept as a single constant so index.html/overlay.html can mirror it.
+export const DEFAULT_ACCENT_HEX = "#22c55e";
 
 function clampByte(n: number): number {
   return Math.max(0, Math.min(255, Math.round(n)));
@@ -33,7 +35,7 @@ export function normalizeHexColor(
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const normalized = normalizeHexColor(hex);
   if (!normalized) {
-    return { r: 249, g: 115, b: 22 };
+    return { r: 34, g: 197, b: 94 };
   }
   const body = normalized.slice(1);
   const r = Number.parseInt(body.slice(0, 2), 16);
@@ -63,7 +65,7 @@ function mix(
 /**
  * Apply the app accent by overriding CSS variables on :root.
  *
- * Pass null/"" to reset to the default CSS-defined tangerine.
+ * Pass null/"" to reset to the default CSS-defined accent.
  */
 export function applyAccentColor(accentHex: string | null | undefined): void {
   if (typeof document === "undefined") return;
@@ -78,7 +80,7 @@ export function applyAccentColor(accentHex: string | null | undefined): void {
     style.removeProperty("--accent-primary");
 
     // Keep Mantine "orange" mapped to our *default* accent so components that use
-    // `color="orange"` still match the brand Tangerine when the user has no override.
+    // `color="orange"` still match the app accent when the user has no override.
     const { r, g, b } = hexToRgb(DEFAULT_ACCENT_HEX);
     const hover = rgbToHex(mix({ r, g, b }, { r: 255, g: 255, b: 255 }, 0.22));
 

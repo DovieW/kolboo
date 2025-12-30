@@ -144,7 +144,7 @@ function Sidebar({
       <footer className="sidebar-footer">
         <a
           className="sidebar-footer-link"
-          href="https://github.com/DovieW/tangerine-voice"
+          href="https://github.com/DovieW/kolboo"
           target="_blank"
           rel="noreferrer"
         >
@@ -217,7 +217,7 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
     <div className="main-content">
       <header className="animate-in" style={{ marginBottom: 32 }}>
         <Title order={1} mb={4}>
-          Welcome to Tangerine
+          Welcome to Kolboo
         </Title>
         <Text c="dimmed" size="sm">
           ~-~-~-~-~-~
@@ -1057,7 +1057,7 @@ function AccentColorSync() {
   // for the async Tauri store to hydrate.
   const bootAccent = useMemo(() => readBootAccentColor(), []);
 
-  // Use layout effect so this runs before paint (avoids a one-frame Tangerine flash).
+  // Use layout effect so this runs before paint (avoids a one-frame accent flash).
   useLayoutEffect(() => {
     const effectiveAccent = settings ? settings.accent_color : bootAccent;
     applyAccentColor(effectiveAccent);

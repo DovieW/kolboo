@@ -100,11 +100,11 @@ const PLAYING_AUDIO_HANDLING_OPTIONS: Array<{
 ];
 
 const AUDIO_CUE_OPTIONS: Array<{ value: AudioCue; label: string }> = [
-  { value: "tangerine", label: "Tangerine" },
+  { value: "kolboo", label: "Kolboo" },
   { value: "maraca", label: "Maraca" },
   { value: "clave", label: "Claves" },
   // Required: current cue should be last in the dropdown.
-  { value: "tambourine", label: "Tambourine" },
+  { value: "legacy", label: "Kolboo (Legacy)" },
 ];
 
 function getProfileValue<T>(
@@ -171,7 +171,7 @@ export function UiSettings({
   const soundInheriting =
     isProfileScope && isInheriting(profile?.sound_enabled);
 
-  const audioCueFromSettings: AudioCue = settings?.audio_cue ?? "tangerine";
+  const audioCueFromSettings: AudioCue = settings?.audio_cue ?? "kolboo";
   const [audioCueDropdownValue, setAudioCueDropdownValue] =
     useState<AudioCue>(audioCueFromSettings);
 
@@ -227,7 +227,7 @@ export function UiSettings({
 
   // Accent color (global only)
   const ACCENT_COLOR_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: "tangerine", label: "Tangerine" },
+    { value: "#f97316", label: "Tangerine" },
     { value: "#ef4444", label: "Red" },
     { value: "#ec4899", label: "Pink" },
     { value: "#a855f7", label: "Purple" },
@@ -238,8 +238,8 @@ export function UiSettings({
     { value: "#9ca3af", label: "Grey" },
   ];
 
-  const accentColorValue = settings?.accent_color ?? null;
-  const accentDropdownValueFromSettings = accentColorValue ?? "tangerine";
+  const accentColorValue = settings?.accent_color ?? DEFAULT_ACCENT_HEX;
+  const accentDropdownValueFromSettings = accentColorValue;
   const [accentDropdownValue, setAccentDropdownValue] = useState<string>(
     accentDropdownValueFromSettings
   );
@@ -249,7 +249,7 @@ export function UiSettings({
   }, [accentDropdownValueFromSettings]);
 
   const getAccentSwatch = (value: string): string => {
-    return value === "tangerine" ? DEFAULT_ACCENT_HEX : value;
+    return value;
   };
 
   const handleAccentColorChange = (value: string | null) => {
@@ -258,13 +258,6 @@ export function UiSettings({
 
     // Update UI immediately (even before the settings query refetch completes)
     setAccentDropdownValue(value);
-
-    if (value === "tangerine") {
-      // Use default Tangerine (remove override)
-      applyAccentColor(null);
-      updateAccentColor.mutate(null);
-      return;
-    }
 
     applyAccentColor(value);
     updateAccentColor.mutate(value);

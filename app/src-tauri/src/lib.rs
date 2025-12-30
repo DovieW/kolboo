@@ -1177,7 +1177,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
 
     if sound_enabled {
         let audio_cue_raw: String =
-            get_setting_from_store(app, "audio_cue", "tangerine".to_string());
+            get_setting_from_store(app, "audio_cue", "kolboo".to_string());
         let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
         audio::play_sound(audio::SoundType::RecordingStop, audio_cue);
     }
@@ -1241,7 +1241,7 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
 
     // Get current settings from store
     let sound_enabled: bool = get_setting_from_store(app, "sound_enabled", true);
-    let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "tangerine".to_string());
+    let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "kolboo".to_string());
     let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
     let playing_audio_handling: PlayingAudioHandling = get_playing_audio_handling(app);
 
@@ -1786,7 +1786,7 @@ pub fn run() {
                 "overlay",
                 tauri::WebviewUrl::App("overlay.html".into()),
             )
-            .title("Tangerine Overlay")
+            .title("Kolboo Overlay")
             .inner_size(48.0, 48.0)
             .decorations(false)
             .transparent(true)
@@ -1913,7 +1913,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     "main",
                     tauri::WebviewUrl::App("index.html".into()),
                 )
-                .title("Tangerine")
+                .title("Kolboo")
                 .inner_size(1280.0, 720.0)
                 .resizable(true)
                 .center()

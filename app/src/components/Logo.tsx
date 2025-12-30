@@ -12,11 +12,11 @@ export function Logo({ size = 48, className }: LogoProps) {
       height={size}
       className={className}
       role="img"
-      aria-label="Voice logo"
+      aria-label="Kolboo logo"
       /*
-				The SVG paths use `currentColor`, so we intentionally avoid hard-coding
-				fill. This allows the logo to pick up Tangerine accents via CSS.
-			*/
+        The SVG uses `currentColor`, so we intentionally avoid hard-coding
+        fill. This allows the logo to pick up the user's accent via CSS.
+      */
     />
   );
 }

@@ -3,7 +3,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Store } from "@tauri-apps/plugin-store";
 import { z } from "zod";
-import { normalizeHexColor } from "./accentColor";
+import { DEFAULT_ACCENT_HEX, normalizeHexColor } from "./accentColor";
 
 /**
  * Connection state for UI display (maps from pipeline state)
@@ -140,7 +140,7 @@ export interface RewriteProgramPromptProfile {
 
 export type PlayingAudioHandling = "none" | "mute" | "pause" | "mute_and_pause";
 
-export type AudioCue = "tangerine" | "maraca" | "clave" | "tambourine";
+export type AudioCue = "kolboo" | "maraca" | "clave" | "legacy";
 
 export type OverlayMode = "always" | "never" | "recording_only";
 
@@ -255,7 +255,7 @@ export interface AppSettings {
   selected_mic_id: string | null;
   sound_enabled: boolean;
   audio_cue: AudioCue;
-  /** Optional user override; null/undefined means use default Tangerine accent */
+  /** User-selected accent color (hex). */
   accent_color: string | null;
   // Global gate for the optional LLM rewrite step
   rewrite_llm_enabled: boolean;
@@ -363,16 +363,16 @@ function normalizePlayingAudioHandling(value: unknown): PlayingAudioHandling {
 
 function normalizeAudioCue(value: unknown): AudioCue {
   if (
-    value === "tangerine" ||
+    value === "kolboo" ||
     value === "maraca" ||
     value === "clave" ||
-    value === "tambourine"
+    value === "legacy"
   ) {
     return value;
   }
 
   // Default for fresh installs / missing setting
-  return "tangerine";
+  return "kolboo";
 }
 
 function normalizeNoiseGateStrength(value: unknown): number {
@@ -923,9 +923,20 @@ export const tauriAPI = {
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
       audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: normalizeHexColor(
-        (await store.get<string | null>("accent_color")) ?? null
-      ),
+      accent_color: await(async () => {
+        const raw = (await store.get<string | null>("accent_color")) ?? null;
+        const normalized = normalizeHexColor(raw);
+
+        // If unset/invalid, default to the app's default accent.
+        // (Tangerine is an explicit option in the UI, not the implicit default.)
+        if (!normalized) {
+          await store.set("accent_color", DEFAULT_ACCENT_HEX);
+          await store.save();
+          return DEFAULT_ACCENT_HEX;
+        }
+
+        return normalized;
+      })(),
       rewrite_llm_enabled:
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
       cleanup_prompt_sections:
@@ -989,7 +1000,7 @@ export const tauriAPI = {
       quiet_audio_require_speech:
         (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
 
-      noise_gate_threshold_dbfs: await (async () => {
+      noise_gate_threshold_dbfs: await(async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -1028,7 +1039,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -1050,14 +1061,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })()),
+      })(),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -1071,7 +1082,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })()),
+      })(),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),

@@ -13,25 +13,25 @@ pub enum SoundType {
 
 /// User-selectable sound cue theme.
 ///
-/// Note: `Tambourine` intentionally preserves the legacy MP3 files so existing users
-/// can keep the current sound.
+/// Note: `Legacy` intentionally preserves the existing MP3 files so users can keep the
+/// original sound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioCue {
-    Tangerine,
+    Kolboo,
     Maraca,
     Clave,
-    Tambourine,
+    Legacy,
 }
 
 impl AudioCue {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "tangerine" => Self::Tangerine,
+            "kolboo" => Self::Kolboo,
             "maraca" => Self::Maraca,
             "clave" => Self::Clave,
-            "tambourine" => Self::Tambourine,
-            // Unknown values: default to Tangerine.
-            _ => Self::Tangerine,
+            "legacy" => Self::Legacy,
+            // Unknown values: default to Kolboo.
+            _ => Self::Kolboo,
         }
     }
 }
@@ -49,7 +49,7 @@ pub fn estimated_duration(sound_type: SoundType, cue: AudioCue) -> Duration {
     match cue {
         // For the legacy MP3 cue, use the decoder's total duration when available.
         // If unavailable, fall back to a conservative default.
-        AudioCue::Tambourine => {
+        AudioCue::Legacy => {
             let sound_data = match sound_type {
                 SoundType::RecordingStart => START_SOUND,
                 SoundType::RecordingStop => STOP_SOUND,
@@ -62,7 +62,7 @@ pub fn estimated_duration(sound_type: SoundType, cue: AudioCue) -> Duration {
         }
 
         // Synth cues: keep in sync with durations in `build_synth_cue_source`.
-        AudioCue::Tangerine => match sound_type {
+        AudioCue::Kolboo => match sound_type {
             // Start cue: two-note up-chime (shorter than the previous 3-note arpeggio).
             SoundType::RecordingStart => Duration::from_millis(170),
             SoundType::RecordingStop => Duration::from_millis(195),
@@ -100,7 +100,7 @@ pub(crate) fn play_sound_blocking(
 
     match cue {
         // Preserve the existing cue exactly (legacy MP3 assets).
-        AudioCue::Tambourine => {
+        AudioCue::Legacy => {
             let sound_data = match sound_type {
                 SoundType::RecordingStart => START_SOUND,
                 SoundType::RecordingStop => STOP_SOUND,
@@ -262,7 +262,7 @@ fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffe
     let mut seed: u32 = 0xA1B2_C3D4;
 
     match cue {
-        AudioCue::Tangerine => {
+        AudioCue::Kolboo => {
             // Friendly chime: short arpeggio up (start) / down (stop).
             // Uses additive harmonics + decay instead of flat sine notes.
             match sound_type {
@@ -338,9 +338,9 @@ fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffe
             }
         }
 
-        // Should never hit: Tambourine handled in play_sound_blocking.
+        // Should never hit: Legacy handled in play_sound_blocking.
         // If it does, keep duration at the default 0.
-        AudioCue::Tambourine => {}
+        AudioCue::Legacy => {}
     }
 
     let seq = SamplesBuffer::new(CHANNELS, SAMPLE_RATE, samples);

@@ -1,8 +1,8 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "Tangerine",
-	"identifier": "com.tangerine-voice.app",
-	"mainBinaryName": "tangerine-voice",
+	"productName": "Kolboo",
+	"identifier": "com.kolboo.app",
+	"mainBinaryName": "kolboo",
 	"version": "0.1.0",
 	"build": {
 		"beforeDevCommand": "pnpm dev:vite",
@@ -15,7 +15,7 @@
 		"withGlobalTauri": false,
 		"windows": [
 			{
-				"title": "Tangerine",
+				"title": "Kolboo",
 				"label": "main",
 				"width": 1280,
 				"height": 720,

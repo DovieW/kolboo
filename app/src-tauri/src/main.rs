@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-        tangerine_voice_lib::run();
+                kolboo_lib::run();
 }

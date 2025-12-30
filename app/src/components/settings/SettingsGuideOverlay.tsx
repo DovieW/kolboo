@@ -102,7 +102,7 @@ export function SettingsGuideOverlay({
   const dictationInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sampleText =
-    "Tangerine is ready. I can dictate with my voice, rewrite text, and tune settings per app.";
+    "Kolboo is ready. I can dictate with my voice, rewrite text, and tune settings per app.";
 
   const clearWelcomeTimers = () => {
     for (const t of welcomeTimersRef.current) window.clearTimeout(t);
@@ -329,7 +329,7 @@ export function SettingsGuideOverlay({
               }
             >
               <Title order={2} style={{ marginTop: 18 }}>
-                Welcome to Tangerine
+                Welcome to Kolboo
               </Title>
               <Text c="dimmed" size="sm" style={{ marginTop: 6 }}>
                 Let’s get your voice dictation set up.

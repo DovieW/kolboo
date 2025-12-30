@@ -5,7 +5,7 @@ use std::time::Duration;
 
 /// Play the selected cue once as a short preview.
 ///
-/// Frontend passes the cue string (e.g. "tangerine"). Unknown values fall back to Tangerine.
+/// Frontend passes the cue string (e.g. "kolboo"). Unknown values fall back to the default cue.
 #[tauri::command]
 pub async fn play_audio_cue_preview(cue: String) -> Result<(), String> {
     let cue = AudioCue::from_str(&cue);
