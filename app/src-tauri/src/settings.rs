@@ -3,6 +3,76 @@ use std::str::FromStr;
 
 use crate::llm::PromptSections;
 
+// ============================================================================
+// Network / proxy settings (stored in settings.json)
+// ============================================================================
+
+/// Proxy mode for outgoing HTTP requests.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyMode {
+    /// Force-disable any proxy usage (ignore env/system proxies).
+    NoProxy,
+    /// Use system defaults (env vars / OS proxy discovery).
+    System,
+    /// Use a user-specified proxy URL.
+    Manual,
+}
+
+impl Default for ProxyMode {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
+/// Manual proxy configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManualProxySettings {
+    /// Proxy URL (applied to both http + https). Example: "http://127.0.0.1:8080".
+    #[serde(default)]
+    pub proxy_url: String,
+    /// Comma-separated or whitespace-separated host list to bypass the proxy.
+    /// Mirrors NO_PROXY semantics.
+    #[serde(default)]
+    pub no_proxy: String,
+    /// Optional username for basic proxy auth.
+    #[serde(default)]
+    pub username: String,
+    /// Optional password for basic proxy auth.
+    #[serde(default)]
+    pub password: String,
+}
+
+impl Default for ManualProxySettings {
+    fn default() -> Self {
+        Self {
+            proxy_url: String::new(),
+            // Common proxy bypass defaults.
+            no_proxy: "localhost,127.0.0.1".to_string(),
+            username: String::new(),
+            password: String::new(),
+        }
+    }
+}
+
+/// Persistent proxy settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProxySettings {
+    #[serde(default)]
+    pub mode: ProxyMode,
+    #[serde(default)]
+    pub manual: ManualProxySettings,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            mode: ProxyMode::System,
+            manual: ManualProxySettings::default(),
+        }
+    }
+}
+
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::Shortcut;
 

@@ -39,6 +39,7 @@ import {
   AudioSettings,
   DataSettings,
   HotkeySettings,
+  NetworkSettings,
   PromptSettings,
   ProfileConfigModal,
   UiSettings,
@@ -832,6 +833,7 @@ function SettingsView() {
           <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
           <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
           <Tabs.Tab value="data">Data</Tabs.Tab>
+          <Tabs.Tab value="network">Network</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="ai" pt="md">
@@ -867,6 +869,12 @@ function SettingsView() {
         <Tabs.Panel value="data" pt="md">
           <div className="settings-card">
             <DataSettings editingProfileId={editingProfileId} />
+          </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="network" pt="md">
+          <div className="settings-card">
+            <NetworkSettings editingProfileId={editingProfileId} />
           </div>
         </Tabs.Panel>
       </Tabs>
@@ -1068,6 +1076,7 @@ function SettingsViewWithGuideLauncher({
           <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
           <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
           <Tabs.Tab value="data">Data</Tabs.Tab>
+          <Tabs.Tab value="network">Network</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="ai" pt="md">
@@ -1103,6 +1112,12 @@ function SettingsViewWithGuideLauncher({
         <Tabs.Panel value="data" pt="md">
           <div className="settings-card">
             <DataSettings editingProfileId={editingProfileId} />
+          </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="network" pt="md">
+          <div className="settings-card">
+            <NetworkSettings editingProfileId={editingProfileId} />
           </div>
         </Tabs.Panel>
       </Tabs>

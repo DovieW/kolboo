@@ -50,6 +50,21 @@ impl GeminiLlmProvider {
         }
     }
 
+    /// Create with a custom HTTP client.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_client(client: Client, api_key: String, model: Option<String>) -> Self {
+        Self {
+            client,
+            api_key,
+            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            timeout: Some(DEFAULT_LLM_TIMEOUT),
+            thinking_budget: None,
+            thinking_level: None,
+            structured_outputs: true,
+            request_log_store: None,
+        }
+    }
+
     /// Enable/disable Structured Outputs (JSON schema mode).
     ///
     /// This provider defaults to **enabled** because it improves determinism for transcript

@@ -4,6 +4,7 @@ pub mod data;
 pub mod history;
 pub mod llm;
 pub mod logs;
+pub mod network;
 pub mod overlay;
 pub mod pricing;
 pub mod recording;

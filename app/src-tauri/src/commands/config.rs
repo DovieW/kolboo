@@ -582,6 +582,14 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or(default_pipeline_config.quiet_audio_require_speech);
 
+    // Network / proxy settings
+    let proxy_settings: crate::settings::ProxySettings = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("proxy_settings"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
     let config = PipelineConfig {
         input_device_name,
         stt_provider: stt_provider.clone(),
@@ -594,6 +602,8 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         vad_config: vad_settings.to_vad_auto_stop_config(),
         transcription_timeout: std::time::Duration::from_secs_f64(stt_timeout_seconds),
         max_recording_bytes: 50 * 1024 * 1024, // 50MB
+
+        proxy_settings,
 
         quiet_audio_gate_enabled,
         quiet_audio_min_duration_secs,

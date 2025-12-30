@@ -14,7 +14,7 @@ This is a fork of [Tambourine](https://github.com/kstonekuan/tambourine-voice) m
 |<img width="2364" height="1410" alt="image" src="https://github.com/user-attachments/assets/d38fb833-243c-4014-9b42-404a30799f71" />|<img width="2364" height="1410" alt="image" src="https://github.com/user-attachments/assets/bf3c5d51-947a-483b-8f81-0a84b3e21786" />|
 |Stats (WIP)|Logs|
 |<img width="2364" height="1410" alt="image" src="https://github.com/user-attachments/assets/7402a31f-a580-4bff-8e75-7fc458b9cc2f" />|<img width="2364" height="1410" alt="image" src="https://github.com/user-attachments/assets/dec7fb49-c788-400f-ab5a-bb58ec455eb2" />|
-
+u
 ## Features
 
 - Dictate using state-of-the-art speech-to-text and language models.
@@ -22,7 +22,7 @@ This is a fork of [Tambourine](https://github.com/kstonekuan/tambourine-voice) m
 - Pass dictation to LLMs for further enhancement.
 - Create per program workflows using the profile system.
 - Clean overlay while transcribing ([image](https://github.com/user-attachments/assets/73cbdadd-a347-4bde-b473-8e974dac7eff)) with customizable sound cue.
-- Comprehensive provider and model support ([full list](docs/SUPPORTED_PROVIDERS_AND_MODELS.md)): Local, Google, OpenAI, Groq, Avalon and more.
+- Comprehensive provider and model support ([full list](docs/User Docs/SUPPORTED_PROVIDERS_AND_MODELS.md)): Local, Google, OpenAI, Groq, Avalon and more.
 - Logging and testing system to easily troubleshoot issues and work on prompts.
 - Stats page to track cost usage and more (WIP).
 - Audio refinement settings.

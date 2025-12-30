@@ -47,6 +47,18 @@ impl GroqLlmProvider {
         }
     }
 
+    /// Create with a custom HTTP client.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_client(client: Client, api_key: String, model: Option<String>) -> Self {
+        Self {
+            client,
+            api_key,
+            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            timeout: Some(DEFAULT_LLM_TIMEOUT),
+            request_log_store: None,
+        }
+    }
+
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
         self

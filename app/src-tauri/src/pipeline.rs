@@ -21,6 +21,7 @@ use crate::llm::{
     LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
 };
 use crate::request_log::RequestLogStore;
+use crate::settings::ProxySettings;
 use crate::stt::{AudioFormat, RetryConfig, SttError, SttProvider, SttRegistry, with_retry};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -295,6 +296,9 @@ pub struct PipelineConfig {
     /// Maximum recording size in bytes (0 = no limit beyond default)
     pub max_recording_bytes: usize,
 
+    /// Outgoing HTTP proxy settings.
+    pub proxy_settings: ProxySettings,
+
     /// Enable a quiet-audio gate to avoid silent-audio hallucinations.
     pub quiet_audio_gate_enabled: bool,
     /// Treat recordings shorter than this as effectively quiet.
@@ -355,6 +359,8 @@ impl Default for PipelineConfig {
             transcription_timeout: DEFAULT_TRANSCRIPTION_TIMEOUT,
             max_recording_bytes: MAX_WAV_SIZE_BYTES,
 
+            proxy_settings: ProxySettings::default(),
+
             quiet_audio_gate_enabled: true,
             quiet_audio_min_duration_secs: DEFAULT_QUIET_AUDIO_MIN_DURATION_SECS,
             quiet_audio_rms_dbfs_threshold: DEFAULT_QUIET_AUDIO_RMS_DBFS_THRESHOLD,
@@ -398,6 +404,20 @@ struct PipelineInner {
 }
 
 impl PipelineInner {
+    fn build_http_client(&self) -> Result<reqwest::Client, PipelineError> {
+        crate::network::build_http_client(&self.config.proxy_settings).map_err(|e| {
+            PipelineError::Config(format!("Failed to create HTTP client: {}", e))
+        })
+    }
+
+    fn build_http_client_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<reqwest::Client, PipelineError> {
+        crate::network::build_http_client_with_timeout(&self.config.proxy_settings, timeout)
+            .map_err(|e| PipelineError::Config(format!("Failed to create HTTP client: {}", e)))
+    }
+
     fn new(config: PipelineConfig) -> Self {
         let audio_capture = AudioCapture::with_vad_config(config.vad_config.clone());
         let mut inner = Self {
@@ -459,7 +479,8 @@ impl PipelineInner {
 
         let provider: Arc<dyn SttProvider> = match provider_id.as_str() {
             "openai" => Arc::new(
-                crate::stt::OpenAiSttProvider::new(
+                crate::stt::OpenAiSttProvider::with_client(
+                    self.build_http_client_with_timeout(Duration::from_secs(120))?,
                     api_key,
                     model,
                     self.config.stt_transcription_prompt.clone(),
@@ -467,7 +488,8 @@ impl PipelineInner {
                 .with_request_log_store(self.config.request_log_store.clone()),
             ),
             "aquavoice" => Arc::new(
-                crate::stt::AquavoiceSttProvider::new(
+                crate::stt::AquavoiceSttProvider::with_client(
+                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
                     api_key,
                     model,
                     self.config.stt_transcription_prompt.clone(),
@@ -475,7 +497,8 @@ impl PipelineInner {
                 .with_request_log_store(self.config.request_log_store.clone()),
             ),
             "groq" => Arc::new(
-                crate::stt::GroqSttProvider::new(
+                crate::stt::GroqSttProvider::with_client(
+                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
                     api_key,
                     model,
                     self.config.stt_transcription_prompt.clone(),
@@ -483,7 +506,11 @@ impl PipelineInner {
                 .with_request_log_store(self.config.request_log_store.clone()),
             ),
             "assemblyai" => Arc::new(
-                crate::stt::AssemblyAiSttProvider::new(api_key, model)
+                crate::stt::AssemblyAiSttProvider::with_client(
+                    self.build_http_client_with_timeout(Duration::from_secs(120))?,
+                    api_key,
+                    model,
+                )
                     .with_request_log_store(self.config.request_log_store.clone()),
             ),
             "speechmatics" => Arc::new(
@@ -491,7 +518,11 @@ impl PipelineInner {
                     .with_request_log_store(self.config.request_log_store.clone()),
             ),
             "deepgram" => Arc::new(
-                crate::stt::DeepgramSttProvider::new(api_key, model)
+                crate::stt::DeepgramSttProvider::with_client(
+                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
+                    api_key,
+                    model,
+                )
                     .with_request_log_store(self.config.request_log_store.clone()),
             ),
             other => {
@@ -580,7 +611,11 @@ impl PipelineInner {
         cfg.gemini_thinking_level = gemini_thinking_level;
         cfg.anthropic_thinking_budget = anthropic_thinking_budget;
 
-        let provider = create_llm_provider(&cfg, self.config.request_log_store.clone());
+        let provider = create_llm_provider(
+            &cfg,
+            self.config.request_log_store.clone(),
+            &self.config.proxy_settings,
+        )?;
         self.llm_provider_cache.insert(cache_key, provider.clone());
         Ok(provider)
     }
@@ -628,77 +663,67 @@ impl PipelineInner {
 fn create_llm_provider(
     config: &LlmConfig,
     request_log_store: Option<RequestLogStore>,
-) -> Arc<dyn LlmProvider> {
-    match config.provider.as_str() {
+    proxy_settings: &ProxySettings,
+) -> Result<Arc<dyn LlmProvider>, PipelineError> {
+    let client = crate::network::build_http_client(proxy_settings)
+        .map_err(|e| PipelineError::Config(format!("Failed to create HTTP client: {}", e)))?;
+
+    let provider: Arc<dyn LlmProvider> = match config.provider.as_str() {
         "anthropic" => {
-            let provider = if let Some(model) = &config.model {
-                AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                AnthropicLlmProvider::new(config.api_key.clone())
-            };
             Arc::new(
-                provider
-                    .with_timeout(config.timeout)
-                    .with_request_log_store(request_log_store.clone())
-                    .with_thinking_budget(config.anthropic_thinking_budget),
+                AnthropicLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone())
+                .with_thinking_budget(config.anthropic_thinking_budget),
             )
         }
         "groq" => {
-            let provider = if let Some(model) = &config.model {
-                GroqLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GroqLlmProvider::new(config.api_key.clone())
-            };
             Arc::new(
-                provider
-                    .with_timeout(config.timeout)
-                    .with_request_log_store(request_log_store.clone()),
+                GroqLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone()),
             )
         }
         "gemini" => {
-            let provider = if let Some(model) = &config.model {
-                GeminiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GeminiLlmProvider::new(config.api_key.clone())
-            };
-
             Arc::new(
-                provider
-                    .with_timeout(config.timeout)
-                    .with_request_log_store(request_log_store.clone())
-                    .with_thinking_budget(config.gemini_thinking_budget)
-                    .with_thinking_level(config.gemini_thinking_level.clone()),
+                GeminiLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone())
+                .with_thinking_budget(config.gemini_thinking_budget)
+                .with_thinking_level(config.gemini_thinking_level.clone()),
             )
         }
         "ollama" => {
-            let provider = OllamaLlmProvider::with_url(
-                config
-                    .ollama_url
-                    .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
-                config.model.clone(),
-            );
             Arc::new(
-                provider
+                OllamaLlmProvider::with_client(client.clone(), config.ollama_url.clone(), config.model.clone())
                     .with_timeout(config.timeout)
                     .with_request_log_store(request_log_store.clone()),
             )
         }
         _ => {
             // Default to OpenAI
-            let provider = if let Some(model) = &config.model {
-                OpenAiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                OpenAiLlmProvider::new(config.api_key.clone())
-            };
             Arc::new(
-                provider
+                OpenAiLlmProvider::with_client(client, config.api_key.clone(), config.model.clone())
                     .with_timeout(config.timeout)
                     .with_request_log_store(request_log_store.clone())
                     .with_reasoning_effort(config.openai_reasoning_effort.clone()),
             )
         }
-    }
+    };
+
+    Ok(provider)
 }
 
 /// Thread-safe wrapper for the recording pipeline

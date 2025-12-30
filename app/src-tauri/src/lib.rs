@@ -14,6 +14,7 @@ mod commands;
 mod cost;
 mod history;
 mod llm;
+mod network;
 mod pipeline;
 mod recordings;
 mod request_log;
@@ -157,6 +158,13 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     set_default("speechmatics_free_tier", json!(true), false);
     set_default("stt_transcription_prompt", json!(null), false);
     set_default("stt_timeout_seconds", json!(10.0), false);
+
+    // Network / proxy settings.
+    set_default(
+        "proxy_settings",
+        serde_json::to_value(crate::settings::ProxySettings::default())?,
+        false,
+    );
     // How many recordings/history items to retain (impacts disk usage).
     // Keep this aligned with the UI default.
     set_default("max_saved_recordings", json!(1000), false);
@@ -1541,6 +1549,8 @@ pub fn run() {
             commands::config::get_default_sections,
             commands::config::get_available_providers,
             commands::config::sync_pipeline_config,
+            // Network commands
+            commands::network::get_system_proxy_info,
             // VAD settings commands
             commands::config::get_vad_settings,
             commands::config::set_vad_settings,
@@ -2342,6 +2352,9 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         })
     };
 
+    let proxy_settings: settings::ProxySettings =
+        get_setting_from_store(app, "proxy_settings", settings::ProxySettings::default());
+
     let config = pipeline::PipelineConfig {
         input_device_name,
         stt_provider,
@@ -2354,6 +2367,8 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         vad_config: vad_settings.to_vad_auto_stop_config(),
         transcription_timeout: Duration::from_secs_f64(stt_timeout_seconds),
         max_recording_bytes: 50 * 1024 * 1024, // 50MB
+
+        proxy_settings,
 
         quiet_audio_gate_enabled,
         quiet_audio_min_duration_secs,

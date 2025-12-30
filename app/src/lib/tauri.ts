@@ -161,6 +161,44 @@ export type RequestLogsRetentionMode = "amount" | "time";
 
 export type SettingsGuideState = "pending" | "skipped" | "completed";
 
+// ============================================================================
+// Network / proxy settings
+// ============================================================================
+
+export type ProxyMode = "no_proxy" | "system" | "manual";
+
+export interface ManualProxySettings {
+  /** Proxy URL applied to both http + https. Example: "http://127.0.0.1:8080" */
+  proxy_url: string;
+  /** Comma- or whitespace-separated bypass list (NO_PROXY semantics). */
+  no_proxy: string;
+  /** Optional basic auth username. */
+  username: string;
+  /** Optional basic auth password. */
+  password: string;
+}
+
+export interface ProxySettings {
+  mode: ProxyMode;
+  manual: ManualProxySettings;
+}
+
+export interface WindowsInternetProxySettings {
+  proxy_enable: boolean | null;
+  proxy_server: string | null;
+  proxy_override: string | null;
+  auto_config_url: string | null;
+}
+
+export interface SystemProxyInfo {
+  env_http_proxy: string | null;
+  env_https_proxy: string | null;
+  env_no_proxy: string | null;
+
+  // Windows-only, best-effort.
+  windows_internet_settings: WindowsInternetProxySettings | null;
+}
+
 export type OpenAiReasoningEffort =
   | "none"
   | "minimal"
@@ -267,6 +305,9 @@ export interface AppSettings {
   stt_transcription_prompt: string | null;
   // AquaVoice server override (optional)
   aquavoice_base_url: string | null;
+
+  // Global proxy configuration for outgoing HTTP requests
+  proxy_settings: ProxySettings;
   llm_provider: string | null;
   llm_model: string | null;
 
@@ -338,6 +379,32 @@ export interface AppSettings {
   request_logs_retention_amount: number;
   // Only used when mode === "time" (0 = forever)
   request_logs_retention_days: number;
+}
+
+function normalizeProxyMode(value: unknown): ProxyMode {
+  if (value === "no_proxy" || value === "system" || value === "manual") {
+    return value;
+  }
+  return "system";
+}
+
+function normalizeManualProxySettings(value: unknown): ManualProxySettings {
+  const v = value && typeof value === "object" ? (value as any) : ({} as any);
+
+  const proxy_url = typeof v.proxy_url === "string" ? v.proxy_url : "";
+  const no_proxy =
+    typeof v.no_proxy === "string" ? v.no_proxy : "localhost,127.0.0.1";
+  const username = typeof v.username === "string" ? v.username : "";
+  const password = typeof v.password === "string" ? v.password : "";
+
+  return { proxy_url, no_proxy, username, password };
+}
+
+function normalizeProxySettings(value: unknown): ProxySettings {
+  const v = value && typeof value === "object" ? (value as any) : ({} as any);
+  const mode = normalizeProxyMode(v.mode);
+  const manual = normalizeManualProxySettings(v.manual);
+  return { mode, manual };
 }
 
 function normalizePlayingAudioHandling(value: unknown): PlayingAudioHandling {
@@ -923,7 +990,7 @@ export const tauriAPI = {
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
       audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: await(async () => {
+      accent_color: await (async () => {
         const raw = (await store.get<string | null>("accent_color")) ?? null;
         const normalized = normalizeHexColor(raw);
 
@@ -950,6 +1017,7 @@ export const tauriAPI = {
         (await store.get<string | null>("stt_transcription_prompt")) ?? null,
       aquavoice_base_url:
         (await store.get<string | null>("aquavoice_base_url")) ?? null,
+      proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
@@ -1000,7 +1068,7 @@ export const tauriAPI = {
       quiet_audio_require_speech:
         (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
 
-      noise_gate_threshold_dbfs: await(async () => {
+      noise_gate_threshold_dbfs: await (async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -1039,7 +1107,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -1061,14 +1129,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })(),
+      })()),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -1082,7 +1150,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })(),
+      })()),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
@@ -1092,6 +1160,10 @@ export const tauriAPI = {
     tryWriteLocalStorage(LOCAL_ACCENT_COLOR_KEY, settings.accent_color ?? null);
 
     return settings;
+  },
+
+  async getSystemProxyInfo(): Promise<SystemProxyInfo> {
+    return invoke<SystemProxyInfo>("get_system_proxy_info");
   },
 
   /**
@@ -1252,6 +1324,12 @@ export const tauriAPI = {
   async updateSTTTranscriptionPrompt(prompt: string | null): Promise<void> {
     const store = await getStore();
     await store.set("stt_transcription_prompt", prompt);
+    await store.save();
+  },
+
+  async updateProxySettings(proxySettings: ProxySettings): Promise<void> {
+    const store = await getStore();
+    await store.set("proxy_settings", normalizeProxySettings(proxySettings));
     await store.save();
   },
 

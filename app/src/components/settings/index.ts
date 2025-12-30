@@ -2,6 +2,7 @@ export { ApiKeysSettings } from "./ApiKeysSettings";
 export { AudioSettings } from "./AudioSettings";
 export { DataSettings } from "./DataSettings";
 export { HotkeySettings } from "./HotkeySettings";
+export { NetworkSettings } from "./NetworkSettings";
 export type { PromptSectionEditorProps } from "./PromptSectionEditor";
 export { PromptSectionEditor } from "./PromptSectionEditor";
 export { PromptSettings } from "./PromptSettings";

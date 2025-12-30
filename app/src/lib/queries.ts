@@ -24,6 +24,7 @@ import {
   type WidgetPosition,
   type CostTimeframe,
   type ModelPricingKind,
+  type ProxySettings,
 } from "./tauri";
 
 export function useModelPricing(
@@ -156,6 +157,15 @@ export function useSettings() {
     queryKey: ["settings"],
     queryFn: () => tauriAPI.getSettings(),
     staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+export function useSystemProxyInfo() {
+  return useQuery({
+    queryKey: ["systemProxyInfo"],
+    queryFn: () => tauriAPI.getSystemProxyInfo(),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -958,6 +968,19 @@ export function useUpdateSTTTranscriptionPrompt() {
   return useMutation({
     mutationFn: async (prompt: string | null) => {
       await tauriAPI.updateSTTTranscriptionPrompt(prompt);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateProxySettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (proxySettings: ProxySettings) => {
+      await tauriAPI.updateProxySettings(proxySettings);
       await configAPI.syncPipelineConfig();
     },
     onSuccess: () => {
