@@ -292,10 +292,18 @@ export function HotkeyInput({
     <div>
       <p className="settings-label">{label}</p>
       {description && <p className="settings-description">{description}</p>}
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled ? true : undefined}
         onClick={handleClick}
-        disabled={disabled}
+        onKeyDown={(e) => {
+          if (disabled) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleClick();
+          }
+        }}
         className={`hotkey-display ${isRecording ? "capturing" : ""}`}
         style={{
           width: "100%",
@@ -376,7 +384,7 @@ export function HotkeyInput({
             )}
           </>
         )}
-      </button>
+      </div>
     </div>
   );
 }

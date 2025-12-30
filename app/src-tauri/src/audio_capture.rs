@@ -835,8 +835,12 @@ impl AudioCapture {
         if let Some(name) = desired_name {
             if let Ok(devices) = host.input_devices() {
                 for d in devices {
-                    let Ok(n) = d.name() else { continue };
-                    if n == name {
+                    let Ok(n) = d.description() else { continue };
+                    let n = n.to_string();
+                    // Backwards-compatible matching: older settings may have stored just the
+                    // plain device name (cpal `name()`), while newer CPAL versions recommend
+                    // using `description()`.
+                    if n == name || n.contains(name) {
                         selected = Some(d);
                         break;
                     }
@@ -865,7 +869,7 @@ impl AudioCapture {
             .default_input_config()
             .map_err(|e| AudioCaptureError::DeviceConfig(e.to_string()))?;
 
-        self.sample_rate = config.sample_rate().0;
+        self.sample_rate = config.sample_rate();
         self.channels = config.channels();
 
         log::info!(
@@ -1338,7 +1342,7 @@ pub fn list_input_devices() -> Vec<String> {
     host.input_devices()
         .map(|devices| {
             devices
-                .filter_map(|d| d.name().ok())
+                .filter_map(|d| d.description().ok().map(|desc| desc.to_string()))
                 .collect()
         })
         .unwrap_or_default()
@@ -1349,9 +1353,9 @@ pub fn list_input_devices() -> Vec<String> {
 pub fn get_default_input_device_info() -> Option<(String, u32, u16)> {
     let host = cpal::default_host();
     let device = host.default_input_device()?;
-    let name = device.name().ok()?;
+    let name = device.description().ok()?.to_string();
     let config = device.default_input_config().ok()?;
-    Some((name, config.sample_rate().0, config.channels()))
+    Some((name, config.sample_rate(), config.channels()))
 }
 
 #[cfg(test)]

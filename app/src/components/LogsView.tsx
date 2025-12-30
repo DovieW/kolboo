@@ -261,6 +261,7 @@ function RequestLogItem({
   const rawTranscriptTrimmed = (log.raw_transcript ?? "").trim();
   const finalOutputTrimmed = (log.final_text ?? "").trim();
   const hasAnyTranscriptText = !!(rawTranscriptTrimmed || finalOutputTrimmed);
+  const playDisabled = log.status === "in_progress";
 
   return (
     <Accordion.Item value={log.id} data-status={log.status}>
@@ -282,15 +283,28 @@ function RequestLogItem({
               }
             >
               <ActionIcon
+                component="span"
+                role="button"
+                tabIndex={playDisabled ? -1 : 0}
+                aria-disabled={playDisabled ? true : undefined}
                 variant="subtle"
                 color="gray"
                 size="sm"
                 loading={player.isLoading(log.id)}
-                disabled={log.status === "in_progress"}
+                disabled={playDisabled}
                 onClick={(e) => {
                   // Prevent accordion toggle when clicking play/pause.
                   e.preventDefault();
                   e.stopPropagation();
+                  if (playDisabled) return;
+                  player.toggle(log.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  // Prevent accordion toggle when activating play/pause.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (playDisabled) return;
                   player.toggle(log.id);
                 }}
                 aria-label={player.isPlaying(log.id) ? "Pause" : "Play"}
