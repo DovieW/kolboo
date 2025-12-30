@@ -220,7 +220,7 @@ jobs:
           echo "artifact_name=kolboo-windows-bundles" >> "$GITHUB_OUTPUT"
 
       - name: Upload bundles
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: kolboo-windows-bundles
           if-no-files-found: error
