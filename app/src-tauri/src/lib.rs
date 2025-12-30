@@ -18,6 +18,7 @@ mod pipeline;
 mod recordings;
 mod request_log;
 mod settings;
+mod shortcuts_lock;
 mod stats;
 mod state;
 mod stt;
@@ -1108,12 +1109,13 @@ pub(crate) fn set_escape_cancel_shortcut_enabled(app: &AppHandle, enabled: bool)
     // Schedule the actual work onto the async runtime to avoid re-entrancy.
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        set_escape_cancel_shortcut_enabled_inner(&app, enabled);
+        set_escape_cancel_shortcut_enabled_inner(&app, enabled).await;
     });
 }
 
 #[cfg(desktop)]
-fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool) {
+async fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool) {
+    let _guard = shortcuts_lock::global_shortcut_lock().lock().await;
     let shortcut_manager = app.global_shortcut();
 
     let is_registered = shortcut_manager.is_registered(ESCAPE_CANCEL_SHORTCUT);

@@ -12,6 +12,7 @@ use tauri_plugin_store::StoreExt;
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn unregister_shortcuts(app: AppHandle) -> Result<(), String> {
+    let _guard = crate::shortcuts_lock::global_shortcut_lock().lock().await;
     log::info!("Temporarily unregistering all shortcuts for hotkey capture");
     let shortcut_manager = app.global_shortcut();
     shortcut_manager
@@ -61,6 +62,7 @@ fn get_hotkey_from_store(
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
+    let _guard = crate::shortcuts_lock::global_shortcut_lock().lock().await;
     // Read hotkeys from store.
     // - missing => default
     // - null => disabled
