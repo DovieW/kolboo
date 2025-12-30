@@ -54,7 +54,7 @@ jobs:
         run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.store_path }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
@@ -82,7 +82,7 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.6
 
       - name: Cache sccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.SCCACHE_DIR }}
           key: ${{ runner.os }}-sccache-${{ hashFiles('app/src-tauri/Cargo.lock') }}
@@ -160,7 +160,7 @@ jobs:
         run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.store_path }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
@@ -180,7 +180,7 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.6
 
       - name: Cache sccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.SCCACHE_DIR }}
           key: ${{ runner.os }}-sccache-${{ hashFiles('app/src-tauri/Cargo.lock') }}
