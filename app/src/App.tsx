@@ -59,6 +59,8 @@ import {
 import { listAllLlmModelKeys, listAllSttModelKeys } from "./lib/modelOptions";
 import { type CostTimeframe, type HotkeyConfig, tauriAPI } from "./lib/tauri";
 import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
+import appPackageJson from "../package.json";
+import { compareSemver, fetchLatestGithubReleaseVersion } from "./lib/updates";
 import "./styles.css";
 
 type View = "home" | "settings" | "logs" | "usage-stats";
@@ -94,6 +96,23 @@ function Sidebar({
   activeView: View;
   onViewChange: (view: View) => void;
 }) {
+  const currentVersion = appPackageJson.version;
+
+  const { data: latestReleaseVersion } = useQuery({
+    queryKey: ["latestReleaseVersion", "DovieW", "kolboo"],
+    queryFn: () =>
+      fetchLatestGithubReleaseVersion({ owner: "DovieW", repo: "kolboo" }),
+    staleTime: 6 * 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
+  const updateAvailable =
+    typeof latestReleaseVersion === "string" &&
+    compareSemver(latestReleaseVersion, currentVersion) > 0;
+
+  const releaseUrl = "https://github.com/DovieW/kolboo/releases";
+
   return (
     <aside className="sidebar">
       <header className="sidebar-header">
@@ -142,14 +161,40 @@ function Sidebar({
       </nav>
 
       <footer className="sidebar-footer">
-        <a
-          className="sidebar-footer-link"
-          href="https://github.com/DovieW/kolboo/releases"
-          target="_blank"
-          rel="noreferrer"
-        >
-          v0.2.2
-        </a>
+        {updateAvailable ? (
+          <Tooltip
+            label={
+              <Text size="xs" fw={700}>
+                UPDATE
+              </Text>
+            }
+            withArrow
+            position="top"
+            offset={6}
+            arrowSize={6}
+            radius="sm"
+            color="red"
+            opened
+          >
+            <a
+              className="sidebar-footer-link"
+              href={releaseUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              v{currentVersion}
+            </a>
+          </Tooltip>
+        ) : (
+          <a
+            className="sidebar-footer-link"
+            href={releaseUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            v{currentVersion}
+          </a>
+        )}
       </footer>
     </aside>
   );
