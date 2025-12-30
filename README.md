@@ -21,7 +21,7 @@ This is a fork of [Tambourine](https://github.com/kstonekuan/tambourine-voice) m
 - Hotkeys for: Toggle recording, Hold to record, Paste last transcription.
 - Pass dictation to LLMs for further enhancement.
 - Create per program workflows using the profile system.
-- Clean overlay while transcribing (image) with customizable sound cue.
+- Clean overlay while transcribing ([image](https://github.com/user-attachments/assets/73cbdadd-a347-4bde-b473-8e974dac7eff)) with customizable sound cue.
 - Comprehensive provider and model support ([full list](docs/SUPPORTED_PROVIDERS_AND_MODELS.md)): Local, Google, OpenAI, Groq, Avalon and more.
 - Logging and testing system to easily troubleshoot issues and work on prompts.
 - Stats page to track cost usage and more (WIP).
