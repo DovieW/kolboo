@@ -1692,8 +1692,119 @@ export function HistoryFeed({
                         </Badge>
                       ) : null;
                     })()}
+                    <Tooltip
+                      label={copiedEntryId === entry.id ? "Copied" : "Copy"}
+                      withArrow
+                    >
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        color="gray"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyEntry(entry.id, entry.text);
+                        }}
+                        disabled={!entry.text || entry.text.trim().length === 0}
+                        aria-label="Copy"
+                      >
+                        <span
+                          className={
+                            "history-copy-icon" +
+                            (copiedEntryId === entry.id
+                              ? " history-copy-icon--checked"
+                              : "")
+                          }
+                        >
+                          {copiedEntryId === entry.id ? (
+                            <Check size={14} />
+                          ) : (
+                            <Copy size={14} />
+                          )}
+                        </span>
+                      </ActionIcon>
+                    </Tooltip>
+
+                    <Tooltip
+                      label={
+                        (entry.status ?? "success") === "in_progress"
+                          ? "Already transcribing"
+                          : "Rerun"
+                      }
+                      withArrow
+                    >
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        color="gray"
+                        disabled={(entry.status ?? "success") === "in_progress"}
+                        loading={
+                          retryMutation.isPending &&
+                          retryMutation.variables === entry.id
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          notifications.show({
+                            title: "Rerunning",
+                            message: "Re-running transcription…",
+                            color: "orange",
+                          });
+                          retryMutation.mutate(entry.id, {
+                            onSuccess: () => {
+                              notifications.show({
+                                title: "Rerun complete",
+                                message:
+                                  "Check History / Request Logs for the new entry.",
+                                color: "teal",
+                              });
+                            },
+                            onError: (e) => {
+                              notifications.show({
+                                title: "Rerun failed",
+                                message: formatErrorMessage(e),
+                                color: "red",
+                              });
+                            },
+                          });
+                        }}
+                        aria-label="Rerun"
+                      >
+                        <RotateCcw size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+
+                    <Tooltip
+                      label={
+                        player.isPlaying(entry.id)
+                          ? "Pause"
+                          : "Play"
+                      }
+                      withArrow
+                    >
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        color="gray"
+                        disabled={(entry.status ?? "success") === "in_progress"}
+                        loading={player.isLoading(entry.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          player.toggle(entry.id);
+                        }}
+                        aria-label={
+                          player.isPlaying(entry.id)
+                            ? "Pause"
+                            : "Play"
+                        }
+                      >
+                        {player.isPlaying(entry.id) ? (
+                          <Pause size={14} />
+                        ) : (
+                          <Play size={14} />
+                        )}
+                      </ActionIcon>
+                    </Tooltip>
                     {onJumpToLog && requestLogIds.has(entry.id) ? (
-                      <Tooltip label="Jump to log" withArrow>
+                      <Tooltip label="Log" withArrow>
                         <ActionIcon
                           variant="subtle"
                           size="sm"
@@ -1702,124 +1813,27 @@ export function HistoryFeed({
                             e.stopPropagation();
                             onJumpToLog(entry.id);
                           }}
-                          aria-label="Jump to log"
+                          aria-label="Log"
                         >
                           <FileText size={14} />
                         </ActionIcon>
                       </Tooltip>
                     ) : null}
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      color="gray"
-                      disabled={(entry.status ?? "success") === "in_progress"}
-                      loading={player.isLoading(entry.id)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        player.toggle(entry.id);
-                      }}
-                      title={
-                        player.isPlaying(entry.id)
-                          ? "Pause recording"
-                          : "Play recording"
-                      }
-                      aria-label={
-                        player.isPlaying(entry.id)
-                          ? "Pause recording"
-                          : "Play recording"
-                      }
-                    >
-                      {player.isPlaying(entry.id) ? (
-                        <Pause size={14} />
-                      ) : (
-                        <Play size={14} />
-                      )}
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      color="gray"
-                      disabled={(entry.status ?? "success") === "in_progress"}
-                      loading={
-                        retryMutation.isPending &&
-                        retryMutation.variables === entry.id
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        notifications.show({
-                          title: "Retrying",
-                          message: "Re-running transcription…",
-                          color: "orange",
-                        });
-                        retryMutation.mutate(entry.id, {
-                          onSuccess: () => {
-                            notifications.show({
-                              title: "Retry complete",
-                              message:
-                                "Check History / Request Logs for the new entry.",
-                              color: "teal",
-                            });
-                          },
-                          onError: (e) => {
-                            notifications.show({
-                              title: "Retry failed",
-                              message: formatErrorMessage(e),
-                              color: "red",
-                            });
-                          },
-                        });
-                      }}
-                      title={
-                        (entry.status ?? "success") === "in_progress"
-                          ? "Already transcribing"
-                          : "Retry transcription"
-                      }
-                    >
-                      <RotateCcw size={14} />
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      color="gray"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCopyEntry(entry.id, entry.text);
-                      }}
-                      title={
-                        copiedEntryId === entry.id
-                          ? "Copied"
-                          : "Copy to clipboard"
-                      }
-                      disabled={!entry.text || entry.text.trim().length === 0}
-                    >
-                      <span
-                        className={
-                          "history-copy-icon" +
-                          (copiedEntryId === entry.id
-                            ? " history-copy-icon--checked"
-                            : "")
-                        }
+                    <Tooltip label="Delete" withArrow>
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        color="red"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(entry.id);
+                        }}
+                        disabled={deleteEntry.isPending}
+                        aria-label="Delete"
                       >
-                        {copiedEntryId === entry.id ? (
-                          <Check size={14} />
-                        ) : (
-                          <Copy size={14} />
-                        )}
-                      </span>
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      color="red"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(entry.id);
-                      }}
-                      title="Delete"
-                      disabled={deleteEntry.isPending}
-                    >
-                      <Trash2 size={14} />
-                    </ActionIcon>
+                        <Trash2 size={14} />
+                      </ActionIcon>
+                    </Tooltip>
                   </div>
                 </div>
               ))}
