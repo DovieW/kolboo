@@ -414,8 +414,23 @@ a:focus-visible {
 	background: var(--bg-card);
 	border-radius: 12px;
 	transition: all 0.2s ease;
-	cursor: default;
+	cursor: pointer;
+
+	
 	border: 1px solid transparent;
+}
+
+.history-copy-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	transition:
+		transform 140ms ease,
+		opacity 140ms ease;
+}
+
+.history-copy-icon--checked {
+	transform: scale(1.08);
 }
 
 

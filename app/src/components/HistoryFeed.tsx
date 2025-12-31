@@ -35,6 +35,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Check,
   Copy,
   Filter,
   FileText,
@@ -48,7 +49,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Store } from "@tauri-apps/plugin-store";
 import {
   useDeleteHistoryEntry,
@@ -380,6 +381,41 @@ export function HistoryFeed({
   });
   const retryMutation = useRetryTranscription();
   const clipboard = useClipboard();
+
+  const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
+  const copiedTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const triggerCopiedFx = (entryId: string) => {
+    setCopiedEntryId(entryId);
+
+    if (copiedTimerRef.current !== null) {
+      window.clearTimeout(copiedTimerRef.current);
+    }
+
+    copiedTimerRef.current = window.setTimeout(() => {
+      setCopiedEntryId((cur) => (cur === entryId ? null : cur));
+      copiedTimerRef.current = null;
+    }, 900);
+  };
+
+  const handleCopyEntry = (
+    entryId: string,
+    text: string | null | undefined
+  ) => {
+    const value = text?.trim() ?? "";
+    if (!value) return;
+    clipboard.copy(value);
+    triggerCopiedFx(entryId);
+  };
 
   const { data: settings } = useSettings();
   const requestLogsLimit = (() => {
@@ -1573,7 +1609,21 @@ export function HistoryFeed({
             </p>
             <div className="history-feed">
               {group.items.map((entry) => (
-                <div key={entry.id} className="history-item">
+                <div
+                  key={entry.id}
+                  className="history-item"
+                  onClick={() => handleCopyEntry(entry.id, entry.text)}
+                  title={entry.text?.trim() ? "Click to copy" : undefined}
+                  role={entry.text?.trim() ? "button" : undefined}
+                  tabIndex={entry.text?.trim() ? 0 : -1}
+                  onKeyDown={(e) => {
+                    if (!entry.text?.trim()) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleCopyEntry(entry.id, entry.text);
+                    }
+                  }}
+                >
                   <span className="history-time">
                     {formatTime(entry.timestamp)}
                   </span>
@@ -1648,7 +1698,10 @@ export function HistoryFeed({
                           variant="subtle"
                           size="sm"
                           color="gray"
-                          onClick={() => onJumpToLog(entry.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onJumpToLog(entry.id);
+                          }}
                           aria-label="Jump to log"
                         >
                           <FileText size={14} />
@@ -1661,7 +1714,10 @@ export function HistoryFeed({
                       color="gray"
                       disabled={(entry.status ?? "success") === "in_progress"}
                       loading={player.isLoading(entry.id)}
-                      onClick={() => player.toggle(entry.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        player.toggle(entry.id);
+                      }}
                       title={
                         player.isPlaying(entry.id)
                           ? "Pause recording"
@@ -1688,7 +1744,8 @@ export function HistoryFeed({
                         retryMutation.isPending &&
                         retryMutation.variables === entry.id
                       }
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         notifications.show({
                           title: "Retrying",
                           message: "Re-running transcription…",
@@ -1724,17 +1781,40 @@ export function HistoryFeed({
                       variant="subtle"
                       size="sm"
                       color="gray"
-                      onClick={() => clipboard.copy(entry.text)}
-                      title="Copy to clipboard"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopyEntry(entry.id, entry.text);
+                      }}
+                      title={
+                        copiedEntryId === entry.id
+                          ? "Copied"
+                          : "Copy to clipboard"
+                      }
                       disabled={!entry.text || entry.text.trim().length === 0}
                     >
-                      <Copy size={14} />
+                      <span
+                        className={
+                          "history-copy-icon" +
+                          (copiedEntryId === entry.id
+                            ? " history-copy-icon--checked"
+                            : "")
+                        }
+                      >
+                        {copiedEntryId === entry.id ? (
+                          <Check size={14} />
+                        ) : (
+                          <Copy size={14} />
+                        )}
+                      </span>
                     </ActionIcon>
                     <ActionIcon
                       variant="subtle"
                       size="sm"
                       color="red"
-                      onClick={() => handleDelete(entry.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(entry.id);
+                      }}
                       title="Delete"
                       disabled={deleteEntry.isPending}
                     >
