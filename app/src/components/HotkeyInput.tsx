@@ -1,4 +1,4 @@
-import { Kbd } from "@mantine/core";
+import { Button, Kbd, Select } from "@mantine/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRecordHotkeys } from "react-hotkeys-hook";
 import type { HotkeyConfig } from "../lib/tauri";
@@ -42,7 +42,107 @@ const STANDALONE_KEYS = new Set([
   "scrolllock",
   "pause",
   "printscreen",
+
+  // Media keys (supported by tauri-plugin-global-shortcut on desktop platforms)
+  "mediaplaypause",
+  "medianexttrack",
+  "mediaprevtrack",
+  "mediaprevioustrack",
+  "mediastop",
+  "mediaselect",
+  "mediarecord",
+  "mediafastforward",
+  "mediarewind",
+
+  // Volume keys
+  "volumeup",
+  "volumedown",
+  "volumemute",
+
+  // Browser keys
+  "browserback",
+  "browserforward",
+  "browserrefresh",
+  "browserstop",
+  "browsersearch",
+  "browserfavorites",
+  "browserhome",
+
+  // Launch keys (common on extended keyboards)
+  "launchmail",
+  "launchmediaplayer",
+  "launchapp1",
+  "launchapp2",
+
+  // Display / hardware keys (common on laptops)
+  "brightnessup",
+  "brightnessdown",
+  "keyboardbrightnessup",
+  "keyboardbrightnessdown",
+  "keyboardbrightnesstoggle",
+  "keyboardilluminationup",
+  "keyboardilluminationdown",
+  "keyboardilluminationtoggle",
+
+  // Misc hardware keys
+  "calculator",
+  "eject",
+  "micmute",
 ]);
+
+// Keys that are awkward/unreliable to capture from a WebView keyboard event.
+// We still let users pick them explicitly.
+const SPECIAL_KEY_OPTIONS: Array<{ label: string; value: string }> = [
+  // Modifier-only (Windows-only; requires native hook)
+  { label: "Modifier (Windows): Right Alt (AltGr)", value: "AltRight" },
+
+  // Media
+  { label: "Media: Play/Pause", value: "MediaPlayPause" },
+  { label: "Media: Next Track", value: "MediaNextTrack" },
+  { label: "Media: Previous Track", value: "MediaPrevTrack" },
+  { label: "Media: Stop", value: "MediaStop" },
+  { label: "Media: Select", value: "MediaSelect" },
+  { label: "Media: Record", value: "MediaRecord" },
+  { label: "Media: Fast Forward", value: "MediaFastForward" },
+  { label: "Media: Rewind", value: "MediaRewind" },
+
+  // Volume
+  { label: "Volume: Mute", value: "VolumeMute" },
+  { label: "Volume: Up", value: "VolumeUp" },
+  { label: "Volume: Down", value: "VolumeDown" },
+
+  // Browser
+  { label: "Browser: Back", value: "BrowserBack" },
+  { label: "Browser: Forward", value: "BrowserForward" },
+  { label: "Browser: Refresh", value: "BrowserRefresh" },
+  { label: "Browser: Stop", value: "BrowserStop" },
+  { label: "Browser: Search", value: "BrowserSearch" },
+  { label: "Browser: Favorites", value: "BrowserFavorites" },
+  { label: "Browser: Home", value: "BrowserHome" },
+
+  // Launch / app keys
+  { label: "Launch: Mail", value: "LaunchMail" },
+  { label: "Launch: Media Player", value: "LaunchMediaPlayer" },
+  { label: "Launch: App 1", value: "LaunchApp1" },
+  { label: "Launch: App 2", value: "LaunchApp2" },
+
+  // Display / hardware
+  { label: "Display: Brightness Up", value: "BrightnessUp" },
+  { label: "Display: Brightness Down", value: "BrightnessDown" },
+  { label: "Keyboard: Backlight Up", value: "KeyboardBrightnessUp" },
+  { label: "Keyboard: Backlight Down", value: "KeyboardBrightnessDown" },
+  { label: "Keyboard: Backlight Toggle", value: "KeyboardBrightnessToggle" },
+
+  // Misc
+  { label: "Hardware: Microphone Mute", value: "MicMute" },
+  { label: "Hardware: Calculator", value: "Calculator" },
+  { label: "Hardware: Eject", value: "Eject" },
+
+  // Lock/power-ish keys (often unsupported as global shortcuts; still selectable)
+  { label: "System: Sleep", value: "Sleep" },
+  { label: "System: Wake Up", value: "WakeUp" },
+  { label: "System: Power", value: "Power" },
+];
 
 /**
  * Map from react-hotkeys-hook key names to Tauri shortcut key names.
@@ -124,6 +224,57 @@ const KEY_NAME_MAP: Record<string, string> = {
   backslash: "Backslash",
   minus: "Minus",
   equal: "Equal",
+
+  // Media keys
+  mediaplaypause: "MediaPlayPause",
+  medianexttrack: "MediaNextTrack",
+  mediaprevtrack: "MediaPrevTrack",
+  mediaprevioustrack: "MediaPrevTrack",
+  mediastop: "MediaStop",
+  mediaselect: "MediaSelect",
+  mediarecord: "MediaRecord",
+  mediafastforward: "MediaFastForward",
+  mediarewind: "MediaRewind",
+
+  // Volume keys
+  volumeup: "VolumeUp",
+  volumedown: "VolumeDown",
+  volumemute: "VolumeMute",
+
+  // Browser keys
+  browserback: "BrowserBack",
+  browserforward: "BrowserForward",
+  browserrefresh: "BrowserRefresh",
+  browserstop: "BrowserStop",
+  browsersearch: "BrowserSearch",
+  browserfavorites: "BrowserFavorites",
+  browserhome: "BrowserHome",
+
+  // Launch keys
+  launchmail: "LaunchMail",
+  launchmediaplayer: "LaunchMediaPlayer",
+  launchapp1: "LaunchApp1",
+  launchapp2: "LaunchApp2",
+
+  // Display / hardware keys
+  brightnessup: "BrightnessUp",
+  brightnessdown: "BrightnessDown",
+  keyboardbrightnessup: "KeyboardBrightnessUp",
+  keyboardbrightnessdown: "KeyboardBrightnessDown",
+  keyboardbrightnesstoggle: "KeyboardBrightnessToggle",
+  keyboardilluminationup: "KeyboardIlluminationUp",
+  keyboardilluminationdown: "KeyboardIlluminationDown",
+  keyboardilluminationtoggle: "KeyboardIlluminationToggle",
+
+  // Misc hardware keys
+  micmute: "MicMute",
+  calculator: "Calculator",
+  eject: "Eject",
+
+  // System keys
+  sleep: "Sleep",
+  wakeup: "WakeUp",
+  power: "Power",
 };
 
 /**
@@ -191,6 +342,12 @@ function formatKeyForDisplay(key: string): string {
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
+function hotkeyToDisplayParts(value: HotkeyConfig): string[] {
+  return value.modifiers
+    .concat([value.key])
+    .map((part) => formatKeyForDisplay(part));
+}
+
 export function HotkeyInput({
   label,
   description,
@@ -204,8 +361,35 @@ export function HotkeyInput({
   const [keys, { start, stop, isRecording: internalIsRecording }] =
     useRecordHotkeys();
 
+  // Keep the last non-empty key set around so a user can click "Save" after releasing.
+  const lastNonEmptyKeysRef = useRef<Set<string>>(new Set());
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const [specialKeySelection, setSpecialKeySelection] = useState<string | null>(
+    null
+  );
+
+  const specialKeyValues = useMemo(
+    () => new Set(SPECIAL_KEY_OPTIONS.map((o) => o.value)),
+    []
+  );
+
   // Use external state if provided, otherwise use internal
   const isRecording = externalIsRecording ?? internalIsRecording;
+
+  // Keep the dropdown synced with the current value (when it matches a known special key).
+  useEffect(() => {
+    if (isRecording) return;
+    if (!value) {
+      setSpecialKeySelection(null);
+      return;
+    }
+
+    const next =
+      value.modifiers.length === 0 && specialKeyValues.has(value.key)
+        ? value.key
+        : null;
+    setSpecialKeySelection(next);
+  }, [isRecording, value, specialKeyValues]);
 
   // Unregister global shortcuts when recording starts, re-register when done.
   // Important: multiple <HotkeyInput/> instances mount in the settings UI.
@@ -248,6 +432,10 @@ export function HotkeyInput({
     if (!isRecording) return;
     if (keys.size === 0) return;
 
+    // Keep a snapshot for manual save.
+    lastNonEmptyKeysRef.current = new Set(keys);
+    if (captureError) setCaptureError(null);
+
     // Check if Escape was pressed (handled separately)
     if (keys.has("escape")) {
       return;
@@ -278,8 +466,55 @@ export function HotkeyInput({
       stop();
       onStopRecording?.();
     } else {
+      setCaptureError(null);
+      setSpecialKeySelection(null);
       start();
       onStartRecording?.();
+    }
+  };
+
+  const handleCancelRecording = () => {
+    stop();
+    onStopRecording?.();
+  };
+
+  const handleSaveRecording = () => {
+    const snapshot =
+      lastNonEmptyKeysRef.current.size > 0 ? lastNonEmptyKeysRef.current : keys;
+
+    // Ignore Escape-only snapshots.
+    const filtered = new Set(
+      Array.from(snapshot).filter((k) => k !== "escape")
+    );
+    if (filtered.size === 0) {
+      setCaptureError("No key captured yet.");
+      return;
+    }
+
+    const config = keysToConfig(filtered);
+    if (!config) {
+      setCaptureError(
+        "That key can't be used as a hotkey by itself. Try adding Ctrl/Alt/Shift, or pick a special key below."
+      );
+      return;
+    }
+
+    onChange(config);
+    stop();
+    onStopRecording?.();
+  };
+
+  const handlePickSpecialKey = (value: string | null) => {
+    setSpecialKeySelection(value);
+    if (!value) return;
+
+    // Special keys are intended to be used alone.
+    onChange({ modifiers: [], key: value });
+
+    // If we're currently recording, stop cleanly.
+    if (isRecording) {
+      stop();
+      onStopRecording?.();
     }
   };
 
@@ -288,10 +523,13 @@ export function HotkeyInput({
     .filter((k) => k !== "escape")
     .map((k) => formatKeyForDisplay(k));
 
+  const displayParts = value ? hotkeyToDisplayParts(value) : null;
+
   return (
-    <div>
+    <div className="hotkey-field">
       <p className="settings-label">{label}</p>
       {description && <p className="settings-description">{description}</p>}
+
       <div
         role="button"
         tabIndex={disabled ? -1 : 0}
@@ -312,78 +550,96 @@ export function HotkeyInput({
           opacity: disabled ? 0.5 : 1,
         }}
       >
-        {isRecording ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-          >
-            {livePreview.length > 0 ? (
-              <>
-                {livePreview.map((part) => (
-                  <Kbd key={part}>{part}</Kbd>
-                ))}
-                <span
-                  style={{
-                    color: "var(--text-secondary)",
-                    fontSize: 12,
-                    marginLeft: 4,
-                  }}
-                >
-                  release to save
-                </span>
-              </>
+        <div className="hotkey-display-left">
+          {isRecording ? (
+            livePreview.length > 0 ? (
+              livePreview.map((part) => <Kbd key={part}>{part}</Kbd>)
             ) : (
-              <span style={{ color: "var(--accent-primary)", fontSize: 14 }}>
-                Press a key or combination...
+              <span className="hotkey-capturing-hint">
+                Press a key or combination…
               </span>
-            )}
-            <span
-              style={{
-                color: "var(--text-tertiary)",
-                fontSize: 11,
-                marginLeft: 8,
-              }}
-            >
-              (Esc to cancel)
-            </span>
-          </div>
-        ) : (
-          <>
-            {value ? (
-              <>
-                {value.modifiers.concat([value.key]).map((part) => (
-                  <Kbd key={part}>{formatKeyForDisplay(part)}</Kbd>
-                ))}
-                <span className="hotkey-actions">
-                  <span className="hotkey-hint">Click to change</span>
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onChange(null);
-                    }}
-                    className="hotkey-clear"
-                  >
-                    Clear
-                  </button>
-                </span>
-              </>
-            ) : (
-              <>
-                <Kbd className="hotkey-placeholder">Unassigned</Kbd>
-                <span className="hotkey-actions">
-                  <span className="hotkey-hint">Click to set</span>
-                </span>
-              </>
-            )}
-          </>
-        )}
+            )
+          ) : displayParts ? (
+            displayParts.map((part) => <Kbd key={part}>{part}</Kbd>)
+          ) : (
+            <Kbd className="hotkey-placeholder">Unassigned</Kbd>
+          )}
+        </div>
+
+        <div className="hotkey-actions">
+          {isRecording ? (
+            <>
+              <span className="hotkey-hint">Esc cancels</span>
+              <Button
+                size="xs"
+                variant="filled"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSaveRecording();
+                }}
+              >
+                Save
+              </Button>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="gray"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleCancelRecording();
+                }}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <>
+              <span className="hotkey-hint">
+                {displayParts ? "Click to change" : "Click to set"}
+              </span>
+              {value && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onChange(null);
+                  }}
+                  className="hotkey-clear"
+                >
+                  Clear
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {captureError && <div className="hotkey-error">{captureError}</div>}
+
+      <div
+        className="hotkey-special-row"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="hotkey-special-meta">
+          <div className="hotkey-special-label">Special key</div>
+        </div>
+
+        <Select
+          placeholder="None"
+          data={SPECIAL_KEY_OPTIONS}
+          value={specialKeySelection}
+          onChange={handlePickSpecialKey}
+          searchable
+          clearable
+          size="xs"
+          disabled={disabled}
+          w={260}
+        />
       </div>
     </div>
   );

@@ -416,7 +416,7 @@ a:focus-visible {
 	transition: all 0.2s ease;
 	cursor: pointer;
 
-	
+
 	border: 1px solid transparent;
 }
 
@@ -706,16 +706,36 @@ a:focus-visible {
 }
 
 /* Hotkey Display */
+.hotkey-field {
+	/* Keep each hotkey input self-contained and visually consistent */
+	margin-top: 8px;
+}
+
 .hotkey-display {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 10px;
 	padding: 10px 16px;
 	background: var(--bg-elevated);
 	border: 1px solid var(--border-default);
 	border-radius: 10px;
 	cursor: pointer;
 	transition: all 0.2s ease;
+}
+
+.hotkey-display-left {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+	min-width: 0;
+	flex-wrap: wrap;
+}
+
+.hotkey-capturing-hint {
+	color: rgba(var(--accent-rgb) / 0.92);
+	font-size: 13px;
+	letter-spacing: -0.01em;
 }
 
 .hotkey-display:hover {
@@ -739,6 +759,40 @@ a:focus-visible {
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
+	flex-shrink: 0;
+}
+
+.hotkey-error {
+	margin-top: 8px;
+	font-size: 12px;
+	color: rgba(239, 68, 68, 0.95);
+}
+
+.hotkey-special-row {
+	margin-top: 10px;
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.hotkey-special-meta {
+	min-width: 0;
+	flex: 1;
+}
+
+.hotkey-special-label {
+	font-size: 12px;
+	color: var(--text-secondary);
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+.hotkey-special-desc {
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--text-muted);
+	line-height: 1.25;
 }
 
 /* Subtle pill button to clear/unset a hotkey */

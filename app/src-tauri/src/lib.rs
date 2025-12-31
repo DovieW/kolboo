@@ -26,6 +26,9 @@ mod stt;
 mod vad;
 mod windows_apps;
 
+#[cfg(target_os = "windows")]
+mod windows_modifier_hotkeys;
+
 #[cfg(test)]
 mod tests;
 
@@ -1600,6 +1603,13 @@ pub fn run() {
                 ensure_default_settings(app.handle())?;
             }
 
+            // Windows-only: enable modifier-only hotkeys (e.g. Right Alt alone) via a low-level
+            // keyboard hook. This is separate from tauri-plugin-global-shortcut.
+            #[cfg(target_os = "windows")]
+            {
+                windows_modifier_hotkeys::init(app.handle().clone());
+            }
+
             // Configure what happens when the user clicks the X on the main/settings window.
             // Default is to close-to-tray (destroy the window; tray can recreate it).
             #[cfg(desktop)]
@@ -1944,6 +1954,154 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Handle modifier-only key events (Windows-only).
+///
+/// This is used for hotkeys like "AltRight" with no modifiers.
+#[cfg(all(desktop, target_os = "windows"))]
+pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: bool) {
+    let state = app.state::<AppState>();
+
+    // Determine which (if any) configured hotkey uses this modifier-only key.
+    let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
+    let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
+    let paste_last_hotkey = get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
+
+    let matches_modifier_only = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == key;
+    let is_toggle = toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
+    let is_hold = hold_hotkey.as_ref().is_some_and(matches_modifier_only);
+    let is_paste_last = paste_last_hotkey.as_ref().is_some_and(matches_modifier_only);
+
+    if !(is_toggle || is_hold || is_paste_last) {
+        return;
+    }
+
+    // Get current settings from store (mirrors handle_shortcut_event behavior)
+    let sound_enabled: bool = get_setting_from_store(app, "sound_enabled", true);
+    let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "kolboo".to_string());
+    let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
+    let playing_audio_handling: PlayingAudioHandling = get_playing_audio_handling(app);
+    let audio_mute_manager = app.try_state::<AudioMuteManager>();
+
+    if is_toggle {
+        // Toggle mode: action happens on key release (debounced)
+        if is_down {
+            state.toggle_key_held.swap(true, Ordering::SeqCst);
+        } else {
+            if state.toggle_key_held.swap(false, Ordering::SeqCst) {
+                let pipeline_state = app
+                    .try_state::<pipeline::SharedPipeline>()
+                    .map(|p| p.state());
+
+                let is_recording = pipeline_state == Some(pipeline::PipelineState::Recording);
+                if is_recording {
+                    stop_recording(
+                        app,
+                        &state,
+                        sound_enabled,
+                        audio_cue,
+                        &audio_mute_manager,
+                        playing_audio_handling,
+                        "Toggle(AltRight)",
+                    );
+                } else {
+                    start_recording(
+                        app,
+                        &state,
+                        sound_enabled,
+                        audio_cue,
+                        &audio_mute_manager,
+                        playing_audio_handling,
+                        "Toggle(AltRight)",
+                    );
+                }
+            }
+        }
+
+        return;
+    }
+
+    if is_hold {
+        // Hold-to-Record: start on press, stop on release
+        if is_down {
+            if !state.ptt_key_held.swap(true, Ordering::SeqCst) {
+                let pipeline_state = app
+                    .try_state::<pipeline::SharedPipeline>()
+                    .map(|p| p.state());
+                let can_start = pipeline_state
+                    .map(|s| s.can_start_recording())
+                    .unwrap_or(false);
+                if can_start {
+                    start_recording(
+                        app,
+                        &state,
+                        sound_enabled,
+                        audio_cue,
+                        &audio_mute_manager,
+                        playing_audio_handling,
+                        "Hold(AltRight)",
+                    );
+                }
+            }
+        } else {
+            if state.ptt_key_held.swap(false, Ordering::SeqCst) {
+                let is_recording = app
+                    .try_state::<pipeline::SharedPipeline>()
+                    .map(|p| p.state() == pipeline::PipelineState::Recording)
+                    .unwrap_or(false);
+                if is_recording {
+                    stop_recording(
+                        app,
+                        &state,
+                        sound_enabled,
+                        audio_cue,
+                        &audio_mute_manager,
+                        playing_audio_handling,
+                        "Hold(AltRight)",
+                    );
+                }
+            }
+        }
+
+        return;
+    }
+
+    if is_paste_last {
+        // Paste-last: action on release (debounced)
+        if is_down {
+            state.paste_key_held.swap(true, Ordering::SeqCst);
+            return;
+        }
+
+        if !state.paste_key_held.swap(false, Ordering::SeqCst) {
+            return;
+        }
+
+        // Key released - output based on configured mode
+        log::info!("OutputLast(AltRight): outputting last transcription");
+
+        let output_mode_str: String =
+            get_setting_from_store(app, "output_mode", "paste".to_string());
+        let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
+        let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
+
+        let history_storage = app.state::<HistoryStorage>();
+
+        if let Ok(entries) = history_storage.get_all(Some(1)) {
+            if let Some(entry) = entries.first() {
+                if let Err(e) = commands::text::output_text_with_mode(
+                    &entry.text,
+                    output_mode,
+                    output_hit_enter,
+                ) {
+                    log::error!("Failed to output last transcription: {}", e);
+                }
+            } else {
+                log::info!("OutputLast(AltRight): no history entries available");
+            }
+        }
+    }
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {

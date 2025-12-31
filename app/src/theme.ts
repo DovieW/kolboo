@@ -32,6 +32,19 @@ export const darkTheme = createTheme({
     ],
   },
   components: {
+    // Mantine Select/MultiSelect show a check icon for the selected option by default.
+    // We prefer a cleaner dropdown UI across the app.
+    Select: {
+      defaultProps: {
+        withCheckIcon: false,
+      },
+    },
+    MultiSelect: {
+      defaultProps: {
+        withCheckIcon: false,
+      },
+    },
+
     Paper: {
       defaultProps: {
         bg: "#111111",

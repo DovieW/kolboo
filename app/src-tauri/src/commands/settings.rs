@@ -7,6 +7,11 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
+#[cfg(all(desktop, target_os = "windows"))]
+fn is_windows_modifier_only_hotkey(hk: &HotkeyConfig) -> bool {
+    hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight")
+}
+
 /// Temporarily unregister all global shortcuts.
 /// Call this before capturing a new hotkey to prevent the shortcuts from intercepting key presses.
 #[cfg(desktop)]
@@ -14,6 +19,13 @@ use tauri_plugin_store::StoreExt;
 pub async fn unregister_shortcuts(app: AppHandle) -> Result<(), String> {
     let _guard = crate::shortcuts_lock::global_shortcut_lock().lock().await;
     log::info!("Temporarily unregistering all shortcuts for hotkey capture");
+
+    // Prevent modifier-only hotkeys (Windows hook) from firing while the UI is capturing.
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_modifier_hotkeys::set_enabled(false);
+    }
+
     let shortcut_manager = app.global_shortcut();
     shortcut_manager
         .unregister_all()
@@ -63,6 +75,13 @@ fn get_hotkey_from_store(
 #[tauri::command]
 pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     let _guard = crate::shortcuts_lock::global_shortcut_lock().lock().await;
+
+    // Hotkey capture ended; allow modifier-only hook hotkeys again.
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_modifier_hotkeys::set_enabled(true);
+    }
+
     // Read hotkeys from store.
     // - missing => default
     // - null => disabled
@@ -100,9 +119,33 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     // Collect shortcuts to register
     let mut shortcuts: Vec<Shortcut> = Vec::new();
     if let Some(hk) = toggle_hotkey {
-        shortcuts.push(hk.to_shortcut_or_default(HotkeyConfig::default_toggle));
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            // handled by Windows hook (not tauri-plugin-global-shortcut)
+        } else {
+            shortcuts.push(hk.to_shortcut_or_default(HotkeyConfig::default_toggle));
+        }
+
+        #[cfg(not(all(desktop, target_os = "windows")))]
+        {
+            shortcuts.push(hk.to_shortcut_or_default(HotkeyConfig::default_toggle));
+        }
     }
     if let Some(hk) = hold_hotkey {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            // handled by Windows hook
+        } else {
+            match hk.to_shortcut() {
+                Ok(sc) => shortcuts.push(sc),
+                Err(e) => log::warn!(
+                    "Invalid hold hotkey in settings store ({}); treating as disabled",
+                    e
+                ),
+            }
+        }
+
+        #[cfg(not(all(desktop, target_os = "windows")))]
         match hk.to_shortcut() {
             Ok(sc) => shortcuts.push(sc),
             Err(e) => log::warn!(
@@ -112,6 +155,20 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
         }
     }
     if let Some(hk) = paste_last_hotkey {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            // handled by Windows hook
+        } else {
+            match hk.to_shortcut() {
+                Ok(sc) => shortcuts.push(sc),
+                Err(e) => log::warn!(
+                    "Invalid paste-last hotkey in settings store ({}); treating as disabled",
+                    e
+                ),
+            }
+        }
+
+        #[cfg(not(all(desktop, target_os = "windows")))]
         match hk.to_shortcut() {
             Ok(sc) => shortcuts.push(sc),
             Err(e) => log::warn!(
