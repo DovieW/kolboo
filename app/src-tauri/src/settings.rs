@@ -56,12 +56,55 @@ impl Default for ManualProxySettings {
 }
 
 /// Persistent proxy settings.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustedCaCertFormat {
+    Pem,
+    Der,
+}
+
+impl Default for TrustedCaCertFormat {
+    fn default() -> Self {
+        Self::Pem
+    }
+}
+
+/// A user-provided CA certificate that should be trusted for outgoing HTTPS.
+///
+/// Stored in settings.json so it can be applied by reqwest at runtime.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TrustedCaCertificate {
+    /// Stable ID for list operations in the UI.
+    #[serde(default)]
+    pub id: String,
+    /// Original filename (for display only).
+    #[serde(default)]
+    pub file_name: String,
+    /// Encoding format used by reqwest when loading this certificate.
+    #[serde(default)]
+    pub format: TrustedCaCertFormat,
+    /// Raw certificate bytes, base64-encoded.
+    #[serde(default)]
+    pub data_base64: String,
+}
+
+/// Persistent proxy settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProxySettings {
     #[serde(default)]
     pub mode: ProxyMode,
     #[serde(default)]
     pub manual: ManualProxySettings,
+
+    /// Additional trusted CA certificates for HTTPS requests.
+    /// Prefer this over disabling TLS verification.
+    #[serde(default)]
+    pub trusted_ca_certificates: Vec<TrustedCaCertificate>,
+
+    /// DANGEROUS: if enabled, accept invalid TLS certificates (e.g. self-signed).
+    /// This weakens security and should only be used when required by your network.
+    #[serde(default)]
+    pub danger_accept_invalid_certs: bool,
 }
 
 impl Default for ProxySettings {
@@ -69,6 +112,8 @@ impl Default for ProxySettings {
         Self {
             mode: ProxyMode::System,
             manual: ManualProxySettings::default(),
+            trusted_ca_certificates: Vec::new(),
+            danger_accept_invalid_certs: false,
         }
     }
 }

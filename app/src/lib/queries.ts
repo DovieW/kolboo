@@ -989,6 +989,20 @@ export function useUpdateProxySettings() {
   });
 }
 
+// Save proxy settings to the local store without syncing the pipeline.
+// Useful for editing Manual fields before enabling Manual mode.
+export function useSaveProxySettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (proxySettings: ProxySettings) => {
+      await tauriAPI.updateProxySettings(proxySettings);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateLLMProvider() {
   const queryClient = useQueryClient();
   return useMutation({

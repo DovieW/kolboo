@@ -167,6 +167,15 @@ export type SettingsGuideState = "pending" | "skipped" | "completed";
 
 export type ProxyMode = "no_proxy" | "system" | "manual";
 
+export type TrustedCaCertFormat = "pem" | "der";
+
+export interface TrustedCaCertificate {
+  id: string;
+  file_name: string;
+  format: TrustedCaCertFormat;
+  data_base64: string;
+}
+
 export interface ManualProxySettings {
   /** Proxy URL applied to both http + https. Example: "http://127.0.0.1:8080" */
   proxy_url: string;
@@ -181,6 +190,9 @@ export interface ManualProxySettings {
 export interface ProxySettings {
   mode: ProxyMode;
   manual: ManualProxySettings;
+  trusted_ca_certificates: TrustedCaCertificate[];
+  /** When true, accept invalid TLS certs (including self-signed). */
+  danger_accept_invalid_certs: boolean;
 }
 
 export interface WindowsInternetProxySettings {
@@ -404,7 +416,45 @@ function normalizeProxySettings(value: unknown): ProxySettings {
   const v = value && typeof value === "object" ? (value as any) : ({} as any);
   const mode = normalizeProxyMode(v.mode);
   const manual = normalizeManualProxySettings(v.manual);
-  return { mode, manual };
+
+  const normalizeTrustedCaCertFormat = (
+    value: unknown
+  ): TrustedCaCertFormat => {
+    return value === "der" ? "der" : "pem";
+  };
+
+  const normalizeTrustedCaCertificate = (
+    value: unknown
+  ): TrustedCaCertificate | null => {
+    if (!value || typeof value !== "object") return null;
+    const x = value as any;
+    const id = typeof x.id === "string" ? x.id : "";
+    const file_name = typeof x.file_name === "string" ? x.file_name : "";
+    const format = normalizeTrustedCaCertFormat(x.format);
+    const data_base64 = typeof x.data_base64 === "string" ? x.data_base64 : "";
+    if (!id || !data_base64) return null;
+    return { id, file_name, format, data_base64 };
+  };
+
+  const trusted_ca_certificates: TrustedCaCertificate[] = Array.isArray(
+    v.trusted_ca_certificates
+  )
+    ? v.trusted_ca_certificates
+        .map(normalizeTrustedCaCertificate)
+        .filter((c): c is TrustedCaCertificate => c !== null)
+    : [];
+
+  const danger_accept_invalid_certs =
+    typeof v.danger_accept_invalid_certs === "boolean"
+      ? v.danger_accept_invalid_certs
+      : false;
+
+  return {
+    mode,
+    manual,
+    trusted_ca_certificates,
+    danger_accept_invalid_certs,
+  };
 }
 
 function normalizePlayingAudioHandling(value: unknown): PlayingAudioHandling {
@@ -1164,6 +1214,15 @@ export const tauriAPI = {
 
   async getSystemProxyInfo(): Promise<SystemProxyInfo> {
     return invoke<SystemProxyInfo>("get_system_proxy_info");
+  },
+
+  async loadTrustedCaCertificateFromFile(
+    path: string
+  ): Promise<TrustedCaCertificate> {
+    return invoke<TrustedCaCertificate>(
+      "load_trusted_ca_certificate_from_file",
+      { path }
+    );
   },
 
   /**

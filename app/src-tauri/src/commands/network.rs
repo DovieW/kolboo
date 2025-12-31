@@ -1,4 +1,5 @@
 use serde::Serialize;
+use crate::settings::{TrustedCaCertFormat, TrustedCaCertificate};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemProxyInfo {
@@ -164,4 +165,60 @@ pub fn get_system_proxy_info() -> SystemProxyInfo {
         env_no_proxy,
         windows_internet_settings: get_windows_internet_proxy_settings(),
     }
+}
+
+#[tauri::command]
+pub fn load_trusted_ca_certificate_from_file(path: String) -> Result<TrustedCaCertificate, String> {
+    use base64::Engine;
+    use std::path::Path;
+
+    let p = Path::new(&path);
+    let file_name = p
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let data = std::fs::read(p)
+        .map_err(|e| format!("Failed to read certificate file: {e}"))?;
+
+    if data.is_empty() {
+        return Err("Certificate file is empty".to_string());
+    }
+
+    // Defensive size limit (certs should be tiny).
+    const MAX_CERT_BYTES: usize = 1024 * 1024;
+    if data.len() > MAX_CERT_BYTES {
+        return Err(format!(
+            "Certificate file is too large ({} bytes).",
+            data.len()
+        ));
+    }
+
+    // Validate and detect format.
+    // NOTE: Avoid probing both parsers on arbitrary bytes; on Windows the
+    // underlying TLS stack can be less forgiving. We do a cheap content sniff
+    // first, then validate with the matching parser.
+    let looks_like_pem = data
+        .windows(b"BEGIN CERTIFICATE".len())
+        .any(|w| w == b"BEGIN CERTIFICATE");
+
+    let format = if looks_like_pem {
+        reqwest::Certificate::from_pem(&data)
+            .map(|_| TrustedCaCertFormat::Pem)
+            .map_err(|_| "Invalid PEM certificate".to_string())?
+    } else {
+        reqwest::Certificate::from_der(&data)
+            .map(|_| TrustedCaCertFormat::Der)
+            .map_err(|_| "Invalid DER certificate".to_string())?
+    };
+
+    let data_base64 = base64::engine::general_purpose::STANDARD.encode(&data);
+
+    Ok(TrustedCaCertificate {
+        id: uuid::Uuid::new_v4().to_string(),
+        file_name,
+        format,
+        data_base64,
+    })
 }

@@ -1483,6 +1483,7 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder.plugin(build_global_shortcut_plugin());
+        builder = builder.plugin(tauri_plugin_dialog::init());
     }
 
     #[cfg(target_os = "macos")]
@@ -1551,6 +1552,7 @@ pub fn run() {
             commands::config::sync_pipeline_config,
             // Network commands
             commands::network::get_system_proxy_info,
+            commands::network::load_trusted_ca_certificate_from_file,
             // VAD settings commands
             commands::config::get_vad_settings,
             commands::config::set_vad_settings,

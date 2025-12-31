@@ -3,9 +3,57 @@
 //! This module centralizes HTTP client construction so that settings like proxy
 //! configuration can be applied consistently across all providers.
 
-use crate::settings::{ProxyMode, ProxySettings};
-use reqwest::{Client, ClientBuilder, NoProxy, Proxy};
+use crate::settings::{ProxyMode, ProxySettings, TrustedCaCertFormat};
+use reqwest::{Certificate, Client, ClientBuilder, NoProxy, Proxy};
 use std::time::Duration;
+
+fn apply_trusted_ca_certificates(
+    mut builder: ClientBuilder,
+    proxy: &ProxySettings,
+) -> ClientBuilder {
+    use base64::Engine;
+
+    for cert in &proxy.trusted_ca_certificates {
+        let raw = cert.data_base64.trim();
+        if raw.is_empty() {
+            continue;
+        }
+
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(raw) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!(
+                    "Failed to decode trusted CA certificate {} ({}): {}",
+                    cert.id,
+                    cert.file_name,
+                    e
+                );
+                continue;
+            }
+        };
+
+        let parsed: Result<Certificate, reqwest::Error> = match cert.format {
+            TrustedCaCertFormat::Pem => Certificate::from_pem(&bytes),
+            TrustedCaCertFormat::Der => Certificate::from_der(&bytes),
+        };
+
+        match parsed {
+            Ok(c) => {
+                builder = builder.add_root_certificate(c);
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to load trusted CA certificate {} ({}): {}",
+                    cert.id,
+                    cert.file_name,
+                    e
+                );
+            }
+        }
+    }
+
+    builder
+}
 
 /// Apply proxy settings to a reqwest `ClientBuilder`.
 ///
@@ -57,7 +105,8 @@ pub fn apply_proxy_settings(
 /// Note: This does not set a default request timeout; call sites may still set
 /// per-request timeouts (preferred for LLM providers).
 pub fn build_http_client(proxy: &ProxySettings) -> Result<Client, String> {
-    let builder = Client::builder();
+    let builder = Client::builder().danger_accept_invalid_certs(proxy.danger_accept_invalid_certs);
+    let builder = apply_trusted_ca_certificates(builder, proxy);
     let builder = apply_proxy_settings(builder, proxy).map_err(|e| e.to_string())?;
     builder.build().map_err(|e| e.to_string())
 }
@@ -69,7 +118,10 @@ pub fn build_http_client_with_timeout(
     proxy: &ProxySettings,
     timeout: Duration,
 ) -> Result<Client, String> {
-    let builder = Client::builder().timeout(timeout);
+    let builder = Client::builder()
+        .timeout(timeout)
+        .danger_accept_invalid_certs(proxy.danger_accept_invalid_certs);
+    let builder = apply_trusted_ca_certificates(builder, proxy);
     let builder = apply_proxy_settings(builder, proxy).map_err(|e| e.to_string())?;
     builder.build().map_err(|e| e.to_string())
 }

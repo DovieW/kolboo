@@ -10,6 +10,7 @@
 		"core:window:allow-hide",
 		"core:window:allow-set-always-on-top",
 		"core:window:allow-start-dragging",
+		"dialog:default",
 		"opener:default",
 		"global-shortcut:default",
 		"store:default"
