@@ -39,6 +39,7 @@ impl AquavoiceSttProvider {
     /// * `api_key` - Aquavoice API key
     /// * `model` - Model to use (default: `avalon-v1-en`)
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(
         api_key: String,
         model: Option<String>,

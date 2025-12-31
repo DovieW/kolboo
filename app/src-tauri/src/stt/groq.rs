@@ -25,6 +25,7 @@ impl GroqSttProvider {
     /// * `api_key` - Groq API key
     /// * `model` - Model to use (e.g., "whisper-large-v3-turbo")
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))

@@ -39,6 +39,7 @@ impl DeepgramSttProvider {
     /// # Arguments
     /// * `api_key` - Deepgram API key
     /// * `model` - Model to use (e.g., "nova-2")
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))

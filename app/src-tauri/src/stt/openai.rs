@@ -31,6 +31,7 @@ impl OpenAiSttProvider {
     ///   - "gpt-4o-audio-preview" (default) - GPT-4o with audio input
     ///   - "gpt-4o-mini-audio-preview" - Smaller/faster GPT-4o audio
     ///   - "whisper-1" - Legacy Whisper API
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120)) // Longer timeout for GPT-4o

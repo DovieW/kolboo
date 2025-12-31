@@ -60,6 +60,7 @@ impl AssemblyAiSttProvider {
     /// - "universal" (default)
     /// - "slam-1"
     /// - "best" (legacy)
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             // AssemblyAI transcription is async; allow a longer HTTP timeout.

@@ -404,12 +404,6 @@ struct PipelineInner {
 }
 
 impl PipelineInner {
-    fn build_http_client(&self) -> Result<reqwest::Client, PipelineError> {
-        crate::network::build_http_client(&self.config.proxy_settings).map_err(|e| {
-            PipelineError::Config(format!("Failed to create HTTP client: {}", e))
-        })
-    }
-
     fn build_http_client_with_timeout(
         &self,
         timeout: Duration,
