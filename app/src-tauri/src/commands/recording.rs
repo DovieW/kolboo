@@ -24,6 +24,22 @@ enum TranscriptionRetentionUnit {
 }
 
 fn resolve_profile_for_foreground_app(cfg: &PipelineConfig) -> (Option<String>, Option<String>) {
+    // Distinguish between:
+    // - Unknown foreground app (can't determine): return no profile -> no chip in UI.
+    // - Known foreground app but no profile match: return explicit "default".
+    #[cfg(desktop)]
+    {
+        if crate::windows_apps::get_foreground_process_path().is_none() {
+            return (None, None);
+        }
+    }
+
+    #[cfg(not(desktop))]
+    {
+        // Non-desktop targets cannot reliably resolve a foreground app.
+        return (None, None);
+    }
+
     let profile = crate::pipeline::select_profile_for_foreground_app(&cfg.llm_config);
 
     if let Some(p) = profile {
@@ -420,6 +436,10 @@ pub async fn pipeline_stop_and_transcribe(
     }
 
     // Capture model info for persistence in history.
+    // Note: we intentionally start with no profile metadata in history.
+    // The overlay window can steal focus during stop, which can cause an incorrect
+    // "Default" profile to be recorded here. We'll update the entry once the
+    // pipeline actually transitions into Transcribing/Rewriting.
     let model_info = RequestModelInfo {
         stt_provider: Some(config.stt_provider.clone()),
         stt_model: config.stt_model.clone(),
@@ -429,8 +449,8 @@ pub async fn pipeline_stop_and_transcribe(
             None
         },
         llm_model: config.llm_config.model.clone(),
-        profile_id: profile_id.clone(),
-        profile_name: profile_name.clone(),
+        profile_id: None,
+        profile_name: None,
     };
 
     // Create an in-progress history entry so the History view shows a running request.
@@ -453,11 +473,23 @@ pub async fn pipeline_stop_and_transcribe(
     {
         let app_clone = app.clone();
         let pipeline_clone = pipeline.inner().clone();
+        let request_id_for_history = active_request_id.clone();
         tauri::async_runtime::spawn(async move {
             let start = Instant::now();
             loop {
                 match pipeline_clone.state() {
                     PipelineState::Transcribing | PipelineState::Rewriting => {
+                        // Now that transcription has begun, update history with the best-available
+                        // profile resolution. This avoids showing a "Default" chip for unknown cases.
+                        if let Some(req_id) = request_id_for_history.as_deref() {
+                            let cfg = pipeline_clone.config();
+                            let (pid, pname) = resolve_profile_for_foreground_app(&cfg);
+                            if let Some(history) = app_clone.try_state::<HistoryStorage>() {
+                                let _ = history.set_request_profile(req_id, pid, pname);
+                                let _ = app_clone.emit("history-changed", ());
+                            }
+                        }
+
                         let _ = app_clone.emit("pipeline-transcription-started", ());
                         break;
                     }
@@ -715,7 +747,20 @@ pub async fn pipeline_retry_transcription(
 
     // Start a *new* request log for the retry attempt.
     let config = pipeline.config();
-    let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
+    // Use the same profile as the original request (if we can find it).
+    // This avoids retry accidentally using Default just because the foreground app changed.
+    let original_profile_id: Option<String> = app
+        .try_state::<HistoryStorage>()
+        .and_then(|history| history.get_by_id(&request_id).ok().flatten())
+        .and_then(|entry| entry.profile_id);
+
+    // Preserve "unknown" as None so the UI doesn't show a Default chip unless it was
+    // explicitly recorded as default on the original entry.
+    let (profile_id, profile_name) = if original_profile_id.is_none() {
+        (None, None)
+    } else {
+        resolve_profile_by_id(&config, original_profile_id.as_deref())
+    };
 
     let new_request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
         log_store.start_request(config.stt_provider.clone(), config.stt_model.clone())
@@ -757,7 +802,10 @@ pub async fn pipeline_retry_transcription(
     let _ = app.emit("pipeline-transcription-started", ());
 
     // Run the retry transcription (STT + optional LLM)
-    let result = match pipeline.transcribe_wav_bytes_detailed(wav.clone()).await {
+    let result = match pipeline
+        .transcribe_wav_bytes_detailed_for_profile(wav.clone(), profile_id.as_deref())
+        .await
+    {
         Ok(r) => r,
         Err(PipelineError::Cancelled) => {
             #[cfg(desktop)]

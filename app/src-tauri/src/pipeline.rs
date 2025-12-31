@@ -1494,6 +1494,19 @@ impl SharedPipeline {
         &self,
         wav_bytes: Vec<u8>,
     ) -> Result<TranscriptionResult, PipelineError> {
+        self.transcribe_wav_bytes_detailed_for_profile(wav_bytes, None)
+            .await
+    }
+
+    /// Transcribe provided WAV bytes, optionally forcing a specific prompt profile.
+    ///
+    /// When `profile_id_override` is provided, we attempt to use that per-program profile
+    /// (by id) instead of selecting based on the current foreground application.
+    pub async fn transcribe_wav_bytes_detailed_for_profile(
+        &self,
+        wav_bytes: Vec<u8>,
+        profile_id_override: Option<&str>,
+    ) -> Result<TranscriptionResult, PipelineError> {
         // Phase 1: Resolve providers/config under lock.
         let (stt_provider, llm_provider, llm_prompts, llm_timeout, retry_config, timeout, cancel_token) = {
             let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
@@ -1523,7 +1536,40 @@ impl SharedPipeline {
             inner.cancel_token = Some(cancel_token.clone());
 
             let llm_config = inner.config.llm_config.clone();
-            let active_profile = select_profile_for_foreground_app(&llm_config);
+            let active_profile = profile_id_override
+                .and_then(|id| {
+                    if id == "default" {
+                        None
+                    } else {
+                        Some(id)
+                    }
+                })
+                .and_then(|id| {
+                    llm_config
+                        .program_prompt_profiles
+                        .iter()
+                        .find(|p| p.id == id)
+                        .cloned()
+                })
+                .or_else(|| select_profile_for_foreground_app(&llm_config));
+
+            // Persist the profile being used for this retry attempt into the request log, if available.
+            if let Some(store) = inner.config.request_log_store.as_ref() {
+                let (profile_id, profile_name) = if let Some(p) = active_profile.as_ref() {
+                    (Some(p.id.clone()), Some(p.name.clone()))
+                } else if profile_id_override == Some("default") {
+                    (Some("default".to_string()), Some("Default".to_string()))
+                } else if let Some(id) = profile_id_override {
+                    (Some(id.to_string()), None)
+                } else {
+                    (Some("default".to_string()), Some("Default".to_string()))
+                };
+
+                store.with_current(|log| {
+                    log.profile_id = profile_id;
+                    log.profile_name = profile_name;
+                });
+            }
             let llm_prompts = active_profile
                 .as_ref()
                 .map(|p| p.prompts.clone())

@@ -310,6 +310,45 @@ impl HistoryStorage {
         Ok(entries)
     }
 
+    /// Get a single history entry by request id.
+    pub fn get_by_id(&self, request_id: &str) -> Result<Option<HistoryEntry>, String> {
+        let data = self
+            .data
+            .read()
+            .map_err(|e| format!("Failed to read history: {}", e))?;
+
+        Ok(data
+            .entries
+            .iter()
+            .find(|e| e.id == request_id)
+            .cloned())
+    }
+
+    /// Update the stored profile metadata for an existing history entry.
+    ///
+    /// This is useful when we create an in-progress entry early, then later
+    /// learn the effective profile used once transcription actually begins.
+    pub fn set_request_profile(
+        &self,
+        request_id: &str,
+        profile_id: Option<String>,
+        profile_name: Option<String>,
+    ) -> Result<(), String> {
+        {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            if let Some(entry) = data.entries.iter_mut().find(|e| e.id == request_id) {
+                entry.profile_id = profile_id;
+                entry.profile_name = profile_name;
+            }
+        }
+
+        self.save()
+    }
+
     /// Query history with server-side filtering and pagination.
     ///
     /// This is primarily used by the UI to avoid transferring the entire history

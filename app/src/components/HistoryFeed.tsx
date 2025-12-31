@@ -1628,13 +1628,15 @@ export function HistoryFeed({
                   </div>
                   <div className="history-actions">
                     {(() => {
-                      const label =
-                        entry.profile_name ??
-                        (entry.profile_id === "default"
-                          ? "Default"
-                          : entry.profile_id);
+                      const label = entry.profile_name ?? entry.profile_id;
 
-                      return label ? (
+                      // Only show a chip for non-default profiles.
+                      // Default should be the absence of a chip.
+                      const isDefault =
+                        entry.profile_id === "default" ||
+                        (label?.toLowerCase?.() ?? "") === "default";
+
+                      return label && !isDefault ? (
                         <Badge size="xs" variant="light" color="gray">
                           {label}
                         </Badge>
