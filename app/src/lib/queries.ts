@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import {
   type AppSettings,
@@ -194,6 +199,7 @@ export function useUpdateToggleHotkey() {
     mutationFn: async (hotkey: HotkeyConfig | null) => {
       // Get current settings for validation
       const settings = await tauriAPI.getSettings();
+      const previous = settings.toggle_hotkey;
 
       // Validate no duplicate (unless unsetting)
       if (hotkey) {
@@ -212,7 +218,21 @@ export function useUpdateToggleHotkey() {
       // Save and re-register
       await tauriAPI.updateToggleHotkey(hotkey);
       await tauriAPI.unregisterShortcuts();
-      await tauriAPI.registerShortcuts();
+
+      try {
+        await tauriAPI.registerShortcuts();
+      } catch (error) {
+        // Defensive: don't leave the user with no registered shortcuts.
+        // Revert setting and restore previous registrations.
+        try {
+          await tauriAPI.updateToggleHotkey(previous);
+          await tauriAPI.unregisterShortcuts();
+          await tauriAPI.registerShortcuts();
+        } catch (restoreError) {
+          console.error("Failed to restore previous toggle hotkey:", restoreError);
+        }
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -226,6 +246,7 @@ export function useUpdateHoldHotkey() {
     mutationFn: async (hotkey: HotkeyConfig | null) => {
       // Get current settings for validation
       const settings = await tauriAPI.getSettings();
+      const previous = settings.hold_hotkey;
 
       // Validate no duplicate (unless unsetting)
       if (hotkey) {
@@ -244,7 +265,19 @@ export function useUpdateHoldHotkey() {
       // Save and re-register
       await tauriAPI.updateHoldHotkey(hotkey);
       await tauriAPI.unregisterShortcuts();
-      await tauriAPI.registerShortcuts();
+
+      try {
+        await tauriAPI.registerShortcuts();
+      } catch (error) {
+        try {
+          await tauriAPI.updateHoldHotkey(previous);
+          await tauriAPI.unregisterShortcuts();
+          await tauriAPI.registerShortcuts();
+        } catch (restoreError) {
+          console.error("Failed to restore previous hold hotkey:", restoreError);
+        }
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -258,6 +291,7 @@ export function useUpdatePasteLastHotkey() {
     mutationFn: async (hotkey: HotkeyConfig | null) => {
       // Get current settings for validation
       const settings = await tauriAPI.getSettings();
+      const previous = settings.paste_last_hotkey;
 
       // Validate no duplicate (unless unsetting)
       if (hotkey) {
@@ -276,7 +310,19 @@ export function useUpdatePasteLastHotkey() {
       // Save and re-register
       await tauriAPI.updatePasteLastHotkey(hotkey);
       await tauriAPI.unregisterShortcuts();
-      await tauriAPI.registerShortcuts();
+
+      try {
+        await tauriAPI.registerShortcuts();
+      } catch (error) {
+        try {
+          await tauriAPI.updatePasteLastHotkey(previous);
+          await tauriAPI.unregisterShortcuts();
+          await tauriAPI.registerShortcuts();
+        } catch (restoreError) {
+          console.error("Failed to restore previous paste-last hotkey:", restoreError);
+        }
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -869,6 +915,7 @@ export function useHistoryPage(params: HistoryPageQuery) {
         pageSize,
         includeUsageCounts,
       }),
+    placeholderData: keepPreviousData,
     // Keep things feeling responsive while typing filters.
     refetchOnWindowFocus: true,
   });

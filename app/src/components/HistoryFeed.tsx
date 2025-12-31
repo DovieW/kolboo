@@ -765,37 +765,10 @@ export function HistoryFeed({
     selectedLlmModelKeys,
   ]);
 
-  if (isLoading) {
-    return (
-      <div className="animate-in animate-in-delay-2">
-        <div className="section-header">
-          <span className="section-title section-title--no-accent">
-            History
-          </span>
-        </div>
-        <div className="empty-state">
-          <p className="empty-state-text">Loading history...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="animate-in animate-in-delay-2">
-        <div className="section-header">
-          <span className="section-title section-title--no-accent">
-            History
-          </span>
-        </div>
-        <div className="empty-state">
-          <p className="empty-state-text" style={{ color: "#ef4444" }}>
-            Failed to load history
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Important UX detail:
+  // keep the filter input mounted even while the query is refetching,
+  // otherwise typing can cause focus loss / flashing.
+  const isInitialLoading = isLoading && !historyPage;
 
   const groupedHistory = groupHistoryByDate(pageHistory);
 
@@ -1573,7 +1546,17 @@ export function HistoryFeed({
         </Stack>
       </Drawer>
 
-      {totalFilteredCount === 0 ? (
+      {isInitialLoading ? (
+        <div className="empty-state">
+          <p className="empty-state-text">Loading history...</p>
+        </div>
+      ) : error ? (
+        <div className="empty-state">
+          <p className="empty-state-text" style={{ color: "#ef4444" }}>
+            Failed to load history
+          </p>
+        </div>
+      ) : totalFilteredCount === 0 ? (
         <div className="empty-state">
           <MessageSquare className="empty-state-icon" />
           {totalHistoryCount === 0 ? (
