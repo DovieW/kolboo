@@ -332,6 +332,18 @@ pub struct PipelineConfig {
     // ------------------------------------------------------------------------
     /// If enabled, run an offline VAD scan at stop-time and skip STT when no speech is detected.
     pub quiet_audio_require_speech: bool,
+
+    // ------------------------------------------------------------------------
+    // Capture behavior (Hot Mic + recovery)
+    // ------------------------------------------------------------------------
+    /// When enabled, keep the input stream open while idle and maintain a rolling pre-roll
+    /// buffer to prepend when recording starts.
+    pub hot_mic_enabled: bool,
+    /// How much audio to keep before record start (milliseconds).
+    pub hot_mic_pre_roll_ms: u32,
+    /// When enabled, watchdog the mic stream and attempt auto-recovery (restart/rebind)
+    /// on hangs/disconnects.
+    pub mic_auto_recover_enabled: bool,
     /// LLM formatting configuration
     pub llm_config: LlmConfig,
     /// API keys for all configured LLM providers (provider id -> key)
@@ -375,6 +387,10 @@ impl Default for PipelineConfig {
             audio_noise_suppression_enabled: false,
 
             quiet_audio_require_speech: false,
+
+            hot_mic_enabled: false,
+            hot_mic_pre_roll_ms: 1500,
+            mic_auto_recover_enabled: false,
 
             llm_config: LlmConfig::default(),
             llm_api_keys: HashMap::new(),
@@ -786,7 +802,7 @@ impl SharedPipeline {
         let input_device_name = inner.config.input_device_name.clone();
         match inner
             .audio_capture
-            .start_with_device_name(max_duration, input_device_name.as_deref())
+            .start_recording_session(max_duration, input_device_name.as_deref())
         {
             Ok(()) => {
                 inner.state = PipelineState::Recording;
@@ -1819,6 +1835,18 @@ impl SharedPipeline {
         inner.initialize_providers(&config);
         // Update VAD config on audio capture
         inner.audio_capture.set_vad_config(config.vad_config);
+
+        // Apply capture behavior (Hot Mic + auto-recovery).
+        // Safe to call while recording: it won't stop the stream mid-session.
+        inner
+            .audio_capture
+            .set_capture_behavior(
+                config.hot_mic_enabled,
+                config.hot_mic_pre_roll_ms,
+                config.mic_auto_recover_enabled,
+                config.input_device_name.as_deref(),
+            )
+            .map_err(PipelineError::AudioCapture)?;
         log::info!("Pipeline configuration updated");
         Ok(())
     }
@@ -1884,7 +1912,7 @@ impl SharedPipeline {
 
             // Stop audio capture if recording
             if inner.state == PipelineState::Recording {
-                inner.audio_capture.stop();
+                inner.audio_capture.stop_recording();
             }
 
             inner.reset_to_idle();

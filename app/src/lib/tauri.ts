@@ -358,6 +358,14 @@ export interface AppSettings {
   // Extra protection: if enabled, also require that VAD detects speech.
   quiet_audio_require_speech: boolean;
 
+  // Capture behavior (Hot Mic + recovery)
+  // When enabled, keep the microphone stream open while idle and maintain a rolling pre-roll.
+  hot_mic_enabled: boolean;
+  // How much audio to keep before record start (ms). Only used when hot_mic_enabled is true.
+  hot_mic_pre_roll_ms: number;
+  // When enabled, watchdog the mic stream and attempt auto-recovery on hangs/disconnects.
+  mic_auto_recover_enabled: boolean;
+
   // Experimental: noise gate threshold (dBFS). null means off.
   noise_gate_threshold_dbfs: number | null;
 
@@ -1040,7 +1048,7 @@ export const tauriAPI = {
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
       audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: await (async () => {
+      accent_color: await(async () => {
         const raw = (await store.get<string | null>("accent_color")) ?? null;
         const normalized = normalizeHexColor(raw);
 
@@ -1118,7 +1126,13 @@ export const tauriAPI = {
       quiet_audio_require_speech:
         (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
 
-      noise_gate_threshold_dbfs: await (async () => {
+      hot_mic_enabled: (await store.get<boolean>("hot_mic_enabled")) ?? false,
+      hot_mic_pre_roll_ms:
+        (await store.get<number>("hot_mic_pre_roll_ms")) ?? 1500,
+      mic_auto_recover_enabled:
+        (await store.get<boolean>("mic_auto_recover_enabled")) ?? false,
+
+      noise_gate_threshold_dbfs: await(async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -1157,7 +1171,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -1179,14 +1193,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })()),
+      })(),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -1200,7 +1214,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })()),
+      })(),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
@@ -1535,6 +1549,25 @@ export const tauriAPI = {
   async updateQuietAudioRequireSpeech(enabled: boolean): Promise<void> {
     const store = await getStore();
     await store.set("quiet_audio_require_speech", enabled);
+    await store.save();
+  },
+
+  async updateHotMicEnabled(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("hot_mic_enabled", !!enabled);
+    await store.save();
+  },
+
+  async updateHotMicPreRollMs(ms: number): Promise<void> {
+    const store = await getStore();
+    const normalized = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
+    await store.set("hot_mic_pre_roll_ms", normalized);
+    await store.save();
+  },
+
+  async updateMicAutoRecoverEnabled(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("mic_auto_recover_enabled", !!enabled);
     await store.save();
   },
 

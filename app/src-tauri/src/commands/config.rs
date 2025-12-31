@@ -487,6 +487,29 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
             if t.is_empty() || t == "default" { None } else { Some(t) }
         });
 
+    // Capture behavior (Hot Mic + recovery)
+    let hot_mic_enabled: bool = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("hot_mic_enabled"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(false);
+
+    let hot_mic_pre_roll_ms: u32 = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("hot_mic_pre_roll_ms"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(1500)
+        .min(5000);
+
+    let mic_auto_recover_enabled: bool = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("mic_auto_recover_enabled"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(false);
+
     // Read quiet-audio gate settings from store
     let default_pipeline_config = PipelineConfig::default();
     let quiet_audio_gate_enabled: bool = app
@@ -619,6 +642,10 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         audio_noise_suppression_enabled,
 
         quiet_audio_require_speech,
+
+        hot_mic_enabled,
+        hot_mic_pre_roll_ms,
+        mic_auto_recover_enabled,
 
         llm_config: crate::llm::LlmConfig {
             enabled: llm_enabled,

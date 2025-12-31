@@ -225,6 +225,14 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         false,
     );
 
+    // Capture behavior (Hot Mic + recovery)
+    // - hot_mic_enabled: keep the input stream open while idle and maintain a rolling pre-roll
+    // - hot_mic_pre_roll_ms: pre-roll duration (ms) to prepend at record start
+    // - mic_auto_recover_enabled: watchdog the stream and attempt restart on hangs/disconnects
+    set_default("hot_mic_enabled", json!(false), false);
+    set_default("hot_mic_pre_roll_ms", json!(1500u32), false);
+    set_default("mic_auto_recover_enabled", json!(false), false);
+
     // Audio + quiet-recording gating.
     set_default(
         "quiet_audio_gate_enabled",
@@ -2354,11 +2362,25 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         })
     };
 
+    // Microphone capture behavior.
+    // - hot_mic_enabled: keep the input stream open while idle and maintain a rolling pre-roll
+    // - hot_mic_pre_roll_ms: pre-roll duration (ms) to prepend at record start
+    // - mic_auto_recover_enabled: watchdog the stream and attempt restart on hangs/disconnects
+    let hot_mic_enabled: bool = get_setting_from_store(app, "hot_mic_enabled", false);
+    let hot_mic_pre_roll_ms: u32 =
+        get_setting_from_store(app, "hot_mic_pre_roll_ms", 1500u32).min(5000);
+    let mic_auto_recover_enabled: bool = get_setting_from_store(app, "mic_auto_recover_enabled", false);
+
     let proxy_settings: settings::ProxySettings =
         get_setting_from_store(app, "proxy_settings", settings::ProxySettings::default());
 
     let config = pipeline::PipelineConfig {
         input_device_name,
+
+        hot_mic_enabled,
+        hot_mic_pre_roll_ms,
+        mic_auto_recover_enabled,
+
         stt_provider,
         stt_api_key,
         stt_api_keys,

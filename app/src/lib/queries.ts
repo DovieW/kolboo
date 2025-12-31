@@ -496,6 +496,45 @@ export function useUpdateQuietAudioRequireSpeech() {
   });
 }
 
+export function useUpdateHotMicEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateHotMicEnabled(enabled);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateHotMicPreRollMs() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ms: number) => {
+      await tauriAPI.updateHotMicPreRollMs(ms);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateMicAutoRecoverEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateMicAutoRecoverEnabled(enabled);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateAudioDownmixToMono() {
   const queryClient = useQueryClient();
   return useMutation({

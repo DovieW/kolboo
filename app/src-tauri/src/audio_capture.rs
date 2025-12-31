@@ -12,7 +12,7 @@ use hound::{WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::sync::mpsc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
 
@@ -303,6 +303,26 @@ impl AudioBuffer {
         }
     }
 
+    /// Update the buffer's format (sample rate + channels) without clearing samples.
+    ///
+    /// This is primarily used by long-running streams (Hot Mic) when the underlying
+    /// device is restarted.
+    pub fn set_format(&mut self, sample_rate: u32, channels: u16) {
+        self.sample_rate = sample_rate;
+        self.channels = channels.max(1);
+    }
+
+    /// Reset the buffer for a new recording session.
+    ///
+    /// Clears samples and sets the max duration (used for trimming during capture).
+    pub fn reset_for_recording(&mut self, max_duration_secs: f32) {
+        self.samples.clear();
+        self.max_duration_secs = max_duration_secs.max(0.0);
+        let capacity =
+            (self.sample_rate as f32 * self.max_duration_secs * self.channels as f32) as usize;
+        self.samples.reserve(capacity.saturating_sub(self.samples.capacity()));
+    }
+
     /// Append samples to the buffer
     pub fn append(&mut self, new_samples: &[f32]) {
         self.samples.extend_from_slice(new_samples);
@@ -500,6 +520,112 @@ impl AudioBuffer {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn channels(&self) -> u16 {
         self.channels
+    }
+}
+
+/// A fixed-capacity rolling buffer for pre-roll audio.
+///
+/// Stores the last N *samples* (interleaved f32 PCM). This is designed to be
+/// cheap to push to from the CPAL input callback.
+#[derive(Debug, Clone)]
+struct RollingBuffer {
+    data: Vec<f32>,
+    write_pos: usize,
+    filled: usize,
+}
+
+impl RollingBuffer {
+    fn new(capacity_samples: usize) -> Self {
+        let cap = capacity_samples;
+        Self {
+            data: vec![0.0; cap],
+            write_pos: 0,
+            filled: 0,
+        }
+    }
+
+    fn capacity(&self) -> usize {
+        self.data.len()
+    }
+
+    fn clear(&mut self) {
+        self.write_pos = 0;
+        self.filled = 0;
+    }
+
+    fn set_capacity(&mut self, capacity_samples: usize) {
+        if capacity_samples == self.capacity() {
+            return;
+        }
+
+        if capacity_samples == 0 {
+            self.data.clear();
+            self.write_pos = 0;
+            self.filled = 0;
+            return;
+        }
+
+        let snapshot = self.snapshot();
+        let keep = if snapshot.len() > capacity_samples {
+            snapshot[snapshot.len() - capacity_samples..].to_vec()
+        } else {
+            snapshot
+        };
+
+        let mut data = vec![0.0; capacity_samples];
+        let n = keep.len().min(capacity_samples);
+        data[..n].copy_from_slice(&keep[..n]);
+
+        self.data = data;
+        self.filled = n;
+        self.write_pos = if self.filled < self.capacity() { self.filled } else { 0 };
+    }
+
+    fn push(&mut self, samples: &[f32]) {
+        let cap = self.capacity();
+        if cap == 0 || samples.is_empty() {
+            return;
+        }
+
+        // Fast path: if input is larger than the whole buffer, keep only the tail.
+        if samples.len() >= cap {
+            let tail = &samples[samples.len() - cap..];
+            self.data.copy_from_slice(tail);
+            self.write_pos = 0;
+            self.filled = cap;
+            return;
+        }
+
+        for &s in samples {
+            self.data[self.write_pos] = s;
+            self.write_pos += 1;
+            if self.write_pos >= cap {
+                self.write_pos = 0;
+            }
+            if self.filled < cap {
+                self.filled += 1;
+            }
+        }
+    }
+
+    fn snapshot(&self) -> Vec<f32> {
+        let cap = self.capacity();
+        if self.filled == 0 || cap == 0 {
+            return Vec::new();
+        }
+
+        if self.filled < cap {
+            // Not wrapped yet; oldest is at 0.
+            return self.data[..self.filled].to_vec();
+        }
+
+        // Wrapped / full: oldest is at write_pos.
+        let mut out = Vec::with_capacity(cap);
+        out.extend_from_slice(&self.data[self.write_pos..]);
+        if self.write_pos > 0 {
+            out.extend_from_slice(&self.data[..self.write_pos]);
+        }
+        out
     }
 }
 
@@ -732,10 +858,20 @@ struct CaptureHandle {
 /// with cpal::Stream. The captured audio is stored in a shared buffer.
 pub struct AudioCapture {
     buffer: Arc<StdMutex<AudioBuffer>>,
+    pre_roll: Arc<StdMutex<RollingBuffer>>,
     capture_handle: Option<CaptureHandle>,
     sample_rate: u32,
     channels: u16,
     vad_config: VadAutoStopConfig,
+
+    // Capture behavior settings (synced from PipelineConfig)
+    hot_mic_enabled: bool,
+    pre_roll_ms: Arc<AtomicU32>,
+    mic_auto_recover_enabled: Arc<AtomicBool>,
+    desired_device_name: Arc<StdMutex<Option<String>>>,
+
+    // Recording session state shared with the capture thread.
+    recording_active: Arc<AtomicBool>,
 
     // Most recent realtime level stats (for UI metering / overlay waveform).
     level_meter: Arc<AudioLevelMeter>,
@@ -749,10 +885,17 @@ impl AudioCapture {
     pub fn new() -> Self {
         Self {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
+            pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
             sample_rate: 44100,
             channels: 1,
             vad_config: VadAutoStopConfig::default(),
+
+            hot_mic_enabled: false,
+            pre_roll_ms: Arc::new(AtomicU32::new(1500)),
+            mic_auto_recover_enabled: Arc::new(AtomicBool::new(false)),
+            desired_device_name: Arc::new(StdMutex::new(None)),
+            recording_active: Arc::new(AtomicBool::new(false)),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
         }
@@ -762,10 +905,17 @@ impl AudioCapture {
     pub fn with_vad_config(vad_config: VadAutoStopConfig) -> Self {
         Self {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
+            pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
             sample_rate: 44100,
             channels: 1,
             vad_config,
+
+            hot_mic_enabled: false,
+            pre_roll_ms: Arc::new(AtomicU32::new(1500)),
+            mic_auto_recover_enabled: Arc::new(AtomicBool::new(false)),
+            desired_device_name: Arc::new(StdMutex::new(None)),
+            recording_active: Arc::new(AtomicBool::new(false)),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
         }
@@ -797,6 +947,214 @@ impl AudioCapture {
         self.vad_config = config;
     }
 
+    /// Update capture behavior settings (Hot Mic + auto-recovery) and apply them.
+    ///
+    /// - When `hot_mic_enabled` is true, the input stream is kept open while idle.
+    /// - When false, the stream is only opened on an explicit recording start.
+    pub fn set_capture_behavior(
+        &mut self,
+        hot_mic_enabled: bool,
+        hot_mic_pre_roll_ms: u32,
+        mic_auto_recover_enabled: bool,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
+        self.hot_mic_enabled = hot_mic_enabled;
+        self.pre_roll_ms
+            .store(hot_mic_pre_roll_ms.min(5000), Ordering::Relaxed);
+        self.mic_auto_recover_enabled
+            .store(mic_auto_recover_enabled, Ordering::Relaxed);
+
+        // Update desired device name for potential restarts.
+        let desired_name = input_device_name
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "default")
+            .map(|s| s.to_string());
+        if let Ok(mut lock) = self.desired_device_name.lock() {
+            *lock = desired_name;
+        }
+
+        if hot_mic_enabled {
+            // Keep the stream open while idle.
+            self.ensure_stream_running(input_device_name)?;
+        } else {
+            // If we are not recording, close the stream to match push-to-talk behavior.
+            if !self.recording_active.load(Ordering::Relaxed) {
+                self.stop();
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Start a recording session.
+    ///
+    /// - In Hot Mic mode, this reuses the always-on stream and prepends the rolling pre-roll.
+    /// - In push-to-talk mode, this starts a new stream and records normally.
+    pub fn start_recording_session(
+        &mut self,
+        max_duration_secs: f32,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
+        if self.hot_mic_enabled {
+            self.ensure_stream_running(input_device_name)?;
+            self.begin_recording_with_pre_roll(max_duration_secs);
+            return Ok(());
+        }
+
+        // Push-to-talk: start a new capture stream and record.
+        self.start_with_device_name(max_duration_secs, input_device_name)
+    }
+
+    fn begin_recording_with_pre_roll(&mut self, max_duration_secs: f32) {
+        // Snapshot pre-roll first (avoid holding lock while mutating recording buffer).
+        let pre_roll = self
+            .pre_roll
+            .lock()
+            .map(|b| b.snapshot())
+            .unwrap_or_default();
+
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.reset_for_recording(max_duration_secs);
+            if !pre_roll.is_empty() {
+                buf.append(&pre_roll);
+            }
+        }
+
+        self.recording_active.store(true, Ordering::Relaxed);
+    }
+
+    /// Stop recording. In Hot Mic mode, keeps the stream open.
+    pub fn stop_recording(&mut self) {
+        self.recording_active.store(false, Ordering::Relaxed);
+        if !self.hot_mic_enabled {
+            self.stop();
+        }
+    }
+
+    fn ensure_stream_running(
+        &mut self,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
+        if self.capture_handle.is_some() {
+            // Stream already running; ensure pre-roll buffer capacity matches current config.
+            let pre_ms = self.pre_roll_ms.load(Ordering::Relaxed) as f32;
+            let (sr, ch) = self
+                .buffer
+                .lock()
+                .map(|b| (b.sample_rate(), b.channels()))
+                .unwrap_or((self.sample_rate, self.channels));
+            let cap_samples = ((sr as f32 * (pre_ms / 1000.0) * ch as f32) as usize).min(10_000_000);
+            if let Ok(mut pr) = self.pre_roll.lock() {
+                pr.set_capacity(cap_samples);
+            }
+            return Ok(());
+        }
+
+        // Start a stream in "armed" mode (recording_active=false).
+        // Reuse the existing device selection logic in start_with_device_name but
+        // do not mark recording as active.
+        self.start_stream_only(input_device_name)
+    }
+
+    fn start_stream_only(&mut self, input_device_name: Option<&str>) -> Result<(), AudioCaptureError> {
+        // Stop any existing stream (defensive)
+        self.stop();
+
+        let host = cpal::default_host();
+        let desired_name = input_device_name
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "default");
+
+        let mut selected: Option<cpal::Device> = None;
+        if let Some(name) = desired_name {
+            if let Ok(devices) = host.input_devices() {
+                for d in devices {
+                    let Ok(n) = d.description() else { continue };
+                    let n = n.to_string();
+                    if n == name || n.contains(name) {
+                        selected = Some(d);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let device = match selected {
+            Some(d) => d,
+            None => host
+                .default_input_device()
+                .ok_or(AudioCaptureError::NoInputDevice)?,
+        };
+
+        let config = device
+            .default_input_config()
+            .map_err(|e| AudioCaptureError::DeviceConfig(e.to_string()))?;
+
+        self.sample_rate = config.sample_rate();
+        self.channels = config.channels().max(1);
+
+        // Update pre-roll buffer capacity based on current stream format.
+        let pre_ms = self.pre_roll_ms.load(Ordering::Relaxed) as f32;
+        let cap_samples =
+            ((self.sample_rate as f32 * (pre_ms / 1000.0) * self.channels as f32) as usize)
+                .min(10_000_000);
+        if let Ok(mut pr) = self.pre_roll.lock() {
+            pr.set_capacity(cap_samples);
+            pr.clear();
+        }
+
+        // Ensure the recording buffer format matches. Keep max_duration as-is for now.
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.set_format(self.sample_rate, self.channels);
+        }
+
+        // Prepare shared state for the capture thread.
+        self.recording_active.store(false, Ordering::Relaxed);
+
+        let buffer_clone = self.buffer.clone();
+        let pre_roll_clone = self.pre_roll.clone();
+        let recording_active = self.recording_active.clone();
+        let meter = self.level_meter.clone();
+        let waveform_meter = self.waveform_meter.clone();
+
+        let (command_tx, command_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let sample_format = config.sample_format();
+        let stream_config: cpal::StreamConfig = config.into();
+        let vad_config = self.vad_config.clone();
+        let pre_roll_ms = self.pre_roll_ms.clone();
+        let auto_recover = self.mic_auto_recover_enabled.clone();
+        let desired_device_name = self.desired_device_name.clone();
+
+        // Spawn capture thread
+        let thread_handle = thread::spawn(move || {
+            run_capture_thread(
+                device,
+                stream_config,
+                sample_format,
+                buffer_clone,
+                pre_roll_clone,
+                recording_active,
+                pre_roll_ms,
+                meter,
+                waveform_meter,
+                command_rx,
+                event_tx,
+                vad_config,
+                auto_recover,
+                desired_device_name,
+            )
+        });
+
+        self.capture_handle = Some(CaptureHandle {
+            command_tx,
+            event_rx,
+            thread_handle,
+        });
+
+        Ok(())
+    }
+
     /// Get the current VAD configuration
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn vad_config(&self) -> &VadAutoStopConfig {
@@ -821,103 +1179,14 @@ impl AudioCapture {
         max_duration_secs: f32,
         input_device_name: Option<&str>,
     ) -> Result<(), AudioCaptureError> {
-        // Stop any existing recording
-        self.stop();
+        // Reuse the stream-only path and then enable recording.
+        self.start_stream_only(input_device_name)?;
 
-        // Get device info first (on main thread)
-        let host = cpal::default_host();
-
-        let desired_name = input_device_name
-            .map(str::trim)
-            .filter(|s| !s.is_empty() && *s != "default");
-
-        let mut selected: Option<cpal::Device> = None;
-        if let Some(name) = desired_name {
-            if let Ok(devices) = host.input_devices() {
-                for d in devices {
-                    let Ok(n) = d.description() else { continue };
-                    let n = n.to_string();
-                    // Backwards-compatible matching: older settings may have stored just the
-                    // plain device name (cpal `name()`), while newer CPAL versions recommend
-                    // using `description()`.
-                    if n == name || n.contains(name) {
-                        selected = Some(d);
-                        break;
-                    }
-                }
-            }
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.reset_for_recording(max_duration_secs);
         }
 
-        let device = match selected {
-            Some(d) => {
-                log::info!("Using selected input device: {}", desired_name.unwrap_or("<unknown>"));
-                d
-            }
-            None => {
-                if let Some(name) = desired_name {
-                    log::warn!(
-                        "Selected input device '{}' not found; falling back to default input device",
-                        name
-                    );
-                }
-                host.default_input_device()
-                    .ok_or(AudioCaptureError::NoInputDevice)?
-            }
-        };
-
-        let config = device
-            .default_input_config()
-            .map_err(|e| AudioCaptureError::DeviceConfig(e.to_string()))?;
-
-        self.sample_rate = config.sample_rate();
-        self.channels = config.channels();
-
-        log::info!(
-            "Audio config: {} Hz, {} channels, {:?}",
-            self.sample_rate,
-            self.channels,
-            config.sample_format()
-        );
-
-        // Create new buffer with correct params
-        self.buffer = Arc::new(StdMutex::new(AudioBuffer::new(
-            self.sample_rate,
-            self.channels,
-            max_duration_secs,
-        )));
-
-        let buffer_clone = self.buffer.clone();
-        let meter = self.level_meter.clone();
-        let waveform_meter = self.waveform_meter.clone();
-        let (command_tx, command_rx) = mpsc::channel();
-        let (event_tx, event_rx) = mpsc::channel();
-        let sample_format = config.sample_format();
-        let stream_config: cpal::StreamConfig = config.into();
-        let vad_config = self.vad_config.clone();
-        let sample_rate = self.sample_rate;
-
-        // Spawn capture thread
-        let thread_handle = thread::spawn(move || {
-            run_capture_thread(
-                device,
-                stream_config,
-                sample_format,
-                buffer_clone,
-                meter,
-                waveform_meter,
-                command_rx,
-                event_tx,
-                vad_config,
-                sample_rate,
-            )
-        });
-
-        self.capture_handle = Some(CaptureHandle {
-            command_tx,
-            event_rx,
-            thread_handle,
-        });
-
+        self.recording_active.store(true, Ordering::Relaxed);
         log::info!("Audio capture started");
         Ok(())
     }
@@ -954,7 +1223,7 @@ impl AudioCapture {
         &mut self,
         noise_gate_strength: u8,
     ) -> Result<(Vec<u8>, AudioLevelStats), AudioCaptureError> {
-        self.stop();
+        self.stop_recording();
 
         let buffer = self
             .buffer
@@ -991,7 +1260,7 @@ impl AudioCapture {
         &mut self,
         cfg: AudioEncodeConfig,
     ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
-        self.stop();
+        self.stop_recording();
 
         let buffer = self
             .buffer
@@ -1010,7 +1279,7 @@ impl AudioCapture {
         &mut self,
         after_cfg: AudioEncodeConfig,
     ) -> Result<(Vec<u8>, Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
-        self.stop();
+        self.stop_recording();
 
         let buffer = self
             .buffer
@@ -1036,6 +1305,7 @@ impl AudioCapture {
 
     /// Stop recording without returning audio data
     pub fn stop(&mut self) {
+        self.recording_active.store(false, Ordering::Relaxed);
         if let Some(handle) = self.capture_handle.take() {
             log::info!("Stopping audio capture");
             // Send stop command (ignore error if thread already stopped)
@@ -1048,7 +1318,7 @@ impl AudioCapture {
     /// Check if currently recording
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_recording(&self) -> bool {
-        self.capture_handle.is_some()
+        self.recording_active.load(Ordering::Relaxed)
     }
 
     /// Poll for VAD events (non-blocking)
@@ -1110,14 +1380,28 @@ fn run_capture_thread(
     config: cpal::StreamConfig,
     sample_format: SampleFormat,
     buffer: Arc<StdMutex<AudioBuffer>>,
+    pre_roll: Arc<StdMutex<RollingBuffer>>,
+    recording_active: Arc<AtomicBool>,
+    pre_roll_ms: Arc<AtomicU32>,
     meter: Arc<AudioLevelMeter>,
     waveform_meter: Arc<AudioWaveformMeter>,
     command_rx: mpsc::Receiver<CaptureCommand>,
     event_tx: mpsc::Sender<AudioCaptureEvent>,
     vad_config: VadAutoStopConfig,
-    sample_rate: u32,
+    auto_recover_enabled: Arc<AtomicBool>,
+    desired_device_name: Arc<StdMutex<Option<String>>>,
 ) -> Result<(), AudioCaptureError> {
     use cpal::Sample;
+
+    use std::time::{Duration, Instant};
+
+    let mut device = device;
+    let config = config;
+    let sample_rate = config.sample_rate;
+
+    // Used for watchdog timing (monotonic).
+    let start = Instant::now();
+    let last_callback_ms = Arc::new(AtomicU64::new(0));
 
     let err_fn = |err| {
         log::error!("Audio stream error: {}", err);
@@ -1156,170 +1440,304 @@ fn run_capture_thread(
         None
     };
 
-    let stream = match sample_format {
-        SampleFormat::F32 => {
-            let buffer = buffer.clone();
-            let meter = meter.clone();
-            let waveform_meter = waveform_meter.clone();
-            let vad_tx = if vad_config.enabled { Some(vad_samples_tx.clone()) } else { None };
-            let channels = config.channels as usize;
-            device.build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    // Realtime meter (cheap math, no allocations).
-                    let mut peak: f32 = 0.0;
-                    let mut sum_sq: f64 = 0.0;
-                    let mut n: u64 = 0;
-                    for &s in data {
-                        let a = s.abs();
-                        if a > peak {
-                            peak = a;
+    let build_stream = |device: &cpal::Device| -> Result<cpal::Stream, AudioCaptureError> {
+        let buffer = buffer.clone();
+        let pre_roll = pre_roll.clone();
+        let recording_active = recording_active.clone();
+        let pre_roll_ms = pre_roll_ms.clone();
+        let meter = meter.clone();
+        let waveform_meter = waveform_meter.clone();
+        let last_callback_ms = last_callback_ms.clone();
+        let vad_tx = if vad_config.enabled {
+            Some(vad_samples_tx.clone())
+        } else {
+            None
+        };
+        let channels = config.channels as usize;
+        let start_cb = start;
+
+        match sample_format {
+            SampleFormat::F32 => device
+                .build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+
+                        // Realtime meter (cheap math, no allocations).
+                        let mut peak: f32 = 0.0;
+                        let mut sum_sq: f64 = 0.0;
+                        let mut n: u64 = 0;
+                        for &s in data {
+                            let a = s.abs();
+                            if a > peak {
+                                peak = a;
+                            }
+                            sum_sq += (s as f64) * (s as f64);
+                            n += 1;
                         }
-                        sum_sq += (s as f64) * (s as f64);
-                        n += 1;
-                    }
-                    let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
-                    meter.update(rms, peak);
+                        let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
+                        meter.update(rms, peak);
+                        waveform_meter.update_from_f32_interleaved(data, channels);
 
-                    // True waveform buckets for UI.
-                    waveform_meter.update_from_f32_interleaved(data, channels);
+                        // Always maintain the rolling pre-roll buffer.
+                        if let Ok(mut pr) = pre_roll.lock() {
+                            pr.push(data);
+                        }
 
-                    // Store audio in buffer
-                    if let Ok(mut buf) = buffer.lock() {
-                        buf.append(data);
-                    }
-
-                    // Send samples to VAD thread if enabled
-                    if let Some(ref tx) = vad_tx {
-                        let mono = if channels > 1 {
-                            downmix_interleaved_chunk_to_mono(data, channels)
-                        } else {
-                            data.to_vec()
-                        };
-                        let _ = tx.send(mono);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        SampleFormat::I16 => {
-            let buffer = buffer.clone();
-            let meter = meter.clone();
-            let waveform_meter = waveform_meter.clone();
-            let vad_tx = if vad_config.enabled { Some(vad_samples_tx.clone()) } else { None };
-            let channels = config.channels as usize;
-            device.build_input_stream(
-                &config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let mut peak: f32 = 0.0;
-                    let mut sum_sq: f64 = 0.0;
-                    let samples: Vec<f32> = data
-                        .iter()
-                        .map(|&s| {
-                            let f = s.to_float_sample();
-                            let a = f.abs();
-                            if a > peak {
-                                peak = a;
+                        // Record only when active.
+                        if recording_active.load(Ordering::Relaxed) {
+                            if let Ok(mut buf) = buffer.lock() {
+                                buf.append(data);
                             }
-                            sum_sq += (f as f64) * (f as f64);
-                            f
-                        })
-                        .collect();
-                    let n = samples.len() as u64;
-                    let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
-                    meter.update(rms, peak);
 
-                    // True waveform buckets for UI.
-                    waveform_meter.update_from_f32_interleaved(&samples, channels);
-
-                    // Store audio in buffer
-                    if let Ok(mut buf) = buffer.lock() {
-                        buf.append(&samples);
-                    }
-
-                    // Send samples to VAD thread if enabled
-                    if let Some(ref tx) = vad_tx {
-                        let mono = if channels > 1 {
-                            downmix_interleaved_chunk_to_mono(&samples, channels)
-                        } else {
-                            samples
-                        };
-                        let _ = tx.send(mono);
-                    }
-                },
-                err_fn,
-                None,
-            )
-        }
-        SampleFormat::U16 => {
-            let buffer = buffer.clone();
-            let meter = meter.clone();
-            let waveform_meter = waveform_meter.clone();
-            let vad_tx = if vad_config.enabled { Some(vad_samples_tx.clone()) } else { None };
-            let channels = config.channels as usize;
-            device.build_input_stream(
-                &config,
-                move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                    let mut peak: f32 = 0.0;
-                    let mut sum_sq: f64 = 0.0;
-                    let samples: Vec<f32> = data
-                        .iter()
-                        .map(|&s| {
-                            let f = s.to_float_sample();
-                            let a = f.abs();
-                            if a > peak {
-                                peak = a;
+                            if let Some(ref tx) = vad_tx {
+                                let mono = if channels > 1 {
+                                    downmix_interleaved_chunk_to_mono(data, channels)
+                                } else {
+                                    data.to_vec()
+                                };
+                                let _ = tx.send(mono);
                             }
-                            sum_sq += (f as f64) * (f as f64);
-                            f
-                        })
-                        .collect();
-                    let n = samples.len() as u64;
-                    let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
-                    meter.update(rms, peak);
+                        }
 
-                    // True waveform buckets for UI.
-                    waveform_meter.update_from_f32_interleaved(&samples, channels);
+                        // Keep capacity in sync if pre-roll ms changes drastically.
+                        // (Avoids waiting for a config sync while stream is running.)
+                        let _ = pre_roll_ms.load(Ordering::Relaxed);
+                    },
+                    err_fn,
+                    None,
+                ),
+            SampleFormat::I16 => device
+                .build_input_stream(
+                    &config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                    // Store audio in buffer
-                    if let Ok(mut buf) = buffer.lock() {
-                        buf.append(&samples);
-                    }
+                        let mut peak: f32 = 0.0;
+                        let mut sum_sq: f64 = 0.0;
+                        let samples: Vec<f32> = data
+                            .iter()
+                            .map(|&s| {
+                                let f = s.to_float_sample();
+                                let a = f.abs();
+                                if a > peak {
+                                    peak = a;
+                                }
+                                sum_sq += (f as f64) * (f as f64);
+                                f
+                            })
+                            .collect();
+                        let n = samples.len() as u64;
+                        let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
+                        meter.update(rms, peak);
+                        waveform_meter.update_from_f32_interleaved(&samples, channels);
 
-                    // Send samples to VAD thread if enabled
-                    if let Some(ref tx) = vad_tx {
-                        let mono = if channels > 1 {
-                            downmix_interleaved_chunk_to_mono(&samples, channels)
-                        } else {
-                            samples
-                        };
-                        let _ = tx.send(mono);
-                    }
-                },
-                err_fn,
-                None,
-            )
+                        if let Ok(mut pr) = pre_roll.lock() {
+                            pr.push(&samples);
+                        }
+
+                        if recording_active.load(Ordering::Relaxed) {
+                            if let Ok(mut buf) = buffer.lock() {
+                                buf.append(&samples);
+                            }
+
+                            if let Some(ref tx) = vad_tx {
+                                let mono = if channels > 1 {
+                                    downmix_interleaved_chunk_to_mono(&samples, channels)
+                                } else {
+                                    samples
+                                };
+                                let _ = tx.send(mono);
+                            }
+                        }
+
+                        let _ = pre_roll_ms.load(Ordering::Relaxed);
+                    },
+                    err_fn,
+                    None,
+                ),
+            SampleFormat::U16 => device
+                .build_input_stream(
+                    &config,
+                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+
+                        let mut peak: f32 = 0.0;
+                        let mut sum_sq: f64 = 0.0;
+                        let samples: Vec<f32> = data
+                            .iter()
+                            .map(|&s| {
+                                let f = s.to_float_sample();
+                                let a = f.abs();
+                                if a > peak {
+                                    peak = a;
+                                }
+                                sum_sq += (f as f64) * (f as f64);
+                                f
+                            })
+                            .collect();
+                        let n = samples.len() as u64;
+                        let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
+                        meter.update(rms, peak);
+                        waveform_meter.update_from_f32_interleaved(&samples, channels);
+
+                        if let Ok(mut pr) = pre_roll.lock() {
+                            pr.push(&samples);
+                        }
+
+                        if recording_active.load(Ordering::Relaxed) {
+                            if let Ok(mut buf) = buffer.lock() {
+                                buf.append(&samples);
+                            }
+
+                            if let Some(ref tx) = vad_tx {
+                                let mono = if channels > 1 {
+                                    downmix_interleaved_chunk_to_mono(&samples, channels)
+                                } else {
+                                    samples
+                                };
+                                let _ = tx.send(mono);
+                            }
+                        }
+
+                        let _ = pre_roll_ms.load(Ordering::Relaxed);
+                    },
+                    err_fn,
+                    None,
+                ),
+            _ => {
+                return Err(AudioCaptureError::DeviceConfig(format!(
+                    "Unsupported sample format: {:?}",
+                    sample_format
+                )));
+            }
         }
-        _ => {
-            return Err(AudioCaptureError::DeviceConfig(format!(
-                "Unsupported sample format: {:?}",
-                sample_format
-            )));
-        }
-    }
-    .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))?;
+        .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
+    };
+
+    let mut stream = build_stream(&device)?;
 
     stream
         .play()
         .map_err(|e| AudioCaptureError::StreamStart(e.to_string()))?;
 
-    // Wait for stop command
+    // Wait for stop command, with optional watchdog restart.
+    const WATCHDOG_CHECK_EVERY_MS: u64 = 100;
+    const WATCHDOG_STALL_MS: u64 = 2000;
+    let mut consecutive_restart_failures: u32 = 0;
+
     loop {
-        match command_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+        match command_rx.recv_timeout(Duration::from_millis(WATCHDOG_CHECK_EVERY_MS)) {
             Ok(CaptureCommand::Stop) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Watchdog: if we're idle and callbacks have stalled, attempt to restart.
+                if !auto_recover_enabled.load(Ordering::Relaxed) {
+                    continue;
+                }
+                if recording_active.load(Ordering::Relaxed) {
+                    continue;
+                }
+
+                let now_ms = start.elapsed().as_millis() as u64;
+                let last_ms = last_callback_ms.load(Ordering::Relaxed);
+                if last_ms == 0 {
+                    // Stream may not have delivered a callback yet.
+                    continue;
+                }
+
+                if now_ms.saturating_sub(last_ms) < WATCHDOG_STALL_MS {
+                    continue;
+                }
+
+                log::warn!(
+                    "Audio capture watchdog: no callback for {}ms; attempting stream restart",
+                    now_ms.saturating_sub(last_ms)
+                );
+
+                // Clear pre-roll to avoid carrying stale audio across a restart.
+                if let Ok(mut pr) = pre_roll.lock() {
+                    pr.clear();
+                }
+
+                // Try rebuilding the stream on the current device.
+                match build_stream(&device).and_then(|s| {
+                    s.play()
+                        .map_err(|e| AudioCaptureError::StreamStart(e.to_string()))
+                        .map(|_| s)
+                }) {
+                    Ok(new_stream) => {
+                        stream = new_stream;
+                        consecutive_restart_failures = 0;
+                        last_callback_ms.store(now_ms, Ordering::Relaxed);
+                        continue;
+                    }
+                    Err(e) => {
+                        consecutive_restart_failures = consecutive_restart_failures.saturating_add(1);
+                        log::warn!("Audio capture watchdog: restart failed: {}", e);
+                    }
+                }
+
+                // Optional: try rebinding to the desired/default device using the same config.
+                let maybe_name = desired_device_name.lock().ok().and_then(|n| n.clone());
+                let host = cpal::default_host();
+                let mut rebound: Option<cpal::Device> = None;
+                if let Some(name) = maybe_name.as_deref() {
+                    if let Ok(devices) = host.input_devices() {
+                        for d in devices {
+                            let Ok(desc) = d.description() else { continue };
+                            let desc = desc.to_string();
+                            if desc == name || desc.contains(name) {
+                                rebound = Some(d);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if rebound.is_none() {
+                    rebound = host.default_input_device();
+                }
+                if let Some(new_device) = rebound {
+                    device = new_device;
+                    if let Ok(mut buf) = buffer.lock() {
+                        buf.set_format(config.sample_rate, config.channels);
+                    }
+                    // Resize pre-roll based on current config and configured ms.
+                    let pre_ms = pre_roll_ms.load(Ordering::Relaxed).min(5000) as f32;
+                    let cap_samples =
+                        ((config.sample_rate as f32 * (pre_ms / 1000.0) * config.channels as f32) as usize)
+                            .min(10_000_000);
+                    if let Ok(mut pr) = pre_roll.lock() {
+                        pr.set_capacity(cap_samples);
+                    }
+
+                    match build_stream(&device).and_then(|s| {
+                        s.play()
+                            .map_err(|e| AudioCaptureError::StreamStart(e.to_string()))
+                            .map(|_| s)
+                    }) {
+                        Ok(new_stream) => {
+                            stream = new_stream;
+                            consecutive_restart_failures = 0;
+                            last_callback_ms.store(now_ms, Ordering::Relaxed);
+                            continue;
+                        }
+                        Err(e) => {
+                            consecutive_restart_failures = consecutive_restart_failures.saturating_add(1);
+                            log::warn!("Audio capture watchdog: rebind restart failed: {}", e);
+                        }
+                    }
+                }
+
+                // Backoff to avoid tight restart loops.
+                let backoff_ms = match consecutive_restart_failures {
+                    0 | 1 => 200,
+                    2 => 500,
+                    3 => 1000,
+                    _ => 2000,
+                };
+                std::thread::sleep(Duration::from_millis(backoff_ms));
+            }
         }
     }
 

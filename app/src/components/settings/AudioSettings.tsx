@@ -18,6 +18,9 @@ import {
   useUpdateAudioHighpassEnabled,
   useUpdateAudioNoiseSuppressionEnabled,
   useUpdateAudioResampleTo16khz,
+  useUpdateHotMicEnabled,
+  useUpdateHotMicPreRollMs,
+  useUpdateMicAutoRecoverEnabled,
   useUpdateNoiseGateThresholdDbfs,
   useUpdateQuietAudioGateEnabled,
   useUpdateQuietAudioMinDurationSecs,
@@ -55,6 +58,10 @@ export function AudioSettings({
   const updateAudioNoiseSuppressionEnabled =
     useUpdateAudioNoiseSuppressionEnabled();
 
+  const updateHotMicEnabled = useUpdateHotMicEnabled();
+  const updateHotMicPreRollMs = useUpdateHotMicPreRollMs();
+  const updateMicAutoRecoverEnabled = useUpdateMicAutoRecoverEnabled();
+
   const audioTestStart = useAudioSettingsTestStartRecording();
   const audioTestStop = useAudioSettingsTestStopRecording();
 
@@ -81,6 +88,10 @@ export function AudioSettings({
   const audioAgcEnabled = settings?.audio_agc_enabled ?? false;
   const audioNoiseSuppressionEnabled =
     settings?.audio_noise_suppression_enabled ?? false;
+
+  const hotMicEnabled = settings?.hot_mic_enabled ?? false;
+  const hotMicPreRollMs = settings?.hot_mic_pre_roll_ms ?? 1500;
+  const micAutoRecoverEnabled = settings?.mic_auto_recover_enabled ?? false;
 
   const noiseGateThresholdDbfsFromSettings =
     settings?.noise_gate_threshold_dbfs ?? null;
@@ -148,6 +159,69 @@ export function AudioSettings({
   const content = (
     <>
       <DeviceSelector />
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Hot Mic Mode</p>
+          <p className="settings-description">
+            Keep the microphone open (no transcription) and buffer a short
+            pre-roll so you don’t miss the first word
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+            Pre-roll: {hotMicPreRollMs} ms
+          </Text>
+          <NumberInput
+            value={hotMicPreRollMs}
+            onChange={(value) => {
+              const next = typeof value === "number" ? value : 1500;
+              updateHotMicPreRollMs.mutate(next);
+            }}
+            min={0}
+            max={5000}
+            step={100}
+            disabled={isProfileScope || !hotMicEnabled}
+            placeholder="Pre-roll (ms)"
+            styles={{
+              input: {
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                width: 140,
+              },
+            }}
+          />
+          <Switch
+            checked={hotMicEnabled}
+            onChange={(event) =>
+              updateHotMicEnabled.mutate(event.currentTarget.checked)
+            }
+            disabled={isProfileScope}
+            color="gray"
+            size="md"
+          />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Auto-recover microphone</p>
+          <p className="settings-description">
+            If the mic stream stops delivering audio (disconnects, sleep, device
+            changes), attempt to restart automatically
+          </p>
+        </div>
+        <Switch
+          checked={micAutoRecoverEnabled}
+          onChange={(event) =>
+            updateMicAutoRecoverEnabled.mutate(event.currentTarget.checked)
+          }
+          disabled={isProfileScope}
+          color="gray"
+          size="md"
+        />
+      </div>
 
       <div className="settings-row no-divider">
         <div>
