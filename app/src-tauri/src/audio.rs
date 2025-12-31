@@ -1,6 +1,8 @@
 use rodio::buffer::SamplesBuffer;
 use rodio::{Decoder, OutputStreamBuilder, Source};
 use std::io::Cursor;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
@@ -40,6 +42,31 @@ impl AudioCue {
 const START_SOUND: &[u8] = include_bytes!("assets/start.mp3");
 const STOP_SOUND: &[u8] = include_bytes!("assets/stop.mp3");
 
+/// Global cue output stream.
+///
+/// Why: rapidly opening/closing default output streams (especially on Windows/WASAPI)
+/// can cause audible pops/cut-offs when the user starts/stops recordings quickly.
+/// Keeping a single stream alive and feeding the mixer tends to be much more stable.
+static CUE_STREAM: OnceLock<Mutex<Option<rodio::OutputStream>>> = OnceLock::new();
+
+fn cue_stream() -> Result<std::sync::MutexGuard<'static, Option<rodio::OutputStream>>, Box<dyn std::error::Error + Send + Sync>> {
+    let cell = CUE_STREAM.get_or_init(|| Mutex::new(None));
+    let mut guard = cell.lock().map_err(|_| "Cue stream mutex poisoned")?;
+    if guard.is_none() {
+        *guard = Some(OutputStreamBuilder::open_default_stream()?);
+    }
+    Ok(guard)
+}
+
+fn reset_cue_stream() {
+    if let Some(cell) = CUE_STREAM.get() {
+        if let Ok(mut guard) = cell.lock() {
+            // Dropping the old stream forces the next playback to re-open the default device.
+            *guard = None;
+        }
+    }
+}
+
 /// Best-effort estimate of how long a cue will be audible.
 ///
 /// Used to avoid cutting off cues when we do side-effects (like system mute) shortly after
@@ -64,7 +91,7 @@ pub fn estimated_duration(sound_type: SoundType, cue: AudioCue) -> Duration {
         // Synth cues: keep in sync with durations in `build_synth_cue_source`.
         AudioCue::Kolboo => match sound_type {
             // Start cue: two-note up-chime (shorter than the previous 3-note arpeggio).
-            SoundType::RecordingStart => Duration::from_millis(170),
+            SoundType::RecordingStart => Duration::from_millis(185),
             SoundType::RecordingStop => Duration::from_millis(195),
         },
         AudioCue::Maraca => match sound_type {
@@ -91,11 +118,8 @@ pub(crate) fn play_sound_blocking(
     sound_type: SoundType,
     cue: AudioCue,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let stream = OutputStreamBuilder::open_default_stream()?;
-
     // Some devices/backends take a moment to "wake" after being idle.
-    // Since dropping `stream` stops playback, keep extra tail padding so we don't
-    // clip the end of a cue (most noticeable on the first playback after idle).
+    // Keep a small tail pad so cues don't clip (especially the first playback after idle).
     const TAIL_PAD: Duration = Duration::from_millis(250);
 
     match cue {
@@ -112,14 +136,35 @@ pub(crate) fn play_sound_blocking(
                 .total_duration()
                 .unwrap_or(Duration::from_millis(500));
 
-            stream.mixer().add(decoded);
+            {
+                let mut guard = cue_stream().or_else(|e| {
+                    // If the default device is in a bad state, a reset can help.
+                    // (Users have reported that switching the Windows default device "fixes" it,
+                    // which is effectively a reset at the OS level.)
+                    log::warn!("Failed to open cue stream (will reset and retry once): {e}");
+                    reset_cue_stream();
+                    cue_stream()
+                })?;
+                if let Some(stream) = guard.as_ref() {
+                    stream.mixer().add(decoded);
+                }
+            }
             thread::sleep(duration + TAIL_PAD);
         }
 
         // New cues are synthesized at runtime (no extra audio assets needed).
         _ => {
             let (seq, duration) = build_synth_cue_source(sound_type, cue);
-            stream.mixer().add(seq);
+            {
+                let mut guard = cue_stream().or_else(|e| {
+                    log::warn!("Failed to open cue stream (will reset and retry once): {e}");
+                    reset_cue_stream();
+                    cue_stream()
+                })?;
+                if let Some(stream) = guard.as_ref() {
+                    stream.mixer().add(seq);
+                }
+            }
             thread::sleep(duration + TAIL_PAD);
         }
     }
@@ -159,6 +204,11 @@ fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffe
         let attack = attack.min(n).max(1);
         let decay_k = 6.0_f32; // larger = faster decay
 
+        // Add a tiny linear release so the last sample reliably trends to 0.
+        // This reduces "clipped"-sounding tails and minimizes end clicks.
+        let release = ((SAMPLE_RATE as f32) * 0.008).round() as usize; // ~8ms
+        let release = release.min(n).max(1);
+
         // Slight detune + a couple harmonics for a bell-ish tone.
         let detune = 0.0045;
 
@@ -171,11 +221,18 @@ fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffe
                 1.0
             };
 
+            let rel = if i + release >= n {
+                let remaining = (n - i).max(1) as f32;
+                (remaining / release as f32).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+
             let base = (2.0 * PI * (freq_hz * (1.0 + detune)) * t).sin();
             let h2 = (2.0 * PI * (freq_hz * 2.01) * t).sin() * 0.35;
             let h3 = (2.0 * PI * (freq_hz * 3.00) * t).sin() * 0.18;
 
-            let v = (base + h2 + h3) * amp * env * atk;
+            let v = (base + h2 + h3) * amp * env * atk * rel;
             samples.push(soft_clip(v));
         }
     }
@@ -270,7 +327,8 @@ fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffe
                     // Keep this cue snappy; it should be informative, not a jingle.
                     let d1 = Duration::from_millis(70);
                     let gap = Duration::from_millis(20);
-                    let d2 = Duration::from_millis(80);
+                    // Slightly longer second note so the tail doesn't feel clipped.
+                    let d2 = Duration::from_millis(95);
 
                     push_chime(&mut samples, 523.25, d1, 0.20); // C5
                     push_silence(&mut samples, gap);
