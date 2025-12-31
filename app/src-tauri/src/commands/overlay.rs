@@ -1,4 +1,8 @@
+use std::sync::atomic::Ordering;
+
 use tauri::{AppHandle, Emitter, Manager};
+
+use crate::state::AppState;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -88,6 +92,10 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> Result<(), Stri
     }
 
     if let Some(window) = app.get_webview_window("overlay") {
+        // Bump the epoch so any previously-scheduled delayed hides know they are outdated.
+        app.state::<AppState>()
+            .overlay_visibility_epoch
+            .fetch_add(1, Ordering::SeqCst);
         window.show().map_err(|e| e.to_string())?;
     }
 
@@ -221,6 +229,10 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
                 // Fallback hide (in case the overlay UI isn't ready to handle the event).
                 let window_clone = window.clone();
                 let app_clone = app.clone();
+                let expected_epoch = app
+                    .state::<AppState>()
+                    .overlay_visibility_epoch
+                    .load(Ordering::SeqCst);
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(220)).await;
                     let current_mode: String = get_setting_from_store(
@@ -228,7 +240,11 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
                         "overlay_mode",
                         "recording_only".to_string(),
                     );
-                    if current_mode == "never" {
+                    let current_epoch = app_clone
+                        .state::<AppState>()
+                        .overlay_visibility_epoch
+                        .load(Ordering::SeqCst);
+                    if current_mode == "never" && current_epoch == expected_epoch {
                         let _ = window_clone.hide();
                     }
                 });
@@ -238,6 +254,10 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
                 let _ = app.emit("overlay-hide-requested", ());
                 let window_clone = window.clone();
                 let app_clone = app.clone();
+                let expected_epoch = app
+                    .state::<AppState>()
+                    .overlay_visibility_epoch
+                    .load(Ordering::SeqCst);
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(220)).await;
                     let current_mode: String = get_setting_from_store(
@@ -245,7 +265,11 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
                         "overlay_mode",
                         "recording_only".to_string(),
                     );
-                    if current_mode == "recording_only" {
+                    let current_epoch = app_clone
+                        .state::<AppState>()
+                        .overlay_visibility_epoch
+                        .load(Ordering::SeqCst);
+                    if current_mode == "recording_only" && current_epoch == expected_epoch {
                         let _ = window_clone.hide();
                     }
                 });

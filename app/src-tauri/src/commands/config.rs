@@ -474,9 +474,11 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
-    // Read selected input device name from store.
+    // Read selected input device from store.
     // NOTE: The frontend setting key is historically named `selected_mic_id`.
-    // For backend recording, we treat it as a CPAL device name.
+    // Newer builds store a backend-generated selection token (unique per enumerated device).
+    // Older builds stored a CPAL device *name*.
+    // The audio capture layer accepts both.
     let input_device_name: Option<String> = app
         .store("settings.json")
         .ok()

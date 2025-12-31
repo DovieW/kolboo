@@ -6,15 +6,101 @@
 //! Supports optional Voice Activity Detection (VAD) for auto-stop functionality.
 
 use crate::vad::{VadConfig, VadEvent, VadFrameProcessor};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use hound::{WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::mpsc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
+
+const MIC_DEVICE_ID_PREFIX: &str = "mic:v1:";
+
+/// Public device descriptor for the frontend.
+///
+/// NOTE: `id` is a stable-ish *selection token* for this session, not a true OS device ID.
+/// It is guaranteed unique within the returned list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioInputDeviceInfo {
+    pub id: String,
+    pub name: String,
+}
+
+fn encode_mic_device_id(name: &str, ordinal_for_name: usize) -> String {
+    // Base64url without padding so it is easy to embed in a string.
+    let name_b64 = URL_SAFE_NO_PAD.encode(name.as_bytes());
+    format!("{MIC_DEVICE_ID_PREFIX}{name_b64}:{ordinal_for_name}")
+}
+
+fn decode_mic_device_id(id: &str) -> Option<(String, usize)> {
+    // Format: mic:v1:<base64url(name)>:<ordinal>
+    let rest = id.strip_prefix(MIC_DEVICE_ID_PREFIX)?;
+    let mut parts = rest.rsplitn(2, ':');
+    let ordinal_str = parts.next()?;
+    let name_b64 = parts.next()?;
+    let ordinal = ordinal_str.parse::<usize>().ok()?;
+    let name_bytes = URL_SAFE_NO_PAD.decode(name_b64).ok()?;
+    let name = String::from_utf8(name_bytes).ok()?;
+    Some((name, ordinal))
+}
+
+fn normalize_input_device_selection(input_device: Option<&str>) -> Option<(String, usize, bool)> {
+    // Returns (desired_name, desired_ordinal, is_encoded_id)
+    let raw = input_device
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "default")?;
+
+    if let Some((name, ordinal)) = decode_mic_device_id(raw) {
+        return Some((name, ordinal, true));
+    }
+
+    Some((raw.to_string(), 0, false))
+}
+
+fn select_input_device_from_host(
+    host: &cpal::Host,
+    selection: Option<&str>,
+) -> Option<cpal::Device> {
+    let (desired_name, desired_ordinal, is_encoded) =
+        normalize_input_device_selection(selection)?;
+
+    // Prefer exact-name matching with ordinal disambiguation.
+    let mut ordinal_for_name: usize = 0;
+    if let Ok(devices) = host.input_devices() {
+        for d in devices {
+            let Ok(desc) = d.description() else { continue };
+            let name = desc.to_string();
+            if name == desired_name {
+                if ordinal_for_name == desired_ordinal {
+                    return Some(d);
+                }
+                ordinal_for_name = ordinal_for_name.saturating_add(1);
+            }
+        }
+    }
+
+    // Legacy fallback: some older stored values used partial matches.
+    // For encoded IDs, do NOT do a contains() fallback (could pick the wrong device).
+    if is_encoded {
+        return None;
+    }
+
+    if let Ok(devices) = host.input_devices() {
+        for d in devices {
+            let Ok(desc) = d.description() else { continue };
+            let name = desc.to_string();
+            if name.contains(&desired_name) {
+                return Some(d);
+            }
+        }
+    }
+
+    None
+}
 
 fn clamp_u8_0_100(v: u8) -> u8 {
     v.min(100)
@@ -1061,30 +1147,10 @@ impl AudioCapture {
         self.stop();
 
         let host = cpal::default_host();
-        let desired_name = input_device_name
-            .map(str::trim)
-            .filter(|s| !s.is_empty() && *s != "default");
 
-        let mut selected: Option<cpal::Device> = None;
-        if let Some(name) = desired_name {
-            if let Ok(devices) = host.input_devices() {
-                for d in devices {
-                    let Ok(n) = d.description() else { continue };
-                    let n = n.to_string();
-                    if n == name || n.contains(name) {
-                        selected = Some(d);
-                        break;
-                    }
-                }
-            }
-        }
-
-        let device = match selected {
-            Some(d) => d,
-            None => host
-                .default_input_device()
-                .ok_or(AudioCaptureError::NoInputDevice)?,
-        };
+        let device = select_input_device_from_host(&host, input_device_name)
+            .or_else(|| host.default_input_device())
+            .ok_or(AudioCaptureError::NoInputDevice)?;
 
         let config = device
             .default_input_config()
@@ -1681,22 +1747,8 @@ fn run_capture_thread(
                 // Optional: try rebinding to the desired/default device using the same config.
                 let maybe_name = desired_device_name.lock().ok().and_then(|n| n.clone());
                 let host = cpal::default_host();
-                let mut rebound: Option<cpal::Device> = None;
-                if let Some(name) = maybe_name.as_deref() {
-                    if let Ok(devices) = host.input_devices() {
-                        for d in devices {
-                            let Ok(desc) = d.description() else { continue };
-                            let desc = desc.to_string();
-                            if desc == name || desc.contains(name) {
-                                rebound = Some(d);
-                                break;
-                            }
-                        }
-                    }
-                }
-                if rebound.is_none() {
-                    rebound = host.default_input_device();
-                }
+                let rebound = select_input_device_from_host(&host, maybe_name.as_deref())
+                    .or_else(|| host.default_input_device());
                 if let Some(new_device) = rebound {
                     device = new_device;
                     if let Ok(mut buf) = buffer.lock() {
@@ -1759,11 +1811,61 @@ pub fn list_input_devices() -> Vec<String> {
     let host = cpal::default_host();
     host.input_devices()
         .map(|devices| {
-            devices
-                .filter_map(|d| d.description().ok().map(|desc| desc.to_string()))
-                .collect()
+            // Defensive: CPAL device descriptions are not guaranteed unique on Windows.
+            // The legacy API returns names only; dedupe to avoid downstream UI crashes
+            // in case a caller uses names as unique keys.
+            let mut out: Vec<String> = Vec::new();
+            let mut seen: HashSet<String> = HashSet::new();
+
+            for name in devices.filter_map(|d| d.description().ok().map(|desc| desc.to_string())) {
+                if seen.insert(name.clone()) {
+                    out.push(name);
+                }
+            }
+
+            out
         })
         .unwrap_or_default()
+}
+
+/// Get the list of available input devices, with unique IDs suitable for UI option values.
+///
+/// The ID format is `mic:v1:<base64url(name)>:<ordinal>` where ordinal is the 0-based
+/// occurrence index for that exact name in the CPAL enumeration order.
+pub fn list_input_devices_v2() -> Vec<AudioInputDeviceInfo> {
+    let host = cpal::default_host();
+
+    let Ok(devices) = host.input_devices() else {
+        return Vec::new();
+    };
+
+    let mut name_ordinals: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<AudioInputDeviceInfo> = Vec::new();
+
+    for d in devices {
+        let Ok(desc) = d.description() else { continue };
+        let name = desc.to_string();
+        let ordinal = name_ordinals.get(&name).copied().unwrap_or(0);
+        name_ordinals.insert(name.clone(), ordinal.saturating_add(1));
+
+        out.push(AudioInputDeviceInfo {
+            id: encode_mic_device_id(&name, ordinal),
+            name,
+        });
+    }
+
+    // Extra defensive: ensure uniqueness even if encoding logic changes.
+    // (Should never trigger, but guarantees the UI can't crash.)
+    let mut seen_ids: HashMap<String, usize> = HashMap::new();
+    for device in &mut out {
+        let n = seen_ids.get(&device.id).copied().unwrap_or(0);
+        if n > 0 {
+            device.id = format!("{}:dup{}", device.id, n);
+        }
+        seen_ids.insert(device.id.clone(), n.saturating_add(1));
+    }
+
+    out
 }
 
 /// Get information about the default input device

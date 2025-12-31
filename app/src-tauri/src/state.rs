@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 #[cfg(desktop)]
 use std::sync::Mutex;
 
@@ -6,6 +6,11 @@ use std::sync::Mutex;
 pub struct AppState {
     /// Tracks if currently recording (for both toggle and hold modes)
     pub is_recording: AtomicBool,
+    /// Monotonic token bumped every time we *show* the overlay window.
+    ///
+    /// Used to guard delayed-hide fallbacks against races where a previous session schedules
+    /// a hide, but a new recording/error shows the overlay before that timer fires.
+    pub overlay_visibility_epoch: AtomicU64,
     /// Tracks whether we toggled MediaPlayPause when recording started.
     /// Used to restore playback when recording ends.
     pub play_pause_toggled: AtomicBool,

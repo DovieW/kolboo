@@ -39,6 +39,14 @@ pub fn list_audio_input_devices() -> Vec<String> {
     audio_capture::list_input_devices()
 }
 
+/// List available audio input devices as seen by the backend (CPAL), with unique IDs.
+///
+/// Use this from the frontend when building Select/Combobox options.
+#[tauri::command]
+pub fn list_audio_input_devices_v2() -> Vec<audio_capture::AudioInputDeviceInfo> {
+    audio_capture::list_input_devices_v2()
+}
+
 /// Get the backend default audio input device name (CPAL default), if available.
 #[tauri::command]
 pub fn get_default_audio_input_device_name() -> Option<String> {

@@ -985,6 +985,10 @@ fn stop_recording(
                         if let Some(window) = app_clone.get_webview_window("overlay") {
                             let window_clone = window.clone();
                             let app_check = app_clone.clone();
+                            let expected_epoch = app_clone
+                                .state::<AppState>()
+                                .overlay_visibility_epoch
+                                .load(Ordering::SeqCst);
                             tauri::async_runtime::spawn(async move {
                                 tokio::time::sleep(std::time::Duration::from_millis(220)).await;
                                 let current_mode: String = get_setting_from_store(
@@ -992,7 +996,11 @@ fn stop_recording(
                                     "overlay_mode",
                                     "recording_only".to_string(),
                                 );
-                                if current_mode == "recording_only" {
+                                let current_epoch = app_check
+                                    .state::<AppState>()
+                                    .overlay_visibility_epoch
+                                    .load(Ordering::SeqCst);
+                                if current_mode == "recording_only" && current_epoch == expected_epoch {
                                     let _ = window_clone.hide();
                                 }
                             });
@@ -1262,6 +1270,10 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
         if let Some(window) = app.get_webview_window("overlay") {
             let window_clone = window.clone();
             let app_check = app.clone();
+            let expected_epoch = app
+                .state::<AppState>()
+                .overlay_visibility_epoch
+                .load(Ordering::SeqCst);
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(220)).await;
                 let current_mode: String = get_setting_from_store(
@@ -1269,7 +1281,11 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
                     "overlay_mode",
                     "recording_only".to_string(),
                 );
-                if current_mode == "recording_only" {
+                let current_epoch = app_check
+                    .state::<AppState>()
+                    .overlay_visibility_epoch
+                    .load(Ordering::SeqCst);
+                if current_mode == "recording_only" && current_epoch == expected_epoch {
                     let _ = window_clone.hide();
                 }
             });
@@ -1363,9 +1379,27 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                     log::info!("Toggle released: pipeline state = {:?}", pipeline_state);
                     emit_system_event(app, "shortcut", "Toggle key released", Some(&format!("Pipeline state: {:?}", pipeline_state)));
 
-                    let is_recording = pipeline_state == Some(pipeline::PipelineState::Recording);
+                    // Do not allow starting a new capture while we are processing a previous one.
+                    // This avoids a brief error UI flash if the user taps the toggle again.
+                    if matches!(
+                        pipeline_state,
+                        Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                    ) {
+                        log::info!(
+                            "Toggle ignored (pipeline busy: {:?})",
+                            pipeline_state
+                        );
+                        return;
+                    }
 
-                    if is_recording {
+                    let can_stop = pipeline_state
+                        .map(|s| s.can_stop_recording())
+                        .unwrap_or(false);
+                    let can_start = pipeline_state
+                        .map(|s| s.can_start_recording())
+                        .unwrap_or(false);
+
+                    if can_stop {
                         stop_recording(
                             app,
                             &state,
@@ -1375,7 +1409,7 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                             playing_audio_handling,
                             "Toggle",
                         );
-                    } else {
+                    } else if can_start {
                         start_recording(
                             app,
                             &state,
@@ -1384,6 +1418,11 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                             &audio_mute_manager,
                             playing_audio_handling,
                             "Toggle",
+                        );
+                    } else {
+                        log::info!(
+                            "Toggle ignored (pipeline state: {:?})",
+                            pipeline_state
                         );
                     }
                 }
@@ -1510,6 +1549,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::audio::play_audio_cue_preview,
             commands::audio::list_audio_input_devices,
+            commands::audio::list_audio_input_devices_v2,
             commands::audio::get_default_audio_input_device_name,
             commands::text::type_text,
             commands::text::get_server_url,
@@ -1994,8 +2034,26 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
                     .try_state::<pipeline::SharedPipeline>()
                     .map(|p| p.state());
 
-                let is_recording = pipeline_state == Some(pipeline::PipelineState::Recording);
-                if is_recording {
+                // Do not allow starting a new capture while we are processing a previous one.
+                if matches!(
+                    pipeline_state,
+                    Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                ) {
+                    log::info!(
+                        "Toggle(AltRight) ignored (pipeline busy: {:?})",
+                        pipeline_state
+                    );
+                    return;
+                }
+
+                let can_stop = pipeline_state
+                    .map(|s| s.can_stop_recording())
+                    .unwrap_or(false);
+                let can_start = pipeline_state
+                    .map(|s| s.can_start_recording())
+                    .unwrap_or(false);
+
+                if can_stop {
                     stop_recording(
                         app,
                         &state,
@@ -2005,7 +2063,7 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
                         playing_audio_handling,
                         "Toggle(AltRight)",
                     );
-                } else {
+                } else if can_start {
                     start_recording(
                         app,
                         &state,
@@ -2014,6 +2072,11 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
                         &audio_mute_manager,
                         playing_audio_handling,
                         "Toggle(AltRight)",
+                    );
+                } else {
+                    log::info!(
+                        "Toggle(AltRight) ignored (pipeline state: {:?})",
+                        pipeline_state
                     );
                 }
             }
@@ -2507,7 +2570,9 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     // Microphone selection (backend / CPAL).
     // Historical key name is `selected_mic_id` (originally from browser deviceId).
-    // We now treat it as a CPAL device name for backend recording + overlay waveform.
+    // Newer builds store a backend-generated selection token (unique per enumerated device).
+    // Older builds stored a CPAL device *name*.
+    // The audio capture layer accepts both.
     let input_device_name: Option<String> = {
         let raw: Option<String> = get_setting_from_store(app, "selected_mic_id", None);
         raw.and_then(|s| {
