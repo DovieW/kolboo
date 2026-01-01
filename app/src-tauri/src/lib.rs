@@ -1560,6 +1560,8 @@ pub fn run() {
             commands::history::get_history,
             commands::history::get_history_page,
             commands::history::delete_history_entry,
+            commands::history::get_history_delete_options,
+            commands::history::delete_history_entry_ex,
             commands::history::clear_history,
             commands::overlay::resize_overlay,
             commands::overlay::show_overlay,

@@ -1,5 +1,9 @@
 use crate::history::{HistoryEntry, HistoryPageQuery, HistoryPageResult, HistoryStorage};
+use crate::recordings::RecordingStore;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
+use tauri::Manager;
+use std::collections::HashSet;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -64,6 +68,207 @@ pub async fn delete_history_entry(
     history: State<'_, HistoryStorage>,
 ) -> Result<bool, String> {
     history.delete(&id)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HistoryDeleteOptions {
+    pub recording_id: Option<String>,
+    pub recording_exists: bool,
+    pub recording_ref_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryDeleteMode {
+    /// Delete only this history entry.
+    EntryOnly,
+    /// Delete this entry and delete the underlying recording.
+    ///
+    /// Any other history entries that referenced this recording will have their
+    /// `recording_request_id` cleared (so Play/Rerun disappear).
+    EntryAndRecording,
+    /// Delete the recording AND all history entries that reference it.
+    RecordingAndAllEntries,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HistoryDeleteResult {
+    pub deleted_entries: u64,
+    pub deleted_recording: bool,
+}
+
+fn resolve_recording_source_id(
+    app: &AppHandle,
+    history: &HistoryStorage,
+    entry: &HistoryEntry,
+) -> Result<Option<String>, String> {
+    if let Some(rid) = entry.recording_request_id.as_ref() {
+        let r = rid.trim();
+        if !r.is_empty() {
+            return Ok(Some(r.to_string()));
+        }
+    }
+
+    // Best-effort backfill: if a WAV exists under this entry id, treat it as the recording source.
+    if let Some(store) = app.try_state::<RecordingStore>() {
+        if store.has(&entry.id) {
+            let _ = history.set_request_recording_id(&entry.id, Some(entry.id.clone()));
+            return Ok(Some(entry.id.clone()));
+        }
+    }
+
+    Ok(None)
+}
+
+fn compute_recording_ref_count(
+    app: &AppHandle,
+    history: &HistoryStorage,
+    recording_id: &str,
+) -> Result<u64, String> {
+    let entries = history.get_all(None)?;
+
+    let mut count = 0u64;
+    for e in entries.iter() {
+        let source = if let Some(rid) = e.recording_request_id.as_ref() {
+            let r = rid.trim();
+            if r.is_empty() {
+                None
+            } else {
+                Some(r.to_string())
+            }
+        } else if let Some(store) = app.try_state::<RecordingStore>() {
+            if store.has(&e.id) {
+                Some(e.id.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if source.as_deref() == Some(recording_id) {
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
+
+/// Determine whether deleting an entry should also delete a recording, and whether the
+/// recording is shared by other history entries.
+#[tauri::command]
+pub async fn get_history_delete_options(
+    app: AppHandle,
+    id: String,
+    history: State<'_, HistoryStorage>,
+) -> Result<HistoryDeleteOptions, String> {
+    let Some(entry) = history.get_by_id(&id)? else {
+        return Err("History entry not found".to_string());
+    };
+
+    let recording_id = resolve_recording_source_id(&app, &history, &entry)?;
+    let recording_exists = recording_id
+        .as_deref()
+        .map(|rid| {
+            app.try_state::<RecordingStore>()
+                .map(|store| store.has(rid))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+
+    let recording_ref_count = if let Some(rid) = recording_id.as_deref() {
+        compute_recording_ref_count(&app, &history, rid)?
+    } else {
+        0
+    };
+
+    Ok(HistoryDeleteOptions {
+        recording_id,
+        recording_exists,
+        recording_ref_count,
+    })
+}
+
+/// Delete a history entry with an explicit mode, optionally deleting the underlying recording.
+#[tauri::command]
+pub async fn delete_history_entry_ex(
+    app: AppHandle,
+    id: String,
+    mode: HistoryDeleteMode,
+    history: State<'_, HistoryStorage>,
+) -> Result<HistoryDeleteResult, String> {
+    let entry = history
+        .get_by_id(&id)?
+        .ok_or_else(|| "History entry not found".to_string())?;
+
+    let recording_id = resolve_recording_source_id(&app, &history, &entry)?;
+
+    match mode {
+        HistoryDeleteMode::EntryOnly => {
+            let deleted = history.delete(&id)?;
+            Ok(HistoryDeleteResult {
+                deleted_entries: if deleted { 1 } else { 0 },
+                deleted_recording: false,
+            })
+        }
+        HistoryDeleteMode::EntryAndRecording => {
+            let deleted_entry = history.delete(&id)?;
+
+            let mut deleted_recording = false;
+            if let Some(rid) = recording_id.as_deref() {
+                if let Some(store) = app.try_state::<RecordingStore>() {
+                    deleted_recording = store.delete_wav_if_exists(rid)?;
+                }
+                // Ensure any other entries pointing at this recording no longer claim a recording.
+                let _ = history.clear_recording_request_id_for_source(rid);
+            }
+
+            Ok(HistoryDeleteResult {
+                deleted_entries: if deleted_entry { 1 } else { 0 },
+                deleted_recording,
+            })
+        }
+        HistoryDeleteMode::RecordingAndAllEntries => {
+            let Some(rid) = recording_id.as_deref() else {
+                // Nothing to delete other than the requested entry.
+                let deleted = history.delete(&id)?;
+                return Ok(HistoryDeleteResult {
+                    deleted_entries: if deleted { 1 } else { 0 },
+                    deleted_recording: false,
+                });
+            };
+
+            let entries = history.get_all(None)?;
+            let mut ids: HashSet<String> = HashSet::new();
+            for e in entries.iter() {
+                let source = if let Some(x) = e.recording_request_id.as_ref() {
+                    let t = x.trim();
+                    if t.is_empty() { None } else { Some(t.to_string()) }
+                } else if let Some(store) = app.try_state::<RecordingStore>() {
+                    if store.has(&e.id) { Some(e.id.clone()) } else { None }
+                } else {
+                    None
+                };
+
+                if source.as_deref() == Some(rid) {
+                    ids.insert(e.id.clone());
+                }
+            }
+
+            let deleted_entries = history.delete_many(&ids)? as u64;
+
+            let deleted_recording = if let Some(store) = app.try_state::<RecordingStore>() {
+                store.delete_wav_if_exists(rid)?
+            } else {
+                false
+            };
+
+            Ok(HistoryDeleteResult {
+                deleted_entries,
+                deleted_recording,
+            })
+        }
+    }
 }
 
 /// Clear all history entries

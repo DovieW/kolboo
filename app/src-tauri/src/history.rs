@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::RwLock;
 use uuid::Uuid;
 
@@ -52,6 +53,15 @@ pub struct HistoryEntry {
     /// LLM model used for rewriting (if enabled).
     #[serde(default)]
     pub llm_model: Option<String>,
+
+    /// Request id of the WAV recording to use for playback/rerun.
+    ///
+    /// - For "normal" requests this will typically equal `id` (when a recording was saved).
+    /// - For reruns/retries, this should point to the original request id that owns the WAV.
+    ///
+    /// When `None`, no recording is known/available for this entry.
+    #[serde(default)]
+    pub recording_request_id: Option<String>,
 }
 
 /// Metadata about which models were used for a transcription request.
@@ -79,6 +89,7 @@ impl HistoryEntry {
             stt_model: None,
             llm_provider: None,
             llm_model: None,
+            recording_request_id: None,
         }
     }
 
@@ -95,6 +106,7 @@ impl HistoryEntry {
             stt_model: model_info.stt_model,
             llm_provider: model_info.llm_provider,
             llm_model: model_info.llm_model,
+            recording_request_id: None,
         }
     }
 }
@@ -349,6 +361,26 @@ impl HistoryStorage {
         self.save()
     }
 
+    /// Update the stored recording source id for an existing history entry.
+    pub fn set_request_recording_id(
+        &self,
+        request_id: &str,
+        recording_request_id: Option<String>,
+    ) -> Result<(), String> {
+        {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            if let Some(entry) = data.entries.iter_mut().find(|e| e.id == request_id) {
+                entry.recording_request_id = recording_request_id;
+            }
+        }
+
+        self.save()
+    }
+
     /// Query history with server-side filtering and pagination.
     ///
     /// This is primarily used by the UI to avoid transferring the entire history
@@ -557,6 +589,62 @@ impl HistoryStorage {
         }
 
         Ok(deleted)
+    }
+
+    /// Delete multiple entries by ID in a single save.
+    ///
+    /// Returns the number of entries removed.
+    pub fn delete_many(&self, ids: &HashSet<String>) -> Result<usize, String> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let deleted = {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            let initial_len = data.entries.len();
+            data.entries.retain(|e| !ids.contains(&e.id));
+            initial_len.saturating_sub(data.entries.len())
+        };
+
+        if deleted > 0 {
+            self.save()?;
+        }
+
+        Ok(deleted)
+    }
+
+    /// Clear `recording_request_id` for any entries pointing at a given recording source.
+    ///
+    /// Returns the number of entries updated.
+    pub fn clear_recording_request_id_for_source(
+        &self,
+        recording_request_id: &str,
+    ) -> Result<usize, String> {
+        let mut updated = 0usize;
+
+        {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            for entry in data.entries.iter_mut() {
+                if entry.recording_request_id.as_deref() == Some(recording_request_id) {
+                    entry.recording_request_id = None;
+                    updated += 1;
+                }
+            }
+        }
+
+        if updated > 0 {
+            self.save()?;
+        }
+
+        Ok(updated)
     }
 
     /// Clear all history

@@ -55,6 +55,24 @@ interface HistoryEntry {
   stt_model?: string | null;
   llm_provider?: string | null;
   llm_model?: string | null;
+  // Request id of the WAV recording to use for playback/rerun.
+  recording_request_id?: string | null;
+}
+
+export type HistoryDeleteMode =
+  | "entry_only"
+  | "entry_and_recording"
+  | "recording_and_all_entries";
+
+export interface HistoryDeleteOptions {
+  recording_id: string | null;
+  recording_exists: boolean;
+  recording_ref_count: number;
+}
+
+export interface HistoryDeleteResult {
+  deleted_entries: number;
+  deleted_recording: boolean;
 }
 
 export interface HistoryPageQuery {
@@ -1812,6 +1830,17 @@ export const tauriAPI = {
 
   async deleteHistoryEntry(id: string): Promise<boolean> {
     return invoke("delete_history_entry", { id });
+  },
+
+  async getHistoryDeleteOptions(id: string): Promise<HistoryDeleteOptions> {
+    return invoke("get_history_delete_options", { id });
+  },
+
+  async deleteHistoryEntryEx(
+    id: string,
+    mode: HistoryDeleteMode
+  ): Promise<HistoryDeleteResult> {
+    return invoke("delete_history_entry_ex", { id, mode });
   },
 
   async clearHistory(): Promise<void> {

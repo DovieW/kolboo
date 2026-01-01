@@ -52,7 +52,6 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Store } from "@tauri-apps/plugin-store";
 import {
-  useDeleteHistoryEntry,
   useHistoryAll,
   useHistoryPage,
   useRequestLogs,
@@ -65,6 +64,7 @@ import {
   dataAPI,
   recordingsAPI,
   tauriAPI,
+  type HistoryDeleteMode,
   type LlmProviderInfo,
 } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
@@ -158,6 +158,7 @@ interface GroupedHistory {
     stt_model?: string | null;
     llm_provider?: string | null;
     llm_model?: string | null;
+    recording_request_id?: string | null;
   }>;
 }
 
@@ -349,7 +350,24 @@ export function HistoryFeed({
 } = {}) {
   const queryClient = useQueryClient();
   const recordingsStats = useRecordingsStats();
-  const deleteEntry = useDeleteHistoryEntry();
+
+  const invalidateHistoryQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["history"] });
+    queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+    queryClient.invalidateQueries({ queryKey: ["historyPage"] });
+    queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
+    // Notify other windows about history change
+    tauriAPI.emitHistoryChanged();
+  };
+
+  const deleteHistoryEntryEx = useMutation({
+    mutationFn: async (args: { id: string; mode: HistoryDeleteMode }) =>
+      tauriAPI.deleteHistoryEntryEx(args.id, args.mode),
+    onSuccess: () => {
+      invalidateHistoryQueries();
+    },
+  });
+
   const deleteAllHistoryAndRecordings = useMutation({
     mutationFn: async () => {
       const deletedRecordings = await dataAPI.deleteAllRecordings();
@@ -381,6 +399,34 @@ export function HistoryFeed({
   });
   const retryMutation = useRetryTranscription();
   const clipboard = useClipboard();
+
+  // Cache whether a recording exists for a given request id (used to decide whether to show Rerun).
+  const [recordingExistsById, setRecordingExistsById] = useState<
+    Map<string, { exists: boolean; checkedAt: number }>
+  >(new Map());
+
+  // Internal tick to allow short polling for newly-created/in-progress entries.
+  // Without this, a "missing" cache entry would only re-check when some other state changes.
+  const [recordingsProbeTick, setRecordingsProbeTick] = useState(0);
+
+  // Optimistic UI: hide deleted entries immediately, delete in background.
+  const [hiddenEntryIds, setHiddenEntryIds] = useState<Set<string>>(() => new Set());
+
+  const hideEntries = (ids: Iterable<string>) => {
+    setHiddenEntryIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  };
+
+  const unhideEntries = (ids: Iterable<string>) => {
+    setHiddenEntryIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+  };
 
   const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
@@ -490,7 +536,7 @@ export function HistoryFeed({
   // Optional: fetch full history only when the analysis modal is opened.
   const allHistoryQuery = useHistoryAll({ enabled: analysisOpened });
 
-  const pageHistory = historyPage?.items ?? [];
+  const pageHistory = (historyPage?.items ?? []).filter((e) => !hiddenEntryIds.has(e.id));
   const totalHistoryCount = historyPage?.totalAll ?? 0;
   const totalFilteredCount = historyPage?.totalFiltered ?? 0;
   const totalPages = Math.max(
@@ -524,6 +570,14 @@ export function HistoryFeed({
 
   const [sendDrawerOpened, sendDrawerHandlers] = useDisclosure(false);
   const isNarrow = useMediaQuery("(max-width: 900px)");
+
+  const [deleteOneOpened, deleteOneHandlers] = useDisclosure(false);
+  const [deleteOneContext, setDeleteOneContext] = useState<{
+    entryId: string;
+    recordingId: string;
+    refCount: number;
+  } | null>(null);
+  const [deleteOneBusy, setDeleteOneBusy] = useState(false);
 
   const { data: llmProviders } = useQuery({
     queryKey: ["llmProviders"],
@@ -649,7 +703,79 @@ export function HistoryFeed({
   }, [queryClient]);
 
   const handleDelete = (id: string) => {
-    deleteEntry.mutate(id);
+    (async () => {
+      try {
+        const options = await tauriAPI.getHistoryDeleteOptions(id);
+
+        const recordingId = (options.recording_id ?? "").trim();
+        const hasRecording = Boolean(recordingId) && options.recording_exists;
+        const refCount = options.recording_ref_count ?? 0;
+
+        // No recording: delete transcript only.
+        if (!hasRecording) {
+          hideEntries([id]);
+          deleteHistoryEntryEx.mutate(
+            { id, mode: "entry_only" },
+            {
+              onSuccess: () => {
+                notifications.show({
+                  title: "History",
+                  message: "Deleted transcript.",
+                  color: "green",
+                });
+              },
+              onError: (e) => {
+                unhideEntries([id]);
+                notifications.show({
+                  title: "History",
+                  message: formatErrorMessage(e),
+                  color: "red",
+                });
+              },
+            }
+          );
+          return;
+        }
+
+        // Unshared recording: delete transcript + recording immediately.
+        if (refCount <= 1) {
+          hideEntries([id]);
+          deleteHistoryEntryEx.mutate(
+            { id, mode: "entry_and_recording" },
+            {
+              onSuccess: (res) => {
+                notifications.show({
+                  title: "History",
+                  message: res.deleted_recording
+                    ? "Deleted transcript and recording."
+                    : "Deleted transcript.",
+                  color: "green",
+                });
+              },
+              onError: (e) => {
+                unhideEntries([id]);
+                notifications.show({
+                  title: "History",
+                  message: formatErrorMessage(e),
+                  color: "red",
+                });
+              },
+            }
+          );
+          return;
+        }
+
+        // Shared recording: ask what to delete.
+        setDeleteOneContext({ entryId: id, recordingId, refCount });
+        deleteOneHandlers.open();
+      } catch (e) {
+        notifications.show({
+          title: "History",
+          message: formatErrorMessage(e),
+          color: "red",
+        });
+      }
+    })();
   };
 
   const handleDeleteAll = () => {
@@ -771,6 +897,105 @@ export function HistoryFeed({
   const isInitialLoading = isLoading && !historyPage;
 
   const groupedHistory = groupHistoryByDate(pageHistory);
+
+  // Probe recordings for currently visible entries (best-effort).
+  useEffect(() => {
+    let cancelled = false;
+
+    let timeout: number | null = null;
+
+    const now = Date.now();
+    const retryMissingAfterMs = 650;
+    const pollIntervalMs = 650;
+    const recentWindowMs = 30_000;
+    const maxChecksPerTick = 12;
+
+    const isEntryRecentOrInProgress = (entry: { timestamp?: string; status?: string }) => {
+      const status = (entry.status ?? "success").toString();
+      if (status === "in_progress") return true;
+      if (status === "error") return false;
+      const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : NaN;
+      return Number.isFinite(ts) ? now - ts < recentWindowMs : false;
+    };
+
+    const candidates: Array<{ id: string; priority: number }> = [];
+    let shouldPollAgain = false;
+
+    for (const group of groupedHistory) {
+      for (const entry of group.items) {
+        const recordingId =
+          (entry.recording_request_id ?? entry.id)?.trim?.() ?? "";
+        if (!recordingId) continue;
+
+        const shouldPoll = isEntryRecentOrInProgress(entry);
+        const cached = recordingExistsById.get(recordingId);
+
+        if (shouldPoll && (!cached || !cached.exists)) {
+          shouldPollAgain = true;
+        }
+
+        // Probe on first-seen.
+        if (!cached) {
+          candidates.push({ id: recordingId, priority: shouldPoll ? 2 : 1 });
+          continue;
+        }
+
+        // Re-check quickly for recent/in-progress entries when previously missing.
+        if (shouldPoll && !cached.exists && now - cached.checkedAt > retryMissingAfterMs) {
+          candidates.push({ id: recordingId, priority: 2 });
+        }
+      }
+    }
+
+    if (shouldPollAgain) {
+      timeout = window.setTimeout(() => {
+        setRecordingsProbeTick((t) => t + 1);
+      }, pollIntervalMs);
+    }
+
+    if (candidates.length === 0) {
+      return () => {
+        cancelled = true;
+        if (timeout !== null) window.clearTimeout(timeout);
+      };
+    }
+
+    // De-dupe + prioritize newer/in-progress checks.
+    const seen = new Set<string>();
+    const selected: string[] = [];
+    candidates
+      .sort((a, b) => b.priority - a.priority)
+      .forEach((x) => {
+        if (seen.has(x.id)) return;
+        seen.add(x.id);
+        selected.push(x.id);
+      });
+
+    const batch = selected.slice(0, maxChecksPerTick);
+
+    (async () => {
+      await Promise.all(
+        batch.map(async (id) => {
+          try {
+            const url = await recordingsAPI.getRecordingAssetUrl({ requestId: id });
+            if (cancelled) return;
+            setRecordingExistsById((prev) => {
+              const next = new Map(prev);
+              next.set(id, { exists: Boolean(url), checkedAt: Date.now() });
+              return next;
+            });
+          } catch {
+            // Treat errors as "unknown"; don't force-hide actions.
+          }
+        })
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      if (timeout !== null) window.clearTimeout(timeout);
+    };
+  }, [groupedHistory, recordingExistsById, recordingsProbeTick]);
 
   const isFiltering = filterText.trim().length > 0 || hasActiveFilters;
 
@@ -1221,6 +1446,128 @@ export function HistoryFeed({
             Delete transcripts and recordings
           </Button>
         </Group>
+      </Modal>
+
+      <Modal
+        opened={deleteOneOpened}
+        onClose={() => {
+          if (deleteOneBusy || deleteHistoryEntryEx.isPending) return;
+          deleteOneHandlers.close();
+          setDeleteOneContext(null);
+        }}
+        title="Delete"
+        centered
+        size="sm"
+      >
+        {deleteOneContext ? (
+          <>
+            <Text size="sm" mb="sm">
+              This transcript shares its recording with{" "}
+              {Math.max(0, deleteOneContext.refCount - 1)} other history item
+              {Math.max(0, deleteOneContext.refCount - 1) === 1 ? "" : "s"}.
+            </Text>
+            <Text size="sm" c="dimmed" mb="lg">
+              Choose what to delete.
+            </Text>
+
+            <Group justify="flex-end" gap="sm" wrap="wrap">
+              <Button
+                variant="subtle"
+                color="gray"
+                onClick={() => {
+                  setDeleteOneBusy(true);
+
+                  // Optimistically hide only the selected entry.
+                  hideEntries([deleteOneContext.entryId]);
+
+                  deleteHistoryEntryEx.mutate(
+                    { id: deleteOneContext.entryId, mode: "entry_only" },
+                    {
+                      onSuccess: () => {
+                        notifications.show({
+                          title: "History",
+                          message: "Deleted transcript.",
+                          color: "green",
+                        });
+                        deleteOneHandlers.close();
+                        setDeleteOneContext(null);
+                      },
+                      onError: (e) => {
+                        unhideEntries([deleteOneContext.entryId]);
+                        notifications.show({
+                          title: "History",
+                          message: formatErrorMessage(e),
+                          color: "red",
+                        });
+                      },
+                      onSettled: () => setDeleteOneBusy(false),
+                    }
+                  );
+                }}
+                loading={
+                  deleteOneBusy &&
+                  deleteHistoryEntryEx.variables?.mode === "entry_only"
+                }
+                disabled={deleteOneBusy || deleteHistoryEntryEx.isPending}
+              >
+                Delete only this transcript
+              </Button>
+
+              <Button
+                color="red"
+                onClick={() => {
+                  setDeleteOneBusy(true);
+
+                  // Optimistically hide all visible entries that reference this recording.
+                  const rid = deleteOneContext.recordingId;
+                  const visibleIdsToHide: string[] = [];
+                  for (const e of historyPage?.items ?? []) {
+                    const source = (e.recording_request_id ?? e.id)?.trim?.() ?? "";
+                    if (source && source === rid) visibleIdsToHide.push(e.id);
+                  }
+                  hideEntries(visibleIdsToHide.length > 0 ? visibleIdsToHide : [deleteOneContext.entryId]);
+
+                  deleteHistoryEntryEx.mutate(
+                    {
+                      id: deleteOneContext.entryId,
+                      mode: "recording_and_all_entries",
+                    },
+                    {
+                      onSuccess: (res) => {
+                        notifications.show({
+                          title: "History",
+                          message: `Deleted ${res.deleted_entries.toLocaleString()} transcript${
+                            res.deleted_entries === 1 ? "" : "s"
+                          }${res.deleted_recording ? " and recording" : ""}.`,
+                          color: "green",
+                        });
+                        deleteOneHandlers.close();
+                        setDeleteOneContext(null);
+                      },
+                      onError: (e) => {
+                        unhideEntries(visibleIdsToHide.length > 0 ? visibleIdsToHide : [deleteOneContext.entryId]);
+                        notifications.show({
+                          title: "History",
+                          message: formatErrorMessage(e),
+                          color: "red",
+                        });
+                      },
+                      onSettled: () => setDeleteOneBusy(false),
+                    }
+                  );
+                }}
+                loading={
+                  deleteOneBusy &&
+                  deleteHistoryEntryEx.variables?.mode ===
+                    "recording_and_all_entries"
+                }
+                disabled={deleteOneBusy || deleteHistoryEntryEx.isPending}
+              >
+                Delete all using this recording
+              </Button>
+            </Group>
+          </>
+        ) : null}
       </Modal>
 
       <Modal
@@ -1707,85 +2054,120 @@ export function HistoryFeed({
                       </ActionIcon>
                     </Tooltip>
 
-                    <Tooltip
-                      label={
-                        (entry.status ?? "success") === "in_progress"
-                          ? "Already transcribing"
-                          : "Rerun"
-                      }
-                      withArrow
-                    >
-                      <ActionIcon
-                        variant="subtle"
-                        size="sm"
-                        color="gray"
-                        disabled={(entry.status ?? "success") === "in_progress"}
-                        loading={
-                          retryMutation.isPending &&
-                          retryMutation.variables === entry.id
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          notifications.show({
-                            title: "Rerunning",
-                            message: "Re-running transcription…",
-                            color: "orange",
-                          });
-                          retryMutation.mutate(entry.id, {
-                            onSuccess: () => {
-                              notifications.show({
-                                title: "Rerun complete",
-                                message:
-                                  "Check History / Request Logs for the new entry.",
-                                color: "teal",
-                              });
-                            },
-                            onError: (e) => {
-                              notifications.show({
-                                title: "Rerun failed",
-                                message: formatErrorMessage(e),
-                                color: "red",
-                              });
-                            },
-                          });
-                        }}
-                        aria-label="Rerun"
-                      >
-                        <RotateCcw size={14} />
-                      </ActionIcon>
-                    </Tooltip>
+                    {(() => {
+                      const recordingId =
+                        (entry.recording_request_id ?? entry.id)?.trim?.() ?? "";
+                      const cached =
+                        recordingId ? recordingExistsById.get(recordingId) : undefined;
+                      const knownExists = cached?.exists;
+                      const isKnownMissing =
+                        !recordingId || knownExists === false;
 
-                    <Tooltip
-                      label={
-                        player.isPlaying(entry.id)
-                          ? "Pause"
-                          : "Play"
-                      }
-                      withArrow
-                    >
-                      <ActionIcon
-                        variant="subtle"
-                        size="sm"
-                        color="gray"
-                        disabled={(entry.status ?? "success") === "in_progress"}
-                        loading={player.isLoading(entry.id)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          player.toggle(entry.id);
-                        }}
-                        aria-label={
-                          player.isPlaying(entry.id)
-                            ? "Pause"
-                            : "Play"
-                        }
-                      >
-                        {player.isPlaying(entry.id) ? (
-                          <Pause size={14} />
-                        ) : (
-                          <Play size={14} />
-                        )}
-                      </ActionIcon>
-                    </Tooltip>
+                      const isPlaying = recordingId
+                        ? player.isPlaying(recordingId)
+                        : false;
+
+                      return (
+                        <>
+                          {/* Rerun */}
+                          {!isKnownMissing ? (
+                            <Tooltip
+                              label={
+                                (entry.status ?? "success") === "in_progress"
+                                  ? "Already transcribing"
+                                  : "Rerun"
+                              }
+                              withArrow
+                            >
+                              <ActionIcon
+                                variant="subtle"
+                                size="sm"
+                                color="gray"
+                                disabled={(entry.status ?? "success") === "in_progress"}
+                                loading={
+                                  retryMutation.isPending &&
+                                  retryMutation.variables === entry.id
+                                }
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  notifications.show({
+                                    title: "Rerunning",
+                                    message: "Re-running transcription…",
+                                    color: "orange",
+                                  });
+
+                                  // Rerun is keyed by the history entry id; the backend resolves
+                                  // which recording to use via `recording_request_id`.
+                                  retryMutation.mutate(entry.id, {
+                                    onSuccess: () => {
+                                      notifications.show({
+                                        title: "Rerun complete",
+                                        message:
+                                          "Check History / Request Logs for the new entry.",
+                                        color: "teal",
+                                      });
+                                    },
+                                    onError: (e) => {
+                                      notifications.show({
+                                        title: "Rerun failed",
+                                        message: formatErrorMessage(e),
+                                        color: "red",
+                                      });
+                                    },
+                                  });
+                                }}
+                                aria-label="Rerun"
+                              >
+                                <RotateCcw size={14} />
+                              </ActionIcon>
+                            </Tooltip>
+                          ) : null}
+
+                          {/* Play */}
+                          <Tooltip
+                            label={
+                              isKnownMissing
+                                ? "No recording"
+                                : isPlaying
+                                  ? "Pause"
+                                  : "Play"
+                            }
+                            withArrow
+                          >
+                            <ActionIcon
+                              variant="subtle"
+                              size="sm"
+                              color="gray"
+                              disabled={
+                                (entry.status ?? "success") === "in_progress" ||
+                                isKnownMissing
+                              }
+                              loading={
+                                recordingId ? player.isLoading(recordingId) : false
+                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!recordingId) return;
+                                player.toggle(recordingId);
+                              }}
+                              aria-label={
+                                isKnownMissing
+                                  ? "No recording"
+                                  : isPlaying
+                                    ? "Pause"
+                                    : "Play"
+                              }
+                            >
+                              {isPlaying ? (
+                                <Pause size={14} />
+                              ) : (
+                                <Play size={14} />
+                              )}
+                            </ActionIcon>
+                          </Tooltip>
+                        </>
+                      );
+                    })()}
                     {onJumpToLog && requestLogIds.has(entry.id) ? (
                       <Tooltip label="Log" withArrow>
                         <ActionIcon
@@ -1811,7 +2193,7 @@ export function HistoryFeed({
                           e.stopPropagation();
                           handleDelete(entry.id);
                         }}
-                        disabled={deleteEntry.isPending}
+                        disabled={deleteHistoryEntryEx.isPending || deleteOneBusy}
                         aria-label="Delete"
                       >
                         <Trash2 size={14} />

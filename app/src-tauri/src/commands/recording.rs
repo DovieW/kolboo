@@ -696,6 +696,12 @@ pub async fn pipeline_stop_and_transcribe(
         if let Some(wav) = wav_bytes {
             if store.save_wav(req_id, &wav).is_ok() {
                 let _ = store.prune_to_max_files(max_saved_recordings);
+
+                // Mark that this history entry has a recording available (it is stored under req_id).
+                if let Some(history) = app.try_state::<HistoryStorage>() {
+                    let _ = history.set_request_recording_id(req_id, Some(req_id.to_string()));
+                    let _ = app.emit("history-changed", ());
+                }
             }
         }
     }
@@ -741,8 +747,17 @@ pub async fn pipeline_retry_transcription(
         .try_state::<RecordingStore>()
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
 
+    // Resolve which request id actually owns the recording.
+    // - For normal requests, this is the same as `request_id`.
+    // - For reruns (including failed reruns), the entry should point back to the original.
+    let recording_source_id: String = app
+        .try_state::<HistoryStorage>()
+        .and_then(|history| history.get_by_id(&request_id).ok().flatten())
+        .and_then(|entry| entry.recording_request_id)
+        .unwrap_or_else(|| request_id.clone());
+
     let wav = recording_store
-        .load_wav(&request_id)
+        .load_wav(&recording_source_id)
         .map_err(CommandError::from)?;
 
     // Start a *new* request log for the retry attempt.
@@ -795,6 +810,13 @@ pub async fn pipeline_retry_transcription(
                 model_info,
                 max_saved_recordings,
             );
+
+            // Ensure play/rerun for this new entry points at the original recording.
+            let _ = history.set_request_recording_id(
+                req_id,
+                Some(recording_source_id.clone()),
+            );
+
             let _ = app.emit("history-changed", ());
         }
     }
@@ -850,12 +872,8 @@ pub async fn pipeline_retry_transcription(
         }
     };
 
-    // Persist audio under the *new* request id (best-effort)
-    if let Some(req_id) = new_request_id.as_deref() {
-        if recording_store.save_wav(req_id, &wav).is_ok() {
-            let _ = recording_store.prune_to_max_files(max_saved_recordings);
-        }
-    }
+    // IMPORTANT: Do NOT copy the WAV under the new request id.
+    // Reruns always point back to the original recording via `recording_request_id`.
 
     let final_text = result.final_text.clone();
 
