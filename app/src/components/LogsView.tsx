@@ -49,7 +49,9 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useClearRequestLogs, useRequestLogs } from "../lib/queries";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
+import { diffTextInline } from "../lib/textDiff";
 import { LogJsonModal } from "./LogJsonModal";
+import { InlineTextDiff } from "./InlineTextDiff";
 import type {
   LogEntry,
   LogLevel,
@@ -262,6 +264,50 @@ function RequestLogItem({
   const finalOutputTrimmed = (log.final_text ?? "").trim();
   const hasAnyTranscriptText = !!(rawTranscriptTrimmed || finalOutputTrimmed);
   const playDisabled = log.status === "in_progress";
+  const showRewriteDiff =
+    llmAttempted &&
+    typeof log.raw_transcript === "string" &&
+    typeof log.final_text === "string" &&
+    log.raw_transcript !== log.final_text;
+
+  const differenceInfo = useMemo(() => {
+    if (!showRewriteDiff) return null;
+
+    const before = log.raw_transcript ?? "";
+    const after = log.final_text ?? "";
+    const chunks = diffTextInline(before, after);
+
+    let equalChars = 0;
+    let changedChars = 0;
+    for (const c of chunks) {
+      if (c.added || c.removed) changedChars += c.value.length;
+      else equalChars += c.value.length;
+    }
+
+    const total = equalChars + changedChars;
+    const changeRatio = total > 0 ? changedChars / total : 0;
+
+    const tooLarge = changeRatio >= 0.62 || equalChars < 24;
+    if (tooLarge) return null;
+
+    // Count "change groups" (roughly: edit hunks). Treat a delete+insert
+    // sequence with no unchanged text between as one change.
+    let changeGroups = 0;
+    let inGroup = false;
+    for (const c of chunks) {
+      const changed = Boolean(c.added) || Boolean(c.removed);
+      if (!changed) {
+        inGroup = false;
+        continue;
+      }
+      if (!inGroup) {
+        changeGroups += 1;
+        inGroup = true;
+      }
+    }
+
+    return { chunks, changeGroups };
+  }, [showRewriteDiff, log.raw_transcript, log.final_text]);
 
   return (
     <Accordion.Item value={log.id} data-status={log.status}>
@@ -348,18 +394,34 @@ function RequestLogItem({
                         </Text>
                       </Box>
                     )}
-                    {log.final_text &&
-                      (log.final_text !== log.raw_transcript ||
-                        llmAttempted) && (
-                        <Box>
-                          <Text size="xs" fw={600} c="dimmed">
-                            Final Output:
+                    {log.final_text && (
+                      <Box>
+                        <Text size="xs" fw={600} c="dimmed">
+                          Rewrite Output:
+                        </Text>
+                        {typeof log.raw_transcript === "string" &&
+                        typeof log.final_text === "string" &&
+                        log.final_text === log.raw_transcript ? (
+                          <Text size="sm" c="dimmed">
+                            (no change)
                           </Text>
+                        ) : (
                           <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
                             {log.final_text}
                           </Text>
-                        </Box>
-                      )}
+                        )}
+                      </Box>
+                    )}
+
+                    {differenceInfo && (
+                      <Box>
+                        <Text size="xs" fw={600} c="dimmed">
+                          Difference ({differenceInfo.changeGroups} change
+                          {differenceInfo.changeGroups === 1 ? "" : "s"}):
+                        </Text>
+                        <InlineTextDiff chunks={differenceInfo.chunks} />
+                      </Box>
+                    )}
                   </>
                 ) : (
                   <Box>
