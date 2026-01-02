@@ -1897,6 +1897,40 @@ impl SharedPipeline {
         Ok(())
     }
 
+    /// Temporarily override the audio capture behavior without updating the full PipelineConfig.
+    ///
+    /// This is intended for short-lived UI utilities (e.g. Settings mic level test) that
+    /// need a CPAL stream running to drive realtime meters.
+    pub fn set_capture_behavior_override(
+        &self,
+        hot_mic_enabled: bool,
+        hot_mic_pre_roll_ms: u32,
+        mic_auto_recover_enabled: bool,
+        input_device_name: Option<&str>,
+    ) -> Result<(), PipelineError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+        // Never stop/retarget the stream mid-recording.
+        if inner.state == PipelineState::Recording {
+            return Err(PipelineError::AlreadyRecording);
+        }
+
+        inner
+            .audio_capture
+            .set_capture_behavior(
+                hot_mic_enabled,
+                hot_mic_pre_roll_ms,
+                mic_auto_recover_enabled,
+                input_device_name,
+            )
+            .map_err(PipelineError::AudioCapture)?;
+
+        Ok(())
+    }
+
     /// Check if recording
     pub fn is_recording(&self) -> bool {
         self.inner

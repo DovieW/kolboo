@@ -37,7 +37,7 @@ use history::{HistoryStorage, RequestModelInfo};
 use recordings::RecordingStore;
 use request_log::{RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
 use settings::HotkeyConfig;
-use state::{AppState, TrayKeepAlive};
+use state::{AppState, MicTestMeterState, TrayKeepAlive};
 
 #[cfg(desktop)]
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -1579,11 +1579,14 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(AppState::default())
         .manage(TrayKeepAlive::default())
+        .manage(MicTestMeterState::default())
         .invoke_handler(tauri::generate_handler![
             commands::audio::play_audio_cue_preview,
             commands::audio::list_audio_input_devices,
             commands::audio::list_audio_input_devices_v2,
             commands::audio::get_default_audio_input_device_name,
+            commands::audio::mic_test_start_meter,
+            commands::audio::mic_test_stop_meter,
             commands::text::type_text,
             commands::text::get_server_url,
             commands::settings::register_shortcuts,
