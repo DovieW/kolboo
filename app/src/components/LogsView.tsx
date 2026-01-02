@@ -599,6 +599,9 @@ export function LogsView(
   const { data: logs } = useRequestLogs(50);
   const clearLogsMutation = useClearRequestLogs();
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([]);
+  const [systemEventsAccordionValue, setSystemEventsAccordionValue] = useState<
+    string | null
+  >(null);
   const [filterText, setFilterText] = useState("");
   const [filtersOpened, setFiltersOpened] = useState(false);
   const [filtersExpandedSection, setFiltersExpandedSection] = useState<
@@ -1083,95 +1086,121 @@ export function LogsView(
 
       {/* System Events Panel */}
       {systemEvents.length > 0 && (
-        <Paper
-          withBorder
-          p="sm"
-          style={{ background: "var(--mantine-color-dark-8)" }}
+        <Accordion
+          variant="contained"
+          radius="md"
+          chevronPosition="right"
+          value={systemEventsAccordionValue}
+          onChange={setSystemEventsAccordionValue}
         >
-          <Group justify="space-between" mb="xs">
-            <Group gap="xs">
-              <Zap
-                size={16}
-                style={{ color: "var(--mantine-color-yellow-5)" }}
-              />
-              <Text size="sm" fw={600}>
-                System Events (Live)
-              </Text>
-            </Group>
-            <Group gap="xs">
-              <CopyButton value={JSON.stringify(systemEvents, null, 2)}>
-                {({ copied, copy }) => (
+          <Accordion.Item value="system-events">
+            <Accordion.Control>
+              <Group justify="space-between" wrap="nowrap" pr="xs">
+                <Group gap="xs" wrap="nowrap">
+                  <Zap
+                    size={16}
+                    style={{ color: "var(--mantine-color-yellow-5)" }}
+                  />
+                  <Text size="sm" fw={600}>
+                    System Events (Live)
+                  </Text>
+                  <Badge size="xs" variant="light" color="gray">
+                    {systemEvents.length}
+                  </Badge>
+                </Group>
+
+                <Group gap="xs" wrap="nowrap">
+                  <CopyButton value={JSON.stringify(systemEvents, null, 2)}>
+                    {({ copied, copy }) => (
+                      <Button
+                        variant="subtle"
+                        color={copied ? "teal" : "gray"}
+                        size="xs"
+                        leftSection={<Copy size={12} />}
+                        onClick={(e) => {
+                          // Prevent toggling the accordion when clicking actions.
+                          e.preventDefault();
+                          e.stopPropagation();
+                          copy();
+                        }}
+                      >
+                        {copied ? "Copied!" : "Copy All"}
+                      </Button>
+                    )}
+                  </CopyButton>
+
                   <Button
                     variant="subtle"
-                    color={copied ? "teal" : "gray"}
+                    color="gray"
                     size="xs"
-                    leftSection={<Copy size={12} />}
-                    onClick={copy}
+                    onClick={(e) => {
+                      // Prevent toggling the accordion when clicking actions.
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSystemEvents([]);
+                      setSystemEventsAccordionValue(null);
+                    }}
                   >
-                    {copied ? "Copied!" : "Copy All"}
+                    Clear
                   </Button>
-                )}
-              </CopyButton>
-              <Button
-                variant="subtle"
-                color="gray"
-                size="xs"
-                onClick={() => setSystemEvents([])}
-              >
-                Clear
-              </Button>
-            </Group>
-          </Group>
-          <Stack gap={4} style={{ maxHeight: 200, overflowY: "auto" }}>
-            {systemEvents.map((event, idx) => (
-              <Group
-                key={`${event.timestamp}-${idx}`}
-                gap="xs"
-                wrap="nowrap"
-                align="flex-start"
-              >
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  ff="monospace"
-                  style={{
-                    whiteSpace: "nowrap",
-                    minWidth: 92,
-                    textAlign: "right",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {new Date(event.timestamp).toLocaleTimeString(undefined, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })}
-                </Text>
-                <Badge
-                  size="xs"
-                  color={
-                    event.event_type === "error"
-                      ? "red"
-                      : event.event_type === "shortcut"
-                      ? "blue"
-                      : "gray"
-                  }
-                >
-                  {event.event_type}
-                </Badge>
-                <Text size="xs" style={{ flex: 1 }}>
-                  {event.message}
-                  {event.details && (
-                    <Text span c="dimmed" size="xs">
-                      {" "}
-                      - {event.details}
-                    </Text>
-                  )}
-                </Text>
+                </Group>
               </Group>
-            ))}
-          </Stack>
-        </Paper>
+            </Accordion.Control>
+            <Accordion.Panel>
+              <Stack gap={4} style={{ maxHeight: 120, overflowY: "auto" }}>
+                {systemEvents.map((event, idx) => (
+                  <Group
+                    key={`${event.timestamp}-${idx}`}
+                    gap="xs"
+                    wrap="nowrap"
+                    align="flex-start"
+                  >
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      ff="monospace"
+                      style={{
+                        whiteSpace: "nowrap",
+                        minWidth: 92,
+                        textAlign: "right",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {new Date(event.timestamp).toLocaleTimeString(
+                        undefined,
+                        {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        }
+                      )}
+                    </Text>
+                    <Badge
+                      size="xs"
+                      color={
+                        event.event_type === "error"
+                          ? "red"
+                          : event.event_type === "shortcut"
+                          ? "blue"
+                          : "gray"
+                      }
+                    >
+                      {event.event_type}
+                    </Badge>
+                    <Text size="xs" style={{ flex: 1 }}>
+                      {event.message}
+                      {event.details && (
+                        <Text span c="dimmed" size="xs">
+                          {" "}- {event.details}
+                        </Text>
+                      )}
+                    </Text>
+                  </Group>
+                ))}
+              </Stack>
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion>
       )}
 
       {pageLogs && pageLogs.length > 0 ? (
