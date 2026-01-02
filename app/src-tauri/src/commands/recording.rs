@@ -512,6 +512,42 @@ pub async fn pipeline_stop_and_transcribe(
         });
     }
 
+    // Emit rewriting started once the pipeline actually enters the optional LLM phase.
+    //
+    // Why not rely on the overlay's `pipeline_get_state` polling?
+    // The overlay may be awaiting a long-running `invoke("pipeline_stop_and_transcribe")`,
+    // which can prevent intermediate polling updates from being observed. A dedicated event
+    // keeps the UI honest about the rewrite duration.
+    {
+        let app_clone = app.clone();
+        let pipeline_clone = pipeline.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            let start = Instant::now();
+            loop {
+                match pipeline_clone.state() {
+                    PipelineState::Rewriting => {
+                        let _ = app_clone.emit("pipeline-rewriting-started", ());
+                        break;
+                    }
+                    PipelineState::Idle | PipelineState::Error => {
+                        // No rewrite (disabled/failed early) or pipeline exited.
+                        break;
+                    }
+                    PipelineState::Recording | PipelineState::Transcribing => {
+                        // Not yet.
+                    }
+                }
+
+                // Hard stop to avoid a runaway task in pathological cases.
+                if start.elapsed() > Duration::from_secs(15 * 60) {
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+    }
+
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
@@ -822,6 +858,33 @@ pub async fn pipeline_retry_transcription(
     }
 
     let _ = app.emit("pipeline-transcription-started", ());
+
+    // Emit rewriting started once we enter the optional LLM phase.
+    {
+        let app_clone = app.clone();
+        let pipeline_clone = pipeline.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            let start = Instant::now();
+            loop {
+                match pipeline_clone.state() {
+                    PipelineState::Rewriting => {
+                        let _ = app_clone.emit("pipeline-rewriting-started", ());
+                        break;
+                    }
+                    PipelineState::Idle | PipelineState::Error => {
+                        break;
+                    }
+                    PipelineState::Recording | PipelineState::Transcribing => {}
+                }
+
+                if start.elapsed() > Duration::from_secs(15 * 60) {
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+    }
 
     // Run the retry transcription (STT + optional LLM)
     let result = match pipeline

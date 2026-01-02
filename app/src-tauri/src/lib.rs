@@ -806,6 +806,37 @@ fn stop_recording(
                 });
             }
 
+            // Emit rewriting started once the pipeline actually enters the optional LLM phase.
+            //
+            // This keeps the overlay UI accurate even if state polling is delayed.
+            {
+                let app_for_evt = app_clone.clone();
+                let pipeline_for_evt = pipeline_clone.clone();
+                tauri::async_runtime::spawn(async move {
+                    let start = std::time::Instant::now();
+                    loop {
+                        match pipeline_for_evt.state() {
+                            pipeline::PipelineState::Rewriting => {
+                                let _ = app_for_evt.emit("pipeline-rewriting-started", ());
+                                break;
+                            }
+                            pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
+                                // No rewrite (disabled/failed early) or pipeline exited.
+                                break;
+                            }
+                            pipeline::PipelineState::Recording
+                            | pipeline::PipelineState::Transcribing => {}
+                        }
+
+                        if start.elapsed() > std::time::Duration::from_secs(15 * 60) {
+                            break;
+                        }
+
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                });
+            }
+
             // Create an in-progress history entry while we transcribe.
             if let Some(ref req_id) = request_id {
                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {

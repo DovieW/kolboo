@@ -1885,6 +1885,12 @@ function RecordingControl() {
       );
 
       unlisteners.push(
+        await listen("pipeline-rewriting-started", () => {
+          setPipelineState("rewriting");
+        })
+      );
+
+      unlisteners.push(
         await listen("pipeline-cancelled", () => {
           setPipelineState("idle");
           setLastError(null);
