@@ -225,6 +225,9 @@ function RequestLogItem({
   // Use `llm_duration_ms` to indicate whether an LLM rewrite was actually attempted.
   const llmAttempted = log.llm_duration_ms !== null;
   const totalDurationMs = (() => {
+    // Prefer backend-provided duration. This excludes recording time and matches
+    // "request processing" time (stop -> STT/LLM -> done).
+    if (typeof log.total_duration_ms === "number") return log.total_duration_ms;
     if (!log.ended_at) return null;
     const start = Date.parse(log.started_at);
     const end = Date.parse(log.ended_at);
@@ -692,6 +695,8 @@ export function LogsView(
     const maxMs = Number.isFinite(maxRaw) && maxRaw >= 0 ? maxRaw * 1000 : null;
 
     const getTotalDurationMs = (log: RequestLog): number | null => {
+      if (typeof log.total_duration_ms === "number")
+        return log.total_duration_ms;
       // In-progress has no ended_at (and should always be included anyway).
       if (!log.ended_at) return null;
       const start = Date.parse(log.started_at);
@@ -1166,14 +1171,11 @@ export function LogsView(
                         fontVariantNumeric: "tabular-nums",
                       }}
                     >
-                      {new Date(event.timestamp).toLocaleTimeString(
-                        undefined,
-                        {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                        }
-                      )}
+                      {new Date(event.timestamp).toLocaleTimeString(undefined, {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })}
                     </Text>
                     <Badge
                       size="xs"
@@ -1191,7 +1193,8 @@ export function LogsView(
                       {event.message}
                       {event.details && (
                         <Text span c="dimmed" size="xs">
-                          {" "}- {event.details}
+                          {" "}
+                          - {event.details}
                         </Text>
                       )}
                     </Text>

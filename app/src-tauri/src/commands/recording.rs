@@ -553,6 +553,10 @@ pub async fn pipeline_stop_and_transcribe(
         log_store.with_current(|log| {
             log.profile_id = profile_id.clone();
             log.profile_name = profile_name.clone();
+            // Important: do not include recording time in the request "Total" duration.
+            // The request log is created at recording-start, so we explicitly mark the
+            // processing start when transcription begins.
+            log.mark_processing_started();
             log.info("Recording stopped, starting transcription");
         });
     }
@@ -1178,6 +1182,8 @@ pub async fn pipeline_dictate(
         log_store.with_current(|log| {
             log.profile_id = profile_id.clone();
             log.profile_name = profile_name.clone();
+            // Do not include recording time in the request "Total" duration.
+            log.mark_processing_started();
             log.info("Recording stopped, starting transcription");
         });
     }

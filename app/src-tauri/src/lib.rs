@@ -859,6 +859,8 @@ fn stop_recording(
             // Log transcription start for this request
             if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
+                    // Do not include recording time in the request "Total" duration.
+                    log.mark_processing_started();
                     log.info("Recording stopped, starting transcription");
                 });
             }

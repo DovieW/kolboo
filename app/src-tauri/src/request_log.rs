@@ -76,6 +76,13 @@ pub struct RequestLog {
     pub id: String,
     /// When the request started
     pub started_at: DateTime<Utc>,
+    /// When request *processing* started (excludes recording time).
+    ///
+    /// For the main pipeline flow, the request log is created at recording-start,
+    /// but the user-facing "Total" duration should represent only the backend
+    /// processing time (stop -> STT/LLM -> done).
+    #[serde(default)]
+    pub processing_started_at: Option<DateTime<Utc>>,
     /// When the request completed (if finished)
     #[serde(rename = "ended_at")]
     pub completed_at: Option<DateTime<Utc>>,
@@ -172,6 +179,7 @@ impl RequestLog {
         Self {
             id: Uuid::new_v4().to_string(),
             started_at: Utc::now(),
+            processing_started_at: None,
             completed_at: None,
             stt_provider,
             stt_model,
@@ -199,6 +207,26 @@ impl RequestLog {
             llm_is_free_tier: false,
             stt_estimated_cost_usd_micros: None,
             llm_estimated_cost_usd_micros: None,
+        }
+    }
+
+    /// Mark the beginning of request processing (excluding recording time).
+    ///
+    /// This is idempotent: calling it multiple times will keep the first value.
+    pub fn mark_processing_started(&mut self) {
+        if self.processing_started_at.is_none() {
+            self.processing_started_at = Some(Utc::now());
+        }
+    }
+
+    fn compute_total_duration_ms(&self) -> Option<u64> {
+        let end = self.completed_at?;
+        let start = self.processing_started_at.unwrap_or(self.started_at);
+        let ms = (end - start).num_milliseconds();
+        if ms < 0 {
+            None
+        } else {
+            Some(ms as u64)
         }
     }
 
@@ -249,10 +277,7 @@ impl RequestLog {
     pub fn complete_success(&mut self) {
         self.completed_at = Some(Utc::now());
         self.status = RequestStatus::Success;
-        self.total_duration_ms = Some(
-            (self.completed_at.unwrap() - self.started_at)
-                .num_milliseconds() as u64,
-        );
+        self.total_duration_ms = self.compute_total_duration_ms();
     }
 
     /// Mark request as complete with error
@@ -260,20 +285,14 @@ impl RequestLog {
         self.completed_at = Some(Utc::now());
         self.status = RequestStatus::Error;
         self.error_message = Some(error.into());
-        self.total_duration_ms = Some(
-            (self.completed_at.unwrap() - self.started_at)
-                .num_milliseconds() as u64,
-        );
+        self.total_duration_ms = self.compute_total_duration_ms();
     }
 
     /// Mark request as cancelled
     pub fn complete_cancelled(&mut self) {
         self.completed_at = Some(Utc::now());
         self.status = RequestStatus::Cancelled;
-        self.total_duration_ms = Some(
-            (self.completed_at.unwrap() - self.started_at)
-                .num_milliseconds() as u64,
-        );
+        self.total_duration_ms = self.compute_total_duration_ms();
     }
 }
 

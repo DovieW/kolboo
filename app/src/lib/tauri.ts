@@ -2075,6 +2075,8 @@ export interface RequestLog {
 
   raw_transcript: string | null;
   final_text: string | null;
+  // Total request processing duration (ms). Excludes recording time when available.
+  total_duration_ms: number | null;
   stt_duration_ms: number | null;
   llm_duration_ms: number | null;
   status: RequestStatus;
