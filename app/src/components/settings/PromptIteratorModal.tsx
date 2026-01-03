@@ -84,15 +84,16 @@ export function PromptIteratorModal({
     setIsTestingPrompt(true);
 
     try {
-      // Use the improved prompt to test the original input
-      // We'll need to call the test_llm_rewrite command with the improved prompt
-      // For now, this is a placeholder - we'll implement this properly
-      const testResult = await testPromptWithInput(
-        improvedPrompt,
-        input,
-        profileId ?? null
+      // Testing with the improved prompt would require temporarily applying it
+      // or implementing a custom test command that accepts a prompt override.
+      // For now, we show a helpful message.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setTestOutput(
+        "To test this improved prompt:\n\n" +
+        "1. Click 'Apply to Settings' to use it\n" +
+        "2. Then use the 'Test rewrite' section above to validate the results\n\n" +
+        "This ensures you're testing with the exact same configuration."
       );
-      setTestOutput(testResult);
     } catch (err: any) {
       setTestError(err?.message || err?.toString() || "Test failed");
     } finally {
@@ -360,15 +361,4 @@ export function PromptIteratorModal({
       </Stack>
     </Modal>
   );
-}
-
-// Placeholder function - will be implemented properly with backend support
-async function testPromptWithInput(
-  _prompt: string,
-  _input: string,
-  _profileId: string | null
-): Promise<string> {
-  // This will call a backend command to test the prompt
-  // For now, return a placeholder
-  return "Test functionality will be implemented with backend support";
 }
