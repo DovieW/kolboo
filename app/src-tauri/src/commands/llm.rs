@@ -553,6 +553,127 @@ pub async fn test_llm_rewrite(
     }
 }
 
+/// Improve a prompt based on examples of input, actual output, and desired output.
+///
+/// Uses the LLM to analyze the difference and generate an improved prompt.
+#[tauri::command]
+pub async fn improve_prompt(
+    app: AppHandle,
+    pipeline: State<'_, SharedPipeline>,
+    current_prompt: String,
+    input: String,
+    actual_output: String,
+    desired_output: String,
+    reasoning: Option<String>,
+    profile_id: Option<String>,
+) -> Result<ImprovePromptResponse, LlmCommandError> {
+    let config = pipeline.config();
+
+    // Resolve the requested profile (if any).
+    let resolved_profile = profile_id
+        .as_deref()
+        .and_then(|id| if id == "default" { None } else { Some(id) })
+        .map(|id| {
+            config
+                .llm_config
+                .program_prompt_profiles
+                .iter()
+                .find(|p| p.id == id)
+                .cloned()
+                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))
+        })
+        .transpose()?;
+
+    let (desired_provider, desired_model) = if let Some(profile) = resolved_profile.as_ref() {
+        let provider = profile
+            .llm_provider
+            .clone()
+            .unwrap_or_else(|| config.llm_config.provider.clone());
+        let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
+
+        (provider, model)
+    } else {
+        (
+            config.llm_config.provider.clone(),
+            config.llm_config.model.clone(),
+        )
+    };
+
+    let api_key = if desired_provider == "ollama" {
+        String::new()
+    } else {
+        config
+            .llm_api_keys
+            .get(desired_provider.as_str())
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    if desired_provider != "ollama" && api_key.trim().is_empty() {
+        return Err(LlmCommandError::from(format!(
+            "No API key configured for provider: {}",
+            desired_provider
+        )));
+    }
+
+    let provider_cfg = LlmConfig {
+        enabled: true,
+        provider: desired_provider,
+        api_key,
+        model: desired_model,
+        ollama_url: config.llm_config.ollama_url.clone(),
+        openai_reasoning_effort: config.llm_config.openai_reasoning_effort.clone(),
+        gemini_thinking_budget: config.llm_config.gemini_thinking_budget,
+        gemini_thinking_level: config.llm_config.gemini_thinking_level.clone(),
+        anthropic_thinking_budget: config.llm_config.anthropic_thinking_budget,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: Vec::new(),
+        timeout: config.llm_config.timeout,
+    };
+
+    let provider = create_llm_provider_unstructured(&provider_cfg);
+
+    // Build the system prompt for the meta-prompt task
+    let system_prompt = "You are an expert at analyzing and improving prompts for language models. \
+        Your task is to analyze a prompt that is not producing the desired output and suggest improvements. \
+        Focus on being specific, clear, and actionable in your improvements. \
+        Return ONLY the improved prompt text, without any explanations or meta-commentary.";
+
+    // Build the user prompt with all the context
+    let mut user_prompt = format!(
+        "Current prompt:\n{}\n\n\
+        Example input:\n{}\n\n\
+        Actual output (incorrect):\n{}\n\n\
+        Desired output (correct):\n{}",
+        current_prompt, input, actual_output, desired_output
+    );
+
+    if let Some(reason) = reasoning.as_ref() {
+        if !reason.trim().is_empty() {
+            user_prompt.push_str(&format!("\n\nReasoning for why the actual output is incorrect:\n{}", reason));
+        }
+    }
+
+    user_prompt.push_str("\n\nBased on the above, please provide an improved version of the current prompt that would produce the desired output instead of the actual output. Return only the improved prompt text.");
+
+    let output_res = provider
+        .complete(system_prompt, &user_prompt)
+        .await
+        .map_err(|e| LlmCommandError::from(e.to_string()))?;
+
+    // Best-effort: emit LLM cost event for the current request log (if any).
+    crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
+
+    Ok(ImprovePromptResponse {
+        improved_prompt: output_res.trim().to_string(),
+    })
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ImprovePromptResponse {
+    pub improved_prompt: String,
+}
+
 /// Run a one-off LLM completion with explicit provider/model and explicit prompts.
 ///
 /// This is used by the History UI to send analysis instructions as the *system prompt*

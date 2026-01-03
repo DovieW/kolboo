@@ -1946,6 +1946,23 @@ export const llmAPI = {
       profileId: params.profileId ?? null,
     }),
 
+  improvePrompt: (params: {
+    currentPrompt: string;
+    input: string;
+    actualOutput: string;
+    desiredOutput: string;
+    reasoning: string | null;
+    profileId: string | null;
+  }) =>
+    invoke<{ improvedPrompt: string }>("improve_prompt", {
+      currentPrompt: params.currentPrompt,
+      input: params.input,
+      actualOutput: params.actualOutput,
+      desiredOutput: params.desiredOutput,
+      reasoning: params.reasoning,
+      profileId: params.profileId,
+    }),
+
   complete: (params: {
     provider: string;
     model?: string | null;

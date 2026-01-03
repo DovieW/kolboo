@@ -1652,6 +1652,7 @@ pub fn run() {
             commands::llm::update_llm_prompts,
             commands::llm::get_llm_config,
             commands::llm::test_llm_rewrite,
+            commands::llm::improve_prompt,
             commands::llm::llm_complete,
             // Local Whisper model management commands
             commands::whisper::is_local_whisper_available,

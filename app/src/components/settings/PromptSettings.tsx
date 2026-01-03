@@ -47,6 +47,7 @@ import {
 import { LLM_MODELS, STT_MODELS } from "../../lib/modelOptions";
 import { HintSelect } from "../HintSelect";
 import { PromptSectionEditor } from "./PromptSectionEditor";
+import { PromptIteratorModal } from "./PromptIteratorModal";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
 
@@ -197,6 +198,8 @@ export function PromptSettings({
     number | null
   >(null);
   const rewriteTestStartRef = useRef<number | null>(null);
+
+  const [promptIteratorOpen, setPromptIteratorOpen] = useState(false);
 
   const runRewriteTest = () => {
     setRewriteTestError("");
@@ -2811,6 +2814,35 @@ export function PromptSettings({
             </Accordion.Panel>
           </Accordion.Item>
 
+          <Accordion.Item value={`${activeProfileId}-prompt-iterator`}>
+            <Accordion.Control>
+              <div>
+                <p className="settings-label">Prompt Iterator</p>
+                <p className="settings-description">
+                  Improve your prompt by providing examples of input, actual output, and desired output
+                </p>
+              </div>
+            </Accordion.Control>
+            <Accordion.Panel>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                <Text size="xs" c="dimmed">
+                  Use this tool to iteratively improve your prompt. Provide an example input,
+                  the output you got, and the output you wanted. The AI will analyze the
+                  difference and suggest improvements to your prompt.
+                </Text>
+
+                <Button
+                  color="orange"
+                  onClick={() => setPromptIteratorOpen(true)}
+                >
+                  Open Prompt Iterator
+                </Button>
+              </div>
+            </Accordion.Panel>
+          </Accordion.Item>
+
           <PromptSectionEditor
             sectionKey={`${activeProfileId}-main-prompt`}
             title="Core Formatting Rules"
@@ -3029,6 +3061,16 @@ export function PromptSettings({
           />
         </Accordion>
       </div>
+
+      <PromptIteratorModal
+        opened={promptIteratorOpen}
+        onClose={() => setPromptIteratorOpen(false)}
+        currentPrompt={localSections?.main.content ?? defaultSections?.main ?? ""}
+        profileId={activeProfileId}
+        onApplyPrompt={(improvedPrompt) => {
+          handleSave("main", improvedPrompt);
+        }}
+      />
     </>
   );
 }

@@ -137,6 +137,19 @@ export function useTestLlmRewrite() {
   });
 }
 
+export function useImprovePrompt() {
+  return useMutation({
+    mutationFn: (params: {
+      currentPrompt: string;
+      input: string;
+      actualOutput: string;
+      desiredOutput: string;
+      reasoning: string | null;
+      profileId: string | null;
+    }): Promise<{ improvedPrompt: string }> => llmAPI.improvePrompt(params),
+  });
+}
+
 export function useTestSttTranscribeLastAudio() {
   return useMutation({
     mutationFn: (params: { profileId?: string | null }): Promise<string> =>
