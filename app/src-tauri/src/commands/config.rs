@@ -15,8 +15,8 @@ use tauri_plugin_store::StoreExt;
 // Default Prompt Sections
 // ============================================================================
 
-/// Main prompt section - Core rules, punctuation, new lines
-pub const MAIN_PROMPT_DEFAULT: &str = r#"You are a dictation formatting assistant. Your task is to format transcribed speech.
+/// System prompt - Core formatting rules
+pub const SYSTEM_PROMPT_DEFAULT: &str = r#"You are a dictation formatting assistant. Your task is to format transcribed speech.
 
 ## Core Rules
 - Remove filler words (um, uh, err, erm, etc.)
@@ -84,65 +84,17 @@ world
 
 bye""#;
 
-/// Advanced prompt section - Backtrack corrections and list formatting
-pub const ADVANCED_PROMPT_DEFAULT: &str = r#"## Backtrack Corrections
-When the speaker corrects themselves mid-sentence, use only the corrected version:
-- "actually" signals a correction: "at 2 actually 3" = "at 3"
-- "scratch that" removes the previous phrase: "cookies scratch that brownies" = "brownies"
-- "wait" or "I mean" signal corrections: "on Monday wait Tuesday" = "on Tuesday"
-- Natural restatements: "as a gift... as a present" = "as a present"
-
-Examples:
-- "Let's do coffee at 2 actually 3" = "Let's do coffee at 3."
-- "I'll bring cookies scratch that brownies" = "I'll bring brownies."
-- "Send it to John I mean Jane" = "Send it to Jane."
-
-## List Formats
-When sequence words are detected, format as a numbered or bulleted list:
-- Triggers: "one", "two", "three" or "first", "second", "third"
-- Capitalize each list item
-
-Example:
-- "My goals are one finish the report two send the presentation three review feedback" =
-  "My goals are:
-  1. Finish the report
-  2. Send the presentation
-  3. Review feedback""#;
-
-/// Dictionary prompt section - Personal word mappings
-pub const DICTIONARY_PROMPT_DEFAULT: &str = r#"## Personal Dictionary
-Apply these corrections for technical terms, proper nouns, and custom words.
-
-Entries can be in various formats - interpret flexibly:
-- Explicit mappings: "ant row pic = Anthropic"
-- Single terms to recognize: Just "LLM" (correct phonetic mismatches)
-- Natural descriptions: "The name 'Claude' should always be capitalized"
-
-When you hear terms that sound like entries below, use the correct spelling/form.
-
-### Entries:
-Kolboo
-LLM
-ant row pick = Anthropic
-Claude
-Pipecat
-Tauri"#;
-
 /// Response containing default prompt sections
 #[derive(Debug, Serialize)]
 pub struct DefaultSectionsResponse {
-    pub main: String,
-    pub advanced: String,
-    pub dictionary: String,
+    pub system: String,
 }
 
 /// Get default prompts for each section
 #[tauri::command]
 pub fn get_default_sections() -> DefaultSectionsResponse {
     DefaultSectionsResponse {
-        main: MAIN_PROMPT_DEFAULT.to_string(),
-        advanced: ADVANCED_PROMPT_DEFAULT.to_string(),
-        dictionary: DICTIONARY_PROMPT_DEFAULT.to_string(),
+        system: SYSTEM_PROMPT_DEFAULT.to_string(),
     }
 }
 
@@ -441,18 +393,57 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
-    let program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile> =
-        rewrite_program_prompt_profiles
-            .into_iter()
-            .map(|p| crate::llm::ProgramPromptProfile {
+    let program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile> = rewrite_program_prompt_profiles
+        .into_iter()
+        .map(|p| {
+            let profile_prompts = p
+                .cleanup_prompt_sections
+                .as_ref()
+                .map(|o| o.apply_to(&base_prompts))
+                .unwrap_or_else(|| base_prompts.clone());
+
+            let presets = p
+                .presets
+                .into_iter()
+                .map(|preset| {
+                    let preset_prompts = preset
+                        .cleanup_prompt_sections
+                        .as_ref()
+                        .map(|o| o.apply_to(&profile_prompts))
+                        .unwrap_or_else(|| profile_prompts.clone());
+
+                    crate::llm::ProgramPreset {
+                        id: preset.id,
+                        name: preset.name,
+                        description: preset.description,
+                        routing_hints: preset.routing_hints,
+                        prompts: preset_prompts,
+                        rewrite_llm_enabled: preset.rewrite_llm_enabled,
+                        stt_provider: preset.stt_provider,
+                        stt_model: preset.stt_model,
+                        stt_timeout_seconds: preset.stt_timeout_seconds,
+                        llm_provider: preset.llm_provider,
+                        llm_model: preset.llm_model,
+                        openai_reasoning_effort: preset.openai_reasoning_effort,
+                        gemini_thinking_budget: preset.gemini_thinking_budget,
+                        gemini_thinking_level: preset.gemini_thinking_level,
+                        anthropic_thinking_budget: preset.anthropic_thinking_budget,
+                    }
+                })
+                .collect();
+
+            crate::llm::ProgramPromptProfile {
                 id: p.id,
                 name: p.name,
                 program_paths: p.program_paths,
-                prompts: p
-                    .cleanup_prompt_sections
-                    .as_ref()
-                    .map(|o| o.apply_to(&base_prompts))
-                    .unwrap_or_else(|| base_prompts.clone()),
+                prompts: profile_prompts,
+
+                presets,
+                default_preset_id: p.default_preset_id,
+                default_preset_description: p.default_preset_description,
+                active_preset_id: p.active_preset_id,
+                router: p.router,
+
                 rewrite_llm_enabled: p.rewrite_llm_enabled,
                 stt_provider: p.stt_provider,
                 stt_model: p.stt_model,
@@ -463,8 +454,9 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
                 gemini_thinking_budget: p.gemini_thinking_budget,
                 gemini_thinking_level: p.gemini_thinking_level,
                 anthropic_thinking_budget: p.anthropic_thinking_budget,
-            })
-            .collect();
+            }
+        })
+        .collect();
 
     // Read VAD settings from store
     let vad_settings: VadSettings = app
@@ -674,12 +666,13 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
             .update_config(config)
             .map_err(|e| format!("Failed to update pipeline config: {}", e))?;
         log::info!(
-            "Pipeline config synced - STT: {} ({}), LLM: {} ({}), VAD: {}",
+            "Pipeline config synced - STT: {} ({}), LLM: {} ({}), VAD: {}, program_profiles: {}",
             stt_provider,
             stt_model.as_deref().unwrap_or("default"),
             llm_provider_setting.clone().unwrap_or_else(|| "disabled".to_string()),
             llm_model_effective.as_deref().unwrap_or("default"),
-            vad_settings.enabled
+            vad_settings.enabled,
+            pipeline.config().llm_config.program_prompt_profiles.len()
         );
     }
 
@@ -753,9 +746,7 @@ mod tests {
     #[test]
     fn test_get_default_sections() {
         let response = get_default_sections();
-        assert!(!response.main.is_empty());
-        assert!(!response.advanced.is_empty());
-        assert!(!response.dictionary.is_empty());
-        assert!(response.main.contains("dictation formatting"));
+        assert!(!response.system.is_empty());
+        assert!(response.system.contains("dictation formatting"));
     }
 }

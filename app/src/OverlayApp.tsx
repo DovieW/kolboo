@@ -11,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
 } from "react";
 import { applyAccentColor } from "./lib/accentColor";
 import { useSettings, useTypeText } from "./lib/queries";
@@ -36,6 +37,7 @@ type PipelineState =
   | "idle"
   | "arming"
   | "recording"
+  | "routing"
   | "transcribing"
   | "rewriting"
   | "error";
@@ -46,6 +48,7 @@ function isPipelineState(value: string): value is PipelineState {
     // NOTE: "arming" is a UI-only state; Rust will never return it.
     value === "arming" ||
     value === "recording" ||
+    value === "routing" ||
     value === "transcribing" ||
     value === "rewriting" ||
     value === "error"
@@ -181,7 +184,7 @@ function RecordingDot({ state }: { state: PipelineState }) {
   const dotState =
     state === "recording" || state === "arming"
       ? "recording"
-      : state === "transcribing" || state === "rewriting"
+      : state === "transcribing" || state === "routing" || state === "rewriting"
       ? "processing"
       : "idle";
 
@@ -193,7 +196,7 @@ function RecordingDot({ state }: { state: PipelineState }) {
         dotState === "recording"
           ? "Recording"
           : dotState === "processing"
-          ? "Transcribing"
+          ? "Processing"
           : "Idle"
       }
     />
@@ -1419,6 +1422,8 @@ function RecordingControl() {
   const [lastFailedRequestId, setLastFailedRequestId] = useState<string | null>(
     null
   );
+  const [sessionPresetId, setSessionPresetId] = useState<string | null>(null);
+  const hoverCloseTimerRef = useRef<number | null>(null);
   const [containerRef, rect] = useResizeObserver();
   const hasDragStartedRef = useRef(false);
   const [animState, setAnimState] = useState<"enter" | "visible" | "exit">(
@@ -1429,13 +1434,15 @@ function RecordingControl() {
   // During the exit animation, the backend may have already flipped the pipeline
   // back to idle. Hold onto the last busy phase so we don't briefly render the
   // waveform right before the window hides.
-  const lastBusyPhaseRef = useRef<"transcribing" | "rewriting" | null>(null);
+  const lastBusyPhaseRef = useRef<
+    "transcribing" | "routing" | "rewriting" | null
+  >(null);
 
   // In recording-only mode, the pipeline can reach `idle` slightly before we
   // receive the backend's `overlay-hide-requested` event. Keep the phase text
   // visible across that tiny gap too.
   const [holdPhaseText, setHoldPhaseText] = useState<
-    "transcribing" | "rewriting" | null
+    "transcribing" | "routing" | "rewriting" | null
   >(null);
   const holdPhaseTimerRef = useRef<number | null>(null);
   const prevPipelineForPhaseHoldRef = useRef<PipelineState>("idle");
@@ -1449,6 +1456,126 @@ function RecordingControl() {
 
   // Load settings (overlay mode + selected mic)
   const { data: settings } = useSettings();
+
+  // Hover-revealed preset controls.
+  // IMPORTANT: Do NOT resize the main overlay window on hover (it causes cursor flicker/jitter).
+  // Instead, we show a dedicated hover window anchored to the overlay.
+  const hoverPanelEnabled =
+    pipelineState !== "error" &&
+    expanded &&
+    (settings?.overlay_mode === "always" ||
+      settings?.overlay_mode === "recording_only");
+
+  type ActiveProfileInfo = {
+    profile_id: string | null;
+    profile_name: string | null;
+  };
+
+  const [activeProfile, setActiveProfile] = useState<ActiveProfileInfo | null>(
+    null
+  );
+
+  const activeProfileId = activeProfile?.profile_id ?? null;
+
+  const activeProfilePresets = useMemo(() => {
+    if (!settings) return [];
+    if (!activeProfileId) return [];
+    if (activeProfileId === "default") return [];
+    const profile = settings.rewrite_program_prompt_profiles.find(
+      (p) => p.id === activeProfileId
+    );
+    return profile?.presets ?? [];
+  }, [settings, activeProfileId]);
+
+  const sessionPresetLabel = useMemo(() => {
+    if (!sessionPresetId) return "Auto";
+    const preset = activeProfilePresets.find((p) => p.id === sessionPresetId);
+    return preset?.name ?? "Auto";
+  }, [activeProfilePresets, sessionPresetId]);
+
+  const activeProfileRouter = useMemo(() => {
+    if (!settings) return null;
+    if (!activeProfileId) return null;
+    if (activeProfileId === "default") return null;
+    const profile = settings.rewrite_program_prompt_profiles.find(
+      (p) => p.id === activeProfileId
+    );
+    return profile?.router ?? null;
+  }, [settings, activeProfileId]);
+
+  const routerIsEffectivelyOn =
+    !!activeProfileRouter &&
+    activeProfileRouter.enabled &&
+    activeProfileRouter.strategy !== "off";
+
+  const toggleRouterEnabled = useCallback(async () => {
+    if (!settings) return;
+    if (!activeProfileId || activeProfileId === "default") return;
+
+    const profiles = settings.rewrite_program_prompt_profiles;
+    const idx = profiles.findIndex((p) => p.id === activeProfileId);
+    if (idx < 0) return;
+
+    const profile = profiles[idx];
+    const current = profile.router ?? null;
+
+    const nextRouter = (() => {
+      // "Off" means "not selecting presets automatically".
+      // Prefer preserving the user's configured strategy/model when possible.
+      if (routerIsEffectivelyOn) {
+        if (!current) return { enabled: false, strategy: "off" };
+        return { ...current, enabled: false };
+      }
+
+      if (current && current.strategy !== "off") {
+        return { ...current, enabled: true };
+      }
+
+      // No router configured yet: pick a sensible default so the toggle actually works.
+      return {
+        enabled: true,
+        strategy: "embeddings",
+        embedding_provider: "openai" as const,
+        embedding_model: "text-embedding-3-small",
+        similarity_threshold: null,
+        similarity_margin: null,
+      };
+    })();
+
+    const nextProfiles = profiles.map((p) =>
+      p.id === activeProfileId ? { ...p, router: nextRouter } : p
+    );
+
+    try {
+      await tauriAPI.updateRewriteProgramPromptProfiles(nextProfiles);
+      await tauriAPI.emitSettingsChanged({});
+    } catch (error) {
+      console.error("[Overlay] Failed to toggle router:", error);
+    }
+  }, [activeProfileId, routerIsEffectivelyOn, settings]);
+
+  const setSessionPresetLock = useCallback(
+    async (nextPresetId: string | null) => {
+      setSessionPresetId(nextPresetId);
+
+      const profileIdForLock =
+        activeProfileId && activeProfileId !== "default"
+          ? activeProfileId
+          : null;
+
+      // Best-effort: set immediately so the lock applies even when stop is
+      // triggered by a global hotkey.
+      try {
+        await invoke("pipeline_set_session_preset_lock", {
+          profileId: profileIdForLock,
+          presetId: nextPresetId ?? null,
+        });
+      } catch {
+        // ignore
+      }
+    },
+    [activeProfileId]
+  );
 
   const bootAccent = useMemo(() => readBootAccentColor(), []);
 
@@ -1490,11 +1617,61 @@ function RecordingControl() {
     return () => clearInterval(interval);
   }, []);
 
+  // Resolve the active program profile periodically while expanded so we can
+  // show profile-scoped preset info in the hover panel.
+  useEffect(() => {
+    const shouldSync = expanded;
+    if (!shouldSync) return;
+
+    let cancelled = false;
+    let interval: number | null = null;
+
+    const sync = async () => {
+      try {
+        const result = await invoke<ActiveProfileInfo>(
+          "pipeline_get_active_profile_for_foreground_app"
+        );
+        if (cancelled) return;
+        setActiveProfile({
+          profile_id: result?.profile_id ?? null,
+          profile_name: result?.profile_name ?? null,
+        });
+      } catch {
+        // Best-effort. Overlay can still function without this.
+      }
+    };
+
+    sync();
+    interval = window.setInterval(sync, 1500);
+
+    return () => {
+      cancelled = true;
+      if (interval) window.clearInterval(interval);
+    };
+  }, [expanded]);
+
+  // If presets change (e.g. user deleted one), avoid keeping an invalid selection.
+  useEffect(() => {
+    if (!sessionPresetId) return;
+    if (activeProfilePresets.some((p) => p.id === sessionPresetId)) return;
+    setSessionPresetId(null);
+  }, [activeProfilePresets, sessionPresetId]);
+
+  // New recording sessions should start in Auto mode.
+  useEffect(() => {
+    if (pipelineState !== "recording") return;
+    setSessionPresetId(null);
+  }, [pipelineState]);
+
   useEffect(() => {
     const prev = prevPipelineForPhaseHoldRef.current;
     prevPipelineForPhaseHoldRef.current = pipelineState;
 
-    if (pipelineState === "transcribing" || pipelineState === "rewriting") {
+    if (
+      pipelineState === "transcribing" ||
+      pipelineState === "routing" ||
+      pipelineState === "rewriting"
+    ) {
       lastBusyPhaseRef.current = pipelineState;
       if (holdPhaseTimerRef.current) {
         window.clearTimeout(holdPhaseTimerRef.current);
@@ -1511,7 +1688,7 @@ function RecordingControl() {
     if (
       settings?.overlay_mode === "recording_only" &&
       pipelineState === "idle" &&
-      (prev === "transcribing" || prev === "rewriting")
+      (prev === "transcribing" || prev === "routing" || prev === "rewriting")
     ) {
       if (holdPhaseText !== prev) {
         setHoldPhaseText(prev);
@@ -1558,6 +1735,14 @@ function RecordingControl() {
   // (or vice versa) for a frame.
   useEffect(() => {
     if (expanded) {
+      // In recording-only mode, the backend controls show/hide. Never render a blank
+      // transparent window while we wait for resize observer/pipeline polling.
+      if (settings?.overlay_mode === "recording_only") {
+        setRenderExpanded(true);
+        tauriAPI.resizeOverlay(224, 56);
+        return;
+      }
+
       // During an active capture cycle, prioritize responsiveness over avoiding a
       // one-frame clipped border: render immediately so the waveform can warm up.
       if (pipelineState !== "idle") {
@@ -1572,17 +1757,30 @@ function RecordingControl() {
     // Collapse: hide expanded immediately, then shrink window.
     setRenderExpanded(false);
     tauriAPI.resizeOverlay(56, 56);
-  }, [expanded, pipelineState]);
+  }, [expanded, hoverPanelEnabled, pipelineState, settings?.overlay_mode]);
 
   useEffect(() => {
     if (!expanded) return;
+
+    // Recording-only mode should always show the full widget when visible.
+    if (settings?.overlay_mode === "recording_only") {
+      if (!renderExpanded) setRenderExpanded(true);
+      return;
+    }
+
     // If we're active, we already rendered immediately above.
     if (pipelineState !== "idle") return;
 
     if (rect.width >= 220) {
       setRenderExpanded(true);
     }
-  }, [expanded, pipelineState, rect.width]);
+  }, [
+    expanded,
+    pipelineState,
+    rect.width,
+    renderExpanded,
+    settings?.overlay_mode,
+  ]);
 
   // Keep expanded while active; collapse when returning to idle.
   useEffect(() => {
@@ -1773,6 +1971,21 @@ function RecordingControl() {
     if (pipelineState !== "recording") return;
 
     try {
+      // Best-effort: set the one-shot preset lock right before we transcribe.
+      // This allows the user to force a preset for *this* dictation without
+      // persisting the override.
+      try {
+        await invoke("pipeline_set_session_preset_lock", {
+          profileId:
+            activeProfileId && activeProfileId !== "default"
+              ? activeProfileId
+              : null,
+          presetId: sessionPresetId ?? null,
+        });
+      } catch (error) {
+        console.error("[Pipeline] Failed to set session preset lock:", error);
+      }
+
       // UX: once the user stops, always show "transcribing" (even if the backend
       // ends up short-circuiting due to quiet-audio gating).
       setPipelineState("transcribing");
@@ -1795,6 +2008,7 @@ function RecordingControl() {
       setLastError(null);
       setLastErrorDetail(null);
       setLastFailedRequestId(null);
+      setSessionPresetId(null);
     } catch (error) {
       console.error("[Pipeline] Failed to stop and transcribe:", error);
       setPipelineState("error");
@@ -1804,7 +2018,7 @@ function RecordingControl() {
       setLastError(errorInfo);
       setLastErrorDetail(String(error));
     }
-  }, [pipelineState, typeTextMutation]);
+  }, [activeProfileId, pipelineState, sessionPresetId, typeTextMutation]);
 
   const onRetry = useCallback(async () => {
     if (!lastFailedRequestId) return;
@@ -1812,6 +2026,19 @@ function RecordingControl() {
       setPipelineState("transcribing");
       setLastError(null);
       setLastErrorDetail(null);
+
+      // Best-effort: apply session lock to retry too.
+      try {
+        await invoke("pipeline_set_session_preset_lock", {
+          profileId:
+            activeProfileId && activeProfileId !== "default"
+              ? activeProfileId
+              : null,
+          presetId: sessionPresetId ?? null,
+        });
+      } catch {
+        // ignore
+      }
 
       const transcript = await invoke<string>("pipeline_retry_transcription", {
         requestId: lastFailedRequestId,
@@ -1829,13 +2056,14 @@ function RecordingControl() {
 
       setPipelineState("idle");
       setLastFailedRequestId(null);
+      setSessionPresetId(null);
     } catch (error) {
       console.error("[Pipeline] Retry failed:", error);
       setPipelineState("error");
       setLastError(parseError(error));
       setLastErrorDetail(String(error));
     }
-  }, [lastFailedRequestId, typeTextMutation]);
+  }, [activeProfileId, lastFailedRequestId, sessionPresetId, typeTextMutation]);
 
   // Hotkey event listeners
   // Listen for recording state changes from shortcuts (Rust handles the actual recording)
@@ -1852,6 +2080,12 @@ function RecordingControl() {
         setLastErrorDetail(null);
         setLastFailedRequestId(null);
         setPipelineState("recording");
+
+        // In recording_only mode the backend may have just shown the window while the
+        // overlay UI is still in the pre-show "enter" animation state (opacity 0)
+        // from the prior hide. Force visibility immediately so the window isn't
+        // effectively invisible on short recordings.
+        setAnimState("visible");
       });
       unlistenStop = await tauriAPI.onStopRecording(() => {
         // UX: once the user stops, always show "transcribing".
@@ -1887,6 +2121,12 @@ function RecordingControl() {
       unlisteners.push(
         await listen("pipeline-rewriting-started", () => {
           setPipelineState("rewriting");
+        })
+      );
+
+      unlisteners.push(
+        await listen("pipeline-routing-started", () => {
+          setPipelineState("routing");
         })
       );
 
@@ -2033,7 +2273,9 @@ function RecordingControl() {
   );
 
   const isLoading =
-    pipelineState === "transcribing" || pipelineState === "rewriting";
+    pipelineState === "transcribing" ||
+    pipelineState === "routing" ||
+    pipelineState === "rewriting";
   const isArming = pipelineState === "arming";
   const isRecording = pipelineState === "recording";
   const isWaveActive = isArming || isRecording;
@@ -2041,12 +2283,14 @@ function RecordingControl() {
   const isError = pipelineState === "error";
   const centerPhaseText = (() => {
     if (pipelineState === "rewriting") return "rewriting...";
+    if (pipelineState === "routing") return "routing...";
     if (pipelineState === "transcribing") return "transcribing...";
 
     // Recording-only: keep the last busy phase visible across the small idle gap
     // (before the backend hide request arrives).
     if (settings?.overlay_mode === "recording_only") {
       if (holdPhaseText === "rewriting") return "rewriting...";
+      if (holdPhaseText === "routing") return "routing...";
       if (holdPhaseText === "transcribing") return "transcribing...";
     }
 
@@ -2054,6 +2298,7 @@ function RecordingControl() {
     // one-frame flash of the waveform as the pipeline returns to idle.
     if (animState === "exit") {
       if (lastBusyPhaseRef.current === "rewriting") return "rewriting...";
+      if (lastBusyPhaseRef.current === "routing") return "routing...";
       if (lastBusyPhaseRef.current === "transcribing") return "transcribing...";
     }
 
@@ -2079,9 +2324,22 @@ function RecordingControl() {
       {...bindDrag()}
       className="overlay-widget"
       data-anim={animState}
+      onMouseEnter={() => {
+        if (hoverCloseTimerRef.current) {
+          window.clearTimeout(hoverCloseTimerRef.current);
+          hoverCloseTimerRef.current = null;
+        }
+        if (hoverPanelEnabled) {
+          tauriAPI.showOverlayHover().catch(() => {});
+        }
+      }}
+      onMouseLeave={() => {
+        if (!hoverPanelEnabled) return;
+        tauriAPI.scheduleHideOverlayHover(220).catch(() => {});
+      }}
       style={{
         width: "100%",
-        height: "100%",
+        position: "relative",
         cursor: "grab",
         userSelect: "none",
       }}
@@ -2103,7 +2361,7 @@ function RecordingControl() {
         ) : null}
 
         {/* Expanded widget */}
-        {renderExpanded ? (
+        {renderExpanded || settings?.overlay_mode === "recording_only" ? (
           <button
             type="button"
             onClick={handleClick}
@@ -2160,52 +2418,54 @@ function RecordingControl() {
                 </>
               )}
             </div>
-            {isError ? (
-              <div className="overlay-meta">
-                {lastFailedRequestId ? (
+            <div className="overlay-meta">
+              {isError ? (
+                <>
+                  {lastFailedRequestId ? (
+                    <div
+                      className="overlay-pill"
+                      data-variant="dim"
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRetry();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onRetry();
+                        }
+                      }}
+                    >
+                      Retry
+                    </div>
+                  ) : null}
+
                   <div
-                    className="overlay-pill"
-                    data-variant="dim"
+                    className="overlay-pill overlay-pill--close"
                     role="button"
                     tabIndex={0}
+                    aria-label="Close"
+                    title="Close"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onRetry();
+                      dismissError();
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         e.stopPropagation();
-                        onRetry();
+                        dismissError();
                       }
                     }}
                   >
-                    Retry
+                    ×
                   </div>
-                ) : null}
-
-                <div
-                  className="overlay-pill overlay-pill--close"
-                  role="button"
-                  tabIndex={0}
-                  aria-label="Close"
-                  title="Close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    dismissError();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      dismissError();
-                    }
-                  }}
-                >
-                  ×
-                </div>
-              </div>
-            ) : null}
+                </>
+              ) : null}
+            </div>
           </button>
         ) : null}
       </div>

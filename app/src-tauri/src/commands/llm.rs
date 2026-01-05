@@ -1,9 +1,6 @@
 //! Tauri commands for LLM formatting configuration.
 
-use crate::llm::{
-    LlmConfig, PromptSections, ADVANCED_PROMPT_DEFAULT, DICTIONARY_PROMPT_DEFAULT,
-    MAIN_PROMPT_DEFAULT,
-};
+use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::llm::{
     format_text, AnthropicLlmProvider, GroqLlmProvider, LlmProvider, OllamaLlmProvider,
     OpenAiLlmProvider, GeminiLlmProvider,
@@ -47,6 +44,20 @@ pub struct LlmConfigPayload {
 
 #[derive(Debug, serde::Serialize)]
 pub struct TestLlmRewriteResponse {
+    pub output: String,
+    pub provider_used: String,
+    pub model_used: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct IterateRewritePromptResponse {
+    pub improved_prompt: String,
+    pub provider_used: String,
+    pub model_used: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TestRewriteWithPromptResponse {
     pub output: String,
     pub provider_used: String,
     pub model_used: String,
@@ -217,26 +228,14 @@ fn create_llm_provider_without_timeout(
 /// Prompt configuration payload from frontend
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct PromptConfigPayload {
-    /// Custom main prompt (null to use default)
-    pub main_custom: Option<String>,
-    /// Whether advanced section is enabled
-    pub advanced_enabled: bool,
-    /// Custom advanced prompt (null to use default)
-    pub advanced_custom: Option<String>,
-    /// Whether dictionary section is enabled
-    pub dictionary_enabled: bool,
-    /// Custom dictionary prompt (null to use default)
-    pub dictionary_custom: Option<String>,
+    /// Custom system prompt (null to use default)
+    pub system_custom: Option<String>,
 }
 
 impl From<PromptConfigPayload> for PromptSections {
     fn from(payload: PromptConfigPayload) -> Self {
         Self {
-            main_custom: payload.main_custom,
-            advanced_enabled: payload.advanced_enabled,
-            advanced_custom: payload.advanced_custom,
-            dictionary_enabled: payload.dictionary_enabled,
-            dictionary_custom: payload.dictionary_custom,
+            system_custom: payload.system_custom,
         }
     }
 }
@@ -244,11 +243,7 @@ impl From<PromptConfigPayload> for PromptSections {
 impl From<PromptSections> for PromptConfigPayload {
     fn from(sections: PromptSections) -> Self {
         Self {
-            main_custom: sections.main_custom,
-            advanced_enabled: sections.advanced_enabled,
-            advanced_custom: sections.advanced_custom,
-            dictionary_enabled: sections.dictionary_enabled,
-            dictionary_custom: sections.dictionary_custom,
+            system_custom: sections.system_custom,
         }
     }
 }
@@ -257,18 +252,14 @@ impl From<PromptSections> for PromptConfigPayload {
 #[tauri::command]
 pub fn get_llm_default_prompts() -> DefaultPromptsResponse {
     DefaultPromptsResponse {
-        main: MAIN_PROMPT_DEFAULT.to_string(),
-        advanced: ADVANCED_PROMPT_DEFAULT.to_string(),
-        dictionary: DICTIONARY_PROMPT_DEFAULT.to_string(),
+        system: SYSTEM_PROMPT_DEFAULT.to_string(),
     }
 }
 
 /// Response containing default prompts
 #[derive(Debug, serde::Serialize)]
 pub struct DefaultPromptsResponse {
-    pub main: String,
-    pub advanced: String,
-    pub dictionary: String,
+    pub system: String,
 }
 
 /// Get available LLM providers
@@ -553,6 +544,402 @@ pub async fn test_llm_rewrite(
     }
 }
 
+/// Iterate on the rewrite system prompt using an example transcript + before/after outputs.
+///
+/// This command is designed for the Settings "Prompt lab" UI.
+/// It creates a dedicated request-log entry so provider/model + request/response payloads
+/// are visible in Request Logs.
+#[tauri::command]
+pub async fn iterate_rewrite_prompt(
+    app: AppHandle,
+    pipeline: State<'_, SharedPipeline>,
+    transcript: String,
+    problem_output: String,
+    desired_output: String,
+    current_prompt: String,
+    profile_id: Option<String>,
+    mode: Option<String>,
+) -> Result<IterateRewritePromptResponse, LlmCommandError> {
+    let llm_started_at = Instant::now();
+
+    let request_log_store = app
+        .try_state::<RequestLogStore>()
+        .map(|s| s.inner().clone());
+
+    if let Some(store) = request_log_store.as_ref() {
+        store.start_request("prompt-iter".to_string(), None);
+        store.with_current(|log| {
+            log.raw_transcript = Some(transcript.clone());
+            let mode_label = mode
+                .as_deref()
+                .unwrap_or("fixed")
+                .to_string();
+            log.info(format!("Prompt iteration started (mode: {})", mode_label));
+        });
+    }
+
+    let config = pipeline.config();
+
+    let resolved_profile = profile_id
+        .as_deref()
+        .and_then(|id| if id == "default" { None } else { Some(id) })
+        .map(|id| {
+            config
+                .llm_config
+                .program_prompt_profiles
+                .iter()
+                .find(|p| p.id == id)
+                .cloned()
+                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))
+        })
+        .transpose()?;
+
+    if let Some(store) = request_log_store.as_ref() {
+        let (used_id, used_name) = if let Some(p) = resolved_profile.as_ref() {
+            (Some(p.id.clone()), Some(p.name.clone()))
+        } else {
+            (Some("default".to_string()), Some("Default".to_string()))
+        };
+
+        store.with_current(|log| {
+            log.profile_id = used_id;
+            log.profile_name = used_name;
+        });
+    }
+
+    let (desired_provider, desired_model) = if let Some(profile) = resolved_profile.as_ref() {
+        let provider = profile
+            .llm_provider
+            .clone()
+            .unwrap_or_else(|| config.llm_config.provider.clone());
+        let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
+        (provider, model)
+    } else {
+        (config.llm_config.provider.clone(), config.llm_config.model.clone())
+    };
+
+    let api_key = if desired_provider == "ollama" {
+        String::new()
+    } else {
+        config
+            .llm_api_keys
+            .get(desired_provider.as_str())
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    // Apply provider-specific thinking/reasoning knobs (profile overrides -> global defaults).
+    let effective_openai_reasoning_effort = resolved_profile
+        .as_ref()
+        .and_then(|p| p.openai_reasoning_effort.clone())
+        .or_else(|| config.llm_config.openai_reasoning_effort.clone());
+    let effective_gemini_thinking_budget = resolved_profile
+        .as_ref()
+        .and_then(|p| p.gemini_thinking_budget)
+        .or(config.llm_config.gemini_thinking_budget);
+    let effective_gemini_thinking_level = resolved_profile
+        .as_ref()
+        .and_then(|p| p.gemini_thinking_level.clone())
+        .or_else(|| config.llm_config.gemini_thinking_level.clone());
+    let effective_anthropic_thinking_budget = resolved_profile
+        .as_ref()
+        .and_then(|p| p.anthropic_thinking_budget)
+        .or(config.llm_config.anthropic_thinking_budget);
+
+    let provider_cfg = LlmConfig {
+        enabled: true,
+        provider: desired_provider,
+        api_key,
+        model: desired_model,
+        ollama_url: config.llm_config.ollama_url.clone(),
+        openai_reasoning_effort: effective_openai_reasoning_effort,
+        gemini_thinking_budget: effective_gemini_thinking_budget,
+        gemini_thinking_level: effective_gemini_thinking_level,
+        anthropic_thinking_budget: effective_anthropic_thinking_budget,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: Vec::new(),
+        timeout: config.llm_config.timeout,
+    };
+
+    // This is a Settings UI helper: do not enforce request timeouts.
+    let provider = create_llm_provider_without_timeout(&provider_cfg, request_log_store.clone());
+
+    let mode = mode.as_deref().unwrap_or("fixed");
+
+    let system_prompt = match mode {
+        "new" => "You write system prompts for rewriting dictation transcripts.\n\nReturn ONLY the system prompt text.\n- No markdown\n- No quotes\n- No greetings\n- No explanations\n- The result must be usable as a system prompt as-is",
+        _ => "You improve system prompts for rewriting dictation transcripts.\n\nReturn ONLY the improved system prompt text.\n- No markdown\n- No quotes\n- No greetings\n- No explanations\n- The result must be usable as a system prompt as-is",
+    };
+
+    let user_message = match mode {
+        "new" => format!(
+            "Transcript (input):\n<<<\n{transcript}\n>>>\n\nPrompt goal / description:\n<<<\n{goal}\n>>>\n\nDesired output:\n<<<\n{desired_output}\n>>>\n\nExisting prompt (reference; may be ignored):\n<<<\n{current_prompt}\n>>>\n\nTask:\nWrite a NEW system prompt from scratch that would transform transcripts like the input into the desired output, following the prompt goal/description. Be specific and include clear rules. Do not refer to or edit the existing prompt; produce a complete prompt.",
+            transcript = transcript.trim(),
+            goal = problem_output.trim(),
+            desired_output = desired_output.trim(),
+            current_prompt = current_prompt.trim(),
+        ),
+        _ => format!(
+            "Current system prompt:\n<<<\n{current_prompt}\n>>>\n\nTranscript (input):\n<<<\n{transcript}\n>>>\n\nProblem output (current prompt produced):\n<<<\n{problem_output}\n>>>\n\nDesired output:\n<<<\n{desired_output}\n>>>\n\nTask:\nWrite an improved system prompt that would transform the transcript into the desired output more reliably. Preserve the original style and scope. Add or adjust rules only as needed.",
+            current_prompt = current_prompt.trim(),
+            transcript = transcript.trim(),
+            problem_output = problem_output.trim(),
+            desired_output = desired_output.trim(),
+        ),
+    };
+
+    let improved_res = provider.complete(system_prompt, &user_message).await;
+
+    match improved_res {
+        Ok(improved_raw) => {
+            let improved = improved_raw.trim().to_string();
+
+            if let Some(store) = request_log_store.as_ref() {
+                let llm_duration_ms = llm_started_at.elapsed().as_millis() as u64;
+                let provider_used = provider.name().to_string();
+                let model_used = provider.model().to_string();
+
+                store.with_current(|log| {
+                    log.llm_provider = Some(provider_used.clone());
+                    log.llm_model = Some(model_used.clone());
+                    // Use the standard rewrite fields so the Logs UI can show the content.
+                    log.formatted_transcript = Some(improved.clone());
+                    log.llm_duration_ms = Some(llm_duration_ms);
+                    log.info(format!(
+                        "Prompt iteration completed in {}ms ({} chars)",
+                        llm_duration_ms,
+                        improved.len()
+                    ));
+                    log.complete_success();
+                });
+
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Success,
+                    None,
+                );
+                store.complete_current();
+
+                return Ok(IterateRewritePromptResponse {
+                    improved_prompt: improved,
+                    provider_used,
+                    model_used,
+                });
+            }
+
+            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
+
+            Ok(IterateRewritePromptResponse {
+                improved_prompt: improved,
+                provider_used: provider.name().to_string(),
+                model_used: provider.model().to_string(),
+            })
+        }
+        Err(e) => {
+            if let Some(store) = request_log_store.as_ref() {
+                let llm_duration_ms = llm_started_at.elapsed().as_millis() as u64;
+                store.with_current(|log| {
+                    log.llm_duration_ms = Some(llm_duration_ms);
+                    log.error(format!("Prompt iteration failed: {}", e));
+                    log.complete_error(e.to_string());
+                });
+
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Error,
+                    None,
+                );
+                store.complete_current();
+            } else {
+                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
+            }
+
+            Err(LlmCommandError::from(e.to_string()))
+        }
+    }
+}
+
+/// Test a custom system prompt against a transcript.
+///
+/// This mirrors the rewrite step (system prompt + transcript -> output) but allows passing an
+/// arbitrary system prompt string.
+#[tauri::command]
+pub async fn test_rewrite_with_prompt(
+    app: AppHandle,
+    pipeline: State<'_, SharedPipeline>,
+    transcript: String,
+    prompt: String,
+    profile_id: Option<String>,
+) -> Result<TestRewriteWithPromptResponse, LlmCommandError> {
+    let llm_started_at = Instant::now();
+
+    let request_log_store = app
+        .try_state::<RequestLogStore>()
+        .map(|s| s.inner().clone());
+
+    if let Some(store) = request_log_store.as_ref() {
+        store.start_request("prompt-test".to_string(), None);
+        store.with_current(|log| {
+            log.raw_transcript = Some(transcript.clone());
+            log.info("Prompt test started");
+        });
+    }
+
+    let config = pipeline.config();
+
+    let resolved_profile = profile_id
+        .as_deref()
+        .and_then(|id| if id == "default" { None } else { Some(id) })
+        .map(|id| {
+            config
+                .llm_config
+                .program_prompt_profiles
+                .iter()
+                .find(|p| p.id == id)
+                .cloned()
+                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))
+        })
+        .transpose()?;
+
+    if let Some(store) = request_log_store.as_ref() {
+        let (used_id, used_name) = if let Some(p) = resolved_profile.as_ref() {
+            (Some(p.id.clone()), Some(p.name.clone()))
+        } else {
+            (Some("default".to_string()), Some("Default".to_string()))
+        };
+
+        store.with_current(|log| {
+            log.profile_id = used_id;
+            log.profile_name = used_name;
+        });
+    }
+
+    let (desired_provider, desired_model) = if let Some(profile) = resolved_profile.as_ref() {
+        let provider = profile
+            .llm_provider
+            .clone()
+            .unwrap_or_else(|| config.llm_config.provider.clone());
+        let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
+        (provider, model)
+    } else {
+        (config.llm_config.provider.clone(), config.llm_config.model.clone())
+    };
+
+    let api_key = if desired_provider == "ollama" {
+        String::new()
+    } else {
+        config
+            .llm_api_keys
+            .get(desired_provider.as_str())
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    let effective_openai_reasoning_effort = resolved_profile
+        .as_ref()
+        .and_then(|p| p.openai_reasoning_effort.clone())
+        .or_else(|| config.llm_config.openai_reasoning_effort.clone());
+    let effective_gemini_thinking_budget = resolved_profile
+        .as_ref()
+        .and_then(|p| p.gemini_thinking_budget)
+        .or(config.llm_config.gemini_thinking_budget);
+    let effective_gemini_thinking_level = resolved_profile
+        .as_ref()
+        .and_then(|p| p.gemini_thinking_level.clone())
+        .or_else(|| config.llm_config.gemini_thinking_level.clone());
+    let effective_anthropic_thinking_budget = resolved_profile
+        .as_ref()
+        .and_then(|p| p.anthropic_thinking_budget)
+        .or(config.llm_config.anthropic_thinking_budget);
+
+    let provider_cfg = LlmConfig {
+        enabled: true,
+        provider: desired_provider,
+        api_key,
+        model: desired_model,
+        ollama_url: config.llm_config.ollama_url.clone(),
+        openai_reasoning_effort: effective_openai_reasoning_effort,
+        gemini_thinking_budget: effective_gemini_thinking_budget,
+        gemini_thinking_level: effective_gemini_thinking_level,
+        anthropic_thinking_budget: effective_anthropic_thinking_budget,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: Vec::new(),
+        timeout: config.llm_config.timeout,
+    };
+
+    let provider = create_llm_provider_without_timeout(&provider_cfg, request_log_store.clone());
+
+    let output_res = provider.complete(prompt.as_str(), transcript.as_str()).await;
+
+    match output_res {
+        Ok(output_raw) => {
+            let output = output_raw.trim().to_string();
+
+            if let Some(store) = request_log_store.as_ref() {
+                let llm_duration_ms = llm_started_at.elapsed().as_millis() as u64;
+                let provider_used = provider.name().to_string();
+                let model_used = provider.model().to_string();
+
+                store.with_current(|log| {
+                    log.llm_provider = Some(provider_used.clone());
+                    log.llm_model = Some(model_used.clone());
+                    log.formatted_transcript = Some(output.clone());
+                    log.llm_duration_ms = Some(llm_duration_ms);
+                    log.info(format!(
+                        "Prompt test completed in {}ms ({} -> {} chars)",
+                        llm_duration_ms,
+                        transcript.len(),
+                        output.len()
+                    ));
+                    log.complete_success();
+                });
+
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Success,
+                    None,
+                );
+                store.complete_current();
+
+                return Ok(TestRewriteWithPromptResponse {
+                    output,
+                    provider_used,
+                    model_used,
+                });
+            }
+
+            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
+
+            Ok(TestRewriteWithPromptResponse {
+                output,
+                provider_used: provider.name().to_string(),
+                model_used: provider.model().to_string(),
+            })
+        }
+        Err(e) => {
+            if let Some(store) = request_log_store.as_ref() {
+                let llm_duration_ms = llm_started_at.elapsed().as_millis() as u64;
+                store.with_current(|log| {
+                    log.llm_duration_ms = Some(llm_duration_ms);
+                    log.error(format!("Prompt test failed: {}", e));
+                    log.complete_error(e.to_string());
+                });
+
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Error,
+                    None,
+                );
+                store.complete_current();
+            } else {
+                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
+            }
+
+            Err(LlmCommandError::from(e.to_string()))
+        }
+    }
+}
+
 /// Run a one-off LLM completion with explicit provider/model and explicit prompts.
 ///
 /// This is used by the History UI to send analysis instructions as the *system prompt*
@@ -741,8 +1128,6 @@ mod tests {
     #[test]
     fn test_get_default_prompts() {
         let prompts = get_llm_default_prompts();
-        assert!(!prompts.main.is_empty());
-        assert!(!prompts.advanced.is_empty());
-        assert!(!prompts.dictionary.is_empty());
+        assert!(!prompts.system.is_empty());
     }
 }

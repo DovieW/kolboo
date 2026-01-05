@@ -16,13 +16,15 @@
 //! - Configurable prompts for dictation cleanup
 
 use crate::audio_capture::{AudioCapture, AudioCaptureDiagnostics, AudioCaptureError, AudioCaptureEvent, AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats, VadAutoStopConfig};
+use crate::embeddings;
 use crate::llm::{
     format_text, AnthropicLlmProvider, GeminiLlmProvider, GroqLlmProvider, LlmConfig, LlmError,
     LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
 };
 use crate::request_log::RequestLogStore;
-use crate::settings::ProxySettings;
+use crate::settings::{IntentRouterStrategy, ProxySettings};
 use crate::stt::{AudioFormat, RetryConfig, SttError, SttProvider, SttRegistry, with_retry};
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,7 +32,27 @@ use tokio_util::sync::CancellationToken;
 
 fn normalize_program_path(path: &str) -> String {
     // Windows comparisons are case-insensitive, and we want to treat / and \ equivalently.
-    path.replace('/', "\\").to_lowercase()
+    // Also strip common Windows path prefixes that may appear depending on how the OS reports
+    // process image names.
+    let mut s = path.trim().trim_matches('"').replace('/', "\\");
+    if let Some(rest) = s.strip_prefix("\\\\?\\") {
+        s = rest.to_string();
+    } else if let Some(rest) = s.strip_prefix("\\\\??\\") {
+        s = rest.to_string();
+    }
+    s.to_lowercase()
+}
+
+fn program_basename_lower(path_norm: &str) -> &str {
+    path_norm
+        .rsplit('\\')
+        .next()
+        .unwrap_or(path_norm)
+        .trim()
+}
+
+fn strip_exe_suffix(name: &str) -> &str {
+    name.strip_suffix(".exe").unwrap_or(name)
 }
 
 pub(crate) fn select_profile_for_foreground_app(
@@ -38,17 +60,54 @@ pub(crate) fn select_profile_for_foreground_app(
 ) -> Option<crate::llm::ProgramPromptProfile> {
     let foreground = crate::windows_apps::get_foreground_process_path();
     let Some(foreground) = foreground else {
+        log::debug!(
+            "Pipeline: Foreground process path unavailable; cannot select per-program profile (profiles={})",
+            llm_config.program_prompt_profiles.len()
+        );
         return None;
     };
 
     let foreground_norm = normalize_program_path(&foreground);
+    let foreground_base = program_basename_lower(&foreground_norm);
+    let foreground_base_noexe = strip_exe_suffix(foreground_base);
 
     for profile in &llm_config.program_prompt_profiles {
-        if profile
-            .program_paths
-            .iter()
-            .any(|p| normalize_program_path(p) == foreground_norm)
-        {
+        if profile.program_paths.iter().any(|p| {
+            let p_norm = normalize_program_path(p);
+            if p_norm == foreground_norm {
+                return true;
+            }
+
+            // Allow configuring just an executable name (e.g. "obsidian.exe") instead of
+            // the full path. Also handle cases where the stored path differs (portable installs,
+            // drive letter changes, etc.) but the basename is stable.
+            let p_base = program_basename_lower(&p_norm);
+            if !p_base.is_empty() {
+                if p_base == foreground_base {
+                    return true;
+                }
+                if strip_exe_suffix(p_base) == foreground_base_noexe {
+                    return true;
+                }
+            }
+
+            // If the stored path is a full path, basename check above already covers most
+            // mismatches. As a last resort, allow "ends_with" on the normalized path.
+            // This helps when the OS returns slightly different prefixes.
+            if p_norm.contains('\\') {
+                if foreground_norm.ends_with(&p_norm) {
+                    return true;
+                }
+                if !p_norm.ends_with(".exe") {
+                    let p_norm_exe = format!("{}.exe", p_norm);
+                    if foreground_norm.ends_with(&p_norm_exe) {
+                        return true;
+                    }
+                }
+            }
+
+            false
+        }) {
             log::debug!(
                 "Pipeline: Using profile '{}' for foreground app {}",
                 profile.name,
@@ -58,7 +117,600 @@ pub(crate) fn select_profile_for_foreground_app(
         }
     }
 
+    // Helpful when users report everything is always "Default".
+    // Keep this at debug to avoid noisy logs, but include key derived values.
+    log::debug!(
+        "Pipeline: No program profile match for foreground='{}' (norm='{}', base='{}', profiles={})",
+        foreground,
+        foreground_norm,
+        foreground_base,
+        llm_config.program_prompt_profiles.len()
+    );
+
     None
+}
+
+fn select_effective_preset<'a>(
+    profile: &'a crate::llm::ProgramPromptProfile,
+) -> Option<&'a crate::llm::ProgramPreset> {
+    let find_by_id = |id: &str| profile.presets.iter().find(|p| p.id == id);
+
+    if let Some(id) = profile.active_preset_id.as_deref() {
+        return find_by_id(id);
+    }
+    if let Some(id) = profile.default_preset_id.as_deref() {
+        return find_by_id(id);
+    }
+    None
+}
+
+fn find_preset_by_id<'a>(
+    profile: &'a crate::llm::ProgramPromptProfile,
+    id: &str,
+) -> Option<&'a crate::llm::ProgramPreset> {
+    profile.presets.iter().find(|p| p.id == id)
+}
+
+fn router_enabled(profile: &crate::llm::ProgramPromptProfile) -> bool {
+    profile
+        .router
+        .as_ref()
+        .map(|r| r.enabled && r.strategy != IntentRouterStrategy::Off)
+        .unwrap_or(false)
+}
+
+fn preview_for_log(s: &str, max_chars: usize) -> (String, bool, usize) {
+    let len = s.chars().count();
+    let mut preview: String = s.chars().take(max_chars).collect();
+    let truncated = len > max_chars;
+    if truncated {
+        preview.push_str("…");
+    }
+    (preview, truncated, len)
+}
+
+async fn route_preset_id_with_embeddings(
+    profile: &crate::llm::ProgramPromptProfile,
+    transcript: &str,
+    proxy_settings: &ProxySettings,
+    llm_api_keys: &HashMap<String, String>,
+    embedding_cache: &Arc<Mutex<HashMap<String, Vec<f32>>>>,
+) -> Option<(Option<String>, Vec<(String, f32)>, f32, f32, JsonValue, JsonValue)> {
+    const DEFAULT_CANDIDATE_ID: &str = "__default__";
+
+    let router = profile.router.as_ref()?;
+    if !router.enabled || router.strategy != IntentRouterStrategy::Embeddings {
+        return None;
+    }
+
+    let default_desc = profile
+        .default_preset_description
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    // Routing only makes sense when there is more than one possible target.
+    let candidate_count = profile.presets.len() + if default_desc.is_some() { 1 } else { 0 };
+    if candidate_count < 2 {
+        return None;
+    }
+
+    let embedding_provider = router
+        .embedding_provider
+        .as_deref()
+        .unwrap_or("openai");
+    if embedding_provider != "openai" {
+        log::warn!(
+            "Intent router: embeddings provider '{}' not supported; routing skipped",
+            embedding_provider
+        );
+        return None;
+    }
+
+    let embedding_model = router
+        .embedding_model
+        .as_deref()
+        .unwrap_or("text-embedding-3-small");
+    let pick_highest_score = router.pick_highest_score;
+    let threshold = router.similarity_threshold.unwrap_or(0.78);
+    let margin = router.similarity_margin.unwrap_or(0.05);
+
+    let api_key = llm_api_keys.get("openai").map(|s| s.as_str()).unwrap_or("");
+    if api_key.trim().is_empty() {
+        log::warn!(
+            "Intent router: OpenAI API key missing; embeddings routing skipped"
+        );
+        return None;
+    }
+
+    let client = match crate::network::build_http_client_with_timeout(proxy_settings, Duration::from_secs(30)) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Intent router: failed to build HTTP client: {}", e);
+            return None;
+        }
+    };
+
+    let transcript = transcript.trim();
+    if transcript.is_empty() {
+        return None;
+    }
+
+    let mut call_id: u64 = 0;
+    let mut calls_request: Vec<JsonValue> = Vec::new();
+    let mut calls_response: Vec<JsonValue> = Vec::new();
+
+    fn push_call(
+        call_id: &mut u64,
+        calls_request: &mut Vec<JsonValue>,
+        calls_response: &mut Vec<JsonValue>,
+        kind: &str,
+        candidate_id: Option<&str>,
+        from_cache: bool,
+        request: JsonValue,
+        response: JsonValue,
+    ) {
+        calls_request.push(serde_json::json!({
+            "id": *call_id,
+            "kind": kind,
+            "candidate_id": candidate_id,
+            "from_cache": from_cache,
+            "request": request,
+        }));
+        calls_response.push(serde_json::json!({
+            "id": *call_id,
+            "kind": kind,
+            "candidate_id": candidate_id,
+            "from_cache": from_cache,
+            "response": response,
+        }));
+        *call_id += 1;
+    }
+
+    fn build_router_payloads(
+        embedding_provider: &str,
+        embedding_model: &str,
+        pick_highest_score: bool,
+        threshold: f32,
+        margin: f32,
+        selected: &Option<String>,
+        scores: &Vec<(String, f32)>,
+        calls_request: &Vec<JsonValue>,
+        calls_response: &Vec<JsonValue>,
+    ) -> (JsonValue, JsonValue) {
+        let router_request_json = serde_json::json!({
+            "type": "embeddings",
+            "provider": embedding_provider,
+            "model": embedding_model,
+            "pick_highest_score": pick_highest_score,
+            "similarity_threshold": threshold,
+            "similarity_margin": margin,
+            "calls": calls_request,
+        });
+        let router_response_json = serde_json::json!({
+            "type": "embeddings",
+            "selected_preset_id": selected,
+            "scores": scores,
+            "calls": calls_response,
+        });
+        (router_request_json, router_response_json)
+    }
+
+    let transcript_embedding = match embeddings::openai::embed_text_with_debug(
+        &client,
+        api_key,
+        embedding_model,
+        transcript,
+    )
+    .await
+    {
+        Ok((v, req, resp)) => {
+            push_call(
+                &mut call_id,
+                &mut calls_request,
+                &mut calls_response,
+                "transcript",
+                None,
+                false,
+                req,
+                resp,
+            );
+            v
+        }
+        Err(e) => {
+            log::warn!("Intent router: embeddings request failed: {}", e);
+
+            let (preview, truncated, len) = preview_for_log(transcript, 800);
+            let req = serde_json::json!({
+                "provider": embedding_provider,
+                "model": embedding_model,
+                "input_preview": preview,
+                "input_len": len,
+                "input_truncated": truncated,
+            });
+
+            let err_json = serde_json::from_str::<JsonValue>(&e.to_string())
+                .unwrap_or(JsonValue::String(e.to_string()));
+            let resp = serde_json::json!({ "error": err_json });
+            push_call(
+                &mut call_id,
+                &mut calls_request,
+                &mut calls_response,
+                "transcript",
+                None,
+                false,
+                req,
+                resp,
+            );
+
+            let empty_scores: Vec<(String, f32)> = Vec::new();
+            let (router_req, router_resp) = build_router_payloads(
+                embedding_provider,
+                embedding_model,
+                pick_highest_score,
+                threshold,
+                margin,
+                &None,
+                &empty_scores,
+                &calls_request,
+                &calls_response,
+            );
+            return Some((None, empty_scores, threshold, margin, router_req, router_resp));
+        }
+    };
+
+    // Compute a per-preset score as the best similarity across its hints.
+    let mut best: Option<(String, f32)> = None;
+    let mut second_best: Option<(String, f32)> = None;
+
+    // Collect scores for diagnostics/UI.
+    let mut scores: Vec<(String, f32)> = Vec::new();
+
+    // Compute a per-candidate score as the best similarity across its hints.
+    // Candidates include:
+    // - each preset
+    // - optionally, the implicit Default target (returns None)
+    let mut candidates: Vec<(String, Vec<String>)> = Vec::new();
+    for preset in &profile.presets {
+        // If there are no hints, fall back to using the preset name/description as a weak hint.
+        let mut hints: Vec<String> = Vec::new();
+        for h in &preset.routing_hints {
+            let t = h.trim();
+            if !t.is_empty() {
+                hints.push(t.to_string());
+            }
+        }
+        if hints.is_empty() {
+            if let Some(desc) = preset
+                .description
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+            {
+                hints.push(format!("{} — {}", preset.name.trim(), desc));
+            } else {
+                hints.push(preset.name.trim().to_string());
+            }
+        }
+
+        candidates.push((preset.id.clone(), hints));
+    }
+    if let Some(desc) = default_desc {
+        candidates.push((DEFAULT_CANDIDATE_ID.to_string(), vec![desc]));
+    }
+
+    for (candidate_id, hints) in candidates {
+        let mut candidate_best: Option<f32> = None;
+
+        for hint in hints {
+            let cache_key = format!("openai::{}::{}", embedding_model, hint);
+
+            let cached_hint_embedding: Vec<f32> = {
+                if let Ok(cache) = embedding_cache.lock() {
+                    if let Some(v) = cache.get(&cache_key) {
+                        v.clone()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                }
+            };
+
+            let hint_embedding = if !cached_hint_embedding.is_empty() {
+                let (preview, truncated, len) = preview_for_log(&hint, 800);
+                let req = serde_json::json!({
+                    "provider": embedding_provider,
+                    "model": embedding_model,
+                    "cache_key": cache_key,
+                    "input_preview": preview,
+                    "input_len": len,
+                    "input_truncated": truncated,
+                });
+                let resp = serde_json::json!({
+                    "from_cache": true,
+                    "embedding_len": cached_hint_embedding.len(),
+                });
+                push_call(
+                    &mut call_id,
+                    &mut calls_request,
+                    &mut calls_response,
+                    "hint",
+                    Some(candidate_id.as_str()),
+                    true,
+                    req,
+                    resp,
+                );
+                cached_hint_embedding
+            } else {
+                match embeddings::openai::embed_text_with_debug(
+                    &client,
+                    api_key,
+                    embedding_model,
+                    &hint,
+                )
+                .await
+                {
+                    Ok((v, req, resp)) => {
+                        push_call(
+                            &mut call_id,
+                            &mut calls_request,
+                            &mut calls_response,
+                            "hint",
+                            Some(candidate_id.as_str()),
+                            false,
+                            req,
+                            resp,
+                        );
+                        if let Ok(mut cache) = embedding_cache.lock() {
+                            // Keep cache bounded.
+                            if cache.len() > 512 {
+                                cache.clear();
+                            }
+                            cache.insert(cache_key, v.clone());
+                        }
+                        v
+                    }
+                    Err(e) => {
+                        let (preview, truncated, len) = preview_for_log(&hint, 800);
+                        let req = serde_json::json!({
+                            "provider": embedding_provider,
+                            "model": embedding_model,
+                            "input_preview": preview,
+                            "input_len": len,
+                            "input_truncated": truncated,
+                        });
+                        let err_json = serde_json::from_str::<JsonValue>(&e.to_string())
+                            .unwrap_or(JsonValue::String(e.to_string()));
+                        let resp = serde_json::json!({ "error": err_json });
+                        push_call(
+                            &mut call_id,
+                            &mut calls_request,
+                            &mut calls_response,
+                            "hint",
+                            Some(candidate_id.as_str()),
+                            false,
+                            req,
+                            resp,
+                        );
+
+                        log::debug!(
+                            "Intent router: failed to embed hint ({}): {}",
+                            candidate_id,
+                            e
+                        );
+                        continue;
+                    }
+                }
+            };
+
+            let sim = embeddings::cosine_similarity(&transcript_embedding, &hint_embedding);
+            if let Some(sim) = sim {
+                candidate_best = Some(candidate_best.map(|b| b.max(sim)).unwrap_or(sim));
+            }
+        }
+
+        let Some(score) = candidate_best else { continue };
+
+        scores.push((candidate_id.clone(), score));
+
+        match best {
+            None => best = Some((candidate_id.clone(), score)),
+            Some((_, best_score)) if score > best_score => {
+                second_best = best.clone();
+                best = Some((candidate_id.clone(), score));
+            }
+            _ => {
+                if second_best
+                    .as_ref()
+                    .map(|(_, s)| score > *s)
+                    .unwrap_or(true)
+                {
+                    second_best = Some((candidate_id.clone(), score));
+                }
+            }
+        }
+    }
+
+    let Some((best_id, best_score)) = best else {
+        let (router_req, router_resp) = build_router_payloads(
+            embedding_provider,
+            embedding_model,
+            pick_highest_score,
+            threshold,
+            margin,
+            &None,
+            &scores,
+            &calls_request,
+            &calls_response,
+        );
+        return Some((None, scores, threshold, margin, router_req, router_resp));
+    };
+
+    if !pick_highest_score {
+        if best_score < threshold {
+            log::debug!(
+                "Intent router: no preset met threshold (best {:.3} < {:.3})",
+                best_score,
+                threshold
+            );
+            let (router_req, router_resp) = build_router_payloads(
+                embedding_provider,
+                embedding_model,
+                pick_highest_score,
+                threshold,
+                margin,
+                &None,
+                &scores,
+                &calls_request,
+                &calls_response,
+            );
+            return Some((None, scores, threshold, margin, router_req, router_resp));
+        }
+
+        if let Some((_, second_score)) = second_best {
+            if best_score - second_score < margin {
+                log::debug!(
+                    "Intent router: ambiguous match (best {:.3}, second {:.3}, margin {:.3})",
+                    best_score,
+                    second_score,
+                    margin
+                );
+                let (router_req, router_resp) = build_router_payloads(
+                    embedding_provider,
+                    embedding_model,
+                    pick_highest_score,
+                    threshold,
+                    margin,
+                    &None,
+                    &scores,
+                    &calls_request,
+                    &calls_response,
+                );
+                return Some((None, scores, threshold, margin, router_req, router_resp));
+            }
+        }
+    }
+
+    let selected = if best_id == DEFAULT_CANDIDATE_ID {
+        None
+    } else {
+        Some(best_id)
+    };
+
+    let (router_req, router_resp) = build_router_payloads(
+        embedding_provider,
+        embedding_model,
+        pick_highest_score,
+        threshold,
+        margin,
+        &selected,
+        &scores,
+        &calls_request,
+        &calls_response,
+    );
+    Some((selected, scores, threshold, margin, router_req, router_resp))
+}
+
+async fn route_preset_id_with_llm(
+    profile: &crate::llm::ProgramPromptProfile,
+    transcript: &str,
+    provider: &dyn LlmProvider,
+) -> Option<(Option<String>, JsonValue, JsonValue)> {
+    let router = profile.router.as_ref()?;
+    if !router.enabled || router.strategy != IntentRouterStrategy::Llm {
+        return None;
+    }
+
+    let default_desc = profile
+        .default_preset_description
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let candidate_count = profile.presets.len() + if default_desc.is_some() { 1 } else { 0 };
+    if candidate_count < 2 {
+        return None;
+    }
+
+    let transcript = transcript.trim();
+    if transcript.is_empty() {
+        return None;
+    }
+
+    // Keep this extremely constrained: output must be exactly one preset id, or "none".
+    let mut options = String::new();
+    if let Some(desc) = default_desc {
+        options.push_str(&format!("- none: {}\n", desc));
+    }
+    for p in &profile.presets {
+        let desc = p.description.clone().unwrap_or_default();
+        let hints = if p.routing_hints.is_empty() {
+            String::new()
+        } else {
+            format!(" Hints: {}", p.routing_hints.join(" | "))
+        };
+        options.push_str(&format!("- {}: {}{}\n", p.id, desc, hints));
+    }
+
+    let system = "You are an intent router. Choose the best preset id for the transcript.\n\nRules:\n- Output ONLY one of the preset ids exactly as provided, or the single word 'none'.\n- Do not include quotes, punctuation, or any extra text.\n- If you are not confident, output 'none'.\n";
+
+    let user = format!(
+        "Presets:\n{}\nTranscript:\n{}",
+        options,
+        transcript
+    );
+
+    let (system_preview, system_truncated, system_len) = preview_for_log(system, 1200);
+    let (user_preview, user_truncated, user_len) = preview_for_log(&user, 2400);
+    let request_json = serde_json::json!({
+        "type": "llm",
+        "provider": provider.name(),
+        "model": provider.model(),
+        "messages": [
+            {
+                "role": "system",
+                "content_preview": system_preview,
+                "content_len": system_len,
+                "content_truncated": system_truncated,
+            },
+            {
+                "role": "user",
+                "content_preview": user_preview,
+                "content_len": user_len,
+                "content_truncated": user_truncated,
+            }
+        ]
+    });
+
+    let out = match provider.complete(system, &user).await {
+        Ok(s) => s.trim().to_string(),
+        Err(e) => {
+            log::warn!("Intent router: LLM routing failed: {}", e);
+            let response_json = serde_json::json!({
+                "type": "llm",
+                "error": e.to_string(),
+            });
+            return Some((None, request_json, response_json));
+        }
+    };
+
+    let out_for_json = out.clone();
+    let response_json = serde_json::json!({
+        "type": "llm",
+        "raw": out_for_json,
+    });
+
+    if out.eq_ignore_ascii_case("none") {
+        return Some((None, request_json, response_json));
+    }
+
+    if profile.presets.iter().any(|p| p.id == out) {
+        Some((Some(out), request_json, response_json))
+    } else {
+        log::debug!("Intent router: LLM returned unknown preset id '{}'; ignored", out);
+        Some((None, request_json, response_json))
+    }
 }
 
 fn canonicalize_stt_provider_id(id: &str) -> String {
@@ -173,6 +825,8 @@ pub enum PipelineState {
     Recording,
     /// Pipeline is transcribing recorded audio
     Transcribing,
+    /// Pipeline is running the intent router (preset selection) after STT
+    Routing,
     /// Pipeline is rewriting/formatting text via an LLM (optional step)
     Rewriting,
     /// Pipeline encountered an error (recoverable - can start new recording)
@@ -195,6 +849,7 @@ impl PipelineState {
         matches!(
             self,
             PipelineState::Recording | PipelineState::Transcribing | PipelineState::Rewriting
+                | PipelineState::Routing
         )
     }
 }
@@ -740,10 +1395,19 @@ fn create_llm_provider(
 ///
 /// Uses standard Mutex to be Send + Sync for Tauri state management.
 /// Provides robust error handling and cancellation support.
+#[derive(Debug, Clone)]
+struct SessionPresetLock {
+    profile_id: Option<String>,
+    preset_id: String,
+}
+
 pub struct SharedPipeline {
     inner: Arc<Mutex<PipelineInner>>,
     level_meter: crate::audio_capture::SharedAudioLevelMeter,
     waveform_meter: crate::audio_capture::SharedAudioWaveformMeter,
+    embedding_cache: Arc<Mutex<HashMap<String, Vec<f32>>>>,
+    session_preset_lock: Arc<Mutex<Option<SessionPresetLock>>>,
+    session_profile_override: Arc<Mutex<Option<String>>>,
 }
 
 impl SharedPipeline {
@@ -756,7 +1420,103 @@ impl SharedPipeline {
             inner: Arc::new(Mutex::new(inner)),
             level_meter,
             waveform_meter,
+            embedding_cache: Arc::new(Mutex::new(HashMap::new())),
+            session_preset_lock: Arc::new(Mutex::new(None)),
+            session_profile_override: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Set (or clear) the in-memory session profile override.
+    ///
+    /// This does not persist to disk. When set, the next transcription will prefer
+    /// this profile id over selecting based on the current foreground application.
+    ///
+    /// This helps avoid Windows focus edge cases where our always-on-top overlay
+    /// briefly becomes the foreground window during stop/transcribe.
+    pub fn set_session_profile_override(
+        &self,
+        profile_id: Option<String>,
+    ) -> Result<(), PipelineError> {
+        let mut guard = self
+            .session_profile_override
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+        let normalized = profile_id.and_then(|s| {
+            let t = s.trim().to_string();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
+        });
+
+        *guard = normalized;
+        Ok(())
+    }
+
+    fn take_session_profile_override(&self) -> Option<String> {
+        self.session_profile_override
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+    }
+
+    /// Set (or clear) the in-memory session preset lock.
+    ///
+    /// This does not persist to disk. When set, it takes precedence over the
+    /// persisted profile `active_preset_id` and intent router.
+    pub fn set_session_preset_lock(
+        &self,
+        profile_id: Option<String>,
+        preset_id: Option<String>,
+    ) -> Result<(), PipelineError> {
+        let mut lock = self
+            .session_preset_lock
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+        if let Some(preset_id) = preset_id.and_then(|s| {
+            let t = s.trim().to_string();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
+        }) {
+            let pid = profile_id.and_then(|s| {
+                let t = s.trim().to_string();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t)
+                }
+            });
+            *lock = Some(SessionPresetLock {
+                profile_id: pid,
+                preset_id,
+            });
+        } else {
+            *lock = None;
+        }
+
+        Ok(())
+    }
+
+    /// Take (read and clear) the current session preset lock.
+    fn take_session_preset_lock(&self) -> Option<SessionPresetLock> {
+        self.session_preset_lock
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+    }
+
+    /// Read (without clearing) the current session preset lock.
+    pub fn peek_session_preset_lock(&self) -> Option<(Option<String>, String)> {
+        let guard = self.session_preset_lock.lock().ok()?;
+        guard
+            .as_ref()
+            .map(|lock| (lock.profile_id.clone(), lock.preset_id.clone()))
     }
 
     /// Try to read the current state without blocking.
@@ -785,6 +1545,12 @@ impl SharedPipeline {
     ///
     /// Creates a new cancellation token for this recording session.
     pub fn start_recording(&self) -> Result<(), PipelineError> {
+        // Defensive: clear any previous session preset lock so we don't accidentally
+        // apply an override from a prior (cancelled) session.
+        //
+        // The overlay/hotkey path can still set the lock again while recording.
+        let _ = self.set_session_preset_lock(None, None);
+
         let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
 
         // State guard: only allow starting from Idle or Error states
@@ -1068,8 +1834,12 @@ impl SharedPipeline {
     pub async fn stop_and_transcribe_detailed(
         &self,
     ) -> Result<TranscriptionResult, PipelineError> {
+        // Profile override is per recording session; take + clear it now so it doesn't
+        // leak into the next request.
+        let session_profile_override = self.take_session_profile_override();
+
         // Phase 1: Stop recording and prepare for transcription (synchronous, holds lock briefly)
-        let (wav_bytes, stt_provider, llm_provider, llm_prompts, llm_timeout, retry_config, timeout, cancel_token) = {
+        let (wav_bytes, stt_provider, retry_config, timeout, cancel_token, active_profile) = {
             let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
 
             if !inner.state.can_stop_recording() {
@@ -1169,7 +1939,27 @@ impl SharedPipeline {
             inner.state = PipelineState::Transcribing;
 
             let llm_config = inner.config.llm_config.clone();
-            let active_profile = select_profile_for_foreground_app(&llm_config);
+            let active_profile = session_profile_override
+                .as_deref()
+                .and_then(|id| {
+                    if id == "default" {
+                        None
+                    } else {
+                        Some(id)
+                    }
+                })
+                .and_then(|id| {
+                    llm_config
+                        .program_prompt_profiles
+                        .iter()
+                        .find(|p| p.id == id)
+                        .cloned()
+                })
+                .or_else(|| select_profile_for_foreground_app(&llm_config));
+
+            let active_preset = active_profile
+                .as_ref()
+                .and_then(|profile| select_effective_preset(profile));
 
             // Persist the *actual* profile used for this request into the request log.
             // Note: picking the profile at transcription time tends to be more accurate than
@@ -1177,6 +1967,10 @@ impl SharedPipeline {
             if let Some(store) = inner.config.request_log_store.as_ref() {
                 let (profile_id, profile_name) = if let Some(p) = active_profile.as_ref() {
                     (Some(p.id.clone()), Some(p.name.clone()))
+                } else if session_profile_override.as_deref() == Some("default") {
+                    (Some("default".to_string()), Some("Default".to_string()))
+                } else if let Some(id) = session_profile_override.as_deref() {
+                    (Some(id.to_string()), None)
                 } else {
                     (Some("default".to_string()), Some("Default".to_string()))
                 };
@@ -1186,25 +1980,20 @@ impl SharedPipeline {
                     log.profile_name = profile_name;
                 });
             }
-            let llm_prompts = active_profile
-                .as_ref()
-                .map(|p| p.prompts.clone())
-                .unwrap_or_else(|| llm_config.prompts.clone());
-
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
             let desired_stt_provider = canonicalize_stt_provider_id(
-                active_profile
-                    .as_ref()
+                active_preset
                     .and_then(|p| p.stt_provider.as_deref())
+                    .or_else(|| active_profile.as_ref().and_then(|p| p.stt_provider.as_deref()))
                     .unwrap_or(inner.config.stt_provider.as_str()),
             );
-            let desired_stt_model = active_profile
-                .as_ref()
+            let desired_stt_model = active_preset
                 .and_then(|p| p.stt_model.clone())
+                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_model.clone()))
                 .or_else(|| inner.config.stt_model.clone());
-            let desired_timeout = active_profile
-                .as_ref()
+            let desired_timeout = active_preset
                 .and_then(|p| p.stt_timeout_seconds)
+                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_timeout_seconds))
                 .map(|s| seconds_to_duration_or(s, inner.config.transcription_timeout))
                 .unwrap_or(inner.config.transcription_timeout);
 
@@ -1233,104 +2022,16 @@ impl SharedPipeline {
                 }
             };
 
-            // Resolve effective LLM provider/model (profile overrides -> global defaults), gated by
-            // the active profile's enable flag (falls back to the global enable).
-            let llm_timeout = llm_config.timeout;
-            let effective_llm_enabled = active_profile
-                .as_ref()
-                .and_then(|p| p.rewrite_llm_enabled)
-                .unwrap_or(inner.config.llm_config.enabled);
-
-            let llm_provider = if effective_llm_enabled {
-                let desired_llm_provider = active_profile
-                    .as_ref()
-                    .and_then(|p| p.llm_provider.clone())
-                    .unwrap_or_else(|| llm_config.provider.clone());
-                let desired_llm_model = active_profile
-                    .as_ref()
-                    .and_then(|p| p.llm_model.clone())
-                    .or_else(|| llm_config.model.clone());
-
-                // Resolve effective provider-specific thinking knobs (profile overrides -> global defaults).
-                let effective_openai_reasoning_effort = active_profile
-                    .as_ref()
-                    .and_then(|p| p.openai_reasoning_effort.clone())
-                    .or_else(|| llm_config.openai_reasoning_effort.clone());
-                let effective_gemini_thinking_budget = active_profile
-                    .as_ref()
-                    .and_then(|p| p.gemini_thinking_budget)
-                    .or(llm_config.gemini_thinking_budget);
-                let effective_gemini_thinking_level = active_profile
-                    .as_ref()
-                    .and_then(|p| p.gemini_thinking_level.clone())
-                    .or_else(|| llm_config.gemini_thinking_level.clone());
-                let effective_anthropic_thinking_budget = active_profile
-                    .as_ref()
-                    .and_then(|p| p.anthropic_thinking_budget)
-                    .or(llm_config.anthropic_thinking_budget);
-
-                match inner.get_or_create_llm_provider(
-                    desired_llm_provider.as_str(),
-                    desired_llm_model.clone(),
-                    llm_timeout,
-                    llm_config.ollama_url.clone(),
-                    effective_openai_reasoning_effort.clone(),
-                    effective_gemini_thinking_budget,
-                    effective_gemini_thinking_level.clone(),
-                    effective_anthropic_thinking_budget,
-                ) {
-                    Ok(p) => Some(p),
-                    Err(e) => {
-                        // Fallback to global provider if profile requested a different one.
-                        if active_profile
-                            .as_ref()
-                            .and_then(|p| p.llm_provider.as_ref())
-                            .is_some()
-                            && desired_llm_provider != llm_config.provider
-                        {
-                            log::warn!(
-                                "Pipeline: Profile LLM provider '{}' unavailable ({}), falling back to '{}'",
-                                desired_llm_provider,
-                                e,
-                                llm_config.provider
-                            );
-                            inner
-                                .get_or_create_llm_provider(
-                                    llm_config.provider.as_str(),
-                                    llm_config.model.clone(),
-                                    llm_timeout,
-                                    llm_config.ollama_url.clone(),
-                                    effective_openai_reasoning_effort,
-                                    effective_gemini_thinking_budget,
-                                    effective_gemini_thinking_level,
-                                    effective_anthropic_thinking_budget,
-                                )
-                                .ok()
-                        } else {
-                            log::warn!(
-                                "Pipeline: LLM disabled for this transcription ({}).",
-                                e
-                            );
-                            None
-                        }
-                    }
-                }
-            } else {
-                None
-            };
-
             let retry_config = inner.config.retry_config.clone();
             let cancel_token = inner.cancel_token.clone().unwrap_or_else(CancellationToken::new);
 
             (
                 wav_bytes,
                 stt_provider,
-                llm_provider,
-                llm_prompts,
-                llm_timeout,
                 retry_config,
                 desired_timeout,
                 cancel_token,
+                active_profile,
             )
         };
 
@@ -1396,7 +2097,453 @@ impl SharedPipeline {
         let stt_duration_ms = stt_start.elapsed().as_millis() as u64;
         log::info!("Pipeline: STT complete, {} chars", stt_text.len());
 
-        // Phase 3: Optional LLM formatting
+        // Phase 3a: Decide which preset (if any) to use for the rewrite step.
+        // This is where routing can run, because we finally have the transcript.
+        let (proxy_settings, llm_api_keys, request_log_store) = {
+            let inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            (
+                inner.config.proxy_settings.clone(),
+                inner.config.llm_api_keys.clone(),
+                inner.config.request_log_store.clone(),
+            )
+        };
+
+        // Session lock is a one-shot override: take + clear it now so it only
+        // applies to this transcription attempt.
+        let session_lock = self.take_session_preset_lock();
+
+        let mut routed_preset_id: Option<String> = None;
+        if let Some(profile) = active_profile.as_ref() {
+            // Session override wins over everything else.
+            if let Some(lock) = session_lock.as_ref() {
+                let profile_ok = lock
+                    .profile_id
+                    .as_deref()
+                    .map(|pid| pid == profile.id)
+                    .unwrap_or(true);
+
+                if profile_ok {
+                    if find_preset_by_id(profile, lock.preset_id.as_str()).is_some() {
+                        routed_preset_id = Some(lock.preset_id.clone());
+                    }
+                }
+            }
+
+            // Persisted manual override wins over router/default.
+            if routed_preset_id.is_none() {
+                if let Some(id) = profile.active_preset_id.as_deref() {
+                routed_preset_id = Some(id.to_string());
+                }
+            }
+
+            if routed_preset_id.is_none() && router_enabled(profile) {
+                // For LLM routing, we need a provider instance. We build one using global/profile
+                // settings (not preset-specific) because routing precedes preset selection.
+                if profile
+                    .router
+                    .as_ref()
+                    .map(|r| r.strategy == IntentRouterStrategy::Llm)
+                    .unwrap_or(false)
+                {
+                    let maybe_provider = {
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                        let llm_cfg = inner.config.llm_config.clone();
+
+                        inner
+                            .get_or_create_llm_provider(
+                                llm_cfg.provider.as_str(),
+                                llm_cfg.model.clone(),
+                                llm_cfg.timeout,
+                                llm_cfg.ollama_url.clone(),
+                                llm_cfg.openai_reasoning_effort.clone(),
+                                llm_cfg.gemini_thinking_budget,
+                                llm_cfg.gemini_thinking_level.clone(),
+                                llm_cfg.anthropic_thinking_budget,
+                            )
+                            .ok()
+                    };
+
+                    if let Some(p) = maybe_provider {
+                        // Expose routing as a distinct UI phase.
+                        {
+                            let mut inner = self
+                                .inner
+                                .lock()
+                                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                            if inner.state == PipelineState::Transcribing {
+                                inner.state = PipelineState::Routing;
+                            }
+                        }
+
+                        let router_start = std::time::Instant::now();
+                        let llm_out =
+                            route_preset_id_with_llm(profile, &stt_text, p.as_ref()).await;
+                        if let Some((selected, router_req, router_resp)) = llm_out {
+                            routed_preset_id = selected;
+                            if let Some(store) = request_log_store.as_ref() {
+                                store.with_current(|log| {
+                                    log.router_request_json = Some(router_req);
+                                    log.router_response_json = Some(router_resp);
+                                });
+                            }
+                        }
+
+                        let router_duration_ms = router_start.elapsed().as_millis() as u64;
+                        if let Some(store) = request_log_store.as_ref() {
+                            let mut scores: Vec<crate::request_log::RouterPresetScore> = profile
+                                .presets
+                                .iter()
+                                .map(|preset| crate::request_log::RouterPresetScore {
+                                    preset_id: preset.id.clone(),
+                                    preset_name: preset.name.clone(),
+                                    score: None,
+                                    selected: routed_preset_id
+                                        .as_deref()
+                                        .map(|id| id == preset.id)
+                                        .unwrap_or(false),
+                                })
+                                .collect();
+
+                            // Include the implicit Default (no preset) target when configured.
+                            if profile
+                                .default_preset_description
+                                .as_ref()
+                                .map(|s| !s.trim().is_empty())
+                                .unwrap_or(false)
+                            {
+                                scores.push(crate::request_log::RouterPresetScore {
+                                    preset_id: "__default__".to_string(),
+                                    preset_name: "Default (no preset)".to_string(),
+                                    score: None,
+                                    selected: routed_preset_id.is_none(),
+                                });
+                            }
+
+                            store.with_current(|log| {
+                                log.router_duration_ms = Some(router_duration_ms);
+                                log.router_strategy = Some("llm".to_string());
+                                log.router_scores = Some(scores);
+                                log.info(format!(
+                                    "Intent router (llm) completed in {}ms",
+                                    router_duration_ms
+                                ));
+                            });
+                        }
+
+                        // Restore the phase to Transcribing until/if we enter Rewriting.
+                        {
+                            let mut inner = self
+                                .inner
+                                .lock()
+                                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                            if inner.state == PipelineState::Routing {
+                                inner.state = PipelineState::Transcribing;
+                            }
+                        }
+                    }
+                } else {
+                    // Expose routing as a distinct UI phase.
+                    {
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                        if inner.state == PipelineState::Transcribing {
+                            inner.state = PipelineState::Routing;
+                        }
+                    }
+
+                    let router_start = std::time::Instant::now();
+                    let embeddings_out = route_preset_id_with_embeddings(
+                        profile,
+                        &stt_text,
+                        &proxy_settings,
+                        &llm_api_keys,
+                        &self.embedding_cache,
+                    )
+                    .await;
+
+                    if let Some((selected, scores_raw, threshold, margin, router_req, router_resp)) =
+                        embeddings_out
+                    {
+                        routed_preset_id = selected;
+
+                        if let Some(store) = request_log_store.as_ref() {
+                            store.with_current(|log| {
+                                log.router_request_json = Some(router_req);
+                                log.router_response_json = Some(router_resp);
+                            });
+                        }
+
+                        let router_duration_ms = router_start.elapsed().as_millis() as u64;
+                        if let Some(store) = request_log_store.as_ref() {
+                            let pick_highest_score = profile
+                                .router
+                                .as_ref()
+                                .map(|r| r.pick_highest_score)
+                                .unwrap_or(false);
+
+                            let selected_default = {
+                                let mut best_id: Option<&str> = None;
+                                let mut best_score: f32 = 0.0;
+                                let mut second_best_score: Option<f32> = None;
+
+                                for (id, score) in &scores_raw {
+                                    let score = *score;
+                                    match best_id {
+                                        None => {
+                                            best_id = Some(id.as_str());
+                                            best_score = score;
+                                        }
+                                        Some(_) if score > best_score => {
+                                            second_best_score = Some(best_score);
+                                            best_id = Some(id.as_str());
+                                            best_score = score;
+                                        }
+                                        Some(_) => {
+                                            if score <= best_score
+                                                && second_best_score
+                                                    .map(|s| score > s)
+                                                    .unwrap_or(true)
+                                            {
+                                                second_best_score = Some(score);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if pick_highest_score {
+                                    matches!(best_id, Some("__default__"))
+                                } else {
+                                    match best_id {
+                                        Some("__default__") if best_score >= threshold => {
+                                            second_best_score
+                                                .map(|s| best_score - s >= margin)
+                                                .unwrap_or(true)
+                                        }
+                                        _ => false,
+                                    }
+                                }
+                            };
+
+                            // Map raw candidate score list -> per-preset scores.
+                            let mut score_map: std::collections::HashMap<String, f32> =
+                                std::collections::HashMap::new();
+                            for (id, score) in scores_raw {
+                                score_map.insert(id, score);
+                            }
+
+                            let mut scores: Vec<crate::request_log::RouterPresetScore> = profile
+                                .presets
+                                .iter()
+                                .map(|preset| crate::request_log::RouterPresetScore {
+                                    preset_id: preset.id.clone(),
+                                    preset_name: preset.name.clone(),
+                                    score: score_map.get(&preset.id).copied(),
+                                    selected: routed_preset_id
+                                        .as_deref()
+                                        .map(|id| id == preset.id)
+                                        .unwrap_or(false),
+                                })
+                                .collect();
+
+                            // Include the implicit Default (no preset) target when configured.
+                            if profile
+                                .default_preset_description
+                                .as_ref()
+                                .map(|s| !s.trim().is_empty())
+                                .unwrap_or(false)
+                            {
+                                scores.push(crate::request_log::RouterPresetScore {
+                                    preset_id: "__default__".to_string(),
+                                    preset_name: "Default (no preset)".to_string(),
+                                    score: score_map.get("__default__").copied(),
+                                    selected: selected_default,
+                                });
+                            }
+
+                            // Sort by score desc, with None last.
+                            scores.sort_by(|a, b| match (a.score, b.score) {
+                                (Some(sa), Some(sb)) => sb
+                                    .partial_cmp(&sa)
+                                    .unwrap_or(std::cmp::Ordering::Equal),
+                                (Some(_), None) => std::cmp::Ordering::Less,
+                                (None, Some(_)) => std::cmp::Ordering::Greater,
+                                (None, None) => std::cmp::Ordering::Equal,
+                            });
+
+                            store.with_current(|log| {
+                                log.router_duration_ms = Some(router_duration_ms);
+                                log.router_strategy = Some("embeddings".to_string());
+                                log.router_scores = Some(scores);
+                                if pick_highest_score {
+                                    log.info_with_details(
+                                        format!(
+                                            "Intent router (embeddings) completed in {}ms",
+                                            router_duration_ms
+                                        ),
+                                        "pick_highest_score=true".to_string(),
+                                    );
+                                } else {
+                                    log.info_with_details(
+                                        format!(
+                                            "Intent router (embeddings) completed in {}ms",
+                                            router_duration_ms
+                                        ),
+                                        format!(
+                                            "threshold={:.3}, margin={:.3}",
+                                            threshold, margin
+                                        ),
+                                    );
+                                }
+                            });
+                        }
+                    }
+
+                    // Restore the phase to Transcribing until/if we enter Rewriting.
+                    {
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                        if inner.state == PipelineState::Routing {
+                            inner.state = PipelineState::Transcribing;
+                        }
+                    }
+                }
+            }
+
+            // Default preset is the fallback when routing is off/undecided.
+            if routed_preset_id.is_none() {
+                routed_preset_id = profile.default_preset_id.clone();
+            }
+        }
+
+        // Persist the selected preset (or lack of preset) into the request log so the UI can
+        // show "Profile: Preset".
+        if let Some(store) = request_log_store.as_ref() {
+            let (preset_id, preset_name) = if let Some(profile) = active_profile.as_ref() {
+                let preset_name = routed_preset_id
+                    .as_deref()
+                    .and_then(|id| find_preset_by_id(profile, id))
+                    .map(|p| p.name.clone());
+                (routed_preset_id.clone(), preset_name)
+            } else {
+                (None, None)
+            };
+
+            store.with_current(|log| {
+                log.preset_id = preset_id;
+                log.preset_name = preset_name;
+            });
+        }
+
+        if let (Some(store), Some(profile)) = (request_log_store.as_ref(), active_profile.as_ref()) {
+            if let Some(id) = routed_preset_id.as_deref() {
+                if let Some(preset) = find_preset_by_id(profile, id) {
+                    let reason = if session_lock
+                        .as_ref()
+                        .map(|l| l.preset_id == id)
+                        .unwrap_or(false)
+                    {
+                        "Session override selected preset"
+                    } else if profile
+                        .active_preset_id
+                        .as_deref()
+                        .map(|l| l == id)
+                        .unwrap_or(false)
+                    {
+                        "Manual (persisted) override selected preset"
+                    } else if router_enabled(profile) {
+                        "Intent router selected preset"
+                    } else {
+                        "Default preset selected"
+                    };
+
+                    store.with_current(|log| {
+                        log.info_with_details(reason, format!("{} ({})", preset.name, preset.id));
+                    });
+                }
+            }
+        }
+
+        // Phase 3b: Build the effective LLM provider + prompts based on the routed preset.
+        let (llm_provider, llm_prompts, llm_timeout) = {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+            let llm_config = inner.config.llm_config.clone();
+            let selected_profile = active_profile.as_ref();
+            let selected_preset = selected_profile
+                .and_then(|p| routed_preset_id.as_deref().and_then(|id| find_preset_by_id(p, id)));
+
+            let llm_prompts = selected_preset
+                .map(|p| p.prompts.clone())
+                .or_else(|| selected_profile.map(|p| p.prompts.clone()))
+                .unwrap_or_else(|| llm_config.prompts.clone());
+
+            let llm_timeout = llm_config.timeout;
+            let effective_llm_enabled = selected_preset
+                .and_then(|p| p.rewrite_llm_enabled)
+                .or_else(|| selected_profile.and_then(|p| p.rewrite_llm_enabled))
+                .unwrap_or(inner.config.llm_config.enabled);
+
+            let llm_provider = if effective_llm_enabled {
+                let desired_llm_provider = selected_preset
+                    .and_then(|p| p.llm_provider.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
+                    .unwrap_or_else(|| llm_config.provider.clone());
+                let desired_llm_model = selected_preset
+                    .and_then(|p| p.llm_model.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.llm_model.clone()))
+                    .or_else(|| llm_config.model.clone());
+
+                // Resolve effective provider-specific thinking knobs (preset -> profile -> global).
+                let effective_openai_reasoning_effort = selected_preset
+                    .and_then(|p| p.openai_reasoning_effort.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.openai_reasoning_effort.clone()))
+                    .or_else(|| llm_config.openai_reasoning_effort.clone());
+                let effective_gemini_thinking_budget = selected_preset
+                    .and_then(|p| p.gemini_thinking_budget)
+                    .or_else(|| selected_profile.and_then(|p| p.gemini_thinking_budget))
+                    .or(llm_config.gemini_thinking_budget);
+                let effective_gemini_thinking_level = selected_preset
+                    .and_then(|p| p.gemini_thinking_level.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.gemini_thinking_level.clone()))
+                    .or_else(|| llm_config.gemini_thinking_level.clone());
+                let effective_anthropic_thinking_budget = selected_preset
+                    .and_then(|p| p.anthropic_thinking_budget)
+                    .or_else(|| selected_profile.and_then(|p| p.anthropic_thinking_budget))
+                    .or(llm_config.anthropic_thinking_budget);
+
+                inner
+                    .get_or_create_llm_provider(
+                        desired_llm_provider.as_str(),
+                        desired_llm_model.clone(),
+                        llm_timeout,
+                        llm_config.ollama_url.clone(),
+                        effective_openai_reasoning_effort,
+                        effective_gemini_thinking_budget,
+                        effective_gemini_thinking_level,
+                        effective_anthropic_thinking_budget,
+                    )
+                    .ok()
+            } else {
+                None
+            };
+
+            (llm_provider, llm_prompts, llm_timeout)
+        };
+
+        // Phase 4: Optional LLM formatting
         let mut llm_duration_ms: Option<u64> = None;
         let mut llm_outcome: LlmOutcome = LlmOutcome::NotAttempted;
 
@@ -1456,6 +2603,16 @@ impl SharedPipeline {
 
             llm_duration_ms = Some(llm_start.elapsed().as_millis() as u64);
 
+            // Persist the *actual* provider/model used into the request log.
+            // This matters when global LLM rewrite is disabled but a profile/preset
+            // overrides `rewrite_llm_enabled` to true.
+            if let Some(store) = request_log_store.as_ref() {
+                store.with_current(|log| {
+                    log.llm_provider = llm_provider_used.clone();
+                    log.llm_model = llm_model_used.clone();
+                });
+            }
+
             match llm_result {
                 Ok(text) => text,
                 Err(PipelineError::Cancelled) => {
@@ -1469,7 +2626,7 @@ impl SharedPipeline {
             stt_text.clone()
         };
 
-        // Phase 4: Update state to idle
+        // Phase 5: Update state to idle
         {
             let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
             inner.reset_to_idle();
@@ -1508,7 +2665,7 @@ impl SharedPipeline {
         profile_id_override: Option<&str>,
     ) -> Result<TranscriptionResult, PipelineError> {
         // Phase 1: Resolve providers/config under lock.
-        let (stt_provider, llm_provider, llm_prompts, llm_timeout, retry_config, timeout, cancel_token) = {
+        let (stt_provider, retry_config, timeout, cancel_token, active_profile) = {
             let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
 
             // Guard: don't run a retry while actively recording.
@@ -1553,6 +2710,10 @@ impl SharedPipeline {
                 })
                 .or_else(|| select_profile_for_foreground_app(&llm_config));
 
+            let active_preset = active_profile
+                .as_ref()
+                .and_then(|profile| select_effective_preset(profile));
+
             // Persist the profile being used for this retry attempt into the request log, if available.
             if let Some(store) = inner.config.request_log_store.as_ref() {
                 let (profile_id, profile_name) = if let Some(p) = active_profile.as_ref() {
@@ -1570,25 +2731,20 @@ impl SharedPipeline {
                     log.profile_name = profile_name;
                 });
             }
-            let llm_prompts = active_profile
-                .as_ref()
-                .map(|p| p.prompts.clone())
-                .unwrap_or_else(|| llm_config.prompts.clone());
-
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
             let desired_stt_provider = canonicalize_stt_provider_id(
-                active_profile
-                    .as_ref()
+                active_preset
                     .and_then(|p| p.stt_provider.as_deref())
+                    .or_else(|| active_profile.as_ref().and_then(|p| p.stt_provider.as_deref()))
                     .unwrap_or(inner.config.stt_provider.as_str()),
             );
-            let desired_stt_model = active_profile
-                .as_ref()
+            let desired_stt_model = active_preset
                 .and_then(|p| p.stt_model.clone())
+                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_model.clone()))
                 .or_else(|| inner.config.stt_model.clone());
-            let desired_timeout = active_profile
-                .as_ref()
+            let desired_timeout = active_preset
                 .and_then(|p| p.stt_timeout_seconds)
+                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_timeout_seconds))
                 .map(|s| seconds_to_duration_or(s, inner.config.transcription_timeout))
                 .unwrap_or(inner.config.transcription_timeout);
 
@@ -1617,98 +2773,14 @@ impl SharedPipeline {
                 }
             };
 
-            // Resolve effective LLM provider/model (profile overrides -> global defaults)
-            let llm_timeout = llm_config.timeout;
-            let effective_llm_enabled = active_profile
-                .as_ref()
-                .and_then(|p| p.rewrite_llm_enabled)
-                .unwrap_or(inner.config.llm_config.enabled);
-
-            let llm_provider = if effective_llm_enabled {
-                let desired_llm_provider = active_profile
-                    .as_ref()
-                    .and_then(|p| p.llm_provider.clone())
-                    .unwrap_or_else(|| llm_config.provider.clone());
-                let desired_llm_model = active_profile
-                    .as_ref()
-                    .and_then(|p| p.llm_model.clone())
-                    .or_else(|| llm_config.model.clone());
-
-                // Resolve effective provider-specific thinking knobs (profile overrides -> global defaults).
-                let effective_openai_reasoning_effort = active_profile
-                    .as_ref()
-                    .and_then(|p| p.openai_reasoning_effort.clone())
-                    .or_else(|| llm_config.openai_reasoning_effort.clone());
-                let effective_gemini_thinking_budget = active_profile
-                    .as_ref()
-                    .and_then(|p| p.gemini_thinking_budget)
-                    .or(llm_config.gemini_thinking_budget);
-                let effective_gemini_thinking_level = active_profile
-                    .as_ref()
-                    .and_then(|p| p.gemini_thinking_level.clone())
-                    .or_else(|| llm_config.gemini_thinking_level.clone());
-                let effective_anthropic_thinking_budget = active_profile
-                    .as_ref()
-                    .and_then(|p| p.anthropic_thinking_budget)
-                    .or(llm_config.anthropic_thinking_budget);
-
-                match inner.get_or_create_llm_provider(
-                    desired_llm_provider.as_str(),
-                    desired_llm_model.clone(),
-                    llm_timeout,
-                    llm_config.ollama_url.clone(),
-                    effective_openai_reasoning_effort.clone(),
-                    effective_gemini_thinking_budget,
-                    effective_gemini_thinking_level.clone(),
-                    effective_anthropic_thinking_budget,
-                ) {
-                    Ok(p) => Some(p),
-                    Err(e) => {
-                        // Fallback to global provider if profile requested a different one.
-                        if active_profile
-                            .as_ref()
-                            .and_then(|p| p.llm_provider.as_ref())
-                            .is_some()
-                            && desired_llm_provider != llm_config.provider
-                        {
-                            log::warn!(
-                                "Pipeline: Profile LLM provider '{}' unavailable ({}), falling back to '{}'",
-                                desired_llm_provider,
-                                e,
-                                llm_config.provider
-                            );
-                            inner
-                                .get_or_create_llm_provider(
-                                    llm_config.provider.as_str(),
-                                    llm_config.model.clone(),
-                                    llm_timeout,
-                                    llm_config.ollama_url.clone(),
-                                    effective_openai_reasoning_effort,
-                                    effective_gemini_thinking_budget,
-                                    effective_gemini_thinking_level,
-                                    effective_anthropic_thinking_budget,
-                                )
-                                .ok()
-                        } else {
-                            log::warn!("Pipeline: LLM disabled for this transcription ({})", e);
-                            None
-                        }
-                    }
-                }
-            } else {
-                None
-            };
-
             let retry_config = inner.config.retry_config.clone();
 
             (
                 stt_provider,
-                llm_provider,
-                llm_prompts,
-                llm_timeout,
                 retry_config,
                 desired_timeout,
                 cancel_token,
+                active_profile,
             )
         };
 
@@ -1770,6 +2842,442 @@ impl SharedPipeline {
         let stt_duration_ms = stt_start.elapsed().as_millis() as u64;
         log::info!("Pipeline: Retry STT complete, {} chars", stt_text.len());
 
+        // Phase 3a: Route preset for rewrite (retry path).
+        let (proxy_settings, llm_api_keys, request_log_store) = {
+            let inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            (
+                inner.config.proxy_settings.clone(),
+                inner.config.llm_api_keys.clone(),
+                inner.config.request_log_store.clone(),
+            )
+        };
+
+        let session_lock = self.take_session_preset_lock();
+
+        let mut routed_preset_id: Option<String> = None;
+        if let Some(profile) = active_profile.as_ref() {
+            if let Some(lock) = session_lock.as_ref() {
+                let profile_ok = lock
+                    .profile_id
+                    .as_deref()
+                    .map(|pid| pid == profile.id)
+                    .unwrap_or(true);
+                if profile_ok {
+                    if find_preset_by_id(profile, lock.preset_id.as_str()).is_some() {
+                        routed_preset_id = Some(lock.preset_id.clone());
+                    }
+                }
+            }
+
+            if routed_preset_id.is_none() {
+                if let Some(id) = profile.active_preset_id.as_deref() {
+                    routed_preset_id = Some(id.to_string());
+                }
+            }
+
+            if routed_preset_id.is_none() && router_enabled(profile) {
+                if profile
+                    .router
+                    .as_ref()
+                    .map(|r| r.strategy == IntentRouterStrategy::Llm)
+                    .unwrap_or(false)
+                {
+                    let maybe_provider = {
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                        let llm_cfg = inner.config.llm_config.clone();
+
+                        inner
+                            .get_or_create_llm_provider(
+                                llm_cfg.provider.as_str(),
+                                llm_cfg.model.clone(),
+                                llm_cfg.timeout,
+                                llm_cfg.ollama_url.clone(),
+                                llm_cfg.openai_reasoning_effort.clone(),
+                                llm_cfg.gemini_thinking_budget,
+                                llm_cfg.gemini_thinking_level.clone(),
+                                llm_cfg.anthropic_thinking_budget,
+                            )
+                            .ok()
+                    };
+
+                    if let Some(p) = maybe_provider {
+                        // Expose routing as a distinct UI phase.
+                        {
+                            let mut inner = self
+                                .inner
+                                .lock()
+                                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                            if inner.state == PipelineState::Transcribing {
+                                inner.state = PipelineState::Routing;
+                            }
+                        }
+
+                        let router_start = std::time::Instant::now();
+                        let llm_out =
+                            route_preset_id_with_llm(profile, &stt_text, p.as_ref()).await;
+                        if let Some((selected, router_req, router_resp)) = llm_out {
+                            routed_preset_id = selected;
+                            if let Some(store) = request_log_store.as_ref() {
+                                store.with_current(|log| {
+                                    log.router_request_json = Some(router_req);
+                                    log.router_response_json = Some(router_resp);
+                                });
+                            }
+                        }
+
+                        let router_duration_ms = router_start.elapsed().as_millis() as u64;
+                        if let Some(store) = request_log_store.as_ref() {
+                            let mut scores: Vec<crate::request_log::RouterPresetScore> = profile
+                                .presets
+                                .iter()
+                                .map(|preset| crate::request_log::RouterPresetScore {
+                                    preset_id: preset.id.clone(),
+                                    preset_name: preset.name.clone(),
+                                    score: None,
+                                    selected: routed_preset_id
+                                        .as_deref()
+                                        .map(|id| id == preset.id)
+                                        .unwrap_or(false),
+                                })
+                                .collect();
+
+                            // Include the implicit Default (no preset) target when configured.
+                            if profile
+                                .default_preset_description
+                                .as_ref()
+                                .map(|s| !s.trim().is_empty())
+                                .unwrap_or(false)
+                            {
+                                scores.push(crate::request_log::RouterPresetScore {
+                                    preset_id: "__default__".to_string(),
+                                    preset_name: "Default (no preset)".to_string(),
+                                    score: None,
+                                    selected: routed_preset_id.is_none(),
+                                });
+                            }
+
+                            store.with_current(|log| {
+                                log.router_duration_ms = Some(router_duration_ms);
+                                log.router_strategy = Some("llm".to_string());
+                                log.router_scores = Some(scores);
+                                log.info(format!(
+                                    "Intent router (llm) completed in {}ms",
+                                    router_duration_ms
+                                ));
+                            });
+                        }
+
+                        // Restore the phase to Transcribing until/if we enter Rewriting.
+                        {
+                            let mut inner = self
+                                .inner
+                                .lock()
+                                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                            if inner.state == PipelineState::Routing {
+                                inner.state = PipelineState::Transcribing;
+                            }
+                        }
+                    }
+                } else {
+                    // Expose routing as a distinct UI phase.
+                    {
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                        if inner.state == PipelineState::Transcribing {
+                            inner.state = PipelineState::Routing;
+                        }
+                    }
+
+                    let router_start = std::time::Instant::now();
+                    let embeddings_out = route_preset_id_with_embeddings(
+                        profile,
+                        &stt_text,
+                        &proxy_settings,
+                        &llm_api_keys,
+                        &self.embedding_cache,
+                    )
+                    .await;
+
+                    if let Some((selected, scores_raw, threshold, margin, router_req, router_resp)) =
+                        embeddings_out
+                    {
+                        routed_preset_id = selected;
+
+                        if let Some(store) = request_log_store.as_ref() {
+                            store.with_current(|log| {
+                                log.router_request_json = Some(router_req);
+                                log.router_response_json = Some(router_resp);
+                            });
+                        }
+
+                        let router_duration_ms = router_start.elapsed().as_millis() as u64;
+                        if let Some(store) = request_log_store.as_ref() {
+                            let pick_highest_score = profile
+                                .router
+                                .as_ref()
+                                .map(|r| r.pick_highest_score)
+                                .unwrap_or(false);
+
+                            let selected_default = {
+                                let mut best_id: Option<&str> = None;
+                                let mut best_score: f32 = 0.0;
+                                let mut second_best_score: Option<f32> = None;
+
+                                for (id, score) in &scores_raw {
+                                    let score = *score;
+                                    match best_id {
+                                        None => {
+                                            best_id = Some(id.as_str());
+                                            best_score = score;
+                                        }
+                                        Some(_) if score > best_score => {
+                                            second_best_score = Some(best_score);
+                                            best_id = Some(id.as_str());
+                                            best_score = score;
+                                        }
+                                        Some(_) => {
+                                            if score <= best_score
+                                                && second_best_score
+                                                    .map(|s| score > s)
+                                                    .unwrap_or(true)
+                                            {
+                                                second_best_score = Some(score);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if pick_highest_score {
+                                    matches!(best_id, Some("__default__"))
+                                } else {
+                                    match best_id {
+                                        Some("__default__") if best_score >= threshold => {
+                                            second_best_score
+                                                .map(|s| best_score - s >= margin)
+                                                .unwrap_or(true)
+                                        }
+                                        _ => false,
+                                    }
+                                }
+                            };
+
+                            // Map raw candidate score list -> per-preset scores.
+                            let mut score_map: std::collections::HashMap<String, f32> =
+                                std::collections::HashMap::new();
+                            for (id, score) in scores_raw {
+                                score_map.insert(id, score);
+                            }
+
+                            let mut scores: Vec<crate::request_log::RouterPresetScore> = profile
+                                .presets
+                                .iter()
+                                .map(|preset| crate::request_log::RouterPresetScore {
+                                    preset_id: preset.id.clone(),
+                                    preset_name: preset.name.clone(),
+                                    score: score_map.get(&preset.id).copied(),
+                                    selected: routed_preset_id
+                                        .as_deref()
+                                        .map(|id| id == preset.id)
+                                        .unwrap_or(false),
+                                })
+                                .collect();
+
+                            // Include the implicit Default (no preset) target when configured.
+                            if profile
+                                .default_preset_description
+                                .as_ref()
+                                .map(|s| !s.trim().is_empty())
+                                .unwrap_or(false)
+                            {
+                                scores.push(crate::request_log::RouterPresetScore {
+                                    preset_id: "__default__".to_string(),
+                                    preset_name: "Default (no preset)".to_string(),
+                                    score: score_map.get("__default__").copied(),
+                                    selected: selected_default,
+                                });
+                            }
+
+                            // Sort by score desc, with None last.
+                            scores.sort_by(|a, b| match (a.score, b.score) {
+                                (Some(sa), Some(sb)) => sb
+                                    .partial_cmp(&sa)
+                                    .unwrap_or(std::cmp::Ordering::Equal),
+                                (Some(_), None) => std::cmp::Ordering::Less,
+                                (None, Some(_)) => std::cmp::Ordering::Greater,
+                                (None, None) => std::cmp::Ordering::Equal,
+                            });
+
+                            store.with_current(|log| {
+                                log.router_duration_ms = Some(router_duration_ms);
+                                log.router_strategy = Some("embeddings".to_string());
+                                log.router_scores = Some(scores);
+                                if pick_highest_score {
+                                    log.info_with_details(
+                                        format!(
+                                            "Intent router (embeddings) completed in {}ms",
+                                            router_duration_ms
+                                        ),
+                                        "pick_highest_score=true".to_string(),
+                                    );
+                                } else {
+                                    log.info_with_details(
+                                        format!(
+                                            "Intent router (embeddings) completed in {}ms",
+                                            router_duration_ms
+                                        ),
+                                        format!(
+                                            "threshold={:.3}, margin={:.3}",
+                                            threshold, margin
+                                        ),
+                                    );
+                                }
+                            });
+                        }
+                    }
+
+                    // Restore the phase to Transcribing until/if we enter Rewriting.
+                    {
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                        if inner.state == PipelineState::Routing {
+                            inner.state = PipelineState::Transcribing;
+                        }
+                    }
+                }
+            }
+
+            if routed_preset_id.is_none() {
+                routed_preset_id = profile.default_preset_id.clone();
+            }
+        }
+
+        // Persist the selected preset (or lack of preset) into the request log so the UI can
+        // show "Profile: Preset".
+        if let Some(store) = request_log_store.as_ref() {
+            let (preset_id, preset_name) = if let Some(profile) = active_profile.as_ref() {
+                let preset_name = routed_preset_id
+                    .as_deref()
+                    .and_then(|id| find_preset_by_id(profile, id))
+                    .map(|p| p.name.clone());
+                (routed_preset_id.clone(), preset_name)
+            } else {
+                (None, None)
+            };
+
+            store.with_current(|log| {
+                log.preset_id = preset_id;
+                log.preset_name = preset_name;
+            });
+        }
+
+        if let (Some(store), Some(profile)) = (request_log_store.as_ref(), active_profile.as_ref()) {
+            if let Some(id) = routed_preset_id.as_deref() {
+                if let Some(preset) = find_preset_by_id(profile, id) {
+                    let reason = if session_lock
+                        .as_ref()
+                        .map(|l| l.preset_id == id)
+                        .unwrap_or(false)
+                    {
+                        "Session override selected preset"
+                    } else if profile
+                        .active_preset_id
+                        .as_deref()
+                        .map(|l| l == id)
+                        .unwrap_or(false)
+                    {
+                        "Manual (persisted) override selected preset"
+                    } else if router_enabled(profile) {
+                        "Intent router selected preset"
+                    } else {
+                        "Default preset selected"
+                    };
+
+                    store.with_current(|log| {
+                        log.info_with_details(reason, format!("{} ({})", preset.name, preset.id));
+                    });
+                }
+            }
+        }
+
+        // Phase 3b: Build effective LLM provider + prompts.
+        let (llm_provider, llm_prompts, llm_timeout) = {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+            let llm_config = inner.config.llm_config.clone();
+            let selected_profile = active_profile.as_ref();
+            let selected_preset = selected_profile
+                .and_then(|p| routed_preset_id.as_deref().and_then(|id| find_preset_by_id(p, id)));
+
+            let llm_prompts = selected_preset
+                .map(|p| p.prompts.clone())
+                .or_else(|| selected_profile.map(|p| p.prompts.clone()))
+                .unwrap_or_else(|| llm_config.prompts.clone());
+
+            let llm_timeout = llm_config.timeout;
+            let effective_llm_enabled = selected_preset
+                .and_then(|p| p.rewrite_llm_enabled)
+                .or_else(|| selected_profile.and_then(|p| p.rewrite_llm_enabled))
+                .unwrap_or(inner.config.llm_config.enabled);
+
+            let llm_provider = if effective_llm_enabled {
+                let desired_llm_provider = selected_preset
+                    .and_then(|p| p.llm_provider.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
+                    .unwrap_or_else(|| llm_config.provider.clone());
+                let desired_llm_model = selected_preset
+                    .and_then(|p| p.llm_model.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.llm_model.clone()))
+                    .or_else(|| llm_config.model.clone());
+
+                let effective_openai_reasoning_effort = selected_preset
+                    .and_then(|p| p.openai_reasoning_effort.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.openai_reasoning_effort.clone()))
+                    .or_else(|| llm_config.openai_reasoning_effort.clone());
+                let effective_gemini_thinking_budget = selected_preset
+                    .and_then(|p| p.gemini_thinking_budget)
+                    .or_else(|| selected_profile.and_then(|p| p.gemini_thinking_budget))
+                    .or(llm_config.gemini_thinking_budget);
+                let effective_gemini_thinking_level = selected_preset
+                    .and_then(|p| p.gemini_thinking_level.clone())
+                    .or_else(|| selected_profile.and_then(|p| p.gemini_thinking_level.clone()))
+                    .or_else(|| llm_config.gemini_thinking_level.clone());
+                let effective_anthropic_thinking_budget = selected_preset
+                    .and_then(|p| p.anthropic_thinking_budget)
+                    .or_else(|| selected_profile.and_then(|p| p.anthropic_thinking_budget))
+                    .or(llm_config.anthropic_thinking_budget);
+
+                inner
+                    .get_or_create_llm_provider(
+                        desired_llm_provider.as_str(),
+                        desired_llm_model.clone(),
+                        llm_timeout,
+                        llm_config.ollama_url.clone(),
+                        effective_openai_reasoning_effort,
+                        effective_gemini_thinking_budget,
+                        effective_gemini_thinking_level,
+                        effective_anthropic_thinking_budget,
+                    )
+                    .ok()
+            } else {
+                None
+            };
+
+            (llm_provider, llm_prompts, llm_timeout)
+        };
+
         // Phase 3: Optional LLM formatting
         let mut llm_duration_ms: Option<u64> = None;
         let mut llm_outcome: LlmOutcome = LlmOutcome::NotAttempted;
@@ -1823,6 +3331,14 @@ impl SharedPipeline {
             };
 
             llm_duration_ms = Some(llm_start.elapsed().as_millis() as u64);
+
+            // Persist the *actual* provider/model used into the request log.
+            if let Some(store) = request_log_store.as_ref() {
+                store.with_current(|log| {
+                    log.llm_provider = llm_provider_used.clone();
+                    log.llm_model = llm_model_used.clone();
+                });
+            }
 
             match llm_result {
                 Ok(text) => text,
@@ -2099,6 +3615,9 @@ impl Clone for SharedPipeline {
             inner: self.inner.clone(),
             level_meter: self.level_meter.clone(),
             waveform_meter: self.waveform_meter.clone(),
+            embedding_cache: self.embedding_cache.clone(),
+            session_preset_lock: self.session_preset_lock.clone(),
+            session_profile_override: self.session_profile_override.clone(),
         }
     }
 }

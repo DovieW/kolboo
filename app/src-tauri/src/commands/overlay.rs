@@ -21,49 +21,110 @@ fn set_widget_position_impl(app: &AppHandle, position: &str) -> Result<(), Strin
         return Err("Overlay window not found".to_string());
     };
 
+    // Prefer the monitor the window is currently on, but fall back to primary/available monitors.
+    // This helps when the window was previously on a disconnected display or current_monitor()
+    // is temporarily unavailable right after show/hide transitions.
     let monitor = window
         .current_monitor()
-        .map_err(|e| e.to_string())?
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| {
+            window
+                .available_monitors()
+                .ok()
+                .and_then(|mut monitors| monitors.pop())
+        })
         .ok_or("No monitor found")?;
 
+    // Use PHYSICAL coordinates for all window placement.
+    // This avoids DPI conversion edge cases where logical math + LogicalPosition
+    // can lead to double-scaling on Windows (window ends up off-screen).
     let screen_size = monitor.size();
+    let screen_pos = monitor.position();
     let scale = monitor.scale_factor();
-    let screen_width = screen_size.width as f64 / scale;
-    let screen_height = screen_size.height as f64 / scale;
+    let screen_width_px = screen_size.width as f64;
+    let screen_height_px = screen_size.height as f64;
+    let origin_x_px = screen_pos.x as f64;
+    let origin_y_px = screen_pos.y as f64;
 
     // Get current window size
     let window_size = window.outer_size().map_err(|e| e.to_string())?;
-    let window_width = window_size.width as f64 / scale;
-    let window_height = window_size.height as f64 / scale;
+    let mut window_width_px = window_size.width as f64;
+    let mut window_height_px = window_size.height as f64;
+
+    // When the window is hidden (recording_only/never), some platforms can report
+    // a near-zero outer_size. Using that would place the window partially or fully
+    // off-screen. Prefer a conservative estimate that matches the overlay UI.
+    if window_width_px < 20.0 || window_height_px < 20.0 {
+        window_width_px = (224.0 * scale).round();
+        window_height_px = (56.0 * scale).round();
+    }
 
     // Calculate margins (pixels from edge)
-    let margin = 50.0;
+    let margin_px = (50.0 * scale).round();
 
-    let (x, y) = match position {
-        "top-left" => (margin, margin),
-        "top-center" => ((screen_width - window_width) / 2.0, margin),
-        "top-right" => (screen_width - window_width - margin, margin),
-        "center" => (
-            (screen_width - window_width) / 2.0,
-            (screen_height - window_height) / 2.0,
+    let (mut x_px, mut y_px) = match position {
+        "top-left" => (origin_x_px + margin_px, origin_y_px + margin_px),
+        "top-center" => (
+            origin_x_px + (screen_width_px - window_width_px) / 2.0,
+            origin_y_px + margin_px,
         ),
-        "bottom-left" => (margin, screen_height - window_height - margin),
+        "top-right" => (
+            origin_x_px + screen_width_px - window_width_px - margin_px,
+            origin_y_px + margin_px,
+        ),
+        "center" => (
+            origin_x_px + (screen_width_px - window_width_px) / 2.0,
+            origin_y_px + (screen_height_px - window_height_px) / 2.0,
+        ),
+        "bottom-left" => (
+            origin_x_px + margin_px,
+            origin_y_px + screen_height_px - window_height_px - margin_px,
+        ),
         "bottom-center" => (
-            (screen_width - window_width) / 2.0,
-            screen_height - window_height - margin,
+            origin_x_px + (screen_width_px - window_width_px) / 2.0,
+            origin_y_px + screen_height_px - window_height_px - margin_px,
         ),
         "bottom-right" => (
-            screen_width - window_width - margin,
-            screen_height - window_height - margin,
+            origin_x_px + screen_width_px - window_width_px - margin_px,
+            origin_y_px + screen_height_px - window_height_px - margin_px,
         ),
         _ => return Err(format!("Invalid widget position: {}", position)),
     };
 
+    // Clamp to screen bounds with a small margin. This avoids cases where size estimates
+    // (or unusual DPI/taskbar geometry) would push the window slightly off-screen.
+    let clamp_margin_px = (12.0 * scale).round();
+    let min_x_px = origin_x_px + clamp_margin_px;
+    let min_y_px = origin_y_px + clamp_margin_px;
+    let max_x_px =
+        (origin_x_px + screen_width_px - window_width_px - clamp_margin_px).max(min_x_px);
+    let max_y_px =
+        (origin_y_px + screen_height_px - window_height_px - clamp_margin_px).max(min_y_px);
+    x_px = x_px.clamp(min_x_px, max_x_px);
+    y_px = y_px.clamp(min_y_px, max_y_px);
+
     window
-        .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: x_px.round() as i32,
+            y: y_px.round() as i32,
+        }))
         .map_err(|e| e.to_string())?;
 
-    log::info!("Widget position set to {} at ({}, {})", position, x, y);
+    log::info!(
+        "Widget position set to {} at logical=({:.1}, {:.1}) physical=({:.0}, {:.0}) [monitor_origin_logical=({:.1}, {:.1}) physical=({:.0}, {:.0}), scale={}]",
+        position,
+        x_px / scale,
+        y_px / scale,
+        x_px,
+        y_px,
+        origin_x_px / scale,
+        origin_y_px / scale,
+        origin_x_px,
+        origin_y_px,
+        scale
+    );
     Ok(())
 }
 
@@ -85,18 +146,74 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> Result<(), Stri
     let overlay_mode: String =
         get_setting_from_store(app, "overlay_mode", "recording_only".to_string());
 
-    if overlay_mode != "always" {
-        if let Err(e) = snap_overlay_to_saved_position(app) {
-            log::warn!("Failed to snap overlay position on show: {}", e);
-        }
-    }
-
     if let Some(window) = app.get_webview_window("overlay") {
         // Bump the epoch so any previously-scheduled delayed hides know they are outdated.
         app.state::<AppState>()
             .overlay_visibility_epoch
             .fetch_add(1, Ordering::SeqCst);
+
+        let visible_before = window.is_visible().ok();
+        log::info!("[overlay] show requested (mode={}, visible_before={:?})", overlay_mode, visible_before);
+
         window.show().map_err(|e| e.to_string())?;
+
+        // If the frontend hasn't mounted yet (or resize calls were missed), the overlay can
+        // remain at its tiny initial size and appear "missing" near the screen edge.
+        // In recording-only mode we always want the expanded pill while visible.
+        if overlay_mode == "recording_only" {
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: 224.0,
+                height: 56.0,
+            }));
+        }
+
+        // Recovery: if the overlay was previously on a disconnected monitor, show() may succeed
+        // but the window can still be effectively invisible. Centering is a good best-effort
+        // recovery before we snap to the user's preferred position.
+        let _ = window.unminimize();
+        let _ = window.center();
+
+        // Best-effort: some environments can lose the always-on-top flag across hide/show.
+        let _ = window.set_always_on_top(true);
+
+        // For non-always modes, snap after show/center so current_monitor() resolves reliably.
+        if overlay_mode != "always" {
+            if let Err(e) = snap_overlay_to_saved_position(app) {
+                log::warn!("Failed to snap overlay position on show: {}", e);
+            }
+        }
+
+        // Diagnostics: log final geometry + monitor. On Windows with DPI/multi-monitor,
+        // a window can be technically visible but placed somewhere unexpected.
+        let pos = window.outer_position().ok();
+        let outer = window.outer_size().ok();
+        let inner = window.inner_size().ok();
+        let scale = window.scale_factor().ok();
+        let mon = window.current_monitor().ok().flatten();
+        if let Some(m) = mon {
+            log::info!(
+                "[overlay] final geom pos={:?} outer={:?} inner={:?} scale={:?} monitor={{name={:?}, pos={:?}, size={:?}, scale={}}}",
+                pos,
+                outer,
+                inner,
+                scale,
+                m.name(),
+                m.position(),
+                m.size(),
+                m.scale_factor()
+            );
+        } else {
+            log::info!(
+                "[overlay] final geom pos={:?} outer={:?} inner={:?} scale={:?} monitor=<none>",
+                pos,
+                outer,
+                inner,
+                scale
+            );
+        }
+
+        let visible_after = window.is_visible().ok();
+        log::info!("[overlay] show complete (visible_after={:?})", visible_after);
     }
 
     Ok(())
@@ -110,20 +227,16 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(
     let height = height.max(min_size);
 
     if let Some(window) = app.get_webview_window("overlay") {
-        // We position using *outer* geometry (position + size), because that's what the OS
-        // uses for window placement. On Windows/macOS the outer size includes decorations,
-        // so using the requested logical size directly can cause subtle drift.
+        // We position using *outer* geometry (position + size) in PHYSICAL pixels.
+        // Using logical floats here can accumulate rounding error across repeated
+        // size transitions (notably hover open/close), causing the overlay to drift.
         let prev = if let (Ok(pos), Ok(outer_size), Ok(inner_size)) =
             (window.outer_position(), window.outer_size(), window.inner_size())
         {
             let scale = window.scale_factor().unwrap_or(1.0);
-            let x = pos.x as f64 / scale;
-            let y = pos.y as f64 / scale;
-            let w = outer_size.width as f64 / scale;
-            let h = outer_size.height as f64 / scale;
             let inner_w = inner_size.width as f64 / scale;
             let inner_h = inner_size.height as f64 / scale;
-            Some((x, y, w, h, inner_w, inner_h, scale))
+            Some((pos, outer_size, inner_w, inner_h))
         } else {
             None
         };
@@ -133,57 +246,84 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(
             .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
             .map_err(|e| e.to_string())?;
 
-        // For the fixed collapsed/expanded toggle sizes (56x56 <-> 264x56), keep the window
+        // For the fixed collapsed/expanded toggle sizes (56x56 <-> expanded x 56), keep the window
         // center fixed so the expanded state grows out from the collapsed widget's location.
         // Avoid clamping in this path: users prefer slight off-screen over "push away" drift.
         let is_fixed_toggle_size = (height - 56.0).abs() < 0.5
-            && ((width - 56.0).abs() < 0.5 || (width - 264.0).abs() < 0.5);
+            && ((width - 56.0).abs() < 0.5
+                || (width - 224.0).abs() < 0.5
+                || (width - 264.0).abs() < 0.5);
 
-        if let Some((prev_x, prev_y, prev_outer_w, prev_outer_h, prev_inner_w, prev_inner_h, scale)) =
-            prev
-        {
-            // Try to use the actual outer size after resize (most accurate).
-            // Fall back to estimating using the previous decoration delta if needed.
-            let (new_outer_w, new_outer_h) = match window.outer_size() {
-                Ok(sz) => (sz.width as f64 / scale, sz.height as f64 / scale),
+        if let Some((prev_pos_px, prev_outer_px, prev_inner_w, prev_inner_h)) = prev {
+            // Use actual outer size after resize when possible; otherwise estimate from the
+            // previous decoration delta.
+            let new_outer_px = match window.outer_size() {
+                Ok(sz) => sz,
                 Err(_) => {
-                    // Estimate decoration delta using the pre-resize outer vs inner sizes.
+                    let scale = window.scale_factor().unwrap_or(1.0);
+                    let prev_outer_w = prev_outer_px.width as f64 / scale;
+                    let prev_outer_h = prev_outer_px.height as f64 / scale;
                     let decor_w = (prev_outer_w - prev_inner_w).max(0.0);
                     let decor_h = (prev_outer_h - prev_inner_h).max(0.0);
-                    (width + decor_w, height + decor_h)
+                    tauri::PhysicalSize {
+                        width: ((width + decor_w) * scale).round().max(1.0) as u32,
+                        height: ((height + decor_h) * scale).round().max(1.0) as u32,
+                    }
                 }
             };
 
-            let mut x;
-            let mut y;
+            let mut x_px: i32;
+            let mut y_px: i32;
+
+            // When temporarily showing a hover panel above the overlay widget we resize the window
+            // to a taller size. Preserve the widget's *bottom-center* across that transition so
+            // it doesn't jump away from the cursor (which would instantly cancel hover).
+            let was_compact = (prev_inner_h - 56.0).abs() < 1.2;
+            let is_compact = (height - 56.0).abs() < 0.8;
+            let is_hover_panel_transition = (was_compact && !is_compact) || (!was_compact && is_compact);
 
             if is_fixed_toggle_size {
-                let cx = prev_x + prev_outer_w / 2.0;
-                let cy = prev_y + prev_outer_h / 2.0;
-                x = cx - new_outer_w / 2.0;
-                y = cy - new_outer_h / 2.0;
+                let cx_px = prev_pos_px.x + (prev_outer_px.width as i32 / 2);
+                let cy_px = prev_pos_px.y + (prev_outer_px.height as i32 / 2);
+                x_px = cx_px - (new_outer_px.width as i32 / 2);
+                y_px = cy_px - (new_outer_px.height as i32 / 2);
+            } else if is_hover_panel_transition {
+                let bc_x_px = prev_pos_px.x + (prev_outer_px.width as i32 / 2);
+                let bc_y_px = prev_pos_px.y + prev_outer_px.height as i32;
+                x_px = bc_x_px - (new_outer_px.width as i32 / 2);
+                y_px = bc_y_px - new_outer_px.height as i32;
             } else {
                 // Default: preserve top-left and clamp to screen bounds.
-                x = prev_x;
-                y = prev_y;
+                x_px = prev_pos_px.x;
+                y_px = prev_pos_px.y;
 
                 if let Ok(Some(monitor)) = window.current_monitor() {
                     let screen_size = monitor.size();
+                    let screen_pos = monitor.position();
                     let scale = monitor.scale_factor();
-                    let screen_width = screen_size.width as f64 / scale;
-                    let screen_height = screen_size.height as f64 / scale;
+                    let screen_w_px = (screen_size.width as f64).round() as i32;
+                    let screen_h_px = (screen_size.height as f64).round() as i32;
+                    let margin_px = (12.0 * scale).round() as i32;
 
-                    let margin = 12.0;
-                    let max_x = (screen_width - new_outer_w - margin).max(margin);
-                    let max_y = (screen_height - new_outer_h - margin).max(margin);
+                    let min_x_px = screen_pos.x + margin_px;
+                    let min_y_px = screen_pos.y + margin_px;
+                    let max_x_px =
+                        (screen_pos.x + screen_w_px - new_outer_px.width as i32 - margin_px)
+                            .max(min_x_px);
+                    let max_y_px =
+                        (screen_pos.y + screen_h_px - new_outer_px.height as i32 - margin_px)
+                            .max(min_y_px);
 
-                    x = x.clamp(margin, max_x);
-                    y = y.clamp(margin, max_y);
+                    x_px = x_px.clamp(min_x_px, max_x_px);
+                    y_px = y_px.clamp(min_y_px, max_y_px);
                 }
             }
 
             window
-                .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
+                .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x: x_px,
+                    y: y_px,
+                }))
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -211,6 +351,107 @@ pub async fn hide_overlay(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("overlay") {
         window.hide().map_err(|e| e.to_string())?;
     }
+
+    // Best-effort: also hide the hover panel window so it doesn't orphan.
+    if let Some(window) = app.get_webview_window("overlay_hover") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn show_overlay_hover(app: AppHandle) -> Result<(), String> {
+    let Some(overlay) = app.get_webview_window("overlay") else {
+        return Err("Overlay window not found".to_string());
+    };
+    let Some(hover) = app.get_webview_window("overlay_hover") else {
+        return Err("Overlay hover window not found".to_string());
+    };
+
+    app.state::<AppState>()
+        .overlay_hover_epoch
+        .fetch_add(1, Ordering::SeqCst);
+
+    // Fixed hover panel size (logical).
+    let hover_w = 320.0;
+    let hover_h = 220.0;
+    let gap = 10.0;
+
+    // Compute in physical px to avoid cumulative rounding drift on Windows.
+    let scale = overlay.scale_factor().unwrap_or(1.0);
+    let overlay_pos = overlay.outer_position().map_err(|e| e.to_string())?;
+    let overlay_size = overlay.outer_size().map_err(|e| e.to_string())?;
+
+    // Ensure hover window is the expected size.
+    let _ = hover.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: hover_w,
+        height: hover_h,
+    }));
+
+    let hover_w_px = (hover_w * scale).round() as i32;
+    let hover_h_px = (hover_h * scale).round() as i32;
+    let gap_px = (gap * scale).round() as i32;
+
+    let overlay_center_x_px = overlay_pos.x + (overlay_size.width as i32 / 2);
+    let overlay_top_y_px = overlay_pos.y;
+
+    let x_px = overlay_center_x_px - (hover_w_px / 2);
+    let y_px = overlay_top_y_px - hover_h_px - gap_px;
+
+    hover
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: x_px,
+            y: y_px,
+        }))
+        .map_err(|e| e.to_string())?;
+
+    // Keep above other windows.
+    let _ = hover.set_always_on_top(true);
+    hover.show().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn hide_overlay_hover(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("overlay_hover") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+
+    // Bump epoch so any pending hides are considered stale.
+    app.state::<AppState>()
+        .overlay_hover_epoch
+        .fetch_add(1, Ordering::SeqCst);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Result<(), String> {
+    let expected_epoch = app
+        .state::<AppState>()
+        .overlay_hover_epoch
+        .load(Ordering::SeqCst);
+
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let delay = std::time::Duration::from_millis(delay_ms);
+        tokio::time::sleep(delay).await;
+
+        let current_epoch = app_clone
+            .state::<AppState>()
+            .overlay_hover_epoch
+            .load(Ordering::SeqCst);
+
+        if current_epoch != expected_epoch {
+            return;
+        }
+
+        if let Some(window) = app_clone.get_webview_window("overlay_hover") {
+            let _ = window.hide();
+        }
+    });
+
     Ok(())
 }
 

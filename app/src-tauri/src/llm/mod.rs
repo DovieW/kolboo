@@ -18,10 +18,7 @@ pub use groq::GroqLlmProvider;
 pub use ollama::OllamaLlmProvider;
 pub use openai::OpenAiLlmProvider;
 pub use defaults::default_llm_model_for_provider;
-pub use prompts::{
-    combine_prompt_sections, PromptSections, ADVANCED_PROMPT_DEFAULT, DICTIONARY_PROMPT_DEFAULT,
-    MAIN_PROMPT_DEFAULT,
-};
+pub use prompts::{combine_prompt_sections, PromptSections, SYSTEM_PROMPT_DEFAULT};
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -170,6 +167,39 @@ pub struct LlmConfig {
     pub timeout: Duration,
 }
 
+/// A preset/mode within a program profile.
+///
+/// This is a runtime representation (used by the pipeline). The persisted version lives in
+/// `crate::settings`.
+#[derive(Debug, Clone)]
+pub struct ProgramPreset {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+
+    /// Example utterances / short hints used by the intent router.
+    pub routing_hints: Vec<String>,
+
+    /// Prompt sections to use when this preset is selected.
+    pub prompts: PromptSections,
+
+    /// Optional per-preset gate for rewrite (falls back to profile/global settings).
+    pub rewrite_llm_enabled: Option<bool>,
+
+    // Optional per-preset overrides for the pipeline
+    pub stt_provider: Option<String>,
+    pub stt_model: Option<String>,
+    pub stt_timeout_seconds: Option<f64>,
+    pub llm_provider: Option<String>,
+    pub llm_model: Option<String>,
+
+    // Optional per-preset provider-specific thinking/reasoning knobs.
+    pub openai_reasoning_effort: Option<String>,
+    pub gemini_thinking_budget: Option<i64>,
+    pub gemini_thinking_level: Option<String>,
+    pub anthropic_thinking_budget: Option<i64>,
+}
+
 /// Per-program prompt override profile.
 ///
 /// If the active/foreground executable path matches any entry in `program_paths`, `prompts` is used instead of
@@ -180,7 +210,22 @@ pub struct ProgramPromptProfile {
     pub id: String,
     pub name: String,
     pub program_paths: Vec<String>,
+    /// Base prompt sections for this program profile.
+    ///
+    /// When presets are configured, the selected preset's `prompts` should be used for the
+    /// rewrite step instead.
     pub prompts: PromptSections,
+
+    /// Presets/modes within this program profile.
+    pub presets: Vec<ProgramPreset>,
+    /// Default preset used when routing is off/undecided.
+    pub default_preset_id: Option<String>,
+    /// Description for the implicit "Default" (no preset) routing target.
+    pub default_preset_description: Option<String>,
+    /// Persisted manual selection (if set, can be used as an override for routing).
+    pub active_preset_id: Option<String>,
+    /// Optional intent router configuration.
+    pub router: Option<crate::settings::IntentRouterSettings>,
 
     /// Optional per-profile gate for rewrite (falls back to LlmConfig.enabled)
     pub rewrite_llm_enabled: Option<bool>,

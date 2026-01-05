@@ -1,5 +1,13 @@
 export type ModelOption = { value: string; label: string };
 
+// Model options for embedding providers (used by intent router).
+export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
+  openai: [
+    { value: "text-embedding-3-small", label: "Text Embedding 3 Small" },
+    { value: "text-embedding-3-large", label: "Text Embedding 3 Large" },
+  ],
+};
+
 // Model options for each STT provider.
 // This is intentionally shared between Settings pickers and History filters so
 // they always list the same models.

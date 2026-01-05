@@ -245,12 +245,51 @@ a:focus-visible {
 
 /* Main Content */
 .main-content {
+	/* Shared padding vars so sticky headers can offset them cleanly */
+	--main-pad-y: 32px;
+	--main-pad-x: 40px;
+
 	flex: 1;
 	overflow-y: auto;
 	/* Prevent subtle width changes when scrollbar appears/disappears (tab switches) */
 	scrollbar-gutter: stable;
-	padding: 32px 40px;
+	padding: 0;
 	background: var(--bg-primary);
+}
+
+/* Default padded content area inside a scrollable `.main-content` pane.
+
+	We keep padding off the scroll container itself so sticky headers can sit
+	flush to the top without needing negative margins (more reliable across
+	platforms/webviews).
+*/
+.main-content-inner {
+	padding: 0 var(--main-pad-x) var(--main-pad-y);
+}
+
+/* Sticky page header within a scrollable .main-content pane.
+
+	Usage:
+	- Add `tv-page-header` to the top heading container in each view.
+	- Works even though `.main-content` uses padding, by offsetting via negative margins.
+*/
+.main-content .tv-page-header {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	margin: 0 0 20px;
+	padding: 14px var(--main-pad-x) 14px;
+
+	/* Ensure scrolled content doesn't show through the sticky area */
+	background: rgba(0, 0, 0, 0.94);
+	border-bottom: 1px solid var(--border-subtle);
+	backdrop-filter: blur(10px);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+	.main-content .tv-page-header {
+		background: var(--bg-primary);
+	}
 }
 
 .main-content::-webkit-scrollbar {

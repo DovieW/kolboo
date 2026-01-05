@@ -15,6 +15,7 @@ export interface PromptSectionEditorProps {
   title: string;
   description: string;
   enabled: boolean;
+  headerActions?: React.ReactNode;
   initialContent: string;
   defaultContent: string;
   hasCustom: boolean;
@@ -39,6 +40,7 @@ export function PromptSectionEditor({
   title,
   description,
   enabled,
+  headerActions,
   initialContent,
   defaultContent,
   hasCustom,
@@ -102,7 +104,10 @@ export function PromptSectionEditor({
             <p className="settings-label">{title}</p>
             <p className="settings-description">{description}</p>
           </div>
-          {(showInheritInfo || showDisableOverride || !hideToggle) && (
+          {(headerActions ||
+            showInheritInfo ||
+            showDisableOverride ||
+            !hideToggle) && (
             <div
               style={{ display: "flex", alignItems: "center", gap: 8 }}
               // NOTE: Do NOT stop propagation in capture phase here.
@@ -110,6 +115,23 @@ export function PromptSectionEditor({
               // the inner controls (reload icon/switch). Instead, each control stops
               // propagation on its own capture handlers.
             >
+              {headerActions ? (
+                <span
+                  // Prevent accordion toggle when interacting with header actions.
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  {headerActions}
+                </span>
+              ) : null}
+
               {showInheritInfo && (
                 <Tooltip label={inheritTooltip} withArrow>
                   <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />

@@ -25,6 +25,8 @@ import {
   sttAPI,
   tauriAPI,
   type TestLlmRewriteResponse,
+  type IterateRewritePromptResponse,
+  type TestRewriteWithPromptResponse,
   validateHotkeyNotDuplicate,
   type WidgetPosition,
   type CostTimeframe,
@@ -134,6 +136,30 @@ export function useTestLlmRewrite() {
       transcript: string;
       profileId?: string | null;
     }): Promise<TestLlmRewriteResponse> => llmAPI.testLlmRewrite(params),
+  });
+}
+
+export function useIterateRewritePrompt() {
+  return useMutation({
+    mutationFn: (params: {
+      transcript: string;
+      problemOutput: string;
+      desiredOutput: string;
+      currentPrompt: string;
+      profileId?: string | null;
+    }): Promise<IterateRewritePromptResponse> =>
+      llmAPI.iterateRewritePrompt(params),
+  });
+}
+
+export function useTestRewriteWithPrompt() {
+  return useMutation({
+    mutationFn: (params: {
+      transcript: string;
+      prompt: string;
+      profileId?: string | null;
+    }): Promise<TestRewriteWithPromptResponse> =>
+      llmAPI.testRewriteWithPrompt(params),
   });
 }
 

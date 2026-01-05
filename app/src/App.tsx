@@ -261,7 +261,7 @@ function InstructionsCard() {
 function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
   return (
     <div className="main-content">
-      <header className="animate-in" style={{ marginBottom: 32 }}>
+      <header className="tv-page-header animate-in">
         <Title order={1} mb={4}>
           Welcome to Kolboo
         </Title>
@@ -270,9 +270,10 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
         </Text>
       </header>
 
-      <InstructionsCard />
-
-      <HistoryFeed onJumpToLog={onJumpToLog} />
+      <div className="main-content-inner">
+        <InstructionsCard />
+        <HistoryFeed onJumpToLog={onJumpToLog} />
+      </div>
     </div>
   );
 }
@@ -312,7 +313,7 @@ function UsageStatsView() {
 
   return (
     <div className="main-content">
-      <header className="animate-in" style={{ marginBottom: 20 }}>
+      <header className="tv-page-header animate-in">
         <Group justify="space-between" align="center" wrap="wrap">
           <Title order={1} mb={0}>
             Stats
@@ -629,28 +630,30 @@ function UsageStatsView() {
         </Group>
       </header>
 
-      <Tabs
-        value={activeStatsTab}
-        onChange={(value) => {
-          if (!value) return;
-          setActiveStatsTab(value);
-        }}
-        keepMounted={false}
-      >
-        <Tabs.List>
-          <Tabs.Tab value="cost">Cost</Tabs.Tab>
-        </Tabs.List>
+      <div className="main-content-inner">
+        <Tabs
+          value={activeStatsTab}
+          onChange={(value) => {
+            if (!value) return;
+            setActiveStatsTab(value);
+          }}
+          keepMounted={false}
+        >
+          <Tabs.List>
+            <Tabs.Tab value="cost">Cost</Tabs.Tab>
+          </Tabs.List>
 
-        <Tabs.Panel value="cost" pt="md">
-          <CostTab
-            timeframe={timeframe}
-            kind={statsKind}
-            sttModelKeys={selectedSttModelKeys}
-            llmModelKeys={selectedLlmModelKeys}
-            excludeFreeTier={excludeFreeTier}
-          />
-        </Tabs.Panel>
-      </Tabs>
+          <Tabs.Panel value="cost" pt="md">
+            <CostTab
+              timeframe={timeframe}
+              kind={statsKind}
+              sttModelKeys={selectedSttModelKeys}
+              llmModelKeys={selectedLlmModelKeys}
+              excludeFreeTier={excludeFreeTier}
+            />
+          </Tabs.Panel>
+        </Tabs>
+      </div>
     </div>
   );
 }
@@ -711,9 +714,8 @@ function SettingsView() {
   return (
     <div className="main-content">
       <header
-        className="animate-in"
+        className="tv-page-header animate-in"
         style={{
-          marginBottom: 20,
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "space-between",
@@ -805,79 +807,81 @@ function SettingsView() {
         </div>
       </header>
 
-      <ProfileConfigModal
-        opened={programsModalOpen}
-        onClose={() => {
-          setProgramsModalOpen(false);
-          setAutoCreateProfileOnOpen(false);
-        }}
-        editingProfileId={editingProfileId}
-        onEditingProfileChange={setEditingProfileId}
-        autoCreateProfile={autoCreateProfileOnOpen}
-      />
+      <div className="main-content-inner">
+        <ProfileConfigModal
+          opened={programsModalOpen}
+          onClose={() => {
+            setProgramsModalOpen(false);
+            setAutoCreateProfileOnOpen(false);
+          }}
+          editingProfileId={editingProfileId}
+          onEditingProfileChange={setEditingProfileId}
+          autoCreateProfile={autoCreateProfileOnOpen}
+        />
 
-      <Tabs
-        value={activeSettingsTab}
-        onChange={(value) => {
-          if (!value) return;
-          setHasUserSelectedTab(true);
-          setActiveSettingsTab(value);
-        }}
-        classNames={{ root: "settings-tabs" }}
-        keepMounted={false}
-      >
-        <Tabs.List>
-          <Tabs.Tab value="ai">AI</Tabs.Tab>
-          <Tabs.Tab value="ui">UI</Tabs.Tab>
-          <Tabs.Tab value="audio">Audio</Tabs.Tab>
-          <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
-          <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
-          <Tabs.Tab value="data">Data</Tabs.Tab>
-          <Tabs.Tab value="network">Network</Tabs.Tab>
-        </Tabs.List>
+        <Tabs
+          value={activeSettingsTab}
+          onChange={(value) => {
+            if (!value) return;
+            setHasUserSelectedTab(true);
+            setActiveSettingsTab(value);
+          }}
+          classNames={{ root: "settings-tabs" }}
+          keepMounted={false}
+        >
+          <Tabs.List>
+            <Tabs.Tab value="ai">AI</Tabs.Tab>
+            <Tabs.Tab value="ui">UI</Tabs.Tab>
+            <Tabs.Tab value="audio">Audio</Tabs.Tab>
+            <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
+            <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
+            <Tabs.Tab value="data">Data</Tabs.Tab>
+            <Tabs.Tab value="network">Network</Tabs.Tab>
+          </Tabs.List>
 
-        <Tabs.Panel value="ai" pt="md">
-          <div className="settings-card">
-            <PromptSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="ai" pt="md">
+            <div className="settings-card">
+              <PromptSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="ui" pt="md">
-          <div className="settings-card">
-            <UiSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="ui" pt="md">
+            <div className="settings-card">
+              <UiSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="audio" pt="md">
-          <div className="settings-card">
-            <AudioSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="audio" pt="md">
+            <div className="settings-card">
+              <AudioSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="hotkeys" pt="md">
-          <div className="settings-card">
-            <HotkeySettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="hotkeys" pt="md">
+            <div className="settings-card">
+              <HotkeySettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="api-keys" pt="md">
-          <div className="settings-card">
-            <ApiKeysSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="api-keys" pt="md">
+            <div className="settings-card">
+              <ApiKeysSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="data" pt="md">
-          <div className="settings-card">
-            <DataSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="data" pt="md">
+            <div className="settings-card">
+              <DataSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="network" pt="md">
-          <div className="settings-card">
-            <NetworkSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
-      </Tabs>
+          <Tabs.Panel value="network" pt="md">
+            <div className="settings-card">
+              <NetworkSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
+        </Tabs>
+      </div>
     </div>
   );
 }
@@ -942,9 +946,8 @@ function SettingsViewWithGuideLauncher({
   return (
     <div className="main-content">
       <header
-        className="animate-in"
+        className="tv-page-header animate-in"
         style={{
-          marginBottom: 20,
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "space-between",
@@ -1048,79 +1051,81 @@ function SettingsViewWithGuideLauncher({
         </div>
       </header>
 
-      <ProfileConfigModal
-        opened={programsModalOpen}
-        onClose={() => {
-          setProgramsModalOpen(false);
-          setAutoCreateProfileOnOpen(false);
-        }}
-        editingProfileId={editingProfileId}
-        onEditingProfileChange={setEditingProfileId}
-        autoCreateProfile={autoCreateProfileOnOpen}
-      />
+      <div className="main-content-inner">
+        <ProfileConfigModal
+          opened={programsModalOpen}
+          onClose={() => {
+            setProgramsModalOpen(false);
+            setAutoCreateProfileOnOpen(false);
+          }}
+          editingProfileId={editingProfileId}
+          onEditingProfileChange={setEditingProfileId}
+          autoCreateProfile={autoCreateProfileOnOpen}
+        />
 
-      <Tabs
-        value={activeSettingsTab}
-        onChange={(value) => {
-          if (!value) return;
-          setHasUserSelectedTab(true);
-          setActiveSettingsTab(value);
-        }}
-        classNames={{ root: "settings-tabs" }}
-        keepMounted={false}
-      >
-        <Tabs.List>
-          <Tabs.Tab value="ai">AI</Tabs.Tab>
-          <Tabs.Tab value="ui">UI</Tabs.Tab>
-          <Tabs.Tab value="audio">Audio</Tabs.Tab>
-          <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
-          <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
-          <Tabs.Tab value="data">Data</Tabs.Tab>
-          <Tabs.Tab value="network">Network</Tabs.Tab>
-        </Tabs.List>
+        <Tabs
+          value={activeSettingsTab}
+          onChange={(value) => {
+            if (!value) return;
+            setHasUserSelectedTab(true);
+            setActiveSettingsTab(value);
+          }}
+          classNames={{ root: "settings-tabs" }}
+          keepMounted={false}
+        >
+          <Tabs.List>
+            <Tabs.Tab value="ai">AI</Tabs.Tab>
+            <Tabs.Tab value="ui">UI</Tabs.Tab>
+            <Tabs.Tab value="audio">Audio</Tabs.Tab>
+            <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
+            <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
+            <Tabs.Tab value="data">Data</Tabs.Tab>
+            <Tabs.Tab value="network">Network</Tabs.Tab>
+          </Tabs.List>
 
-        <Tabs.Panel value="ai" pt="md">
-          <div className="settings-card">
-            <PromptSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="ai" pt="md">
+            <div className="settings-card">
+              <PromptSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="ui" pt="md">
-          <div className="settings-card">
-            <UiSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="ui" pt="md">
+            <div className="settings-card">
+              <UiSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="audio" pt="md">
-          <div className="settings-card">
-            <AudioSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="audio" pt="md">
+            <div className="settings-card">
+              <AudioSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="hotkeys" pt="md">
-          <div className="settings-card">
-            <HotkeySettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="hotkeys" pt="md">
+            <div className="settings-card">
+              <HotkeySettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="api-keys" pt="md">
-          <div className="settings-card">
-            <ApiKeysSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="api-keys" pt="md">
+            <div className="settings-card">
+              <ApiKeysSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="data" pt="md">
-          <div className="settings-card">
-            <DataSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
+          <Tabs.Panel value="data" pt="md">
+            <div className="settings-card">
+              <DataSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
 
-        <Tabs.Panel value="network" pt="md">
-          <div className="settings-card">
-            <NetworkSettings editingProfileId={editingProfileId} />
-          </div>
-        </Tabs.Panel>
-      </Tabs>
+          <Tabs.Panel value="network" pt="md">
+            <div className="settings-card">
+              <NetworkSettings editingProfileId={editingProfileId} />
+            </div>
+          </Tabs.Panel>
+        </Tabs>
+      </div>
     </div>
   );
 }

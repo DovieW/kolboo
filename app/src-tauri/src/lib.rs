@@ -12,6 +12,7 @@ mod audio_capture;
 mod audio_mute;
 mod commands;
 mod cost;
+mod embeddings;
 mod history;
 mod llm;
 mod network;
@@ -513,8 +514,41 @@ fn start_recording(
 
     // Start pipeline recording FIRST - if it fails, don't do anything else
     if let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() {
+        // Pin the per-program profile *before* we show any overlay windows.
+        // The overlay is always-on-top and can briefly become the foreground window on Windows,
+        // which would otherwise cause per-program profile detection to degrade to Default.
+        let config = pipeline.config();
+        let foreground = crate::windows_apps::get_foreground_process_path();
+        let matched_profile = crate::pipeline::select_profile_for_foreground_app(&config.llm_config);
+
+        if let Some(p) = matched_profile.as_ref() {
+            let _ = pipeline.set_session_profile_override(Some(p.id.clone()));
+        } else {
+            let _ = pipeline.set_session_profile_override(None);
+        }
+
+        log::info!(
+            "[profile] start_recording source={} foreground={:?} profiles={} matched={}",
+            source,
+            foreground,
+            config.llm_config.program_prompt_profiles.len(),
+            matched_profile
+                .as_ref()
+                .map(|p| format!("{} ({})", p.name, p.id))
+                .unwrap_or_else(|| "<none>".to_string())
+        );
+
+        let (profile_id, profile_name) = if foreground.is_none() {
+            (None, None)
+        } else if let Some(p) = matched_profile.as_ref() {
+            (Some(p.id.clone()), Some(p.name.clone()))
+        } else {
+            (Some("default".to_string()), Some("Default".to_string()))
+        };
+
         if let Err(e) = pipeline.start_recording() {
             log::error!("{}: Failed to start pipeline recording: {} (state was: {:?})", source, e, current_state);
+            let _ = pipeline.set_session_profile_override(None);
             let error_msg = format!("{} (pipeline state: {:?})", e, current_state);
             emit_system_event(app, "error", &format!("{}: Failed to start recording", source), Some(&error_msg));
             let payload = serde_json::json!({
@@ -527,9 +561,10 @@ fn start_recording(
 
         // Pipeline started successfully - now start request logging.
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let config = pipeline.config();
             log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
             log_store.with_current(|log| {
+                log.profile_id = profile_id;
+                log.profile_name = profile_name;
                 log.llm_provider = if config.llm_config.enabled {
                     Some(config.llm_config.provider.clone())
                 } else {
@@ -584,7 +619,9 @@ fn start_recording(
     let overlay_mode: String =
         get_setting_from_store(app, "overlay_mode", "recording_only".to_string());
     if overlay_mode == "recording_only" {
-        let _ = commands::overlay::show_overlay_with_reset_if_not_always(app);
+        if let Err(e) = commands::overlay::show_overlay_with_reset_if_not_always(app) {
+            log::warn!("Failed to show overlay on recording start: {}", e);
+        }
     }
 
     // Prime the overlay waveform immediately. The background publisher loop will follow up
@@ -731,6 +768,8 @@ fn stop_recording(
             llm_model: config.llm_config.model.clone(),
             profile_id: profile.as_ref().map(|p| p.id.clone()),
             profile_name: profile.as_ref().map(|p| p.name.clone()),
+            preset_id: None,
+            preset_name: None,
         };
 
         // Capture current request id (for history + retry audio).
@@ -794,7 +833,7 @@ fn stop_recording(
                                 // Idle can happen immediately due to quiet-audio skip.
                                 break;
                             }
-                            pipeline::PipelineState::Recording => {}
+                            pipeline::PipelineState::Recording | pipeline::PipelineState::Routing => {}
                         }
 
                         if start.elapsed() > std::time::Duration::from_secs(2) {
@@ -802,6 +841,35 @@ fn stop_recording(
                         }
 
                         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                    }
+                });
+            }
+
+            // Emit routing started once the pipeline transitions into the Routing phase.
+            {
+                let app_for_evt = app_clone.clone();
+                let pipeline_for_evt = pipeline_clone.clone();
+                tauri::async_runtime::spawn(async move {
+                    let start = std::time::Instant::now();
+                    loop {
+                        match pipeline_for_evt.state() {
+                            pipeline::PipelineState::Routing => {
+                                let _ = app_for_evt.emit("pipeline-routing-started", ());
+                                break;
+                            }
+                            pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
+                                break;
+                            }
+                            pipeline::PipelineState::Recording
+                            | pipeline::PipelineState::Transcribing
+                            | pipeline::PipelineState::Rewriting => {}
+                        }
+
+                        if start.elapsed() > std::time::Duration::from_secs(15 * 60) {
+                            break;
+                        }
+
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     }
                 });
             }
@@ -825,7 +893,8 @@ fn stop_recording(
                                 break;
                             }
                             pipeline::PipelineState::Recording
-                            | pipeline::PipelineState::Transcribing => {}
+                            | pipeline::PipelineState::Transcribing
+                            | pipeline::PipelineState::Routing => {}
                         }
 
                         if start.elapsed() > std::time::Duration::from_secs(15 * 60) {
@@ -1138,7 +1207,9 @@ fn stop_recording(
 
                     // Force-show overlay for retry UI regardless of overlay_mode.
                     // If the user is not in always-visible mode, also snap back to the saved preset.
-                    let _ = commands::overlay::show_overlay_with_reset_if_not_always(&app_clone);
+                    if let Err(e) = commands::overlay::show_overlay_with_reset_if_not_always(&app_clone) {
+                        log::warn!("Failed to force-show overlay after error: {}", e);
+                    }
 
                 }
             }
@@ -1602,10 +1673,16 @@ pub fn run() {
             commands::overlay::resize_overlay,
             commands::overlay::show_overlay,
             commands::overlay::hide_overlay,
+            commands::overlay::show_overlay_hover,
+            commands::overlay::hide_overlay_hover,
+            commands::overlay::schedule_hide_overlay_hover,
             commands::overlay::set_overlay_mode,
             commands::overlay::set_widget_position,
             // Pipeline commands for all-in-app STT
             commands::recording::pipeline_start_recording,
+            commands::recording::pipeline_get_active_profile_for_foreground_app,
+            commands::recording::pipeline_get_session_preset_lock,
+            commands::recording::pipeline_set_session_preset_lock,
             commands::recording::pipeline_stop_and_transcribe,
             commands::recording::pipeline_cancel,
             commands::recording::pipeline_get_state,
@@ -1652,6 +1729,8 @@ pub fn run() {
             commands::llm::update_llm_prompts,
             commands::llm::get_llm_config,
             commands::llm::test_llm_rewrite,
+            commands::llm::iterate_rewrite_prompt,
+            commands::llm::test_rewrite_with_prompt,
             commands::llm::llm_complete,
             // Local Whisper model management commands
             commands::whisper::is_local_whisper_available,
@@ -1940,6 +2019,30 @@ pub fn run() {
             .background_throttling(BackgroundThrottlingPolicy::Disabled)
             .build()?;
 
+            // Create hover panel window (hidden by default).
+            // This avoids resizing the main overlay window on hover, which can cause
+            // cursor flicker and position drift on Windows.
+            let _overlay_hover = tauri::WebviewWindowBuilder::new(
+                app,
+                "overlay_hover",
+                tauri::WebviewUrl::App("overlay-hover.html".into()),
+            )
+            .title("Kolboo Presets")
+            .inner_size(320.0, 220.0)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focused(false)
+            .focusable(false)
+            .accept_first_mouse(true)
+            .visible(false)
+            .visible_on_all_workspaces(true)
+            .background_throttling(BackgroundThrottlingPolicy::Disabled)
+            .build()?;
+
             // On macOS, convert to NSPanel for better fullscreen app behavior
             #[cfg(target_os = "macos")]
             {
@@ -1971,15 +2074,20 @@ pub fn run() {
             // Position overlay based on saved setting
             if let Ok(Some(monitor)) = overlay.current_monitor() {
                 let size = monitor.size();
+                let pos = monitor.position();
                 let scale = monitor.scale_factor();
-                let screen_width = size.width as f64 / scale;
-                let screen_height = size.height as f64 / scale;
+                // Use PHYSICAL coordinates for initial placement to avoid DPI conversion
+                // edge cases on Windows.
+                let screen_width_px = size.width as f64;
+                let screen_height_px = size.height as f64;
+                let origin_x_px = pos.x as f64;
+                let origin_y_px = pos.y as f64;
 
                 // Estimate initial widget size (before content loads). The frontend will
                 // auto-resize after mount, but using a closer estimate prevents off-screen drift.
-                let window_width = 264.0;
-                let window_height = 56.0;
-                let margin = 50.0;
+                let window_width_px = (224.0 * scale).round();
+                let window_height_px = (56.0 * scale).round();
+                let margin_px = (50.0 * scale).round();
 
                 let widget_position: String = get_setting_from_store(
                     app.handle(),
@@ -1987,26 +2095,39 @@ pub fn run() {
                     "bottom-center".to_string(),
                 );
 
-                let (x, y) = match widget_position.as_str() {
-                    "top-left" => (margin, margin),
-                    "top-center" => ((screen_width - window_width) / 2.0, margin),
-                    "top-right" => (screen_width - window_width - margin, margin),
+                let (x_px, y_px) = match widget_position.as_str() {
+                    "top-left" => (origin_x_px + margin_px, origin_y_px + margin_px),
+                    "top-center" => (
+                        origin_x_px + (screen_width_px - window_width_px) / 2.0,
+                        origin_y_px + margin_px,
+                    ),
+                    "top-right" => (
+                        origin_x_px + screen_width_px - window_width_px - margin_px,
+                        origin_y_px + margin_px,
+                    ),
                     "center" => (
-                        (screen_width - window_width) / 2.0,
-                        (screen_height - window_height) / 2.0,
+                        origin_x_px + (screen_width_px - window_width_px) / 2.0,
+                        origin_y_px + (screen_height_px - window_height_px) / 2.0,
                     ),
-                    "bottom-left" => (margin, screen_height - window_height - margin),
+                    "bottom-left" => (
+                        origin_x_px + margin_px,
+                        origin_y_px + screen_height_px - window_height_px - margin_px,
+                    ),
                     "bottom-center" => (
-                        (screen_width - window_width) / 2.0,
-                        screen_height - window_height - margin,
+                        origin_x_px + (screen_width_px - window_width_px) / 2.0,
+                        origin_y_px + screen_height_px - window_height_px - margin_px,
                     ),
-                    _ => ( // "bottom-right" or unknown
-                        screen_width - window_width - margin,
-                        screen_height - window_height - margin,
+                    _ => (
+                        // "bottom-right" or unknown
+                        origin_x_px + screen_width_px - window_width_px - margin_px,
+                        origin_y_px + screen_height_px - window_height_px - margin_px,
                     ),
                 };
 
-                let _ = overlay.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+                let _ = overlay.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x: x_px.round() as i32,
+                    y: y_px.round() as i32,
+                }));
             }
 
             // Set initial overlay visibility based on saved settings
@@ -2584,25 +2705,66 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     let program_prompt_profiles: Vec<llm::ProgramPromptProfile> = rewrite_program_prompt_profiles
         .into_iter()
-        .map(|p| llm::ProgramPromptProfile {
-            id: p.id,
-            name: p.name,
-            program_paths: p.program_paths,
-            prompts: p
+        .map(|p| {
+            let profile_prompts = p
                 .cleanup_prompt_sections
                 .as_ref()
                 .map(|o| o.apply_to(&base_prompts))
-                .unwrap_or_else(|| base_prompts.clone()),
-            rewrite_llm_enabled: p.rewrite_llm_enabled,
-            stt_provider: p.stt_provider,
-            stt_model: p.stt_model,
-            stt_timeout_seconds: p.stt_timeout_seconds,
-            llm_provider: p.llm_provider,
-            llm_model: p.llm_model,
-            openai_reasoning_effort: p.openai_reasoning_effort,
-            gemini_thinking_budget: p.gemini_thinking_budget,
-            gemini_thinking_level: p.gemini_thinking_level,
-            anthropic_thinking_budget: p.anthropic_thinking_budget,
+                .unwrap_or_else(|| base_prompts.clone());
+
+            let presets = p
+                .presets
+                .into_iter()
+                .map(|preset| {
+                    let preset_prompts = preset
+                        .cleanup_prompt_sections
+                        .as_ref()
+                        .map(|o| o.apply_to(&profile_prompts))
+                        .unwrap_or_else(|| profile_prompts.clone());
+
+                    llm::ProgramPreset {
+                        id: preset.id,
+                        name: preset.name,
+                        description: preset.description,
+                        routing_hints: preset.routing_hints,
+                        prompts: preset_prompts,
+                        rewrite_llm_enabled: preset.rewrite_llm_enabled,
+                        stt_provider: preset.stt_provider,
+                        stt_model: preset.stt_model,
+                        stt_timeout_seconds: preset.stt_timeout_seconds,
+                        llm_provider: preset.llm_provider,
+                        llm_model: preset.llm_model,
+                        openai_reasoning_effort: preset.openai_reasoning_effort,
+                        gemini_thinking_budget: preset.gemini_thinking_budget,
+                        gemini_thinking_level: preset.gemini_thinking_level,
+                        anthropic_thinking_budget: preset.anthropic_thinking_budget,
+                    }
+                })
+                .collect();
+
+            llm::ProgramPromptProfile {
+                id: p.id,
+                name: p.name,
+                program_paths: p.program_paths,
+                prompts: profile_prompts,
+
+                presets,
+                default_preset_id: p.default_preset_id,
+                default_preset_description: p.default_preset_description,
+                active_preset_id: p.active_preset_id,
+                router: p.router,
+
+                rewrite_llm_enabled: p.rewrite_llm_enabled,
+                stt_provider: p.stt_provider,
+                stt_model: p.stt_model,
+                stt_timeout_seconds: p.stt_timeout_seconds,
+                llm_provider: p.llm_provider,
+                llm_model: p.llm_model,
+                openai_reasoning_effort: p.openai_reasoning_effort,
+                gemini_thinking_budget: p.gemini_thinking_budget,
+                gemini_thinking_level: p.gemini_thinking_level,
+                anthropic_thinking_budget: p.anthropic_thinking_budget,
+            }
         })
         .collect();
 

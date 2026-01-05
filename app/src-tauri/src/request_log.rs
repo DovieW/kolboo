@@ -69,6 +69,21 @@ pub enum LogLevel {
     Error,
 }
 
+/// Router score for a preset candidate.
+///
+/// - `score` is strategy-dependent.
+///   - embeddings router: cosine similarity (0..=1-ish)
+///   - llm router: currently `None` (no numeric scoring)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterPresetScore {
+    pub preset_id: String,
+    pub preset_name: String,
+    #[serde(default)]
+    pub score: Option<f32>,
+    #[serde(default)]
+    pub selected: bool,
+}
+
 /// A complete request log containing all entries for a single transcription request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestLog {
@@ -103,6 +118,15 @@ pub struct RequestLog {
     /// Prompt profile display name used for this request.
     #[serde(default)]
     pub profile_name: Option<String>,
+
+    /// Preset id selected for this request (if any).
+    ///
+    /// When None, the request used the profile/global defaults ("Default" in UI).
+    #[serde(default)]
+    pub preset_id: Option<String>,
+    /// Preset display name selected for this request (if any).
+    #[serde(default)]
+    pub preset_name: Option<String>,
     /// Audio duration in seconds
     pub audio_duration_secs: Option<f32>,
     /// Audio file size in bytes
@@ -143,6 +167,29 @@ pub struct RequestLog {
     pub stt_duration_ms: Option<u64>,
     /// LLM duration in milliseconds
     pub llm_duration_ms: Option<u64>,
+
+    /// Intent router duration in milliseconds (when routing is enabled and actually ran).
+    #[serde(default)]
+    pub router_duration_ms: Option<u64>,
+    /// Which router strategy was used (e.g. "embeddings" or "llm").
+    #[serde(default)]
+    pub router_strategy: Option<String>,
+    /// Per-preset router scores (when routing ran).
+    #[serde(default)]
+    pub router_scores: Option<Vec<RouterPresetScore>>,
+
+    /// Payload sent to router provider (when routing ran).
+    ///
+    /// For embeddings routing this may be an array of calls.
+    /// For LLM routing this contains the router prompt payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub router_request_json: Option<JsonValue>,
+    /// Payload received from router provider (when routing ran).
+    ///
+    /// For embeddings routing this may be an array of responses.
+    /// For LLM routing this contains the raw router output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub router_response_json: Option<JsonValue>,
 
     /// Whether the STT call was treated as free-tier for pricing/cost purposes.
     #[serde(default)]
@@ -187,6 +234,8 @@ impl RequestLog {
             llm_model: None,
             profile_id: None,
             profile_name: None,
+            preset_id: None,
+            preset_name: None,
             audio_duration_secs: None,
             audio_size_bytes: None,
             sample_rate: None,
@@ -202,6 +251,13 @@ impl RequestLog {
             total_duration_ms: None,
             stt_duration_ms: None,
             llm_duration_ms: None,
+
+            router_duration_ms: None,
+            router_strategy: None,
+            router_scores: None,
+
+            router_request_json: None,
+            router_response_json: None,
 
             stt_is_free_tier: false,
             llm_is_free_tier: false,

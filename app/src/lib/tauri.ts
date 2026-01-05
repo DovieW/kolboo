@@ -43,6 +43,148 @@ function normalizeHotkeyConfig(
   return result.success ? result.data : fallback;
 }
 
+function normalizeIntentRouterStrategy(value: unknown): IntentRouterStrategy {
+  if (value === "off" || value === "embeddings" || value === "llm")
+    return value;
+  return "off";
+}
+
+function normalizeIntentRouterSettings(value: unknown): IntentRouterSettings {
+  const v = value && typeof value === "object" ? (value as any) : ({} as any);
+  const enabled = typeof v.enabled === "boolean" ? v.enabled : false;
+  const strategy = normalizeIntentRouterStrategy(v.strategy);
+
+  const embedding_provider =
+    v.embedding_provider === "openai" ? ("openai" as const) : null;
+  const embedding_model =
+    typeof v.embedding_model === "string" ? v.embedding_model : null;
+
+  const pick_highest_score =
+    typeof v.pick_highest_score === "boolean" ? v.pick_highest_score : null;
+
+  const similarity_threshold =
+    typeof v.similarity_threshold === "number" &&
+    Number.isFinite(v.similarity_threshold)
+      ? v.similarity_threshold
+      : null;
+  const similarity_margin =
+    typeof v.similarity_margin === "number" &&
+    Number.isFinite(v.similarity_margin)
+      ? v.similarity_margin
+      : null;
+
+  return {
+    enabled,
+    strategy,
+    embedding_provider,
+    embedding_model,
+    pick_highest_score,
+    similarity_threshold,
+    similarity_margin,
+  };
+}
+
+function normalizeRewritePreset(value: unknown): RewritePreset | null {
+  const p = value && typeof value === "object" ? (value as any) : null;
+  if (!p) return null;
+  const id = typeof p.id === "string" ? p.id : "";
+  const name = typeof p.name === "string" ? p.name : "";
+  if (!id) return null;
+
+  const description = typeof p.description === "string" ? p.description : null;
+  const routing_hints = Array.isArray(p.routing_hints)
+    ? p.routing_hints
+        .map((x: any) => (typeof x === "string" ? x.trim() : ""))
+        .filter(Boolean)
+    : null;
+
+  const cleanup_prompt_sections =
+    p.cleanup_prompt_sections && typeof p.cleanup_prompt_sections === "object"
+      ? // NOTE: This is normalized again inside getSettings(). Here we only ensure
+        // it's either a well-formed override or null.
+        (p.cleanup_prompt_sections as CleanupPromptSectionsOverride)
+      : null;
+
+  const rewrite_llm_enabled =
+    typeof p.rewrite_llm_enabled === "boolean" ? p.rewrite_llm_enabled : null;
+  const stt_provider =
+    typeof p.stt_provider === "string" ? p.stt_provider : null;
+  const stt_model = typeof p.stt_model === "string" ? p.stt_model : null;
+  const stt_timeout_seconds =
+    typeof p.stt_timeout_seconds === "number" &&
+    Number.isFinite(p.stt_timeout_seconds)
+      ? p.stt_timeout_seconds
+      : null;
+  const llm_provider =
+    typeof p.llm_provider === "string" ? p.llm_provider : null;
+  const llm_model = typeof p.llm_model === "string" ? p.llm_model : null;
+
+  const openai_reasoning_effort = normalizeOpenAiReasoningEffort(
+    p.openai_reasoning_effort
+  );
+  const gemini_thinking_budget = normalizeGeminiThinkingBudget(
+    p.gemini_thinking_budget
+  );
+  const gemini_thinking_level = normalizeGeminiThinkingLevel(
+    p.gemini_thinking_level
+  );
+  const anthropic_thinking_budget = normalizeAnthropicThinkingBudget(
+    p.anthropic_thinking_budget
+  );
+
+  const sound_enabled =
+    typeof p.sound_enabled === "boolean" ? p.sound_enabled : null;
+  const playing_audio_handling =
+    typeof p.playing_audio_handling === "string"
+      ? normalizePlayingAudioHandling(p.playing_audio_handling)
+      : null;
+  const overlay_mode =
+    typeof p.overlay_mode === "string"
+      ? normalizeOverlayMode(p.overlay_mode)
+      : null;
+  const widget_position =
+    typeof p.widget_position === "string" &&
+    (p.widget_position === "center" ||
+      p.widget_position === "top-left" ||
+      p.widget_position === "top-center" ||
+      p.widget_position === "top-right" ||
+      p.widget_position === "bottom-left" ||
+      p.widget_position === "bottom-center" ||
+      p.widget_position === "bottom-right")
+      ? (p.widget_position as WidgetPosition)
+      : null;
+  const output_mode =
+    typeof p.output_mode === "string"
+      ? normalizeOutputMode(p.output_mode)
+      : null;
+  const output_hit_enter =
+    typeof p.output_hit_enter === "boolean" ? p.output_hit_enter : null;
+
+  return {
+    id,
+    name,
+    description,
+    routing_hints,
+    cleanup_prompt_sections,
+    rewrite_llm_enabled,
+    stt_provider,
+    stt_model,
+    stt_timeout_seconds,
+    llm_provider,
+    llm_model,
+    openai_reasoning_effort,
+    gemini_thinking_budget,
+    gemini_thinking_level,
+    anthropic_thinking_budget,
+    sound_enabled,
+    playing_audio_handling,
+    overlay_mode,
+    widget_position,
+    output_mode,
+    output_hit_enter,
+  };
+}
+
 interface HistoryEntry {
   id: string;
   timestamp: string;
@@ -51,6 +193,8 @@ interface HistoryEntry {
   error_message?: string | null;
   profile_id?: string | null;
   profile_name?: string | null;
+  preset_id?: string | null;
+  preset_name?: string | null;
   stt_provider?: string | null;
   stt_model?: string | null;
   llm_provider?: string | null;
@@ -102,21 +246,61 @@ export interface HistoryPageResult {
 }
 
 export interface PromptSection {
-  enabled: boolean;
   content: string | null;
 }
 
 export interface CleanupPromptSections {
-  main: PromptSection;
-  advanced: PromptSection;
-  dictionary: PromptSection;
+  system: PromptSection;
 }
 
 // Per-profile prompt overrides: each section can be omitted/null to inherit from Default.
 export interface CleanupPromptSectionsOverride {
-  main?: PromptSection | null;
-  advanced?: PromptSection | null;
-  dictionary?: PromptSection | null;
+  system?: PromptSection | null;
+}
+
+export type IntentRouterStrategy = "off" | "embeddings" | "llm";
+
+export interface IntentRouterSettings {
+  enabled: boolean;
+  strategy: IntentRouterStrategy;
+
+  // Embeddings routing knobs (only used when strategy === "embeddings")
+  embedding_provider?: "openai" | null;
+  embedding_model?: string | null;
+  pick_highest_score?: boolean | null;
+  similarity_threshold?: number | null;
+  similarity_margin?: number | null;
+}
+
+export interface RewritePreset {
+  id: string;
+  name: string;
+  description?: string | null;
+
+  // Routing hints used by the intent router
+  routing_hints?: string[] | null;
+
+  // Same override surface area as RewriteProgramPromptProfile
+  cleanup_prompt_sections: CleanupPromptSectionsOverride | null;
+
+  rewrite_llm_enabled?: boolean | null;
+  stt_provider?: string | null;
+  stt_model?: string | null;
+  stt_timeout_seconds?: number | null;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+
+  openai_reasoning_effort?: OpenAiReasoningEffort | null;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: "minimal" | "low" | "medium" | "high" | null;
+  anthropic_thinking_budget?: number | null;
+
+  sound_enabled?: boolean | null;
+  playing_audio_handling?: PlayingAudioHandling | null;
+  overlay_mode?: OverlayMode | null;
+  widget_position?: WidgetPosition | null;
+  output_mode?: OutputMode | null;
+  output_hit_enter?: boolean | null;
 }
 
 export interface RewriteProgramPromptProfile {
@@ -124,6 +308,18 @@ export interface RewriteProgramPromptProfile {
   name: string;
   program_paths: string[];
   cleanup_prompt_sections: CleanupPromptSectionsOverride | null;
+
+  // Presets/modes within this program profile.
+  // Missing/undefined means "no presets" (backward compatible).
+  presets?: RewritePreset[] | null;
+  // Default preset to use when routing is off or undecided.
+  default_preset_id?: string | null;
+  // Description for the implicit "Default" (no preset) target, used by the intent router.
+  default_preset_description?: string | null;
+  // Router configuration for auto-selecting a preset based on dictation intent.
+  router?: IntentRouterSettings | null;
+  // Manually selected active preset for this profile (persisted selection).
+  active_preset_id?: string | null;
 
   // Per-profile gate for the optional LLM rewrite step (falls back to AppSettings.rewrite_llm_enabled)
   rewrite_llm_enabled?: boolean | null;
@@ -296,6 +492,13 @@ function normalizeOutputMode(value: unknown): OutputMode {
   // - "keystrokes_and_clipboard"
   // - "auto_paste"
   return "paste";
+}
+
+function normalizeOverlayMode(value: unknown): OverlayMode {
+  if (value === "always" || value === "never" || value === "recording_only") {
+    return value;
+  }
+  return "recording_only";
 }
 
 // What the window close (X) button does for the main/settings window.
@@ -880,17 +1083,44 @@ export const tauriAPI = {
     const normalizePromptSection = (value: any): PromptSection | null => {
       if (value === null) return null;
       if (!value || typeof value !== "object") return null;
-
-      const enabled =
-        typeof (value as any).enabled === "boolean"
-          ? (value as any).enabled
-          : true;
       const content =
         typeof (value as any).content === "string"
           ? (value as any).content
           : null;
 
-      return { enabled, content };
+      return { content };
+    };
+
+    const normalizeCleanupPromptSections = (
+      value: any
+    ): CleanupPromptSections | null => {
+      if (value === null || value === undefined) return null;
+      if (!value || typeof value !== "object") return null;
+      const v = value as any;
+
+      // New shape
+      if (Object.prototype.hasOwnProperty.call(v, "system")) {
+        const system = normalizePromptSection(v.system) ?? { content: null };
+        return { system };
+      }
+
+      // Legacy shape: { main, advanced, dictionary }
+      // We keep only the old "main" section as the new System Prompt.
+      if (Object.prototype.hasOwnProperty.call(v, "main")) {
+        const main = v.main;
+        const legacyContent =
+          typeof main === "string"
+            ? main
+            : main &&
+              typeof main === "object" &&
+              typeof main.content === "string"
+            ? main.content
+            : null;
+        return { system: { content: legacyContent } };
+      }
+
+      // Unknown/empty object => treat as unset.
+      return null;
     };
 
     const normalizeCleanupPromptSectionsOverride = (
@@ -902,15 +1132,12 @@ export const tauriAPI = {
       const v = value as any;
       const out: CleanupPromptSectionsOverride = {};
 
-      if (Object.prototype.hasOwnProperty.call(v, "main")) {
-        out.main = normalizePromptSection(v.main);
+      if (Object.prototype.hasOwnProperty.call(v, "system")) {
+        out.system = normalizePromptSection(v.system);
       }
-      if (Object.prototype.hasOwnProperty.call(v, "advanced")) {
-        out.advanced = normalizePromptSection(v.advanced);
-      }
-      if (Object.prototype.hasOwnProperty.call(v, "dictionary")) {
-        out.dictionary = normalizePromptSection(v.dictionary);
-      }
+
+      // If we didn't recognize anything (or it's effectively empty), treat as unset.
+      if (out.system == null) return null;
 
       return out;
     };
@@ -1014,6 +1241,32 @@ export const tauriAPI = {
           ? (p as any).output_hit_enter
           : null;
 
+      const presets_raw = (p as any).presets;
+      const presets: RewritePreset[] | null = Array.isArray(presets_raw)
+        ? presets_raw
+            .map(normalizeRewritePreset)
+            .filter((x): x is RewritePreset => x !== null)
+        : null;
+
+      const default_preset_id =
+        typeof (p as any).default_preset_id === "string"
+          ? (p as any).default_preset_id
+          : null;
+
+      const default_preset_description =
+        typeof (p as any).default_preset_description === "string"
+          ? (p as any).default_preset_description
+          : null;
+
+      const active_preset_id =
+        typeof (p as any).active_preset_id === "string"
+          ? (p as any).active_preset_id
+          : null;
+
+      const router = (p as any).router
+        ? normalizeIntentRouterSettings((p as any).router)
+        : null;
+
       if (!id) return null;
 
       return {
@@ -1021,6 +1274,13 @@ export const tauriAPI = {
         name,
         program_paths,
         cleanup_prompt_sections,
+
+        presets,
+        default_preset_id,
+        default_preset_description,
+        router,
+        active_preset_id,
+
         rewrite_llm_enabled,
         stt_provider,
         stt_model,
@@ -1082,10 +1342,30 @@ export const tauriAPI = {
       })(),
       rewrite_llm_enabled:
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
-      cleanup_prompt_sections:
-        (await store.get<CleanupPromptSections | null>(
-          "cleanup_prompt_sections"
-        )) ?? null,
+      cleanup_prompt_sections: await(async () => {
+        const raw = await store.get<any>("cleanup_prompt_sections");
+        const normalized = normalizeCleanupPromptSections(raw);
+
+        // If we had legacy/invalid shapes, write back the normalized value to
+        // avoid runtime errors and keep the store clean.
+        const rawIsObject = raw && typeof raw === "object";
+        const rawHasSystem = rawIsObject
+          ? Object.prototype.hasOwnProperty.call(raw, "system")
+          : false;
+        const rawHasLegacyMain = rawIsObject
+          ? Object.prototype.hasOwnProperty.call(raw, "main")
+          : false;
+
+        if (
+          (rawHasLegacyMain || (rawIsObject && !rawHasSystem)) &&
+          normalized
+        ) {
+          await store.set("cleanup_prompt_sections", normalized);
+          await store.save();
+        }
+
+        return normalized;
+      })(),
       rewrite_program_prompt_profiles,
       stt_provider: (await store.get<string | null>("stt_provider")) ?? null,
       stt_model: (await store.get<string | null>("stt_model")) ?? null,
@@ -1370,8 +1650,26 @@ export const tauriAPI = {
     profiles: RewriteProgramPromptProfile[]
   ): Promise<void> {
     const store = await getStore();
-    await store.set("rewrite_program_prompt_profiles", profiles);
+
+    // Normalize a couple of legacy/nullable shapes before writing so the backend
+    // can deserialize reliably.
+    const sanitized = profiles.map((profile) => {
+      const presets = (profile.presets ?? []).map((preset) => ({
+        ...preset,
+        routing_hints: preset.routing_hints ?? [],
+      }));
+
+      return {
+        ...profile,
+        presets,
+      };
+    });
+
+    await store.set("rewrite_program_prompt_profiles", sanitized);
     await store.save();
+
+    // Notify other windows (overlay/hover) to refresh cached settings.
+    await emit("settings-changed", {});
   },
 
   async listOpenWindows(): Promise<OpenWindowInfo[]> {
@@ -1852,6 +2150,18 @@ export const tauriAPI = {
     return invoke("resize_overlay", { width, height });
   },
 
+  async showOverlayHover(): Promise<void> {
+    return invoke("show_overlay_hover");
+  },
+
+  async scheduleHideOverlayHover(delayMs: number): Promise<void> {
+    return invoke("schedule_hide_overlay_hover", { delayMs });
+  },
+
+  async hideOverlayHover(): Promise<void> {
+    return invoke("hide_overlay_hover");
+  },
+
   async startDragging(): Promise<void> {
     const window = getCurrentWindow();
     return window.startDragging();
@@ -1935,6 +2245,18 @@ export interface LlmCompleteResponse {
   model_used: string;
 }
 
+export interface IterateRewritePromptResponse {
+  improved_prompt: string;
+  provider_used: string;
+  model_used: string;
+}
+
+export interface TestRewriteWithPromptResponse {
+  output: string;
+  provider_used: string;
+  model_used: string;
+}
+
 export const llmAPI = {
   getLlmProviders: () => invoke<LlmProviderInfo[]>("get_llm_providers"),
 
@@ -1962,6 +2284,34 @@ export const llmAPI = {
         systemPrompt: params.systemPrompt,
         userPrompt: params.userPrompt,
       },
+    }),
+
+  iterateRewritePrompt: (params: {
+    profileId?: string | null;
+    mode?: "fixed" | "new";
+    transcript: string;
+    problemOutput: string;
+    desiredOutput: string;
+    currentPrompt: string;
+  }) =>
+    invoke<IterateRewritePromptResponse>("iterate_rewrite_prompt", {
+      transcript: params.transcript,
+      problemOutput: params.problemOutput,
+      desiredOutput: params.desiredOutput,
+      currentPrompt: params.currentPrompt,
+      profileId: params.profileId ?? null,
+      mode: params.mode ?? null,
+    }),
+
+  testRewriteWithPrompt: (params: {
+    profileId?: string | null;
+    transcript: string;
+    prompt: string;
+  }) =>
+    invoke<TestRewriteWithPromptResponse>("test_rewrite_with_prompt", {
+      transcript: params.transcript,
+      prompt: params.prompt,
+      profileId: params.profileId ?? null,
     }),
 };
 
@@ -2018,9 +2368,7 @@ export const audioSettingsTestAPI = {
 // ============================================================================
 
 export interface DefaultSectionsResponse {
-  main: string;
-  advanced: string;
-  dictionary: string;
+  system: string;
 }
 
 interface ProviderInfo {
@@ -2073,12 +2421,25 @@ export interface RequestLog {
   profile_id?: string | null;
   profile_name?: string | null;
 
+  preset_id?: string | null;
+  preset_name?: string | null;
+
   raw_transcript: string | null;
   final_text: string | null;
   // Total request processing duration (ms). Excludes recording time when available.
   total_duration_ms: number | null;
   stt_duration_ms: number | null;
   llm_duration_ms: number | null;
+
+  // Intent router (preset selection) diagnostics
+  router_duration_ms?: number | null;
+  router_strategy?: string | null;
+  router_scores?: Array<{
+    preset_id: string;
+    preset_name: string;
+    score: number | null;
+    selected: boolean;
+  }> | null;
   status: RequestStatus;
   error_message: string | null;
   entries: LogEntry[];
@@ -2094,6 +2455,11 @@ export interface RequestLog {
   stt_response_json?: unknown;
   llm_request_json?: unknown;
   llm_response_json?: unknown;
+
+  // Optional router payloads for debugging.
+  // For embeddings this may be an array of calls/responses.
+  router_request_json?: unknown;
+  router_response_json?: unknown;
 }
 
 export interface RecordingsStats {

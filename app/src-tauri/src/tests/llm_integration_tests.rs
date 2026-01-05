@@ -65,12 +65,8 @@ fn test_ollama_llm_provider_with_custom_url() {
 #[test]
 fn test_prompt_sections_default() {
     let prompts = PromptSections::default();
-    // Check main_prompt method returns non-empty default
-    assert!(!prompts.main_prompt().is_empty());
-    // Advanced is enabled by default
-    assert!(prompts.advanced_enabled);
-    // Dictionary is disabled by default
-    assert!(!prompts.dictionary_enabled);
+    // Check system_prompt method returns non-empty default
+    assert!(!prompts.system_prompt().is_empty());
 }
 
 /// Integration test for OpenAI LLM provider.

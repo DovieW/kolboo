@@ -154,6 +154,8 @@ interface GroupedHistory {
     error_message?: string | null;
     profile_id?: string | null;
     profile_name?: string | null;
+    preset_id?: string | null;
+    preset_name?: string | null;
     stt_provider?: string | null;
     stt_model?: string | null;
     llm_provider?: string | null;
@@ -171,6 +173,8 @@ function groupHistoryByDate(
     error_message?: string | null;
     profile_id?: string | null;
     profile_name?: string | null;
+    preset_id?: string | null;
+    preset_name?: string | null;
     stt_provider?: string | null;
     stt_model?: string | null;
     llm_provider?: string | null;
@@ -410,7 +414,9 @@ export function HistoryFeed({
   const [recordingsProbeTick, setRecordingsProbeTick] = useState(0);
 
   // Optimistic UI: hide deleted entries immediately, delete in background.
-  const [hiddenEntryIds, setHiddenEntryIds] = useState<Set<string>>(() => new Set());
+  const [hiddenEntryIds, setHiddenEntryIds] = useState<Set<string>>(
+    () => new Set()
+  );
 
   const hideEntries = (ids: Iterable<string>) => {
     setHiddenEntryIds((prev) => {
@@ -536,7 +542,9 @@ export function HistoryFeed({
   // Optional: fetch full history only when the analysis modal is opened.
   const allHistoryQuery = useHistoryAll({ enabled: analysisOpened });
 
-  const pageHistory = (historyPage?.items ?? []).filter((e) => !hiddenEntryIds.has(e.id));
+  const pageHistory = (historyPage?.items ?? []).filter(
+    (e) => !hiddenEntryIds.has(e.id)
+  );
   const totalHistoryCount = historyPage?.totalAll ?? 0;
   const totalFilteredCount = historyPage?.totalFiltered ?? 0;
   const totalPages = Math.max(
@@ -910,7 +918,10 @@ export function HistoryFeed({
     const recentWindowMs = 30_000;
     const maxChecksPerTick = 12;
 
-    const isEntryRecentOrInProgress = (entry: { timestamp?: string; status?: string }) => {
+    const isEntryRecentOrInProgress = (entry: {
+      timestamp?: string;
+      status?: string;
+    }) => {
       const status = (entry.status ?? "success").toString();
       if (status === "in_progress") return true;
       if (status === "error") return false;
@@ -941,7 +952,11 @@ export function HistoryFeed({
         }
 
         // Re-check quickly for recent/in-progress entries when previously missing.
-        if (shouldPoll && !cached.exists && now - cached.checkedAt > retryMissingAfterMs) {
+        if (
+          shouldPoll &&
+          !cached.exists &&
+          now - cached.checkedAt > retryMissingAfterMs
+        ) {
           candidates.push({ id: recordingId, priority: 2 });
         }
       }
@@ -977,7 +992,9 @@ export function HistoryFeed({
       await Promise.all(
         batch.map(async (id) => {
           try {
-            const url = await recordingsAPI.getRecordingAssetUrl({ requestId: id });
+            const url = await recordingsAPI.getRecordingAssetUrl({
+              requestId: id,
+            });
             if (cancelled) return;
             setRecordingExistsById((prev) => {
               const next = new Map(prev);
@@ -1522,10 +1539,15 @@ export function HistoryFeed({
                   const rid = deleteOneContext.recordingId;
                   const visibleIdsToHide: string[] = [];
                   for (const e of historyPage?.items ?? []) {
-                    const source = (e.recording_request_id ?? e.id)?.trim?.() ?? "";
+                    const source =
+                      (e.recording_request_id ?? e.id)?.trim?.() ?? "";
                     if (source && source === rid) visibleIdsToHide.push(e.id);
                   }
-                  hideEntries(visibleIdsToHide.length > 0 ? visibleIdsToHide : [deleteOneContext.entryId]);
+                  hideEntries(
+                    visibleIdsToHide.length > 0
+                      ? visibleIdsToHide
+                      : [deleteOneContext.entryId]
+                  );
 
                   deleteHistoryEntryEx.mutate(
                     {
@@ -1545,7 +1567,11 @@ export function HistoryFeed({
                         setDeleteOneContext(null);
                       },
                       onError: (e) => {
-                        unhideEntries(visibleIdsToHide.length > 0 ? visibleIdsToHide : [deleteOneContext.entryId]);
+                        unhideEntries(
+                          visibleIdsToHide.length > 0
+                            ? visibleIdsToHide
+                            : [deleteOneContext.entryId]
+                        );
                         notifications.show({
                           title: "History",
                           message: formatErrorMessage(e),
@@ -2008,17 +2034,33 @@ export function HistoryFeed({
                   </div>
                   <div className="history-actions">
                     {(() => {
-                      const label = entry.profile_name ?? entry.profile_id;
+                      const profileLabel = (() => {
+                        const name = (entry.profile_name ?? "").trim();
+                        const id = (entry.profile_id ?? "").trim();
+                        if (name) return name;
+                        if (!id || id === "default") return "Default";
+                        return id;
+                      })();
 
-                      // Only show a chip for non-default profiles.
-                      // Default should be the absence of a chip.
-                      const isDefault =
-                        entry.profile_id === "default" ||
-                        (label?.toLowerCase?.() ?? "") === "default";
+                      const presetLabel = (() => {
+                        const name = (entry.preset_name ?? "").trim();
+                        const id = (entry.preset_id ?? "").trim();
+                        if (name) return name;
+                        if (id) return id;
+                        return "Default";
+                      })();
 
-                      return label && !isDefault ? (
+                      const isDefaultProfile =
+                        (entry.profile_id ?? "").trim() === "default" ||
+                        profileLabel.toLowerCase() === "default";
+
+                      const shouldShow =
+                        !isDefaultProfile ||
+                        presetLabel.toLowerCase() !== "default";
+
+                      return shouldShow ? (
                         <Badge size="xs" variant="light" color="gray">
-                          {label}
+                          {profileLabel}: {presetLabel}
                         </Badge>
                       ) : null;
                     })()}
@@ -2056,9 +2098,11 @@ export function HistoryFeed({
 
                     {(() => {
                       const recordingId =
-                        (entry.recording_request_id ?? entry.id)?.trim?.() ?? "";
-                      const cached =
-                        recordingId ? recordingExistsById.get(recordingId) : undefined;
+                        (entry.recording_request_id ?? entry.id)?.trim?.() ??
+                        "";
+                      const cached = recordingId
+                        ? recordingExistsById.get(recordingId)
+                        : undefined;
                       const knownExists = cached?.exists;
                       const isKnownMissing =
                         !recordingId || knownExists === false;
@@ -2083,7 +2127,9 @@ export function HistoryFeed({
                                 variant="subtle"
                                 size="sm"
                                 color="gray"
-                                disabled={(entry.status ?? "success") === "in_progress"}
+                                disabled={
+                                  (entry.status ?? "success") === "in_progress"
+                                }
                                 loading={
                                   retryMutation.isPending &&
                                   retryMutation.variables === entry.id
@@ -2129,8 +2175,8 @@ export function HistoryFeed({
                               isKnownMissing
                                 ? "No recording"
                                 : isPlaying
-                                  ? "Pause"
-                                  : "Play"
+                                ? "Pause"
+                                : "Play"
                             }
                             withArrow
                           >
@@ -2143,7 +2189,9 @@ export function HistoryFeed({
                                 isKnownMissing
                               }
                               loading={
-                                recordingId ? player.isLoading(recordingId) : false
+                                recordingId
+                                  ? player.isLoading(recordingId)
+                                  : false
                               }
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2154,8 +2202,8 @@ export function HistoryFeed({
                                 isKnownMissing
                                   ? "No recording"
                                   : isPlaying
-                                    ? "Pause"
-                                    : "Play"
+                                  ? "Pause"
+                                  : "Play"
                               }
                             >
                               {isPlaying ? (
@@ -2193,7 +2241,9 @@ export function HistoryFeed({
                           e.stopPropagation();
                           handleDelete(entry.id);
                         }}
-                        disabled={deleteHistoryEntryEx.isPending || deleteOneBusy}
+                        disabled={
+                          deleteHistoryEntryEx.isPending || deleteOneBusy
+                        }
                         aria-label="Delete"
                       >
                         <Trash2 size={14} />

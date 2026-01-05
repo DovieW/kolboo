@@ -8,7 +8,9 @@ type TabKey =
   | "stt-request"
   | "stt-response"
   | "llm-request"
-  | "llm-response";
+  | "llm-response"
+  | "router-request"
+  | "router-response";
 
 function stringifyJson(value: unknown): string {
   if (value === undefined) return "";
@@ -89,6 +91,9 @@ export function LogJsonModal({
     log.stt_request_json !== undefined || log.stt_response_json !== undefined;
   const hasLlmPayload =
     log.llm_request_json !== undefined || log.llm_response_json !== undefined;
+  const hasRouterPayload =
+    log.router_request_json !== undefined ||
+    log.router_response_json !== undefined;
 
   const [tab, setTab] = useState<TabKey>("full");
 
@@ -96,7 +101,7 @@ export function LogJsonModal({
   useEffect(() => {
     if (!opened) return;
     setTab("full");
-  }, [opened, log.id, hasLlmPayload]);
+  }, [opened, log.id, hasLlmPayload, hasRouterPayload]);
 
   return (
     <Modal
@@ -149,6 +154,13 @@ export function LogJsonModal({
                 <Tabs.Tab value="llm-response">LLM Response</Tabs.Tab>
               </>
             )}
+
+            {hasRouterPayload && (
+              <>
+                <Tabs.Tab value="router-request">Router Request</Tabs.Tab>
+                <Tabs.Tab value="router-response">Router Response</Tabs.Tab>
+              </>
+            )}
           </Tabs.List>
 
           <Tabs.Panel
@@ -196,11 +208,30 @@ export function LogJsonModal({
               </Tabs.Panel>
             </>
           )}
+
+          {hasRouterPayload && (
+            <>
+              <Tabs.Panel
+                value="router-request"
+                pt="sm"
+                style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+              >
+                <JsonPanel value={log.router_request_json} />
+              </Tabs.Panel>
+              <Tabs.Panel
+                value="router-response"
+                pt="sm"
+                style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+              >
+                <JsonPanel value={log.router_response_json} />
+              </Tabs.Panel>
+            </>
+          )}
         </Tabs>
 
-        {!hasSttPayload && !hasLlmPayload && (
+        {!hasSttPayload && !hasLlmPayload && !hasRouterPayload && (
           <Text size="xs" c="dimmed">
-            No STT/LLM payloads captured for this request.
+            No STT/LLM/Router payloads captured for this request.
           </Text>
         )}
       </Stack>

@@ -341,20 +341,120 @@ pub fn recordings_get_stats(app: AppHandle) -> Result<RecordingsStats, CommandEr
     store.stats().map_err(CommandError::from)
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActiveProfileInfo {
+    pub profile_id: Option<String>,
+    pub profile_name: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionPresetLockInfo {
+    pub profile_id: Option<String>,
+    pub preset_id: Option<String>,
+}
+
+/// Resolve the currently active program profile based on the foreground application.
+///
+/// This is used by the overlay to show per-program UX (e.g. a one-shot preset lock)
+/// without re-implementing OS-specific process detection in the frontend.
+#[tauri::command]
+pub fn pipeline_get_active_profile_for_foreground_app(
+    pipeline: State<'_, SharedPipeline>,
+) -> Result<ActiveProfileInfo, CommandError> {
+    let config = pipeline.config();
+    let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
+    Ok(ActiveProfileInfo {
+        profile_id,
+        profile_name,
+    })
+}
+
+/// Set (or clear) a one-shot, non-persisted preset override.
+///
+/// The next transcription will prefer this preset over any persisted manual override
+/// and over intent routing.
+#[tauri::command]
+pub fn pipeline_set_session_preset_lock(
+    pipeline: State<'_, SharedPipeline>,
+    profile_id: Option<String>,
+    preset_id: Option<String>,
+) -> Result<(), CommandError> {
+    pipeline
+        .set_session_preset_lock(profile_id, preset_id)
+        .map_err(CommandError::from)
+}
+
+/// Read the current in-memory session preset lock (without clearing it).
+#[tauri::command]
+pub fn pipeline_get_session_preset_lock(
+    pipeline: State<'_, SharedPipeline>,
+) -> Result<SessionPresetLockInfo, CommandError> {
+    let lock = pipeline.peek_session_preset_lock();
+    Ok(match lock {
+        Some((profile_id, preset_id)) => SessionPresetLockInfo {
+            profile_id,
+            preset_id: Some(preset_id),
+        },
+        None => SessionPresetLockInfo {
+            profile_id: None,
+            preset_id: None,
+        },
+    })
+}
+
 /// Start recording audio using the pipeline
 #[tauri::command]
 pub fn pipeline_start_recording(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<(), CommandError> {
+    // Resolve the profile immediately (best-effort) while the user is likely still
+    // in the target app, then pin it for this recording session so stop/transcribe
+    // isn't impacted by focus stealing from our always-on-top windows.
+    //
+    // IMPORTANT: Only pin a *real* program profile id. Do NOT pin explicit "default",
+    // because that would force the whole request to Default even if matching could
+    // have succeeded later.
+    let config = pipeline.config();
+
+    #[cfg(desktop)]
+    let foreground = crate::windows_apps::get_foreground_process_path();
+    #[cfg(not(desktop))]
+    let foreground: Option<String> = None;
+
+    let matched_profile = crate::pipeline::select_profile_for_foreground_app(&config.llm_config);
+    if let Some(p) = matched_profile.as_ref() {
+        let _ = pipeline.set_session_profile_override(Some(p.id.clone()));
+    } else {
+        let _ = pipeline.set_session_profile_override(None);
+    }
+
+    // One-time per recording: log what we saw so we can debug "always Default" reports.
+    log::info!(
+        "[profile] start_recording foreground={:?} profiles={} matched={}",
+        foreground,
+        config.llm_config.program_prompt_profiles.len(),
+        matched_profile
+            .as_ref()
+            .map(|p| format!("{} ({})", p.name, p.id))
+            .unwrap_or_else(|| "<none>".to_string())
+    );
+
+    // Preserve existing semantics for UI chips/logs:
+    // - foreground unknown -> None
+    // - foreground known but no match -> Default
+    // - match -> profile
+    let (profile_id, profile_name) = if foreground.is_none() {
+        (None, None)
+    } else if let Some(p) = matched_profile.as_ref() {
+        (Some(p.id.clone()), Some(p.name.clone()))
+    } else {
+        (Some("default".to_string()), Some("Default".to_string()))
+    };
+
     // Start request logging
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        let config = pipeline.config();
-        let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
-        log_store.start_request(
-            config.stt_provider.clone(),
-            config.stt_model.clone(),
-        );
+        log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
         log_store.with_current(|log| {
             log.profile_id = profile_id;
             log.profile_name = profile_name;
@@ -369,6 +469,8 @@ pub fn pipeline_start_recording(
     }
 
     pipeline.start_recording().map_err(|e| {
+        // If we fail to start, clear any pinned session profile so it doesn't leak.
+        let _ = pipeline.set_session_profile_override(None);
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
             log_store.with_current(|log| {
                 log.error(format!("Failed to start recording: {}", e));
@@ -451,6 +553,8 @@ pub async fn pipeline_stop_and_transcribe(
         llm_model: config.llm_config.model.clone(),
         profile_id: None,
         profile_name: None,
+        preset_id: None,
+        preset_name: None,
     };
 
     // Create an in-progress history entry so the History view shows a running request.
@@ -478,12 +582,29 @@ pub async fn pipeline_stop_and_transcribe(
             let start = Instant::now();
             loop {
                 match pipeline_clone.state() {
-                    PipelineState::Transcribing | PipelineState::Rewriting => {
-                        // Now that transcription has begun, update history with the best-available
-                        // profile resolution. This avoids showing a "Default" chip for unknown cases.
+                    PipelineState::Transcribing | PipelineState::Routing | PipelineState::Rewriting => {
+                        // Now that transcription has begun, copy the *actual* profile metadata
+                        // from the request log into History.
+                        //
+                        // Why not resolve from the foreground app here?
+                        // On Windows, our always-on-top overlay windows can briefly become the
+                        // foreground window during stop/transcribe, which can incorrectly record
+                        // the profile as Default. The pipeline writes the chosen profile into the
+                        // request log as part of starting transcription.
                         if let Some(req_id) = request_id_for_history.as_deref() {
-                            let cfg = pipeline_clone.config();
-                            let (pid, pname) = resolve_profile_for_foreground_app(&cfg);
+                            let profile_meta = app_clone
+                                .try_state::<RequestLogStore>()
+                                .and_then(|store| {
+                                    store.with_current(|log| {
+                                        (log.profile_id.clone(), log.profile_name.clone())
+                                    })
+                                });
+
+                            let (pid, pname) = profile_meta.unwrap_or_else(|| {
+                                let cfg = pipeline_clone.config();
+                                resolve_profile_for_foreground_app(&cfg)
+                            });
+
                             if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                 let _ = history.set_request_profile(req_id, pid, pname);
                                 let _ = app_clone.emit("history-changed", ());
@@ -512,6 +633,34 @@ pub async fn pipeline_stop_and_transcribe(
         });
     }
 
+    // Emit routing started once the pipeline actually enters the Routing phase.
+    {
+        let app_clone = app.clone();
+        let pipeline_clone = pipeline.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            let start = Instant::now();
+            loop {
+                match pipeline_clone.state() {
+                    PipelineState::Routing => {
+                        let _ = app_clone.emit("pipeline-routing-started", ());
+                        break;
+                    }
+                    PipelineState::Idle | PipelineState::Error => {
+                        break;
+                    }
+                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Rewriting => {}
+                }
+
+                // Hard stop to avoid a runaway task in pathological cases.
+                if start.elapsed() > Duration::from_secs(15 * 60) {
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        });
+    }
+
     // Emit rewriting started once the pipeline actually enters the optional LLM phase.
     //
     // Why not rely on the overlay's `pipeline_get_state` polling?
@@ -533,7 +682,7 @@ pub async fn pipeline_stop_and_transcribe(
                         // No rewrite (disabled/failed early) or pipeline exited.
                         break;
                     }
-                    PipelineState::Recording | PipelineState::Transcribing => {
+                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Routing => {
                         // Not yet.
                     }
                 }
@@ -725,6 +874,23 @@ pub async fn pipeline_stop_and_transcribe(
             wav_bytes.as_deref(),
         );
 
+        // Persist preset metadata into History (best-effort).
+        if let Some(req_id) = active_request_id.as_deref() {
+            let preset_meta = log_store.with_current(|log| {
+                (log.preset_id.clone(), log.preset_name.clone())
+            });
+            if let Some((preset_id, preset_name)) = preset_meta {
+                if let Some(history) = app.try_state::<HistoryStorage>() {
+                    let _ = history.set_request_preset(
+                        req_id,
+                        preset_id,
+                        preset_name,
+                    );
+                    let _ = app.emit("history-changed", ());
+                }
+            }
+        }
+
         log_store.complete_current();
     }
 
@@ -840,6 +1006,8 @@ pub async fn pipeline_retry_transcription(
         llm_model: config.llm_config.model.clone(),
         profile_id: profile_id.clone(),
         profile_name: profile_name.clone(),
+        preset_id: None,
+        preset_name: None,
     };
 
     // Create a history entry for the retry attempt.
@@ -878,7 +1046,7 @@ pub async fn pipeline_retry_transcription(
                     PipelineState::Idle | PipelineState::Error => {
                         break;
                     }
-                    PipelineState::Recording | PipelineState::Transcribing => {}
+                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Routing => {}
                 }
 
                 if start.elapsed() > Duration::from_secs(15 * 60) {
@@ -886,6 +1054,33 @@ pub async fn pipeline_retry_transcription(
                 }
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+    }
+
+    // Emit routing started once we enter the Routing phase.
+    {
+        let app_clone = app.clone();
+        let pipeline_clone = pipeline.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            let start = Instant::now();
+            loop {
+                match pipeline_clone.state() {
+                    PipelineState::Routing => {
+                        let _ = app_clone.emit("pipeline-routing-started", ());
+                        break;
+                    }
+                    PipelineState::Idle | PipelineState::Error => {
+                        break;
+                    }
+                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Rewriting => {}
+                }
+
+                if start.elapsed() > Duration::from_secs(15 * 60) {
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
         });
     }
@@ -972,6 +1167,19 @@ pub async fn pipeline_retry_transcription(
         // Persist cost/usage stats (best-effort).
         crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, Some(wav.as_slice()));
 
+        // Persist preset metadata into History (best-effort).
+        if let Some(req_id) = new_request_id.as_deref() {
+            let preset_meta = log_store.with_current(|log| {
+                (log.preset_id.clone(), log.preset_name.clone())
+            });
+            if let Some((preset_id, preset_name)) = preset_meta {
+                if let Some(history) = app.try_state::<HistoryStorage>() {
+                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
+                    let _ = app.emit("history-changed", ());
+                }
+            }
+        }
+
         log_store.complete_current();
     }
 
@@ -1038,6 +1246,7 @@ pub fn pipeline_get_state(
     let state_str = match state {
         PipelineState::Idle => "idle",
         PipelineState::Recording => "recording",
+        PipelineState::Routing => "routing",
         PipelineState::Transcribing => "transcribing",
         PipelineState::Rewriting => "rewriting",
         PipelineState::Error => "error",
@@ -1167,6 +1376,8 @@ pub async fn pipeline_dictate(
         llm_model: cfg.llm_config.model.clone(),
         profile_id: profile_id.clone(),
         profile_name: profile_name.clone(),
+        preset_id: None,
+        preset_name: None,
     };
 
     // Create an in-progress history entry so the History view shows a running request.
@@ -1197,7 +1408,7 @@ pub async fn pipeline_dictate(
             let start = Instant::now();
             loop {
                 match pipeline_clone.state() {
-                    PipelineState::Transcribing | PipelineState::Rewriting => {
+                    PipelineState::Transcribing | PipelineState::Routing | PipelineState::Rewriting => {
                         let _ = app_clone.emit("pipeline-transcription-started", ());
                         break;
                     }
@@ -1211,6 +1422,32 @@ pub async fn pipeline_dictate(
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(15)).await;
+            }
+        });
+    }
+
+    // Emit routing started once we enter the Routing phase.
+    {
+        let app_clone = app.clone();
+        let pipeline_clone = pipeline.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            let start = Instant::now();
+            loop {
+                match pipeline_clone.state() {
+                    PipelineState::Routing => {
+                        let _ = app_clone.emit("pipeline-routing-started", ());
+                        break;
+                    }
+                    PipelineState::Idle | PipelineState::Error => {
+                        break;
+                    }
+                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Rewriting => {}
+                }
+
+                if start.elapsed() > Duration::from_secs(15 * 60) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
         });
     }
@@ -1381,6 +1618,19 @@ pub async fn pipeline_dictate(
         // NOTE: `pipeline_stop_and_transcribe` and `pipeline_retry_transcription` already do this,
         // but `pipeline_dictate` is a separate flow used by hotkeys and should also be tracked.
         crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, wav_bytes.as_deref());
+
+        // Persist preset metadata into History (best-effort).
+        if let Some(req_id) = active_request_id.as_deref() {
+            let preset_meta = log_store.with_current(|log| {
+                (log.preset_id.clone(), log.preset_name.clone())
+            });
+            if let Some((preset_id, preset_name)) = preset_meta {
+                if let Some(history) = app.try_state::<HistoryStorage>() {
+                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
+                    let _ = app.emit("history-changed", ());
+                }
+            }
+        }
 
         log_store.complete_current();
     }

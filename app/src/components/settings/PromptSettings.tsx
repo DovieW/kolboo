@@ -11,6 +11,7 @@ import {
   Switch,
   Textarea,
   Text,
+  TextInput,
   Tooltip,
 } from "@mantine/core";
 import { Info, RotateCcw } from "lucide-react";
@@ -20,6 +21,8 @@ import {
   useSettings,
   useAvailableProviders,
   useTestLlmRewrite,
+  useIterateRewritePrompt,
+  useTestRewriteWithPrompt,
   useTestSttTranscribeLastAudio,
   useHasLastAudioForSttTest,
   useUpdateCleanupPromptSections,
@@ -40,22 +43,27 @@ import {
 import {
   type CleanupPromptSections,
   type CleanupPromptSectionsOverride,
+  type IntentRouterSettings,
   type OpenAiReasoningEffort,
+  type RewritePreset,
   type RewriteProgramPromptProfile,
   tauriAPI,
 } from "../../lib/tauri";
-import { LLM_MODELS, STT_MODELS } from "../../lib/modelOptions";
+import {
+  EMBEDDING_MODELS,
+  LLM_MODELS,
+  STT_MODELS,
+} from "../../lib/modelOptions";
 import { HintSelect } from "../HintSelect";
 import { PromptSectionEditor } from "./PromptSectionEditor";
+import { RewritePromptLabModal } from "./RewritePromptLabModal";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
 
 // (debug logging removed)
 
 const DEFAULT_SECTIONS: CleanupPromptSections = {
-  main: { enabled: true, content: null },
-  advanced: { enabled: false, content: null },
-  dictionary: { enabled: false, content: null },
+  system: { content: null },
 };
 
 // NOTE: This timeout is used by the Rust pipeline as a transcription request timeout.
@@ -74,7 +82,7 @@ function formatUsdRateFromMicros(micros: number): string {
   return `$${dollars.toFixed(2).replace(/\.00$/, "")}`;
 }
 
-type SectionKey = "main" | "advanced" | "dictionary";
+type SectionKey = "system";
 
 function errorToMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -93,14 +101,11 @@ function errorToMessage(err: unknown): string {
 }
 
 interface LocalSectionState {
-  enabled: boolean;
   content: string;
 }
 
 interface LocalSections {
-  main: LocalSectionState;
-  advanced: LocalSectionState;
-  dictionary: LocalSectionState;
+  system: LocalSectionState;
 }
 
 function createId(): string {
@@ -117,6 +122,9 @@ export function PromptSettings({
 }: {
   editingProfileId?: string;
 }) {
+  const EDIT_DEFAULT_PRESET = "__default__";
+  const PRESET_REWRITE_INHERIT = "__inherit__";
+
   const activeProfileId = editingProfileId ?? "default";
   const isDefaultScope = activeProfileId === "default";
 
@@ -130,6 +138,8 @@ export function PromptSettings({
   const updateRewriteProgramPromptProfiles =
     useUpdateRewriteProgramPromptProfiles();
   const testLlmRewrite = useTestLlmRewrite();
+  const iterateRewritePrompt = useIterateRewritePrompt();
+  const testRewriteWithPrompt = useTestRewriteWithPrompt();
   const testSttLastAudio = useTestSttTranscribeLastAudio();
   const { data: hasLastAudioForSttTest } = useHasLastAudioForSttTest();
 
@@ -152,6 +162,12 @@ export function PromptSettings({
     activeProfileId === "default"
       ? null
       : profiles.find((p) => p.id === activeProfileId) ?? null;
+
+  const activeProfileLabel = useMemo(() => {
+    if (activeProfileId === "default") return "Default";
+    const name = activeProfile?.name?.trim();
+    return name ? name : activeProfileId;
+  }, [activeProfileId, activeProfile?.name]);
 
   const defaultRewriteEnabled = settings?.rewrite_llm_enabled ?? false;
 
@@ -197,6 +213,180 @@ export function PromptSettings({
     number | null
   >(null);
   const rewriteTestStartRef = useRef<number | null>(null);
+
+  const [promptLabOpen, setPromptLabOpen] = useState(false);
+  const [promptLabContextPrompt, setPromptLabContextPrompt] =
+    useState<string>("");
+  const [promptLabContextLabel, setPromptLabContextLabel] =
+    useState<string>("");
+
+  // Presets + intent router (profile-only features).
+  const presets: RewritePreset[] = useMemo(() => {
+    if (!activeProfile) return [];
+    return Array.isArray(activeProfile.presets) ? activeProfile.presets : [];
+  }, [activeProfile]);
+
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const [localPresetName, setLocalPresetName] = useState<string>("");
+  const [localPresetDescription, setLocalPresetDescription] =
+    useState<string>("");
+  const [localPresetHintsText, setLocalPresetHintsText] = useState<string>("");
+
+  const [localDefaultPresetDescription, setLocalDefaultPresetDescription] =
+    useState<string>("");
+
+  const selectedPreset: RewritePreset | null = useMemo(() => {
+    if (!activeProfile) return null;
+    if (!editingPresetId) return null;
+    return presets.find((p) => p.id === editingPresetId) ?? null;
+  }, [activeProfile, presets, editingPresetId]);
+
+  const isEditingDefaultPreset = editingPresetId === EDIT_DEFAULT_PRESET;
+
+  useEffect(() => {
+    if (!activeProfile) {
+      setEditingPresetId(null);
+      return;
+    }
+
+    // Keep selection stable where possible.
+    if (
+      editingPresetId &&
+      (editingPresetId === EDIT_DEFAULT_PRESET ||
+        presets.some((p) => p.id === editingPresetId))
+    ) {
+      return;
+    }
+
+    setEditingPresetId(presets[0]?.id ?? null);
+  }, [activeProfileId, activeProfile, presets, editingPresetId]);
+
+  useEffect(() => {
+    if (!selectedPreset) {
+      setLocalPresetName("");
+      setLocalPresetDescription("");
+      setLocalPresetHintsText("");
+      return;
+    }
+
+    setLocalPresetName(selectedPreset.name);
+    setLocalPresetDescription(selectedPreset.description ?? "");
+    const lines = (selectedPreset.routing_hints ?? []).filter(Boolean);
+    setLocalPresetHintsText(lines.join("\n"));
+  }, [selectedPreset?.id]);
+
+  useEffect(() => {
+    if (!activeProfile) {
+      setLocalDefaultPresetDescription("");
+      return;
+    }
+    setLocalDefaultPresetDescription(
+      activeProfile.default_preset_description ?? ""
+    );
+  }, [activeProfileId, activeProfile?.default_preset_description]);
+
+  const savePresets = (
+    nextPresets: RewritePreset[],
+    extra?: Partial<RewriteProgramPromptProfile>
+  ) => {
+    if (!activeProfile) return;
+    saveProfileMetadata({ presets: nextPresets, ...(extra ?? {}) });
+  };
+
+  const updatePreset = (presetId: string, patch: Partial<RewritePreset>) => {
+    const next = presets.map((p) =>
+      p.id === presetId ? { ...p, ...patch } : p
+    );
+    savePresets(next);
+  };
+
+  const deletePreset = (presetId: string) => {
+    if (!activeProfile) return;
+    const nextPresets = presets.filter((p) => p.id !== presetId);
+
+    const nextProfilePatch: Partial<RewriteProgramPromptProfile> = {};
+    if (activeProfile.default_preset_id === presetId) {
+      nextProfilePatch.default_preset_id = null;
+    }
+    if (activeProfile.active_preset_id === presetId) {
+      nextProfilePatch.active_preset_id = null;
+    }
+
+    savePresets(nextPresets, nextProfilePatch);
+    if (editingPresetId === presetId) {
+      setEditingPresetId(nextPresets[0]?.id ?? null);
+    }
+  };
+
+  const addPreset = () => {
+    if (!activeProfile) return;
+    const id = createId();
+    const p: RewritePreset = {
+      id,
+      name: "New preset",
+      description: null,
+      routing_hints: null,
+      cleanup_prompt_sections: null,
+      rewrite_llm_enabled: null,
+      stt_provider: null,
+      stt_model: null,
+      stt_timeout_seconds: null,
+      llm_provider: null,
+      llm_model: null,
+      openai_reasoning_effort: null,
+      gemini_thinking_budget: null,
+      gemini_thinking_level: null,
+      anthropic_thinking_budget: null,
+      sound_enabled: null,
+      playing_audio_handling: null,
+      overlay_mode: null,
+      widget_position: null,
+      output_mode: null,
+      output_hit_enter: null,
+    };
+
+    const next = [...presets, p];
+    savePresets(next);
+    setEditingPresetId(id);
+  };
+
+  const normalizeRouter = (
+    router: IntentRouterSettings | null | undefined
+  ): IntentRouterSettings => {
+    const r = router ?? ({} as any);
+    return {
+      enabled: Boolean(r.enabled),
+      strategy:
+        r.strategy === "embeddings" || r.strategy === "llm"
+          ? r.strategy
+          : "off",
+      embedding_provider: r.embedding_provider === "openai" ? "openai" : null,
+      embedding_model:
+        typeof r.embedding_model === "string" ? r.embedding_model : null,
+      pick_highest_score:
+        typeof r.pick_highest_score === "boolean" ? r.pick_highest_score : null,
+      similarity_threshold:
+        typeof r.similarity_threshold === "number" &&
+        Number.isFinite(r.similarity_threshold)
+          ? r.similarity_threshold
+          : null,
+      similarity_margin:
+        typeof r.similarity_margin === "number" &&
+        Number.isFinite(r.similarity_margin)
+          ? r.similarity_margin
+          : null,
+    };
+  };
+
+  const effectiveRouter: IntentRouterSettings | null = useMemo(() => {
+    if (!activeProfile) return null;
+    return normalizeRouter(activeProfile.router);
+  }, [activeProfile?.router, activeProfileId]);
+
+  const saveRouter = (router: IntentRouterSettings | null) => {
+    if (!activeProfile) return;
+    saveProfileMetadata({ router });
+  };
 
   const runRewriteTest = () => {
     setRewriteTestError("");
@@ -266,8 +456,10 @@ export function PromptSettings({
     useState(false);
   const [geminiThinkingBudgetInheriting, setGeminiThinkingBudgetInheriting] =
     useState(false);
-  const [anthropicThinkingBudgetInheriting, setAnthropicThinkingBudgetInheriting] =
-    useState(false);
+  const [
+    anthropicThinkingBudgetInheriting,
+    setAnthropicThinkingBudgetInheriting,
+  ] = useState(false);
 
   // NOTE: Settings tabs unmount when switching (keepMounted=false). If we render
   // switches immediately, they first render with placeholder values then “jump”
@@ -276,6 +468,21 @@ export function PromptSettings({
   const [localSections, setLocalSections] = useState<LocalSections | null>(
     null
   );
+
+  const effectiveCurrentPrompt = useMemo(() => {
+    if (localSections == null) return "";
+
+    return (localSections.system.content ?? "").trim();
+  }, [localSections]);
+
+  // Keep PromptLab context aligned with current scope by default.
+  useEffect(() => {
+    if (!promptLabOpen) {
+      setPromptLabContextPrompt(effectiveCurrentPrompt);
+      setPromptLabContextLabel(activeProfileLabel);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveCurrentPrompt, activeProfileLabel, promptLabOpen]);
 
   // When updating per-section prompt overrides quickly (e.g., toggling Advanced then
   // Dictionary immediately), relying on `activeProfile` can drop earlier changes
@@ -303,23 +510,12 @@ export function PromptSettings({
         activeProfileId === "default"
           ? base
           : {
-              main: profileOverrides?.main ?? base.main,
-              advanced: profileOverrides?.advanced ?? base.advanced,
-              dictionary: profileOverrides?.dictionary ?? base.dictionary,
+              system: profileOverrides?.system ?? base.system,
             };
 
       setLocalSections({
-        main: {
-          enabled: resolved.main.enabled,
-          content: resolved.main.content ?? defaultSections.main,
-        },
-        advanced: {
-          enabled: resolved.advanced.enabled,
-          content: resolved.advanced.content ?? defaultSections.advanced,
-        },
-        dictionary: {
-          enabled: resolved.dictionary.enabled,
-          content: resolved.dictionary.content ?? defaultSections.dictionary,
+        system: {
+          content: resolved.system.content ?? defaultSections.system,
         },
       });
     }
@@ -966,39 +1162,26 @@ export function PromptSettings({
   };
 
   const baseStoredSections: CleanupPromptSections =
-    settings?.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
+    settings?.cleanup_prompt_sections &&
+    (settings.cleanup_prompt_sections as any).system
+      ? settings.cleanup_prompt_sections
+      : DEFAULT_SECTIONS;
 
   const storedSectionsResolved: CleanupPromptSections =
     activeProfileId === "default" || !activeProfile
       ? baseStoredSections
       : {
-          main:
-            activeProfile.cleanup_prompt_sections?.main ??
-            baseStoredSections.main,
-          advanced:
-            activeProfile.cleanup_prompt_sections?.advanced ??
-            baseStoredSections.advanced,
-          dictionary:
-            activeProfile.cleanup_prompt_sections?.dictionary ??
-            baseStoredSections.dictionary,
+          system:
+            activeProfile.cleanup_prompt_sections?.system ??
+            baseStoredSections.system,
         };
 
   const hasCustomContent = {
-    main: Boolean(storedSectionsResolved.main.content),
-    advanced: Boolean(storedSectionsResolved.advanced.content),
-    dictionary: Boolean(storedSectionsResolved.dictionary.content),
+    system: Boolean(storedSectionsResolved.system.content),
   };
-
-  const activeProfileLabel =
-    activeProfileId === "default"
-      ? "Default"
-      : activeProfile?.name?.trim()
-      ? activeProfile.name.trim()
-      : activeProfileId;
 
   const buildSections = (overrides?: {
     key: SectionKey;
-    enabled?: boolean;
     content?: string | null;
   }): CleanupPromptSections => {
     if (localSections === null) {
@@ -1018,22 +1201,8 @@ export function PromptSettings({
       return content || null;
     };
 
-    const getEnabled = (key: SectionKey): boolean => {
-      return overrides?.key === key && overrides.enabled !== undefined
-        ? overrides.enabled
-        : localSections[key].enabled;
-    };
-
     return {
-      main: { enabled: getEnabled("main"), content: getContent("main") },
-      advanced: {
-        enabled: getEnabled("advanced"),
-        content: getContent("advanced"),
-      },
-      dictionary: {
-        enabled: getEnabled("dictionary"),
-        content: getContent("dictionary"),
-      },
+      system: { content: getContent("system") },
     };
   };
 
@@ -1049,10 +1218,7 @@ export function PromptSettings({
   const normalizePromptOverrides = (
     overrides: CleanupPromptSectionsOverride
   ): CleanupPromptSectionsOverride | null => {
-    const hasAny =
-      overrides.main != null ||
-      overrides.advanced != null ||
-      overrides.dictionary != null;
+    const hasAny = overrides.system != null;
     return hasAny ? overrides : null;
   };
 
@@ -1072,7 +1238,6 @@ export function PromptSettings({
   const buildSectionOverride = (
     key: SectionKey,
     overrides?: {
-      enabled?: boolean;
       content?: string | null;
     }
   ): CleanupPromptSections[SectionKey] => {
@@ -1088,13 +1253,7 @@ export function PromptSettings({
     const contentToStore =
       contentRaw === defaultSections?.[key] ? null : contentRaw || null;
 
-    const enabledToStore =
-      overrides?.enabled !== undefined
-        ? overrides.enabled
-        : localSections[key].enabled;
-
     return {
-      enabled: enabledToStore,
       content: contentToStore,
     };
   };
@@ -1116,23 +1275,6 @@ export function PromptSettings({
         tauriAPI.emitSettingsChanged();
       },
     });
-  };
-
-  const handleToggle = (key: SectionKey, checked: boolean) => {
-    setLocalSections((prev) => {
-      if (prev === null) return prev;
-      return { ...prev, [key]: { ...prev[key], enabled: checked } };
-    });
-
-    if (activeProfileId === "default") {
-      saveAllSections(buildSections({ key, enabled: checked }));
-      return;
-    }
-
-    saveProfileSectionOverride(
-      key,
-      buildSectionOverride(key, { enabled: checked })
-    );
   };
 
   const handleSave = (key: SectionKey, content: string) => {
@@ -1245,6 +1387,59 @@ export function PromptSettings({
     );
   }
 
+  const presetSelectOptions = presets.map((p) => ({
+    value: p.id,
+    label: p.name || p.id,
+  }));
+
+  const defaultPresetValue =
+    !activeProfile || !activeProfile.default_preset_id
+      ? "__none__"
+      : activeProfile.default_preset_id;
+
+  const activePresetValue =
+    !activeProfile || !activeProfile.active_preset_id
+      ? "__none__"
+      : activeProfile.active_preset_id;
+
+  const routerStrategyValue =
+    !effectiveRouter || !effectiveRouter.enabled
+      ? "off"
+      : effectiveRouter.strategy;
+
+  const openAiEmbeddingModels = EMBEDDING_MODELS.openai ?? [];
+  const embeddingModelValue =
+    effectiveRouter?.embedding_model ?? openAiEmbeddingModels[0]?.value ?? null;
+
+  const profilePromptDefaultContent = localSections.system.content ?? "";
+
+  const getPresetPromptOverride = (
+    preset: RewritePreset,
+    key: SectionKey
+  ): CleanupPromptSections[SectionKey] | null => {
+    const o = preset.cleanup_prompt_sections ?? null;
+    if (!o) return null;
+    const v = (o as any)[key];
+    return v ?? null;
+  };
+
+  const savePresetSectionOverride = (
+    preset: RewritePreset,
+    key: SectionKey,
+    section: CleanupPromptSections[SectionKey] | null
+  ) => {
+    const current: CleanupPromptSectionsOverride =
+      preset.cleanup_prompt_sections ?? {};
+    const nextOverrides: CleanupPromptSectionsOverride = {
+      ...current,
+      [key]: section,
+    };
+    const hasAny = nextOverrides.system != null;
+    updatePreset(preset.id, {
+      cleanup_prompt_sections: hasAny ? nextOverrides : null,
+    });
+  };
+
   return (
     <>
       <Modal
@@ -1273,6 +1468,45 @@ export function PromptSettings({
           </Button>
         </Group>
       </Modal>
+
+      <RewritePromptLabModal
+        opened={promptLabOpen}
+        onClose={() => setPromptLabOpen(false)}
+        profileId={activeProfileId}
+        profileLabel={promptLabContextLabel || activeProfileLabel}
+        initialTranscript={rewriteTestInput}
+        initialProblemOutput={rewriteTestOutput}
+        currentPrompt={promptLabContextPrompt || effectiveCurrentPrompt}
+        onIteratePrompt={async (params) => {
+          const res = await iterateRewritePrompt.mutateAsync({
+            transcript: params.transcript,
+            problemOutput: params.problemOutput,
+            desiredOutput: params.desiredOutput,
+            currentPrompt: params.currentPrompt,
+            profileId: params.profileId,
+            mode: params.mode,
+          });
+
+          return {
+            improvedPrompt: res.improved_prompt,
+            providerUsed: res.provider_used,
+            modelUsed: res.model_used,
+          };
+        }}
+        onTestPrompt={async (params) => {
+          const res = await testRewriteWithPrompt.mutateAsync({
+            transcript: params.transcript,
+            prompt: params.prompt,
+            profileId: params.profileId,
+          });
+
+          return {
+            output: res.output,
+            providerUsed: res.provider_used,
+            modelUsed: res.model_used,
+          };
+        }}
+      />
 
       <Divider
         mt="xs"
@@ -2697,6 +2931,87 @@ export function PromptSettings({
         </div>
       )}
 
+      <div style={{ marginTop: 16, marginBottom: 16 }}>
+        <Accordion variant="separated" radius="md">
+          <PromptSectionEditor
+            sectionKey={`${activeProfileId}-system-prompt`}
+            title="System Prompt"
+            description="Instructions used when rewriting the transcript"
+            enabled={true}
+            hideToggle={true}
+            headerActions={
+              <Button
+                variant="light"
+                color="gray"
+                disabled={
+                  updateCleanupPromptSections.isPending ||
+                  updateRewriteProgramPromptProfiles.isPending ||
+                  updateRewriteLlmEnabled.isPending
+                }
+                onClick={() => {
+                  setPromptLabContextPrompt(effectiveCurrentPrompt);
+                  setPromptLabContextLabel(activeProfileLabel);
+                  setPromptLabOpen(true);
+                }}
+              >
+                Prompt Lab
+              </Button>
+            }
+            initialContent={localSections!.system.content}
+            defaultContent={defaultSections?.system ?? ""}
+            hasCustom={hasCustomContent.system}
+            inheritMode={
+              isDefaultScope
+                ? null
+                : activeProfile?.cleanup_prompt_sections?.system == null
+                ? "inheriting"
+                : "overriding"
+            }
+            onDisableOverride={
+              isDefaultScope
+                ? undefined
+                : () =>
+                    openDisableOverrideDialog({
+                      title: "Disable System Prompt override?",
+                      onConfirm: () => {
+                        const base =
+                          settings?.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
+
+                        const current: CleanupPromptSectionsOverride =
+                          activeProfile?.cleanup_prompt_sections ?? {};
+                        const next = normalizePromptOverrides({
+                          ...current,
+                          system: null,
+                        });
+                        profilePromptOverridesRef.current = next;
+
+                        const resolved: CleanupPromptSections = {
+                          system: next?.system ?? base.system,
+                        };
+
+                        setLocalSections({
+                          system: {
+                            content:
+                              resolved.system.content ??
+                              defaultSections!.system,
+                          },
+                        });
+
+                        saveProfileMetadata({ cleanup_prompt_sections: next });
+                      },
+                    })
+            }
+            onToggle={() => {}}
+            onSave={(content) => handleSave("system", content)}
+            onReset={() => handleReset("system")}
+            isSaving={
+              updateCleanupPromptSections.isPending ||
+              updateRewriteProgramPromptProfiles.isPending
+            }
+          />
+        </Accordion>
+      </div>
+
       <div style={{ marginTop: 16 }}>
         <Accordion variant="separated" radius="md">
           <Accordion.Item value={`${activeProfileId}-test-rewrite`}>
@@ -2714,14 +3029,6 @@ export function PromptSettings({
               >
                 <Text size="xs" c="dimmed">
                   Testing profile: {activeProfileLabel}
-                  {activeProfileId === "default"
-                    ? ""
-                    : ` · Advanced ${
-                        localSections!.advanced.enabled ? "on" : "off"
-                      }` +
-                      ` · Dictionary ${
-                        localSections!.dictionary.enabled ? "on" : "off"
-                      }`}
                 </Text>
 
                 <Textarea
@@ -2810,225 +3117,797 @@ export function PromptSettings({
               </div>
             </Accordion.Panel>
           </Accordion.Item>
-
-          <PromptSectionEditor
-            sectionKey={`${activeProfileId}-main-prompt`}
-            title="Core Formatting Rules"
-            description="Filler word removal, punctuation, capitalization"
-            enabled={true}
-            hideToggle={true}
-            initialContent={localSections!.main.content}
-            defaultContent={defaultSections?.main ?? ""}
-            hasCustom={hasCustomContent.main}
-            inheritMode={
-              isDefaultScope
-                ? null
-                : activeProfile?.cleanup_prompt_sections?.main == null
-                ? "inheriting"
-                : "overriding"
-            }
-            onDisableOverride={
-              isDefaultScope
-                ? undefined
-                : () =>
-                    openDisableOverrideDialog({
-                      title: "Disable Core Formatting Rules override?",
-                      onConfirm: () => {
-                        const base =
-                          settings?.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
-
-                        const current: CleanupPromptSectionsOverride =
-                          activeProfile?.cleanup_prompt_sections ?? {};
-                        const next = normalizePromptOverrides({
-                          ...current,
-                          main: null,
-                        });
-                        profilePromptOverridesRef.current = next;
-
-                        const resolved: CleanupPromptSections = {
-                          main: next?.main ?? base.main,
-                          advanced: next?.advanced ?? base.advanced,
-                          dictionary: next?.dictionary ?? base.dictionary,
-                        };
-
-                        setLocalSections({
-                          main: {
-                            enabled: resolved.main.enabled,
-                            content:
-                              resolved.main.content ?? defaultSections!.main,
-                          },
-                          advanced: {
-                            enabled: resolved.advanced.enabled,
-                            content:
-                              resolved.advanced.content ??
-                              defaultSections!.advanced,
-                          },
-                          dictionary: {
-                            enabled: resolved.dictionary.enabled,
-                            content:
-                              resolved.dictionary.content ??
-                              defaultSections!.dictionary,
-                          },
-                        });
-
-                        saveProfileMetadata({ cleanup_prompt_sections: next });
-                      },
-                    })
-            }
-            onToggle={() => {}}
-            onSave={(content) => handleSave("main", content)}
-            onReset={() => handleReset("main")}
-            isSaving={
-              updateCleanupPromptSections.isPending ||
-              updateRewriteProgramPromptProfiles.isPending
-            }
-          />
-
-          <PromptSectionEditor
-            sectionKey={`${activeProfileId}-advanced-prompt`}
-            title="Advanced Features"
-            description='Backtrack corrections ("scratch that") and list formatting'
-            enabled={localSections!.advanced.enabled}
-            initialContent={localSections!.advanced.content}
-            defaultContent={defaultSections?.advanced ?? ""}
-            hasCustom={hasCustomContent.advanced}
-            inheritMode={
-              isDefaultScope
-                ? null
-                : activeProfile?.cleanup_prompt_sections?.advanced == null
-                ? "inheriting"
-                : "overriding"
-            }
-            onDisableOverride={
-              isDefaultScope
-                ? undefined
-                : () =>
-                    openDisableOverrideDialog({
-                      title: "Disable Advanced Features override?",
-                      onConfirm: () => {
-                        const base =
-                          settings?.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
-
-                        const current: CleanupPromptSectionsOverride =
-                          activeProfile?.cleanup_prompt_sections ?? {};
-                        const next = normalizePromptOverrides({
-                          ...current,
-                          advanced: null,
-                        });
-                        profilePromptOverridesRef.current = next;
-
-                        const resolved: CleanupPromptSections = {
-                          main: next?.main ?? base.main,
-                          advanced: next?.advanced ?? base.advanced,
-                          dictionary: next?.dictionary ?? base.dictionary,
-                        };
-
-                        setLocalSections({
-                          main: {
-                            enabled: resolved.main.enabled,
-                            content:
-                              resolved.main.content ?? defaultSections!.main,
-                          },
-                          advanced: {
-                            enabled: resolved.advanced.enabled,
-                            content:
-                              resolved.advanced.content ??
-                              defaultSections!.advanced,
-                          },
-                          dictionary: {
-                            enabled: resolved.dictionary.enabled,
-                            content:
-                              resolved.dictionary.content ??
-                              defaultSections!.dictionary,
-                          },
-                        });
-
-                        saveProfileMetadata({ cleanup_prompt_sections: next });
-                      },
-                    })
-            }
-            onToggle={(checked) => handleToggle("advanced", checked)}
-            onSave={(content) => handleSave("advanced", content)}
-            onReset={() => handleReset("advanced")}
-            isSaving={
-              updateCleanupPromptSections.isPending ||
-              updateRewriteProgramPromptProfiles.isPending
-            }
-          />
-
-          <PromptSectionEditor
-            sectionKey={`${activeProfileId}-dictionary-prompt`}
-            title="Personal Dictionary"
-            description="Custom word mappings for technical terms"
-            enabled={localSections!.dictionary.enabled}
-            initialContent={localSections!.dictionary.content}
-            defaultContent={defaultSections?.dictionary ?? ""}
-            hasCustom={hasCustomContent.dictionary}
-            inheritMode={
-              isDefaultScope
-                ? null
-                : activeProfile?.cleanup_prompt_sections?.dictionary == null
-                ? "inheriting"
-                : "overriding"
-            }
-            onDisableOverride={
-              isDefaultScope
-                ? undefined
-                : () =>
-                    openDisableOverrideDialog({
-                      title: "Disable Personal Dictionary override?",
-                      onConfirm: () => {
-                        const base =
-                          settings?.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
-
-                        const current: CleanupPromptSectionsOverride =
-                          activeProfile?.cleanup_prompt_sections ?? {};
-                        const next = normalizePromptOverrides({
-                          ...current,
-                          dictionary: null,
-                        });
-                        profilePromptOverridesRef.current = next;
-
-                        const resolved: CleanupPromptSections = {
-                          main: next?.main ?? base.main,
-                          advanced: next?.advanced ?? base.advanced,
-                          dictionary: next?.dictionary ?? base.dictionary,
-                        };
-
-                        setLocalSections({
-                          main: {
-                            enabled: resolved.main.enabled,
-                            content:
-                              resolved.main.content ?? defaultSections!.main,
-                          },
-                          advanced: {
-                            enabled: resolved.advanced.enabled,
-                            content:
-                              resolved.advanced.content ??
-                              defaultSections!.advanced,
-                          },
-                          dictionary: {
-                            enabled: resolved.dictionary.enabled,
-                            content:
-                              resolved.dictionary.content ??
-                              defaultSections!.dictionary,
-                          },
-                        });
-
-                        saveProfileMetadata({ cleanup_prompt_sections: next });
-                      },
-                    })
-            }
-            onToggle={(checked) => handleToggle("dictionary", checked)}
-            onSave={(content) => handleSave("dictionary", content)}
-            onReset={() => handleReset("dictionary")}
-            isSaving={
-              updateCleanupPromptSections.isPending ||
-              updateRewriteProgramPromptProfiles.isPending
-            }
-          />
         </Accordion>
       </div>
+
+      {!isDefaultScope && activeProfile ? (
+        <>
+          <Divider
+            mt="md"
+            mb="xs"
+            label="Presets & intent router"
+            labelPosition="left"
+            styles={{
+              root: {
+                borderTopWidth: 2,
+                borderColor: "var(--border-default)",
+              },
+              label: {
+                color: "var(--text-primary)",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              },
+            }}
+          />
+
+          <div style={{ marginTop: 0, marginBottom: 16 }}>
+            <Accordion variant="separated" radius="md">
+              <Accordion.Item value={`${activeProfileId}-presets`}>
+                <Accordion.Control>
+                  <div>
+                    <p className="settings-label">Presets</p>
+                    <p className="settings-description">
+                      Create multiple dictation modes for this program, then
+                      choose one manually or let the intent router auto-select.
+                    </p>
+                  </div>
+                </Accordion.Control>
+                <Accordion.Panel>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <Group
+                      justify="space-between"
+                      align="center"
+                      wrap="wrap"
+                      gap={12}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div>
+                          <Text size="xs" c="dimmed" mb={4}>
+                            Default preset
+                          </Text>
+                          <Select
+                            data={[
+                              { value: "__none__", label: "None" },
+                              ...presetSelectOptions,
+                            ]}
+                            value={defaultPresetValue}
+                            onChange={(value) => {
+                              if (!value) return;
+                              saveProfileMetadata({
+                                default_preset_id:
+                                  value === "__none__" ? null : value,
+                              });
+                            }}
+                            placeholder="None"
+                            withCheckIcon={false}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                minWidth: 220,
+                              },
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <Text size="xs" c="dimmed" mb={4}>
+                            Manual preset override (persisted)
+                          </Text>
+                          <Select
+                            data={[
+                              {
+                                value: "__none__",
+                                label: "None (use router/default)",
+                              },
+                              ...presetSelectOptions,
+                            ]}
+                            value={activePresetValue}
+                            onChange={(value) => {
+                              if (!value) return;
+                              saveProfileMetadata({
+                                active_preset_id:
+                                  value === "__none__" ? null : value,
+                              });
+                            }}
+                            placeholder="None"
+                            withCheckIcon={false}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                minWidth: 260,
+                              },
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <Button color="gray" onClick={addPreset}>
+                        Add preset
+                      </Button>
+                    </Group>
+
+                    {presets.length === 0 ? (
+                      <Text size="sm" c="dimmed">
+                        No presets yet. Add one to enable routing and quick
+                        switching.
+                      </Text>
+                    ) : null}
+
+                    {presets.length > 0 ? (
+                      <>
+                        <Group
+                          justify="space-between"
+                          align="flex-end"
+                          wrap="wrap"
+                          gap={12}
+                        >
+                          <div style={{ flex: 1, minWidth: 260 }}>
+                            <Text size="xs" c="dimmed" mb={4}>
+                              Editing preset
+                            </Text>
+                            <Select
+                              data={[
+                                {
+                                  value: EDIT_DEFAULT_PRESET,
+                                  label: "Default",
+                                },
+                                ...presetSelectOptions,
+                              ]}
+                              value={editingPresetId}
+                              onChange={(value) => {
+                                setEditingPresetId(value ?? null);
+                              }}
+                              placeholder="Select preset"
+                              withCheckIcon={false}
+                              styles={{
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                },
+                              }}
+                            />
+                          </div>
+
+                          {selectedPreset ? (
+                            <Button
+                              color="red"
+                              variant="light"
+                              onClick={() => deletePreset(selectedPreset.id)}
+                            >
+                              Delete preset
+                            </Button>
+                          ) : null}
+                        </Group>
+
+                        {selectedPreset ? (
+                          <>
+                            <TextInput
+                              label="Preset name"
+                              value={localPresetName}
+                              onChange={(e) =>
+                                setLocalPresetName(e.currentTarget.value)
+                              }
+                              onBlur={() => {
+                                const next = localPresetName.trim();
+                                if (next && next !== selectedPreset.name) {
+                                  updatePreset(selectedPreset.id, {
+                                    name: next,
+                                  });
+                                }
+                              }}
+                              styles={{
+                                label: { fontSize: 12 },
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                },
+                              }}
+                            />
+
+                            <Textarea
+                              label="Description (optional)"
+                              value={localPresetDescription}
+                              onChange={(e) =>
+                                setLocalPresetDescription(e.currentTarget.value)
+                              }
+                              onBlur={() => {
+                                const trimmed = localPresetDescription.trim();
+                                const next =
+                                  trimmed.length === 0 ? null : trimmed;
+                                if (
+                                  (selectedPreset.description ?? null) !== next
+                                ) {
+                                  updatePreset(selectedPreset.id, {
+                                    description: next,
+                                  });
+                                }
+                              }}
+                              autosize
+                              minRows={2}
+                              styles={{
+                                label: { fontSize: 12 },
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                },
+                              }}
+                            />
+
+                            <div>
+                              <Text size="xs" c="dimmed" mb={4}>
+                                Rewrite step
+                              </Text>
+                              <Select
+                                data={[
+                                  {
+                                    value: PRESET_REWRITE_INHERIT,
+                                    label: `Inherit (${
+                                      localProfileRewriteEnabled ? "On" : "Off"
+                                    })`,
+                                  },
+                                  { value: "on", label: "On" },
+                                  { value: "off", label: "Off (skip rewrite)" },
+                                ]}
+                                value={
+                                  selectedPreset.rewrite_llm_enabled == null
+                                    ? PRESET_REWRITE_INHERIT
+                                    : selectedPreset.rewrite_llm_enabled
+                                    ? "on"
+                                    : "off"
+                                }
+                                onChange={(value) => {
+                                  if (!value) return;
+                                  if (value === PRESET_REWRITE_INHERIT) {
+                                    updatePreset(selectedPreset.id, {
+                                      rewrite_llm_enabled: null,
+                                    });
+                                    return;
+                                  }
+
+                                  updatePreset(selectedPreset.id, {
+                                    rewrite_llm_enabled: value === "on",
+                                  });
+                                }}
+                                withCheckIcon={false}
+                                styles={{
+                                  input: {
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 220,
+                                  },
+                                }}
+                              />
+                            </div>
+
+                            <Textarea
+                              label="Routing hints (one per line)"
+                              description="If empty, the router falls back to preset name/description."
+                              value={localPresetHintsText}
+                              onChange={(e) =>
+                                setLocalPresetHintsText(e.currentTarget.value)
+                              }
+                              onBlur={() => {
+                                const lines = localPresetHintsText
+                                  .split(/\r?\n/)
+                                  .map((s) => s.trim())
+                                  .filter(Boolean);
+                                const next = lines.length === 0 ? null : lines;
+                                const current =
+                                  selectedPreset.routing_hints ?? null;
+                                if (
+                                  JSON.stringify(current) !==
+                                  JSON.stringify(next)
+                                ) {
+                                  updatePreset(selectedPreset.id, {
+                                    routing_hints: next,
+                                  });
+                                }
+                              }}
+                              autosize
+                              minRows={3}
+                              styles={{
+                                label: { fontSize: 12 },
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                  fontFamily: "monospace",
+                                  fontSize: "13px",
+                                },
+                              }}
+                            />
+
+                            <div>
+                              <Text size="sm" fw={600} mb={6}>
+                                System Prompt override (relative to this
+                                profile)
+                              </Text>
+
+                              <Accordion variant="separated" radius="md">
+                                {(() => {
+                                  const key: SectionKey = "system";
+                                  const override = getPresetPromptOverride(
+                                    selectedPreset,
+                                    key
+                                  );
+                                  const baseContent =
+                                    profilePromptDefaultContent;
+
+                                  const initialContent =
+                                    override && override.content != null
+                                      ? override.content
+                                      : baseContent;
+
+                                  const presetLabel =
+                                    selectedPreset.name?.trim() ||
+                                    selectedPreset.id;
+
+                                  return (
+                                    <PromptSectionEditor
+                                      key={`${activeProfileId}-${selectedPreset.id}-${key}`}
+                                      sectionKey={`${activeProfileId}-preset-${selectedPreset.id}-${key}`}
+                                      title="System Prompt"
+                                      description="Override the profile System Prompt for this preset."
+                                      enabled={true}
+                                      hideToggle={true}
+                                      headerActions={
+                                        <Button
+                                          variant="light"
+                                          color="gray"
+                                          disabled={
+                                            updateRewriteProgramPromptProfiles.isPending
+                                          }
+                                          onClick={() => {
+                                            setPromptLabContextPrompt(
+                                              (initialContent ?? "").trim()
+                                            );
+                                            setPromptLabContextLabel(
+                                              `${activeProfileLabel} · ${presetLabel}`
+                                            );
+                                            setPromptLabOpen(true);
+                                          }}
+                                        >
+                                          Prompt Lab
+                                        </Button>
+                                      }
+                                      initialContent={initialContent}
+                                      defaultContent={baseContent}
+                                      hasCustom={override != null}
+                                      inheritMode={
+                                        override == null
+                                          ? "inheriting"
+                                          : "overriding"
+                                      }
+                                      inheritTooltip="Inheriting from the profile System Prompt"
+                                      disableOverrideTooltip="Disable override (inherit from profile)"
+                                      onDisableOverride={() =>
+                                        savePresetSectionOverride(
+                                          selectedPreset,
+                                          key,
+                                          null
+                                        )
+                                      }
+                                      resetLabel="Reset to Profile"
+                                      onToggle={() => {}}
+                                      onSave={(content) => {
+                                        const contentToStore =
+                                          content === baseContent
+                                            ? null
+                                            : content || null;
+                                        const next = {
+                                          content: contentToStore,
+                                        };
+                                        savePresetSectionOverride(
+                                          selectedPreset,
+                                          key,
+                                          next
+                                        );
+                                      }}
+                                      onReset={() =>
+                                        savePresetSectionOverride(
+                                          selectedPreset,
+                                          key,
+                                          null
+                                        )
+                                      }
+                                      isSaving={
+                                        updateRewriteProgramPromptProfiles.isPending
+                                      }
+                                    />
+                                  );
+                                })()}
+                              </Accordion>
+                            </div>
+                          </>
+                        ) : isEditingDefaultPreset ? (
+                          <>
+                            <Textarea
+                              label="Default description (optional)"
+                              description="Used by the intent router when deciding to use the profile defaults (no preset)."
+                              value={localDefaultPresetDescription}
+                              onChange={(e) =>
+                                setLocalDefaultPresetDescription(
+                                  e.currentTarget.value
+                                )
+                              }
+                              onBlur={() => {
+                                const trimmed =
+                                  localDefaultPresetDescription.trim();
+                                const next =
+                                  trimmed.length === 0 ? null : trimmed;
+                                if (
+                                  (activeProfile?.default_preset_description ??
+                                    null) !== next
+                                ) {
+                                  saveProfileMetadata({
+                                    default_preset_description: next,
+                                  });
+                                }
+                              }}
+                              autosize
+                              minRows={2}
+                              styles={{
+                                label: { fontSize: 12 },
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                },
+                              }}
+                            />
+                          </>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                </Accordion.Panel>
+              </Accordion.Item>
+
+              <Accordion.Item value={`${activeProfileId}-intent-router`}>
+                <Accordion.Control>
+                  <div>
+                    <p className="settings-label">Intent router</p>
+                    <p className="settings-description">
+                      Automatically select a preset based on the transcript.
+                    </p>
+                  </div>
+                </Accordion.Control>
+                <Accordion.Panel>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    {presets.length === 0 ? (
+                      <Text size="sm" c="dimmed">
+                        Add at least one preset to enable routing.
+                      </Text>
+                    ) : null}
+
+                    <div
+                      className="settings-row no-divider"
+                      style={{ paddingTop: 0 }}
+                    >
+                      <div>
+                        <p className="settings-label">Enable router</p>
+                        <p className="settings-description">
+                          When enabled, the router picks a preset after STT.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={routerStrategyValue !== "off"}
+                        onChange={(e) => {
+                          const enabled = e.currentTarget.checked;
+                          if (!enabled) {
+                            saveRouter({
+                              enabled: false,
+                              strategy: "off",
+                              embedding_provider: null,
+                              embedding_model: null,
+                              pick_highest_score: null,
+                              similarity_threshold: null,
+                              similarity_margin: null,
+                            });
+                            return;
+                          }
+
+                          // Default to embeddings when turning on.
+                          saveRouter({
+                            enabled: true,
+                            strategy: "embeddings",
+                            embedding_provider: "openai",
+                            embedding_model: embeddingModelValue,
+                            pick_highest_score:
+                              effectiveRouter?.pick_highest_score ?? null,
+                            similarity_threshold:
+                              effectiveRouter?.similarity_threshold ?? null,
+                            similarity_margin:
+                              effectiveRouter?.similarity_margin ?? null,
+                          });
+                        }}
+                        color="gray"
+                        size="md"
+                        disabled={presets.length === 0}
+                      />
+                    </div>
+
+                    <div className="settings-row">
+                      <div>
+                        <p className="settings-label">Strategy</p>
+                        <p className="settings-description">
+                          Embeddings is fast and deterministic; LLM can be more
+                          flexible but costs more.
+                        </p>
+                      </div>
+                      <Select
+                        data={[
+                          { value: "off", label: "Off" },
+                          { value: "embeddings", label: "Embeddings" },
+                          { value: "llm", label: "LLM" },
+                        ]}
+                        value={routerStrategyValue}
+                        onChange={(value) => {
+                          if (!value) return;
+                          if (value === "off") {
+                            saveRouter({
+                              enabled: false,
+                              strategy: "off",
+                              embedding_provider: null,
+                              embedding_model: null,
+                              pick_highest_score: null,
+                              similarity_threshold: null,
+                              similarity_margin: null,
+                            });
+                            return;
+                          }
+
+                          if (value === "embeddings") {
+                            saveRouter({
+                              enabled: true,
+                              strategy: "embeddings",
+                              embedding_provider: "openai",
+                              embedding_model: embeddingModelValue,
+                              pick_highest_score:
+                                effectiveRouter?.pick_highest_score ?? null,
+                              similarity_threshold:
+                                effectiveRouter?.similarity_threshold ?? null,
+                              similarity_margin:
+                                effectiveRouter?.similarity_margin ?? null,
+                            });
+                            return;
+                          }
+
+                          saveRouter({
+                            enabled: true,
+                            strategy: "llm",
+                            embedding_provider: null,
+                            embedding_model: null,
+                            pick_highest_score: null,
+                            similarity_threshold: null,
+                            similarity_margin: null,
+                          });
+                        }}
+                        withCheckIcon={false}
+                        disabled={presets.length === 0}
+                        styles={{
+                          input: {
+                            backgroundColor: "var(--bg-elevated)",
+                            borderColor: "var(--border-default)",
+                            color: "var(--text-primary)",
+                            minWidth: 200,
+                          },
+                        }}
+                      />
+                    </div>;
+
+                    {
+                      routerStrategyValue === "embeddings" ? (
+                        <>
+                          <Text size="xs" c="dimmed">
+                            Uses your OpenAI API key. Configure it in API Keys.
+                          </Text>
+
+                          <div className="settings-row">
+                            <div>
+                              <p className="settings-label">
+                                Pick highest score
+                              </p>
+                              <p className="settings-description">
+                                Always selects the candidate with the highest
+                                similarity score. Disables threshold + margin.
+                              </p>
+                            </div>
+                            <Switch
+                              checked={Boolean(
+                                effectiveRouter?.pick_highest_score
+                              )}
+                              onChange={(e) => {
+                                const enabled = e.currentTarget.checked;
+                                const next = normalizeRouter(
+                                  activeProfile.router
+                                );
+                                saveRouter({
+                                  ...next,
+                                  enabled: true,
+                                  strategy: "embeddings",
+                                  pick_highest_score: enabled,
+                                });
+                              }}
+                              color="gray"
+                              size="md"
+                              disabled={presets.length === 0}
+                            />
+                          </div>
+
+                          <div className="settings-row">
+                            <div>
+                              <p className="settings-label">Embedding model</p>
+                              <p className="settings-description">
+                                Model used to embed the transcript and hints.
+                              </p>
+                            </div>
+                            <Select
+                              data={openAiEmbeddingModels}
+                              value={embeddingModelValue}
+                              onChange={(value) => {
+                                if (!value) return;
+                                const next = normalizeRouter(
+                                  activeProfile.router
+                                );
+                                saveRouter({
+                                  ...next,
+                                  enabled: true,
+                                  strategy: "embeddings",
+                                  embedding_provider: "openai",
+                                  embedding_model: value,
+                                });
+                              }}
+                              withCheckIcon={false}
+                              styles={{
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                  minWidth: 240,
+                                },
+                              }}
+                            />
+                          </div>
+
+                          <div className="settings-row">
+                            <div>
+                              <p className="settings-label">
+                                Similarity threshold
+                              </p>
+                              <p className="settings-description">
+                                Minimum cosine similarity to accept a match.
+                              </p>
+                            </div>
+                            <NumberInput
+                              value={
+                                effectiveRouter?.similarity_threshold ?? 0.78
+                              }
+                              onChange={(value) => {
+                                if (
+                                  typeof value !== "number" ||
+                                  Number.isNaN(value)
+                                )
+                                  return;
+                                const next = normalizeRouter(
+                                  activeProfile.router
+                                );
+                                saveRouter({
+                                  ...next,
+                                  enabled: true,
+                                  strategy: "embeddings",
+                                  similarity_threshold: value,
+                                });
+                              }}
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              clampBehavior="blur"
+                              disabled={Boolean(
+                                effectiveRouter?.pick_highest_score
+                              )}
+                              styles={{
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                  width: 140,
+                                },
+                              }}
+                            />
+                          </div>
+
+                          <div className="settings-row no-divider">
+                            <div>
+                              <p className="settings-label">
+                                Similarity margin
+                              </p>
+                              <p className="settings-description">
+                                Required gap between the best and second-best
+                                preset.
+                              </p>
+                            </div>
+                            <NumberInput
+                              value={effectiveRouter?.similarity_margin ?? 0.05}
+                              onChange={(value) => {
+                                if (
+                                  typeof value !== "number" ||
+                                  Number.isNaN(value)
+                                )
+                                  return;
+                                const next = normalizeRouter(
+                                  activeProfile.router
+                                );
+                                saveRouter({
+                                  ...next,
+                                  enabled: true,
+                                  strategy: "embeddings",
+                                  similarity_margin: value,
+                                });
+                              }}
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              clampBehavior="blur"
+                              disabled={Boolean(
+                                effectiveRouter?.pick_highest_score
+                              )}
+                              styles={{
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                  width: 140,
+                                },
+                              }}
+                            />
+                          </div>
+                        </>
+                      ) : null
+                    }
+
+                    {routerStrategyValue === "llm" ? (
+                      <Text size="xs" c="dimmed">
+                        LLM routing uses your configured rewrite LLM
+                        provider/model.
+                      </Text>
+                    ) : null}
+                  </div>
+                </Accordion.Panel>
+              </Accordion.Item>
+            </Accordion>
+          </div>
+        </>
+      ) : null}
     </>
   );
 }

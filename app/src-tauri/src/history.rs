@@ -41,6 +41,15 @@ pub struct HistoryEntry {
     /// Prompt profile display name used for this transcription.
     #[serde(default)]
     pub profile_name: Option<String>,
+
+    /// Preset id selected for this transcription (if any).
+    ///
+    /// When None, the request used the profile/global defaults ("Default" in UI).
+    #[serde(default)]
+    pub preset_id: Option<String>,
+    /// Preset display name selected for this transcription (if any).
+    #[serde(default)]
+    pub preset_name: Option<String>,
     /// STT provider used for this transcription (e.g., "groq", "openai").
     #[serde(default)]
     pub stt_provider: Option<String>,
@@ -73,6 +82,8 @@ pub struct RequestModelInfo {
     pub llm_model: Option<String>,
     pub profile_id: Option<String>,
     pub profile_name: Option<String>,
+    pub preset_id: Option<String>,
+    pub preset_name: Option<String>,
 }
 
 impl HistoryEntry {
@@ -85,6 +96,8 @@ impl HistoryEntry {
             error_message: None,
             profile_id: None,
             profile_name: None,
+            preset_id: None,
+            preset_name: None,
             stt_provider: None,
             stt_model: None,
             llm_provider: None,
@@ -102,6 +115,8 @@ impl HistoryEntry {
             error_message: None,
             profile_id: model_info.profile_id,
             profile_name: model_info.profile_name,
+            preset_id: model_info.preset_id,
+            preset_name: model_info.preset_name,
             stt_provider: model_info.stt_provider,
             stt_model: model_info.stt_model,
             llm_provider: model_info.llm_provider,
@@ -355,6 +370,31 @@ impl HistoryStorage {
             if let Some(entry) = data.entries.iter_mut().find(|e| e.id == request_id) {
                 entry.profile_id = profile_id;
                 entry.profile_name = profile_name;
+            }
+        }
+
+        self.save()
+    }
+
+    /// Update the stored preset metadata for an existing history entry.
+    ///
+    /// This is useful when we create an in-progress entry early, then later
+    /// learn the effective preset used once routing has been resolved.
+    pub fn set_request_preset(
+        &self,
+        request_id: &str,
+        preset_id: Option<String>,
+        preset_name: Option<String>,
+    ) -> Result<(), String> {
+        {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            if let Some(entry) = data.entries.iter_mut().find(|e| e.id == request_id) {
+                entry.preset_id = preset_id;
+                entry.preset_name = preset_name;
             }
         }
 

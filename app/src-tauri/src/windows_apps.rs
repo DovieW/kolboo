@@ -4,9 +4,13 @@
 
 #[cfg(target_os = "windows")]
 mod imp {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
     use windows::core::{BOOL, PWSTR};
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
     use windows::Win32::System::Threading::{
+        GetCurrentProcessId,
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -46,6 +50,82 @@ mod imp {
         }
     }
 
+    // When our always-on-top overlay windows are visible, Windows can briefly report our own
+    // process as the foreground window. That breaks per-program profile matching.
+    // We keep a short-lived memory of the last non-Kolboo foreground process and use it as a
+    // fallback when the current foreground belongs to our process.
+    fn last_external_foreground_cell() -> &'static Mutex<Option<(String, Instant)>> {
+        static CELL: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
+        CELL.get_or_init(|| Mutex::new(None))
+    }
+
+    fn record_external_foreground(path: &str) {
+        let mut guard = last_external_foreground_cell().lock().unwrap();
+        *guard = Some((path.to_string(), Instant::now()));
+    }
+
+    fn get_recent_external_foreground(max_age: Duration) -> Option<String> {
+        let guard = last_external_foreground_cell().lock().unwrap();
+        let (path, at) = guard.as_ref()?;
+        if at.elapsed() <= max_age {
+            Some(path.clone())
+        } else {
+            None
+        }
+    }
+
+    fn find_external_process_path_by_z_order(current_pid: u32) -> Option<String> {
+        #[derive(Debug)]
+        struct State {
+            current_pid: u32,
+            found: Option<String>,
+        }
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            // Safety: caller passes a valid mutable State pointer via LPARAM.
+            let state = unsafe { &mut *(lparam.0 as *mut State) };
+
+            unsafe {
+                if !IsWindowVisible(hwnd).as_bool() {
+                    return BOOL(1);
+                }
+
+                let title_len = GetWindowTextLengthW(hwnd);
+                if title_len == 0 {
+                    return BOOL(1);
+                }
+
+                let mut pid: u32 = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                if pid == 0 {
+                    return BOOL(1);
+                }
+                if pid == state.current_pid {
+                    return BOOL(1);
+                }
+
+                let Some(process_path) = query_process_path(pid) else {
+                    return BOOL(1);
+                };
+
+                state.found = Some(process_path);
+                // Stop enumeration once we found the first plausible external window.
+                BOOL(0)
+            }
+        }
+
+        let mut state = State {
+            current_pid,
+            found: None,
+        };
+
+        unsafe {
+            let _ = EnumWindows(Some(enum_proc), LPARAM((&mut state as *mut _) as isize));
+        }
+
+        state.found
+    }
+
     pub fn get_foreground_process_path() -> Option<String> {
         unsafe {
             let hwnd = GetForegroundWindow();
@@ -59,7 +139,33 @@ mod imp {
                 return None;
             }
 
-            query_process_path(pid)
+            let current_pid = GetCurrentProcessId();
+            if pid == current_pid {
+                // Prefer the most recent external foreground.
+                if let Some(path) = get_recent_external_foreground(Duration::from_secs(5)) {
+                    log::debug!(
+                        "[windows_apps] Foreground is Kolboo pid {}; using recent external foreground: {}",
+                        current_pid,
+                        path
+                    );
+                    return Some(path);
+                }
+
+                // If we don't have a recent external sample yet, try to recover a plausible
+                // external "active" app by scanning top-level windows (best-effort).
+                let path = find_external_process_path_by_z_order(current_pid)?;
+                log::debug!(
+                    "[windows_apps] Foreground is Kolboo pid {}; recovered external foreground from z-order: {}",
+                    current_pid,
+                    path
+                );
+                record_external_foreground(&path);
+                return Some(path);
+            }
+
+            let path = query_process_path(pid)?;
+            record_external_foreground(&path);
+            Some(path)
         }
     }
 

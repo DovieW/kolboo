@@ -14,6 +14,10 @@ pub struct AppState {
     /// Used to guard delayed-hide fallbacks against races where a previous session schedules
     /// a hide, but a new recording/error shows the overlay before that timer fires.
     pub overlay_visibility_epoch: AtomicU64,
+
+    /// Monotonic token bumped every time we show/refresh the overlay hover window.
+    /// Used to cancel delayed-hide timers when the pointer moves between windows.
+    pub overlay_hover_epoch: AtomicU64,
     /// Tracks whether we toggled MediaPlayPause when recording started.
     /// Used to restore playback when recording ends.
     pub play_pause_toggled: AtomicBool,

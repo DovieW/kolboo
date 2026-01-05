@@ -296,42 +296,26 @@ impl VadSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PromptSectionSetting {
-    pub enabled: bool,
     pub content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CleanupPromptSectionsSetting {
-    /// Per-section overrides. If a section is None/missing, it inherits from the base prompts.
+    /// System prompt override. When missing/None, inherit from base prompts.
     #[serde(default)]
-    pub main: Option<PromptSectionSetting>,
-    #[serde(default)]
-    pub advanced: Option<PromptSectionSetting>,
-    #[serde(default)]
-    pub dictionary: Option<PromptSectionSetting>,
+    pub system: Option<PromptSectionSetting>,
 }
 
 impl CleanupPromptSectionsSetting {
     /// Apply these overrides on top of a base `PromptSections`.
     ///
     /// - Any missing section inherits from `base`.
-    /// - `content: None` means "use built-in default prompt for that section".
+    /// - `content: None` means "use built-in default system prompt".
     pub fn apply_to(&self, base: &PromptSections) -> PromptSections {
         let mut next = base.clone();
 
-        if let Some(main) = &self.main {
-            // Main section is always included; `enabled` is ignored.
-            next.main_custom = main.content.clone();
-        }
-
-        if let Some(advanced) = &self.advanced {
-            next.advanced_enabled = advanced.enabled;
-            next.advanced_custom = advanced.content.clone();
-        }
-
-        if let Some(dictionary) = &self.dictionary {
-            next.dictionary_enabled = dictionary.enabled;
-            next.dictionary_custom = dictionary.content.clone();
+        if let Some(system) = &self.system {
+            next.system_custom = system.content.clone();
         }
 
         next
@@ -349,6 +333,25 @@ pub struct RewriteProgramPromptProfile {
     )]
     pub program_paths: Vec<String>,
     pub cleanup_prompt_sections: Option<CleanupPromptSectionsSetting>,
+
+    // Presets/modes within this program profile.
+    // Default empty list keeps older settings.json compatible.
+    // Some historical frontend versions wrote `presets: null`, which would
+    // otherwise fail to deserialize and cause *all* profiles to be dropped.
+    #[serde(default, deserialize_with = "deserialize_null_to_default_vec")]
+    pub presets: Vec<RewritePreset>,
+    /// Default preset used when routing is off/undecided.
+    #[serde(default)]
+    pub default_preset_id: Option<String>,
+    /// Description for the implicit "Default" (no preset) routing target.
+    #[serde(default)]
+    pub default_preset_description: Option<String>,
+    /// Persisted manual selection (if set, can be used as an override for routing).
+    #[serde(default)]
+    pub active_preset_id: Option<String>,
+    /// Optional intent router configuration.
+    #[serde(default)]
+    pub router: Option<IntentRouterSettings>,
 
     /// Optional per-profile gate for the rewrite step (falls back to global setting)
     #[serde(default)]
@@ -375,6 +378,107 @@ pub struct RewriteProgramPromptProfile {
     pub gemini_thinking_level: Option<String>,
     #[serde(default)]
     pub anthropic_thinking_budget: Option<i64>,
+}
+
+// ============================================================================
+// Presets + intent router (stored in settings.json)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RewritePreset {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// Example utterances / short hints used by the intent router.
+    // Some historical frontend versions wrote `routing_hints: null`.
+    #[serde(default, deserialize_with = "deserialize_null_to_default_vec")]
+    pub routing_hints: Vec<String>,
+
+    #[serde(default)]
+    pub cleanup_prompt_sections: Option<CleanupPromptSectionsSetting>,
+
+    /// Optional per-preset gate for the rewrite step (falls back to profile/global setting).
+    #[serde(default)]
+    pub rewrite_llm_enabled: Option<bool>,
+
+    #[serde(default)]
+    pub stt_provider: Option<String>,
+    #[serde(default)]
+    pub stt_model: Option<String>,
+    #[serde(default)]
+    pub stt_timeout_seconds: Option<f64>,
+    #[serde(default)]
+    pub llm_provider: Option<String>,
+    #[serde(default)]
+    pub llm_model: Option<String>,
+
+    #[serde(default)]
+    pub openai_reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub gemini_thinking_budget: Option<i64>,
+    #[serde(default)]
+    pub gemini_thinking_level: Option<String>,
+    #[serde(default)]
+    pub anthropic_thinking_budget: Option<i64>,
+}
+
+fn deserialize_null_to_default_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn deserialize_null_to_default_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(false))
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentRouterStrategy {
+    Off,
+    Embeddings,
+    Llm,
+}
+
+impl Default for IntentRouterStrategy {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IntentRouterSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub strategy: IntentRouterStrategy,
+
+    // Embeddings routing knobs
+    #[serde(default)]
+    pub embedding_provider: Option<String>,
+    #[serde(default)]
+    pub embedding_model: Option<String>,
+
+    /// If true, always pick the candidate with the highest similarity score.
+    /// When enabled, threshold/margin are ignored.
+    ///
+    /// Some historical frontend versions may write this as null; tolerate it.
+    #[serde(default, deserialize_with = "deserialize_null_to_default_bool")]
+    pub pick_highest_score: bool,
+
+    #[serde(default)]
+    pub similarity_threshold: Option<f32>,
+    #[serde(default)]
+    pub similarity_margin: Option<f32>,
 }
 
 fn deserialize_program_paths<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
