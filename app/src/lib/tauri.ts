@@ -55,7 +55,9 @@ function normalizeIntentRouterSettings(value: unknown): IntentRouterSettings {
   const strategy = normalizeIntentRouterStrategy(v.strategy);
 
   const embedding_provider =
-    v.embedding_provider === "openai" ? ("openai" as const) : null;
+    v.embedding_provider === "openai" || v.embedding_provider === "cohere"
+      ? (v.embedding_provider as "openai" | "cohere")
+      : null;
   const embedding_model =
     typeof v.embedding_model === "string" ? v.embedding_model : null;
 
@@ -292,7 +294,7 @@ export interface IntentRouterSettings {
   strategy: IntentRouterStrategy;
 
   // Embeddings routing knobs (only used when strategy === "embeddings")
-  embedding_provider?: "openai" | null;
+  embedding_provider?: "openai" | "cohere" | null;
   embedding_model?: string | null;
   pick_highest_score?: boolean | null;
   similarity_threshold?: number | null;
@@ -587,6 +589,9 @@ export interface AppSettings {
   // Provider-specific knobs
   // When true, treat Groq usage as free-tier (UI-only for now; kept in settings for future backend usage).
   groq_free_tier: boolean;
+
+  // When true, treat Cohere usage as free-tier for stats filtering.
+  cohere_free_tier: boolean;
 
   // When true, treat AssemblyAI usage as free-tier for stats filtering.
   assemblyai_free_tier: boolean;
@@ -1366,7 +1371,7 @@ export const tauriAPI = {
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
       audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: await(async () => {
+      accent_color: await (async () => {
         const raw = (await store.get<string | null>("accent_color")) ?? null;
         const normalized = normalizeHexColor(raw);
 
@@ -1382,7 +1387,7 @@ export const tauriAPI = {
       })(),
       rewrite_llm_enabled:
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
-      cleanup_prompt_sections: await(async () => {
+      cleanup_prompt_sections: await (async () => {
         const raw = await store.get<any>("cleanup_prompt_sections");
         const normalized = normalizeCleanupPromptSections(raw);
 
@@ -1417,6 +1422,7 @@ export const tauriAPI = {
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
+      cohere_free_tier: (await store.get<boolean>("cohere_free_tier")) ?? true,
       assemblyai_free_tier:
         (await store.get<boolean>("assemblyai_free_tier")) ?? true,
       speechmatics_free_tier:
@@ -1470,7 +1476,7 @@ export const tauriAPI = {
       mic_auto_recover_enabled:
         (await store.get<boolean>("mic_auto_recover_enabled")) ?? false,
 
-      noise_gate_threshold_dbfs: await(async () => {
+      noise_gate_threshold_dbfs: await (async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -1509,7 +1515,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -1531,14 +1537,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })(),
+      })()),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -1552,7 +1558,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })(),
+      })()),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
@@ -1729,6 +1735,12 @@ export const tauriAPI = {
   async updateGroqFreeTier(enabled: boolean): Promise<void> {
     const store = await getStore();
     await store.set("groq_free_tier", !!enabled);
+    await store.save();
+  },
+
+  async updateCohereFreeTier(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("cohere_free_tier", !!enabled);
     await store.save();
   },
 

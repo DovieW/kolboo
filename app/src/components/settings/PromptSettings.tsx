@@ -369,7 +369,10 @@ export function PromptSettings({
         r.strategy === "embeddings" || r.strategy === "llm"
           ? r.strategy
           : "off",
-      embedding_provider: r.embedding_provider === "openai" ? "openai" : null,
+      embedding_provider:
+        r.embedding_provider === "openai" || r.embedding_provider === "cohere"
+          ? r.embedding_provider
+          : null,
       embedding_model:
         typeof r.embedding_model === "string" ? r.embedding_model : null,
       pick_highest_score:
@@ -1439,9 +1442,15 @@ export function PromptSettings({
       ? "off"
       : effectiveRouter.strategy;
 
-  const openAiEmbeddingModels = EMBEDDING_MODELS.openai ?? [];
-  const embeddingModelValue =
-    effectiveRouter?.embedding_model ?? openAiEmbeddingModels[0]?.value ?? null;
+  const embeddingProviderValue =
+    effectiveRouter?.embedding_provider ?? "openai";
+  const embeddingModels =
+    EMBEDDING_MODELS[embeddingProviderValue] ?? EMBEDDING_MODELS.openai ?? [];
+  const embeddingModelValue = (() => {
+    const raw = effectiveRouter?.embedding_model ?? null;
+    if (raw && embeddingModels.some((m) => m.value === raw)) return raw;
+    return embeddingModels[0]?.value ?? null;
+  })();
 
   const profilePromptDefaultContent = localSections.system.content ?? "";
 
@@ -3724,11 +3733,16 @@ export function PromptSettings({
                           }
 
                           if (value === "embeddings") {
+                            const provider = "openai";
+                            const modelOptions =
+                              EMBEDDING_MODELS[provider] ?? [];
+                            const modelValue = modelOptions[0]?.value ?? null;
+
                             saveRouter({
                               enabled: true,
                               strategy: "embeddings",
-                              embedding_provider: "openai",
-                              embedding_model: embeddingModelValue,
+                              embedding_provider: provider,
+                              embedding_model: modelValue,
                               pick_highest_score:
                                 effectiveRouter?.pick_highest_score ?? true,
                               similarity_threshold:
@@ -3795,8 +3809,88 @@ export function PromptSettings({
                     {routerStrategyValue === "embeddings" ? (
                       <>
                         <Text size="xs" c="dimmed">
-                          Uses your OpenAI API key. Configure it in API Keys.
+                          Uses your{" "}
+                          {embeddingProviderValue === "cohere"
+                            ? "Cohere"
+                            : "OpenAI"}{" "}
+                          API key. Configure it in API Keys.
                         </Text>
+
+                        <div className="settings-row">
+                          <div>
+                            <p className="settings-label">Embedding provider</p>
+                            <p className="settings-description">
+                              Provider used to embed the transcript and hints.
+                            </p>
+                          </div>
+                          <Select
+                            data={[
+                              { value: "openai", label: "OpenAI" },
+                              { value: "cohere", label: "Cohere" },
+                            ]}
+                            value={embeddingProviderValue}
+                            onChange={(value) => {
+                              if (!value) return;
+                              const models = EMBEDDING_MODELS[value] ?? [];
+                              const nextModel = models[0]?.value ?? null;
+                              const next = normalizeRouter(
+                                activeProfile.router
+                              );
+                              saveRouter({
+                                ...next,
+                                enabled: true,
+                                strategy: "embeddings",
+                                embedding_provider: value as any,
+                                embedding_model: nextModel,
+                              });
+                            }}
+                            withCheckIcon={false}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                minWidth: 200,
+                              },
+                            }}
+                          />
+                        </div>
+
+                        <div className="settings-row">
+                          <div>
+                            <p className="settings-label">Embedding model</p>
+                            <p className="settings-description">
+                              Model used to embed the transcript and hints.
+                            </p>
+                          </div>
+                          <Select
+                            data={embeddingModels}
+                            value={embeddingModelValue}
+                            onChange={(value) => {
+                              if (!value) return;
+                              const next = normalizeRouter(
+                                activeProfile.router
+                              );
+                              saveRouter({
+                                ...next,
+                                enabled: true,
+                                strategy: "embeddings",
+                                embedding_provider:
+                                  embeddingProviderValue as any,
+                                embedding_model: value,
+                              });
+                            }}
+                            withCheckIcon={false}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                minWidth: 240,
+                              },
+                            }}
+                          />
+                        </div>
 
                         <div className="settings-row">
                           <div>
@@ -3825,41 +3919,6 @@ export function PromptSettings({
                             color="gray"
                             size="md"
                             disabled={presets.length === 0}
-                          />
-                        </div>
-
-                        <div className="settings-row">
-                          <div>
-                            <p className="settings-label">Embedding model</p>
-                            <p className="settings-description">
-                              Model used to embed the transcript and hints.
-                            </p>
-                          </div>
-                          <Select
-                            data={openAiEmbeddingModels}
-                            value={embeddingModelValue}
-                            onChange={(value) => {
-                              if (!value) return;
-                              const next = normalizeRouter(
-                                activeProfile.router
-                              );
-                              saveRouter({
-                                ...next,
-                                enabled: true,
-                                strategy: "embeddings",
-                                embedding_provider: "openai",
-                                embedding_model: value,
-                              });
-                            }}
-                            withCheckIcon={false}
-                            styles={{
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                minWidth: 240,
-                              },
-                            }}
                           />
                         </div>
 

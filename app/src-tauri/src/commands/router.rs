@@ -5,7 +5,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -102,27 +102,35 @@ pub async fn cache_router_embeddings(
         .as_deref()
         .unwrap_or("openai")
         .to_string();
-    if embedding_provider != "openai" {
+    if embedding_provider != "openai" && embedding_provider != "cohere" {
         return Err(format!(
             "Embeddings provider '{}' not supported",
             embedding_provider
         ));
     }
 
+    let embedding_model_default = if embedding_provider == "cohere" {
+        "embed-english-v3.0"
+    } else {
+        "text-embedding-3-small"
+    };
     let embedding_model = router
         .embedding_model
         .as_deref()
-        .unwrap_or("text-embedding-3-small")
+        .unwrap_or(embedding_model_default)
         .to_string();
 
-    // Use OpenAI key from the central LLM API keys map.
+    // Use provider key from the central LLM API keys map.
     let api_key = config
         .llm_api_keys
-        .get("openai")
+        .get(embedding_provider.as_str())
         .map(|s| s.as_str())
         .unwrap_or("");
     if api_key.trim().is_empty() {
-        return Err("OpenAI API key missing (required for embeddings router)".to_string());
+        return Err(format!(
+            "{} API key missing (required for embeddings router)",
+            embedding_provider
+        ));
     }
 
     let proxy_settings: ProxySettings = config.proxy_settings.clone();
@@ -155,13 +163,24 @@ pub async fn cache_router_embeddings(
     };
 
     let hints = collect_candidate_hints(&profile);
+
+    // Cohere rate limits can be quite strict (especially on free tiers). To avoid
+    // sending one request per hint, batch Cohere embed calls.
+    const COHERE_BATCH_SIZE: usize = 32;
+
+    let mut cohere_pending: Vec<(String, String)> = Vec::new();
     for (_candidate_id, hint) in &hints {
         let hint = hint.trim();
         if hint.is_empty() {
             continue;
         }
 
-        let cache_key = format!("openai::{}::{}", embedding_model, hint);
+        let cache_key = if embedding_provider == "cohere" {
+            format!("cohere::{}::search_document::{}", embedding_model, hint)
+        } else {
+            // Back-compat: keep existing OpenAI cache key format.
+            format!("openai::{}::{}", embedding_model, hint)
+        };
 
         if !force_refresh {
             // If the embedding is already persisted, ensure it's also present in the in-memory cache.
@@ -187,16 +206,44 @@ pub async fn cache_router_embeddings(
             }
         }
 
+        if embedding_provider == "cohere" {
+            cohere_pending.push((cache_key, hint.to_string()));
+            continue;
+        }
+
         let embedding = crate::embeddings::openai::embed_text(&client, api_key, &embedding_model, hint)
             .await
             .map_err(|e| format!("Embeddings request failed: {e}"))?;
 
-        if embedding.is_empty() {
-            continue;
+        if !embedding.is_empty() {
+            new_entries.insert(cache_key, embedding);
+            cached_now += 1;
         }
+    }
 
-        new_entries.insert(cache_key, embedding);
-        cached_now += 1;
+    if embedding_provider == "cohere" && !cohere_pending.is_empty() {
+        for chunk in cohere_pending.chunks(COHERE_BATCH_SIZE) {
+            let cache_keys: Vec<String> = chunk.iter().map(|(k, _)| k.clone()).collect();
+            let texts: Vec<String> = chunk.iter().map(|(_, t)| t.clone()).collect();
+
+            let embeddings = crate::embeddings::cohere::embed_texts(
+                &client,
+                api_key,
+                &embedding_model,
+                "search_document",
+                &texts,
+            )
+            .await
+            .map_err(|e| format!("Embeddings request failed: {e}"))?;
+
+            for (cache_key, embedding) in cache_keys.into_iter().zip(embeddings.into_iter()) {
+                if embedding.is_empty() {
+                    continue;
+                }
+                new_entries.insert(cache_key, embedding);
+                cached_now += 1;
+            }
+        }
     }
 
     // Preload any embeddings we found in the persisted store but were missing from memory.

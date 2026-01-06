@@ -6,6 +6,11 @@ export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
     { value: "text-embedding-3-small", label: "Text Embedding 3 Small" },
     { value: "text-embedding-3-large", label: "Text Embedding 3 Large" },
   ],
+  cohere: [
+    { value: "embed-v4.0", label: "Embed v4" },
+    { value: "embed-multilingual-v3.0", label: "Embed Multilingual v3" },
+    { value: "embed-english-v3.0", label: "Embed English v3" },
+  ],
 };
 
 // Model options for each STT provider.
@@ -69,7 +74,10 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
   gemini: [
     // Gemini 3 (preview) - requested as explicit `models/...` IDs.
     { value: "models/gemini-3-pro-preview", label: "Gemini 3 Pro (Preview)" },
-    { value: "models/gemini-3-flash-preview", label: "Gemini 3 Flash (Preview)" },
+    {
+      value: "models/gemini-3-flash-preview",
+      label: "Gemini 3 Flash (Preview)",
+    },
 
     // Gemini 2.5 (stable)
     { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
@@ -85,6 +93,11 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
     { value: "claude-3-5-haiku-latest", label: "Claude 3.5 Haiku" },
     { value: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet" },
     { value: "claude-3-opus-latest", label: "Claude 3 Opus" },
+  ],
+  cohere: [
+    { value: "command-a-03-2025", label: "Command A" },
+    { value: "command-r-plus-08-2024", label: "Command R+ (08/2024)" },
+    { value: "command-r-08-2024", label: "Command R (08/2024)" },
   ],
   ollama: [], // Ollama models are dynamic based on what's installed
 };

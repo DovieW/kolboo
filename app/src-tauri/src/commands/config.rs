@@ -133,6 +133,7 @@ const LLM_PROVIDERS: &[(&str, &str, bool)] = &[
     ("openai", "OpenAI", false),
     ("gemini", "Google AI Studio", false),
     ("anthropic", "Anthropic", false),
+    ("cohere", "Cohere", false),
     ("groq", "Groq", false),
     ("ollama", "Ollama", true),
 ];
@@ -361,7 +362,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
     // Read all available LLM API keys (for per-profile provider overrides at runtime)
     let mut llm_api_keys: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for provider in ["openai", "anthropic", "groq", "gemini"] {
+    for provider in ["openai", "anthropic", "groq", "gemini", "cohere"] {
         let key_name = format!("{}_api_key", provider);
         let key: String = app
             .store("settings.json")

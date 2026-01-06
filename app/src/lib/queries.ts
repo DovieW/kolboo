@@ -1029,6 +1029,19 @@ export function useUpdateGroqFreeTier() {
   });
 }
 
+export function useUpdateCohereFreeTier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateCohereFreeTier(enabled);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateAssemblyAiFreeTier() {
   const queryClient = useQueryClient();
   return useMutation({

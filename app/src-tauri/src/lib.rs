@@ -158,6 +158,8 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     set_default("stt_provider", json!("groq"), false);
     // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
     set_default("groq_free_tier", json!(true), false);
+    // Cohere toggle (used by stats filtering).
+    set_default("cohere_free_tier", json!(true), false);
     // AssemblyAI and Speechmatics toggles (used by stats filtering).
     set_default("assemblyai_free_tier", json!(true), false);
     set_default("speechmatics_free_tier", json!(true), false);
@@ -2717,7 +2719,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     // Read all available LLM API keys (for per-profile provider overrides at runtime)
     let mut llm_api_keys: HashMap<String, String> = HashMap::new();
-    for provider in ["openai", "anthropic", "groq", "gemini"] {
+    for provider in ["openai", "anthropic", "groq", "gemini", "cohere"] {
         let key_name = format!("{}_api_key", provider);
         let key: String = get_setting_from_store(app, &key_name, String::new());
         if !key.is_empty() {

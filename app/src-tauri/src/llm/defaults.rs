@@ -9,6 +9,7 @@ pub fn default_llm_model_for_provider(provider: &str) -> Option<&'static str> {
         "openai" => Some("gpt-4o-mini"),
         "anthropic" => Some("claude-3-haiku-20240307"),
         "groq" => Some("llama-3.3-70b-versatile"),
+        "cohere" => Some("command-r-08-2024"),
         "gemini" => Some("gemini-2.5-flash"),
         "ollama" => Some("llama3.2"),
         _ => None,

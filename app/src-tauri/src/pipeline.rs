@@ -18,8 +18,8 @@
 use crate::audio_capture::{AudioCapture, AudioCaptureDiagnostics, AudioCaptureError, AudioCaptureEvent, AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats, VadAutoStopConfig};
 use crate::embeddings;
 use crate::llm::{
-    format_text, AnthropicLlmProvider, GeminiLlmProvider, GroqLlmProvider, LlmConfig, LlmError,
-    LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
+    format_text, AnthropicLlmProvider, CohereLlmProvider, GeminiLlmProvider, GroqLlmProvider,
+    LlmConfig, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
 };
 use crate::request_log::RequestLogStore;
 use crate::settings::{IntentRouterStrategy, ProxySettings};
@@ -200,7 +200,8 @@ async fn route_preset_id_with_embeddings(
         .embedding_provider
         .as_deref()
         .unwrap_or("openai");
-    if embedding_provider != "openai" {
+
+    if embedding_provider != "openai" && embedding_provider != "cohere" {
         log::warn!(
             "Intent router: embeddings provider '{}' not supported; routing skipped",
             embedding_provider
@@ -208,18 +209,27 @@ async fn route_preset_id_with_embeddings(
         return None;
     }
 
+    let embedding_model_default = if embedding_provider == "cohere" {
+        "embed-english-v3.0"
+    } else {
+        "text-embedding-3-small"
+    };
     let embedding_model = router
         .embedding_model
         .as_deref()
-        .unwrap_or("text-embedding-3-small");
+        .unwrap_or(embedding_model_default);
     let pick_highest_score = router.pick_highest_score;
     let threshold = router.similarity_threshold.unwrap_or(0.78);
     let margin = router.similarity_margin.unwrap_or(0.05);
 
-    let api_key = llm_api_keys.get("openai").map(|s| s.as_str()).unwrap_or("");
+    let api_key = llm_api_keys
+        .get(embedding_provider)
+        .map(|s| s.as_str())
+        .unwrap_or("");
     if api_key.trim().is_empty() {
         log::warn!(
-            "Intent router: OpenAI API key missing; embeddings routing skipped"
+            "Intent router: {} API key missing; embeddings routing skipped",
+            embedding_provider
         );
         return None;
     }
@@ -297,14 +307,24 @@ async fn route_preset_id_with_embeddings(
         (router_request_json, router_response_json)
     }
 
-    let transcript_embedding = match embeddings::openai::embed_text_with_debug(
-        &client,
-        api_key,
-        embedding_model,
-        transcript,
-    )
-    .await
-    {
+    let transcript_embedding_result: Result<(Vec<f32>, JsonValue, JsonValue), String> =
+        if embedding_provider == "cohere" {
+            embeddings::cohere::embed_text_with_debug(
+                &client,
+                api_key,
+                embedding_model,
+                "search_query",
+                transcript,
+            )
+            .await
+            .map_err(|e| e.to_string())
+        } else {
+            embeddings::openai::embed_text_with_debug(&client, api_key, embedding_model, transcript)
+                .await
+                .map_err(|e| e.to_string())
+        };
+
+    let transcript_embedding = match transcript_embedding_result {
         Ok((v, req, resp)) => {
             push_call(
                 &mut call_id,
@@ -325,13 +345,17 @@ async fn route_preset_id_with_embeddings(
             let req = serde_json::json!({
                 "provider": embedding_provider,
                 "model": embedding_model,
+                "input_type": if embedding_provider == "cohere" {
+                    JsonValue::String("search_query".to_string())
+                } else {
+                    JsonValue::Null
+                },
                 "input_preview": preview,
                 "input_len": len,
                 "input_truncated": truncated,
             });
 
-            let err_json = serde_json::from_str::<JsonValue>(&e.to_string())
-                .unwrap_or(JsonValue::String(e.to_string()));
+            let err_json = serde_json::from_str::<JsonValue>(&e).unwrap_or(JsonValue::String(e));
             let resp = serde_json::json!({ "error": err_json });
             push_call(
                 &mut call_id,
@@ -404,7 +428,12 @@ async fn route_preset_id_with_embeddings(
         let mut candidate_best: Option<f32> = None;
 
         for hint in hints {
-            let cache_key = format!("openai::{}::{}", embedding_model, hint);
+            let cache_key = if embedding_provider == "cohere" {
+                format!("cohere::{}::search_document::{}", embedding_model, hint)
+            } else {
+                // Back-compat: keep existing OpenAI cache key format.
+                format!("openai::{}::{}", embedding_model, hint)
+            };
 
             let cached_hint_embedding: Vec<f32> = {
                 if let Ok(cache) = embedding_cache.lock() {
@@ -423,6 +452,11 @@ async fn route_preset_id_with_embeddings(
                 let req = serde_json::json!({
                     "provider": embedding_provider,
                     "model": embedding_model,
+                    "input_type": if embedding_provider == "cohere" {
+                        JsonValue::String("search_document".to_string())
+                    } else {
+                        JsonValue::Null
+                    },
                     "cache_key": cache_key,
                     "input_preview": preview,
                     "input_len": len,
@@ -444,14 +478,23 @@ async fn route_preset_id_with_embeddings(
                 );
                 cached_hint_embedding
             } else {
-                match embeddings::openai::embed_text_with_debug(
-                    &client,
-                    api_key,
-                    embedding_model,
-                    &hint,
-                )
-                .await
-                {
+                let embed_result: Result<(Vec<f32>, JsonValue, JsonValue), String> = if embedding_provider == "cohere" {
+                    embeddings::cohere::embed_text_with_debug(
+                        &client,
+                        api_key,
+                        embedding_model,
+                        "search_document",
+                        &hint,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())
+                } else {
+                    embeddings::openai::embed_text_with_debug(&client, api_key, embedding_model, &hint)
+                        .await
+                        .map_err(|e| e.to_string())
+                };
+
+                match embed_result {
                     Ok((v, req, resp)) => {
                         push_call(
                             &mut call_id,
@@ -479,12 +522,17 @@ async fn route_preset_id_with_embeddings(
                         let req = serde_json::json!({
                             "provider": embedding_provider,
                             "model": embedding_model,
+                            "input_type": if embedding_provider == "cohere" {
+                                JsonValue::String("search_document".to_string())
+                            } else {
+                                JsonValue::Null
+                            },
                             "input_preview": preview,
                             "input_len": len,
                             "input_truncated": truncated,
                         });
-                        let err_json = serde_json::from_str::<JsonValue>(&e.to_string())
-                            .unwrap_or(JsonValue::String(e.to_string()));
+                        let err_json = serde_json::from_str::<JsonValue>(&e)
+                            .unwrap_or_else(|_| JsonValue::String(e.clone()));
                         let resp = serde_json::json!({ "error": err_json });
                         push_call(
                             &mut call_id,
@@ -1417,6 +1465,17 @@ fn create_llm_provider(
                 OllamaLlmProvider::with_client(client.clone(), config.ollama_url.clone(), config.model.clone())
                     .with_timeout(config.timeout)
                     .with_request_log_store(request_log_store.clone()),
+            )
+        }
+        "cohere" => {
+            Arc::new(
+                CohereLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone()),
             )
         }
         _ => {

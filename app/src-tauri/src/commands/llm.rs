@@ -2,8 +2,8 @@
 
 use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::llm::{
-    format_text, AnthropicLlmProvider, GroqLlmProvider, LlmProvider, OllamaLlmProvider,
-    OpenAiLlmProvider, GeminiLlmProvider,
+    format_text, AnthropicLlmProvider, CohereLlmProvider, GeminiLlmProvider, GroqLlmProvider,
+    LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
 };
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
@@ -122,6 +122,14 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
                     .with_structured_outputs(false),
             )
         }
+        "cohere" => {
+            let provider = if let Some(model) = &config.model {
+                CohereLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CohereLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(provider.with_timeout(config.timeout))
+        }
         "ollama" => {
             let provider = OllamaLlmProvider::with_url(
                 config
@@ -192,6 +200,18 @@ fn create_llm_provider_without_timeout(
                     .with_request_log_store(request_log_store.clone())
                     .with_thinking_budget(config.gemini_thinking_budget)
                     .with_thinking_level(config.gemini_thinking_level.clone()),
+            )
+        }
+        "cohere" => {
+            let provider = if let Some(model) = &config.model {
+                CohereLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CohereLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
             )
         }
         "ollama" => {
@@ -327,6 +347,17 @@ pub fn get_llm_providers() -> Vec<LlmProviderInfo> {
                 "llama-3.1-8b-instant".to_string(),
                 "openai/gpt-oss-120b".to_string(),
                 "openai/gpt-oss-20b".to_string(),
+            ],
+        },
+        LlmProviderInfo {
+            id: "cohere".to_string(),
+            name: "Cohere".to_string(),
+            requires_api_key: true,
+            default_model: "command-r-08-2024".to_string(),
+            models: vec![
+                "command-a-03-2025".to_string(),
+                "command-r-plus-08-2024".to_string(),
+                "command-r-08-2024".to_string(),
             ],
         },
         LlmProviderInfo {
@@ -1201,11 +1232,12 @@ mod tests {
     #[test]
     fn test_get_llm_providers() {
         let providers = get_llm_providers();
-        assert_eq!(providers.len(), 5);
+        assert_eq!(providers.len(), 6);
         assert!(providers.iter().any(|p| p.id == "openai"));
         assert!(providers.iter().any(|p| p.id == "gemini"));
         assert!(providers.iter().any(|p| p.id == "anthropic"));
         assert!(providers.iter().any(|p| p.id == "groq"));
+        assert!(providers.iter().any(|p| p.id == "cohere"));
         assert!(providers.iter().any(|p| p.id == "ollama"));
     }
 
