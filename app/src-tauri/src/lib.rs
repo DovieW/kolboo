@@ -1391,10 +1391,11 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
         .and_then(|store| store.with_current(|log| log.id.clone()));
 
     // If pipeline isn't in a cancellable state, ignore.
-    let can_cancel = app
-        .try_state::<pipeline::SharedPipeline>()
-        .map(|p| p.state().can_cancel())
-        .unwrap_or(false);
+    // Also capture the pipeline state so we can tailor UX (e.g. avoid double "stop" cues
+    // when cancelling during transcription).
+    let pipeline = app.try_state::<pipeline::SharedPipeline>();
+    let pipeline_state = pipeline.as_ref().map(|p| p.state());
+    let can_cancel = pipeline_state.map(|s| s.can_cancel()).unwrap_or(false);
 
     if !can_cancel {
         // Defensive: if we somehow still have the shortcut registered while idle, disable it.
@@ -1431,7 +1432,13 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
         }
     }
 
-    if sound_enabled {
+    // Never play the stop cue for Escape-to-cancel.
+    // (User expectation: Escape is a silent abort, not a "stop recording" confirmation.)
+    // For other cancel sources, we keep the existing behavior and only play the stop cue
+    // if we're cancelling *during recording*.
+    let should_play_stop_cue = source != "Escape"
+        && matches!(pipeline_state, Some(pipeline::PipelineState::Recording));
+    if sound_enabled && should_play_stop_cue {
         let audio_cue_raw: String =
             get_setting_from_store(app, "audio_cue", "kolboo".to_string());
         let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
@@ -1456,7 +1463,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     }
 
     // Cancel pipeline
-    if let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() {
+    if let Some(pipeline) = pipeline {
         pipeline.cancel();
     }
 
