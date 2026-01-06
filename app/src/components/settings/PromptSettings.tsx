@@ -1716,7 +1716,7 @@ export function PromptSettings({
       <Divider
         mt="xs"
         mb="xs"
-        label="Speech-to-text"
+        label="Transcribe"
         labelPosition="left"
         styles={{
           root: {
@@ -2223,7 +2223,7 @@ export function PromptSettings({
       <Divider
         mt="md"
         mb="xs"
-        label="Language model"
+        label="Rewrite"
         labelPosition="left"
         styles={{
           root: {
