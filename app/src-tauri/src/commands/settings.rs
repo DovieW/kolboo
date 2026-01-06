@@ -123,12 +123,24 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
         if is_windows_modifier_only_hotkey(&hk) {
             // handled by Windows hook (not tauri-plugin-global-shortcut)
         } else {
-            shortcuts.push(hk.to_shortcut_or_default(HotkeyConfig::default_toggle));
+            match hk.to_shortcut() {
+                Ok(sc) => shortcuts.push(sc),
+                Err(e) => log::warn!(
+                    "Invalid toggle hotkey in settings store ({}); treating as disabled",
+                    e
+                ),
+            }
         }
 
         #[cfg(not(all(desktop, target_os = "windows")))]
         {
-            shortcuts.push(hk.to_shortcut_or_default(HotkeyConfig::default_toggle));
+            match hk.to_shortcut() {
+                Ok(sc) => shortcuts.push(sc),
+                Err(e) => log::warn!(
+                    "Invalid toggle hotkey in settings store ({}); treating as disabled",
+                    e
+                ),
+            }
         }
     }
     if let Some(hk) = hold_hotkey {

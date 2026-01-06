@@ -3002,6 +3002,11 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+    #[cfg(all(desktop, target_os = "windows"))]
+    fn is_windows_modifier_only_hotkey(hk: &HotkeyConfig) -> bool {
+        hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight")
+    }
+
     // Read hotkeys from store.
     // - missing => default
     // - null => disabled
@@ -3012,21 +3017,40 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     let paste_last_hotkey =
         get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
 
-    // Convert to shortcut strings with validation (fall back to defaults if invalid).
+    // Convert to shortcut strings with validation.
+    //
+    // Windows-only note:
+    // - Modifier-only hotkeys (e.g. AltRight) are handled by the low-level hook
+    //   in windows_modifier_hotkeys.rs and are NOT registered with
+    //   tauri-plugin-global-shortcut.
+    //
+    // We must not fall back to a different key (like the historical F3) here,
+    // otherwise both keys can end up toggling recording.
     // NOTE: We intentionally register each shortcut individually so that a conflict
     // (e.g. another app already using Ctrl+F3) doesn't prevent the app from starting.
-    let toggle_shortcut_str: Option<String> = toggle_hotkey.map(|hk| {
-        hk.to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .unwrap_or_else(|e| {
+    let toggle_shortcut_str: Option<String> = toggle_hotkey.and_then(|hk| {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            return None;
+        }
+
+        match hk.to_shortcut() {
+            Ok(_) => Some(hk.to_shortcut_string()),
+            Err(e) => {
                 log::warn!(
-                    "Invalid toggle hotkey in settings store ({}); falling back to default",
+                    "Invalid toggle hotkey in settings store ({}); treating as disabled",
                     e
                 );
-                HotkeyConfig::default_toggle().to_shortcut_string()
-            })
+                None
+            }
+        }
     });
     let hold_shortcut_str: Option<String> = hold_hotkey.and_then(|hk| {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            return None;
+        }
+
         hk.to_shortcut()
             .map(|_| hk.to_shortcut_string())
             .map_err(|e| {
@@ -3038,6 +3062,11 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
             .ok()
     });
     let paste_last_shortcut_str: Option<String> = paste_last_hotkey.and_then(|hk| {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            return None;
+        }
+
         hk.to_shortcut()
             .map(|_| hk.to_shortcut_string())
             .map_err(|e| {

@@ -938,9 +938,12 @@ function normalizeRequestLogsRetentionDays(value: unknown): number {
 
 const DEFAULT_HOTKEY_MODIFIERS: string[] = [];
 
+const IS_WINDOWS =
+  typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+
 export const defaultToggleHotkey: HotkeyConfig = {
   modifiers: DEFAULT_HOTKEY_MODIFIERS,
-  key: "F3",
+  key: IS_WINDOWS ? "AltRight" : "F3",
 };
 
 export const defaultHoldHotkey: HotkeyConfig | null = null;

@@ -8,8 +8,14 @@ import type { HotkeyConfig } from "./tauri";
 /** Default modifiers for the toggle hotkey (none) */
 export const DEFAULT_HOTKEY_MODIFIERS: string[] = [];
 
-/** Default key for toggle recording (F3) */
-export const DEFAULT_TOGGLE_KEY = "F3";
+const IS_WINDOWS =
+	typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+
+/** Default key for toggle recording.
+ * - Windows: modifier-only hotkey (Right Alt / AltGr)
+ * - Other: F3 (portable, supported by global shortcut plugin)
+ */
+export const DEFAULT_TOGGLE_KEY = IS_WINDOWS ? "AltRight" : "F3";
 
 // ============================================================================
 

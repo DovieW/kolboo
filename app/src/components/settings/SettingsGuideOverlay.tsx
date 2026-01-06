@@ -65,6 +65,11 @@ export function SettingsGuideOverlay({
   const { data: settings } = useSettings();
   const toggleHotkey = settings?.toggle_hotkey ?? null;
 
+  const recommendedToggleKeyLabel =
+    typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
+      ? "Right Alt"
+      : "F3";
+
   const welcomeTimersRef = useRef<number[]>([]);
 
   const [phase, setPhase] = useState<Phase>("welcome");
@@ -446,7 +451,8 @@ export function SettingsGuideOverlay({
                     <>
                       Your toggle recording shortcut is{" "}
                       <HotkeyCombo config={null} />. Set one in Settings →
-                      Hotkeys (recommended: <Kbd>F3</Kbd>), then press it once
+                      Hotkeys (recommended: <Kbd>{recommendedToggleKeyLabel}</Kbd>),
+                      then press it once
                       to start recording and again to stop.
                     </>
                   )}
