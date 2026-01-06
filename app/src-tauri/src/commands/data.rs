@@ -159,6 +159,7 @@ pub fn delete_all_api_keys(app: AppHandle) -> Result<(), String> {
     // Known provider keys. (Local providers generally don't use API keys.)
     for key in [
         "openai_api_key",
+        "cerebras_api_key",
         "aquavoice_api_key",
         "groq_api_key",
         "deepgram_api_key",

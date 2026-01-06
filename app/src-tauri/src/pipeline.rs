@@ -18,8 +18,8 @@
 use crate::audio_capture::{AudioCapture, AudioCaptureDiagnostics, AudioCaptureError, AudioCaptureEvent, AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats, VadAutoStopConfig};
 use crate::embeddings;
 use crate::llm::{
-    format_text, AnthropicLlmProvider, CohereLlmProvider, GeminiLlmProvider, GroqLlmProvider,
-    LlmConfig, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
+    format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider, GeminiLlmProvider,
+    GroqLlmProvider, LlmConfig, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
 };
 use crate::request_log::RequestLogStore;
 use crate::settings::{IntentRouterStrategy, ProxySettings};
@@ -1434,6 +1434,18 @@ fn create_llm_provider(
         .map_err(|e| PipelineError::Config(format!("Failed to create HTTP client: {}", e)))?;
 
     let provider: Arc<dyn LlmProvider> = match config.provider.as_str() {
+        "cerebras" => {
+            Arc::new(
+                CerebrasLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone())
+                .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+            )
+        }
         "anthropic" => {
             Arc::new(
                 AnthropicLlmProvider::with_client(

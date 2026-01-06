@@ -7,6 +7,7 @@
 pub fn default_llm_model_for_provider(provider: &str) -> Option<&'static str> {
     match provider {
         "openai" => Some("gpt-4o-mini"),
+        "cerebras" => Some("llama-3.3-70b"),
         "anthropic" => Some("claude-3-haiku-20240307"),
         "groq" => Some("llama-3.3-70b-versatile"),
         "cohere" => Some("command-r-08-2024"),

@@ -52,6 +52,17 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 
 // Model options for each LLM provider.
 export const LLM_MODELS: Record<string, ModelOption[]> = {
+  cerebras: [
+    { value: "llama-3.3-70b", label: "Llama 3.3 70B" },
+    { value: "llama3.1-8b", label: "Llama 3.1 8B" },
+    { value: "gpt-oss-120b", label: "GPT-OSS 120B" },
+    { value: "qwen-3-32b", label: "Qwen 3 32B" },
+    {
+      value: "qwen-3-235b-a22b-instruct-2507",
+      label: "Qwen 3 235B Instruct (Preview)",
+    },
+    { value: "zai-glm-4.6", label: "GLM 4.6 (Preview)" },
+  ],
   groq: [
     { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
     { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" },

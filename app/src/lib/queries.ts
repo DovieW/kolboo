@@ -1040,6 +1040,19 @@ export function useUpdateGroqFreeTier() {
   });
 }
 
+export function useUpdateCerebrasFreeTier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateCerebrasFreeTier(enabled);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateCohereFreeTier() {
   const queryClient = useQueryClient();
   return useMutation({

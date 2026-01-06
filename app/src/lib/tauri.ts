@@ -591,6 +591,9 @@ export interface AppSettings {
   llm_model: string | null;
 
   // Provider-specific knobs
+  // When true, treat Cerebras usage as free-tier for stats filtering.
+  cerebras_free_tier: boolean;
+
   // When true, treat Groq usage as free-tier (UI-only for now; kept in settings for future backend usage).
   groq_free_tier: boolean;
 
@@ -1427,6 +1430,7 @@ export const tauriAPI = {
       proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
+      cerebras_free_tier: (await store.get<boolean>("cerebras_free_tier")) ?? true,
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
       cohere_free_tier: (await store.get<boolean>("cohere_free_tier")) ?? true,
       assemblyai_free_tier:
@@ -1737,6 +1741,12 @@ export const tauriAPI = {
   async updateSTTProvider(provider: string | null): Promise<void> {
     const store = await getStore();
     await store.set("stt_provider", provider);
+    await store.save();
+  },
+
+  async updateCerebrasFreeTier(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("cerebras_free_tier", !!enabled);
     await store.save();
   },
 

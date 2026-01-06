@@ -5,6 +5,7 @@
 //! configurable prompts to clean up and format transcribed speech.
 
 mod anthropic;
+mod cerebras;
 mod cohere;
 mod defaults;
 mod gemini;
@@ -14,6 +15,7 @@ mod openai;
 mod prompts;
 
 pub use anthropic::AnthropicLlmProvider;
+pub use cerebras::CerebrasLlmProvider;
 pub use cohere::CohereLlmProvider;
 pub use gemini::GeminiLlmProvider;
 pub use groq::GroqLlmProvider;

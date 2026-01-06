@@ -20,6 +20,7 @@ import {
 import {
   useSettings,
   useUpdateAssemblyAiFreeTier,
+  useUpdateCerebrasFreeTier,
   useUpdateCohereFreeTier,
   useUpdateGroqFreeTier,
   useUpdateSpeechmaticsFreeTier,
@@ -43,6 +44,20 @@ const API_KEYS: ApiKeyConfig[] = [
     placeholder: "Enter API key",
     storeKey: "groq_api_key",
     getKeyUrl: "https://console.groq.com/keys",
+  },
+  {
+    id: "cerebras",
+    label: "Cerebras",
+    placeholder: "Enter API key",
+    storeKey: "cerebras_api_key",
+    getKeyUrl: "https://cloud.cerebras.ai/platform",
+  },
+  {
+    id: "cohere",
+    label: "Cohere",
+    placeholder: "Enter API key",
+    storeKey: "cohere_api_key",
+    getKeyUrl: "https://dashboard.cohere.com/api-keys",
   },
   {
     id: "assemblyai",
@@ -78,13 +93,6 @@ const API_KEYS: ApiKeyConfig[] = [
     placeholder: "Enter API key",
     storeKey: "openai_api_key",
     getKeyUrl: "https://platform.openai.com/api-keys",
-  },
-  {
-    id: "cohere",
-    label: "Cohere",
-    placeholder: "Enter API key",
-    storeKey: "cohere_api_key",
-    getKeyUrl: "https://dashboard.cohere.com/api-keys",
   },
   {
     id: "deepgram",
@@ -177,6 +185,7 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 
   const { data: settings } = useSettings();
   const updateGroqFreeTier = useUpdateGroqFreeTier();
+  const updateCerebrasFreeTier = useUpdateCerebrasFreeTier();
   const updateAssemblyAiFreeTier = useUpdateAssemblyAiFreeTier();
   const updateSpeechmaticsFreeTier = useUpdateSpeechmaticsFreeTier();
   const updateCohereFreeTier = useUpdateCohereFreeTier();
@@ -255,6 +264,30 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
               title="Assume Groq calls cost $0 for stats"
             >
               Assume Groq calls cost $0 for stats
+            </Text>
+          </Group>
+        )}
+        {config.id === "cerebras" && (
+          <Group gap={10} align="center" wrap="nowrap" mt={2}>
+            <Switch
+              size="sm"
+              checked={settings?.cerebras_free_tier ?? true}
+              onChange={(e) =>
+                updateCerebrasFreeTier.mutate(e.currentTarget.checked)
+              }
+              aria-label="Cerebras free tier"
+            />
+            <Text size="xs" c="var(--text-secondary)" fw={600}>
+              Free tier
+            </Text>
+            <Text
+              size="xs"
+              c="var(--text-muted)"
+              className="settings-description--single-line"
+              style={{ flex: 1 }}
+              title="Assume Cerebras calls cost $0 for stats"
+            >
+              Assume Cerebras calls cost $0 for stats
             </Text>
           </Group>
         )}

@@ -2,8 +2,8 @@
 
 use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::llm::{
-    format_text, AnthropicLlmProvider, CohereLlmProvider, GeminiLlmProvider, GroqLlmProvider,
-    LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
+    format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider, GeminiLlmProvider,
+    GroqLlmProvider, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
 };
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
@@ -87,6 +87,18 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
     // This is used for one-off ad-hoc completions (e.g. History "Analyze transcripts" → "Send to LLM").
     // We intentionally disable rewrite-oriented structured outputs so the model can return free-form text.
     match config.provider.as_str() {
+        "cerebras" => {
+            let provider = if let Some(model) = &config.model {
+                CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CerebrasLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .with_timeout(config.timeout)
+                    .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+            )
+        }
         "anthropic" => {
             let provider = if let Some(model) = &config.model {
                 AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
@@ -162,6 +174,19 @@ fn create_llm_provider_without_timeout(
     request_log_store: Option<RequestLogStore>,
 ) -> Arc<dyn LlmProvider> {
     match config.provider.as_str() {
+        "cerebras" => {
+            let provider = if let Some(model) = &config.model {
+                CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CerebrasLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
+                    .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+            )
+        }
         "anthropic" => {
             let provider = if let Some(model) = &config.model {
                 AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
@@ -286,6 +311,20 @@ pub struct DefaultPromptsResponse {
 #[tauri::command]
 pub fn get_llm_providers() -> Vec<LlmProviderInfo> {
     vec![
+        LlmProviderInfo {
+            id: "cerebras".to_string(),
+            name: "Cerebras".to_string(),
+            requires_api_key: true,
+            default_model: "llama-3.3-70b".to_string(),
+            models: vec![
+                "llama-3.3-70b".to_string(),
+                "llama3.1-8b".to_string(),
+                "gpt-oss-120b".to_string(),
+                "qwen-3-32b".to_string(),
+                "qwen-3-235b-a22b-instruct-2507".to_string(),
+                "zai-glm-4.6".to_string(),
+            ],
+        },
         LlmProviderInfo {
             id: "openai".to_string(),
             name: "OpenAI".to_string(),
