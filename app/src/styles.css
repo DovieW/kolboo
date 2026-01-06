@@ -150,12 +150,13 @@ a:focus-visible {
 
 .sidebar-header {
 	padding: 0 12px 24px;
-	border-bottom: 1px solid var(--border-subtle);
-	margin-bottom: 16px;
+	border-bottom: none;
+	margin-bottom: 10px;
 }
 
 .sidebar-logo {
 	display: flex;
+	margin-top: 10px;
 	align-items: center;
 	justify-content: center;
 	color: var(--accent-primary);
