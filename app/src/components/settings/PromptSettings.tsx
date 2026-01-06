@@ -315,7 +315,7 @@ export function PromptSettings({
       return;
     }
 
-    setEditingPresetId(presets[0]?.id ?? null);
+    setEditingPresetId(presets[0]?.id ?? EDIT_DEFAULT_PRESET);
   }, [activeProfileId, activeProfile, presets, editingPresetId]);
 
   useEffect(() => {
@@ -3430,60 +3430,59 @@ export function PromptSettings({
 
                     {presets.length === 0 ? (
                       <Text size="sm" c="dimmed">
-                        No presets yet. Add one to enable routing and quick
+                        No additional presets yet. You can still configure the
+                        Default preset below; add presets for routing and quick
                         switching.
                       </Text>
                     ) : null}
 
-                    {presets.length > 0 ? (
-                      <>
-                        <Group
-                          justify="space-between"
-                          align="flex-end"
-                          wrap="wrap"
-                          gap={12}
-                        >
-                          <div style={{ flex: 1, minWidth: 260 }}>
-                            <Text size="xs" c="dimmed" mb={4}>
-                              Editing preset
-                            </Text>
-                            <Select
-                              data={[
-                                {
-                                  value: EDIT_DEFAULT_PRESET,
-                                  label: "Default",
-                                },
-                                ...presetSelectOptions,
-                              ]}
-                              value={editingPresetId}
-                              onChange={(value) => {
-                                setEditingPresetId(value ?? null);
-                              }}
-                              placeholder="Select preset"
-                              withCheckIcon={false}
-                              styles={{
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                },
-                              }}
-                            />
-                          </div>
-
-                          {selectedPreset ? (
-                            <Button
-                              color="red"
-                              variant="light"
-                              onClick={() => deletePreset(selectedPreset.id)}
-                            >
-                              Delete preset
-                            </Button>
-                          ) : null}
-                        </Group>
+                      <Group
+                        justify="space-between"
+                        align="flex-end"
+                        wrap="wrap"
+                        gap={12}
+                      >
+                        <div style={{ flex: 1, minWidth: 260 }}>
+                          <Text size="xs" c="dimmed" mb={4}>
+                            Editing preset
+                          </Text>
+                          <Select
+                            data={[
+                              {
+                                value: EDIT_DEFAULT_PRESET,
+                                label: "Default",
+                              },
+                              ...presetSelectOptions,
+                            ]}
+                            value={editingPresetId ?? EDIT_DEFAULT_PRESET}
+                            onChange={(value) => {
+                              setEditingPresetId(value ?? EDIT_DEFAULT_PRESET);
+                            }}
+                            placeholder="Default"
+                            withCheckIcon={false}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                              },
+                            }}
+                          />
+                        </div>
 
                         {selectedPreset ? (
-                          <>
+                          <Button
+                            color="red"
+                            variant="light"
+                            onClick={() => deletePreset(selectedPreset.id)}
+                          >
+                            Delete preset
+                          </Button>
+                        ) : null}
+                      </Group>
+
+                      {selectedPreset ? (
+                        <>
                             <TextInput
                               label="Preset name"
                               value={localPresetName}
@@ -4209,10 +4208,9 @@ export function PromptSettings({
                                 </Accordion.Item>
                               </Accordion>
                             </div>
-                          </>
-                        ) : null}
-                      </>
-                    ) : null}
+                        </>
+
+                      ) : null}
                   </div>
                 </Accordion.Panel>
               </Accordion.Item>
