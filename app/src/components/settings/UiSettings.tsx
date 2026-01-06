@@ -176,7 +176,7 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
   }, [audioCueFromSettings]);
 
   const globalPlayingAudioHandling: PlayingAudioHandling =
-    settings?.playing_audio_handling ?? "mute";
+    settings?.playing_audio_handling ?? "none";
   const playingAudioHandling = isProfileScope
     ? getProfileValue(
         profile?.playing_audio_handling,
@@ -185,6 +185,13 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     : globalPlayingAudioHandling;
   const playingAudioHandlingInheriting =
     isProfileScope && isInheriting(profile?.playing_audio_handling);
+
+  const cueDisabledByMuteHandling =
+    playingAudioHandling === "mute" || playingAudioHandling === "mute_and_pause";
+
+  const cueDisabledReason = cueDisabledByMuteHandling
+    ? "Sound cues are disabled while Playing audio handling includes mute. Choose 'none' or 'pause' to enable cues."
+    : null;
 
   const globalOverlayMode: OverlayMode =
     settings?.overlay_mode ?? "recording_only";
@@ -281,6 +288,7 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
   };
 
   const handlePreviewAudioCue = async () => {
+    if (cueDisabledByMuteHandling) return;
     try {
       await invoke("play_audio_cue_preview", { cue: audioCueDropdownValue });
     } catch (err) {
@@ -442,42 +450,56 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Tooltip label="Preview (start + stop)" withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              disabled={isLoading}
-              onMouseDown={(e) => {
-                // Prevent focusing/opening the select when clicking the button.
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onClick={handlePreviewAudioCue}
-            >
-              <Play size={14} style={{ opacity: 0.65 }} />
-            </ActionIcon>
-          </Tooltip>
           <Tooltip
-            label={GLOBAL_ONLY_TOOLTIP}
-            disabled={!isProfileScope}
+            label={cueDisabledReason ?? "Preview (start + stop)"}
             withArrow
           >
-            <Select
-              data={AUDIO_CUE_OPTIONS}
-              value={audioCueDropdownValue}
-              onChange={handleAudioCueChange}
-              disabled={isLoading || isProfileScope}
-              withCheckIcon={false}
-              styles={{
-                input: {
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 180,
-                },
-              }}
-            />
+            {/* Wrap so tooltip still shows even when the button is disabled */}
+            <span style={{ display: "inline-flex" }}>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                disabled={isLoading || cueDisabledByMuteHandling}
+                onMouseDown={(e) => {
+                  // Prevent focusing/opening the select when clicking the button.
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={handlePreviewAudioCue}
+              >
+                <Play size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </span>
+          </Tooltip>
+
+          <Tooltip
+            label={
+              isProfileScope
+                ? GLOBAL_ONLY_TOOLTIP
+                : cueDisabledReason ?? ""
+            }
+            disabled={!(isProfileScope || cueDisabledByMuteHandling)}
+            withArrow
+          >
+            {/* Wrap so tooltip still shows even when the select is disabled */}
+            <div style={{ display: "inline-block" }}>
+              <Select
+                data={AUDIO_CUE_OPTIONS}
+                value={audioCueDropdownValue}
+                onChange={handleAudioCueChange}
+                disabled={isLoading || isProfileScope || cueDisabledByMuteHandling}
+                withCheckIcon={false}
+                styles={{
+                  input: {
+                    backgroundColor: "var(--bg-elevated)",
+                    borderColor: "var(--border-default)",
+                    color: "var(--text-primary)",
+                    minWidth: 180,
+                  },
+                }}
+              />
+            </div>
           </Tooltip>
         </div>
       </div>

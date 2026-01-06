@@ -221,7 +221,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("main_window_close_behavior", json!("minimize_to_tray"), false);
     dirty |= set_default("output_mode", json!("paste"), false);
     dirty |= set_default("output_hit_enter", json!(false), false);
-    dirty |= set_default("playing_audio_handling", json!("mute"), false);
+    dirty |= set_default("playing_audio_handling", json!("none"), false);
     dirty |= set_default("sound_enabled", json!(true), false);
     dirty |= set_default("rewrite_llm_enabled", json!(false), false);
 
@@ -430,7 +430,7 @@ impl PlayingAudioHandling {
             "pause" => Self::Pause,
             "mute_and_pause" => Self::MuteAndPause,
             // Unknown values: fall back to the default.
-            _ => Self::Mute,
+            _ => Self::None,
         }
     }
 
@@ -454,14 +454,14 @@ fn get_playing_audio_handling(app: &AppHandle) -> PlayingAudioHandling {
     }
 
     // Legacy fallback: auto_mute_audio boolean.
-    // If the legacy key is missing entirely, we default to Mute.
+    // If the legacy key is missing entirely, default to None.
     let legacy_raw: serde_json::Value =
         get_setting_from_store(app, "auto_mute_audio", serde_json::Value::Null);
 
     match legacy_raw {
         serde_json::Value::Bool(true) => PlayingAudioHandling::Mute,
         serde_json::Value::Bool(false) => PlayingAudioHandling::None,
-        _ => PlayingAudioHandling::Mute,
+        _ => PlayingAudioHandling::None,
     }
 }
 
@@ -661,25 +661,12 @@ fn start_recording(
     //
     // If we're about to mute system audio, defer the mute until the cue has finished playing,
     // but do so off-thread so the overlay can appear immediately.
-    if sound_enabled {
-        if playing_audio_handling.wants_mute() {
-            let app_for_audio = app.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = audio::play_sound_blocking(audio::SoundType::RecordingStart, audio_cue)
-                {
-                    log::warn!("Failed to play start sound: {}", e);
-                }
-
-                if let Some(manager) = app_for_audio.try_state::<AudioMuteManager>() {
-                    if let Err(e) = manager.mute() {
-                        log::warn!("Failed to mute audio: {}", e);
-                    }
-                }
-            });
-        } else {
-            // No immediate mute: play asynchronously to keep the UI responsive.
-            audio::play_sound(audio::SoundType::RecordingStart, audio_cue);
-        }
+    // If playing-audio handling includes mute, we intentionally suppress the cue entirely.
+    // (User expectation: mute modes are "quiet" and should not play chimes.)
+    let should_play_start_cue = sound_enabled && !playing_audio_handling.wants_mute();
+    if should_play_start_cue {
+        // No immediate mute: play asynchronously to keep the UI responsive.
+        audio::play_sound(audio::SoundType::RecordingStart, audio_cue);
     }
 
     // Show overlay if in "recording_only" mode
@@ -718,8 +705,9 @@ fn start_recording(
     let _ = app.emit("recording-start", ());
 
     // Mute system audio if enabled.
-    // If sound is enabled, mute is deferred until after the cue finishes (see above).
-    if playing_audio_handling.wants_mute() && !sound_enabled {
+    // If we played a cue, muting used to be deferred until after the cue finishes.
+    // We no longer play cues in mute modes, so we can always mute immediately.
+    if playing_audio_handling.wants_mute() {
         if let Some(manager) = audio_mute_manager {
             if let Err(e) = manager.mute() {
                 log::warn!("Failed to mute audio: {}", e);
@@ -777,7 +765,8 @@ fn stop_recording(
     // enter Transcribing/Rewriting.
     let quiet_audio_gate_enabled: bool =
         get_setting_from_store(app, "quiet_audio_gate_enabled", true);
-    let play_stop_sound_when_transcribing = sound_enabled && quiet_audio_gate_enabled;
+    let play_stop_sound_when_transcribing =
+        sound_enabled && quiet_audio_gate_enabled && !playing_audio_handling.wants_mute();
 
     // Keep Escape-to-cancel enabled during the transcription phase too.
     set_escape_cancel_shortcut_enabled(app, true);
@@ -790,7 +779,7 @@ fn stop_recording(
         }
     }
     // If the quiet-audio gate is disabled, play the stop sound immediately as before.
-    if sound_enabled && !quiet_audio_gate_enabled {
+    if sound_enabled && !quiet_audio_gate_enabled && !playing_audio_handling.wants_mute() {
         audio::play_sound(audio::SoundType::RecordingStop, audio_cue);
     }
 
@@ -1437,6 +1426,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     // For other cancel sources, we keep the existing behavior and only play the stop cue
     // if we're cancelling *during recording*.
     let should_play_stop_cue = source != "Escape"
+        && !playing_audio_handling.wants_mute()
         && matches!(pipeline_state, Some(pipeline::PipelineState::Recording));
     if sound_enabled && should_play_stop_cue {
         let audio_cue_raw: String =

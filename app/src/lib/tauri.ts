@@ -758,7 +758,7 @@ function normalizePlayingAudioHandling(value: unknown): PlayingAudioHandling {
   }
 
   // Default for fresh installs / missing setting
-  return "mute";
+  return "none";
 }
 
 function normalizeAudioCue(value: unknown): AudioCue {
@@ -1453,8 +1453,8 @@ export const tauriAPI = {
         (await store.get("playing_audio_handling")) ??
           // Legacy key for migration:
           (await store.get<boolean>("auto_mute_audio")) ??
-          // If neither exists, default to mute
-          "mute"
+          // If neither exists, default to none
+          "none"
       ),
       stt_timeout_seconds:
         (await store.get<number | null>("stt_timeout_seconds")) ?? null,
