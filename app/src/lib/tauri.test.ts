@@ -87,10 +87,11 @@ describe("hotkeyIsSameAs", () => {
 
 describe("createHotkeyDuplicateSchema", () => {
 	const allHotkeys = {
-		toggle: { modifiers: ["ctrl", "alt"], key: "Space" },
-		hold: { modifiers: ["ctrl", "alt"], key: "Backquote" },
-		paste_last: { modifiers: ["ctrl", "alt"], key: "Period" },
-	};
+    toggle: { modifiers: ["ctrl", "alt"], key: "Space" },
+    hold: { modifiers: ["ctrl", "alt"], key: "Backquote" },
+    paste_last: { modifiers: ["ctrl", "alt"], key: "Period" },
+    retry: { modifiers: ["ctrl", "alt"], key: "KeyR" },
+  };
 
 	it("allows a unique hotkey when editing toggle", () => {
 		const schema = createHotkeyDuplicateSchema(allHotkeys, "toggle");
@@ -139,10 +140,11 @@ describe("createHotkeyDuplicateSchema", () => {
 
 describe("validateHotkeyNotDuplicate", () => {
 	const allHotkeys = {
-		toggle: { modifiers: ["ctrl", "alt"], key: "Space" },
-		hold: { modifiers: ["ctrl", "alt"], key: "Backquote" },
-		paste_last: { modifiers: ["ctrl", "alt"], key: "Period" },
-	};
+    toggle: { modifiers: ["ctrl", "alt"], key: "Space" },
+    hold: { modifiers: ["ctrl", "alt"], key: "Backquote" },
+    paste_last: { modifiers: ["ctrl", "alt"], key: "Period" },
+    retry: { modifiers: ["ctrl", "alt"], key: "KeyR" },
+  };
 
 	it("returns null for a unique hotkey", () => {
 		const result = validateHotkeyNotDuplicate(

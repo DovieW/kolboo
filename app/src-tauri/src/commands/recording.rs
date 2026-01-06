@@ -968,6 +968,16 @@ pub async fn pipeline_retry_transcription(
     pipeline: State<'_, SharedPipeline>,
     request_id: String,
 ) -> Result<String, CommandError> {
+    pipeline_retry_transcription_impl(app, pipeline.inner().clone(), request_id).await
+}
+
+/// Implementation for retry transcription that can be called both from the Tauri command
+/// and from internal shortcut handlers.
+pub(crate) async fn pipeline_retry_transcription_impl(
+    app: AppHandle,
+    pipeline: SharedPipeline,
+    request_id: String,
+) -> Result<String, CommandError> {
     let max_saved_recordings = get_max_saved_recordings(&app);
 
     // Allow Escape-to-cancel while the retry transcription is running.
@@ -978,14 +988,25 @@ pub async fn pipeline_retry_transcription(
         .try_state::<RecordingStore>()
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
 
+    let original_entry = app
+        .try_state::<HistoryStorage>()
+        .and_then(|history| history.get_by_id(&request_id).ok().flatten());
+
     // Resolve which request id actually owns the recording.
     // - For normal requests, this is the same as `request_id`.
     // - For reruns (including failed reruns), the entry should point back to the original.
-    let recording_source_id: String = app
-        .try_state::<HistoryStorage>()
-        .and_then(|history| history.get_by_id(&request_id).ok().flatten())
-        .and_then(|entry| entry.recording_request_id)
+    let recording_source_id: String = original_entry
+        .as_ref()
+        .and_then(|entry| entry.recording_request_id.clone())
         .unwrap_or_else(|| request_id.clone());
+
+    // Preserve the preset used by the original request (if we can find it).
+    // This was added after presets existed, but retry transcription historically did not
+    // carry preset selection forward.
+    let original_preset_id: Option<String> = original_entry.as_ref().and_then(|e| e.preset_id.clone());
+    let original_preset_name: Option<String> = original_entry
+        .as_ref()
+        .and_then(|e| e.preset_name.clone());
 
     let wav = recording_store
         .load_wav(&recording_source_id)
@@ -995,10 +1016,7 @@ pub async fn pipeline_retry_transcription(
     let config = pipeline.config();
     // Use the same profile as the original request (if we can find it).
     // This avoids retry accidentally using Default just because the foreground app changed.
-    let original_profile_id: Option<String> = app
-        .try_state::<HistoryStorage>()
-        .and_then(|history| history.get_by_id(&request_id).ok().flatten())
-        .and_then(|entry| entry.profile_id);
+    let original_profile_id: Option<String> = original_entry.as_ref().and_then(|e| e.profile_id.clone());
 
     // Preserve "unknown" as None so the UI doesn't show a Default chip unless it was
     // explicitly recorded as default on the original entry.
@@ -1016,6 +1034,10 @@ pub async fn pipeline_retry_transcription(
         log_store.with_current(|log| {
             log.profile_id = profile_id.clone();
             log.profile_name = profile_name.clone();
+            // Seed preset metadata up-front so UI/logs can reflect intent immediately.
+            // The pipeline will still persist the *effective* preset selected during routing.
+            log.preset_id = original_preset_id.clone();
+            log.preset_name = original_preset_name.clone();
         });
     }
 
@@ -1031,24 +1053,17 @@ pub async fn pipeline_retry_transcription(
         llm_model: config.llm_config.model.clone(),
         profile_id: profile_id.clone(),
         profile_name: profile_name.clone(),
-        preset_id: None,
-        preset_name: None,
+        preset_id: original_preset_id.clone(),
+        preset_name: original_preset_name.clone(),
     };
 
     // Create a history entry for the retry attempt.
     if let Some(req_id) = new_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.add_request_entry(
-                req_id.to_string(),
-                model_info,
-                max_saved_recordings,
-            );
+            let _ = history.add_request_entry(req_id.to_string(), model_info, max_saved_recordings);
 
             // Ensure play/rerun for this new entry points at the original recording.
-            let _ = history.set_request_recording_id(
-                req_id,
-                Some(recording_source_id.clone()),
-            );
+            let _ = history.set_request_recording_id(req_id, Some(recording_source_id.clone()));
 
             let _ = app.emit("history-changed", ());
         }
@@ -1056,10 +1071,35 @@ pub async fn pipeline_retry_transcription(
 
     let _ = app.emit("pipeline-transcription-started", ());
 
+    // If we know the original preset, set a one-shot session lock so the retry uses the
+    // same preset as the entry being rerun (instead of whatever the profile/router would
+    // pick right now).
+    //
+    // This lock is normally consumed (take+clear) by the pipeline once it reaches routing,
+    // but we also defensively clear it on drop so early STT failures don't leak the lock
+    // into the next transcription attempt.
+    struct ClearPresetLockOnDrop {
+        pipeline: SharedPipeline,
+    }
+    impl Drop for ClearPresetLockOnDrop {
+        fn drop(&mut self) {
+            let _ = self.pipeline.set_session_preset_lock(None, None);
+        }
+    }
+
+    let _preset_lock_guard = if original_preset_id.is_some() {
+        let _ = pipeline.set_session_preset_lock(profile_id.clone(), original_preset_id.clone());
+        Some(ClearPresetLockOnDrop {
+            pipeline: pipeline.clone(),
+        })
+    } else {
+        None
+    };
+
     // Emit rewriting started once we enter the optional LLM phase.
     {
         let app_clone = app.clone();
-        let pipeline_clone = pipeline.inner().clone();
+        let pipeline_clone = pipeline.clone();
         tauri::async_runtime::spawn(async move {
             let start = Instant::now();
             loop {
@@ -1086,7 +1126,7 @@ pub async fn pipeline_retry_transcription(
     // Emit routing started once we enter the Routing phase.
     {
         let app_clone = app.clone();
-        let pipeline_clone = pipeline.inner().clone();
+        let pipeline_clone = pipeline.clone();
         tauri::async_runtime::spawn(async move {
             let start = Instant::now();
             loop {
@@ -1136,7 +1176,11 @@ pub async fn pipeline_retry_transcription(
                 });
 
                 // Persist cost/usage stats (best-effort).
-                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, Some(wav.as_slice()));
+                crate::stats::emit_cost_events_for_current_request(
+                    &app,
+                    EventStatus::Error,
+                    Some(wav.as_slice()),
+                );
 
                 log_store.complete_current();
             }
@@ -1194,13 +1238,16 @@ pub async fn pipeline_retry_transcription(
         });
 
         // Persist cost/usage stats (best-effort).
-        crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, Some(wav.as_slice()));
+        crate::stats::emit_cost_events_for_current_request(
+            &app,
+            EventStatus::Success,
+            Some(wav.as_slice()),
+        );
 
         // Persist preset metadata into History (best-effort).
         if let Some(req_id) = new_request_id.as_deref() {
-            let preset_meta = log_store.with_current(|log| {
-                (log.preset_id.clone(), log.preset_name.clone())
-            });
+            let preset_meta =
+                log_store.with_current(|log| (log.preset_id.clone(), log.preset_name.clone()));
             if let Some((preset_id, preset_name)) = preset_meta {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.set_request_preset(req_id, preset_id, preset_name);

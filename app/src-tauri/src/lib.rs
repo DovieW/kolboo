@@ -288,6 +288,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Hold-to-record and paste-last are disabled by default.
     dirty |= set_default("hold_hotkey", json!(null), true);
     dirty |= set_default("paste_last_hotkey", json!(null), true);
+    dirty |= set_default("retry_hotkey", json!(null), true);
 
     // VAD settings are used by the pipeline.
     dirty |= set_default(
@@ -406,6 +407,105 @@ fn sanitize_transcript(transcript: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+/// Resolve the most recent history entry id that has a persisted recording available.
+///
+/// This is used by the Retry hotkey to pick "the last recording".
+#[cfg(desktop)]
+fn resolve_last_recording_history_entry_id(app: &AppHandle) -> Option<String> {
+    let Some(history) = app.try_state::<HistoryStorage>() else {
+        return None;
+    };
+
+    let Some(store) = app.try_state::<RecordingStore>() else {
+        return None;
+    };
+
+    // Be conservative on work done inside shortcut-triggered paths.
+    let entries = history.get_all(Some(50)).ok()?;
+    for entry in entries.iter() {
+        // Prefer an explicit recording pointer (covers reruns), but fall back to
+        // legacy storage where the WAV is stored under the entry id.
+        let candidate_ids = [
+            entry.recording_request_id.as_deref(),
+            Some(entry.id.as_str()),
+        ];
+
+        if candidate_ids
+            .iter()
+            .flatten()
+            .any(|rid| store.has(rid.trim()))
+        {
+            return Some(entry.id.clone());
+        }
+    }
+
+    None
+}
+
+/// Retry the last available recording and output the result.
+///
+/// Intended for use by the global Retry hotkey (so it shows the overlay loading state
+/// even when the overlay is normally hidden).
+#[cfg(desktop)]
+fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &str) {
+    let app = app.clone();
+    let source = source.to_string();
+
+    tauri::async_runtime::spawn(async move {
+        let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() else {
+            log::warn!("{source}: pipeline not available; cannot retry");
+            return;
+        };
+        let pipeline = (*pipeline).clone();
+
+        let pipeline_state = pipeline.state();
+        if !matches!(pipeline_state, pipeline::PipelineState::Idle | pipeline::PipelineState::Error)
+        {
+            log::info!("{source}: retry ignored (pipeline busy: {:?})", pipeline_state);
+            return;
+        }
+
+        let Some(history_entry_id) = resolve_last_recording_history_entry_id(&app) else {
+            log::info!("{source}: no recording available to retry");
+            emit_system_event(&app, "shortcut", "Retry: no recording available", None);
+            return;
+        };
+
+        // Force-show overlay so the user gets the loading state UX.
+        if let Err(e) = commands::overlay::show_overlay_with_reset_if_not_always(&app) {
+            log::warn!("{source}: failed to show overlay for retry: {}", e);
+        }
+
+        let transcript = match commands::recording::pipeline_retry_transcription_impl(
+            app.clone(),
+            pipeline.clone(),
+            history_entry_id,
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                log::warn!("{source}: retry failed: {}", e.message);
+                return;
+            }
+        };
+
+        let Some(text) = sanitize_transcript(&transcript) else {
+            log::info!("{source}: retry returned empty transcript; nothing to output");
+            return;
+        };
+
+        let output_mode_str: String = get_setting_from_store(&app, "output_mode", "paste".to_string());
+        let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
+        let output_hit_enter: bool = get_setting_from_store(&app, "output_hit_enter", false);
+
+        if let Err(e) = commands::text::output_text_with_mode(&text, output_mode, output_hit_enter)
+        {
+            log::error!("{source}: failed to output retry transcript: {}", e);
+        }
+    });
 }
 
 // ============================================================================
@@ -1073,6 +1173,22 @@ fn stop_recording(
                             log.complete_success();
                         });
 
+                        // Persist preset metadata into History (best-effort).
+                        // The pipeline decides preset selection during routing and stores it
+                        // into the current RequestLog; we mirror that into History so the
+                        // History badge matches Request Logs.
+                        if let Some(req_id) = request_id.as_deref() {
+                            let preset_meta = log_store.with_current(|log| {
+                                (log.preset_id.clone(), log.preset_name.clone())
+                            });
+                            if let Some((preset_id, preset_name)) = preset_meta {
+                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
+                                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
+                                    let _ = app_clone.emit("history-changed", ());
+                                }
+                            }
+                        }
+
                         // Persist cost/usage stats (best-effort).
                         if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
                             stats::emit_cost_events_for_current_request(
@@ -1518,6 +1634,7 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
     let paste_last_hotkey =
         get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
+    let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
 
     // Convert to normalized shortcut strings.
     // For disabled hotkeys, we keep None so it can never match.
@@ -1550,6 +1667,17 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
             })
             .ok()
     });
+    let retry_shortcut_str: Option<String> = retry_hotkey.and_then(|hk| {
+        hk.to_shortcut()
+            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid retry hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
+    });
 
     // Get audio mute manager if available
     let audio_mute_manager = app.try_state::<AudioMuteManager>();
@@ -1558,6 +1686,7 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     let is_toggle = toggle_shortcut_str.as_deref() == Some(shortcut_str.as_str());
     let is_hold = hold_shortcut_str.as_deref() == Some(shortcut_str.as_str());
     let is_paste_last = paste_last_shortcut_str.as_deref() == Some(shortcut_str.as_str());
+    let is_retry = retry_shortcut_str.as_deref() == Some(shortcut_str.as_str());
 
     if is_toggle {
         // Toggle mode: action happens on key release (debounced)
@@ -1705,6 +1834,19 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                             log::info!("OutputLast: no history entries available");
                         }
                     }
+                }
+            }
+        }
+    } else if is_retry {
+        // Retry last recording: action on release (debounced)
+        match event.state {
+            ShortcutState::Pressed => {
+                state.retry_key_held.swap(true, Ordering::SeqCst);
+            }
+            ShortcutState::Released => {
+                if state.retry_key_held.swap(false, Ordering::SeqCst) {
+                    log::info!("Retry: retrying last recording");
+                    spawn_retry_last_recording_and_output(app, "Retry");
                 }
             }
         }
@@ -2303,13 +2445,15 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
     let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
     let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
     let paste_last_hotkey = get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
+    let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
 
     let matches_modifier_only = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == key;
     let is_toggle = toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
     let is_hold = hold_hotkey.as_ref().is_some_and(matches_modifier_only);
     let is_paste_last = paste_last_hotkey.as_ref().is_some_and(matches_modifier_only);
+    let is_retry = retry_hotkey.as_ref().is_some_and(matches_modifier_only);
 
-    if !(is_toggle || is_hold || is_paste_last) {
+    if !(is_toggle || is_hold || is_paste_last || is_retry) {
         return;
     }
 
@@ -2460,6 +2604,23 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
                 log::info!("OutputLast(AltRight): no history entries available");
             }
         }
+
+        return;
+    }
+
+    if is_retry {
+        // Retry-last-recording: action on release (debounced)
+        if is_down {
+            state.retry_key_held.swap(true, Ordering::SeqCst);
+            return;
+        }
+
+        if !state.retry_key_held.swap(false, Ordering::SeqCst) {
+            return;
+        }
+
+        log::info!("Retry(AltRight): retrying last recording");
+        spawn_retry_last_recording_and_output(app, "Retry(AltRight)");
     }
 }
 
@@ -3016,6 +3177,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
     let paste_last_hotkey =
         get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
+    let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
 
     // Convert to shortcut strings with validation.
     //
@@ -3078,11 +3240,29 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
             .ok()
     });
 
+    let retry_shortcut_str: Option<String> = retry_hotkey.and_then(|hk| {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            return None;
+        }
+
+        hk.to_shortcut()
+            .map(|_| hk.to_shortcut_string())
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid retry hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
+    });
+
     log::info!(
-        "Registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}",
+        "Registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}",
         toggle_shortcut_str.as_deref().unwrap_or("<disabled>"),
         hold_shortcut_str.as_deref().unwrap_or("<disabled>"),
-        paste_last_shortcut_str.as_deref().unwrap_or("<disabled>")
+        paste_last_shortcut_str.as_deref().unwrap_or("<disabled>"),
+        retry_shortcut_str.as_deref().unwrap_or("<disabled>")
     );
 
     let shortcut_manager = app.global_shortcut();
@@ -3142,6 +3322,23 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 },
             ) {
                 failures.push(format!("PasteLast ({}) => {}", paste_last_shortcut_str, e));
+            }
+        }
+    }
+
+    if let Some(retry_shortcut_str) = &retry_shortcut_str {
+        let retry_shortcut =
+            <Shortcut as std::str::FromStr>::from_str(retry_shortcut_str).map_err(|e| {
+                failures.push(format!(
+                    "Retry ({}) => failed to parse shortcut: {:?}",
+                    retry_shortcut_str, e
+                ));
+            });
+        if let Ok(retry_shortcut) = retry_shortcut {
+            if let Err(e) = shortcut_manager.on_shortcut(retry_shortcut, |app, shortcut, event| {
+                handle_shortcut_event(app, shortcut, &event);
+            }) {
+                failures.push(format!("Retry ({}) => {}", retry_shortcut_str, e));
             }
         }
     }

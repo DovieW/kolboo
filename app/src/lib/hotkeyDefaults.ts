@@ -30,3 +30,6 @@ export const DEFAULT_HOLD_HOTKEY: HotkeyConfig | null = null;
 
 /** Default paste last transcription hotkey config (unset) */
 export const DEFAULT_PASTE_LAST_HOTKEY: HotkeyConfig | null = null;
+
+/** Default retry last recording hotkey config (unset) */
+export const DEFAULT_RETRY_HOTKEY: HotkeyConfig | null = null;

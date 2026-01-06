@@ -243,6 +243,7 @@ export function useUpdateToggleHotkey() {
             toggle: settings.toggle_hotkey,
             hold: settings.hold_hotkey,
             paste_last: settings.paste_last_hotkey,
+            retry: settings.retry_hotkey,
           },
           "toggle"
         );
@@ -263,7 +264,10 @@ export function useUpdateToggleHotkey() {
           await tauriAPI.unregisterShortcuts();
           await tauriAPI.registerShortcuts();
         } catch (restoreError) {
-          console.error("Failed to restore previous toggle hotkey:", restoreError);
+          console.error(
+            "Failed to restore previous toggle hotkey:",
+            restoreError
+          );
         }
         throw error;
       }
@@ -290,6 +294,7 @@ export function useUpdateHoldHotkey() {
             toggle: settings.toggle_hotkey,
             hold: settings.hold_hotkey,
             paste_last: settings.paste_last_hotkey,
+            retry: settings.retry_hotkey,
           },
           "hold"
         );
@@ -308,7 +313,10 @@ export function useUpdateHoldHotkey() {
           await tauriAPI.unregisterShortcuts();
           await tauriAPI.registerShortcuts();
         } catch (restoreError) {
-          console.error("Failed to restore previous hold hotkey:", restoreError);
+          console.error(
+            "Failed to restore previous hold hotkey:",
+            restoreError
+          );
         }
         throw error;
       }
@@ -335,6 +343,7 @@ export function useUpdatePasteLastHotkey() {
             toggle: settings.toggle_hotkey,
             hold: settings.hold_hotkey,
             paste_last: settings.paste_last_hotkey,
+            retry: settings.retry_hotkey,
           },
           "paste_last"
         );
@@ -354,6 +363,55 @@ export function useUpdatePasteLastHotkey() {
           await tauriAPI.registerShortcuts();
         } catch (restoreError) {
           console.error("Failed to restore previous paste-last hotkey:", restoreError);
+        }
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateRetryHotkey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (hotkey: HotkeyConfig | null) => {
+      // Get current settings for validation
+      const settings = await tauriAPI.getSettings();
+      const previous = settings.retry_hotkey;
+
+      // Validate no duplicate (unless unsetting)
+      if (hotkey) {
+        const error = validateHotkeyNotDuplicate(
+          hotkey,
+          {
+            toggle: settings.toggle_hotkey,
+            hold: settings.hold_hotkey,
+            paste_last: settings.paste_last_hotkey,
+            retry: settings.retry_hotkey,
+          },
+          "retry"
+        );
+        if (error) throw new Error(error);
+      }
+
+      // Save and re-register
+      await tauriAPI.updateRetryHotkey(hotkey);
+      await tauriAPI.unregisterShortcuts();
+
+      try {
+        await tauriAPI.registerShortcuts();
+      } catch (error) {
+        try {
+          await tauriAPI.updateRetryHotkey(previous);
+          await tauriAPI.unregisterShortcuts();
+          await tauriAPI.registerShortcuts();
+        } catch (restoreError) {
+          console.error(
+            "Failed to restore previous retry hotkey:",
+            restoreError
+          );
         }
         throw error;
       }

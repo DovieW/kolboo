@@ -569,6 +569,7 @@ export interface AppSettings {
   toggle_hotkey: HotkeyConfig | null;
   hold_hotkey: HotkeyConfig | null;
   paste_last_hotkey: HotkeyConfig | null;
+  retry_hotkey: HotkeyConfig | null;
   selected_mic_id: string | null;
   sound_enabled: boolean;
   audio_cue: AudioCue;
@@ -950,6 +951,8 @@ export const defaultHoldHotkey: HotkeyConfig | null = null;
 
 export const defaultPasteLastHotkey: HotkeyConfig | null = null;
 
+export const defaultRetryHotkey: HotkeyConfig | null = null;
+
 // ============================================================================
 // Store helpers
 // ============================================================================
@@ -987,12 +990,13 @@ export function hotkeyIsSameAs(a: HotkeyConfig, b: HotkeyConfig): boolean {
   );
 }
 
-type HotkeyType = "toggle" | "hold" | "paste_last";
+type HotkeyType = "toggle" | "hold" | "paste_last" | "retry";
 
 const HOTKEY_LABELS: Record<HotkeyType, string> = {
   toggle: "toggle",
   hold: "hold",
   paste_last: "paste last",
+  retry: "retry",
 };
 
 /**
@@ -1030,6 +1034,7 @@ export function validateHotkeyNotDuplicate(
     toggle: HotkeyConfig | null;
     hold: HotkeyConfig | null;
     paste_last: HotkeyConfig | null;
+    retry: HotkeyConfig | null;
   },
   excludeType: HotkeyType
 ): string | null {
@@ -1379,6 +1384,10 @@ export const tauriAPI = {
         await store.get("paste_last_hotkey"),
         defaultPasteLastHotkey
       ),
+      retry_hotkey: normalizeHotkeyConfig(
+        await store.get("retry_hotkey"),
+        defaultRetryHotkey
+      ),
       selected_mic_id:
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
@@ -1433,7 +1442,8 @@ export const tauriAPI = {
       proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
-      cerebras_free_tier: (await store.get<boolean>("cerebras_free_tier")) ?? true,
+      cerebras_free_tier:
+        (await store.get<boolean>("cerebras_free_tier")) ?? true,
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
       cohere_free_tier: (await store.get<boolean>("cohere_free_tier")) ?? true,
       assemblyai_free_tier:
@@ -1669,6 +1679,12 @@ export const tauriAPI = {
     await store.save();
   },
 
+  async updateRetryHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    const store = await getStore();
+    await store.set("retry_hotkey", hotkey);
+    await store.save();
+  },
+
   async updateSelectedMic(micId: string | null): Promise<void> {
     const store = await getStore();
     await store.set("selected_mic_id", micId);
@@ -1894,7 +1910,9 @@ export const tauriAPI = {
     await store.save();
 
     // Notify other windows (overlay) to refresh cached settings.
-    await emit("settings-changed", { overlay_show_detailed_loading: !!enabled });
+    await emit("settings-changed", {
+      overlay_show_detailed_loading: !!enabled,
+    });
   },
 
   async updateWidgetPosition(position: WidgetPosition): Promise<void> {
@@ -2184,6 +2202,7 @@ export const tauriAPI = {
     await store.set("toggle_hotkey", defaultToggleHotkey);
     await store.set("hold_hotkey", defaultHoldHotkey);
     await store.set("paste_last_hotkey", defaultPasteLastHotkey);
+    await store.set("retry_hotkey", defaultRetryHotkey);
     await store.save();
   },
 

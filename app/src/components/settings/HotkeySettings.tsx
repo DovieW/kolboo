@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   DEFAULT_HOLD_HOTKEY,
   DEFAULT_PASTE_LAST_HOTKEY,
+  DEFAULT_RETRY_HOTKEY,
   DEFAULT_TOGGLE_HOTKEY,
 } from "../../lib/hotkeyDefaults";
 import {
@@ -11,6 +12,7 @@ import {
   useSettings,
   useUpdateHoldHotkey,
   useUpdatePasteLastHotkey,
+  useUpdateRetryHotkey,
   useUpdateToggleHotkey,
 } from "../../lib/queries";
 import type { HotkeyConfig } from "../../lib/tauri";
@@ -19,7 +21,7 @@ import { HotkeyInput } from "../HotkeyInput";
 const GLOBAL_ONLY_TOOLTIP =
   "This setting can only be changed in the Default profile";
 
-type RecordingInput = "toggle" | "hold" | "paste_last" | null;
+type RecordingInput = "toggle" | "hold" | "paste_last" | "retry" | null;
 
 export function HotkeySettings({
   editingProfileId,
@@ -31,6 +33,7 @@ export function HotkeySettings({
   const updateToggleHotkey = useUpdateToggleHotkey();
   const updateHoldHotkey = useUpdateHoldHotkey();
   const updatePasteLastHotkey = useUpdatePasteLastHotkey();
+  const updateRetryHotkey = useUpdateRetryHotkey();
   const resetHotkeys = useResetHotkeysToDefaults();
 
   // Track which input is currently recording (only one at a time)
@@ -44,6 +47,7 @@ export function HotkeySettings({
     updateToggleHotkey.error ||
     updateHoldHotkey.error ||
     updatePasteLastHotkey.error ||
+    updateRetryHotkey.error ||
     resetHotkeys.error;
 
   const errorMessage =
@@ -85,6 +89,10 @@ export function HotkeySettings({
 
   const handlePasteLastHotkeyChange = (config: HotkeyConfig | null) => {
     updatePasteLastHotkey.mutate(config);
+  };
+
+  const handleRetryHotkeyChange = (config: HotkeyConfig | null) => {
+    updateRetryHotkey.mutate(config);
   };
 
   const content = (
@@ -136,6 +144,19 @@ export function HotkeySettings({
           disabled={isLoading || updatePasteLastHotkey.isPending}
           isRecording={recordingInput === "paste_last"}
           onStartRecording={() => setRecordingInput("paste_last")}
+          onStopRecording={() => setRecordingInput(null)}
+        />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <HotkeyInput
+          label="Retry Last Recording"
+          description="Re-run the most recent recording and paste the result"
+          value={settings ? settings.retry_hotkey : DEFAULT_RETRY_HOTKEY}
+          onChange={handleRetryHotkeyChange}
+          disabled={isLoading || updateRetryHotkey.isPending}
+          isRecording={recordingInput === "retry"}
+          onStartRecording={() => setRecordingInput("retry")}
           onStopRecording={() => setRecordingInput(null)}
         />
       </div>

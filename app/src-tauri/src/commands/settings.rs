@@ -91,9 +91,10 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     let hold_hotkey = get_hotkey_from_store(&app, "hold_hotkey", HotkeyConfig::default_hold);
     let paste_last_hotkey =
         get_hotkey_from_store(&app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
+    let retry_hotkey = get_hotkey_from_store(&app, "retry_hotkey", HotkeyConfig::default_retry);
 
     log::info!(
-        "Re-registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}",
+        "Re-registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}",
         toggle_hotkey
             .as_ref()
             .map(|h| h.to_shortcut_string())
@@ -103,6 +104,10 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             .map(|h| h.to_shortcut_string())
             .unwrap_or_else(|| "<disabled>".to_string()),
         paste_last_hotkey
+            .as_ref()
+            .map(|h| h.to_shortcut_string())
+            .unwrap_or_else(|| "<disabled>".to_string()),
+        retry_hotkey
             .as_ref()
             .map(|h| h.to_shortcut_string())
             .unwrap_or_else(|| "<disabled>".to_string())
@@ -185,6 +190,30 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             Ok(sc) => shortcuts.push(sc),
             Err(e) => log::warn!(
                 "Invalid paste-last hotkey in settings store ({}); treating as disabled",
+                e
+            ),
+        }
+    }
+
+    if let Some(hk) = retry_hotkey {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            // handled by Windows hook
+        } else {
+            match hk.to_shortcut() {
+                Ok(sc) => shortcuts.push(sc),
+                Err(e) => log::warn!(
+                    "Invalid retry hotkey in settings store ({}); treating as disabled",
+                    e
+                ),
+            }
+        }
+
+        #[cfg(not(all(desktop, target_os = "windows")))]
+        match hk.to_shortcut() {
+            Ok(sc) => shortcuts.push(sc),
+            Err(e) => log::warn!(
+                "Invalid retry hotkey in settings store ({}); treating as disabled",
                 e
             ),
         }

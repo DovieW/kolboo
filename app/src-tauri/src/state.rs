@@ -25,6 +25,8 @@ pub struct AppState {
     pub ptt_key_held: AtomicBool,
     /// Tracks if paste-last key is currently held down
     pub paste_key_held: AtomicBool,
+    /// Tracks if retry key is currently held down
+    pub retry_key_held: AtomicBool,
     /// Tracks if toggle key is currently held down (for debouncing - action happens on release)
     pub toggle_key_held: AtomicBool,
 }

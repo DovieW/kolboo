@@ -214,6 +214,13 @@ impl HotkeyConfig {
         None
     }
 
+    /// Default retry-last-recording hotkey as a setting value.
+    ///
+    /// Retry is disabled by default.
+    pub fn default_retry() -> Option<Self> {
+        None
+    }
+
     /// Convert to shortcut string format like "ctrl+alt+Space"
     /// Note: modifiers must be lowercase for the parser to recognize them
     pub fn to_shortcut_string(&self) -> String {
