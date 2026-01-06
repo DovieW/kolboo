@@ -15,7 +15,7 @@ import {
 } from "react";
 import { applyAccentColor } from "./lib/accentColor";
 import { useSettings, useTypeText } from "./lib/queries";
-import { type ConnectionState, tauriAPI } from "./lib/tauri";
+import { type ConnectionState, type IntentRouterSettings, tauriAPI } from "./lib/tauri";
 import "./app.css";
 
 function readBootAccentColor(): string | null {
@@ -144,6 +144,7 @@ function pipelineToConnectionState(state: PipelineState): ConnectionState {
       return "connecting";
     case "recording":
       return "recording";
+    case "routing":
     case "transcribing":
     case "rewriting":
       return "processing";
@@ -941,13 +942,16 @@ function AudioWave({
 
         const midY = logicalH / 2;
         // Keep the idle animation subtle so it doesn't read as "picking up noise".
-        const amp = logicalH * 0.055;
-        const phase = t / 650;
+        const amp = logicalH * 0.075;
+        // Faster phase = more motion (used as a pleasant "loading" animation too).
+        const phase = t / 360;
+        // More than 1 cycle across the width reads as more animated without feeling "spiky".
+        const cycles = 1.6;
         for (let i = 0; i < points; i++) {
           const x = i / (points - 1);
           wave[i] =
-            Math.sin(phase + x * Math.PI * 2) *
-            (0.6 + 0.4 * Math.sin(phase * 0.9));
+            Math.sin(phase + x * Math.PI * 2 * cycles) *
+            (0.62 + 0.38 * Math.sin(phase * 1.2 + x * Math.PI * 2 * 0.5));
         }
 
         const { r, g, b } = getAccentRgb();
@@ -1431,26 +1435,15 @@ function RecordingControl() {
   const lastOverlayShowTsRef = useRef<number>(0);
   const suppressHoverUntilLeaveRef = useRef<boolean>(false);
 
-  const [containerRef, rect] = useResizeObserver();
+  const [containerRef, rect] = useResizeObserver<HTMLDivElement>();
 
   const widgetElRef = useRef<HTMLDivElement | null>(null);
   const setWidgetRef = useCallback(
     (el: HTMLDivElement | null) => {
       widgetElRef.current = el;
-      // Preserve existing resize observer wiring.
-      // Mantine's useResizeObserver returns a ref object, but React also allows
-      // callback refs. Support both shapes defensively.
-      if (typeof containerRef === "function") {
-        containerRef(el);
-      } else if (
-        containerRef &&
-        typeof containerRef === "object" &&
-        "current" in containerRef
-      ) {
-        (
-          containerRef as React.MutableRefObject<HTMLDivElement | null>
-        ).current = el;
-      }
+      // Mantine's useResizeObserver returns a ref object.
+      (containerRef as React.MutableRefObject<HTMLDivElement | null>).current =
+        el;
     },
     [containerRef]
   );
@@ -1548,9 +1541,10 @@ function RecordingControl() {
     if (idx < 0) return;
 
     const profile = profiles[idx];
-    const current = profile.router ?? null;
+    if (!profile) return;
+    const current: IntentRouterSettings | null = profile.router ?? null;
 
-    const nextRouter = (() => {
+    const nextRouter: IntentRouterSettings = (() => {
       // "Off" means "not selecting presets automatically".
       // Prefer preserving the user's configured strategy/model when possible.
       if (routerIsEffectivelyOn) {
@@ -1566,7 +1560,7 @@ function RecordingControl() {
       return {
         enabled: true,
         strategy: "embeddings",
-        embedding_provider: "openai" as const,
+        embedding_provider: "openai",
         embedding_model: "text-embedding-3-small",
         similarity_threshold: null,
         similarity_margin: null,
@@ -2372,6 +2366,7 @@ function RecordingControl() {
   const isWaveActive = isArming || isRecording;
   const isBusy = isArming || isLoading;
   const isError = pipelineState === "error";
+  const showDetailedLoading = settings?.overlay_show_detailed_loading ?? false;
   const centerPhaseText = (() => {
     if (pipelineState === "rewriting") return "rewriting...";
     if (pipelineState === "routing") return "routing...";
@@ -2511,7 +2506,7 @@ function RecordingControl() {
                     {lastError.message}
                   </div>
                 </div>
-              ) : centerPhaseText ? (
+              ) : centerPhaseText && showDetailedLoading ? (
                 <div className="overlay-phase-text" aria-live="polite">
                   {centerPhaseText}
                 </div>

@@ -609,6 +609,8 @@ export interface AppSettings {
   playing_audio_handling: PlayingAudioHandling;
   stt_timeout_seconds: number | null;
   overlay_mode: OverlayMode;
+  /** When true, show detailed phase text (routing/transcribing/rewriting) in the overlay. */
+  overlay_show_detailed_loading: boolean;
   widget_position: WidgetPosition;
   output_mode: OutputMode;
   output_hit_enter: boolean;
@@ -1450,6 +1452,8 @@ export const tauriAPI = {
         (await store.get<number | null>("stt_timeout_seconds")) ?? null,
       overlay_mode:
         (await store.get<OverlayMode>("overlay_mode")) ?? "recording_only",
+      overlay_show_detailed_loading:
+        (await store.get<boolean>("overlay_show_detailed_loading")) ?? false,
       widget_position:
         (await store.get<WidgetPosition>("widget_position")) ?? "bottom-center",
       output_mode: normalizeOutputMode(await store.get("output_mode")),
@@ -1865,6 +1869,15 @@ export const tauriAPI = {
 
     // Notify other windows (overlay) to refresh cached settings.
     await emit("settings-changed", {});
+  },
+
+  async updateOverlayShowDetailedLoading(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("overlay_show_detailed_loading", !!enabled);
+    await store.save();
+
+    // Notify other windows (overlay) to refresh cached settings.
+    await emit("settings-changed", { overlay_show_detailed_loading: !!enabled });
   },
 
   async updateWidgetPosition(position: WidgetPosition): Promise<void> {

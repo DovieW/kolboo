@@ -21,6 +21,7 @@ import {
   useUpdateOutputHitEnter,
   useUpdateOutputMode,
   useUpdateOverlayMode,
+  useUpdateOverlayShowDetailedLoading,
   useUpdatePlayingAudioHandling,
   useUpdateRewriteProgramPromptProfiles,
   useUpdateSoundEnabled,
@@ -123,6 +124,7 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
   const updateMainWindowCloseBehavior = useUpdateMainWindowCloseBehavior();
   const updatePlayingAudioHandling = useUpdatePlayingAudioHandling();
   const updateOverlayMode = useUpdateOverlayMode();
+  const updateOverlayShowDetailedLoading = useUpdateOverlayShowDetailedLoading();
   const updateWidgetPosition = useUpdateWidgetPosition();
   const updateOutputMode = useUpdateOutputMode();
   const updateOutputHitEnter = useUpdateOutputHitEnter();
@@ -191,6 +193,9 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     : globalOverlayMode;
   const overlayModeInheriting =
     isProfileScope && isInheriting(profile?.overlay_mode);
+
+  const overlayShowDetailedLoading =
+    settings?.overlay_show_detailed_loading ?? false;
 
   const globalWidgetPosition: WidgetPosition =
     settings?.widget_position ?? "bottom-center";
@@ -300,6 +305,12 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
       return;
     }
     updateOverlayMode.mutate(value as OverlayMode);
+  };
+
+  const handleOverlayShowDetailedLoadingChange = (checked: boolean) => {
+    // Global-only setting
+    if (isProfileScope) return;
+    updateOverlayShowDetailedLoading.mutate(checked);
   };
 
   const handleWidgetPositionChange = (value: string | null) => {
@@ -578,6 +589,38 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
               },
             }}
           />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Overlay detailed loading</p>
+          <p className="settings-description">
+            Show text like “transcribing…”, “routing…”, “rewriting…” instead of a
+            loading waveform
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Tooltip
+            label={GLOBAL_ONLY_TOOLTIP}
+            disabled={!isProfileScope}
+            withArrow
+            position="top-start"
+          >
+            <div style={isProfileScope ? { opacity: 0.5 } : undefined}>
+              <Switch
+                checked={overlayShowDetailedLoading}
+                onChange={(event) =>
+                  handleOverlayShowDetailedLoadingChange(
+                    event.currentTarget.checked
+                  )
+                }
+                disabled={isLoading || isProfileScope}
+                color="gray"
+                size="md"
+              />
+            </div>
+          </Tooltip>
         </div>
       </div>
 

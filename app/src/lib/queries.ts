@@ -454,6 +454,17 @@ export function useUpdateOverlayMode() {
   });
 }
 
+export function useUpdateOverlayShowDetailedLoading() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      tauriAPI.updateOverlayShowDetailedLoading(enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateWidgetPosition() {
   const queryClient = useQueryClient();
   return useMutation({

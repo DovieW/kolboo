@@ -199,6 +199,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Defensive cap (bytes). The pruning logic enforces this regardless of time settings.
     set_default("stats_retention_max_bytes", json!(50_000_000u64), false);
     set_default("overlay_mode", json!("recording_only"), false);
+    // Whether the overlay shows detailed phase text while processing
+    // (e.g. "transcribing…", "routing…", "rewriting…"). When false, the overlay
+    // uses a waveform animation instead.
+    set_default("overlay_show_detailed_loading", json!(false), false);
     set_default("widget_position", json!("bottom-center"), false);
     // Whether clicking the window X exits the app or closes the main window to the tray.
     // - "exit_program": exit the application process
