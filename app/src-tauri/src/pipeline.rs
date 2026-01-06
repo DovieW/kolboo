@@ -979,8 +979,11 @@ pub enum LlmNotAttemptedReason {
     QuietAudioGate,
     /// Offline VAD detected no speech (STT skipped), so LLM rewrite was never reached.
     NoSpeechDetectedByVad,
-    /// Global LLM rewrite toggle is disabled.
-    DisabledGlobally,
+    /// Default/global rewrite toggle is disabled.
+    ///
+    /// Historically rewrite enablement lived in a global setting (`rewrite_llm_enabled`) and
+    /// the Default profile inherited it. We keep this reason so request logs stay explicit.
+    DisabledByDefaultProfile,
     /// Per-profile toggle explicitly disabled rewrite.
     DisabledByProfile,
     /// Selected preset explicitly disabled rewrite.
@@ -1000,7 +1003,9 @@ impl LlmNotAttemptedReason {
             LlmNotAttemptedReason::NoSpeechDetectedByVad => {
                 "reason=stt_skipped_no_speech_detected".to_string()
             }
-            LlmNotAttemptedReason::DisabledGlobally => "reason=disabled_global".to_string(),
+            LlmNotAttemptedReason::DisabledByDefaultProfile => {
+                "reason=disabled_default_profile".to_string()
+            }
             LlmNotAttemptedReason::DisabledByProfile => "reason=disabled_profile".to_string(),
             LlmNotAttemptedReason::DisabledByPreset => "reason=disabled_preset".to_string(),
             LlmNotAttemptedReason::ProviderUnavailable { provider, error } => format!(
@@ -2719,30 +2724,50 @@ impl SharedPipeline {
 
             let selected_preset_rewrite_enabled = selected_preset.map(|p| p.rewrite_llm_enabled);
 
-            // Hard gates: global toggle + optional per-profile toggle.
-            // Presets can disable rewrite, but cannot enable it when global/profile is off.
-            let global_enabled = inner.config.llm_config.enabled;
-            let profile_enabled = selected_profile
-                .and_then(|p| p.rewrite_llm_enabled)
-                .unwrap_or(global_enabled);
-            let effective_llm_enabled = if !global_enabled {
-                false
-            } else if let Some(preset) = selected_preset {
+            // Rewrite gates:
+            // - Each profile has its own enable toggle.
+            // - The legacy "global" toggle (llm_config.enabled) is treated as the Default
+            //   profile's toggle ONLY (or as a fallback when no profile is available).
+            // - Presets can disable rewrite, but cannot enable it when the profile is off.
+            let default_profile_enabled = inner.config.llm_config.enabled;
+
+            let profile_enabled = match selected_profile {
+                Some(p) => match p.rewrite_llm_enabled {
+                    Some(v) => v,
+                    None => {
+                        if p.id == "default" {
+                            default_profile_enabled
+                        } else {
+                            // Unset should not inherit Default/global; keep profiles independent.
+                            true
+                        }
+                    }
+                },
+                None => default_profile_enabled,
+            };
+
+            let effective_llm_enabled = if let Some(preset) = selected_preset {
                 profile_enabled && preset.rewrite_llm_enabled
             } else {
                 profile_enabled
             };
 
-            let disabled_reason = if global_enabled {
-                if !profile_enabled {
-                    Some(LlmNotAttemptedReason::DisabledByProfile)
-                } else if selected_preset_rewrite_enabled == Some(false) {
-                    Some(LlmNotAttemptedReason::DisabledByPreset)
+            let disabled_reason = if !profile_enabled {
+                // Distinguish the common legacy case where Default inherits the global toggle.
+                if selected_profile
+                    .as_ref()
+                    .map(|p| p.id == "default" && p.rewrite_llm_enabled.is_none())
+                    .unwrap_or(false)
+                    && !default_profile_enabled
+                {
+                    Some(LlmNotAttemptedReason::DisabledByDefaultProfile)
                 } else {
-                    None
+                    Some(LlmNotAttemptedReason::DisabledByProfile)
                 }
+            } else if selected_preset_rewrite_enabled == Some(false) {
+                Some(LlmNotAttemptedReason::DisabledByPreset)
             } else {
-                Some(LlmNotAttemptedReason::DisabledGlobally)
+                None
             };
 
             let (llm_provider, not_attempted_reason) = if effective_llm_enabled {
@@ -3505,28 +3530,43 @@ impl SharedPipeline {
 
             let selected_preset_rewrite_enabled = selected_preset.map(|p| p.rewrite_llm_enabled);
 
-            let global_enabled = inner.config.llm_config.enabled;
-            let profile_enabled = selected_profile
-                .and_then(|p| p.rewrite_llm_enabled)
-                .unwrap_or(global_enabled);
-            let effective_llm_enabled = if !global_enabled {
-                false
-            } else if let Some(preset) = selected_preset {
+            let default_profile_enabled = inner.config.llm_config.enabled;
+
+            let profile_enabled = match selected_profile {
+                Some(p) => match p.rewrite_llm_enabled {
+                    Some(v) => v,
+                    None => {
+                        if p.id == "default" {
+                            default_profile_enabled
+                        } else {
+                            true
+                        }
+                    }
+                },
+                None => default_profile_enabled,
+            };
+
+            let effective_llm_enabled = if let Some(preset) = selected_preset {
                 profile_enabled && preset.rewrite_llm_enabled
             } else {
                 profile_enabled
             };
 
-            let disabled_reason = if global_enabled {
-                if !profile_enabled {
-                    Some(LlmNotAttemptedReason::DisabledByProfile)
-                } else if selected_preset_rewrite_enabled == Some(false) {
-                    Some(LlmNotAttemptedReason::DisabledByPreset)
+            let disabled_reason = if !profile_enabled {
+                if selected_profile
+                    .as_ref()
+                    .map(|p| p.id == "default" && p.rewrite_llm_enabled.is_none())
+                    .unwrap_or(false)
+                    && !default_profile_enabled
+                {
+                    Some(LlmNotAttemptedReason::DisabledByDefaultProfile)
                 } else {
-                    None
+                    Some(LlmNotAttemptedReason::DisabledByProfile)
                 }
+            } else if selected_preset_rewrite_enabled == Some(false) {
+                Some(LlmNotAttemptedReason::DisabledByPreset)
             } else {
-                Some(LlmNotAttemptedReason::DisabledGlobally)
+                None
             };
 
             let (llm_provider, not_attempted_reason) = if effective_llm_enabled {
