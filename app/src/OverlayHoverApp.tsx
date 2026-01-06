@@ -107,7 +107,6 @@ export default function OverlayHoverApp() {
   const activeProfilePresets = useMemo(() => {
     if (!settings) return [];
     if (!activeProfileId) return [];
-    if (activeProfileId === "default") return [];
     const profile = settings.rewrite_program_prompt_profiles.find(
       (p) => p.id === activeProfileId
     );
@@ -119,7 +118,6 @@ export default function OverlayHoverApp() {
   const routerIsEffectivelyOn = useMemo(() => {
     if (!settings) return false;
     if (!activeProfileId) return false;
-    if (activeProfileId === "default") return false;
     const profile = settings.rewrite_program_prompt_profiles.find(
       (p) => p.id === activeProfileId
     );
@@ -127,13 +125,28 @@ export default function OverlayHoverApp() {
     return Boolean(r && r.enabled && r.strategy !== "off");
   }, [settings, activeProfileId]);
 
+  const rewriteIsEnabled = useMemo(() => {
+    if (!settings) return false;
+    if (!activeProfileId) return false;
+
+    // Default profile uses the global rewrite toggle.
+    if (activeProfileId === "default") return settings.rewrite_llm_enabled;
+
+    const profile = settings.rewrite_program_prompt_profiles.find(
+      (p) => p.id === activeProfileId
+    );
+    if (!profile) return settings.rewrite_llm_enabled;
+    return typeof profile.rewrite_llm_enabled === "boolean"
+      ? profile.rewrite_llm_enabled
+      : settings.rewrite_llm_enabled;
+  }, [settings, activeProfileId]);
+
+  const shouldShow = routerIsEffectivelyOn && hasPresets && rewriteIsEnabled;
+
   const setSessionPresetLock = useCallback(
     async (nextPresetId: string | null) => {
       try {
-        const profileIdForLock =
-          activeProfileId && activeProfileId !== "default"
-            ? activeProfileId
-            : null;
+        const profileIdForLock = activeProfileId ?? null;
         await invoke("pipeline_set_session_preset_lock", {
           profileId: profileIdForLock,
           presetId: nextPresetId ?? null,
@@ -147,16 +160,15 @@ export default function OverlayHoverApp() {
     [activeProfileId, keepAlive]
   );
 
-  // Hard rule: hover overlay should only ever show if there are presets.
-  // If the backend shows the window while there are no presets (or presets were deleted),
-  // immediately hide it so we don't render an empty dot/pill.
+  // Hard rule: hover overlay should never show unless the router is on, rewrite is enabled,
+  // and there are presets.
   useEffect(() => {
-    if (!hasPresets) {
+    if (!shouldShow) {
       tauriAPI.hideOverlayHover().catch(() => {});
     }
-  }, [hasPresets]);
+  }, [shouldShow]);
 
-  if (!hasPresets) {
+  if (!shouldShow) {
     return null;
   }
 

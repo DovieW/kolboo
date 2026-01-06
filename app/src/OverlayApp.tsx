@@ -15,7 +15,12 @@ import {
 } from "react";
 import { applyAccentColor } from "./lib/accentColor";
 import { useSettings, useTypeText } from "./lib/queries";
-import { type ConnectionState, type IntentRouterSettings, tauriAPI } from "./lib/tauri";
+import {
+  type ConnectionState,
+  type IntentRouterSettings,
+  type RewriteProgramPromptProfile,
+  tauriAPI,
+} from "./lib/tauri";
 import "./app.css";
 
 function readBootAccentColor(): string | null {
@@ -1499,15 +1504,18 @@ function RecordingControl() {
 
   const activeProfileId = activeProfile?.profile_id ?? null;
 
-  const activeProfilePresets = useMemo(() => {
-    if (!settings) return [];
-    if (!activeProfileId) return [];
-    if (activeProfileId === "default") return [];
-    const profile = settings.rewrite_program_prompt_profiles.find(
-      (p) => p.id === activeProfileId
+  const activeProfileObj = useMemo(() => {
+    if (!settings) return null;
+    if (!activeProfileId) return null;
+    return (
+      settings.rewrite_program_prompt_profiles.find((p) => p.id === activeProfileId) ??
+      null
     );
-    return profile?.presets ?? [];
   }, [settings, activeProfileId]);
+
+  const activeProfilePresets = useMemo(() => {
+    return activeProfileObj?.presets ?? [];
+  }, [activeProfileObj]);
 
   const hoverHasPresets = activeProfilePresets.length > 0;
 
@@ -1518,29 +1526,59 @@ function RecordingControl() {
   }, [activeProfilePresets, sessionPresetId]);
 
   const activeProfileRouter = useMemo(() => {
-    if (!settings) return null;
-    if (!activeProfileId) return null;
-    if (activeProfileId === "default") return null;
-    const profile = settings.rewrite_program_prompt_profiles.find(
-      (p) => p.id === activeProfileId
-    );
-    return profile?.router ?? null;
-  }, [settings, activeProfileId]);
+    return activeProfileObj?.router ?? null;
+  }, [activeProfileObj]);
 
   const routerIsEffectivelyOn =
     !!activeProfileRouter &&
     activeProfileRouter.enabled &&
     activeProfileRouter.strategy !== "off";
 
+  const rewriteIsEnabled = useMemo(() => {
+    if (!settings) return false;
+    if (!activeProfileId) return false;
+
+    // Default profile inherits the global rewrite toggle.
+    if (activeProfileId === "default") return settings.rewrite_llm_enabled;
+
+    const profile = activeProfileObj;
+    if (!profile) return settings.rewrite_llm_enabled;
+
+    return typeof profile.rewrite_llm_enabled === "boolean"
+      ? profile.rewrite_llm_enabled
+      : settings.rewrite_llm_enabled;
+  }, [activeProfileObj, activeProfileId, settings]);
+
+  const shouldShowHoverPresets =
+    routerIsEffectivelyOn && hoverHasPresets && rewriteIsEnabled;
+
   const toggleRouterEnabled = useCallback(async () => {
     if (!settings) return;
-    if (!activeProfileId || activeProfileId === "default") return;
+    if (!activeProfileId) return;
 
     const profiles = settings.rewrite_program_prompt_profiles;
     const idx = profiles.findIndex((p) => p.id === activeProfileId);
-    if (idx < 0) return;
 
-    const profile = profiles[idx];
+    // Backward compatible: if Default hasn't been migrated into the profile list yet,
+    // upsert it now so it can own router/presets.
+    const profile: RewriteProgramPromptProfile | null =
+      idx >= 0
+        ? (profiles[idx] ?? null)
+        : activeProfileId === "default"
+          ? {
+              id: "default",
+              name: "Default",
+              program_paths: [],
+              cleanup_prompt_sections: null,
+              presets: [],
+              default_preset_id: null,
+              default_preset_description: null,
+              router: null,
+              active_preset_id: null,
+              rewrite_llm_enabled: null,
+            }
+          : null;
+
     if (!profile) return;
     const current: IntentRouterSettings | null = profile.router ?? null;
 
@@ -1567,9 +1605,16 @@ function RecordingControl() {
       };
     })();
 
-    const nextProfiles = profiles.map((p) =>
-      p.id === activeProfileId ? { ...p, router: nextRouter } : p
-    );
+    const nextProfiles =
+      idx >= 0
+        ? profiles.map((p) =>
+            p.id === activeProfileId ? { ...p, router: nextRouter } : p
+          )
+        : [
+            // Insert Default first so it doesn't show up as a "program profile" elsewhere.
+            { ...profile, router: nextRouter },
+            ...profiles,
+          ];
 
     try {
       await tauriAPI.updateRewriteProgramPromptProfiles(nextProfiles);
@@ -1583,10 +1628,7 @@ function RecordingControl() {
     async (nextPresetId: string | null) => {
       setSessionPresetId(nextPresetId);
 
-      const profileIdForLock =
-        activeProfileId && activeProfileId !== "default"
-          ? activeProfileId
-          : null;
+      const profileIdForLock = activeProfileId ?? null;
 
       // Best-effort: set immediately so the lock applies even when stop is
       // triggered by a global hotkey.
@@ -1734,9 +1776,9 @@ function RecordingControl() {
   // Hide it proactively so we don't end up with an empty tiny "dot" panel.
   useEffect(() => {
     if (!expanded) return;
-    if (hoverHasPresets) return;
+    if (shouldShowHoverPresets) return;
     tauriAPI.hideOverlayHover().catch(() => {});
-  }, [expanded, hoverHasPresets]);
+  }, [expanded, shouldShowHoverPresets]);
 
   // New recording sessions should start in Auto mode.
   useEffect(() => {

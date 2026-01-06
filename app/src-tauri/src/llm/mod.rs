@@ -217,8 +217,10 @@ pub struct ProgramPreset {
     /// Prompt sections to use when this preset is selected.
     pub prompts: PromptSections,
 
-    /// Optional per-preset gate for rewrite (falls back to profile/global settings).
-    pub rewrite_llm_enabled: Option<bool>,
+    /// Explicit per-preset gate for rewrite.
+    ///
+    /// Note: global/profile rewrite gates are applied separately as hard gates.
+    pub rewrite_llm_enabled: bool,
 
     // Optional per-preset overrides for the pipeline
     pub stt_provider: Option<String>,

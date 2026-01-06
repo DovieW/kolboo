@@ -134,8 +134,10 @@ function normalizeRewritePreset(value: unknown): RewritePreset | null {
         (p.cleanup_prompt_sections as CleanupPromptSectionsOverride)
       : null;
 
+  // Backward compatible: older settings may omit this field or write null.
+  // Backend defaults missing/null to true.
   const rewrite_llm_enabled =
-    typeof p.rewrite_llm_enabled === "boolean" ? p.rewrite_llm_enabled : null;
+    typeof p.rewrite_llm_enabled === "boolean" ? p.rewrite_llm_enabled : true;
   const stt_provider =
     typeof p.stt_provider === "string" ? p.stt_provider : null;
   const stt_model = typeof p.stt_model === "string" ? p.stt_model : null;
@@ -325,7 +327,9 @@ export interface RewritePreset {
   // Same override surface area as RewriteProgramPromptProfile
   cleanup_prompt_sections: CleanupPromptSectionsOverride | null;
 
-  rewrite_llm_enabled?: boolean | null;
+  // Explicit per-preset gate for rewrite.
+  // Missing/null in legacy settings is treated as true.
+  rewrite_llm_enabled: boolean;
   stt_provider?: string | null;
   stt_model?: string | null;
   stt_timeout_seconds?: number | null;

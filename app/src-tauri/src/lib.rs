@@ -142,7 +142,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     let mut dirty = false;
     // Some settings intentionally use explicit null as a meaningful value.
     // For those keys, we only seed defaults when the key is truly absent.
-    let mut set_default = |key: &str, value: Value, only_if_absent: bool| {
+    //
+    // IMPORTANT: this closure must *not* capture `dirty`, otherwise `dirty` becomes
+    // mutably borrowed for the lifetime of the closure and we can't update it
+    // elsewhere (Rust E0506).
+    let mut set_default = |key: &str, value: Value, only_if_absent: bool| -> bool {
         let should_set = if only_if_absent {
             store.get(key).is_none()
         } else {
@@ -151,86 +155,140 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
 
         if should_set {
             store.set(key.to_string(), value);
-            dirty = true;
+            return true;
         }
+
+        false
     };
 
-    set_default("stt_provider", json!("groq"), false);
+    dirty |= set_default("stt_provider", json!("groq"), false);
     // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
-    set_default("groq_free_tier", json!(true), false);
+    dirty |= set_default("groq_free_tier", json!(true), false);
     // Cohere toggle (used by stats filtering).
-    set_default("cohere_free_tier", json!(true), false);
+    dirty |= set_default("cohere_free_tier", json!(true), false);
     // AssemblyAI and Speechmatics toggles (used by stats filtering).
-    set_default("assemblyai_free_tier", json!(true), false);
-    set_default("speechmatics_free_tier", json!(true), false);
-    set_default("stt_transcription_prompt", json!(null), false);
-    set_default("stt_timeout_seconds", json!(10.0), false);
+    dirty |= set_default("assemblyai_free_tier", json!(true), false);
+    dirty |= set_default("speechmatics_free_tier", json!(true), false);
+    dirty |= set_default("stt_transcription_prompt", json!(null), false);
+    dirty |= set_default("stt_timeout_seconds", json!(10.0), false);
 
     // Network / proxy settings.
-    set_default(
+    dirty |= set_default(
         "proxy_settings",
         serde_json::to_value(crate::settings::ProxySettings::default())?,
         false,
     );
     // How many recordings/history items to retain (impacts disk usage).
     // Keep this aligned with the UI default.
-    set_default("max_saved_recordings", json!(1000), false);
+    dirty |= set_default("max_saved_recordings", json!(1000), false);
 
     // Request logs retention (in-memory request log history).
     // Keep this aligned with the UI default.
-    set_default("request_logs_retention_mode", json!("amount"), false);
-    set_default("request_logs_retention_amount", json!(50), false);
+    dirty |= set_default("request_logs_retention_mode", json!("amount"), false);
+    dirty |= set_default("request_logs_retention_amount", json!(50), false);
     // Only used when mode == "time" (days; 0 = forever)
-    set_default("request_logs_retention_days", json!(7), false);
+    dirty |= set_default("request_logs_retention_days", json!(7), false);
     // Time-based retention for history/transcriptions. 0 = keep forever.
-    set_default("transcription_retention_days", json!(0), false);
+    dirty |= set_default("transcription_retention_days", json!(0), false);
     // New retention keys (unit+value) used by newer UI.
     // Keep legacy days key as well for backward compatibility.
-    set_default("transcription_retention_unit", json!("days"), false);
-    set_default("transcription_retention_value", json!(0.0), false);
+    dirty |= set_default("transcription_retention_unit", json!("days"), false);
+    dirty |= set_default("transcription_retention_value", json!(0.0), false);
     // When deleting old transcriptions, optionally also delete their .wav recordings.
-    set_default("transcription_retention_delete_recordings", json!(false), false);
+    dirty |= set_default("transcription_retention_delete_recordings", json!(false), false);
 
     // Persisted stats retention (usage/cost events).
     // These are stored on disk (unlike request logs which are in-memory).
     // 0 = keep forever.
-    set_default("stats_retention_unit", json!("days"), false);
-    set_default("stats_retention_value", json!(30.0), false);
+    dirty |= set_default("stats_retention_unit", json!("days"), false);
+    dirty |= set_default("stats_retention_value", json!(30.0), false);
     // Defensive cap (bytes). The pruning logic enforces this regardless of time settings.
-    set_default("stats_retention_max_bytes", json!(50_000_000u64), false);
-    set_default("overlay_mode", json!("recording_only"), false);
+    dirty |= set_default("stats_retention_max_bytes", json!(50_000_000u64), false);
+    dirty |= set_default("overlay_mode", json!("recording_only"), false);
     // Whether the overlay shows detailed phase text while processing
     // (e.g. "transcribing…", "routing…", "rewriting…"). When false, the overlay
     // uses a waveform animation instead.
-    set_default("overlay_show_detailed_loading", json!(false), false);
-    set_default("widget_position", json!("bottom-center"), false);
+    dirty |= set_default("overlay_show_detailed_loading", json!(false), false);
+    dirty |= set_default("widget_position", json!("bottom-center"), false);
     // Whether clicking the window X exits the app or closes the main window to the tray.
     // - "exit_program": exit the application process
     // - "minimize_to_tray": close (destroy) the main window but keep the tray app running
     //   (the tray can recreate the main window on demand)
     // Legacy (migrated by the frontend normalizer):
     // - "close_window": previously meant "destroy the main window (tray can recreate it)".
-    set_default("main_window_close_behavior", json!("minimize_to_tray"), false);
-    set_default("output_mode", json!("paste"), false);
-    set_default("output_hit_enter", json!(false), false);
-    set_default("playing_audio_handling", json!("mute"), false);
-    set_default("sound_enabled", json!(true), false);
-    set_default("rewrite_llm_enabled", json!(false), false);
-    set_default("rewrite_program_prompt_profiles", json!([]), false);
+    dirty |= set_default("main_window_close_behavior", json!("minimize_to_tray"), false);
+    dirty |= set_default("output_mode", json!("paste"), false);
+    dirty |= set_default("output_hit_enter", json!(false), false);
+    dirty |= set_default("playing_audio_handling", json!("mute"), false);
+    dirty |= set_default("sound_enabled", json!(true), false);
+    dirty |= set_default("rewrite_llm_enabled", json!(false), false);
+
+    // Rewrite profiles: historically this was an empty array with the Default profile
+    // represented implicitly by global settings. We now want Default to be a real,
+    // persisted profile (id="default") so it can own presets/router config.
+    let default_rewrite_profile = json!({
+        "id": "default",
+        "name": "Default",
+        "program_paths": [],
+        "cleanup_prompt_sections": null,
+        "presets": [],
+        "default_preset_id": null,
+        "default_preset_description": null,
+        "active_preset_id": null,
+        "router": null,
+        // Default profile inherits the global rewrite toggle.
+        "rewrite_llm_enabled": null,
+    });
+    dirty |= set_default(
+        "rewrite_program_prompt_profiles",
+        json!([default_rewrite_profile.clone()]),
+        false,
+    );
+
+    // Migration: if the key exists but Default isn't present yet (e.g. was seeded as []),
+    // insert Default at the front without overwriting other profiles.
+    match store.get("rewrite_program_prompt_profiles") {
+        Some(Value::Array(mut arr)) => {
+            let has_default = arr.iter().any(|v| {
+                v.as_object()
+                    .and_then(|o| o.get("id"))
+                    .and_then(|id| id.as_str())
+                    .map(|id| id == "default")
+                    .unwrap_or(false)
+            });
+
+            if !has_default {
+                arr.insert(0, default_rewrite_profile);
+                store.set("rewrite_program_prompt_profiles".to_string(), Value::Array(arr));
+                dirty = true;
+            }
+        }
+        Some(Value::Null) | None => {
+            // Already handled by set_default above.
+        }
+        Some(_) => {
+            // Malformed value: replace with a minimal sane default.
+            store.set(
+                "rewrite_program_prompt_profiles".to_string(),
+                json!([default_rewrite_profile]),
+            );
+            dirty = true;
+        }
+    }
 
     // Hotkeys: allow explicit null to mean "disabled"; only seed when key is absent.
-    set_default(
+    dirty |= set_default(
         "toggle_hotkey",
         serde_json::to_value(HotkeyConfig::default_toggle())?,
         true,
     );
     // Hotkeys: allow explicit null to mean "disabled"; only seed when key is absent.
     // Hold-to-record and paste-last are disabled by default.
-    set_default("hold_hotkey", json!(null), true);
-    set_default("paste_last_hotkey", json!(null), true);
+    dirty |= set_default("hold_hotkey", json!(null), true);
+    dirty |= set_default("paste_last_hotkey", json!(null), true);
 
     // VAD settings are used by the pipeline.
-    set_default(
+    dirty |= set_default(
         "vad_settings",
         serde_json::to_value(settings::VadSettings::default())?,
         false,
@@ -240,17 +298,17 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // - hot_mic_enabled: keep the input stream open while idle and maintain a rolling pre-roll
     // - hot_mic_pre_roll_ms: pre-roll duration (ms) to prepend at record start
     // - mic_auto_recover_enabled: watchdog the stream and attempt restart on hangs/disconnects
-    set_default("hot_mic_enabled", json!(false), false);
-    set_default("hot_mic_pre_roll_ms", json!(1500u32), false);
-    set_default("mic_auto_recover_enabled", json!(false), false);
+    dirty |= set_default("hot_mic_enabled", json!(false), false);
+    dirty |= set_default("hot_mic_pre_roll_ms", json!(1500u32), false);
+    dirty |= set_default("mic_auto_recover_enabled", json!(false), false);
 
     // Audio + quiet-recording gating.
-    set_default(
+    dirty |= set_default(
         "quiet_audio_gate_enabled",
         json!(default_pipeline_config.quiet_audio_gate_enabled),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "quiet_audio_min_duration_secs",
         json!(default_pipeline_config.quiet_audio_min_duration_secs),
         false,

@@ -130,6 +130,14 @@ pub(crate) fn select_profile_for_foreground_app(
     None
 }
 
+fn select_default_profile(llm_config: &LlmConfig) -> Option<crate::llm::ProgramPromptProfile> {
+    llm_config
+        .program_prompt_profiles
+        .iter()
+        .find(|p| p.id == "default")
+        .cloned()
+}
+
 fn select_effective_preset<'a>(
     profile: &'a crate::llm::ProgramPromptProfile,
 ) -> Option<&'a crate::llm::ProgramPreset> {
@@ -688,10 +696,10 @@ async fn route_preset_id_with_llm(
         return None;
     }
 
-    // Keep this extremely constrained: output must select exactly one preset id (or "none").
+    // Keep this extremely constrained: output must select exactly one preset id (or "default").
     let mut options = String::new();
     if let Some(desc) = default_desc {
-        options.push_str(&format!("- none: {}\n", desc));
+        options.push_str(&format!("- default: {}\n", desc));
     }
     for p in &profile.presets {
         let desc = p.description.clone().unwrap_or_default();
@@ -703,7 +711,7 @@ async fn route_preset_id_with_llm(
         options.push_str(&format!("- {}: {}{}\n", p.id, desc, hints));
     }
 
-    let default_system = "You are an intent router. Choose the best preset id for the transcript.\n\nRules:\n- Output a JSON object matching the provided JSON Schema.\n- Choose exactly one preset_id from the allowed list.\n- If you are not confident, choose preset_id = 'none'.\n";
+    let default_system = "You are an intent router. Choose the best preset id for the transcript.\n\nRules:\n- Output a JSON object matching the provided JSON Schema.\n- Choose exactly one preset_id from the allowed list.\n- If you are not confident, choose preset_id = 'default'.\n";
 
     let system = router
         .llm_system_prompt
@@ -717,6 +725,8 @@ async fn route_preset_id_with_llm(
     // JSON schema (when supported) makes routing far more deterministic.
     // Enforce the allowed values at the schema level.
     let mut allowed: Vec<String> = Vec::new();
+    // Prefer "default", but tolerate legacy "none".
+    allowed.push("default".to_string());
     allowed.push("none".to_string());
     for p in &profile.presets {
         allowed.push(p.id.clone());
@@ -727,7 +737,7 @@ async fn route_preset_id_with_llm(
             "preset_id": {
                 "type": "string",
                 "enum": allowed,
-                "description": "Chosen preset id. Use 'none' to indicate no preset / default."
+                "description": "Chosen preset id. Use 'default' to indicate no preset / default. (Legacy: 'none')"
             }
         },
         "required": ["preset_id"],
@@ -763,7 +773,7 @@ async fn route_preset_id_with_llm(
             system,
             &user,
             "intent_router_choice",
-            "Select one preset id (or none) for the transcript.",
+            "Select one preset id (or default) for the transcript.",
             schema,
         )
         .await
@@ -791,7 +801,7 @@ async fn route_preset_id_with_llm(
         .trim()
         .to_string();
 
-    if out.eq_ignore_ascii_case("none") || out.is_empty() {
+    if out.eq_ignore_ascii_case("default") || out.eq_ignore_ascii_case("none") || out.is_empty() {
         return Some((None, request_json, response_json));
     }
 
@@ -2076,20 +2086,14 @@ impl SharedPipeline {
             let active_profile = session_profile_override
                 .as_deref()
                 .and_then(|id| {
-                    if id == "default" {
-                        None
-                    } else {
-                        Some(id)
-                    }
-                })
-                .and_then(|id| {
                     llm_config
                         .program_prompt_profiles
                         .iter()
                         .find(|p| p.id == id)
                         .cloned()
                 })
-                .or_else(|| select_profile_for_foreground_app(&llm_config));
+                .or_else(|| select_profile_for_foreground_app(&llm_config))
+                .or_else(|| select_default_profile(&llm_config));
 
             let active_preset = active_profile
                 .as_ref()
@@ -2233,7 +2237,7 @@ impl SharedPipeline {
 
         // Phase 3a: Decide which preset (if any) to use for the rewrite step.
         // This is where routing can run, because we finally have the transcript.
-        let (proxy_settings, llm_api_keys, request_log_store) = {
+        let (proxy_settings, llm_api_keys, request_log_store, llm_enabled_global) = {
             let inner = self
                 .inner
                 .lock()
@@ -2242,6 +2246,7 @@ impl SharedPipeline {
                 inner.config.proxy_settings.clone(),
                 inner.config.llm_api_keys.clone(),
                 inner.config.request_log_store.clone(),
+                inner.config.llm_config.enabled,
             )
         };
 
@@ -2249,8 +2254,14 @@ impl SharedPipeline {
         // applies to this transcription attempt.
         let session_lock = self.take_session_preset_lock();
 
+        let profile_rewrite_enabled = active_profile
+            .as_ref()
+            .and_then(|p| p.rewrite_llm_enabled)
+            .unwrap_or(llm_enabled_global);
+
         let mut routed_preset_id: Option<String> = None;
-        if let Some(profile) = active_profile.as_ref() {
+        if profile_rewrite_enabled {
+            if let Some(profile) = active_profile.as_ref() {
             // Session override wins over everything else.
             if let Some(lock) = session_lock.as_ref() {
                 let profile_ok = lock
@@ -2269,7 +2280,7 @@ impl SharedPipeline {
             // Persisted manual override wins over router/default.
             if routed_preset_id.is_none() {
                 if let Some(id) = profile.active_preset_id.as_deref() {
-                routed_preset_id = Some(id.to_string());
+                    routed_preset_id = Some(id.to_string());
                 }
             }
 
@@ -2579,6 +2590,7 @@ impl SharedPipeline {
             if routed_preset_id.is_none() {
                 routed_preset_id = profile.default_preset_id.clone();
             }
+            }
         }
 
         // Persist the selected preset (or lack of preset) into the request log so the UI can
@@ -2647,10 +2659,20 @@ impl SharedPipeline {
                 .unwrap_or_else(|| llm_config.prompts.clone());
 
             let llm_timeout = llm_config.timeout;
-            let effective_llm_enabled = selected_preset
+
+            // Hard gates: global toggle + optional per-profile toggle.
+            // Presets can disable rewrite, but cannot enable it when global/profile is off.
+            let global_enabled = inner.config.llm_config.enabled;
+            let profile_enabled = selected_profile
                 .and_then(|p| p.rewrite_llm_enabled)
-                .or_else(|| selected_profile.and_then(|p| p.rewrite_llm_enabled))
-                .unwrap_or(inner.config.llm_config.enabled);
+                .unwrap_or(global_enabled);
+            let effective_llm_enabled = if !global_enabled {
+                false
+            } else if let Some(preset) = selected_preset {
+                profile_enabled && preset.rewrite_llm_enabled
+            } else {
+                profile_enabled
+            };
 
             let llm_provider = if effective_llm_enabled {
                 let desired_llm_provider = selected_preset
@@ -2867,20 +2889,14 @@ impl SharedPipeline {
             let llm_config = inner.config.llm_config.clone();
             let active_profile = profile_id_override
                 .and_then(|id| {
-                    if id == "default" {
-                        None
-                    } else {
-                        Some(id)
-                    }
-                })
-                .and_then(|id| {
                     llm_config
                         .program_prompt_profiles
                         .iter()
                         .find(|p| p.id == id)
                         .cloned()
                 })
-                .or_else(|| select_profile_for_foreground_app(&llm_config));
+                .or_else(|| select_profile_for_foreground_app(&llm_config))
+                .or_else(|| select_default_profile(&llm_config));
 
             let active_preset = active_profile
                 .as_ref()
@@ -3015,7 +3031,7 @@ impl SharedPipeline {
         log::info!("Pipeline: Retry STT complete, {} chars", stt_text.len());
 
         // Phase 3a: Route preset for rewrite (retry path).
-        let (proxy_settings, llm_api_keys, request_log_store) = {
+        let (proxy_settings, llm_api_keys, request_log_store, llm_enabled_global) = {
             let inner = self
                 .inner
                 .lock()
@@ -3024,13 +3040,20 @@ impl SharedPipeline {
                 inner.config.proxy_settings.clone(),
                 inner.config.llm_api_keys.clone(),
                 inner.config.request_log_store.clone(),
+                inner.config.llm_config.enabled,
             )
         };
 
         let session_lock = self.take_session_preset_lock();
 
+        let profile_rewrite_enabled = active_profile
+            .as_ref()
+            .and_then(|p| p.rewrite_llm_enabled)
+            .unwrap_or(llm_enabled_global);
+
         let mut routed_preset_id: Option<String> = None;
-        if let Some(profile) = active_profile.as_ref() {
+        if profile_rewrite_enabled {
+            if let Some(profile) = active_profile.as_ref() {
             if let Some(lock) = session_lock.as_ref() {
                 let profile_ok = lock
                     .profile_id
@@ -3331,6 +3354,7 @@ impl SharedPipeline {
             if routed_preset_id.is_none() {
                 routed_preset_id = profile.default_preset_id.clone();
             }
+            }
         }
 
         // Persist the selected preset (or lack of preset) into the request log so the UI can
@@ -3399,10 +3423,18 @@ impl SharedPipeline {
                 .unwrap_or_else(|| llm_config.prompts.clone());
 
             let llm_timeout = llm_config.timeout;
-            let effective_llm_enabled = selected_preset
+
+            let global_enabled = inner.config.llm_config.enabled;
+            let profile_enabled = selected_profile
                 .and_then(|p| p.rewrite_llm_enabled)
-                .or_else(|| selected_profile.and_then(|p| p.rewrite_llm_enabled))
-                .unwrap_or(inner.config.llm_config.enabled);
+                .unwrap_or(global_enabled);
+            let effective_llm_enabled = if !global_enabled {
+                false
+            } else if let Some(preset) = selected_preset {
+                profile_enabled && preset.rewrite_llm_enabled
+            } else {
+                profile_enabled
+            };
 
             let llm_provider = if effective_llm_enabled {
                 let desired_llm_provider = selected_preset

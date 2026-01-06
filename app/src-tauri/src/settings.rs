@@ -401,9 +401,16 @@ pub struct RewritePreset {
     #[serde(default)]
     pub cleanup_prompt_sections: Option<CleanupPromptSectionsSetting>,
 
-    /// Optional per-preset gate for the rewrite step (falls back to profile/global setting).
-    #[serde(default)]
-    pub rewrite_llm_enabled: Option<bool>,
+    /// Explicit per-preset gate for the rewrite step.
+    ///
+    /// Semantics:
+    /// - Missing/null in legacy settings => defaults to true (backward compatible)
+    /// - Does NOT override the global or per-profile rewrite gate (those are hard gates)
+    #[serde(
+        default = "default_true",
+        deserialize_with = "deserialize_null_to_default_true_bool"
+    )]
+    pub rewrite_llm_enabled: bool,
 
     #[serde(default)]
     pub stt_provider: Option<String>,
@@ -439,6 +446,17 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(false))
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn deserialize_null_to_default_true_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(true))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

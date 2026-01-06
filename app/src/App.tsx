@@ -704,11 +704,16 @@ function SettingsView() {
   }, [editingProfileId, profiles]);
 
   const editingOptions = [
+    // Keep an explicit Default entry at the top for UX.
+    // If the backend has migrated Default into a real persisted profile (id="default"),
+    // avoid duplicating it in the options list.
     { value: "default", label: "Default" },
-    ...profiles.map((p) => ({
-      value: p.id,
-      label: p.name.trim() ? p.name.trim() : p.id,
-    })),
+    ...profiles
+      .filter((p) => p.id !== "default")
+      .map((p) => ({
+        value: p.id,
+        label: p.name.trim() ? p.name.trim() : p.id,
+      })),
   ];
 
   return (
@@ -936,11 +941,16 @@ function SettingsViewWithGuideLauncher({
   }, [editingProfileId, profiles]);
 
   const editingOptions = [
+    // Keep an explicit Default entry at the top for UX.
+    // If the backend has migrated Default into a real persisted profile (id="default"),
+    // avoid duplicating it in the options list.
     { value: "default", label: "Default" },
-    ...profiles.map((p) => ({
-      value: p.id,
-      label: p.name.trim() ? p.name.trim() : p.id,
-    })),
+    ...profiles
+      .filter((p) => p.id !== "default")
+      .map((p) => ({
+        value: p.id,
+        label: p.name.trim() ? p.name.trim() : p.id,
+      })),
   ];
 
   return (
