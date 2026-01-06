@@ -102,7 +102,7 @@ export function SettingsGuideOverlay({
   const dictationInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sampleText =
-    "Kolboo is ready. I can dictate with my voice, rewrite text, and tune settings per app.";
+    "I can dictate with my voice anywhere, and tune settings per app and website.";
 
   const clearWelcomeTimers = () => {
     for (const t of welcomeTimersRef.current) window.clearTimeout(t);
@@ -450,10 +450,6 @@ export function SettingsGuideOverlay({
                       to start recording and again to stop.
                     </>
                   )}
-                </Text>
-
-                <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
-                  Click the box below so it’s focused, then dictate into it.
                 </Text>
 
                 <div className="tang-guide-copy" style={{ marginTop: 14 }}>
