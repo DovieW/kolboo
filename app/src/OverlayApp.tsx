@@ -1549,8 +1549,16 @@ function RecordingControl() {
       : settings.rewrite_llm_enabled;
   }, [activeProfileObj, activeProfileId, settings]);
 
+  const hoverAllowedByPipelineState =
+    pipelineState !== "transcribing" &&
+    pipelineState !== "routing" &&
+    pipelineState !== "rewriting";
+
   const shouldShowHoverPresets =
-    routerIsEffectivelyOn && hoverHasPresets && rewriteIsEnabled;
+    hoverAllowedByPipelineState &&
+    routerIsEffectivelyOn &&
+    hoverHasPresets &&
+    rewriteIsEnabled;
 
   const toggleRouterEnabled = useCallback(async () => {
     if (!settings) return;
@@ -1563,21 +1571,21 @@ function RecordingControl() {
     // upsert it now so it can own router/presets.
     const profile: RewriteProgramPromptProfile | null =
       idx >= 0
-        ? (profiles[idx] ?? null)
+        ? profiles[idx] ?? null
         : activeProfileId === "default"
-          ? {
-              id: "default",
-              name: "Default",
-              program_paths: [],
-              cleanup_prompt_sections: null,
-              presets: [],
-              default_preset_id: null,
-              default_preset_description: null,
-              router: null,
-              active_preset_id: null,
-              rewrite_llm_enabled: null,
-            }
-          : null;
+        ? {
+            id: "default",
+            name: "Default",
+            program_paths: [],
+            cleanup_prompt_sections: null,
+            presets: [],
+            default_preset_id: null,
+            default_preset_description: null,
+            router: null,
+            active_preset_id: null,
+            rewrite_llm_enabled: null,
+          }
+        : null;
 
     if (!profile) return;
     const current: IntentRouterSettings | null = profile.router ?? null;
@@ -1800,9 +1808,9 @@ function RecordingControl() {
         window.clearTimeout(holdPhaseTimerRef.current);
         holdPhaseTimerRef.current = null;
       }
-      if (holdPhaseText !== pipelineState) {
-        setHoldPhaseText(pipelineState);
-      }
+      if (!hoverPanelEnabled || !shouldShowHoverPresets) {
+              setHoldPhaseText(pipelineState);
+            }
       return;
     }
 
@@ -2457,7 +2465,7 @@ function RecordingControl() {
           window.clearTimeout(hoverCloseTimerRef.current);
           hoverCloseTimerRef.current = null;
         }
-        if (!hoverPanelEnabled || !hoverHasPresets) {
+        if (!hoverPanelEnabled || !shouldShowHoverPresets) {
           tauriAPI.hideOverlayHover().catch(() => {});
           return;
         }
@@ -2487,7 +2495,7 @@ function RecordingControl() {
           return;
         }
 
-        if (!hoverPanelEnabled || !hoverHasPresets) {
+        if (!hoverPanelEnabled || !shouldShowHoverPresets) {
           tauriAPI.hideOverlayHover().catch(() => {});
           return;
         }
