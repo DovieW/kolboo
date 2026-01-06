@@ -1854,6 +1854,41 @@ pub fn run() {
                 ensure_default_settings(app.handle())?;
             }
 
+            // Startup window visibility:
+            // - Show the main window only on first-run (when the setup guide is pending).
+            // - Otherwise, keep it hidden; the tray icon is the explicit entrypoint.
+            #[cfg(desktop)]
+            {
+                let guide_state: String = get_setting_from_store(
+                    app.handle(),
+                    "settings_guide_state",
+                    "pending".to_string(),
+                );
+
+                if let Some(main) = app.get_webview_window("main") {
+                    if guide_state == "pending" {
+                        log::info!(
+                            "Startup: settings guide is pending -> showing main window"
+                        );
+                        let _ = main.show();
+                        let _ = main.unminimize();
+                        let _ = main.set_focus();
+                    } else {
+                        log::info!(
+                            "Startup: settings guide state is '{}' -> keeping main window hidden",
+                            guide_state
+                        );
+                        let _ = main.hide();
+                    }
+                } else {
+                    // If the window isn't present (e.g. it was closed/destroyed or config changed),
+                    // the tray will recreate it on demand.
+                    log::warn!(
+                        "Startup: main window not found; tray will recreate it on demand"
+                    );
+                }
+            }
+
             // Windows-only: enable modifier-only hotkeys (e.g. Right Alt alone) via a low-level
             // keyboard hook. This is separate from tauri-plugin-global-shortcut.
             #[cfg(target_os = "windows")]
