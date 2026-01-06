@@ -464,8 +464,10 @@ async fn route_preset_id_with_embeddings(
                             resp,
                         );
                         if let Ok(mut cache) = embedding_cache.lock() {
-                            // Keep cache bounded.
-                            if cache.len() > 512 {
+                            // Keep cache bounded, but avoid aggressively clearing.
+                            // The cache may be preloaded from persisted store and can be larger
+                            // than a few hundred entries.
+                            if cache.len() > 20_000 {
                                 cache.clear();
                             }
                             cache.insert(cache_key, v.clone());
@@ -638,7 +640,7 @@ async fn route_preset_id_with_llm(
         return None;
     }
 
-    // Keep this extremely constrained: output must be exactly one preset id, or "none".
+    // Keep this extremely constrained: output must select exactly one preset id (or "none").
     let mut options = String::new();
     if let Some(desc) = default_desc {
         options.push_str(&format!("- none: {}\n", desc));
@@ -653,13 +655,36 @@ async fn route_preset_id_with_llm(
         options.push_str(&format!("- {}: {}{}\n", p.id, desc, hints));
     }
 
-    let system = "You are an intent router. Choose the best preset id for the transcript.\n\nRules:\n- Output ONLY one of the preset ids exactly as provided, or the single word 'none'.\n- Do not include quotes, punctuation, or any extra text.\n- If you are not confident, output 'none'.\n";
+    let default_system = "You are an intent router. Choose the best preset id for the transcript.\n\nRules:\n- Output a JSON object matching the provided JSON Schema.\n- Choose exactly one preset_id from the allowed list.\n- If you are not confident, choose preset_id = 'none'.\n";
 
-    let user = format!(
-        "Presets:\n{}\nTranscript:\n{}",
-        options,
-        transcript
-    );
+    let system = router
+        .llm_system_prompt
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default_system);
+
+    let user = format!("Presets:\n{}\nTranscript:\n{}", options, transcript);
+
+    // JSON schema (when supported) makes routing far more deterministic.
+    // Enforce the allowed values at the schema level.
+    let mut allowed: Vec<String> = Vec::new();
+    allowed.push("none".to_string());
+    for p in &profile.presets {
+        allowed.push(p.id.clone());
+    }
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "preset_id": {
+                "type": "string",
+                "enum": allowed,
+                "description": "Chosen preset id. Use 'none' to indicate no preset / default."
+            }
+        },
+        "required": ["preset_id"],
+        "additionalProperties": false
+    });
 
     let (system_preview, system_truncated, system_len) = preview_for_log(system, 1200);
     let (user_preview, user_truncated, user_len) = preview_for_log(&user, 2400);
@@ -667,6 +692,8 @@ async fn route_preset_id_with_llm(
         "type": "llm",
         "provider": provider.name(),
         "model": provider.model(),
+        "structured": true,
+        "schema_name": "intent_router_choice",
         "messages": [
             {
                 "role": "system",
@@ -683,8 +710,17 @@ async fn route_preset_id_with_llm(
         ]
     });
 
-    let out = match provider.complete(system, &user).await {
-        Ok(s) => s.trim().to_string(),
+    let v = match provider
+        .complete_json_schema(
+            system,
+            &user,
+            "intent_router_choice",
+            "Select one preset id (or none) for the transcript.",
+            schema,
+        )
+        .await
+    {
+        Ok(v) => v,
         Err(e) => {
             log::warn!("Intent router: LLM routing failed: {}", e);
             let response_json = serde_json::json!({
@@ -695,13 +731,19 @@ async fn route_preset_id_with_llm(
         }
     };
 
-    let out_for_json = out.clone();
     let response_json = serde_json::json!({
         "type": "llm",
-        "raw": out_for_json,
+        "json": v,
     });
 
-    if out.eq_ignore_ascii_case("none") {
+    let out = v
+        .get("preset_id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if out.eq_ignore_ascii_case("none") || out.is_empty() {
         return Some((None, request_json, response_json));
     }
 
@@ -1424,6 +1466,39 @@ impl SharedPipeline {
             session_preset_lock: Arc::new(Mutex::new(None)),
             session_profile_override: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Merge precomputed embeddings into the in-memory cache.
+    ///
+    /// This cache is used by embeddings routing to avoid recomputing per-preset hint embeddings.
+    pub fn preload_embedding_cache(&self, entries: HashMap<String, Vec<f32>>) {
+        if entries.is_empty() {
+            return;
+        }
+
+        if let Ok(mut cache) = self.embedding_cache.lock() {
+            // Keep cache bounded. (Note: persisted cache may be larger than the runtime cache.)
+            if cache.len() + entries.len() > 2048 {
+                cache.clear();
+            }
+            cache.extend(entries);
+        }
+    }
+
+    pub fn embedding_cache_contains_key(&self, key: &str) -> bool {
+        self.embedding_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(key).map(|v| !v.is_empty()))
+            .unwrap_or(false)
+    }
+
+    pub fn embedding_cache_get(&self, key: &str) -> Option<Vec<f32>> {
+        self.embedding_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(key).cloned())
+            .and_then(|v| if v.is_empty() { None } else { Some(v) })
     }
 
     /// Set (or clear) the in-memory session profile override.
@@ -2155,16 +2230,38 @@ impl SharedPipeline {
                             .map_err(|e| PipelineError::Lock(e.to_string()))?;
                         let llm_cfg = inner.config.llm_config.clone();
 
+                        // Router-specific overrides (fall back to global rewrite LLM config).
+                        let router_cfg = profile.router.as_ref();
+                        let desired_provider = router_cfg
+                            .and_then(|r| r.llm_provider.clone())
+                            .unwrap_or_else(|| llm_cfg.provider.clone());
+                        let desired_model = router_cfg
+                            .and_then(|r| r.llm_model.clone())
+                            .or_else(|| llm_cfg.model.clone());
+
+                        let desired_openai_effort = router_cfg
+                            .and_then(|r| r.openai_reasoning_effort.clone())
+                            .or_else(|| llm_cfg.openai_reasoning_effort.clone());
+                        let desired_gemini_budget = router_cfg
+                            .and_then(|r| r.gemini_thinking_budget)
+                            .or(llm_cfg.gemini_thinking_budget);
+                        let desired_gemini_level = router_cfg
+                            .and_then(|r| r.gemini_thinking_level.clone())
+                            .or_else(|| llm_cfg.gemini_thinking_level.clone());
+                        let desired_anthropic_budget = router_cfg
+                            .and_then(|r| r.anthropic_thinking_budget)
+                            .or(llm_cfg.anthropic_thinking_budget);
+
                         inner
                             .get_or_create_llm_provider(
-                                llm_cfg.provider.as_str(),
-                                llm_cfg.model.clone(),
+                                desired_provider.as_str(),
+                                desired_model,
                                 llm_cfg.timeout,
                                 llm_cfg.ollama_url.clone(),
-                                llm_cfg.openai_reasoning_effort.clone(),
-                                llm_cfg.gemini_thinking_budget,
-                                llm_cfg.gemini_thinking_level.clone(),
-                                llm_cfg.anthropic_thinking_budget,
+                                desired_openai_effort,
+                                desired_gemini_budget,
+                                desired_gemini_level,
+                                desired_anthropic_budget,
                             )
                             .ok()
                     };
@@ -2535,7 +2632,23 @@ impl SharedPipeline {
                         effective_gemini_thinking_level,
                         effective_anthropic_thinking_budget,
                     )
-                    .ok()
+                    .map(Some)
+                    .unwrap_or_else(|e| {
+                        log::warn!(
+                            "Pipeline: LLM provider '{}' unavailable: {}",
+                            desired_llm_provider,
+                            e
+                        );
+                        if let Some(store) = inner.config.request_log_store.as_ref() {
+                            store.with_current(|log| {
+                                log.warn(format!(
+                                    "LLM rewrite enabled but provider '{}' was unavailable: {}",
+                                    desired_llm_provider, e
+                                ));
+                            });
+                        }
+                        None
+                    })
             } else {
                 None
             };
@@ -3270,7 +3383,23 @@ impl SharedPipeline {
                         effective_gemini_thinking_level,
                         effective_anthropic_thinking_budget,
                     )
-                    .ok()
+                    .map(Some)
+                    .unwrap_or_else(|e| {
+                        log::warn!(
+                            "Pipeline: LLM provider '{}' unavailable (retry): {}",
+                            desired_llm_provider,
+                            e
+                        );
+                        if let Some(store) = inner.config.request_log_store.as_ref() {
+                            store.with_current(|log| {
+                                log.warn(format!(
+                                    "LLM rewrite enabled but provider '{}' was unavailable: {}",
+                                    desired_llm_provider, e
+                                ));
+                            });
+                        }
+                        None
+                    })
             } else {
                 None
             };

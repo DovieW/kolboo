@@ -421,6 +421,32 @@ impl HistoryStorage {
         self.save()
     }
 
+    /// Update the stored LLM provider/model for an existing history entry.
+    ///
+    /// This is useful when we create an in-progress entry early (based on the
+    /// configured model), but later learn whether the LLM step actually ran and
+    /// which concrete model was used.
+    pub fn set_request_llm_model(
+        &self,
+        request_id: &str,
+        llm_provider: Option<String>,
+        llm_model: Option<String>,
+    ) -> Result<(), String> {
+        {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            if let Some(entry) = data.entries.iter_mut().find(|e| e.id == request_id) {
+                entry.llm_provider = llm_provider;
+                entry.llm_model = llm_model;
+            }
+        }
+
+        self.save()
+    }
+
     /// Query history with server-side filtering and pagination.
     ///
     /// This is primarily used by the UI to avoid transferring the entire history

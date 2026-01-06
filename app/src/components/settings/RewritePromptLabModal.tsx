@@ -3,13 +3,16 @@ import {
   Divider,
   Group,
   Modal,
+  Select,
   SegmentedControl,
   SimpleGrid,
   Stack,
   Text,
   Textarea,
 } from "@mantine/core";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { llmAPI } from "../../lib/tauri";
 
 function errorToMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -35,19 +38,32 @@ export function RewritePromptLabModal(props: {
   // Computed prompt (edited elsewhere).
   currentPrompt: string;
 
+  // Optional initial model selection (for convenience when opening the modal).
+  initialLlmProvider?: string | null;
+  initialLlmModel?: string | null;
+
   // Actions
   onIteratePrompt: (params: {
     profileId: string;
     mode: "fixed" | "new";
     transcript: string;
     problemOutput: string;
-    desiredOutput: string;
+    desiredOutput?: string;
     currentPrompt: string;
+
+    llmProvider?: string;
+    llmModel?: string;
+    openAiReasoningEffort?: "none" | "low" | "medium" | "high" | null;
+    geminiThinkingLevel?: "minimal" | "low" | "medium" | "high" | null;
+    geminiThinkingBudget?: number | null;
+    anthropicThinkingBudget?: number | null;
   }) => Promise<{
     improvedPrompt: string;
     providerUsed: string;
     modelUsed: string;
   }>;
+
+  onSetPrompt: (prompt: string) => void;
 
   onTestPrompt: (params: {
     profileId: string;
@@ -55,6 +71,19 @@ export function RewritePromptLabModal(props: {
     prompt: string;
   }) => Promise<{ output: string; providerUsed: string; modelUsed: string }>;
 }) {
+  const { data: llmProviders } = useQuery({
+    queryKey: ["llmProviders"],
+    queryFn: () => llmAPI.getLlmProviders(),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+
+  // One dropdown, but maps to different backend knobs depending on provider/model.
+  const [thinkingValue, setThinkingValue] = useState<string>("default");
+
   const [mode, setMode] = useState<"fixed" | "new">("fixed");
 
   const [transcript, setTranscript] = useState("");
@@ -74,6 +103,47 @@ export function RewritePromptLabModal(props: {
   const [isImproving, setIsImproving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
 
+  // If providers load and we don't have a selection yet, default to initial or first provider.
+  useEffect(() => {
+    if (!props.opened) return;
+    if (!llmProviders || llmProviders.length === 0) return;
+
+    if (!selectedProvider) {
+      const preferred = props.initialLlmProvider ?? null;
+      const exists = preferred
+        ? llmProviders.some((p) => p.id === preferred)
+        : false;
+      setSelectedProvider(exists ? preferred : llmProviders[0]!.id);
+    }
+  }, [llmProviders, props.initialLlmProvider, props.opened, selectedProvider]);
+
+  // When provider changes, ensure model is valid for that provider.
+  useEffect(() => {
+    if (!props.opened) return;
+    if (!selectedProvider) return;
+    const provider = (llmProviders ?? []).find(
+      (p) => p.id === selectedProvider
+    );
+    const models = provider?.models ?? [];
+
+    if (models.length === 0) {
+      setSelectedModel(null);
+      return;
+    }
+
+    if (!selectedModel || !models.includes(selectedModel)) {
+      const preferred = props.initialLlmModel ?? null;
+      const usePreferred = preferred && models.includes(preferred);
+      setSelectedModel(usePreferred ? preferred : models[0]!);
+    }
+  }, [
+    llmProviders,
+    props.initialLlmModel,
+    props.opened,
+    selectedModel,
+    selectedProvider,
+  ]);
+
   // Seed values on open.
   useEffect(() => {
     if (!props.opened) return;
@@ -89,7 +159,123 @@ export function RewritePromptLabModal(props: {
     setTestError("");
     setImproveMeta("");
     setTestMeta("");
+
+    setSelectedProvider(props.initialLlmProvider ?? null);
+    setSelectedModel(props.initialLlmModel ?? null);
+    setThinkingValue("default");
   }, [props.opened, props.initialTranscript, props.initialProblemOutput]);
+
+  const supportsOpenAiReasoningEffort =
+    selectedProvider === "openai" &&
+    !!selectedModel &&
+    (selectedModel.startsWith("gpt-5") || selectedModel.startsWith("o"));
+
+  const supportsGeminiThinkingLevel =
+    selectedProvider === "gemini" &&
+    !!selectedModel &&
+    selectedModel.includes("gemini-3");
+
+  const supportsGeminiThinkingBudget =
+    selectedProvider === "gemini" &&
+    !!selectedModel &&
+    selectedModel.includes("gemini-2.5") &&
+    !selectedModel.includes("flash-lite");
+
+  const supportsAnthropicThinkingBudget =
+    selectedProvider === "anthropic" &&
+    !!selectedModel &&
+    (selectedModel.includes("claude-3-7") ||
+      selectedModel.includes("claude-4") ||
+      selectedModel.includes("-4-"));
+
+  const openAiThinkingEffortsForModel = (model: string): string[] => {
+    // Keep aligned with ProvidersSettings.
+    if (model.startsWith("gpt-5-pro")) return ["high"];
+    if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1"))
+      return ["none", "low", "medium", "high"];
+    if (model.startsWith("gpt-5")) return ["low", "medium", "high"];
+    if (model.startsWith("o")) return ["low", "medium", "high"];
+    return [];
+  };
+
+  const thinkingSelectKind:
+    | "none"
+    | "openai"
+    | "geminiLevel"
+    | "geminiBudget"
+    | "anthropicBudget" = supportsOpenAiReasoningEffort
+    ? "openai"
+    : supportsGeminiThinkingLevel
+    ? "geminiLevel"
+    : supportsGeminiThinkingBudget
+    ? "geminiBudget"
+    : supportsAnthropicThinkingBudget
+    ? "anthropicBudget"
+    : "none";
+
+  const thinkingOptions = useMemo((): Array<{
+    value: string;
+    label: string;
+  }> => {
+    if (thinkingSelectKind === "openai") {
+      const model = selectedModel ?? "";
+      return [
+        { value: "default", label: "Default" },
+        ...openAiThinkingEffortsForModel(model).map((v) => ({
+          value: v,
+          label: v === "none" ? "None" : v[0]!.toUpperCase() + v.slice(1),
+        })),
+      ];
+    }
+
+    if (thinkingSelectKind === "geminiLevel") {
+      const isFlash = (selectedModel ?? "").includes("gemini-3-flash");
+      const base = [{ value: "default", label: "Default" }];
+      return isFlash
+        ? base.concat([
+            { value: "minimal", label: "Minimal" },
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High" },
+          ])
+        : base.concat([
+            { value: "low", label: "Low" },
+            { value: "high", label: "High" },
+          ]);
+    }
+
+    if (thinkingSelectKind === "geminiBudget") {
+      const model = selectedModel ?? "";
+      const isPro = model.includes("gemini-2.5-pro");
+      const max = isPro ? 32768 : 24576;
+      const canDisable = model.includes("gemini-2.5-flash") && !isPro;
+
+      return [
+        { value: "default", label: "Default" },
+        { value: "-1", label: "Dynamic (-1)" },
+        ...(canDisable ? [{ value: "0", label: "Off (0)" }] : []),
+        ...(isPro ? [{ value: "128", label: "Minimal (128)" }] : []),
+        { value: "1024", label: "Light (1024)" },
+        { value: "4096", label: "Medium (4096)" },
+        { value: "8192", label: "High (8192)" },
+        { value: "16384", label: "Very High (16384)" },
+        ...(max > 16384 ? [{ value: String(max), label: `Max (${max})` }] : []),
+      ];
+    }
+
+    if (thinkingSelectKind === "anthropicBudget") {
+      return [
+        { value: "default", label: "Default" },
+        { value: "0", label: "Off" },
+        { value: "2000", label: "Low" },
+        { value: "4000", label: "Medium" },
+        { value: "8000", label: "High" },
+        { value: "32000", label: "Max" },
+      ];
+    }
+
+    return [{ value: "default", label: "Not supported" }];
+  }, [selectedModel, thinkingSelectKind]);
 
   // Switching modes changes the meaning of inputs, so clear derived outputs.
   useEffect(() => {
@@ -102,12 +288,19 @@ export function RewritePromptLabModal(props: {
   }, [mode]);
 
   const canImprove = useMemo(() => {
-    const hasCoreInputs =
-      transcript.trim().length > 0 && desiredOutput.trim().length > 0;
     const hasModeSpecificInputs =
       mode === "fixed"
-        ? problemOutput.trim().length > 0 && props.currentPrompt.trim().length > 0
-        : promptGoal.trim().length > 0;
+        ? problemOutput.trim().length > 0 &&
+          props.currentPrompt.trim().length > 0
+        : // New prompt: allow either goal/description OR (transcript + desired output)
+          promptGoal.trim().length > 0 ||
+          (transcript.trim().length > 0 && desiredOutput.trim().length > 0);
+
+    const hasCoreInputs =
+      mode === "fixed"
+        ? transcript.trim().length > 0 && desiredOutput.trim().length > 0
+        : // New prompt mode doesn't require transcript/output when a goal is provided.
+          true;
 
     return hasCoreInputs && hasModeSpecificInputs && !isImproving && !isTesting;
   }, [
@@ -155,6 +348,55 @@ export function RewritePromptLabModal(props: {
       }}
     >
       <Stack gap="sm">
+        <Group grow gap="sm" align="flex-end">
+          <Select
+            label="Provider"
+            data={(llmProviders ?? []).map((p) => ({
+              value: p.id,
+              label: p.name,
+            }))}
+            value={selectedProvider}
+            onChange={(v) => {
+              setSelectedProvider(v);
+              setThinkingValue("default");
+            }}
+            placeholder="Select provider"
+            withCheckIcon={false}
+            disabled={
+              isImproving || isTesting || (llmProviders?.length ?? 0) === 0
+            }
+          />
+
+          <Select
+            label="Model"
+            data={(
+              (llmProviders ?? []).find((p) => p.id === selectedProvider)
+                ?.models ?? []
+            ).map((m) => ({ value: m, label: m }))}
+            value={selectedModel}
+            onChange={(v) => {
+              setSelectedModel(v);
+              setThinkingValue("default");
+            }}
+            placeholder="Select model"
+            withCheckIcon={false}
+            disabled={isImproving || isTesting || !selectedProvider}
+            searchable
+          />
+
+          <Select
+            label="Thinking"
+            data={thinkingOptions}
+            value={thinkingValue}
+            onChange={(v) => setThinkingValue(v ?? "default")}
+            placeholder={
+              thinkingSelectKind === "none" ? "Not supported" : "Default"
+            }
+            withCheckIcon={false}
+            disabled={isImproving || isTesting || thinkingSelectKind === "none"}
+          />
+        </Group>
+
         <Group justify="space-between" align="center" gap="sm">
           <SegmentedControl
             value={mode}
@@ -237,7 +479,7 @@ export function RewritePromptLabModal(props: {
 
           {mode === "new" ? (
             <Textarea
-              label="Desired output (what you want)"
+              label="Desired output"
               value={desiredOutput}
               onChange={(e) => setDesiredOutput(e.currentTarget.value)}
               rows={6}
@@ -287,13 +529,39 @@ export function RewritePromptLabModal(props: {
 
               setIsImproving(true);
               try {
+                const selectedThinking =
+                  thinkingValue && thinkingValue !== "default"
+                    ? thinkingValue
+                    : null;
+
                 const res = await props.onIteratePrompt({
                   profileId: props.profileId,
                   mode,
                   transcript,
                   problemOutput: mode === "fixed" ? problemOutput : promptGoal,
-                  desiredOutput,
+                  desiredOutput: desiredOutput.trim().length
+                    ? desiredOutput
+                    : undefined,
                   currentPrompt: props.currentPrompt,
+
+                  llmProvider: selectedProvider ?? undefined,
+                  llmModel: selectedModel ?? undefined,
+                  openAiReasoningEffort:
+                    thinkingSelectKind === "openai"
+                      ? (selectedThinking as any)
+                      : null,
+                  geminiThinkingLevel:
+                    thinkingSelectKind === "geminiLevel"
+                      ? (selectedThinking as any)
+                      : null,
+                  geminiThinkingBudget:
+                    thinkingSelectKind === "geminiBudget" && selectedThinking
+                      ? Number(selectedThinking)
+                      : null,
+                  anthropicThinkingBudget:
+                    thinkingSelectKind === "anthropicBudget" && selectedThinking
+                      ? Number(selectedThinking)
+                      : null,
                 });
                 setImprovedPrompt(res.improvedPrompt);
                 setImproveMeta(
@@ -341,6 +609,25 @@ export function RewritePromptLabModal(props: {
             }}
           >
             Test prompt
+          </Button>
+
+          <Button
+            color="gray"
+            variant="light"
+            disabled={
+              isImproving ||
+              isTesting ||
+              improvedPrompt.trim().length === 0 ||
+              testedOutput.trim().length === 0
+            }
+            onClick={() => {
+              const next = improvedPrompt.trim();
+              if (!next) return;
+              props.onSetPrompt(next);
+              props.onClose();
+            }}
+          >
+            Set prompt
           </Button>
         </Group>
 

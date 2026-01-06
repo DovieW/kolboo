@@ -14,6 +14,7 @@ import {
   TextInput,
   Tooltip,
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { Info, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -219,6 +220,14 @@ export function PromptSettings({
     useState<string>("");
   const [promptLabContextLabel, setPromptLabContextLabel] =
     useState<string>("");
+  const [promptLabApplyTarget, setPromptLabApplyTarget] = useState<
+    | { type: "profile"; key: SectionKey }
+    | { type: "preset"; presetId: string; key: SectionKey }
+    | null
+  >(null);
+
+  const [isCachingRouterEmbeddings, setIsCachingRouterEmbeddings] =
+    useState(false);
 
   // Presets + intent router (profile-only features).
   const presets: RewritePreset[] = useMemo(() => {
@@ -375,6 +384,29 @@ export function PromptSettings({
         Number.isFinite(r.similarity_margin)
           ? r.similarity_margin
           : null,
+
+      llm_provider: typeof r.llm_provider === "string" ? r.llm_provider : null,
+      llm_model: typeof r.llm_model === "string" ? r.llm_model : null,
+      openai_reasoning_effort:
+        typeof r.openai_reasoning_effort === "string"
+          ? (r.openai_reasoning_effort as any)
+          : null,
+      gemini_thinking_budget:
+        typeof r.gemini_thinking_budget === "number" &&
+        Number.isFinite(r.gemini_thinking_budget)
+          ? r.gemini_thinking_budget
+          : null,
+      gemini_thinking_level:
+        typeof r.gemini_thinking_level === "string"
+          ? (r.gemini_thinking_level as any)
+          : null,
+      anthropic_thinking_budget:
+        typeof r.anthropic_thinking_budget === "number" &&
+        Number.isFinite(r.anthropic_thinking_budget)
+          ? r.anthropic_thinking_budget
+          : null,
+      llm_system_prompt:
+        typeof r.llm_system_prompt === "string" ? r.llm_system_prompt : null,
     };
   };
 
@@ -1471,12 +1503,41 @@ export function PromptSettings({
 
       <RewritePromptLabModal
         opened={promptLabOpen}
-        onClose={() => setPromptLabOpen(false)}
+        onClose={() => {
+          setPromptLabOpen(false);
+          setPromptLabApplyTarget(null);
+        }}
         profileId={activeProfileId}
         profileLabel={promptLabContextLabel || activeProfileLabel}
+        initialLlmProvider={effectiveLlmProvider}
+        initialLlmModel={effectiveLlmModel}
         initialTranscript={rewriteTestInput}
         initialProblemOutput={rewriteTestOutput}
         currentPrompt={promptLabContextPrompt || effectiveCurrentPrompt}
+        onSetPrompt={(nextPrompt) => {
+          const trimmed = nextPrompt.trim();
+          if (!trimmed) return;
+
+          const target = promptLabApplyTarget;
+          if (!target || target.type === "profile") {
+            handleSave("system", trimmed);
+            return;
+          }
+
+          const preset = presets.find((p) => p.id === target.presetId);
+          if (!preset) {
+            // Preset was deleted/changed while modal was open.
+            handleSave("system", trimmed);
+            return;
+          }
+
+          const baseContent = profilePromptDefaultContent;
+          const contentToStore =
+            trimmed === baseContent ? null : trimmed || null;
+          const section =
+            contentToStore == null ? null : { content: contentToStore };
+          savePresetSectionOverride(preset, target.key, section);
+        }}
         onIteratePrompt={async (params) => {
           const res = await iterateRewritePrompt.mutateAsync({
             transcript: params.transcript,
@@ -1485,6 +1546,12 @@ export function PromptSettings({
             currentPrompt: params.currentPrompt,
             profileId: params.profileId,
             mode: params.mode,
+            llmProvider: params.llmProvider,
+            llmModel: params.llmModel,
+            openAiReasoningEffort: params.openAiReasoningEffort,
+            geminiThinkingLevel: params.geminiThinkingLevel,
+            geminiThinkingBudget: params.geminiThinkingBudget,
+            anthropicThinkingBudget: params.anthropicThinkingBudget,
           });
 
           return {
@@ -2951,6 +3018,7 @@ export function PromptSettings({
                 onClick={() => {
                   setPromptLabContextPrompt(effectiveCurrentPrompt);
                   setPromptLabContextLabel(activeProfileLabel);
+                  setPromptLabApplyTarget({ type: "profile", key: "system" });
                   setPromptLabOpen(true);
                 }}
               >
@@ -3487,6 +3555,11 @@ export function PromptSettings({
                                             setPromptLabContextLabel(
                                               `${activeProfileLabel} · ${presetLabel}`
                                             );
+                                            setPromptLabApplyTarget({
+                                              type: "preset",
+                                              presetId: selectedPreset.id,
+                                              key,
+                                            });
                                             setPromptLabOpen(true);
                                           }}
                                         >
@@ -3614,54 +3687,11 @@ export function PromptSettings({
                       style={{ paddingTop: 0 }}
                     >
                       <div>
-                        <p className="settings-label">Enable router</p>
+                        <p className="settings-label">Router strategy</p>
                         <p className="settings-description">
-                          When enabled, the router picks a preset after STT.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={routerStrategyValue !== "off"}
-                        onChange={(e) => {
-                          const enabled = e.currentTarget.checked;
-                          if (!enabled) {
-                            saveRouter({
-                              enabled: false,
-                              strategy: "off",
-                              embedding_provider: null,
-                              embedding_model: null,
-                              pick_highest_score: null,
-                              similarity_threshold: null,
-                              similarity_margin: null,
-                            });
-                            return;
-                          }
-
-                          // Default to embeddings when turning on.
-                          saveRouter({
-                            enabled: true,
-                            strategy: "embeddings",
-                            embedding_provider: "openai",
-                            embedding_model: embeddingModelValue,
-                            pick_highest_score:
-                              effectiveRouter?.pick_highest_score ?? null,
-                            similarity_threshold:
-                              effectiveRouter?.similarity_threshold ?? null,
-                            similarity_margin:
-                              effectiveRouter?.similarity_margin ?? null,
-                          });
-                        }}
-                        color="gray"
-                        size="md"
-                        disabled={presets.length === 0}
-                      />
-                    </div>
-
-                    <div className="settings-row">
-                      <div>
-                        <p className="settings-label">Strategy</p>
-                        <p className="settings-description">
-                          Embeddings is fast and deterministic; LLM can be more
-                          flexible but costs more.
+                          Off disables routing completely. Embeddings is fast
+                          and deterministic; LLM can be more flexible but costs
+                          more.
                         </p>
                       </div>
                       <Select
@@ -3682,6 +3712,13 @@ export function PromptSettings({
                               pick_highest_score: null,
                               similarity_threshold: null,
                               similarity_margin: null,
+                              llm_provider: null,
+                              llm_model: null,
+                              openai_reasoning_effort: null,
+                              gemini_thinking_budget: null,
+                              gemini_thinking_level: null,
+                              anthropic_thinking_budget: null,
+                              llm_system_prompt: null,
                             });
                             return;
                           }
@@ -3693,14 +3730,32 @@ export function PromptSettings({
                               embedding_provider: "openai",
                               embedding_model: embeddingModelValue,
                               pick_highest_score:
-                                effectiveRouter?.pick_highest_score ?? null,
+                                effectiveRouter?.pick_highest_score ?? true,
                               similarity_threshold:
                                 effectiveRouter?.similarity_threshold ?? null,
                               similarity_margin:
                                 effectiveRouter?.similarity_margin ?? null,
+                              llm_provider: null,
+                              llm_model: null,
+                              openai_reasoning_effort: null,
+                              gemini_thinking_budget: null,
+                              gemini_thinking_level: null,
+                              anthropic_thinking_budget: null,
+                              llm_system_prompt: null,
                             });
                             return;
                           }
+
+                          const seedProvider =
+                            settings?.llm_provider ??
+                            effectiveRouter?.llm_provider ??
+                            "openai";
+                          const modelOptions = LLM_MODELS[seedProvider] ?? [];
+                          const seedModel =
+                            effectiveRouter?.llm_model ??
+                            settings?.llm_model ??
+                            modelOptions[0]?.value ??
+                            null;
 
                           saveRouter({
                             enabled: true,
@@ -3710,6 +3765,18 @@ export function PromptSettings({
                             pick_highest_score: null,
                             similarity_threshold: null,
                             similarity_margin: null,
+
+                            llm_provider: seedProvider,
+                            llm_model: seedModel,
+                            openai_reasoning_effort:
+                              settings?.openai_reasoning_effort ?? null,
+                            gemini_thinking_budget:
+                              settings?.gemini_thinking_budget ?? null,
+                            gemini_thinking_level:
+                              settings?.gemini_thinking_level ?? null,
+                            anthropic_thinking_budget:
+                              settings?.anthropic_thinking_budget ?? null,
+                            llm_system_prompt: null,
                           });
                         }}
                         withCheckIcon={false}
@@ -3723,184 +3790,1236 @@ export function PromptSettings({
                           },
                         }}
                       />
-                    </div>;
+                    </div>
 
-                    {
-                      routerStrategyValue === "embeddings" ? (
-                        <>
-                          <Text size="xs" c="dimmed">
-                            Uses your OpenAI API key. Configure it in API Keys.
-                          </Text>
+                    {routerStrategyValue === "embeddings" ? (
+                      <>
+                        <Text size="xs" c="dimmed">
+                          Uses your OpenAI API key. Configure it in API Keys.
+                        </Text>
 
-                          <div className="settings-row">
-                            <div>
-                              <p className="settings-label">
-                                Pick highest score
-                              </p>
-                              <p className="settings-description">
-                                Always selects the candidate with the highest
-                                similarity score. Disables threshold + margin.
-                              </p>
-                            </div>
-                            <Switch
-                              checked={Boolean(
-                                effectiveRouter?.pick_highest_score
-                              )}
-                              onChange={(e) => {
-                                const enabled = e.currentTarget.checked;
-                                const next = normalizeRouter(
-                                  activeProfile.router
-                                );
-                                saveRouter({
-                                  ...next,
-                                  enabled: true,
-                                  strategy: "embeddings",
-                                  pick_highest_score: enabled,
-                                });
-                              }}
-                              color="gray"
-                              size="md"
-                              disabled={presets.length === 0}
-                            />
+                        <div className="settings-row">
+                          <div>
+                            <p className="settings-label">Pick highest score</p>
+                            <p className="settings-description">
+                              Always selects the candidate with the highest
+                              similarity score. Disables threshold + margin.
+                            </p>
                           </div>
+                          <Switch
+                            checked={Boolean(
+                              effectiveRouter?.pick_highest_score
+                            )}
+                            onChange={(e) => {
+                              const enabled = e.currentTarget.checked;
+                              const next = normalizeRouter(
+                                activeProfile.router
+                              );
+                              saveRouter({
+                                ...next,
+                                enabled: true,
+                                strategy: "embeddings",
+                                pick_highest_score: enabled,
+                              });
+                            }}
+                            color="gray"
+                            size="md"
+                            disabled={presets.length === 0}
+                          />
+                        </div>
 
-                          <div className="settings-row">
-                            <div>
-                              <p className="settings-label">Embedding model</p>
-                              <p className="settings-description">
-                                Model used to embed the transcript and hints.
-                              </p>
-                            </div>
-                            <Select
-                              data={openAiEmbeddingModels}
-                              value={embeddingModelValue}
-                              onChange={(value) => {
-                                if (!value) return;
-                                const next = normalizeRouter(
-                                  activeProfile.router
-                                );
-                                saveRouter({
-                                  ...next,
-                                  enabled: true,
-                                  strategy: "embeddings",
-                                  embedding_provider: "openai",
-                                  embedding_model: value,
-                                });
-                              }}
-                              withCheckIcon={false}
-                              styles={{
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                  minWidth: 240,
-                                },
-                              }}
-                            />
+                        <div className="settings-row">
+                          <div>
+                            <p className="settings-label">Embedding model</p>
+                            <p className="settings-description">
+                              Model used to embed the transcript and hints.
+                            </p>
                           </div>
+                          <Select
+                            data={openAiEmbeddingModels}
+                            value={embeddingModelValue}
+                            onChange={(value) => {
+                              if (!value) return;
+                              const next = normalizeRouter(
+                                activeProfile.router
+                              );
+                              saveRouter({
+                                ...next,
+                                enabled: true,
+                                strategy: "embeddings",
+                                embedding_provider: "openai",
+                                embedding_model: value,
+                              });
+                            }}
+                            withCheckIcon={false}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                minWidth: 240,
+                              },
+                            }}
+                          />
+                        </div>
 
-                          <div className="settings-row">
-                            <div>
-                              <p className="settings-label">
-                                Similarity threshold
-                              </p>
-                              <p className="settings-description">
-                                Minimum cosine similarity to accept a match.
-                              </p>
-                            </div>
-                            <NumberInput
-                              value={
-                                effectiveRouter?.similarity_threshold ?? 0.78
+                        <div className="settings-row">
+                          <div>
+                            <p className="settings-label">
+                              Store preset embeddings
+                            </p>
+                            <p className="settings-description">
+                              Precompute and store embeddings for preset hints
+                              so routing doesn’t re-embed them every run.
+                            </p>
+                          </div>
+                          <Button
+                            color="gray"
+                            loading={isCachingRouterEmbeddings}
+                            disabled={
+                              isCachingRouterEmbeddings ||
+                              presets.length === 0 ||
+                              activeProfileId === "default" ||
+                              !embeddingModelValue
+                            }
+                            onClick={async () => {
+                              if (activeProfileId === "default") return;
+                              setIsCachingRouterEmbeddings(true);
+                              try {
+                                const res =
+                                  await tauriAPI.cacheRouterEmbeddings({
+                                    profileId: activeProfileId,
+                                  });
+                                notifications.show({
+                                  title: "Stored router embeddings",
+                                  message: `Cached ${res.cached_now} / ${res.total_hints} hints (${res.skipped_existing} already cached) · ${res.provider} / ${res.model}`,
+                                  color: "gray",
+                                });
+                              } catch (e) {
+                                notifications.show({
+                                  title: "Failed to store embeddings",
+                                  message: errorToMessage(e),
+                                  color: "red",
+                                });
+                              } finally {
+                                setIsCachingRouterEmbeddings(false);
                               }
-                              onChange={(value) => {
-                                if (
-                                  typeof value !== "number" ||
-                                  Number.isNaN(value)
-                                )
-                                  return;
-                                const next = normalizeRouter(
-                                  activeProfile.router
-                                );
-                                saveRouter({
-                                  ...next,
-                                  enabled: true,
-                                  strategy: "embeddings",
-                                  similarity_threshold: value,
-                                });
-                              }}
-                              min={0}
-                              max={1}
-                              step={0.01}
-                              clampBehavior="blur"
-                              disabled={Boolean(
-                                effectiveRouter?.pick_highest_score
-                              )}
-                              styles={{
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                  width: 140,
-                                },
-                              }}
-                            />
-                          </div>
+                            }}
+                          >
+                            Store embeddings
+                          </Button>
+                        </div>
 
-                          <div className="settings-row no-divider">
-                            <div>
-                              <p className="settings-label">
-                                Similarity margin
-                              </p>
-                              <p className="settings-description">
-                                Required gap between the best and second-best
-                                preset.
-                              </p>
-                            </div>
-                            <NumberInput
-                              value={effectiveRouter?.similarity_margin ?? 0.05}
-                              onChange={(value) => {
-                                if (
-                                  typeof value !== "number" ||
-                                  Number.isNaN(value)
-                                )
-                                  return;
-                                const next = normalizeRouter(
-                                  activeProfile.router
-                                );
-                                saveRouter({
-                                  ...next,
-                                  enabled: true,
-                                  strategy: "embeddings",
-                                  similarity_margin: value,
-                                });
-                              }}
-                              min={0}
-                              max={1}
-                              step={0.01}
-                              clampBehavior="blur"
-                              disabled={Boolean(
-                                effectiveRouter?.pick_highest_score
-                              )}
-                              styles={{
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                  width: 140,
-                                },
-                              }}
-                            />
+                        <div className="settings-row">
+                          <div>
+                            <p className="settings-label">
+                              Similarity threshold
+                            </p>
+                            <p className="settings-description">
+                              Minimum cosine similarity to accept a match.
+                            </p>
                           </div>
-                        </>
-                      ) : null
-                    }
+                          <NumberInput
+                            value={
+                              effectiveRouter?.similarity_threshold ?? 0.78
+                            }
+                            onChange={(value) => {
+                              if (
+                                typeof value !== "number" ||
+                                Number.isNaN(value)
+                              )
+                                return;
+                              const next = normalizeRouter(
+                                activeProfile.router
+                              );
+                              saveRouter({
+                                ...next,
+                                enabled: true,
+                                strategy: "embeddings",
+                                similarity_threshold: value,
+                              });
+                            }}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            clampBehavior="blur"
+                            disabled={Boolean(
+                              effectiveRouter?.pick_highest_score
+                            )}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                width: 140,
+                              },
+                            }}
+                          />
+                        </div>
 
-                    {routerStrategyValue === "llm" ? (
-                      <Text size="xs" c="dimmed">
-                        LLM routing uses your configured rewrite LLM
-                        provider/model.
-                      </Text>
+                        <div className="settings-row no-divider">
+                          <div>
+                            <p className="settings-label">Similarity margin</p>
+                            <p className="settings-description">
+                              Required gap between the best and second-best
+                              preset.
+                            </p>
+                          </div>
+                          <NumberInput
+                            value={effectiveRouter?.similarity_margin ?? 0.05}
+                            onChange={(value) => {
+                              if (
+                                typeof value !== "number" ||
+                                Number.isNaN(value)
+                              )
+                                return;
+                              const next = normalizeRouter(
+                                activeProfile.router
+                              );
+                              saveRouter({
+                                ...next,
+                                enabled: true,
+                                strategy: "embeddings",
+                                similarity_margin: value,
+                              });
+                            }}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            clampBehavior="blur"
+                            disabled={Boolean(
+                              effectiveRouter?.pick_highest_score
+                            )}
+                            styles={{
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                width: 140,
+                              },
+                            }}
+                          />
+                        </div>
+                      </>
                     ) : null}
+
+                    {routerStrategyValue === "llm"
+                      ? (() => {
+                          const routerProvider =
+                            effectiveRouter?.llm_provider ??
+                            settings?.llm_provider ??
+                            "openai";
+                          const modelOptions = LLM_MODELS[routerProvider] ?? [];
+                          const routerModel =
+                            effectiveRouter?.llm_model ??
+                            settings?.llm_model ??
+                            modelOptions[0]?.value ??
+                            null;
+
+                          const supportsRouterOpenAiThinking =
+                            routerProvider === "openai" &&
+                            !!routerModel &&
+                            (routerModel.startsWith("gpt-5") ||
+                              routerModel.startsWith("o"));
+
+                          const routerOpenAiThinkingOptions =
+                            !supportsRouterOpenAiThinking || !routerModel
+                              ? []
+                              : [
+                                  {
+                                    value: SELECT_DEFAULT,
+                                    label: "Default",
+                                  },
+                                  ...openAiThinkingEffortsForModel(
+                                    routerModel
+                                  ).map((v) => ({
+                                    value: v,
+                                    label:
+                                      v === "none"
+                                        ? "None"
+                                        : v[0].toUpperCase() + v.slice(1),
+                                  })),
+                                ];
+
+                          const supportsRouterGeminiThinkingLevel =
+                            routerProvider === "gemini" &&
+                            !!routerModel &&
+                            routerModel.includes("gemini-3");
+
+                          const routerIsGemini3Flash =
+                            supportsRouterGeminiThinkingLevel &&
+                            routerModel.includes("gemini-3-flash");
+
+                          const routerIsGemini3Pro =
+                            supportsRouterGeminiThinkingLevel &&
+                            routerModel.includes("gemini-3-pro");
+
+                          const routerGeminiThinkingLevelOptions =
+                            !supportsRouterGeminiThinkingLevel
+                              ? []
+                              : routerIsGemini3Flash
+                              ? [
+                                  {
+                                    value: SELECT_DEFAULT,
+                                    label: "Default",
+                                  },
+                                  { value: "minimal", label: "Minimal" },
+                                  { value: "low", label: "Low" },
+                                  { value: "medium", label: "Medium" },
+                                  { value: "high", label: "High" },
+                                ]
+                              : [
+                                  {
+                                    value: SELECT_DEFAULT,
+                                    label: "Default",
+                                  },
+                                  { value: "low", label: "Low" },
+                                  { value: "high", label: "High" },
+                                ];
+
+                          const supportsRouterGeminiThinkingBudget =
+                            routerProvider === "gemini" &&
+                            !!routerModel &&
+                            routerModel.includes("gemini-2.5") &&
+                            !routerModel.includes("flash-lite");
+
+                          const routerCanDisableGemini25Thinking =
+                            supportsRouterGeminiThinkingBudget &&
+                            routerModel.includes("gemini-2.5-flash") &&
+                            !routerModel.includes("gemini-2.5-pro");
+
+                          const routerIsGemini25Pro =
+                            supportsRouterGeminiThinkingBudget &&
+                            routerModel.includes("gemini-2.5-pro");
+
+                          const routerGemini25MaxBudget = routerIsGemini25Pro
+                            ? 32768
+                            : 24576;
+
+                          const routerGemini25MinBudget = routerIsGemini25Pro
+                            ? 128
+                            : 0;
+
+                          const routerGeminiThinkingBudgetOptions: Array<{
+                            value: string;
+                            label: string;
+                          }> = !supportsRouterGeminiThinkingBudget
+                            ? []
+                            : [
+                                { value: SELECT_DEFAULT, label: "Default" },
+                                { value: "-1", label: "Dynamic (-1)" },
+                                ...(routerCanDisableGemini25Thinking
+                                  ? [{ value: "0", label: "Off (0)" }]
+                                  : []),
+                                ...(routerIsGemini25Pro
+                                  ? [
+                                      {
+                                        value: String(routerGemini25MinBudget),
+                                        label: "Minimal (128)",
+                                      },
+                                    ]
+                                  : []),
+                                { value: "1024", label: "Light (1024)" },
+                                { value: "4096", label: "Medium (4096)" },
+                                { value: "16384", label: "High (16384)" },
+                                ...(routerGemini25MaxBudget > 16384
+                                  ? [
+                                      {
+                                        value: String(routerGemini25MaxBudget),
+                                        label: `Max (${routerGemini25MaxBudget})`,
+                                      },
+                                    ]
+                                  : []),
+                              ];
+
+                          const supportsRouterAnthropicThinkingBudget =
+                            routerProvider === "anthropic" &&
+                            !!routerModel &&
+                            // Extended thinking is supported by newer Claude families. Keep conservative.
+                            (routerModel.includes("claude-3-7") ||
+                              routerModel.includes("claude-4") ||
+                              routerModel.includes("-4-"));
+
+                          const routerAnthropicThinkingLevelOptions: Array<{
+                            value: string;
+                            label: string;
+                          }> = !supportsRouterAnthropicThinkingBudget
+                            ? []
+                            : [
+                                { value: SELECT_DEFAULT, label: "Default" },
+                                { value: "0", label: "Off" },
+                                {
+                                  value: String(
+                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[0]
+                                  ),
+                                  label: "Low",
+                                },
+                                {
+                                  value: String(
+                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[1]
+                                  ),
+                                  label: "Medium",
+                                },
+                                {
+                                  value: String(
+                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[2]
+                                  ),
+                                  label: "High",
+                                },
+                                {
+                                  value: String(
+                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[3]
+                                  ),
+                                  label: "Max",
+                                },
+                              ];
+
+                          const routerAnthropicThinkingLevelOptionsWithCustom =
+                            (() => {
+                              const vRaw =
+                                effectiveRouter?.anthropic_thinking_budget;
+                              const v =
+                                typeof vRaw === "number" &&
+                                Number.isFinite(vRaw)
+                                  ? Math.trunc(vRaw)
+                                  : null;
+                              if (v == null)
+                                return routerAnthropicThinkingLevelOptions;
+
+                              const asString = String(v);
+                              const exists =
+                                routerAnthropicThinkingLevelOptions.some(
+                                  (o) => o.value === asString
+                                );
+                              if (exists)
+                                return routerAnthropicThinkingLevelOptions;
+
+                              return [
+                                ...routerAnthropicThinkingLevelOptions,
+                                { value: asString, label: `Custom (${v})` },
+                              ];
+                            })();
+
+                          return (
+                            <>
+                              <Text size="xs" c="dimmed">
+                                Configure the provider/model used for routing.
+                                The router uses structured output (JSON) when
+                                the selected provider/model supports it.
+                              </Text>
+
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">Provider</p>
+                                  <p className="settings-description">
+                                    LLM provider used only for routing.
+                                  </p>
+                                </div>
+                                <Select
+                                  data={[
+                                    { value: "openai", label: "OpenAI" },
+                                    { value: "gemini", label: "Gemini" },
+                                    { value: "anthropic", label: "Anthropic" },
+                                    { value: "groq", label: "Groq" },
+                                    { value: "ollama", label: "Ollama" },
+                                  ]}
+                                  value={routerProvider}
+                                  onChange={(value) => {
+                                    if (!value) return;
+                                    const next = normalizeRouter(
+                                      activeProfile.router
+                                    );
+                                    const nextModelOptions =
+                                      LLM_MODELS[value] ?? [];
+                                    const nextModel =
+                                      nextModelOptions[0]?.value ?? null;
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: value,
+                                      llm_model: nextModel,
+                                    });
+                                  }}
+                                  withCheckIcon={false}
+                                  styles={{
+                                    input: {
+                                      backgroundColor: "var(--bg-elevated)",
+                                      borderColor: "var(--border-default)",
+                                      color: "var(--text-primary)",
+                                      minWidth: 200,
+                                    },
+                                  }}
+                                />
+                              </div>
+
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">Model</p>
+                                  <p className="settings-description">
+                                    Model used for routing decisions.
+                                  </p>
+                                </div>
+                                {modelOptions.length > 0 ? (
+                                  <Select
+                                    data={modelOptions}
+                                    value={routerModel}
+                                    onChange={(value) => {
+                                      if (!value) return;
+                                      const next = normalizeRouter(
+                                        activeProfile.router
+                                      );
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: value,
+                                      });
+                                    }}
+                                    withCheckIcon={false}
+                                    styles={{
+                                      input: {
+                                        backgroundColor: "var(--bg-elevated)",
+                                        borderColor: "var(--border-default)",
+                                        color: "var(--text-primary)",
+                                        minWidth: 240,
+                                      },
+                                    }}
+                                  />
+                                ) : (
+                                  <TextInput
+                                    value={routerModel ?? ""}
+                                    placeholder="Enter model id"
+                                    onChange={(e) => {
+                                      const value = e.currentTarget.value;
+                                      const next = normalizeRouter(
+                                        activeProfile.router
+                                      );
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: value.trim().length
+                                          ? value
+                                          : null,
+                                      });
+                                    }}
+                                    styles={{
+                                      input: {
+                                        backgroundColor: "var(--bg-elevated)",
+                                        borderColor: "var(--border-default)",
+                                        color: "var(--text-primary)",
+                                        minWidth: 240,
+                                      },
+                                    }}
+                                  />
+                                )}
+                              </div>
+
+                              {supportsRouterOpenAiThinking ? (
+                                <div className="settings-row">
+                                  <div>
+                                    <p className="settings-label">Thinking</p>
+                                    <p className="settings-description">
+                                      Reasoning effort for supported OpenAI
+                                      models.
+                                    </p>
+                                  </div>
+                                  <HintSelect
+                                    data={routerOpenAiThinkingOptions}
+                                    value={
+                                      effectiveRouter?.openai_reasoning_effort ??
+                                      SELECT_DEFAULT
+                                    }
+                                    onChange={(value) => {
+                                      const next = normalizeRouter(
+                                        activeProfile.router
+                                      );
+                                      if (
+                                        value == null ||
+                                        value === SELECT_DEFAULT
+                                      ) {
+                                        saveRouter({
+                                          ...next,
+                                          enabled: true,
+                                          strategy: "llm",
+                                          llm_provider: routerProvider,
+                                          llm_model: routerModel,
+                                          openai_reasoning_effort: null,
+                                        });
+                                        return;
+                                      }
+
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        openai_reasoning_effort: value as any,
+                                      });
+                                    }}
+                                    placeholder="Default"
+                                    inputStyle={{
+                                      backgroundColor: "var(--bg-elevated)",
+                                      borderColor: "var(--border-default)",
+                                      color: "var(--text-primary)",
+                                      minWidth: 200,
+                                    }}
+                                    renderSelected={({
+                                      option,
+                                      placeholder,
+                                    }) => {
+                                      if (!option) {
+                                        return (
+                                          <Text size="sm" c="dimmed">
+                                            {placeholder}
+                                          </Text>
+                                        );
+                                      }
+
+                                      if (option.value !== SELECT_DEFAULT) {
+                                        return (
+                                          <Text size="sm">{option.label}</Text>
+                                        );
+                                      }
+
+                                      const hint = routerModel
+                                        ? settings?.openai_reasoning_effort ??
+                                          openAiDefaultReasoningEffortForModel(
+                                            routerModel
+                                          )
+                                        : settings?.openai_reasoning_effort ??
+                                          "medium";
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }}
+                                    renderOption={({ option }) => {
+                                      if (option.value !== SELECT_DEFAULT) {
+                                        return (
+                                          <Text size="sm">{option.label}</Text>
+                                        );
+                                      }
+
+                                      const hint = routerModel
+                                        ? settings?.openai_reasoning_effort ??
+                                          openAiDefaultReasoningEffortForModel(
+                                            routerModel
+                                          )
+                                        : settings?.openai_reasoning_effort ??
+                                          "medium";
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }}
+                                  />
+                                </div>
+                              ) : null}
+
+                              {supportsRouterGeminiThinkingLevel ? (
+                                <>
+                                  <div className="settings-row">
+                                    <div>
+                                      <p className="settings-label">
+                                        Thinking level
+                                      </p>
+                                      <p className="settings-description">
+                                        {routerIsGemini3Pro
+                                          ? "Gemini 3 Pro supports low/high (default high)."
+                                          : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
+                                      </p>
+                                    </div>
+                                    <HintSelect
+                                      data={routerGeminiThinkingLevelOptions}
+                                      value={
+                                        effectiveRouter?.gemini_thinking_level ??
+                                        SELECT_DEFAULT
+                                      }
+                                      onChange={(value) => {
+                                        const next = normalizeRouter(
+                                          activeProfile.router
+                                        );
+                                        if (
+                                          value == null ||
+                                          value === SELECT_DEFAULT
+                                        ) {
+                                          saveRouter({
+                                            ...next,
+                                            enabled: true,
+                                            strategy: "llm",
+                                            llm_provider: routerProvider,
+                                            llm_model: routerModel,
+                                            gemini_thinking_level: null,
+                                          });
+                                          return;
+                                        }
+
+                                        const v =
+                                          value === "minimal" ||
+                                          value === "low" ||
+                                          value === "medium" ||
+                                          value === "high"
+                                            ? value
+                                            : null;
+                                        if (v == null) return;
+
+                                        saveRouter({
+                                          ...next,
+                                          enabled: true,
+                                          strategy: "llm",
+                                          llm_provider: routerProvider,
+                                          llm_model: routerModel,
+                                          gemini_thinking_level: v,
+                                        });
+                                      }}
+                                      placeholder="Default"
+                                      inputStyle={{
+                                        backgroundColor: "var(--bg-elevated)",
+                                        borderColor: "var(--border-default)",
+                                        color: "var(--text-primary)",
+                                        minWidth: 200,
+                                      }}
+                                      renderSelected={({
+                                        option,
+                                        placeholder,
+                                      }) => {
+                                        if (!option) {
+                                          return (
+                                            <Text size="sm" c="dimmed">
+                                              {placeholder}
+                                            </Text>
+                                          );
+                                        }
+                                        if (option.value !== SELECT_DEFAULT) {
+                                          return (
+                                            <Text size="sm">
+                                              {option.label}
+                                            </Text>
+                                          );
+                                        }
+
+                                        const hint =
+                                          settings?.gemini_thinking_level ??
+                                          "high";
+                                        return (
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "baseline",
+                                              gap: 8,
+                                            }}
+                                          >
+                                            <span style={{ fontSize: 14 }}>
+                                              {option.label}
+                                            </span>
+                                            <span
+                                              style={{
+                                                fontSize: 11,
+                                                color: "var(--text-muted)",
+                                                opacity: 0.9,
+                                                lineHeight: 1,
+                                              }}
+                                            >
+                                              · {hint}
+                                            </span>
+                                          </div>
+                                        );
+                                      }}
+                                      renderOption={({ option }) => {
+                                        if (option.value !== SELECT_DEFAULT) {
+                                          return (
+                                            <Text size="sm">
+                                              {option.label}
+                                            </Text>
+                                          );
+                                        }
+
+                                        const hint =
+                                          settings?.gemini_thinking_level ??
+                                          "high";
+                                        return (
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "baseline",
+                                              gap: 8,
+                                            }}
+                                          >
+                                            <span style={{ fontSize: 14 }}>
+                                              {option.label}
+                                            </span>
+                                            <span
+                                              style={{
+                                                fontSize: 11,
+                                                color: "var(--text-muted)",
+                                                opacity: 0.9,
+                                                lineHeight: 1,
+                                              }}
+                                            >
+                                              · {hint}
+                                            </span>
+                                          </div>
+                                        );
+                                      }}
+                                    />
+                                  </div>
+                                </>
+                              ) : null}
+
+                              {supportsRouterGeminiThinkingBudget ? (
+                                <div className="settings-row">
+                                  <div>
+                                    <p className="settings-label">
+                                      Thinking budget
+                                    </p>
+                                    <p className="settings-description">
+                                      Token budget for Gemini 2.5 thinking.
+                                    </p>
+                                  </div>
+                                  <HintSelect
+                                    data={routerGeminiThinkingBudgetOptions}
+                                    value={
+                                      effectiveRouter?.gemini_thinking_budget ==
+                                      null
+                                        ? SELECT_DEFAULT
+                                        : String(
+                                            effectiveRouter.gemini_thinking_budget
+                                          )
+                                    }
+                                    onChange={(value) => {
+                                      const next = normalizeRouter(
+                                        activeProfile.router
+                                      );
+
+                                      if (
+                                        value == null ||
+                                        value === SELECT_DEFAULT
+                                      ) {
+                                        saveRouter({
+                                          ...next,
+                                          enabled: true,
+                                          strategy: "llm",
+                                          llm_provider: routerProvider,
+                                          llm_model: routerModel,
+                                          gemini_thinking_budget: null,
+                                        });
+                                        return;
+                                      }
+
+                                      const parsed = Number(value);
+                                      if (!Number.isFinite(parsed)) return;
+                                      const asInt = Math.trunc(parsed);
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        gemini_thinking_budget: asInt,
+                                      });
+                                    }}
+                                    placeholder="Default"
+                                    inputStyle={{
+                                      backgroundColor: "var(--bg-elevated)",
+                                      borderColor: "var(--border-default)",
+                                      color: "var(--text-primary)",
+                                      minWidth: 200,
+                                    }}
+                                    renderSelected={({
+                                      option,
+                                      placeholder,
+                                    }) => {
+                                      if (!option) {
+                                        return (
+                                          <Text size="sm" c="dimmed">
+                                            {placeholder}
+                                          </Text>
+                                        );
+                                      }
+                                      if (option.value !== SELECT_DEFAULT)
+                                        return (
+                                          <Text size="sm">{option.label}</Text>
+                                        );
+
+                                      const inherited =
+                                        settings?.gemini_thinking_budget;
+                                      const hint =
+                                        inherited == null
+                                          ? "dynamic"
+                                          : inherited === 0
+                                          ? "off"
+                                          : inherited === -1
+                                          ? "dynamic"
+                                          : String(inherited);
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }}
+                                    renderOption={({ option }) => {
+                                      if (option.value !== SELECT_DEFAULT) {
+                                        return (
+                                          <Text size="sm">{option.label}</Text>
+                                        );
+                                      }
+
+                                      const inherited =
+                                        settings?.gemini_thinking_budget;
+                                      const hint =
+                                        inherited == null
+                                          ? "dynamic"
+                                          : inherited === 0
+                                          ? "off"
+                                          : inherited === -1
+                                          ? "dynamic"
+                                          : String(inherited);
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }}
+                                  />
+                                </div>
+                              ) : null}
+
+                              {supportsRouterAnthropicThinkingBudget ? (
+                                <div className="settings-row">
+                                  <div>
+                                    <p className="settings-label">Thinking</p>
+                                    <p className="settings-description">
+                                      Extended thinking level for Claude models.
+                                    </p>
+                                  </div>
+                                  <HintSelect
+                                    data={
+                                      routerAnthropicThinkingLevelOptionsWithCustom
+                                    }
+                                    value={
+                                      effectiveRouter?.anthropic_thinking_budget ==
+                                      null
+                                        ? SELECT_DEFAULT
+                                        : String(
+                                            effectiveRouter.anthropic_thinking_budget
+                                          )
+                                    }
+                                    onChange={(value) => {
+                                      const next = normalizeRouter(
+                                        activeProfile.router
+                                      );
+
+                                      if (
+                                        value == null ||
+                                        value === SELECT_DEFAULT
+                                      ) {
+                                        saveRouter({
+                                          ...next,
+                                          enabled: true,
+                                          strategy: "llm",
+                                          llm_provider: routerProvider,
+                                          llm_model: routerModel,
+                                          anthropic_thinking_budget: null,
+                                        });
+                                        return;
+                                      }
+
+                                      const parsed = Number(value);
+                                      if (!Number.isFinite(parsed)) return;
+                                      const asInt = Math.trunc(parsed);
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        anthropic_thinking_budget: asInt,
+                                      });
+                                    }}
+                                    placeholder="Default"
+                                    inputStyle={{
+                                      backgroundColor: "var(--bg-elevated)",
+                                      borderColor: "var(--border-default)",
+                                      color: "var(--text-primary)",
+                                      minWidth: 200,
+                                    }}
+                                    renderSelected={({
+                                      option,
+                                      placeholder,
+                                    }) => {
+                                      if (!option) {
+                                        return (
+                                          <Text size="sm" c="dimmed">
+                                            {placeholder}
+                                          </Text>
+                                        );
+                                      }
+
+                                      if (option.value === SELECT_DEFAULT) {
+                                        const inheritedBudget =
+                                          settings?.anthropic_thinking_budget;
+                                        const hint =
+                                          inheritedBudget == null
+                                            ? "off"
+                                            : formatThinkingBudgetShort(
+                                                inheritedBudget
+                                              );
+
+                                        return (
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "baseline",
+                                              gap: 8,
+                                            }}
+                                          >
+                                            <span style={{ fontSize: 14 }}>
+                                              {option.label}
+                                            </span>
+                                            <span
+                                              style={{
+                                                fontSize: 11,
+                                                color: "var(--text-muted)",
+                                                opacity: 0.9,
+                                                lineHeight: 1,
+                                              }}
+                                            >
+                                              · {hint}
+                                            </span>
+                                          </div>
+                                        );
+                                      }
+
+                                      if (option.label.startsWith("Custom")) {
+                                        const n = Number(option.value);
+                                        const suffix = Number.isFinite(n)
+                                          ? formatThinkingBudgetShort(n)
+                                          : null;
+                                        return (
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "baseline",
+                                              gap: 8,
+                                            }}
+                                          >
+                                            <Text size="sm">
+                                              {option.label}
+                                            </Text>
+                                            {suffix && (
+                                              <Text
+                                                size="xs"
+                                                c="dimmed"
+                                                style={{ lineHeight: 1 }}
+                                              >
+                                                {suffix}
+                                              </Text>
+                                            )}
+                                          </div>
+                                        );
+                                      }
+
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }}
+                                    renderOption={({ option }) => {
+                                      if (option.value === SELECT_DEFAULT) {
+                                        const inheritedBudget =
+                                          settings?.anthropic_thinking_budget;
+                                        const hint =
+                                          inheritedBudget == null
+                                            ? "off"
+                                            : formatThinkingBudgetShort(
+                                                inheritedBudget
+                                              );
+
+                                        return (
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "baseline",
+                                              gap: 8,
+                                            }}
+                                          >
+                                            <span style={{ fontSize: 14 }}>
+                                              {option.label}
+                                            </span>
+                                            <span
+                                              style={{
+                                                fontSize: 11,
+                                                color: "var(--text-muted)",
+                                                opacity: 0.9,
+                                                lineHeight: 1,
+                                              }}
+                                            >
+                                              · {hint}
+                                            </span>
+                                          </div>
+                                        );
+                                      }
+
+                                      const n = Number(option.value);
+                                      const suffix = Number.isFinite(n)
+                                        ? formatThinkingBudgetShort(n)
+                                        : null;
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <Text size="sm">{option.label}</Text>
+                                          {suffix && (
+                                            <Text
+                                              size="xs"
+                                              c="dimmed"
+                                              style={{ lineHeight: 1 }}
+                                            >
+                                              {suffix}
+                                            </Text>
+                                          )}
+                                        </div>
+                                      );
+                                    }}
+                                  />
+                                </div>
+                              ) : null}
+
+                              <div className="settings-row no-divider">
+                                <div>
+                                  <p className="settings-label">
+                                    System prompt (advanced)
+                                  </p>
+                                  <p className="settings-description">
+                                    Optional override for the router’s system
+                                    prompt. Structured output rules are still
+                                    enforced.
+                                  </p>
+                                </div>
+                                <Textarea
+                                  value={
+                                    effectiveRouter?.llm_system_prompt ?? ""
+                                  }
+                                  placeholder="(leave empty to use default router prompt)"
+                                  onChange={(e) => {
+                                    const value = e.currentTarget.value;
+                                    const next = normalizeRouter(
+                                      activeProfile.router
+                                    );
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      llm_system_prompt: value.trim().length
+                                        ? value
+                                        : null,
+                                    });
+                                  }}
+                                  autosize
+                                  minRows={2}
+                                  styles={{
+                                    input: {
+                                      backgroundColor: "var(--bg-elevated)",
+                                      borderColor: "var(--border-default)",
+                                      color: "var(--text-primary)",
+                                      minWidth: 320,
+                                    },
+                                  }}
+                                />
+                              </div>
+                            </>
+                          );
+                        })()
+                      : null}
                   </div>
                 </Accordion.Panel>
               </Accordion.Item>

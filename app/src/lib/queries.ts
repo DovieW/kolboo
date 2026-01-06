@@ -144,9 +144,17 @@ export function useIterateRewritePrompt() {
     mutationFn: (params: {
       transcript: string;
       problemOutput: string;
-      desiredOutput: string;
+      desiredOutput?: string | null;
       currentPrompt: string;
       profileId?: string | null;
+      mode?: "fixed" | "new";
+
+      llmProvider?: string | null;
+      llmModel?: string | null;
+      openAiReasoningEffort?: "none" | "low" | "medium" | "high" | null;
+      geminiThinkingLevel?: "minimal" | "low" | "medium" | "high" | null;
+      geminiThinkingBudget?: number | null;
+      anthropicThinkingBudget?: number | null;
     }): Promise<IterateRewritePromptResponse> =>
       llmAPI.iterateRewritePrompt(params),
   });

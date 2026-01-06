@@ -479,6 +479,26 @@ pub struct IntentRouterSettings {
     pub similarity_threshold: Option<f32>,
     #[serde(default)]
     pub similarity_margin: Option<f32>,
+
+    // LLM routing knobs
+    #[serde(default)]
+    pub llm_provider: Option<String>,
+    #[serde(default)]
+    pub llm_model: Option<String>,
+
+    // Optional per-router provider-specific thinking/reasoning knobs.
+    #[serde(default)]
+    pub openai_reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub gemini_thinking_budget: Option<i64>,
+    #[serde(default)]
+    pub gemini_thinking_level: Option<String>,
+    #[serde(default)]
+    pub anthropic_thinking_budget: Option<i64>,
+
+    // Advanced: optional override for the router system prompt.
+    #[serde(default)]
+    pub llm_system_prompt: Option<String>,
 }
 
 fn deserialize_program_paths<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>

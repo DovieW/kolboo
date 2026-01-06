@@ -207,6 +207,16 @@ impl OpenAiLlmProvider {
         }
     }
 
+    fn json_schema_response_format(name: &str, description: &str, schema: serde_json::Value) -> TextFormat {
+        TextFormat {
+            format_type: "json_schema".to_string(),
+            name: Some(name.to_string()),
+            strict: Some(true),
+            description: Some(description.to_string()),
+            schema: Some(schema),
+        }
+    }
+
     fn extract_responses_output_text(value: &serde_json::Value) -> Result<String, LlmError> {
         // Prefer the SDK-style convenience field when present.
         if let Some(s) = value.get("output_text").and_then(|v| v.as_str()) {
@@ -322,16 +332,33 @@ impl LlmProvider for OpenAiLlmProvider {
         let use_structured_outputs =
             self.structured_outputs && Self::supports_structured_outputs(&self.model);
 
-        // When using Structured Outputs, a short explicit instruction helps avoid
-        // accidental prose even though the schema is enforced server-side.
-        let system_prompt = if use_structured_outputs {
-            format!(
-                "{}\n\nReturn ONLY valid JSON that matches the provided JSON Schema (no markdown, no extra keys).",
-                system_prompt
-            )
-        } else {
-            system_prompt.to_string()
-        };
+        if use_structured_outputs {
+            // Preserve historical behavior: `complete()` returns rewritten text for rewrite.
+            let v = self
+                .complete_json_schema(
+                    system_prompt,
+                    user_message,
+                    "rewrite_response",
+                    "Structured output for a dictation transcript rewrite. The model must emit valid JSON matching the schema.",
+                    Self::rewrite_response_format()
+                        .schema
+                        .clone()
+                        .unwrap_or_else(|| json!({})),
+                )
+                .await?;
+
+            let rewritten = v
+                .get("rewritten_text")
+                .and_then(|t| t.as_str())
+                .ok_or_else(|| {
+                    LlmError::InvalidResponse(format!(
+                        "Structured output missing required field 'rewritten_text' (content: {})",
+                        v
+                    ))
+                })?;
+
+            return Ok(rewritten.to_string());
+        }
 
         let reasoning_effort = if Self::supports_reasoning_effort(&self.model) {
             self.validated_reasoning_effort()
@@ -344,7 +371,7 @@ impl LlmProvider for OpenAiLlmProvider {
             input: vec![
                 ResponseInputMessage {
                     role: "system".to_string(),
-                    content: system_prompt,
+                    content: system_prompt.to_string(),
                 },
                 ResponseInputMessage {
                     role: "user".to_string(),
@@ -357,9 +384,7 @@ impl LlmProvider for OpenAiLlmProvider {
                 .map(|effort| ReasoningConfig { effort }),
             temperature: Self::supports_temperature_param(&self.model, reasoning_effort.as_deref())
                 .then_some(0.0),
-            text: use_structured_outputs.then(|| TextConfig {
-                format: Some(Self::rewrite_response_format()),
-            }),
+            text: None,
         };
 
         if let Some(store) = &self.request_log_store {
@@ -424,29 +449,138 @@ impl LlmProvider for OpenAiLlmProvider {
         }
 
         let output_text = Self::extract_responses_output_text(&response_json)?;
+        Ok(output_text)
+    }
 
-        if use_structured_outputs {
-            let v: serde_json::Value = serde_json::from_str(&output_text).map_err(|e| {
+    async fn complete_json_schema(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        schema_name: &str,
+        schema_description: &str,
+        schema: serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        if self.api_key.is_empty() {
+            return Err(LlmError::NoApiKey("openai".to_string()));
+        }
+
+        // Use server-enforced Structured Outputs when supported; otherwise fall back to
+        // instruction-based JSON parsing.
+        let supports = Self::supports_structured_outputs(&self.model);
+        if !supports {
+            let out = self.complete(system_prompt, user_message).await?;
+            return serde_json::from_str::<serde_json::Value>(out.trim()).map_err(|e| {
                 LlmError::InvalidResponse(format!(
                     "Structured output was not valid JSON: {} (content: {})",
-                    e, output_text
+                    e, out
                 ))
-            })?;
-
-            let rewritten = v
-                .get("rewritten_text")
-                .and_then(|t| t.as_str())
-                .ok_or_else(|| {
-                    LlmError::InvalidResponse(format!(
-                        "Structured output missing required field 'rewritten_text' (content: {})",
-                        output_text
-                    ))
-                })?;
-
-            Ok(rewritten.to_string())
-        } else {
-            Ok(output_text)
+            });
         }
+
+        let system_prompt = format!(
+            "{}\n\nReturn ONLY valid JSON that matches the provided JSON Schema (no markdown, no extra keys).",
+            system_prompt
+        );
+
+        let reasoning_effort = if Self::supports_reasoning_effort(&self.model) {
+            self.validated_reasoning_effort()
+        } else {
+            None
+        };
+
+        let request = ResponsesRequest {
+            model: self.model.clone(),
+            input: vec![
+                ResponseInputMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                ResponseInputMessage {
+                    role: "user".to_string(),
+                    content: user_message.to_string(),
+                },
+            ],
+            max_output_tokens: 1024,
+            reasoning: reasoning_effort
+                .clone()
+                .map(|effort| ReasoningConfig { effort }),
+            temperature: Self::supports_temperature_param(&self.model, reasoning_effort.as_deref())
+                .then_some(0.0),
+            text: Some(TextConfig {
+                format: Some(Self::json_schema_response_format(
+                    schema_name,
+                    schema_description,
+                    schema,
+                )),
+            }),
+        };
+
+        if let Some(store) = &self.request_log_store {
+            let request_json = serde_json::to_value(&request).unwrap_or_else(|_| {
+                json!({
+                    "provider": "openai",
+                    "error": "failed to serialize request",
+                })
+            });
+            store.with_current(|log| {
+                log.llm_request_json = Some(request_json);
+            });
+        }
+
+        let mut req = self
+            .client
+            .post(OPENAI_API_URL)
+            .bearer_auth(&self.api_key)
+            .json(&request);
+        if let Some(timeout) = self.timeout {
+            req = req.timeout(timeout);
+        }
+
+        let response = req.send().await.map_err(|e| {
+            if e.is_timeout() {
+                if let Some(timeout) = self.timeout {
+                    LlmError::Timeout(timeout)
+                } else {
+                    LlmError::Network(e)
+                }
+            } else {
+                LlmError::Network(e)
+            }
+        })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
+                return Err(LlmError::Api(format!(
+                    "OpenAI API error ({}): {}",
+                    status, error_response.error.message
+                )));
+            }
+            return Err(LlmError::Api(format!(
+                "OpenAI API error ({}): {}",
+                status, error_text
+            )));
+        }
+
+        let response_json: serde_json::Value = response.json().await.map_err(|e| {
+            LlmError::InvalidResponse(format!("Failed to parse response: {}", e))
+        })?;
+
+        if let Some(store) = &self.request_log_store {
+            let response_for_log = response_json.clone();
+            store.with_current(|log| {
+                log.llm_response_json = Some(response_for_log);
+            });
+        }
+
+        let output_text = Self::extract_responses_output_text(&response_json)?;
+        serde_json::from_str::<serde_json::Value>(output_text.trim()).map_err(|e| {
+            LlmError::InvalidResponse(format!(
+                "Structured output was not valid JSON: {} (content: {})",
+                e, output_text
+            ))
+        })
     }
 
     fn name(&self) -> &'static str {

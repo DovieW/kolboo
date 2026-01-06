@@ -73,6 +73,26 @@ function normalizeIntentRouterSettings(value: unknown): IntentRouterSettings {
       ? v.similarity_margin
       : null;
 
+  const llm_provider =
+    typeof v.llm_provider === "string" ? v.llm_provider : null;
+  const llm_model = typeof v.llm_model === "string" ? v.llm_model : null;
+
+  const openai_reasoning_effort = normalizeOpenAiReasoningEffort(
+    v.openai_reasoning_effort
+  );
+  const gemini_thinking_budget = normalizeGeminiThinkingBudget(
+    v.gemini_thinking_budget
+  );
+  const gemini_thinking_level = normalizeGeminiThinkingLevel(
+    v.gemini_thinking_level
+  );
+  const anthropic_thinking_budget = normalizeAnthropicThinkingBudget(
+    v.anthropic_thinking_budget
+  );
+
+  const llm_system_prompt =
+    typeof v.llm_system_prompt === "string" ? v.llm_system_prompt : null;
+
   return {
     enabled,
     strategy,
@@ -81,6 +101,13 @@ function normalizeIntentRouterSettings(value: unknown): IntentRouterSettings {
     pick_highest_score,
     similarity_threshold,
     similarity_margin,
+    llm_provider,
+    llm_model,
+    openai_reasoning_effort,
+    gemini_thinking_budget,
+    gemini_thinking_level,
+    anthropic_thinking_budget,
+    llm_system_prompt,
   };
 }
 
@@ -270,6 +297,19 @@ export interface IntentRouterSettings {
   pick_highest_score?: boolean | null;
   similarity_threshold?: number | null;
   similarity_margin?: number | null;
+
+  // LLM routing knobs (only used when strategy === "llm")
+  llm_provider?: string | null;
+  llm_model?: string | null;
+
+  // Optional per-router thinking/reasoning knobs (provider/model dependent)
+  openai_reasoning_effort?: OpenAiReasoningEffort | null;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: "minimal" | "low" | "medium" | "high" | null;
+  anthropic_thinking_budget?: number | null;
+
+  // Advanced: optional override for router system prompt
+  llm_system_prompt?: string | null;
 }
 
 export interface RewritePreset {
@@ -2214,11 +2254,31 @@ export const tauriAPI = {
       callback(event.payload);
     });
   },
+
+  async cacheRouterEmbeddings(params: {
+    profileId: string;
+    forceRefresh?: boolean;
+  }): Promise<CacheRouterEmbeddingsResponse> {
+    return invoke("cache_router_embeddings", {
+      profileId: params.profileId,
+      forceRefresh: params.forceRefresh ?? null,
+    });
+  },
 };
 
 export interface OpenWindowInfo {
   title: string;
   process_path: string;
+}
+
+export interface CacheRouterEmbeddingsResponse {
+  provider: string;
+  model: string;
+  total_hints: number;
+  cached_now: number;
+  skipped_existing: number;
+  stored_inserted: number;
+  stored_updated: number;
 }
 
 // ============================================================================
@@ -2291,16 +2351,42 @@ export const llmAPI = {
     mode?: "fixed" | "new";
     transcript: string;
     problemOutput: string;
-    desiredOutput: string;
+    desiredOutput?: string | null;
     currentPrompt: string;
+
+    // Optional overrides used by Prompt Lab only.
+    llmProvider?: string | null;
+    llmModel?: string | null;
+    openAiReasoningEffort?: "none" | "low" | "medium" | "high" | null;
+    geminiThinkingLevel?: "minimal" | "low" | "medium" | "high" | null;
+    geminiThinkingBudget?: number | null;
+    anthropicThinkingBudget?: number | null;
   }) =>
     invoke<IterateRewritePromptResponse>("iterate_rewrite_prompt", {
       transcript: params.transcript,
       problemOutput: params.problemOutput,
-      desiredOutput: params.desiredOutput,
+      desiredOutput:
+        typeof params.desiredOutput === "string" && params.desiredOutput.trim()
+          ? params.desiredOutput
+          : null,
       currentPrompt: params.currentPrompt,
       profileId: params.profileId ?? null,
       mode: params.mode ?? null,
+
+      llmProvider: params.llmProvider ?? null,
+      llmModel: params.llmModel ?? null,
+      openAiReasoningEffort: params.openAiReasoningEffort ?? null,
+      geminiThinkingLevel: params.geminiThinkingLevel ?? null,
+      geminiThinkingBudget:
+        typeof params.geminiThinkingBudget === "number" &&
+        Number.isFinite(params.geminiThinkingBudget)
+          ? params.geminiThinkingBudget
+          : null,
+      anthropicThinkingBudget:
+        typeof params.anthropicThinkingBudget === "number" &&
+        Number.isFinite(params.anthropicThinkingBudget)
+          ? params.anthropicThinkingBudget
+          : null,
     }),
 
   testRewriteWithPrompt: (params: {

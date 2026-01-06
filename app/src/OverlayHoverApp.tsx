@@ -3,7 +3,7 @@ import "./app.css";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { tauriAPI, type IntentRouterSettings } from "./lib/tauri";
+import { tauriAPI } from "./lib/tauri";
 import { useSettings } from "./lib/queries";
 
 type ActiveProfileInfo = {
@@ -114,65 +114,18 @@ export default function OverlayHoverApp() {
     return profile?.presets ?? [];
   }, [settings, activeProfileId]);
 
-  const activeProfileRouter = useMemo(() => {
-    if (!settings) return null;
-    if (!activeProfileId) return null;
-    if (activeProfileId === "default") return null;
+  const hasPresets = activeProfilePresets.length > 0;
+
+  const routerIsEffectivelyOn = useMemo(() => {
+    if (!settings) return false;
+    if (!activeProfileId) return false;
+    if (activeProfileId === "default") return false;
     const profile = settings.rewrite_program_prompt_profiles.find(
       (p) => p.id === activeProfileId
     );
-    return profile?.router ?? null;
+    const r = profile?.router ?? null;
+    return Boolean(r && r.enabled && r.strategy !== "off");
   }, [settings, activeProfileId]);
-
-  const routerIsEffectivelyOn =
-    !!activeProfileRouter &&
-    activeProfileRouter.enabled &&
-    activeProfileRouter.strategy !== "off";
-
-  const toggleRouterEnabled = useCallback(async () => {
-    if (!settings) return;
-    if (!activeProfileId || activeProfileId === "default") return;
-
-    const profiles = settings.rewrite_program_prompt_profiles;
-    const idx = profiles.findIndex((p) => p.id === activeProfileId);
-    if (idx < 0) return;
-
-    const profile = profiles[idx];
-    if (!profile) return;
-    const current = profile.router ?? null;
-
-    const nextRouter: IntentRouterSettings = (() => {
-      if (routerIsEffectivelyOn) {
-        if (!current) return { enabled: false, strategy: "off" };
-        return { ...current, enabled: false };
-      }
-
-      if (current && current.strategy !== "off") {
-        return { ...current, enabled: true };
-      }
-
-      return {
-        enabled: true,
-        strategy: "embeddings",
-        embedding_provider: "openai",
-        embedding_model: "text-embedding-3-small",
-        pick_highest_score: false,
-        similarity_threshold: null,
-        similarity_margin: null,
-      };
-    })();
-
-    const nextProfiles = profiles.map((p) =>
-      p.id === activeProfileId ? { ...p, router: nextRouter } : p
-    );
-
-    try {
-      await tauriAPI.updateRewriteProgramPromptProfiles(nextProfiles);
-      await tauriAPI.emitSettingsChanged({});
-    } catch (error) {
-      console.error("[OverlayHover] Failed to toggle router:", error);
-    }
-  }, [activeProfileId, routerIsEffectivelyOn, settings]);
 
   const setSessionPresetLock = useCallback(
     async (nextPresetId: string | null) => {
@@ -193,6 +146,19 @@ export default function OverlayHoverApp() {
     },
     [activeProfileId, keepAlive]
   );
+
+  // Hard rule: hover overlay should only ever show if there are presets.
+  // If the backend shows the window while there are no presets (or presets were deleted),
+  // immediately hide it so we don't render an empty dot/pill.
+  useEffect(() => {
+    if (!hasPresets) {
+      tauriAPI.hideOverlayHover().catch(() => {});
+    }
+  }, [hasPresets]);
+
+  if (!hasPresets) {
+    return null;
+  }
 
   return (
     <div
@@ -219,70 +185,46 @@ export default function OverlayHoverApp() {
         right: "auto",
         bottom: "auto",
         transform: "none",
+        width: "100%",
+        height: "100%",
+        boxSizing: "border-box",
       }}
     >
-      <div className="overlay-hover-title">Presets</div>
-      <div className="overlay-hover-subtitle">
-        {(activeProfile?.profile_name ?? activeProfileId ?? "Detecting app…")
-          .trim()
-          .slice(0, 64)}
-      </div>
-
       <div className="overlay-hover-row">
-        <button
-          type="button"
-          className="overlay-hover-btn"
-          data-kind="toggle"
-          data-active={routerIsEffectivelyOn ? "true" : "false"}
-          disabled={!activeProfileId || activeProfileId === "default"}
-          onClick={() => {
-            toggleRouterEnabled();
-          }}
-          title={
-            !activeProfileId
-              ? "Detecting the foreground app…"
-              : activeProfileId === "default"
-              ? "No program profile is active (Default)"
-              : undefined
-          }
-        >
-          Intent router: {routerIsEffectivelyOn ? "On" : "Off"}
-        </button>
-      </div>
-
-      <div className="overlay-hover-row">
-        <button
-          type="button"
-          className="overlay-hover-btn"
-          data-active={!sessionLock.preset_id ? "true" : "false"}
-          disabled={!activeProfileId}
-          onClick={() => {
-            setSessionPresetLock(null);
-          }}
-        >
-          Auto
-        </button>
-        {activeProfilePresets.length > 0 ? (
-          activeProfilePresets.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className="overlay-hover-btn"
-              data-active={sessionLock.preset_id === p.id ? "true" : "false"}
-              disabled={!activeProfileId}
-              title={p.description ?? undefined}
-              onClick={() => {
+        {routerIsEffectivelyOn ? (
+          <button
+            type="button"
+            className="overlay-hover-btn"
+            data-active={!sessionLock.preset_id ? "true" : "false"}
+            disabled={!activeProfileId}
+            onClick={() => {
+              setSessionPresetLock(null);
+            }}
+          >
+            Auto
+          </button>
+        ) : null}
+        {activeProfilePresets.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className="overlay-hover-btn"
+            data-active={sessionLock.preset_id === p.id ? "true" : "false"}
+            disabled={!activeProfileId}
+            title={p.description ?? undefined}
+            onClick={() => {
+              if (!routerIsEffectivelyOn && sessionLock.preset_id === p.id) {
+                // When routing is off we hide the explicit "Auto" button.
+                // Clicking the active preset again clears the one-shot lock.
+                setSessionPresetLock(null);
+              } else {
                 setSessionPresetLock(p.id);
-              }}
-            >
-              {p.name.trim().slice(0, 20) || "Preset"}
-            </button>
-          ))
-        ) : (
-          <span className="overlay-hover-footnote">
-            No presets for this profile.
-          </span>
-        )}
+              }
+            }}
+          >
+            {p.name.trim().slice(0, 20) || "Preset"}
+          </button>
+        ))}
       </div>
     </div>
   );

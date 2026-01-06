@@ -555,10 +555,18 @@ pub async fn iterate_rewrite_prompt(
     pipeline: State<'_, SharedPipeline>,
     transcript: String,
     problem_output: String,
-    desired_output: String,
+    desired_output: Option<String>,
     current_prompt: String,
     profile_id: Option<String>,
     mode: Option<String>,
+
+    // Optional Prompt Lab overrides (do not persist; only affect this invocation).
+    llm_provider: Option<String>,
+    llm_model: Option<String>,
+    open_ai_reasoning_effort: Option<String>,
+    gemini_thinking_level: Option<String>,
+    gemini_thinking_budget: Option<i64>,
+    anthropic_thinking_budget: Option<i64>,
 ) -> Result<IterateRewritePromptResponse, LlmCommandError> {
     let llm_started_at = Instant::now();
 
@@ -607,7 +615,7 @@ pub async fn iterate_rewrite_prompt(
         });
     }
 
-    let (desired_provider, desired_model) = if let Some(profile) = resolved_profile.as_ref() {
+    let (base_provider, base_model) = if let Some(profile) = resolved_profile.as_ref() {
         let provider = profile
             .llm_provider
             .clone()
@@ -617,6 +625,20 @@ pub async fn iterate_rewrite_prompt(
     } else {
         (config.llm_config.provider.clone(), config.llm_config.model.clone())
     };
+
+    let desired_provider = llm_provider
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or(base_provider);
+
+    let desired_model = llm_model
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| Some(s.to_string()))
+        .unwrap_or(base_model);
 
     let api_key = if desired_provider == "ollama" {
         String::new()
@@ -628,22 +650,38 @@ pub async fn iterate_rewrite_prompt(
             .unwrap_or_default()
     };
 
-    // Apply provider-specific thinking/reasoning knobs (profile overrides -> global defaults).
-    let effective_openai_reasoning_effort = resolved_profile
-        .as_ref()
-        .and_then(|p| p.openai_reasoning_effort.clone())
+    // Apply provider-specific thinking/reasoning knobs.
+    // Precedence: Prompt Lab override -> profile override -> global defaults.
+    let effective_openai_reasoning_effort = open_ai_reasoning_effort
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            resolved_profile
+                .as_ref()
+                .and_then(|p| p.openai_reasoning_effort.clone())
+        })
         .or_else(|| config.llm_config.openai_reasoning_effort.clone());
-    let effective_gemini_thinking_budget = resolved_profile
-        .as_ref()
-        .and_then(|p| p.gemini_thinking_budget)
+
+    let effective_gemini_thinking_budget = gemini_thinking_budget
+        .or_else(|| resolved_profile.as_ref().and_then(|p| p.gemini_thinking_budget))
         .or(config.llm_config.gemini_thinking_budget);
-    let effective_gemini_thinking_level = resolved_profile
-        .as_ref()
-        .and_then(|p| p.gemini_thinking_level.clone())
+
+    let effective_gemini_thinking_level = gemini_thinking_level
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            resolved_profile
+                .as_ref()
+                .and_then(|p| p.gemini_thinking_level.clone())
+        })
         .or_else(|| config.llm_config.gemini_thinking_level.clone());
-    let effective_anthropic_thinking_budget = resolved_profile
-        .as_ref()
-        .and_then(|p| p.anthropic_thinking_budget)
+
+    let effective_anthropic_thinking_budget = anthropic_thinking_budget
+        .or_else(|| resolved_profile.as_ref().and_then(|p| p.anthropic_thinking_budget))
         .or(config.llm_config.anthropic_thinking_budget);
 
     let provider_cfg = LlmConfig {
@@ -666,25 +704,71 @@ pub async fn iterate_rewrite_prompt(
 
     let mode = mode.as_deref().unwrap_or("fixed");
 
+    // Desired output is optional for "new" mode, but required for "fixed" mode.
+    let desired_output_trimmed = desired_output
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+
+    let transcript_trimmed = transcript.trim();
+    let goal_trimmed = problem_output.trim();
+
+    if mode != "new" && desired_output_trimmed.is_none() {
+        return Err(LlmCommandError::from(
+            "Desired output is required when improving an existing prompt".to_string(),
+        ));
+    }
+
+    if mode == "new" {
+        let has_goal = !goal_trimmed.is_empty();
+        let has_example_pair = !transcript_trimmed.is_empty() && desired_output_trimmed.is_some();
+
+        if !has_goal && !has_example_pair {
+            return Err(LlmCommandError::from(
+                "For New prompt, provide either a prompt goal/description, or both transcript and desired output".to_string(),
+            ));
+        }
+    }
+
     let system_prompt = match mode {
         "new" => "You write system prompts for rewriting dictation transcripts.\n\nReturn ONLY the system prompt text.\n- No markdown\n- No quotes\n- No greetings\n- No explanations\n- The result must be usable as a system prompt as-is",
         _ => "You improve system prompts for rewriting dictation transcripts.\n\nReturn ONLY the improved system prompt text.\n- No markdown\n- No quotes\n- No greetings\n- No explanations\n- The result must be usable as a system prompt as-is",
     };
 
     let user_message = match mode {
-        "new" => format!(
-            "Transcript (input):\n<<<\n{transcript}\n>>>\n\nPrompt goal / description:\n<<<\n{goal}\n>>>\n\nDesired output:\n<<<\n{desired_output}\n>>>\n\nExisting prompt (reference; may be ignored):\n<<<\n{current_prompt}\n>>>\n\nTask:\nWrite a NEW system prompt from scratch that would transform transcripts like the input into the desired output, following the prompt goal/description. Be specific and include clear rules. Do not refer to or edit the existing prompt; produce a complete prompt.",
-            transcript = transcript.trim(),
-            goal = problem_output.trim(),
-            desired_output = desired_output.trim(),
-            current_prompt = current_prompt.trim(),
-        ),
+        "new" => {
+            let mut msg = String::new();
+
+            if !transcript_trimmed.is_empty() {
+                msg.push_str("Transcript (input):\n<<<\n");
+                msg.push_str(transcript_trimmed);
+                msg.push_str("\n>>>\n\n");
+            }
+
+            if !goal_trimmed.is_empty() {
+                msg.push_str("Prompt goal / description:\n<<<\n");
+                msg.push_str(goal_trimmed);
+                msg.push_str("\n>>>\n\n");
+            }
+
+            if let Some(desired) = desired_output_trimmed {
+                msg.push_str("Desired output:\n<<<\n");
+                msg.push_str(desired);
+                msg.push_str("\n>>>\n\n");
+            }
+
+            msg.push_str("Existing prompt (reference; may be ignored):\n<<<\n");
+            msg.push_str(current_prompt.trim());
+            msg.push_str("\n>>>\n\nTask:\nWrite a NEW system prompt from scratch for rewriting dictation transcripts. Use the goal/description and/or the example transcript/output (if provided) as guidance. Be specific and include clear rules. Produce a complete prompt.");
+
+            msg
+        }
         _ => format!(
             "Current system prompt:\n<<<\n{current_prompt}\n>>>\n\nTranscript (input):\n<<<\n{transcript}\n>>>\n\nProblem output (current prompt produced):\n<<<\n{problem_output}\n>>>\n\nDesired output:\n<<<\n{desired_output}\n>>>\n\nTask:\nWrite an improved system prompt that would transform the transcript into the desired output more reliably. Preserve the original style and scope. Add or adjust rules only as needed.",
             current_prompt = current_prompt.trim(),
-            transcript = transcript.trim(),
+            transcript = transcript_trimmed,
             problem_output = problem_output.trim(),
-            desired_output = desired_output.trim(),
+            desired_output = desired_output_trimmed.unwrap_or(""),
         ),
     };
 

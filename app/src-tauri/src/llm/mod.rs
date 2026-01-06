@@ -23,6 +23,7 @@ pub use prompts::{combine_prompt_sections, PromptSections, SYSTEM_PROMPT_DEFAULT
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
+use serde_json::Value as JsonValue;
 
 /// Default timeout for LLM API requests
 pub const DEFAULT_LLM_TIMEOUT: Duration = Duration::from_secs(30);
@@ -54,6 +55,37 @@ pub enum LlmError {
 pub trait LlmProvider: Send + Sync {
     /// Complete a prompt and return the response
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError>;
+
+    /// Complete a prompt and return a structured JSON response.
+    ///
+    /// Providers that support native JSON schema / structured outputs should override this.
+    /// The default implementation falls back to an instruction-based approach and attempts
+    /// to parse the response as JSON.
+    async fn complete_json_schema(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        schema_name: &str,
+        schema_description: &str,
+        schema: JsonValue,
+    ) -> Result<JsonValue, LlmError> {
+        let system = format!(
+            "{}\n\nReturn ONLY valid JSON that matches the provided JSON Schema (no markdown, no extra keys).\nSchema name: {}\nSchema description: {}\nSchema: {}",
+            system_prompt,
+            schema_name,
+            schema_description,
+            schema
+        );
+
+        let out = self.complete(&system, user_message).await?;
+        serde_json::from_str::<JsonValue>(out.trim()).map_err(|e| {
+            LlmError::InvalidResponse(format!(
+                "Structured output was not valid JSON: {} (content: {})",
+                e,
+                out
+            ))
+        })
+    }
 
     /// Get the provider name
     fn name(&self) -> &'static str;

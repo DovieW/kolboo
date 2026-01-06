@@ -822,6 +822,11 @@ pub async fn pipeline_stop_and_transcribe(
             if result.llm_attempted() {
                 log.llm_provider = result.llm_provider_used.clone();
                 log.llm_model = result.llm_model_used.clone();
+            } else {
+                // Avoid misleading UI chips: if we didn't attempt LLM formatting,
+                // clear any pre-populated provider/model values.
+                log.llm_provider = None;
+                log.llm_model = None;
             }
 
             log.info(format!(
@@ -891,6 +896,19 @@ pub async fn pipeline_stop_and_transcribe(
             }
         }
 
+        // Persist the *actual* LLM provider/model used (or clear it if not attempted).
+        if let Some(req_id) = active_request_id.as_deref() {
+            if let Some(history) = app.try_state::<HistoryStorage>() {
+                let (provider, model) = if result.llm_attempted() {
+                    (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                } else {
+                    (None, None)
+                };
+                let _ = history.set_request_llm_model(req_id, provider, model);
+                let _ = app.emit("history-changed", ());
+            }
+        }
+
         log_store.complete_current();
     }
 
@@ -916,6 +934,13 @@ pub async fn pipeline_stop_and_transcribe(
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.complete_request_success(req_id, final_text.clone());
+
+            let (provider, model) = if result.llm_attempted() {
+                (result.llm_provider_used.clone(), result.llm_model_used.clone())
+            } else {
+                (None, None)
+            };
+            let _ = history.set_request_llm_model(req_id, provider, model);
             let _ = app.emit("history-changed", ());
         }
     }
@@ -1154,6 +1179,10 @@ pub async fn pipeline_retry_transcription(
             if result.llm_attempted() {
                 log.llm_provider = result.llm_provider_used.clone();
                 log.llm_model = result.llm_model_used.clone();
+            } else {
+                // Avoid misleading UI chips: clear any pre-populated provider/model values.
+                log.llm_provider = None;
+                log.llm_model = None;
             }
 
             log.info(format!(
@@ -1187,6 +1216,13 @@ pub async fn pipeline_retry_transcription(
     if let Some(req_id) = new_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.complete_request_success(req_id, final_text.clone());
+
+            let (provider, model) = if result.llm_attempted() {
+                (result.llm_provider_used.clone(), result.llm_model_used.clone())
+            } else {
+                (None, None)
+            };
+            let _ = history.set_request_llm_model(req_id, provider, model);
             let _ = app.emit("history-changed", ());
         }
     }
@@ -1571,6 +1607,15 @@ pub async fn pipeline_dictate(
             log.stt_duration_ms = Some(result.stt_duration_ms);
             log.llm_duration_ms = result.llm_duration_ms;
 
+            if result.llm_attempted() {
+                log.llm_provider = result.llm_provider_used.clone();
+                log.llm_model = result.llm_model_used.clone();
+            } else {
+                // Avoid misleading UI chips: clear any pre-populated provider/model values.
+                log.llm_provider = None;
+                log.llm_model = None;
+            }
+
             log.info(format!(
                 "STT completed in {}ms ({} chars)",
                 result.stt_duration_ms,
@@ -1651,6 +1696,13 @@ pub async fn pipeline_dictate(
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.complete_request_success(req_id, final_text.clone());
+
+            let (provider, model) = if result.llm_attempted() {
+                (result.llm_provider_used.clone(), result.llm_model_used.clone())
+            } else {
+                (None, None)
+            };
+            let _ = history.set_request_llm_model(req_id, provider, model);
             let _ = app.emit("history-changed", ());
         }
     }

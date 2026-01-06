@@ -353,19 +353,36 @@ impl LlmProvider for GeminiLlmProvider {
             Some(0.0)
         };
 
+        // Preserve historical behavior: `complete()` returns rewritten text for rewrite.
+        if self.structured_outputs {
+            let v = self
+                .complete_json_schema(
+                    system_prompt,
+                    user_message,
+                    "rewrite_response",
+                    "Structured output for a dictation transcript rewrite. The model must emit valid JSON matching the schema.",
+                    Self::rewrite_response_schema(),
+                )
+                .await?;
+
+            let rewritten = v
+                .get("rewritten_text")
+                .and_then(|t| t.as_str())
+                .ok_or_else(|| {
+                    LlmError::InvalidResponse(format!(
+                        "Gemini structured output missing required field 'rewritten_text' (content: {})",
+                        v
+                    ))
+                })?;
+
+            return Ok(rewritten.to_string());
+        }
+
         let generation_config = GenerationConfig {
             max_output_tokens: 4096,
             temperature,
-            response_mime_type: if self.structured_outputs {
-                "application/json".to_string()
-            } else {
-                "text/plain".to_string()
-            },
-            response_json_schema: if self.structured_outputs {
-                Some(Self::rewrite_response_schema())
-            } else {
-                None
-            },
+            response_mime_type: "text/plain".to_string(),
+            response_json_schema: None,
             thinking_config: self.effective_thinking_config(),
         };
 
@@ -457,29 +474,127 @@ impl LlmProvider for GeminiLlmProvider {
 
         let output_text = Self::extract_text(&response_json)?;
 
-        if !self.structured_outputs {
-            return Ok(output_text);
+        Ok(output_text)
+    }
+
+    async fn complete_json_schema(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        _schema_name: &str,
+        _schema_description: &str,
+        schema: serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        if self.api_key.trim().is_empty() {
+            return Err(LlmError::NoApiKey("gemini".to_string()));
         }
 
-        // Response is JSON-mode; unwrap our schema.
-        let v: serde_json::Value = serde_json::from_str(&output_text).map_err(|e| {
+        let model = Self::normalize_model_name(&self.model);
+        let url = format!("{}/{model}:generateContent", GEMINI_API_ROOT);
+
+        let temperature = if self.model.contains("gemini-3") {
+            None
+        } else {
+            Some(0.0)
+        };
+
+        let generation_config = GenerationConfig {
+            max_output_tokens: 1024,
+            temperature,
+            response_mime_type: "application/json".to_string(),
+            response_json_schema: Some(schema),
+            thinking_config: self.effective_thinking_config(),
+        };
+
+        let request = GenerateContentRequest {
+            system_instruction: Some(Content {
+                role: None,
+                parts: vec![Part {
+                    text: Some(format!(
+                        "{}\n\nReturn ONLY valid JSON that matches the provided JSON Schema (no markdown, no extra keys).",
+                        system_prompt
+                    )),
+                }],
+            }),
+            contents: vec![Content {
+                role: Some("user".to_string()),
+                parts: vec![Part {
+                    text: Some(user_message.to_string()),
+                }],
+            }],
+            generation_config: Some(generation_config),
+        };
+
+        if let Some(store) = &self.request_log_store {
+            let request_json = serde_json::to_value(&request).unwrap_or_else(|_| {
+                json!({
+                    "provider": "gemini",
+                    "error": "failed to serialize request",
+                })
+            });
+            store.with_current(|log| {
+                log.llm_request_json = Some(request_json);
+            });
+        }
+
+        let mut req = self
+            .client
+            .post(url)
+            .header("x-goog-api-key", self.api_key.trim())
+            .json(&request);
+
+        if let Some(timeout) = self.timeout {
+            req = req.timeout(timeout);
+        }
+
+        let response = req.send().await.map_err(|e| {
+            if e.is_timeout() {
+                if let Some(timeout) = self.timeout {
+                    LlmError::Timeout(timeout)
+                } else {
+                    LlmError::Network(e)
+                }
+            } else {
+                LlmError::Network(e)
+            }
+        })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(&error_text) {
+                return Err(LlmError::Api(format!(
+                    "Gemini API error ({}): {}",
+                    status, error_response.error.message
+                )));
+            }
+            return Err(LlmError::Api(format!(
+                "Gemini API error ({}): {}",
+                status, error_text
+            )));
+        }
+
+        let response_value: serde_json::Value = response.json().await.map_err(|e| {
+            LlmError::InvalidResponse(format!("Failed to parse Gemini response: {}", e))
+        })?;
+
+        if let Some(store) = &self.request_log_store {
+            let response_for_log = response_value.clone();
+            store.with_current(|log| {
+                log.llm_response_json = Some(response_for_log);
+            });
+        }
+
+        let response_json: GenerateContentResponse = serde_json::from_value(response_value)
+            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse Gemini response: {}", e)))?;
+
+        let output_text = Self::extract_text(&response_json)?;
+        serde_json::from_str::<serde_json::Value>(output_text.trim()).map_err(|e| {
             LlmError::InvalidResponse(format!(
                 "Gemini structured output was not valid JSON: {} (content: {})",
                 e, output_text
             ))
-        })?;
-
-        let rewritten = v
-            .get("rewritten_text")
-            .and_then(|t| t.as_str())
-            .ok_or_else(|| {
-                LlmError::InvalidResponse(format!(
-                    "Gemini structured output missing required field 'rewritten_text' (content: {})",
-                    output_text
-                ))
-            })?;
-
-        Ok(rewritten.to_string())
+        })
     }
 
     fn name(&self) -> &'static str {

@@ -303,49 +303,44 @@ body {
 	opacity: 0.60;
 }
 
-/* Hover-revealed preset controls (positioned above the widget, out of flow). */
+/* Hover-revealed preset controls (separate hover window).
+
+	The hover window is its own transparent webview. The panel element fills the
+	window to reliably receive pointer events, but it should NOT draw a large
+	background. The visible "pill" belongs to the row container.
+*/
 .overlay-hover-panel {
-	position: absolute;
-	left: 50%;
-	bottom: calc(100% + 10px);
-	transform: translateX(-50%);
-	z-index: 50;
-	min-width: 220px;
-	max-width: 320px;
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: flex-end;
+	justify-content: center;
 	padding: 10px;
-	border-radius: 14px;
+	box-sizing: border-box;
+	background: transparent;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	backdrop-filter: none;
+	color: rgba(255, 255, 255, 0.92);
+	pointer-events: auto;
+}
+
+.overlay-hover-row {
+	margin-top: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 8px;
+	border-radius: 999px;
 	border: 1px solid rgba(255, 255, 255, 0.10);
 	background: rgba(10, 10, 10, 0.97);
 	backdrop-filter: blur(12px);
 	box-shadow:
 		0 16px 40px rgba(0, 0, 0, 0.45),
 		0 0 0 1px rgba(0, 0, 0, 0.18);
-	color: rgba(255, 255, 255, 0.92);
-	pointer-events: auto;
-}
-
-.overlay-hover-title {
-	font-size: 11px;
-	font-weight: 800;
-	letter-spacing: 0.10em;
-	text-transform: uppercase;
-	color: rgba(255, 255, 255, 0.92);
-}
-
-.overlay-hover-subtitle {
-	margin-top: 2px;
-	font-size: 12px;
-	color: rgba(255, 255, 255, 0.72);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.overlay-hover-row {
-	margin-top: 10px;
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
 }
 
 .overlay-hover-btn {
@@ -385,11 +380,6 @@ body {
 	color: rgba(255, 255, 255, 0.84);
 }
 
-.overlay-hover-footnote {
-	margin-top: 10px;
-	font-size: 11px;
-	color: rgba(255, 255, 255, 0.68);
-}
 
 /* Hide tooltips/popups in overlay - use high specificity instead of !important */
 html body [data-radix-popper-content-wrapper],

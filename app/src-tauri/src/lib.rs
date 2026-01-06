@@ -19,6 +19,7 @@ mod network;
 mod pipeline;
 mod recordings;
 mod request_log;
+mod router_embeddings_cache;
 mod settings;
 mod shortcuts_lock;
 mod stats;
@@ -956,6 +957,17 @@ fn stop_recording(
                             log.stt_duration_ms = Some(result.stt_duration_ms);
                             log.llm_duration_ms = result.llm_duration_ms;
 
+                            // Use the provider instance's model (includes provider defaults) so
+                            // the UI can show the real model used. If we didn't attempt LLM
+                            // formatting, clear any pre-populated provider/model values.
+                            if result.llm_attempted() {
+                                log.llm_provider = result.llm_provider_used.clone();
+                                log.llm_model = result.llm_model_used.clone();
+                            } else {
+                                log.llm_provider = None;
+                                log.llm_model = None;
+                            }
+
                             log.info(format!(
                                 "STT completed in {}ms ({} chars)",
                                 result.stt_duration_ms,
@@ -1054,6 +1066,13 @@ fn stop_recording(
                                 if let Err(e) = history.complete_request_success(req_id, text.clone()) {
                                     log::warn!("Failed to update history: {}", e);
                                 }
+
+                                let (provider, model) = if result.llm_attempted() {
+                                    (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                                } else {
+                                    (None, None)
+                                };
+                                let _ = history.set_request_llm_model(req_id, provider, model);
                                 let _ = app_clone.emit("history-changed", ());
                             }
                         }
@@ -1069,6 +1088,13 @@ fn stop_recording(
                         if let Some(ref req_id) = request_id {
                             if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                 let _ = history.complete_request_success(req_id, String::new());
+
+                                let (provider, model) = if result.llm_attempted() {
+                                    (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                                } else {
+                                    (None, None)
+                                };
+                                let _ = history.set_request_llm_model(req_id, provider, model);
                                 let _ = app_clone.emit("history-changed", ());
                             }
                         }
@@ -1732,6 +1758,8 @@ pub fn run() {
             commands::llm::iterate_rewrite_prompt,
             commands::llm::test_rewrite_with_prompt,
             commands::llm::llm_complete,
+            // Router helpers
+            commands::router::cache_router_embeddings,
             // Local Whisper model management commands
             commands::whisper::is_local_whisper_available,
             commands::whisper::get_whisper_models,
@@ -1888,6 +1916,14 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 let pipeline = initialize_pipeline_from_settings(app.handle());
+
+                // Preload persisted router embeddings cache once at startup.
+                // Routing uses the in-memory cache and does not read the store per request.
+                let persisted = router_embeddings_cache::load_router_embeddings_from_store(app.handle());
+                if !persisted.is_empty() {
+                    pipeline.preload_embedding_cache(persisted);
+                }
+
                 app.manage(pipeline);
             }
 

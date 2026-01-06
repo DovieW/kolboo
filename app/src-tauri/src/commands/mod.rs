@@ -8,6 +8,7 @@ pub mod network;
 pub mod overlay;
 pub mod pricing;
 pub mod recording;
+pub mod router;
 pub mod settings;
 pub mod stats;
 pub mod text;

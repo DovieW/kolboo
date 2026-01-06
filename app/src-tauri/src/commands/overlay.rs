@@ -394,9 +394,39 @@ pub async fn show_overlay_hover(app: AppHandle) -> Result<(), String> {
 
     let overlay_center_x_px = overlay_pos.x + (overlay_size.width as i32 / 2);
     let overlay_top_y_px = overlay_pos.y;
+    let overlay_bottom_y_px = overlay_pos.y + overlay_size.height as i32;
 
-    let x_px = overlay_center_x_px - (hover_w_px / 2);
-    let y_px = overlay_top_y_px - hover_h_px - gap_px;
+    // Preferred: above the overlay.
+    let mut x_px = overlay_center_x_px - (hover_w_px / 2);
+    let mut y_px = overlay_top_y_px - hover_h_px - gap_px;
+
+    // Clamp to the monitor bounds (and flip below if we don't fit above).
+    if let Ok(Some(monitor)) = overlay.current_monitor() {
+        let screen_size = monitor.size();
+        let screen_pos = monitor.position();
+        let screen_w_px = screen_size.width as i32;
+        let screen_h_px = screen_size.height as i32;
+        let origin_x_px = screen_pos.x;
+        let origin_y_px = screen_pos.y;
+
+        // A small margin so the panel doesn't hug the monitor edge.
+        let margin_px = (12.0 * scale).round() as i32;
+
+        let min_x = origin_x_px + margin_px;
+        let max_x = (origin_x_px + screen_w_px - hover_w_px - margin_px).max(min_x);
+
+        // If the "above" placement would go off the top, try placing below.
+        let min_y = origin_y_px + margin_px;
+        let max_y = (origin_y_px + screen_h_px - hover_h_px - margin_px).max(min_y);
+
+        if y_px < min_y {
+            // Place below the overlay widget.
+            y_px = overlay_bottom_y_px + gap_px;
+        }
+
+        x_px = x_px.clamp(min_x, max_x);
+        y_px = y_px.clamp(min_y, max_y);
+    }
 
     hover
         .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
