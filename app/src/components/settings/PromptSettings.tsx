@@ -253,11 +253,41 @@ export function PromptSettings({
     return Array.isArray(activeProfile.presets) ? activeProfile.presets : [];
   }, [activeProfile]);
 
+  const getPresetsForProfile = (p: RewriteProgramPromptProfile): RewritePreset[] => {
+    const raw = (p as any).presets;
+    return Array.isArray(raw) ? raw : [];
+  };
+
+  const presetRefCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const profile of profiles) {
+      const seen = new Set<string>();
+      for (const preset of getPresetsForProfile(profile)) {
+        if (seen.has(preset.id)) continue;
+        seen.add(preset.id);
+        counts.set(preset.id, (counts.get(preset.id) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [profiles]);
+
+  const isSharedPresetId = (presetId: string): boolean => {
+    return (presetRefCounts.get(presetId) ?? 0) > 1;
+  };
+
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
   const [localPresetName, setLocalPresetName] = useState<string>("");
   const [localPresetDescription, setLocalPresetDescription] =
     useState<string>("");
   const [localPresetHintsText, setLocalPresetHintsText] = useState<string>("");
+
+  const [linkPresetModalOpen, setLinkPresetModalOpen] = useState(false);
+  const [linkSourceProfileId, setLinkSourceProfileId] = useState<string | null>(
+    null
+  );
+  const [linkSourcePresetId, setLinkSourcePresetId] = useState<string | null>(
+    null
+  );
 
   const [localDefaultPresetDescription, setLocalDefaultPresetDescription] =
     useState<string>("");
@@ -321,6 +351,28 @@ export function PromptSettings({
   };
 
   const updatePreset = (presetId: string, patch: Partial<RewritePreset>) => {
+    // When a preset id appears in more than one profile, treat it like a shared
+    // entity: edits in any profile update all profiles that reference that id.
+    if (isSharedPresetId(presetId)) {
+      const updated = profiles.map((profile) => {
+        const profilePresets = getPresetsForProfile(profile);
+        if (!profilePresets.some((p) => p.id === presetId)) return profile;
+        return {
+          ...profile,
+          presets: profilePresets.map((p) =>
+            p.id === presetId ? { ...p, ...patch } : p
+          ),
+        };
+      });
+
+      updateRewriteProgramPromptProfiles.mutate(updated, {
+        onSuccess: () => {
+          tauriAPI.emitSettingsChanged();
+        },
+      });
+      return;
+    }
+
     const next = presets.map((p) =>
       p.id === presetId ? { ...p, ...patch } : p
     );
@@ -345,7 +397,7 @@ export function PromptSettings({
     }
   };
 
-  const addPreset = () => {
+  const newPreset = () => {
     if (!activeProfile) return;
     const id = createId();
     const p: RewritePreset = {
@@ -376,6 +428,58 @@ export function PromptSettings({
     const next = [...presets, p];
     savePresets(next);
     setEditingPresetId(id);
+  };
+
+  const linkableProfiles = useMemo(() => {
+    return profiles
+      .filter((p) => p.id !== activeProfileId)
+      .map((p) => {
+        const profilePresets = getPresetsForProfile(p);
+        return {
+          id: p.id,
+          label: p.name?.trim() || p.id,
+          presets: profilePresets,
+        };
+      })
+      .filter((p) => p.presets.length > 0);
+  }, [profiles, activeProfileId]);
+
+  const linkSourceProfile = useMemo(() => {
+    if (!linkSourceProfileId) return null;
+    return linkableProfiles.find((p) => p.id === linkSourceProfileId) ?? null;
+  }, [linkSourceProfileId, linkableProfiles]);
+
+  const linkSourcePreset = useMemo(() => {
+    if (!linkSourceProfile) return null;
+    if (!linkSourcePresetId) return null;
+    return linkSourceProfile.presets.find((p) => p.id === linkSourcePresetId) ?? null;
+  }, [linkSourceProfile, linkSourcePresetId]);
+
+  const openLinkPresetModal = () => {
+    const firstProfile = linkableProfiles[0] ?? null;
+    if (!firstProfile) return;
+    setLinkSourceProfileId(firstProfile.id);
+    setLinkSourcePresetId(firstProfile.presets[0]?.id ?? null);
+    setLinkPresetModalOpen(true);
+  };
+
+  const confirmLinkPreset = () => {
+    if (!activeProfile) return;
+    if (!linkSourcePreset) return;
+
+    // If it's already linked, just switch the editor to it.
+    if (presets.some((p) => p.id === linkSourcePreset.id)) {
+      setEditingPresetId(linkSourcePreset.id);
+      setLinkPresetModalOpen(false);
+      return;
+    }
+
+    // “Hard link” semantics: we reuse the same preset id across profiles.
+    // We still store an object in this profile, but updates propagate by id.
+    const next = [...presets, { ...linkSourcePreset }];
+    savePresets(next);
+    setEditingPresetId(linkSourcePreset.id);
+    setLinkPresetModalOpen(false);
   };
 
   const normalizeRouter = (
@@ -1545,10 +1649,14 @@ export function PromptSettings({
     );
   }
 
-  const presetSelectOptions = presets.map((p) => ({
-    value: p.id,
-    label: p.name || p.id,
-  }));
+  const presetSelectOptions = presets.map((p) => {
+    const base = p.name || p.id;
+    const suffix = isSharedPresetId(p.id) ? " (shared)" : "";
+    return {
+      value: p.id,
+      label: `${base}${suffix}`,
+    };
+  });
 
   const defaultPresetRewriteStepValue = (() => {
     if (isDefaultScope) return defaultRewriteEnabled ? "on" : "off";
@@ -1612,6 +1720,64 @@ export function PromptSettings({
 
   return (
     <>
+      <Modal
+        opened={linkPresetModalOpen}
+        onClose={() => setLinkPresetModalOpen(false)}
+        title="Add preset from another profile"
+        centered
+      >
+        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }} mb="sm">
+          This links a preset (shared like a hard link). Editing the preset in
+          either profile will update it everywhere it’s linked.
+        </Text>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Select
+            label="Source profile"
+            data={linkableProfiles.map((p) => ({ value: p.id, label: p.label }))}
+            value={linkSourceProfileId}
+            onChange={(value) => {
+              if (!value) return;
+              setLinkSourceProfileId(value);
+              const nextProfile =
+                linkableProfiles.find((p) => p.id === value) ?? null;
+              setLinkSourcePresetId(nextProfile?.presets[0]?.id ?? null);
+            }}
+            placeholder={linkableProfiles.length === 0 ? "No other profiles" : "Select profile"}
+            withCheckIcon={false}
+          />
+
+          <Select
+            label="Preset"
+            data={(linkSourceProfile?.presets ?? []).map((p) => ({
+              value: p.id,
+              label: p.name?.trim() || p.id,
+            }))}
+            value={linkSourcePresetId}
+            onChange={(value) => {
+              if (!value) return;
+              setLinkSourcePresetId(value);
+            }}
+            disabled={!linkSourceProfile}
+            placeholder={!linkSourceProfile ? "Select a profile first" : "Select preset"}
+            withCheckIcon={false}
+          />
+        </div>
+
+        <Group justify="flex-end" mt="md" gap="sm">
+          <Button variant="default" onClick={() => setLinkPresetModalOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            color="gray"
+            onClick={confirmLinkPreset}
+            disabled={!linkSourcePreset}
+          >
+            Add Preset
+          </Button>
+        </Group>
+      </Modal>
+
       <Modal
         opened={resetDialog !== null}
         onClose={() => setResetDialog(null)}
@@ -3238,9 +3404,28 @@ export function PromptSettings({
                         </div>
                       </div>
 
-                      <Button color="gray" onClick={addPreset}>
-                        Add preset
-                      </Button>
+                      <Group gap={8} wrap="wrap">
+                        <Button color="gray" onClick={newPreset}>
+                          New Preset
+                        </Button>
+                        <Tooltip
+                          label={
+                            linkableProfiles.length === 0
+                              ? "No presets found in other profiles"
+                              : "Add a shared preset from another profile"
+                          }
+                          disabled={linkableProfiles.length > 0}
+                        >
+                          <Button
+                            color="gray"
+                            variant="light"
+                            onClick={openLinkPresetModal}
+                            disabled={linkableProfiles.length === 0}
+                          >
+                            Add Preset
+                          </Button>
+                        </Tooltip>
+                      </Group>
                     </Group>
 
                     {presets.length === 0 ? (
