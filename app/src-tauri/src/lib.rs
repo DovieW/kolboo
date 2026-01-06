@@ -1041,8 +1041,11 @@ fn stop_recording(
                             ));
 
                             match &result.llm_outcome {
-                                pipeline::LlmOutcome::NotAttempted => {
-                                    log.info("LLM formatting not attempted (disabled or unavailable)");
+                                pipeline::LlmOutcome::NotAttempted(reason) => {
+                                    log.info_with_details(
+                                        "LLM formatting not attempted",
+                                        reason.to_log_details(),
+                                    );
                                 }
                                 pipeline::LlmOutcome::Succeeded => {
                                     if let Some(ms) = result.llm_duration_ms {

@@ -970,11 +970,53 @@ pub enum PipelineEvent {
     Error(String),
 }
 
+/// Reason the optional LLM formatting step was not attempted.
+///
+/// This is used to make request logs unambiguous when the rewrite step does not run.
+#[derive(Debug, Clone)]
+pub enum LlmNotAttemptedReason {
+    /// Recording was gated as quiet (STT skipped), so LLM rewrite was never reached.
+    QuietAudioGate,
+    /// Offline VAD detected no speech (STT skipped), so LLM rewrite was never reached.
+    NoSpeechDetectedByVad,
+    /// Global LLM rewrite toggle is disabled.
+    DisabledGlobally,
+    /// Per-profile toggle explicitly disabled rewrite.
+    DisabledByProfile,
+    /// Selected preset explicitly disabled rewrite.
+    DisabledByPreset,
+    /// Rewrite was enabled, but the provider couldn't be constructed/used.
+    ProviderUnavailable { provider: String, error: String },
+    /// Fallback for unexpected paths.
+    Unknown,
+}
+
+impl LlmNotAttemptedReason {
+    pub fn to_log_details(&self) -> String {
+        match self {
+            LlmNotAttemptedReason::QuietAudioGate => {
+                "reason=stt_skipped_quiet_audio_gate".to_string()
+            }
+            LlmNotAttemptedReason::NoSpeechDetectedByVad => {
+                "reason=stt_skipped_no_speech_detected".to_string()
+            }
+            LlmNotAttemptedReason::DisabledGlobally => "reason=disabled_global".to_string(),
+            LlmNotAttemptedReason::DisabledByProfile => "reason=disabled_profile".to_string(),
+            LlmNotAttemptedReason::DisabledByPreset => "reason=disabled_preset".to_string(),
+            LlmNotAttemptedReason::ProviderUnavailable { provider, error } => format!(
+                "reason=provider_unavailable\nprovider={}\nerror={}",
+                provider, error
+            ),
+            LlmNotAttemptedReason::Unknown => "reason=unknown".to_string(),
+        }
+    }
+}
+
 /// Outcome of the optional LLM formatting step.
 #[derive(Debug, Clone)]
 pub enum LlmOutcome {
-    /// LLM step was not attempted (not configured or disabled).
-    NotAttempted,
+    /// LLM step was not attempted.
+    NotAttempted(LlmNotAttemptedReason),
     /// LLM step completed successfully and returned formatted text.
     Succeeded,
     /// LLM step timed out and the pipeline fell back to the raw STT transcript.
@@ -1015,7 +1057,7 @@ pub struct TranscriptionResult {
 
 impl TranscriptionResult {
     pub fn llm_attempted(&self) -> bool {
-        !matches!(self.llm_outcome, LlmOutcome::NotAttempted)
+        !matches!(self.llm_outcome, LlmOutcome::NotAttempted(_))
     }
 }
 
@@ -2054,7 +2096,9 @@ impl SharedPipeline {
                     llm_duration_ms: None,
                     llm_provider_used: None,
                     llm_model_used: None,
-                    llm_outcome: LlmOutcome::NotAttempted,
+                    llm_outcome: LlmOutcome::NotAttempted(
+                        LlmNotAttemptedReason::NoSpeechDetectedByVad,
+                    ),
                 });
             }
 
@@ -2081,7 +2125,7 @@ impl SharedPipeline {
                     llm_duration_ms: None,
                     llm_provider_used: None,
                     llm_model_used: None,
-                    llm_outcome: LlmOutcome::NotAttempted,
+                    llm_outcome: LlmOutcome::NotAttempted(LlmNotAttemptedReason::QuietAudioGate),
                 });
             }
 
@@ -2654,7 +2698,8 @@ impl SharedPipeline {
         }
 
         // Phase 3b: Build the effective LLM provider + prompts based on the routed preset.
-        let (llm_provider, llm_prompts, llm_timeout) = {
+        // Also capture an explicit reason if rewrite is not going to run.
+        let (llm_provider, llm_prompts, llm_timeout, llm_not_attempted_reason) = {
             let mut inner = self
                 .inner
                 .lock()
@@ -2672,6 +2717,8 @@ impl SharedPipeline {
 
             let llm_timeout = llm_config.timeout;
 
+            let selected_preset_rewrite_enabled = selected_preset.map(|p| p.rewrite_llm_enabled);
+
             // Hard gates: global toggle + optional per-profile toggle.
             // Presets can disable rewrite, but cannot enable it when global/profile is off.
             let global_enabled = inner.config.llm_config.enabled;
@@ -2686,7 +2733,19 @@ impl SharedPipeline {
                 profile_enabled
             };
 
-            let llm_provider = if effective_llm_enabled {
+            let disabled_reason = if global_enabled {
+                if !profile_enabled {
+                    Some(LlmNotAttemptedReason::DisabledByProfile)
+                } else if selected_preset_rewrite_enabled == Some(false) {
+                    Some(LlmNotAttemptedReason::DisabledByPreset)
+                } else {
+                    None
+                }
+            } else {
+                Some(LlmNotAttemptedReason::DisabledGlobally)
+            };
+
+            let (llm_provider, not_attempted_reason) = if effective_llm_enabled {
                 let desired_llm_provider = selected_preset
                     .and_then(|p| p.llm_provider.clone())
                     .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
@@ -2725,7 +2784,7 @@ impl SharedPipeline {
                         effective_gemini_thinking_level,
                         effective_anthropic_thinking_budget,
                     )
-                    .map(Some)
+                    .map(|p| (Some(p), None))
                     .unwrap_or_else(|e| {
                         log::warn!(
                             "Pipeline: LLM provider '{}' unavailable: {}",
@@ -2740,18 +2799,26 @@ impl SharedPipeline {
                                 ));
                             });
                         }
-                        None
+                        (
+                            None,
+                            Some(LlmNotAttemptedReason::ProviderUnavailable {
+                                provider: desired_llm_provider,
+                                error: e.to_string(),
+                            }),
+                        )
                     })
             } else {
-                None
+                (None, disabled_reason)
             };
 
-            (llm_provider, llm_prompts, llm_timeout)
+            (llm_provider, llm_prompts, llm_timeout, not_attempted_reason)
         };
 
         // Phase 4: Optional LLM formatting
         let mut llm_duration_ms: Option<u64> = None;
-        let mut llm_outcome: LlmOutcome = LlmOutcome::NotAttempted;
+        let mut llm_outcome: LlmOutcome = LlmOutcome::NotAttempted(
+            llm_not_attempted_reason.unwrap_or(LlmNotAttemptedReason::Unknown),
+        );
 
         // Capture the *actual* provider/model that will be used (including provider defaults)
         // before we move `llm_provider` into the formatting block.
@@ -3418,7 +3485,7 @@ impl SharedPipeline {
         }
 
         // Phase 3b: Build effective LLM provider + prompts.
-        let (llm_provider, llm_prompts, llm_timeout) = {
+        let (llm_provider, llm_prompts, llm_timeout, llm_not_attempted_reason) = {
             let mut inner = self
                 .inner
                 .lock()
@@ -3436,6 +3503,8 @@ impl SharedPipeline {
 
             let llm_timeout = llm_config.timeout;
 
+            let selected_preset_rewrite_enabled = selected_preset.map(|p| p.rewrite_llm_enabled);
+
             let global_enabled = inner.config.llm_config.enabled;
             let profile_enabled = selected_profile
                 .and_then(|p| p.rewrite_llm_enabled)
@@ -3448,7 +3517,19 @@ impl SharedPipeline {
                 profile_enabled
             };
 
-            let llm_provider = if effective_llm_enabled {
+            let disabled_reason = if global_enabled {
+                if !profile_enabled {
+                    Some(LlmNotAttemptedReason::DisabledByProfile)
+                } else if selected_preset_rewrite_enabled == Some(false) {
+                    Some(LlmNotAttemptedReason::DisabledByPreset)
+                } else {
+                    None
+                }
+            } else {
+                Some(LlmNotAttemptedReason::DisabledGlobally)
+            };
+
+            let (llm_provider, not_attempted_reason) = if effective_llm_enabled {
                 let desired_llm_provider = selected_preset
                     .and_then(|p| p.llm_provider.clone())
                     .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
@@ -3486,7 +3567,7 @@ impl SharedPipeline {
                         effective_gemini_thinking_level,
                         effective_anthropic_thinking_budget,
                     )
-                    .map(Some)
+                    .map(|p| (Some(p), None))
                     .unwrap_or_else(|e| {
                         log::warn!(
                             "Pipeline: LLM provider '{}' unavailable (retry): {}",
@@ -3501,18 +3582,26 @@ impl SharedPipeline {
                                 ));
                             });
                         }
-                        None
+                        (
+                            None,
+                            Some(LlmNotAttemptedReason::ProviderUnavailable {
+                                provider: desired_llm_provider,
+                                error: e.to_string(),
+                            }),
+                        )
                     })
             } else {
-                None
+                (None, disabled_reason)
             };
 
-            (llm_provider, llm_prompts, llm_timeout)
+            (llm_provider, llm_prompts, llm_timeout, not_attempted_reason)
         };
 
         // Phase 3: Optional LLM formatting
         let mut llm_duration_ms: Option<u64> = None;
-        let mut llm_outcome: LlmOutcome = LlmOutcome::NotAttempted;
+        let mut llm_outcome: LlmOutcome = LlmOutcome::NotAttempted(
+            llm_not_attempted_reason.unwrap_or(LlmNotAttemptedReason::Unknown),
+        );
 
         let llm_provider_used: Option<String> = llm_provider.as_ref().map(|p| p.name().to_string());
         let llm_model_used: Option<String> = llm_provider.as_ref().map(|p| p.model().to_string());

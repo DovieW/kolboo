@@ -836,8 +836,8 @@ pub async fn pipeline_stop_and_transcribe(
             ));
 
             match &result.llm_outcome {
-                LlmOutcome::NotAttempted => {
-                    log.info("LLM formatting not attempted (disabled or unavailable)");
+                LlmOutcome::NotAttempted(reason) => {
+                    log.info_with_details("LLM formatting not attempted", reason.to_log_details());
                 }
                 LlmOutcome::Succeeded => {
                     if let Some(ms) = result.llm_duration_ms {
@@ -1623,8 +1623,8 @@ pub async fn pipeline_dictate(
             ));
 
             match &result.llm_outcome {
-                LlmOutcome::NotAttempted => {
-                    log.info("LLM formatting not attempted (disabled or unavailable)");
+                LlmOutcome::NotAttempted(reason) => {
+                    log.info_with_details("LLM formatting not attempted", reason.to_log_details());
                 }
                 LlmOutcome::Succeeded => {
                     if let Some(ms) = result.llm_duration_ms {
