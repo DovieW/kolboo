@@ -271,7 +271,7 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
       </header>
 
       <div className="main-content-inner">
-        <InstructionsCard />
+        {/* <InstructionsCard /> */}
         <HistoryFeed onJumpToLog={onJumpToLog} />
       </div>
     </div>
