@@ -1350,6 +1350,14 @@ impl PipelineInner {
                 )
                 .with_request_log_store(self.config.request_log_store.clone()),
             ),
+            "elevenlabs" => Arc::new(
+                crate::stt::ElevenLabsSttProvider::with_client(
+                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
+                    api_key,
+                    model,
+                )
+                .with_request_log_store(self.config.request_log_store.clone()),
+            ),
             "assemblyai" => Arc::new(
                 crate::stt::AssemblyAiSttProvider::with_client(
                     self.build_http_client_with_timeout(Duration::from_secs(120))?,

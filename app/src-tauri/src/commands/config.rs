@@ -119,9 +119,10 @@ pub struct AvailableProvidersResponse {
 
 /// STT provider definitions
 const STT_PROVIDERS: &[(&str, &str, bool)] = &[
+    ("groq", "Groq", false),
+    ("elevenlabs", "ElevenLabs", false),
     ("openai", "OpenAI", false),
     ("aquavoice", "Aquavoice (Avalon)", false),
-    ("groq", "Groq", false),
     ("assemblyai", "AssemblyAI", false),
     ("speechmatics", "Speechmatics", false),
     ("deepgram", "Deepgram", false),
@@ -247,6 +248,40 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .and_then(|store| store.get("whisper_server_base_url"))
         .and_then(|v| serde_json::from_value(v).ok());
 
+    #[cfg(feature = "local-whisper")]
+    let whisper_model_path: Option<std::path::PathBuf> = {
+        use crate::stt::WhisperModel;
+
+        let model_id: String = app
+            .store("settings.json")
+            .ok()
+            .and_then(|store| store.get("local_whisper_model_id"))
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_else(|| "base".to_string());
+
+        let model = match model_id.trim().to_lowercase().as_str() {
+            "tiny" => WhisperModel::Tiny,
+            "tinyen" | "tiny_en" | "tiny-en" => WhisperModel::TinyEn,
+            "base" => WhisperModel::Base,
+            "baseen" | "base_en" | "base-en" => WhisperModel::BaseEn,
+            "small" => WhisperModel::Small,
+            "smallen" | "small_en" | "small-en" => WhisperModel::SmallEn,
+            "medium" => WhisperModel::Medium,
+            "mediumen" | "medium_en" | "medium-en" => WhisperModel::MediumEn,
+            "largev1" | "large_v1" | "large-v1" => WhisperModel::LargeV1,
+            "largev2" | "large_v2" | "large-v2" => WhisperModel::LargeV2,
+            "largev3" | "large_v3" | "large-v3" => WhisperModel::LargeV3,
+            "largev3turbo" | "large_v3_turbo" | "large-v3-turbo" => WhisperModel::LargeV3Turbo,
+            _ => WhisperModel::Base,
+        };
+
+        app.path().app_data_dir().ok().map(|app_data_dir| {
+            let models_dir = app_data_dir.join("whisper-models");
+            let _ = std::fs::create_dir_all(&models_dir);
+            models_dir.join(model.filename())
+        })
+    };
+
     // Get the appropriate API key based on provider
     let stt_api_key: String = {
         let key_name = format!("{}_api_key", stt_provider);
@@ -264,6 +299,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         "openai",
         "aquavoice",
         "groq",
+        "elevenlabs",
         "assemblyai",
         "speechmatics",
         "deepgram",
@@ -683,6 +719,9 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
 
         // Preserve provider payload logging across config sync.
         request_log_store: app.try_state::<RequestLogStore>().map(|s| s.inner().clone()),
+
+        #[cfg(feature = "local-whisper")]
+        whisper_model_path,
     };
 
     // Update the pipeline

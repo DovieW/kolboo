@@ -627,6 +627,9 @@ export interface AppSettings {
   // When true, treat Groq usage as free-tier (UI-only for now; kept in settings for future backend usage).
   groq_free_tier: boolean;
 
+  // When true, treat ElevenLabs usage as free-tier for stats filtering.
+  elevenlabs_free_tier: boolean;
+
   // When true, treat Cohere usage as free-tier for stats filtering.
   cohere_free_tier: boolean;
 
@@ -1565,6 +1568,8 @@ export const tauriAPI = {
       cerebras_free_tier:
         (await store.get<boolean>("cerebras_free_tier")) ?? true,
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
+      elevenlabs_free_tier:
+        (await store.get<boolean>("elevenlabs_free_tier")) ?? true,
       cohere_free_tier: (await store.get<boolean>("cohere_free_tier")) ?? true,
       assemblyai_free_tier:
         (await store.get<boolean>("assemblyai_free_tier")) ?? true,
@@ -1996,6 +2001,12 @@ export const tauriAPI = {
   async updateGroqFreeTier(enabled: boolean): Promise<void> {
     const store = await getStore();
     await store.set("groq_free_tier", !!enabled);
+    await store.save();
+  },
+
+  async updateElevenLabsFreeTier(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("elevenlabs_free_tier", !!enabled);
     await store.save();
   },
 

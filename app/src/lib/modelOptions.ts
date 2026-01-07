@@ -23,6 +23,10 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
     { value: "slam-1", label: "Slam-1" },
     { value: "best", label: "Best (Legacy)" },
   ],
+  elevenlabs: [
+    { value: "scribe_v1", label: "Scribe v1" },
+    { value: "scribe_v1_experimental", label: "Scribe v1 Experimental" },
+  ],
   groq: [
     { value: "whisper-large-v3-turbo", label: "Whisper Large V3 Turbo" },
     { value: "whisper-large-v3", label: "Whisper Large V3" },

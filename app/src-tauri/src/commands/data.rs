@@ -165,6 +165,7 @@ pub fn delete_all_api_keys(app: AppHandle) -> Result<(), String> {
         "deepgram_api_key",
         "gemini_api_key",
         "anthropic_api_key",
+           "elevenlabs_api_key",
     ] {
         store.delete(key);
     }

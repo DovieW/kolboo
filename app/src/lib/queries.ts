@@ -1212,6 +1212,19 @@ export function useUpdateGroqFreeTier() {
   });
 }
 
+export function useUpdateElevenLabsFreeTier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateElevenLabsFreeTier(enabled);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateCerebrasFreeTier() {
   const queryClient = useQueryClient();
   return useMutation({

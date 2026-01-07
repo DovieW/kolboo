@@ -6,6 +6,7 @@
 mod aquavoice;
 mod assemblyai;
 mod deepgram;
+mod elevenlabs;
 mod groq;
 mod openai;
 mod retry;
@@ -18,6 +19,7 @@ mod whisper;
 pub use aquavoice::AquavoiceSttProvider;
 pub use assemblyai::AssemblyAiSttProvider;
 pub use deepgram::DeepgramSttProvider;
+pub use elevenlabs::ElevenLabsSttProvider;
 pub use groq::GroqSttProvider;
 pub use openai::OpenAiSttProvider;
 pub use retry::{with_retry, RetryConfig};

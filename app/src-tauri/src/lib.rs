@@ -179,6 +179,8 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("cerebras_free_tier", json!(true), false);
     // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
     dirty |= set_default("groq_free_tier", json!(true), false);
+    // ElevenLabs free-tier toggle (used by stats filtering).
+    dirty |= set_default("elevenlabs_free_tier", json!(true), false);
     // Cohere toggle (used by stats filtering).
     dirty |= set_default("cohere_free_tier", json!(true), false);
     // AssemblyAI and Speechmatics toggles (used by stats filtering).
@@ -186,6 +188,14 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("speechmatics_free_tier", json!(true), false);
     dirty |= set_default("stt_transcription_prompt", json!(null), false);
     dirty |= set_default("whisper_server_base_url", json!(null), false);
+
+    // Local Whisper model selection (only meaningful when compiled with the feature).
+    // This is the *model file* used by whisper.cpp (not the remote STT model dropdown).
+    #[cfg(feature = "local-whisper")]
+    {
+        dirty |= set_default("local_whisper_model_id", json!("base"), false);
+    }
+
     dirty |= set_default("stt_timeout_seconds", json!(10.0), false);
 
     // Network / proxy settings.
@@ -3645,6 +3655,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         "openai",
         "aquavoice",
         "groq",
+        "elevenlabs",
         "assemblyai",
         "speechmatics",
         "deepgram",
@@ -3661,6 +3672,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         "openai" => get_setting_from_store(app, "openai_api_key", String::new()),
         "aquavoice" => get_setting_from_store(app, "aquavoice_api_key", String::new()),
         "groq" => get_setting_from_store(app, "groq_api_key", String::new()),
+        "elevenlabs" => get_setting_from_store(app, "elevenlabs_api_key", String::new()),
         "assemblyai" => get_setting_from_store(app, "assemblyai_api_key", String::new()),
         "speechmatics" => get_setting_from_store(app, "speechmatics_api_key", String::new()),
         "deepgram" => get_setting_from_store(app, "deepgram_api_key", String::new()),
@@ -3964,6 +3976,36 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         })
     };
 
+    #[cfg(feature = "local-whisper")]
+    let whisper_model_path: Option<std::path::PathBuf> = {
+        use crate::stt::WhisperModel;
+
+        let model_id: String = get_setting_from_store(app, "local_whisper_model_id", "base".to_string());
+        let model = match model_id.trim().to_lowercase().as_str() {
+            "tiny" => WhisperModel::Tiny,
+            "tinyen" | "tiny_en" | "tiny-en" => WhisperModel::TinyEn,
+            "base" => WhisperModel::Base,
+            "baseen" | "base_en" | "base-en" => WhisperModel::BaseEn,
+            "small" => WhisperModel::Small,
+            "smallen" | "small_en" | "small-en" => WhisperModel::SmallEn,
+            "medium" => WhisperModel::Medium,
+            "mediumen" | "medium_en" | "medium-en" => WhisperModel::MediumEn,
+            "largev1" | "large_v1" | "large-v1" => WhisperModel::LargeV1,
+            "largev2" | "large_v2" | "large-v2" => WhisperModel::LargeV2,
+            "largev3" | "large_v3" | "large-v3" => WhisperModel::LargeV3,
+            "largev3turbo" | "large_v3_turbo" | "large-v3-turbo" => WhisperModel::LargeV3Turbo,
+            _ => WhisperModel::Base,
+        };
+
+        app.path().app_data_dir().ok().map(|app_data_dir| {
+            let models_dir = app_data_dir.join("whisper-models");
+            // Best-effort; if it fails we'll still return a path and LocalWhisperProvider
+            // will error clearly if the model doesn't exist.
+            let _ = std::fs::create_dir_all(&models_dir);
+            models_dir.join(model.filename())
+        })
+    };
+
     let config = pipeline::PipelineConfig {
         input_device_name,
 
@@ -4017,6 +4059,9 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
         // Allow providers to enrich the active RequestLog with request/response payloads.
         request_log_store: app.try_state::<RequestLogStore>().map(|s| s.inner().clone()),
+
+        #[cfg(feature = "local-whisper")]
+        whisper_model_path,
     };
 
     log::info!(

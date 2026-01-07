@@ -23,6 +23,7 @@ import {
   useUpdateAssemblyAiFreeTier,
   useUpdateCerebrasFreeTier,
   useUpdateCohereFreeTier,
+  useUpdateElevenLabsFreeTier,
   useUpdateGroqFreeTier,
   useUpdateSpeechmaticsFreeTier,
   useUpdateWhisperServerBaseUrl,
@@ -46,6 +47,13 @@ const API_KEYS: ApiKeyConfig[] = [
     placeholder: "Enter API key",
     storeKey: "groq_api_key",
     getKeyUrl: "https://console.groq.com/keys",
+  },
+  {
+    id: "elevenlabs",
+    label: "ElevenLabs",
+    placeholder: "Enter API key",
+    storeKey: "elevenlabs_api_key",
+    getKeyUrl: "https://elevenlabs.io/app/settings/api-keys",
   },
   {
     id: "cerebras",
@@ -187,6 +195,7 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 
   const { data: settings } = useSettings();
   const updateGroqFreeTier = useUpdateGroqFreeTier();
+  const updateElevenLabsFreeTier = useUpdateElevenLabsFreeTier();
   const updateCerebrasFreeTier = useUpdateCerebrasFreeTier();
   const updateAssemblyAiFreeTier = useUpdateAssemblyAiFreeTier();
   const updateSpeechmaticsFreeTier = useUpdateSpeechmaticsFreeTier();
@@ -266,6 +275,30 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
               title="Assume Groq calls cost $0 for stats"
             >
               Assume Groq calls cost $0 for stats
+            </Text>
+          </Group>
+        )}
+        {config.id === "elevenlabs" && (
+          <Group gap={10} align="center" wrap="nowrap" mt={2}>
+            <Switch
+              size="sm"
+              checked={settings?.elevenlabs_free_tier ?? true}
+              onChange={(e) =>
+                updateElevenLabsFreeTier.mutate(e.currentTarget.checked)
+              }
+              aria-label="ElevenLabs free tier"
+            />
+            <Text size="xs" c="var(--text-secondary)" fw={600}>
+              Free tier
+            </Text>
+            <Text
+              size="xs"
+              c="var(--text-muted)"
+              className="settings-description--single-line"
+              style={{ flex: 1 }}
+              title="Assume ElevenLabs calls cost $0 for stats"
+            >
+              Assume ElevenLabs calls cost $0 for stats
             </Text>
           </Group>
         )}

@@ -352,6 +352,23 @@ Follow patterns in:
 - `app/src-tauri/src/stt/groq.rs`
 - `app/src-tauri/src/stt/deepgram.rs`
 
+#### Example: ElevenLabs STT (Scribe)
+
+ElevenLabs supports file-based speech-to-text via:
+
+- `POST https://api.elevenlabs.io/v1/speech-to-text`
+- header: `xi-api-key: <key>`
+- multipart form fields:
+  - `model_id` (currently `scribe_v1` and `scribe_v1_experimental`)
+  - `file=@audio.wav`
+
+The synchronous response includes a top-level `text` string.
+
+Notes:
+
+- This endpoint does **not** currently support the OpenAI-style `prompt` field, so treat it as **no-prompt** unless/ until ElevenLabs adds an equivalent parameter.
+- Pricing on ElevenLabs is primarily **credit-based**. Unless the repo defines a stable USD/minute mapping, Stats/Logs may record STT events without `estimated_cost_usd_micros`.
+
 ### 2) Backend: export module (STT)
 
 Edit `app/src-tauri/src/stt/mod.rs`:
