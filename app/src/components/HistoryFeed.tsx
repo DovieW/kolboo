@@ -1964,162 +1964,228 @@ export function HistoryFeed({
               {group.date}
             </p>
             <div className="history-feed">
-              {group.items.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="history-item"
-                  onClick={() => handleCopyEntry(entry.id, entry.text)}
-                  title={entry.text?.trim() ? "Click to copy" : undefined}
-                  role={entry.text?.trim() ? "button" : undefined}
-                  tabIndex={entry.text?.trim() ? 0 : -1}
-                  onKeyDown={(e) => {
-                    if (!entry.text?.trim()) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      handleCopyEntry(entry.id, entry.text);
-                    }
-                  }}
-                >
-                  <span className="history-time">
-                    {formatTime(entry.timestamp)}
-                  </span>
-                  <div className="history-text">
-                    {(entry.status ?? "success") === "in_progress" ? (
-                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                        <Loader size="xs" color="orange" />
-                        <Text size="sm" c="dimmed" style={{ minWidth: 0 }}>
-                          Transcribing…
-                        </Text>
-                      </Group>
-                    ) : (entry.status ?? "success") === "error" ? (
-                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                        <Text size="sm" c="red">
-                          Failed
-                        </Text>
+              {group.items.map((entry) => {
+                const status = entry.status ?? "success";
+                const copyValue =
+                  status === "error" ? entry.error_message : entry.text;
+                const hasCopyValue = Boolean(copyValue?.trim());
+
+                return (
+                  <div
+                    key={entry.id}
+                    className="history-item"
+                    onClick={() => handleCopyEntry(entry.id, copyValue)}
+                    title={hasCopyValue ? "Click to copy" : undefined}
+                    role={hasCopyValue ? "button" : undefined}
+                    tabIndex={hasCopyValue ? 0 : -1}
+                    onKeyDown={(e) => {
+                      if (!hasCopyValue) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleCopyEntry(entry.id, copyValue);
+                      }
+                    }}
+                  >
+                    <span className="history-time">
+                      {formatTime(entry.timestamp)}
+                    </span>
+                    <div className="history-text">
+                      {status === "in_progress" ? (
+                        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                          <Loader size="xs" color="orange" />
+                          <Text size="sm" c="dimmed" style={{ minWidth: 0 }}>
+                            Transcribing…
+                          </Text>
+                        </Group>
+                      ) : status === "error" ? (
+                        <Group
+                          gap={8}
+                          wrap="nowrap"
+                          align="flex-start"
+                          style={{ minWidth: 0 }}
+                        >
+                          <Text size="sm" c="red">
+                            Failed
+                          </Text>
+                          <Text
+                            size="sm"
+                            c="dimmed"
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              whiteSpace: "pre-wrap",
+                              overflowWrap: "anywhere",
+                              wordBreak: "break-word",
+                            }}
+                            title={entry.error_message ?? undefined}
+                          >
+                            {entry.error_message?.trim()
+                              ? entry.error_message
+                              : "Try again"}
+                          </Text>
+                        </Group>
+                      ) : (
                         <Text
                           size="sm"
-                          c="dimmed"
-                          style={{
-                            flex: 1,
-                            minWidth: 0,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                          title={entry.error_message ?? undefined}
-                        >
-                          {entry.error_message?.trim()
-                            ? entry.error_message
-                            : "Try again"}
-                        </Text>
-                      </Group>
-                    ) : (
-                      <Text
-                        size="sm"
-                        c={entry.text?.trim() ? undefined : "dimmed"}
-                        style={
-                          entry.text?.trim()
-                            ? undefined
-                            : { fontStyle: "italic" }
-                        }
-                        title={
-                          entry.text?.trim()
-                            ? undefined
-                            : "No transcript was produced"
-                        }
-                      >
-                        {entry.text?.trim() ? entry.text : "No transcript"}
-                      </Text>
-                    )}
-                  </div>
-                  <div className="history-actions">
-                    {(() => {
-                      const profileLabel = (() => {
-                        const name = (entry.profile_name ?? "").trim();
-                        const id = (entry.profile_id ?? "").trim();
-                        if (name) return name;
-                        if (!id || id === "default") return "Default";
-                        return id;
-                      })();
-
-                      const presetLabel = (() => {
-                        const name = (entry.preset_name ?? "").trim();
-                        const id = (entry.preset_id ?? "").trim();
-                        if (name) return name;
-                        if (id) return id;
-                        return "Default";
-                      })();
-
-                      const isDefaultProfile =
-                        (entry.profile_id ?? "").trim() === "default" ||
-                        profileLabel.toLowerCase() === "default";
-
-                      const shouldShow =
-                        !isDefaultProfile ||
-                        presetLabel.toLowerCase() !== "default";
-
-                      return shouldShow ? (
-                        <Badge size="xs" variant="light" color="gray">
-                          {profileLabel}: {presetLabel}
-                        </Badge>
-                      ) : null;
-                    })()}
-                    <Tooltip
-                      label={copiedEntryId === entry.id ? "Copied" : "Copy"}
-                      withArrow
-                    >
-                      <ActionIcon
-                        variant="subtle"
-                        size="sm"
-                        color="gray"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCopyEntry(entry.id, entry.text);
-                        }}
-                        disabled={!entry.text || entry.text.trim().length === 0}
-                        aria-label="Copy"
-                      >
-                        <span
-                          className={
-                            "history-copy-icon" +
-                            (copiedEntryId === entry.id
-                              ? " history-copy-icon--checked"
-                              : "")
+                          c={entry.text?.trim() ? undefined : "dimmed"}
+                          style={
+                            entry.text?.trim()
+                              ? undefined
+                              : { fontStyle: "italic" }
+                          }
+                          title={
+                            entry.text?.trim()
+                              ? undefined
+                              : "No transcript was produced"
                           }
                         >
-                          {copiedEntryId === entry.id ? (
-                            <Check size={14} />
-                          ) : (
-                            <Copy size={14} />
-                          )}
-                        </span>
-                      </ActionIcon>
-                    </Tooltip>
+                          {entry.text?.trim() ? entry.text : "No transcript"}
+                        </Text>
+                      )}
+                    </div>
+                    <div className="history-actions">
+                      {(() => {
+                        const profileLabel = (() => {
+                          const name = (entry.profile_name ?? "").trim();
+                          const id = (entry.profile_id ?? "").trim();
+                          if (name) return name;
+                          if (!id || id === "default") return "Default";
+                          return id;
+                        })();
 
-                    {(() => {
-                      const recordingId =
-                        (entry.recording_request_id ?? entry.id)?.trim?.() ??
-                        "";
-                      const cached = recordingId
-                        ? recordingExistsById.get(recordingId)
-                        : undefined;
-                      const knownExists = cached?.exists;
-                      const isKnownMissing =
-                        !recordingId || knownExists === false;
+                        const presetLabel = (() => {
+                          const name = (entry.preset_name ?? "").trim();
+                          const id = (entry.preset_id ?? "").trim();
+                          if (name) return name;
+                          if (id) return id;
+                          return "Default";
+                        })();
 
-                      const isPlaying = recordingId
-                        ? player.isPlaying(recordingId)
-                        : false;
+                        const isDefaultProfile =
+                          (entry.profile_id ?? "").trim() === "default" ||
+                          profileLabel.toLowerCase() === "default";
 
-                      return (
-                        <>
-                          {/* Rerun */}
-                          {!isKnownMissing ? (
+                        const shouldShow =
+                          !isDefaultProfile ||
+                          presetLabel.toLowerCase() !== "default";
+
+                        return shouldShow ? (
+                          <Badge size="xs" variant="light" color="gray">
+                            {profileLabel}: {presetLabel}
+                          </Badge>
+                        ) : null;
+                      })()}
+                      <Tooltip
+                        label={copiedEntryId === entry.id ? "Copied" : "Copy"}
+                        withArrow
+                      >
+                        <ActionIcon
+                          variant="subtle"
+                          size="sm"
+                          color="gray"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCopyEntry(entry.id, copyValue);
+                          }}
+                          disabled={!hasCopyValue}
+                          aria-label="Copy"
+                        >
+                          <span
+                            className={
+                              "history-copy-icon" +
+                              (copiedEntryId === entry.id
+                                ? " history-copy-icon--checked"
+                                : "")
+                            }
+                          >
+                            {copiedEntryId === entry.id ? (
+                              <Check size={14} />
+                            ) : (
+                              <Copy size={14} />
+                            )}
+                          </span>
+                        </ActionIcon>
+                      </Tooltip>
+
+                      {(() => {
+                        const recordingId =
+                          (entry.recording_request_id ?? entry.id)?.trim?.() ??
+                          "";
+                        const cached = recordingId
+                          ? recordingExistsById.get(recordingId)
+                          : undefined;
+                        const knownExists = cached?.exists;
+                        const isKnownMissing =
+                          !recordingId || knownExists === false;
+
+                        const isPlaying = recordingId
+                          ? player.isPlaying(recordingId)
+                          : false;
+
+                        return (
+                          <>
+                            {/* Rerun */}
+                            {!isKnownMissing ? (
+                              <Tooltip
+                                label={
+                                  status === "in_progress"
+                                    ? "Already transcribing"
+                                    : "Rerun"
+                                }
+                                withArrow
+                              >
+                                <ActionIcon
+                                  variant="subtle"
+                                  size="sm"
+                                  color="gray"
+                                  disabled={status === "in_progress"}
+                                  loading={
+                                    retryMutation.isPending &&
+                                    retryMutation.variables === entry.id
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    notifications.show({
+                                      title: "Rerunning",
+                                      message: "Re-running transcription…",
+                                      color: "orange",
+                                    });
+
+                                    // Rerun is keyed by the history entry id; the backend resolves
+                                    // which recording to use via `recording_request_id`.
+                                    retryMutation.mutate(entry.id, {
+                                      onSuccess: () => {
+                                        notifications.show({
+                                          title: "Rerun complete",
+                                          message:
+                                            "Check History / Request Logs for the new entry.",
+                                          color: "teal",
+                                        });
+                                      },
+                                      onError: (e) => {
+                                        notifications.show({
+                                          title: "Rerun failed",
+                                          message: formatErrorMessage(e),
+                                          color: "red",
+                                        });
+                                      },
+                                    });
+                                  }}
+                                  aria-label="Rerun"
+                                >
+                                  <RotateCcw size={14} />
+                                </ActionIcon>
+                              </Tooltip>
+                            ) : null}
+
+                            {/* Play */}
                             <Tooltip
                               label={
-                                (entry.status ?? "success") === "in_progress"
-                                  ? "Already transcribing"
-                                  : "Rerun"
+                                isKnownMissing
+                                  ? "No recording"
+                                  : isPlaying
+                                  ? "Pause"
+                                  : "Play"
                               }
                               withArrow
                             >
@@ -2128,130 +2194,74 @@ export function HistoryFeed({
                                 size="sm"
                                 color="gray"
                                 disabled={
-                                  (entry.status ?? "success") === "in_progress"
+                                  (entry.status ?? "success") ===
+                                    "in_progress" || isKnownMissing
                                 }
                                 loading={
-                                  retryMutation.isPending &&
-                                  retryMutation.variables === entry.id
+                                  recordingId
+                                    ? player.isLoading(recordingId)
+                                    : false
                                 }
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  notifications.show({
-                                    title: "Rerunning",
-                                    message: "Re-running transcription…",
-                                    color: "orange",
-                                  });
-
-                                  // Rerun is keyed by the history entry id; the backend resolves
-                                  // which recording to use via `recording_request_id`.
-                                  retryMutation.mutate(entry.id, {
-                                    onSuccess: () => {
-                                      notifications.show({
-                                        title: "Rerun complete",
-                                        message:
-                                          "Check History / Request Logs for the new entry.",
-                                        color: "teal",
-                                      });
-                                    },
-                                    onError: (e) => {
-                                      notifications.show({
-                                        title: "Rerun failed",
-                                        message: formatErrorMessage(e),
-                                        color: "red",
-                                      });
-                                    },
-                                  });
+                                  if (!recordingId) return;
+                                  player.toggle(recordingId);
                                 }}
-                                aria-label="Rerun"
+                                aria-label={
+                                  isKnownMissing
+                                    ? "No recording"
+                                    : isPlaying
+                                    ? "Pause"
+                                    : "Play"
+                                }
                               >
-                                <RotateCcw size={14} />
+                                {isPlaying ? (
+                                  <Pause size={14} />
+                                ) : (
+                                  <Play size={14} />
+                                )}
                               </ActionIcon>
                             </Tooltip>
-                          ) : null}
-
-                          {/* Play */}
-                          <Tooltip
-                            label={
-                              isKnownMissing
-                                ? "No recording"
-                                : isPlaying
-                                ? "Pause"
-                                : "Play"
-                            }
-                            withArrow
+                          </>
+                        );
+                      })()}
+                      {onJumpToLog && requestLogIds.has(entry.id) ? (
+                        <Tooltip label="Log" withArrow>
+                          <ActionIcon
+                            variant="subtle"
+                            size="sm"
+                            color="gray"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onJumpToLog(entry.id);
+                            }}
+                            aria-label="Log"
                           >
-                            <ActionIcon
-                              variant="subtle"
-                              size="sm"
-                              color="gray"
-                              disabled={
-                                (entry.status ?? "success") === "in_progress" ||
-                                isKnownMissing
-                              }
-                              loading={
-                                recordingId
-                                  ? player.isLoading(recordingId)
-                                  : false
-                              }
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!recordingId) return;
-                                player.toggle(recordingId);
-                              }}
-                              aria-label={
-                                isKnownMissing
-                                  ? "No recording"
-                                  : isPlaying
-                                  ? "Pause"
-                                  : "Play"
-                              }
-                            >
-                              {isPlaying ? (
-                                <Pause size={14} />
-                              ) : (
-                                <Play size={14} />
-                              )}
-                            </ActionIcon>
-                          </Tooltip>
-                        </>
-                      );
-                    })()}
-                    {onJumpToLog && requestLogIds.has(entry.id) ? (
-                      <Tooltip label="Log" withArrow>
+                            <FileText size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
+                      <Tooltip label="Delete" withArrow>
                         <ActionIcon
                           variant="subtle"
                           size="sm"
-                          color="gray"
+                          color="red"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onJumpToLog(entry.id);
+                            handleDelete(entry.id);
                           }}
-                          aria-label="Log"
+                          disabled={
+                            deleteHistoryEntryEx.isPending || deleteOneBusy
+                          }
+                          aria-label="Delete"
                         >
-                          <FileText size={14} />
+                          <Trash2 size={14} />
                         </ActionIcon>
                       </Tooltip>
-                    ) : null}
-                    <Tooltip label="Delete" withArrow>
-                      <ActionIcon
-                        variant="subtle"
-                        size="sm"
-                        color="red"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(entry.id);
-                        }}
-                        disabled={
-                          deleteHistoryEntryEx.isPending || deleteOneBusy
-                        }
-                        aria-label="Delete"
-                      >
-                        <Trash2 size={14} />
-                      </ActionIcon>
-                    </Tooltip>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))

@@ -198,12 +198,27 @@ function LogEntryItem({ entry }: { entry: LogEntry }) {
         {time}
       </Text>
       {getLogLevelIcon(entry.level)}
-      <Box style={{ flex: 1 }}>
-        <Text size="sm" c={getLogLevelColor(entry.level)}>
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          size="sm"
+          c={getLogLevelColor(entry.level)}
+          style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
+        >
           {entry.message}
         </Text>
         {entry.details && (
-          <Code block mt={4} style={{ fontSize: "0.75rem" }}>
+          <Code
+            block
+            mt={4}
+            style={{
+              fontSize: "0.75rem",
+              maxWidth: "100%",
+              overflowX: "auto",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
+            }}
+          >
             {entry.details}
           </Code>
         )}
@@ -220,6 +235,7 @@ function RequestLogItem({
   player: ReturnType<typeof useRecordingPlayer>;
 }) {
   const [jsonOpened, jsonModal] = useDisclosure(false);
+  const [logEntriesOpened, setLogEntriesOpened] = useState(false);
 
   const kind = log.kind ?? "transcription";
   const isQuickAsk = kind === "quick_ask";
@@ -292,7 +308,9 @@ function RequestLogItem({
   const hasAnyTranscriptText = !!(rawTranscriptTrimmed || finalOutputTrimmed);
   const quickAskQuestionTrimmed = (log.quick_ask_question ?? "").trim();
   const quickAskAnswerTrimmed = (log.quick_ask_answer ?? "").trim();
-  const hasAnyQuickAskText = !!(quickAskQuestionTrimmed || quickAskAnswerTrimmed);
+  const hasAnyQuickAskText = !!(
+    quickAskQuestionTrimmed || quickAskAnswerTrimmed
+  );
   const playDisabled = log.status === "in_progress";
   const showRewriteDiff =
     llmAttempted &&
@@ -561,7 +579,9 @@ function RequestLogItem({
               </Badge>
             )}
 
-            {isQuickAsk && (quickAskMetaLabel || typeof log.quick_ask_duration_ms === "number") ? (
+            {isQuickAsk &&
+            (quickAskMetaLabel ||
+              typeof log.quick_ask_duration_ms === "number") ? (
               <Badge variant="light" size="sm" color="gray">
                 Quick Ask
                 {typeof log.quick_ask_duration_ms === "number"
@@ -637,23 +657,51 @@ function RequestLogItem({
           {/* Log entries */}
           {log.entries.length > 0 && (
             <Box>
-              <Text size="xs" fw={600} c="dimmed" mb="xs">
-                Log Entries ({log.entries.length}):
-              </Text>
-              <Paper
-                withBorder
-                p="sm"
-                style={{ background: "var(--mantine-color-dark-8)" }}
+              <UnstyledButton
+                onClick={() => setLogEntriesOpened((v) => !v)}
+                w="100%"
+                py={4}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                }}
               >
-                <Stack gap={4}>
-                  {log.entries.map((entry, index) => (
-                    <LogEntryItem
-                      key={`${entry.timestamp}-${index}`}
-                      entry={entry}
-                    />
-                  ))}
-                </Stack>
-              </Paper>
+                <Group gap={8} wrap="nowrap">
+                  <Text size="xs" fw={600} c="dimmed">
+                    Log Entries
+                  </Text>
+                  <Badge size="xs" variant="light" color="gray">
+                    {log.entries.length}
+                  </Badge>
+                  <ChevronDown
+                    size={14}
+                    style={{
+                      transform: logEntriesOpened
+                        ? "rotate(180deg)"
+                        : "rotate(0)",
+                      transition: "transform 150ms ease",
+                      color: "var(--text-secondary)",
+                    }}
+                  />
+                </Group>
+              </UnstyledButton>
+              <Collapse in={logEntriesOpened}>
+                <Paper
+                  withBorder
+                  p="sm"
+                  style={{ background: "var(--mantine-color-dark-8)" }}
+                >
+                  <Stack gap={4}>
+                    {log.entries.map((entry, index) => (
+                      <LogEntryItem
+                        key={`${entry.timestamp}-${index}`}
+                        entry={entry}
+                      />
+                    ))}
+                  </Stack>
+                </Paper>
+              </Collapse>
             </Box>
           )}
 
