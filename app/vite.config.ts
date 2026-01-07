@@ -38,6 +38,7 @@ export default defineConfig({
         main: "index.html",
         overlay: "overlay.html",
         overlayHover: "overlay-hover.html",
+        quickAsk: "quick-ask.html",
       },
     },
   },

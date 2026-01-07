@@ -1,5 +1,5 @@
-import { Button, Kbd, Select } from "@mantine/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Button, Kbd, Loader, Select } from "@mantine/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRecordHotkeys } from "react-hotkeys-hook";
 import type { HotkeyConfig } from "../lib/tauri";
 import { tauriAPI } from "../lib/tauri";
@@ -10,6 +10,7 @@ interface HotkeyInputProps {
   value: HotkeyConfig | null;
   onChange: (config: HotkeyConfig | null) => void;
   disabled?: boolean;
+  isSaving?: boolean;
   // Coordinated recording state (managed by parent)
   isRecording?: boolean;
   onStartRecording?: () => void;
@@ -348,12 +349,28 @@ function hotkeyToDisplayParts(value: HotkeyConfig): string[] {
     .map((part) => formatKeyForDisplay(part));
 }
 
+function hotkeyConfigEquals(
+  a: HotkeyConfig | null | undefined,
+  b: HotkeyConfig | null | undefined
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.key !== b.key) return false;
+  if (a.modifiers.length !== b.modifiers.length) return false;
+
+  // Modifiers may be serialized in different orders; treat them as a set.
+  const aMods = [...a.modifiers].map((m) => m.toLowerCase()).sort();
+  const bMods = [...b.modifiers].map((m) => m.toLowerCase()).sort();
+  return aMods.every((m, i) => m === bMods[i]);
+}
+
 export function HotkeyInput({
   label,
   description,
   value,
   onChange,
   disabled,
+  isSaving,
   isRecording: externalIsRecording,
   onStartRecording,
   onStopRecording,
@@ -368,6 +385,12 @@ export function HotkeyInput({
     null
   );
 
+  // While a hotkey update is being persisted to settings.json, keep an optimistic
+  // value around so the UI doesn't briefly flash back to "Unassigned".
+  const [optimisticValue, setOptimisticValue] = useState<
+    HotkeyConfig | null | undefined
+  >(undefined);
+
   const specialKeyValues = useMemo(
     () => new Set(SPECIAL_KEY_OPTIONS.map((o) => o.value)),
     []
@@ -375,6 +398,19 @@ export function HotkeyInput({
 
   // Use external state if provided, otherwise use internal
   const isRecording = externalIsRecording ?? internalIsRecording;
+
+  // Clear optimistic state once the external value catches up.
+  useEffect(() => {
+    if (optimisticValue === undefined) return;
+    if (hotkeyConfigEquals(value, optimisticValue)) {
+      setOptimisticValue(undefined);
+    }
+  }, [value, optimisticValue]);
+
+  const emitChange = useCallback((next: HotkeyConfig | null) => {
+    setOptimisticValue(next);
+    onChange(next);
+  }, [onChange]);
 
   // Keep the dropdown synced with the current value (when it matches a known special key).
   useEffect(() => {
@@ -443,11 +479,11 @@ export function HotkeyInput({
 
     const config = keysToConfig(keys);
     if (config) {
-      onChange(config);
+      emitChange(config);
       stop();
       onStopRecording?.();
     }
-  }, [keys, isRecording, onChange, stop, onStopRecording]);
+  }, [keys, isRecording, emitChange, stop, onStopRecording]);
 
   // Sync internal recording state with external state
   useEffect(() => {
@@ -499,7 +535,7 @@ export function HotkeyInput({
       return;
     }
 
-    onChange(config);
+    emitChange(config);
     stop();
     onStopRecording?.();
   };
@@ -509,7 +545,7 @@ export function HotkeyInput({
     if (!value) return;
 
     // Special keys are intended to be used alone.
-    onChange({ modifiers: [], key: value });
+    emitChange({ modifiers: [], key: value });
 
     // If we're currently recording, stop cleanly.
     if (isRecording) {
@@ -523,7 +559,8 @@ export function HotkeyInput({
     .filter((k) => k !== "escape")
     .map((k) => formatKeyForDisplay(k));
 
-  const displayParts = value ? hotkeyToDisplayParts(value) : null;
+  const effectiveValue = optimisticValue !== undefined ? optimisticValue : value;
+  const displayParts = effectiveValue ? hotkeyToDisplayParts(effectiveValue) : null;
 
   return (
     <div className="hotkey-field">
@@ -597,16 +634,25 @@ export function HotkeyInput({
           ) : (
             <>
               <span className="hotkey-hint">
-                {displayParts ? "Click to change" : "Click to set"}
+                {isSaving ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Loader size="xs" color="gray" />
+                    Saving…
+                  </span>
+                ) : displayParts ? (
+                  "Click to change"
+                ) : (
+                  "Click to set"
+                )}
               </span>
-              {value && (
+              {effectiveValue && (
                 <button
                   type="button"
                   disabled={disabled}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    onChange(null);
+                    emitChange(null);
                   }}
                   className="hotkey-clear"
                 >

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   DEFAULT_HOLD_HOTKEY,
   DEFAULT_PASTE_LAST_HOTKEY,
+  DEFAULT_QUICK_ASK_HOLD_HOTKEY,
+  DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
   DEFAULT_RETRY_HOTKEY,
   DEFAULT_TOGGLE_HOTKEY,
 } from "../../lib/hotkeyDefaults";
@@ -12,6 +14,8 @@ import {
   useSettings,
   useUpdateHoldHotkey,
   useUpdatePasteLastHotkey,
+  useUpdateQuickAskHoldHotkey,
+  useUpdateQuickAskToggleHotkey,
   useUpdateRetryHotkey,
   useUpdateToggleHotkey,
 } from "../../lib/queries";
@@ -21,7 +25,14 @@ import { HotkeyInput } from "../HotkeyInput";
 const GLOBAL_ONLY_TOOLTIP =
   "This setting can only be changed in the Default profile";
 
-type RecordingInput = "toggle" | "hold" | "paste_last" | "retry" | null;
+type RecordingInput =
+  | "toggle"
+  | "hold"
+  | "paste_last"
+  | "retry"
+  | "quick_ask_hold"
+  | "quick_ask_toggle"
+  | null;
 
 export function HotkeySettings({
   editingProfileId,
@@ -34,6 +45,8 @@ export function HotkeySettings({
   const updateHoldHotkey = useUpdateHoldHotkey();
   const updatePasteLastHotkey = useUpdatePasteLastHotkey();
   const updateRetryHotkey = useUpdateRetryHotkey();
+  const updateQuickAskHoldHotkey = useUpdateQuickAskHoldHotkey();
+  const updateQuickAskToggleHotkey = useUpdateQuickAskToggleHotkey();
   const resetHotkeys = useResetHotkeysToDefaults();
 
   // Track which input is currently recording (only one at a time)
@@ -48,6 +61,8 @@ export function HotkeySettings({
     updateHoldHotkey.error ||
     updatePasteLastHotkey.error ||
     updateRetryHotkey.error ||
+    updateQuickAskHoldHotkey.error ||
+    updateQuickAskToggleHotkey.error ||
     resetHotkeys.error;
 
   const errorMessage =
@@ -95,6 +110,14 @@ export function HotkeySettings({
     updateRetryHotkey.mutate(config);
   };
 
+  const handleQuickAskHoldHotkeyChange = (config: HotkeyConfig | null) => {
+    updateQuickAskHoldHotkey.mutate(config);
+  };
+
+  const handleQuickAskToggleHotkeyChange = (config: HotkeyConfig | null) => {
+    updateQuickAskToggleHotkey.mutate(config);
+  };
+
   const content = (
     <>
       {showError && (
@@ -115,6 +138,7 @@ export function HotkeySettings({
         value={settings ? settings.toggle_hotkey : DEFAULT_TOGGLE_HOTKEY}
         onChange={handleToggleHotkeyChange}
         disabled={isLoading || updateToggleHotkey.isPending}
+        isSaving={updateToggleHotkey.isPending}
         isRecording={recordingInput === "toggle"}
         onStartRecording={() => setRecordingInput("toggle")}
         onStopRecording={() => setRecordingInput(null)}
@@ -127,6 +151,7 @@ export function HotkeySettings({
           value={settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY}
           onChange={handleHoldHotkeyChange}
           disabled={isLoading || updateHoldHotkey.isPending}
+          isSaving={updateHoldHotkey.isPending}
           isRecording={recordingInput === "hold"}
           onStartRecording={() => setRecordingInput("hold")}
           onStopRecording={() => setRecordingInput(null)}
@@ -142,6 +167,7 @@ export function HotkeySettings({
           }
           onChange={handlePasteLastHotkeyChange}
           disabled={isLoading || updatePasteLastHotkey.isPending}
+          isSaving={updatePasteLastHotkey.isPending}
           isRecording={recordingInput === "paste_last"}
           onStartRecording={() => setRecordingInput("paste_last")}
           onStopRecording={() => setRecordingInput(null)}
@@ -155,8 +181,45 @@ export function HotkeySettings({
           value={settings ? settings.retry_hotkey : DEFAULT_RETRY_HOTKEY}
           onChange={handleRetryHotkeyChange}
           disabled={isLoading || updateRetryHotkey.isPending}
+          isSaving={updateRetryHotkey.isPending}
           isRecording={recordingInput === "retry"}
           onStartRecording={() => setRecordingInput("retry")}
+          onStopRecording={() => setRecordingInput(null)}
+        />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <HotkeyInput
+          label="Quick Ask Hold"
+          description="Record a question and show an answer overlay (no auto-paste)"
+          value={
+            settings
+              ? settings.quick_ask_hold_hotkey
+              : DEFAULT_QUICK_ASK_HOLD_HOTKEY
+          }
+          onChange={handleQuickAskHoldHotkeyChange}
+          disabled={isLoading || updateQuickAskHoldHotkey.isPending}
+          isSaving={updateQuickAskHoldHotkey.isPending}
+          isRecording={recordingInput === "quick_ask_hold"}
+          onStartRecording={() => setRecordingInput("quick_ask_hold")}
+          onStopRecording={() => setRecordingInput(null)}
+        />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <HotkeyInput
+          label="Quick Ask Toggle"
+          description="Press once to start recording a question, press again to stop (shows answer overlay)"
+          value={
+            settings
+              ? settings.quick_ask_toggle_hotkey
+              : DEFAULT_QUICK_ASK_TOGGLE_HOTKEY
+          }
+          onChange={handleQuickAskToggleHotkeyChange}
+          disabled={isLoading || updateQuickAskToggleHotkey.isPending}
+          isSaving={updateQuickAskToggleHotkey.isPending}
+          isRecording={recordingInput === "quick_ask_toggle"}
+          onStartRecording={() => setRecordingInput("quick_ask_toggle")}
           onStopRecording={() => setRecordingInput(null)}
         />
       </div>

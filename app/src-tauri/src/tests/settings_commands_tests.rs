@@ -25,6 +25,18 @@ fn test_default_paste_last_hotkey() {
 }
 
 #[test]
+fn test_default_retry_hotkey() {
+    let hotkey = HotkeyConfig::default_retry();
+    assert!(hotkey.is_none());
+}
+
+#[test]
+fn test_default_quick_ask_hotkey() {
+    let hotkey = HotkeyConfig::default_quick_ask();
+    assert!(hotkey.is_none());
+}
+
+#[test]
 fn test_to_shortcut_string() {
     let hotkey = HotkeyConfig {
         modifiers: vec!["Ctrl".to_string(), "Alt".to_string()],

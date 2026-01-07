@@ -91,6 +91,7 @@ describe("createHotkeyDuplicateSchema", () => {
     hold: { modifiers: ["ctrl", "alt"], key: "Backquote" },
     paste_last: { modifiers: ["ctrl", "alt"], key: "Period" },
     retry: { modifiers: ["ctrl", "alt"], key: "KeyR" },
+    quick_ask: { modifiers: ["ctrl", "alt"], key: "KeyQ" },
   };
 
 	it("allows a unique hotkey when editing toggle", () => {
@@ -144,6 +145,7 @@ describe("validateHotkeyNotDuplicate", () => {
     hold: { modifiers: ["ctrl", "alt"], key: "Backquote" },
     paste_last: { modifiers: ["ctrl", "alt"], key: "Period" },
     retry: { modifiers: ["ctrl", "alt"], key: "KeyR" },
+    quick_ask: { modifiers: ["ctrl", "alt"], key: "KeyQ" },
   };
 
 	it("returns null for a unique hotkey", () => {

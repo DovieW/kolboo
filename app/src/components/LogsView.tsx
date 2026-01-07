@@ -221,6 +221,9 @@ function RequestLogItem({
 }) {
   const [jsonOpened, jsonModal] = useDisclosure(false);
 
+  const kind = log.kind ?? "transcription";
+  const isQuickAsk = kind === "quick_ask";
+
   // NOTE: `llm_provider`/`llm_model` can reflect configured defaults.
   // Use `llm_duration_ms` to indicate whether an LLM rewrite was actually attempted.
   const llmAttempted = typeof log.llm_duration_ms === "number";
@@ -246,6 +249,14 @@ function RequestLogItem({
   const llmMetaLabel = `${llmProviderLabel}${
     log.llm_model ? ` / ${log.llm_model}` : ""
   }`;
+
+  const quickAskMetaLabel = (() => {
+    const provider = (log.quick_ask_provider ?? "").trim();
+    const model = (log.quick_ask_model ?? "").trim();
+    if (!provider && !model) return null;
+    if (provider && model) return `${provider} / ${model}`;
+    return provider || model;
+  })();
 
   // Always show a profile badge in request logs.
   // If the backend didn't populate profile fields (legacy logs), assume Default.
@@ -279,6 +290,9 @@ function RequestLogItem({
   const rawTranscriptTrimmed = (log.raw_transcript ?? "").trim();
   const finalOutputTrimmed = (log.final_text ?? "").trim();
   const hasAnyTranscriptText = !!(rawTranscriptTrimmed || finalOutputTrimmed);
+  const quickAskQuestionTrimmed = (log.quick_ask_question ?? "").trim();
+  const quickAskAnswerTrimmed = (log.quick_ask_answer ?? "").trim();
+  const hasAnyQuickAskText = !!(quickAskQuestionTrimmed || quickAskAnswerTrimmed);
   const playDisabled = log.status === "in_progress";
   const showRewriteDiff =
     llmAttempted &&
@@ -378,6 +392,16 @@ function RequestLogItem({
                 )}
               </ActionIcon>
             </Tooltip>
+            {isQuickAsk ? (
+              <Badge
+                variant="light"
+                size="sm"
+                color="orange"
+                leftSection={<Zap size={12} />}
+              >
+                Quick Ask
+              </Badge>
+            ) : null}
             {totalDurationMs !== null && (
               <Badge
                 variant="light"
@@ -394,6 +418,34 @@ function RequestLogItem({
       </Accordion.Control>
       <Accordion.Panel>
         <Stack gap="md">
+          {isQuickAsk && hasAnyQuickAskText ? (
+            <Paper withBorder p="sm">
+              <Stack gap="xs">
+                {quickAskQuestionTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Quick Ask Question:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_ask_question}
+                    </Text>
+                  </Box>
+                ) : null}
+
+                {quickAskAnswerTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Quick Ask Answer:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_ask_answer}
+                    </Text>
+                  </Box>
+                ) : null}
+              </Stack>
+            </Paper>
+          ) : null}
+
           {/* Transcript info */}
           {(log.raw_transcript || log.final_text) && (
             <Paper withBorder p="sm">
@@ -508,6 +560,16 @@ function RequestLogItem({
                 STT · {sttMetaLabel} · {sttPriceLabel}
               </Badge>
             )}
+
+            {isQuickAsk && (quickAskMetaLabel || typeof log.quick_ask_duration_ms === "number") ? (
+              <Badge variant="light" size="sm" color="gray">
+                Quick Ask
+                {typeof log.quick_ask_duration_ms === "number"
+                  ? ` ${formatDuration(log.quick_ask_duration_ms)}`
+                  : ""}
+                {quickAskMetaLabel ? ` · ${quickAskMetaLabel}` : ""}
+              </Badge>
+            ) : null}
             {log.llm_duration_ms ? (
               <Badge variant="light" size="sm" color="gray">
                 LLM {formatDuration(log.llm_duration_ms)} · {llmMetaLabel} ·{" "}
@@ -597,6 +659,36 @@ function RequestLogItem({
 
           {/* Copy full log as JSON for debugging */}
           <Group justify="flex-end" gap={4}>
+            {quickAskQuestionTrimmed && (
+              <CopyButton value={quickAskQuestionTrimmed}>
+                {({ copied, copy }) => (
+                  <Button
+                    variant="subtle"
+                    color={copied ? "teal" : "gray"}
+                    size="xs"
+                    leftSection={<Copy size={14} />}
+                    onClick={copy}
+                  >
+                    {copied ? "Copied!" : "Copy Question"}
+                  </Button>
+                )}
+              </CopyButton>
+            )}
+            {quickAskAnswerTrimmed && (
+              <CopyButton value={quickAskAnswerTrimmed}>
+                {({ copied, copy }) => (
+                  <Button
+                    variant="subtle"
+                    color={copied ? "teal" : "gray"}
+                    size="xs"
+                    leftSection={<Copy size={14} />}
+                    onClick={copy}
+                  >
+                    {copied ? "Copied!" : "Copy Answer"}
+                  </Button>
+                )}
+              </CopyButton>
+            )}
             {hasAnyTranscriptText && (
               <CopyButton value={rawTranscriptTrimmed}>
                 {({ copied, copy }) => (
@@ -775,9 +867,12 @@ export function LogsView(
       if (query) {
         const haystack = [
           log.id,
+          log.kind ?? "",
           log.error_message ?? "",
           log.raw_transcript ?? "",
           log.final_text ?? "",
+          log.quick_ask_question ?? "",
+          log.quick_ask_answer ?? "",
         ]
           .join("\n")
           .toLowerCase();

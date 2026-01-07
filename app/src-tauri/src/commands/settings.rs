@@ -7,6 +7,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
+#[cfg(desktop)]
+use std::collections::HashSet;
+
 #[cfg(all(desktop, target_os = "windows"))]
 fn is_windows_modifier_only_hotkey(hk: &HotkeyConfig) -> bool {
     hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight")
@@ -93,8 +96,36 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
         get_hotkey_from_store(&app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
     let retry_hotkey = get_hotkey_from_store(&app, "retry_hotkey", HotkeyConfig::default_retry);
 
+    // Quick Ask hotkeys:
+    // - Legacy key: quick_ask_hotkey (hold-to-record)
+    // - New keys: quick_ask_hold_hotkey + quick_ask_toggle_hotkey
+    // For backward compatibility, Quick Ask Hold falls back to the legacy key only
+    // when the new key is absent (not when explicitly null).
+    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
+        use serde_json::Value;
+
+        let store = app.store("settings.json").ok();
+        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
+
+        let hold = match raw_hold {
+            None => get_hotkey_from_store(&app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
+            Some(Value::Null) => None,
+            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
+                .ok()
+                .or_else(|| HotkeyConfig::default_quick_ask()),
+        };
+
+        let toggle = get_hotkey_from_store(
+            &app,
+            "quick_ask_toggle_hotkey",
+            HotkeyConfig::default_quick_ask,
+        );
+
+        (hold, toggle)
+    };
+
     log::info!(
-        "Re-registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}",
+        "Re-registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}, QuickAskHold: {}, QuickAskToggle: {}",
         toggle_hotkey
             .as_ref()
             .map(|h| h.to_shortcut_string())
@@ -110,6 +141,15 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
         retry_hotkey
             .as_ref()
             .map(|h| h.to_shortcut_string())
+            .unwrap_or_else(|| "<disabled>".to_string()),
+        quick_ask_hold_hotkey
+            .as_ref()
+            .map(|h| h.to_shortcut_string())
+            .unwrap_or_else(|| "<disabled>".to_string())
+        ,
+        quick_ask_toggle_hotkey
+            .as_ref()
+            .map(|h| h.to_shortcut_string())
             .unwrap_or_else(|| "<disabled>".to_string())
     );
 
@@ -123,13 +163,23 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 
     // Collect shortcuts to register
     let mut shortcuts: Vec<Shortcut> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let mut push_unique = |sc: Shortcut| {
+        let k = sc.to_string();
+        if seen.insert(k) {
+            shortcuts.push(sc);
+        } else {
+            log::warn!("Duplicate hotkey detected; skipping duplicate registration");
+        }
+    };
     if let Some(hk) = toggle_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
         if is_windows_modifier_only_hotkey(&hk) {
             // handled by Windows hook (not tauri-plugin-global-shortcut)
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => shortcuts.push(sc),
+                Ok(sc) => push_unique(sc),
                 Err(e) => log::warn!(
                     "Invalid toggle hotkey in settings store ({}); treating as disabled",
                     e
@@ -154,7 +204,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => shortcuts.push(sc),
+                Ok(sc) => push_unique(sc),
                 Err(e) => log::warn!(
                     "Invalid hold hotkey in settings store ({}); treating as disabled",
                     e
@@ -177,7 +227,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => shortcuts.push(sc),
+                Ok(sc) => push_unique(sc),
                 Err(e) => log::warn!(
                     "Invalid paste-last hotkey in settings store ({}); treating as disabled",
                     e
@@ -201,7 +251,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => shortcuts.push(sc),
+                Ok(sc) => push_unique(sc),
                 Err(e) => log::warn!(
                     "Invalid retry hotkey in settings store ({}); treating as disabled",
                     e
@@ -214,6 +264,54 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             Ok(sc) => shortcuts.push(sc),
             Err(e) => log::warn!(
                 "Invalid retry hotkey in settings store ({}); treating as disabled",
+                e
+            ),
+        }
+    }
+
+    if let Some(hk) = quick_ask_hold_hotkey {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            // handled by Windows hook
+        } else {
+            match hk.to_shortcut() {
+                Ok(sc) => push_unique(sc),
+                Err(e) => log::warn!(
+                    "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
+                    e
+                ),
+            }
+        }
+
+        #[cfg(not(all(desktop, target_os = "windows")))]
+        match hk.to_shortcut() {
+            Ok(sc) => push_unique(sc),
+            Err(e) => log::warn!(
+                "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
+                e
+            ),
+        }
+    }
+
+    if let Some(hk) = quick_ask_toggle_hotkey {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            // handled by Windows hook
+        } else {
+            match hk.to_shortcut() {
+                Ok(sc) => push_unique(sc),
+                Err(e) => log::warn!(
+                    "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
+                    e
+                ),
+            }
+        }
+
+        #[cfg(not(all(desktop, target_os = "windows")))]
+        match hk.to_shortcut() {
+            Ok(sc) => push_unique(sc),
+            Err(e) => log::warn!(
+                "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
                 e
             ),
         }

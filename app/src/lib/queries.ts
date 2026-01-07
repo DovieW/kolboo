@@ -32,6 +32,7 @@ import {
   type CostTimeframe,
   type ModelPricingKind,
   type ProxySettings,
+  type OpenAiReasoningEffort,
 } from "./tauri";
 
 export function useModelPricing(
@@ -244,6 +245,8 @@ export function useUpdateToggleHotkey() {
             hold: settings.hold_hotkey,
             paste_last: settings.paste_last_hotkey,
             retry: settings.retry_hotkey,
+            quick_ask_hold: settings.quick_ask_hold_hotkey,
+            quick_ask_toggle: settings.quick_ask_toggle_hotkey,
           },
           "toggle"
         );
@@ -295,6 +298,8 @@ export function useUpdateHoldHotkey() {
             hold: settings.hold_hotkey,
             paste_last: settings.paste_last_hotkey,
             retry: settings.retry_hotkey,
+            quick_ask_hold: settings.quick_ask_hold_hotkey,
+            quick_ask_toggle: settings.quick_ask_toggle_hotkey,
           },
           "hold"
         );
@@ -344,6 +349,8 @@ export function useUpdatePasteLastHotkey() {
             hold: settings.hold_hotkey,
             paste_last: settings.paste_last_hotkey,
             retry: settings.retry_hotkey,
+            quick_ask_hold: settings.quick_ask_hold_hotkey,
+            quick_ask_toggle: settings.quick_ask_toggle_hotkey,
           },
           "paste_last"
         );
@@ -362,7 +369,10 @@ export function useUpdatePasteLastHotkey() {
           await tauriAPI.unregisterShortcuts();
           await tauriAPI.registerShortcuts();
         } catch (restoreError) {
-          console.error("Failed to restore previous paste-last hotkey:", restoreError);
+          console.error(
+            "Failed to restore previous paste-last hotkey:",
+            restoreError
+          );
         }
         throw error;
       }
@@ -390,6 +400,8 @@ export function useUpdateRetryHotkey() {
             hold: settings.hold_hotkey,
             paste_last: settings.paste_last_hotkey,
             retry: settings.retry_hotkey,
+            quick_ask_hold: settings.quick_ask_hold_hotkey,
+            quick_ask_toggle: settings.quick_ask_toggle_hotkey,
           },
           "retry"
         );
@@ -410,6 +422,108 @@ export function useUpdateRetryHotkey() {
         } catch (restoreError) {
           console.error(
             "Failed to restore previous retry hotkey:",
+            restoreError
+          );
+        }
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskHoldHotkey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (hotkey: HotkeyConfig | null) => {
+      // Get current settings for validation
+      const settings = await tauriAPI.getSettings();
+      const previous = settings.quick_ask_hold_hotkey;
+
+      // Validate no duplicate (unless unsetting)
+      if (hotkey) {
+        const error = validateHotkeyNotDuplicate(
+          hotkey,
+          {
+            toggle: settings.toggle_hotkey,
+            hold: settings.hold_hotkey,
+            paste_last: settings.paste_last_hotkey,
+            retry: settings.retry_hotkey,
+            quick_ask_hold: settings.quick_ask_hold_hotkey,
+            quick_ask_toggle: settings.quick_ask_toggle_hotkey,
+          },
+          "quick_ask_hold"
+        );
+        if (error) throw new Error(error);
+      }
+
+      // Save and re-register
+      await tauriAPI.updateQuickAskHoldHotkey(hotkey);
+      await tauriAPI.unregisterShortcuts();
+
+      try {
+        await tauriAPI.registerShortcuts();
+      } catch (error) {
+        try {
+          await tauriAPI.updateQuickAskHoldHotkey(previous);
+          await tauriAPI.unregisterShortcuts();
+          await tauriAPI.registerShortcuts();
+        } catch (restoreError) {
+          console.error(
+            "Failed to restore previous quick ask hold hotkey:",
+            restoreError
+          );
+        }
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskToggleHotkey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (hotkey: HotkeyConfig | null) => {
+      // Get current settings for validation
+      const settings = await tauriAPI.getSettings();
+      const previous = settings.quick_ask_toggle_hotkey;
+
+      // Validate no duplicate (unless unsetting)
+      if (hotkey) {
+        const error = validateHotkeyNotDuplicate(
+          hotkey,
+          {
+            toggle: settings.toggle_hotkey,
+            hold: settings.hold_hotkey,
+            paste_last: settings.paste_last_hotkey,
+            retry: settings.retry_hotkey,
+            quick_ask_hold: settings.quick_ask_hold_hotkey,
+            quick_ask_toggle: settings.quick_ask_toggle_hotkey,
+          },
+          "quick_ask_toggle"
+        );
+        if (error) throw new Error(error);
+      }
+
+      // Save and re-register
+      await tauriAPI.updateQuickAskToggleHotkey(hotkey);
+      await tauriAPI.unregisterShortcuts();
+
+      try {
+        await tauriAPI.registerShortcuts();
+      } catch (error) {
+        try {
+          await tauriAPI.updateQuickAskToggleHotkey(previous);
+          await tauriAPI.unregisterShortcuts();
+          await tauriAPI.registerShortcuts();
+        } catch (restoreError) {
+          console.error(
+            "Failed to restore previous quick ask toggle hotkey:",
             restoreError
           );
         }
@@ -1246,10 +1360,101 @@ export function useUpdateLLMModel() {
   });
 }
 
+export function useUpdateQuickAskProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (provider: string | null) => {
+      await tauriAPI.updateQuickAskProvider(provider);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (model: string | null) => {
+      await tauriAPI.updateQuickAskModel(model);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskSystemPrompt() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (prompt: string | null) => {
+      await tauriAPI.updateQuickAskSystemPrompt(prompt);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskOpenAiReasoningEffort() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (effort: OpenAiReasoningEffort | null) => {
+      await tauriAPI.updateQuickAskOpenAiReasoningEffort(effort);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskAnthropicThinkingBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (budget: number | null) => {
+      await tauriAPI.updateQuickAskAnthropicThinkingBudget(budget);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskGeminiThinkingBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (budget: number | null) => {
+      await tauriAPI.updateQuickAskGeminiThinkingBudget(budget);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskGeminiThinkingLevel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (level: "minimal" | "low" | "medium" | "high" | null) => {
+      await tauriAPI.updateQuickAskGeminiThinkingLevel(level);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateOpenAiReasoningEffort() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (effort: "low" | "medium" | "high" | null) => {
+    mutationFn: async (effort: OpenAiReasoningEffort | null) => {
       await tauriAPI.updateOpenAiReasoningEffort(effort);
       await configAPI.syncPipelineConfig();
     },

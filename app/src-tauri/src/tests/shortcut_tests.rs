@@ -12,7 +12,8 @@ fn test_normalize_uppercase_ctrl() {
 
 #[test]
 fn test_normalize_cmd_to_super() {
-    assert_eq!(normalize_shortcut_string("cmd+shift+a"), "super+shift+a");
+    // Canonical form sorts tokens.
+    assert_eq!(normalize_shortcut_string("cmd+shift+a"), "a+shift+super");
 }
 
 #[test]
@@ -35,7 +36,15 @@ fn test_normalize_multiple_replacements() {
 fn test_normalize_already_normalized() {
     assert_eq!(
         normalize_shortcut_string("control+alt+space"),
-        "control+alt+space"
+        "alt+control+space"
+    );
+}
+
+#[test]
+fn test_normalize_is_order_insensitive() {
+    assert_eq!(
+        normalize_shortcut_string("ctrl+shift+F3"),
+        normalize_shortcut_string("shift+control+f3")
     );
 }
 

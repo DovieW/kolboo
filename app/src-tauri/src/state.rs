@@ -27,6 +27,15 @@ pub struct AppState {
     pub paste_key_held: AtomicBool,
     /// Tracks if retry key is currently held down
     pub retry_key_held: AtomicBool,
+    /// Tracks if quick ask key is currently held down
+    pub quick_ask_key_held: AtomicBool,
+    /// Tracks if quick ask toggle key is currently held down (for debouncing - action happens on release)
+    pub quick_ask_toggle_key_held: AtomicBool,
+    /// Tracks whether the current recording session was started as a Quick Ask.
+    ///
+    /// This is used to branch the stop-recording success path into an LLM answer
+    /// overlay (instead of output/paste).
+    pub quick_ask_session_active: AtomicBool,
     /// Tracks if toggle key is currently held down (for debouncing - action happens on release)
     pub toggle_key_held: AtomicBool,
 }

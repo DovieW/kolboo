@@ -84,11 +84,33 @@ pub struct RouterPresetScore {
     pub selected: bool,
 }
 
+/// High-level kind of request represented by a `RequestLog`.
+///
+/// Most logs represent the main pipeline transcription+rewrite flow.
+/// Quick Ask sessions are also backed by the pipeline, but include an additional
+/// answer-generation step and should be surfaced separately in the UI.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestKind {
+    Transcription,
+    QuickAsk,
+}
+
+impl Default for RequestKind {
+    fn default() -> Self {
+        Self::Transcription
+    }
+}
+
 /// A complete request log containing all entries for a single transcription request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestLog {
     /// Unique ID for this request
     pub id: String,
+
+    /// High-level request kind for UI grouping/filtering.
+    #[serde(default)]
+    pub kind: RequestKind,
     /// When the request started
     pub started_at: DateTime<Utc>,
     /// When request *processing* started (excludes recording time).
@@ -138,6 +160,29 @@ pub struct RequestLog {
     /// Formatted transcript from LLM (if used)
     #[serde(rename = "final_text")]
     pub formatted_transcript: Option<String>,
+
+    /// Quick Ask: the question sent to the answering LLM (usually based on the transcript).
+    #[serde(default)]
+    pub quick_ask_question: Option<String>,
+    /// Quick Ask: the answer returned by the answering LLM.
+    #[serde(default)]
+    pub quick_ask_answer: Option<String>,
+    /// Quick Ask: provider used for the answering LLM.
+    #[serde(default)]
+    pub quick_ask_provider: Option<String>,
+    /// Quick Ask: model used for the answering LLM.
+    #[serde(default)]
+    pub quick_ask_model: Option<String>,
+    /// Quick Ask: duration of the answering LLM call in milliseconds.
+    #[serde(default)]
+    pub quick_ask_duration_ms: Option<u64>,
+
+    /// Quick Ask: payload sent to the answering LLM.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quick_ask_request_json: Option<JsonValue>,
+    /// Quick Ask: payload received from the answering LLM.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quick_ask_response_json: Option<JsonValue>,
 
     /// Exact-ish payload sent to STT provider (with binary audio redacted).
     ///
@@ -225,6 +270,7 @@ impl RequestLog {
     pub fn new(stt_provider: String, stt_model: Option<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
+            kind: RequestKind::Transcription,
             started_at: Utc::now(),
             processing_started_at: None,
             completed_at: None,
@@ -241,6 +287,14 @@ impl RequestLog {
             sample_rate: None,
             raw_transcript: None,
             formatted_transcript: None,
+
+            quick_ask_question: None,
+            quick_ask_answer: None,
+            quick_ask_provider: None,
+            quick_ask_model: None,
+            quick_ask_duration_ms: None,
+            quick_ask_request_json: None,
+            quick_ask_response_json: None,
             stt_request_json: None,
             stt_response_json: None,
             llm_request_json: None,

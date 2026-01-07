@@ -9,6 +9,8 @@ type TabKey =
   | "stt-response"
   | "llm-request"
   | "llm-response"
+  | "quick-ask-request"
+  | "quick-ask-response"
   | "router-request"
   | "router-response";
 
@@ -91,6 +93,9 @@ export function LogJsonModal({
     log.stt_request_json !== undefined || log.stt_response_json !== undefined;
   const hasLlmPayload =
     log.llm_request_json !== undefined || log.llm_response_json !== undefined;
+  const hasQuickAskPayload =
+    log.quick_ask_request_json !== undefined ||
+    log.quick_ask_response_json !== undefined;
   const hasRouterPayload =
     log.router_request_json !== undefined ||
     log.router_response_json !== undefined;
@@ -101,7 +106,7 @@ export function LogJsonModal({
   useEffect(() => {
     if (!opened) return;
     setTab("full");
-  }, [opened, log.id, hasLlmPayload, hasRouterPayload]);
+  }, [opened, log.id, hasLlmPayload, hasQuickAskPayload, hasRouterPayload]);
 
   return (
     <Modal
@@ -152,6 +157,13 @@ export function LogJsonModal({
               <>
                 <Tabs.Tab value="llm-request">LLM Request</Tabs.Tab>
                 <Tabs.Tab value="llm-response">LLM Response</Tabs.Tab>
+              </>
+            )}
+
+            {hasQuickAskPayload && (
+              <>
+                <Tabs.Tab value="quick-ask-request">Quick Ask Request</Tabs.Tab>
+                <Tabs.Tab value="quick-ask-response">Quick Ask Response</Tabs.Tab>
               </>
             )}
 
@@ -209,6 +221,25 @@ export function LogJsonModal({
             </>
           )}
 
+          {hasQuickAskPayload && (
+            <>
+              <Tabs.Panel
+                value="quick-ask-request"
+                pt="sm"
+                style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+              >
+                <JsonPanel value={log.quick_ask_request_json} />
+              </Tabs.Panel>
+              <Tabs.Panel
+                value="quick-ask-response"
+                pt="sm"
+                style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+              >
+                <JsonPanel value={log.quick_ask_response_json} />
+              </Tabs.Panel>
+            </>
+          )}
+
           {hasRouterPayload && (
             <>
               <Tabs.Panel
@@ -229,9 +260,9 @@ export function LogJsonModal({
           )}
         </Tabs>
 
-        {!hasSttPayload && !hasLlmPayload && !hasRouterPayload && (
+        {!hasSttPayload && !hasLlmPayload && !hasQuickAskPayload && !hasRouterPayload && (
           <Text size="xs" c="dimmed">
-            No STT/LLM/Router payloads captured for this request.
+            No STT/LLM/Quick Ask/Router payloads captured for this request.
           </Text>
         )}
       </Stack>

@@ -5,7 +5,8 @@
 	"windows": [
 		"main",
 		"overlay",
-		"overlay_hover"
+		"overlay_hover",
+		"quick_ask"
 	],
 	"permissions": [
 		"core:default",

@@ -384,6 +384,21 @@ export interface RewriteProgramPromptProfile {
   gemini_thinking_level?: "minimal" | "low" | "medium" | "high" | null;
   anthropic_thinking_budget?: number | null;
 
+  // Quick Ask (per-profile overrides)
+  quick_ask_provider?: string | null;
+  quick_ask_model?: string | null;
+  quick_ask_system_prompt?: string | null;
+
+  quick_ask_openai_reasoning_effort?: OpenAiReasoningEffort | null;
+  quick_ask_gemini_thinking_budget?: number | null;
+  quick_ask_gemini_thinking_level?:
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | null;
+  quick_ask_anthropic_thinking_budget?: number | null;
+
   // Per-profile overrides for UI (Option 1: override-or-inherit)
   // NOTE: These are persisted in settings.json as part of the profile object.
   // The backend may ignore them until it is updated to apply them at runtime.
@@ -570,6 +585,8 @@ export interface AppSettings {
   hold_hotkey: HotkeyConfig | null;
   paste_last_hotkey: HotkeyConfig | null;
   retry_hotkey: HotkeyConfig | null;
+  quick_ask_hold_hotkey: HotkeyConfig | null;
+  quick_ask_toggle_hotkey: HotkeyConfig | null;
   selected_mic_id: string | null;
   sound_enabled: boolean;
   audio_cue: AudioCue;
@@ -590,6 +607,16 @@ export interface AppSettings {
   proxy_settings: ProxySettings;
   llm_provider: string | null;
   llm_model: string | null;
+
+  // Quick Ask (global defaults)
+  quick_ask_provider: string | null;
+  quick_ask_model: string | null;
+  quick_ask_system_prompt: string | null;
+
+  quick_ask_openai_reasoning_effort: OpenAiReasoningEffort | null;
+  quick_ask_anthropic_thinking_budget: number | null;
+  quick_ask_gemini_thinking_budget: number | null;
+  quick_ask_gemini_thinking_level: "minimal" | "low" | "medium" | "high" | null;
 
   // Provider-specific knobs
   // When true, treat Cerebras usage as free-tier for stats filtering.
@@ -953,6 +980,10 @@ export const defaultPasteLastHotkey: HotkeyConfig | null = null;
 
 export const defaultRetryHotkey: HotkeyConfig | null = null;
 
+export const defaultQuickAskHoldHotkey: HotkeyConfig | null = null;
+
+export const defaultQuickAskToggleHotkey: HotkeyConfig | null = null;
+
 // ============================================================================
 // Store helpers
 // ============================================================================
@@ -990,13 +1021,21 @@ export function hotkeyIsSameAs(a: HotkeyConfig, b: HotkeyConfig): boolean {
   );
 }
 
-type HotkeyType = "toggle" | "hold" | "paste_last" | "retry";
+type HotkeyType =
+  | "toggle"
+  | "hold"
+  | "paste_last"
+  | "retry"
+  | "quick_ask_hold"
+  | "quick_ask_toggle";
 
 const HOTKEY_LABELS: Record<HotkeyType, string> = {
   toggle: "toggle",
   hold: "hold",
   paste_last: "paste last",
   retry: "retry",
+  quick_ask_hold: "Quick Ask hold",
+  quick_ask_toggle: "Quick Ask toggle",
 };
 
 /**
@@ -1035,6 +1074,8 @@ export function validateHotkeyNotDuplicate(
     hold: HotkeyConfig | null;
     paste_last: HotkeyConfig | null;
     retry: HotkeyConfig | null;
+    quick_ask_hold: HotkeyConfig | null;
+    quick_ask_toggle: HotkeyConfig | null;
   },
   excludeType: HotkeyType
 ): string | null {
@@ -1254,6 +1295,35 @@ export const tauriAPI = {
         normalizeAnthropicThinkingBudgetAllowOff(
           (p as any).anthropic_thinking_budget
         );
+
+      const quick_ask_provider =
+        typeof (p as any).quick_ask_provider === "string"
+          ? (p as any).quick_ask_provider
+          : null;
+      const quick_ask_model =
+        typeof (p as any).quick_ask_model === "string"
+          ? (p as any).quick_ask_model
+          : null;
+      const quick_ask_system_prompt_raw = (p as any).quick_ask_system_prompt;
+      const quick_ask_system_prompt =
+        typeof quick_ask_system_prompt_raw === "string" &&
+        quick_ask_system_prompt_raw.trim().length > 0
+          ? quick_ask_system_prompt_raw
+          : null;
+
+      const quick_ask_openai_reasoning_effort = normalizeOpenAiReasoningEffort(
+        (p as any).quick_ask_openai_reasoning_effort
+      );
+      const quick_ask_gemini_thinking_budget = normalizeGeminiThinkingBudget(
+        (p as any).quick_ask_gemini_thinking_budget
+      );
+      const quick_ask_gemini_thinking_level = normalizeGeminiThinkingLevel(
+        (p as any).quick_ask_gemini_thinking_level
+      );
+      const quick_ask_anthropic_thinking_budget =
+        normalizeAnthropicThinkingBudgetAllowOff(
+          (p as any).quick_ask_anthropic_thinking_budget
+        );
       const rewrite_llm_enabled =
         typeof (p as any).rewrite_llm_enabled === "boolean"
           ? (p as any).rewrite_llm_enabled
@@ -1353,6 +1423,14 @@ export const tauriAPI = {
         gemini_thinking_budget,
         gemini_thinking_level,
         anthropic_thinking_budget,
+
+        quick_ask_provider,
+        quick_ask_model,
+        quick_ask_system_prompt,
+        quick_ask_openai_reasoning_effort,
+        quick_ask_gemini_thinking_budget,
+        quick_ask_gemini_thinking_level,
+        quick_ask_anthropic_thinking_budget,
         sound_enabled,
         playing_audio_handling,
         overlay_mode,
@@ -1371,6 +1449,16 @@ export const tauriAPI = {
             .filter((p): p is RewriteProgramPromptProfile => p !== null)
         : [];
 
+    // Backward compatibility:
+    // - Legacy key: quick_ask_hotkey (hold-to-record)
+    // - New keys: quick_ask_hold_hotkey + quick_ask_toggle_hotkey
+    // IMPORTANT: explicit null means "disabled" and must NOT fall back.
+    const rawQuickAskHold = await store.get("quick_ask_hold_hotkey");
+    const rawQuickAskHoldEffective =
+      rawQuickAskHold === undefined
+        ? await store.get("quick_ask_hotkey")
+        : rawQuickAskHold;
+
     const settings: AppSettings = {
       toggle_hotkey: normalizeHotkeyConfig(
         await store.get("toggle_hotkey"),
@@ -1387,6 +1475,14 @@ export const tauriAPI = {
       retry_hotkey: normalizeHotkeyConfig(
         await store.get("retry_hotkey"),
         defaultRetryHotkey
+      ),
+      quick_ask_hold_hotkey: normalizeHotkeyConfig(
+        rawQuickAskHoldEffective,
+        defaultQuickAskHoldHotkey
+      ),
+      quick_ask_toggle_hotkey: normalizeHotkeyConfig(
+        await store.get("quick_ask_toggle_hotkey"),
+        defaultQuickAskToggleHotkey
       ),
       selected_mic_id:
         (await store.get<string | null>("selected_mic_id")) ?? null,
@@ -1442,6 +1538,26 @@ export const tauriAPI = {
       proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
+
+      quick_ask_provider:
+        (await store.get<string | null>("quick_ask_provider")) ?? null,
+      quick_ask_model:
+        (await store.get<string | null>("quick_ask_model")) ?? null,
+      quick_ask_system_prompt:
+        (await store.get<string | null>("quick_ask_system_prompt")) ?? null,
+
+      quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(
+        await store.get("quick_ask_openai_reasoning_effort")
+      ),
+      quick_ask_anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
+        await store.get("quick_ask_anthropic_thinking_budget")
+      ),
+      quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(
+        await store.get("quick_ask_gemini_thinking_budget")
+      ),
+      quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(
+        await store.get("quick_ask_gemini_thinking_level")
+      ),
       cerebras_free_tier:
         (await store.get<boolean>("cerebras_free_tier")) ?? true,
       groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
@@ -1682,6 +1798,110 @@ export const tauriAPI = {
   async updateRetryHotkey(hotkey: HotkeyConfig | null): Promise<void> {
     const store = await getStore();
     await store.set("retry_hotkey", hotkey);
+    await store.save();
+  },
+
+  async updateQuickAskHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_ask_hold_hotkey", hotkey);
+    await store.save();
+  },
+
+  async updateQuickAskToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_ask_toggle_hotkey", hotkey);
+    await store.save();
+  },
+
+  /**
+   * Legacy alias (pre split): Quick Ask hotkey (hold-to-record).
+   *
+   * Writes both keys for backward compatibility.
+   */
+  async updateQuickAskHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_ask_hotkey", hotkey);
+    await store.set("quick_ask_hold_hotkey", hotkey);
+    await store.save();
+  },
+
+  async updateQuickAskProvider(provider: string | null): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_ask_provider", provider);
+    await store.save();
+  },
+
+  async updateQuickAskModel(model: string | null): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_ask_model", model);
+    await store.save();
+  },
+
+  async updateQuickAskSystemPrompt(prompt: string | null): Promise<void> {
+    const store = await getStore();
+    const normalized = typeof prompt === "string" ? prompt.trim() : "";
+    await store.set(
+      "quick_ask_system_prompt",
+      normalized.length > 0 ? normalized : null
+    );
+    await store.save();
+  },
+
+  async updateQuickAskOpenAiReasoningEffort(
+    effort: OpenAiReasoningEffort | null
+  ): Promise<void> {
+    const store = await getStore();
+    if (effort == null) {
+      await store.delete("quick_ask_openai_reasoning_effort");
+    } else {
+      await store.set(
+        "quick_ask_openai_reasoning_effort",
+        normalizeOpenAiReasoningEffort(effort)
+      );
+    }
+    await store.save();
+  },
+
+  async updateQuickAskAnthropicThinkingBudget(
+    budget: number | null
+  ): Promise<void> {
+    const store = await getStore();
+    if (budget == null) {
+      await store.delete("quick_ask_anthropic_thinking_budget");
+    } else {
+      await store.set(
+        "quick_ask_anthropic_thinking_budget",
+        normalizeAnthropicThinkingBudget(budget)
+      );
+    }
+    await store.save();
+  },
+
+  async updateQuickAskGeminiThinkingBudget(budget: number | null): Promise<void> {
+    const store = await getStore();
+    if (budget == null) {
+      await store.delete("quick_ask_gemini_thinking_budget");
+    } else {
+      await store.set(
+        "quick_ask_gemini_thinking_budget",
+        normalizeGeminiThinkingBudget(budget)
+      );
+    }
+    await store.save();
+  },
+
+  async updateQuickAskGeminiThinkingLevel(
+    level: "minimal" | "low" | "medium" | "high" | null
+  ): Promise<void> {
+    const store = await getStore();
+    if (level == null) {
+      await store.delete("quick_ask_gemini_thinking_level");
+    } else {
+      await store.set(
+        "quick_ask_gemini_thinking_level",
+        normalizeGeminiThinkingLevel(level)
+      );
+    }
     await store.save();
   },
 
@@ -2203,6 +2423,10 @@ export const tauriAPI = {
     await store.set("hold_hotkey", defaultHoldHotkey);
     await store.set("paste_last_hotkey", defaultPasteLastHotkey);
     await store.set("retry_hotkey", defaultRetryHotkey);
+    await store.set("quick_ask_hold_hotkey", defaultQuickAskHoldHotkey);
+    await store.set("quick_ask_toggle_hotkey", defaultQuickAskToggleHotkey);
+    // Legacy alias (pre split): keep in sync.
+    await store.set("quick_ask_hotkey", defaultQuickAskHoldHotkey);
     await store.save();
   },
 
@@ -2394,12 +2618,23 @@ export const llmAPI = {
     model?: string | null;
     systemPrompt: string;
     userPrompt: string;
+
+    // Optional provider-specific thinking knobs.
+    openAiReasoningEffort?: "none" | "low" | "medium" | "high" | null;
+    geminiThinkingBudget?: number | null;
+    geminiThinkingLevel?: "minimal" | "low" | "medium" | "high" | null;
+    anthropicThinkingBudget?: number | null;
   }) =>
     invoke<LlmCompleteResponse>("llm_complete", {
       // Rust signature: llm_complete(pipeline, args: LlmCompleteArgs)
       args: {
         provider: params.provider,
         model: params.model ?? null,
+
+        openAiReasoningEffort: params.openAiReasoningEffort ?? null,
+        geminiThinkingBudget: params.geminiThinkingBudget ?? null,
+        geminiThinkingLevel: params.geminiThinkingLevel ?? null,
+        anthropicThinkingBudget: params.anthropicThinkingBudget ?? null,
 
         // The backend accepts both camelCase and snake_case via serde aliases.
         systemPrompt: params.systemPrompt,
@@ -2548,6 +2783,7 @@ export const configAPI = {
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type RequestStatus = "in_progress" | "success" | "error" | "cancelled";
+export type RequestKind = "transcription" | "quick_ask";
 
 export interface LogEntry {
   timestamp: string;
@@ -2558,6 +2794,10 @@ export interface LogEntry {
 
 export interface RequestLog {
   id: string;
+
+  // High-level request kind for UI grouping/filtering.
+  // Optional for backward compatibility with older logs.
+  kind?: RequestKind;
   started_at: string;
   ended_at: string | null;
   stt_provider: string;
@@ -2573,6 +2813,13 @@ export interface RequestLog {
 
   raw_transcript: string | null;
   final_text: string | null;
+
+  // Quick Ask fields (when kind === "quick_ask")
+  quick_ask_question?: string | null;
+  quick_ask_answer?: string | null;
+  quick_ask_provider?: string | null;
+  quick_ask_model?: string | null;
+  quick_ask_duration_ms?: number | null;
   // Total request processing duration (ms). Excludes recording time when available.
   total_duration_ms: number | null;
   stt_duration_ms: number | null;
@@ -2602,6 +2849,10 @@ export interface RequestLog {
   stt_response_json?: unknown;
   llm_request_json?: unknown;
   llm_response_json?: unknown;
+
+  // Quick Ask payloads (optional)
+  quick_ask_request_json?: unknown;
+  quick_ask_response_json?: unknown;
 
   // Optional router payloads for debugging.
   // For embeddings this may be an array of calls/responses.

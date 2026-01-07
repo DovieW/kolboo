@@ -456,6 +456,14 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
                 gemini_thinking_budget: p.gemini_thinking_budget,
                 gemini_thinking_level: p.gemini_thinking_level,
                 anthropic_thinking_budget: p.anthropic_thinking_budget,
+
+                quick_ask_provider: p.quick_ask_provider,
+                quick_ask_model: p.quick_ask_model,
+                quick_ask_system_prompt: p.quick_ask_system_prompt,
+                quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
+                quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
+                quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,
+                quick_ask_anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
             }
         })
         .collect();

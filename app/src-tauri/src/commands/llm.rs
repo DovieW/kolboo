@@ -75,6 +75,17 @@ pub struct LlmCompleteArgs {
     pub provider: String,
     pub model: Option<String>,
 
+    // Optional provider-specific thinking knobs.
+    // These are used for ad-hoc completions (History UI, Quick Ask tests).
+    #[serde(default, alias = "openAiReasoningEffort")]
+    pub openai_reasoning_effort: Option<String>,
+    #[serde(default, alias = "geminiThinkingBudget")]
+    pub gemini_thinking_budget: Option<i64>,
+    #[serde(default, alias = "geminiThinkingLevel")]
+    pub gemini_thinking_level: Option<String>,
+    #[serde(default, alias = "anthropicThinkingBudget")]
+    pub anthropic_thinking_budget: Option<i64>,
+
     // Historical/UI naming: accept both camelCase and snake_case.
     #[serde(alias = "systemPrompt")]
     pub system_prompt: String,
@@ -82,7 +93,7 @@ pub struct LlmCompleteArgs {
     pub user_prompt: String,
 }
 
-fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
+pub(crate) fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
     // IMPORTANT:
     // This is used for one-off ad-hoc completions (e.g. History "Analyze transcripts" → "Send to LLM").
     // We intentionally disable rewrite-oriented structured outputs so the model can return free-form text.
@@ -1132,10 +1143,20 @@ pub async fn llm_complete(
         api_key,
         model: desired_model,
         ollama_url: config.llm_config.ollama_url.clone(),
-        openai_reasoning_effort: config.llm_config.openai_reasoning_effort.clone(),
-        gemini_thinking_budget: config.llm_config.gemini_thinking_budget,
-        gemini_thinking_level: config.llm_config.gemini_thinking_level.clone(),
-        anthropic_thinking_budget: config.llm_config.anthropic_thinking_budget,
+        openai_reasoning_effort: args
+            .openai_reasoning_effort
+            .clone()
+            .or_else(|| config.llm_config.openai_reasoning_effort.clone()),
+        gemini_thinking_budget: args
+            .gemini_thinking_budget
+            .or(config.llm_config.gemini_thinking_budget),
+        gemini_thinking_level: args
+            .gemini_thinking_level
+            .clone()
+            .or_else(|| config.llm_config.gemini_thinking_level.clone()),
+        anthropic_thinking_budget: args
+            .anthropic_thinking_budget
+            .or(config.llm_config.anthropic_thinking_budget),
         prompts: PromptSections::default(),
         program_prompt_profiles: Vec::new(),
         timeout: config.llm_config.timeout,

@@ -40,6 +40,13 @@ import {
   useUpdateGeminiThinkingBudget,
   useUpdateGeminiThinkingLevel,
   useModelPricing,
+  useUpdateQuickAskProvider,
+  useUpdateQuickAskModel,
+  useUpdateQuickAskSystemPrompt,
+  useUpdateQuickAskOpenAiReasoningEffort,
+  useUpdateQuickAskAnthropicThinkingBudget,
+  useUpdateQuickAskGeminiThinkingBudget,
+  useUpdateQuickAskGeminiThinkingLevel,
 } from "../../lib/queries";
 import {
   type CleanupPromptSections,
@@ -48,6 +55,7 @@ import {
   type OpenAiReasoningEffort,
   type RewritePreset,
   type RewriteProgramPromptProfile,
+  llmAPI,
   tauriAPI,
 } from "../../lib/tauri";
 import {
@@ -155,6 +163,18 @@ export function PromptSettings({
   const updateGeminiThinkingLevel = useUpdateGeminiThinkingLevel();
   const updateSTTTimeout = useUpdateSTTTimeout();
 
+  const updateQuickAskProvider = useUpdateQuickAskProvider();
+  const updateQuickAskModel = useUpdateQuickAskModel();
+  const updateQuickAskSystemPrompt = useUpdateQuickAskSystemPrompt();
+  const updateQuickAskOpenAiReasoningEffort =
+    useUpdateQuickAskOpenAiReasoningEffort();
+  const updateQuickAskAnthropicThinkingBudget =
+    useUpdateQuickAskAnthropicThinkingBudget();
+  const updateQuickAskGeminiThinkingBudget =
+    useUpdateQuickAskGeminiThinkingBudget();
+  const updateQuickAskGeminiThinkingLevel =
+    useUpdateQuickAskGeminiThinkingLevel();
+
   const profiles: RewriteProgramPromptProfile[] =
     settings?.rewrite_program_prompt_profiles ?? [];
 
@@ -203,6 +223,14 @@ export function PromptSettings({
     string | null
   >(null);
 
+  const [localProfileQuickAskProvider, setLocalProfileQuickAskProvider] =
+    useState<string | null>(null);
+  const [localProfileQuickAskModel, setLocalProfileQuickAskModel] = useState<
+    string | null
+  >(null);
+  const [localQuickAskSystemPrompt, setLocalQuickAskSystemPrompt] =
+    useState<string>("");
+
   // Per-profile thinking/reasoning knobs (stored on the profile object).
   // In UI, SELECT_DEFAULT means "inherit from Default/global settings".
   const [
@@ -224,6 +252,15 @@ export function PromptSettings({
   const [localProfileSttTimeout, setLocalProfileSttTimeout] = useState<
     string | number
   >(DEFAULT_STT_TIMEOUT);
+
+  const [localProfileQuickAskOpenAiReasoningEffort, setLocalProfileQuickAskOpenAiReasoningEffort] =
+    useState<string>("default");
+  const [localProfileQuickAskGeminiThinkingLevel, setLocalProfileQuickAskGeminiThinkingLevel] =
+    useState<string>("default");
+  const [localProfileQuickAskGeminiThinkingBudget, setLocalProfileQuickAskGeminiThinkingBudget] =
+    useState<string>("default");
+  const [localProfileQuickAskAnthropicThinkingBudget, setLocalProfileQuickAskAnthropicThinkingBudget] =
+    useState<string>("default");
 
   const [rewriteTestInput, setRewriteTestInput] = useState<string>("");
   const [rewriteTestOutput, setRewriteTestOutput] = useState<string>("");
@@ -616,6 +653,15 @@ export function PromptSettings({
     useState<string>("");
   const sttTestStartRef = useRef<number | null>(null);
 
+  const [quickAskTestInput, setQuickAskTestInput] = useState<string>("");
+  const [quickAskTestOutput, setQuickAskTestOutput] = useState<string>("");
+  const [quickAskTestError, setQuickAskTestError] = useState<string>("");
+  const [quickAskTestDurationMs, setQuickAskTestDurationMs] = useState<
+    number | null
+  >(null);
+  const [quickAskTestPending, setQuickAskTestPending] = useState(false);
+  const quickAskTestStartRef = useRef<number | null>(null);
+
   const [resetDialog, setResetDialog] = useState<null | {
     title: string;
     onConfirm: () => void;
@@ -646,6 +692,29 @@ export function PromptSettings({
   const [
     anthropicThinkingBudgetInheriting,
     setAnthropicThinkingBudgetInheriting,
+  ] = useState(false);
+
+  const [quickAskProviderInheriting, setQuickAskProviderInheriting] =
+    useState(false);
+  const [quickAskModelInheriting, setQuickAskModelInheriting] = useState(false);
+  const [quickAskSystemPromptInheriting, setQuickAskSystemPromptInheriting] =
+    useState(false);
+
+  const [
+    quickAskOpenAiReasoningEffortInheriting,
+    setQuickAskOpenAiReasoningEffortInheriting,
+  ] = useState(false);
+  const [
+    quickAskGeminiThinkingLevelInheriting,
+    setQuickAskGeminiThinkingLevelInheriting,
+  ] = useState(false);
+  const [
+    quickAskGeminiThinkingBudgetInheriting,
+    setQuickAskGeminiThinkingBudgetInheriting,
+  ] = useState(false);
+  const [
+    quickAskAnthropicThinkingBudgetInheriting,
+    setQuickAskAnthropicThinkingBudgetInheriting,
   ] = useState(false);
 
   // NOTE: Settings tabs unmount when switching (keepMounted=false). If we render
@@ -743,6 +812,29 @@ export function PromptSettings({
         activeProfile.anthropic_thinking_budget === null ||
         activeProfile.anthropic_thinking_budget === undefined;
 
+      const quickAskProviderIsNull =
+        activeProfile.quick_ask_provider === null ||
+        activeProfile.quick_ask_provider === undefined;
+      const quickAskModelIsNull =
+        activeProfile.quick_ask_model === null ||
+        activeProfile.quick_ask_model === undefined;
+      const quickAskSystemPromptIsNull =
+        activeProfile.quick_ask_system_prompt === null ||
+        activeProfile.quick_ask_system_prompt === undefined;
+
+      const quickAskOpenAiReasoningEffortIsNull =
+        activeProfile.quick_ask_openai_reasoning_effort === null ||
+        activeProfile.quick_ask_openai_reasoning_effort === undefined;
+      const quickAskGeminiThinkingLevelIsNull =
+        activeProfile.quick_ask_gemini_thinking_level === null ||
+        activeProfile.quick_ask_gemini_thinking_level === undefined;
+      const quickAskGeminiThinkingBudgetIsNull =
+        activeProfile.quick_ask_gemini_thinking_budget === null ||
+        activeProfile.quick_ask_gemini_thinking_budget === undefined;
+      const quickAskAnthropicThinkingBudgetIsNull =
+        activeProfile.quick_ask_anthropic_thinking_budget === null ||
+        activeProfile.quick_ask_anthropic_thinking_budget === undefined;
+
       setSttProviderInheriting(sttProviderIsNull);
       setSttModelInheriting(sttModelIsNull);
       setSttTimeoutInheriting(sttTimeoutIsNull);
@@ -754,6 +846,21 @@ export function PromptSettings({
       setGeminiThinkingLevelInheriting(geminiThinkingLevelIsNull);
       setGeminiThinkingBudgetInheriting(geminiThinkingBudgetIsNull);
       setAnthropicThinkingBudgetInheriting(anthropicThinkingBudgetIsNull);
+
+      setQuickAskProviderInheriting(quickAskProviderIsNull);
+      setQuickAskModelInheriting(quickAskModelIsNull);
+      setQuickAskSystemPromptInheriting(quickAskSystemPromptIsNull);
+
+      setQuickAskOpenAiReasoningEffortInheriting(
+        quickAskOpenAiReasoningEffortIsNull
+      );
+      setQuickAskGeminiThinkingLevelInheriting(quickAskGeminiThinkingLevelIsNull);
+      setQuickAskGeminiThinkingBudgetInheriting(
+        quickAskGeminiThinkingBudgetIsNull
+      );
+      setQuickAskAnthropicThinkingBudgetInheriting(
+        quickAskAnthropicThinkingBudgetIsNull
+      );
 
       // Set local state (falling back to global defaults for display)
       setLocalProfileSttProvider(
@@ -767,6 +874,24 @@ export function PromptSettings({
       );
       setLocalProfileLlmModel(
         activeProfile.llm_model ?? settings?.llm_model ?? null
+      );
+
+      setLocalProfileQuickAskProvider(
+        activeProfile.quick_ask_provider ??
+          settings?.quick_ask_provider ??
+          settings?.llm_provider ??
+          null
+      );
+      setLocalProfileQuickAskModel(
+        activeProfile.quick_ask_model ??
+          settings?.quick_ask_model ??
+          settings?.llm_model ??
+          null
+      );
+      setLocalQuickAskSystemPrompt(
+        activeProfile.quick_ask_system_prompt ??
+          settings?.quick_ask_system_prompt ??
+          ""
       );
 
       setLocalProfileOpenAiReasoningEffort(
@@ -793,6 +918,23 @@ export function PromptSettings({
           settings?.stt_timeout_seconds ??
           DEFAULT_STT_TIMEOUT
       );
+
+      setLocalProfileQuickAskOpenAiReasoningEffort(
+        activeProfile.quick_ask_openai_reasoning_effort ?? "default"
+      );
+      setLocalProfileQuickAskGeminiThinkingLevel(
+        activeProfile.quick_ask_gemini_thinking_level ?? "default"
+      );
+      setLocalProfileQuickAskGeminiThinkingBudget(
+        activeProfile.quick_ask_gemini_thinking_budget == null
+          ? "default"
+          : String(activeProfile.quick_ask_gemini_thinking_budget)
+      );
+      setLocalProfileQuickAskAnthropicThinkingBudget(
+        activeProfile.quick_ask_anthropic_thinking_budget == null
+          ? "default"
+          : String(activeProfile.quick_ask_anthropic_thinking_budget)
+      );
     } else {
       // Default scope - not inheriting
       setSttProviderInheriting(false);
@@ -807,10 +949,22 @@ export function PromptSettings({
       setGeminiThinkingBudgetInheriting(false);
       setAnthropicThinkingBudgetInheriting(false);
 
+      setQuickAskProviderInheriting(false);
+      setQuickAskModelInheriting(false);
+      setQuickAskSystemPromptInheriting(false);
+
+      setQuickAskOpenAiReasoningEffortInheriting(false);
+      setQuickAskGeminiThinkingLevelInheriting(false);
+      setQuickAskGeminiThinkingBudgetInheriting(false);
+      setQuickAskAnthropicThinkingBudgetInheriting(false);
+
       setLocalProfileSttProvider(null);
       setLocalProfileSttModel(null);
       setLocalProfileLlmProvider(null);
       setLocalProfileLlmModel(null);
+      setLocalProfileQuickAskProvider(null);
+      setLocalProfileQuickAskModel(null);
+      setLocalQuickAskSystemPrompt(settings?.quick_ask_system_prompt ?? "");
       setLocalProfileRewriteEnabled(defaultRewriteEnabled);
       setLocalProfileSttTimeout(
         settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT
@@ -820,6 +974,11 @@ export function PromptSettings({
       setLocalProfileGeminiThinkingLevel("default");
       setLocalProfileGeminiThinkingBudget("default");
       setLocalProfileAnthropicThinkingBudget("default");
+
+      setLocalProfileQuickAskOpenAiReasoningEffort("default");
+      setLocalProfileQuickAskGeminiThinkingLevel("default");
+      setLocalProfileQuickAskGeminiThinkingBudget("default");
+      setLocalProfileQuickAskAnthropicThinkingBudget("default");
     }
   }, [
     activeProfileId,
@@ -829,6 +988,9 @@ export function PromptSettings({
     settings?.stt_model,
     settings?.llm_provider,
     settings?.llm_model,
+    settings?.quick_ask_provider,
+    settings?.quick_ask_model,
+    settings?.quick_ask_system_prompt,
     defaultRewriteEnabled,
   ]);
 
@@ -991,6 +1153,28 @@ export function PromptSettings({
       ? rawLlmProvider
       : null;
 
+  const rawQuickAskProvider =
+    activeProfileId === "default"
+      ? settings?.quick_ask_provider ?? settings?.llm_provider ?? null
+      : localProfileQuickAskProvider ??
+        settings?.quick_ask_provider ??
+        settings?.llm_provider ??
+        null;
+  const effectiveQuickAskProvider =
+    rawQuickAskProvider && llmProviderValueSet.has(rawQuickAskProvider)
+      ? rawQuickAskProvider
+      : null;
+
+  const effectiveQuickAskModel =
+    effectiveQuickAskProvider === null
+      ? null
+      : activeProfileId === "default"
+      ? settings?.quick_ask_model ?? settings?.llm_model ?? null
+      : localProfileQuickAskModel ??
+        settings?.quick_ask_model ??
+        settings?.llm_model ??
+        null;
+
   const isOpenAiStt = effectiveSttProvider === "openai";
   const isAquavoiceStt = effectiveSttProvider === "aquavoice";
   const isGroqStt = effectiveSttProvider === "groq";
@@ -1069,11 +1253,17 @@ export function PromptSettings({
     updateSTTTranscriptionPrompt,
   ]);
 
+  // NOTE: Quick Ask System Prompt uses an explicit Save button (like Rewrite prompts),
+  // so we intentionally do NOT auto-save/debounce here.
+
   const sttModelOptions = effectiveSttProvider
     ? STT_MODELS[effectiveSttProvider] ?? []
     : [];
   const llmModelOptions = effectiveLlmProvider
     ? LLM_MODELS[effectiveLlmProvider] ?? []
+    : [];
+  const quickAskModelOptions = effectiveQuickAskProvider
+    ? LLM_MODELS[effectiveQuickAskProvider] ?? []
     : [];
 
   const selectedSttModelForUi =
@@ -1082,6 +1272,16 @@ export function PromptSettings({
       : isDefaultScope
       ? settings?.stt_model ?? sttModelOptions[0]?.value ?? null
       : localProfileSttModel;
+
+  const selectedQuickAskModelForUi =
+    quickAskModelOptions.length === 0
+      ? null
+      : isDefaultScope
+      ? settings?.quick_ask_model ??
+        settings?.llm_model ??
+        quickAskModelOptions[0]?.value ??
+        null
+      : localProfileQuickAskModel;
 
   const effectiveLlmModel =
     effectiveLlmProvider === null
@@ -1169,6 +1369,33 @@ export function PromptSettings({
       effectiveLlmModel.includes("claude-4") ||
       effectiveLlmModel.includes("-4-"));
 
+  const quickAskModelForThinking =
+    selectedQuickAskModelForUi ?? effectiveQuickAskModel;
+
+  const supportsQuickAskOpenAiThinking =
+    effectiveQuickAskProvider === "openai" &&
+    !!quickAskModelForThinking &&
+    (quickAskModelForThinking.startsWith("gpt-5") ||
+      quickAskModelForThinking.startsWith("o"));
+
+  const supportsQuickAskGeminiThinkingLevel =
+    effectiveQuickAskProvider === "gemini" &&
+    !!quickAskModelForThinking &&
+    quickAskModelForThinking.includes("gemini-3");
+
+  const supportsQuickAskGeminiThinkingBudget =
+    effectiveQuickAskProvider === "gemini" &&
+    !!quickAskModelForThinking &&
+    quickAskModelForThinking.includes("gemini-2.5") &&
+    !quickAskModelForThinking.includes("flash-lite");
+
+  const supportsQuickAskAnthropicThinkingBudget =
+    effectiveQuickAskProvider === "anthropic" &&
+    !!quickAskModelForThinking &&
+    (quickAskModelForThinking.includes("claude-3-7") ||
+      quickAskModelForThinking.includes("claude-4") ||
+      quickAskModelForThinking.includes("-4-"));
+
   // Mantine Select requires option values to be strings.
   const SELECT_DEFAULT = "default";
 
@@ -1217,13 +1444,53 @@ export function PromptSettings({
           })),
         ];
 
+  const quickAskOpenAiThinkingOptions =
+    !supportsQuickAskOpenAiThinking || !quickAskModelForThinking
+      ? []
+      : [
+          {
+            value: SELECT_DEFAULT,
+            label: "Default",
+          },
+          ...openAiThinkingEffortsForModel(quickAskModelForThinking).map(
+            (v) => ({
+              value: v,
+              label: v === "none" ? "None" : v[0].toUpperCase() + v.slice(1),
+            })
+          ),
+        ];
+
   const isGemini3Flash =
     supportsGeminiThinkingLevel &&
     effectiveLlmModel?.includes("gemini-3-flash");
   const isGemini3Pro =
     supportsGeminiThinkingLevel && effectiveLlmModel?.includes("gemini-3-pro");
 
+  const isQuickAskGemini3Flash =
+    supportsQuickAskGeminiThinkingLevel &&
+    quickAskModelForThinking?.includes("gemini-3-flash");
+
   const geminiThinkingLevelOptions = isGemini3Flash
+    ? [
+        {
+          value: SELECT_DEFAULT,
+          label: "Default",
+        },
+        { value: "minimal", label: "Minimal" },
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High" },
+      ]
+    : [
+        {
+          value: SELECT_DEFAULT,
+          label: "Default",
+        },
+        { value: "low", label: "Low" },
+        { value: "high", label: "High" },
+      ];
+
+  const quickAskGeminiThinkingLevelOptions = isQuickAskGemini3Flash
     ? [
         {
           value: SELECT_DEFAULT,
@@ -1277,6 +1544,50 @@ export function PromptSettings({
       : []),
   ];
 
+  const canDisableQuickAskGemini25Thinking =
+    supportsQuickAskGeminiThinkingBudget &&
+    !!quickAskModelForThinking &&
+    quickAskModelForThinking.includes("gemini-2.5-flash") &&
+    !quickAskModelForThinking.includes("gemini-2.5-pro");
+
+  const isQuickAskGemini25Pro =
+    supportsQuickAskGeminiThinkingBudget &&
+    !!quickAskModelForThinking &&
+    quickAskModelForThinking.includes("gemini-2.5-pro");
+
+  const quickAskGemini25MaxBudget = isQuickAskGemini25Pro ? 32768 : 24576;
+  const quickAskGemini25MinBudget = isQuickAskGemini25Pro ? 128 : 0;
+
+  const quickAskGeminiThinkingBudgetOptions: Array<{
+    value: string;
+    label: string;
+  }> = [
+    { value: SELECT_DEFAULT, label: "Default" },
+    { value: "-1", label: "Dynamic (-1)" },
+    ...(canDisableQuickAskGemini25Thinking
+      ? [{ value: "0", label: "Off (0)" }]
+      : []),
+    ...(isQuickAskGemini25Pro
+      ? [
+          {
+            value: String(quickAskGemini25MinBudget),
+            label: "Minimal (128)",
+          },
+        ]
+      : []),
+    { value: "1024", label: "Light (1024)" },
+    { value: "4096", label: "Medium (4096)" },
+    { value: "16384", label: "High (16384)" },
+    ...(quickAskGemini25MaxBudget > 16384
+      ? [
+          {
+            value: String(quickAskGemini25MaxBudget),
+            label: `Max (${quickAskGemini25MaxBudget})`,
+          },
+        ]
+      : []),
+  ];
+
   // Anthropic "extended thinking" is controlled via a numeric token budget.
   // We present it as a simple level selector and map levels -> budgets.
   const ANTHROPIC_THINKING_LEVEL_BUDGETS = [2000, 4000, 8000, 32000] as const;
@@ -1298,6 +1609,30 @@ export function PromptSettings({
       : localProfileAnthropicThinkingBudget === SELECT_DEFAULT
       ? null
       : Number(localProfileAnthropicThinkingBudget);
+    const v =
+      typeof vRaw === "number" && Number.isFinite(vRaw)
+        ? Math.trunc(vRaw)
+        : null;
+    if (v == null) return anthropicThinkingLevelOptions;
+
+    const asString = String(v);
+    const exists = anthropicThinkingLevelOptions.some(
+      (o) => o.value === asString
+    );
+    if (exists) return anthropicThinkingLevelOptions;
+
+    return [
+      ...anthropicThinkingLevelOptions,
+      { value: asString, label: `Custom (${v})` },
+    ];
+  })();
+
+  const quickAskAnthropicThinkingLevelOptionsWithCustom = (() => {
+    const vRaw = isDefaultScope
+      ? settings?.quick_ask_anthropic_thinking_budget
+      : localProfileQuickAskAnthropicThinkingBudget === SELECT_DEFAULT
+      ? null
+      : Number(localProfileQuickAskAnthropicThinkingBudget);
     const v =
       typeof vRaw === "number" && Number.isFinite(vRaw)
         ? Math.trunc(vRaw)
@@ -1395,6 +1730,76 @@ export function PromptSettings({
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     updateAnthropicThinkingBudget.mutate(parsed, {
+      onSuccess: () => {
+        tauriAPI.emitSettingsChanged();
+      },
+    });
+  };
+
+  const handleQuickAskOpenAiThinkingChange = (value: string | null) => {
+    if (value == null || value === SELECT_DEFAULT) {
+      updateQuickAskOpenAiReasoningEffort.mutate(null, {
+        onSuccess: () => {
+          tauriAPI.emitSettingsChanged();
+        },
+      });
+      return;
+    }
+
+    updateQuickAskOpenAiReasoningEffort.mutate(value as any, {
+      onSuccess: () => {
+        tauriAPI.emitSettingsChanged();
+      },
+    });
+  };
+
+  const handleQuickAskGeminiThinkingLevelChange = (value: string | null) => {
+    const v =
+      value === "minimal" ||
+      value === "low" ||
+      value === "medium" ||
+      value === "high"
+        ? value
+        : null;
+    updateQuickAskGeminiThinkingLevel.mutate(v, {
+      onSuccess: () => {
+        tauriAPI.emitSettingsChanged();
+      },
+    });
+  };
+
+  const handleQuickAskGeminiThinkingBudgetChange = (value: string | null) => {
+    if (value == null || value === SELECT_DEFAULT) {
+      updateQuickAskGeminiThinkingBudget.mutate(null, {
+        onSuccess: () => {
+          tauriAPI.emitSettingsChanged();
+        },
+      });
+      return;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    updateQuickAskGeminiThinkingBudget.mutate(parsed, {
+      onSuccess: () => {
+        tauriAPI.emitSettingsChanged();
+      },
+    });
+  };
+
+  const handleQuickAskAnthropicThinkingBudgetChange = (value: string | null) => {
+    if (value == null || value === SELECT_DEFAULT) {
+      updateQuickAskAnthropicThinkingBudget.mutate(null, {
+        onSuccess: () => {
+          tauriAPI.emitSettingsChanged();
+        },
+      });
+      return;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    updateQuickAskAnthropicThinkingBudget.mutate(parsed, {
       onSuccess: () => {
         tauriAPI.emitSettingsChanged();
       },
@@ -1611,6 +2016,29 @@ export function PromptSettings({
   const handleDefaultLLMModelChange = (value: string | null) => {
     if (!value) return;
     updateLLMModel.mutate(value, {
+      onSuccess: () => {
+        tauriAPI.emitSettingsChanged();
+      },
+    });
+  };
+
+  const handleDefaultQuickAskProviderChange = (value: string | null) => {
+    if (!value) return;
+    updateQuickAskProvider.mutate(value, {
+      onSuccess: () => {
+        const models = LLM_MODELS[value];
+        const firstModel = models?.[0];
+        if (firstModel) {
+          updateQuickAskModel.mutate(firstModel.value);
+        }
+        tauriAPI.emitSettingsChanged();
+      },
+    });
+  };
+
+  const handleDefaultQuickAskModelChange = (value: string | null) => {
+    if (!value) return;
+    updateQuickAskModel.mutate(value, {
       onSuccess: () => {
         tauriAPI.emitSettingsChanged();
       },
@@ -3301,6 +3729,26 @@ export function PromptSettings({
           </div>
         </div>
       )}
+
+      <Divider
+        mt="md"
+        mb="xs"
+        label="Quick Ask"
+        labelPosition="left"
+        styles={{
+          root: {
+            borderTopWidth: 2,
+            borderColor: "var(--border-default)",
+          },
+          label: {
+            color: "var(--text-primary)",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          },
+        }}
+      />
 
       {/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
 
@@ -5633,6 +6081,1161 @@ export function PromptSettings({
           </div>
         </>
       ) : null}
+
+      <Divider
+        mt="md"
+        mb="xs"
+        label="Quick Ask"
+        labelPosition="left"
+        styles={{
+          root: {
+            borderTopWidth: 2,
+            borderColor: "var(--border-default)",
+          },
+          label: {
+            color: "var(--text-primary)",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          },
+        }}
+      />
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Quick Ask Provider</p>
+          <p className="settings-description">
+            AI service used to answer Quick Ask questions
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && quickAskProviderInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope && !quickAskProviderInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Quick Ask Provider override?",
+                    onConfirm: () => {
+                      setQuickAskProviderInheriting(true);
+                      setQuickAskModelInheriting(true);
+                      setLocalProfileQuickAskProvider(
+                        settings?.quick_ask_provider ??
+                          settings?.llm_provider ??
+                          null
+                      );
+                      setLocalProfileQuickAskModel(
+                        settings?.quick_ask_model ?? settings?.llm_model ?? null
+                      );
+                      saveProfileMetadata({
+                        quick_ask_provider: null,
+                        quick_ask_model: null,
+                      });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Select
+            data={llmProviderOptions}
+            value={effectiveQuickAskProvider}
+            onChange={(value) => {
+              if (!value) return;
+              if (isDefaultScope) {
+                handleDefaultQuickAskProviderChange(value);
+                return;
+              }
+
+              setQuickAskProviderInheriting(false);
+              setQuickAskModelInheriting(false);
+              setLocalProfileQuickAskProvider(value);
+              const models = LLM_MODELS[value] ?? [];
+              const firstModel = models[0]?.value ?? null;
+              setLocalProfileQuickAskModel(firstModel);
+              saveProfileMetadata({
+                quick_ask_provider: value,
+                quick_ask_model: firstModel,
+              });
+            }}
+            placeholder="Select provider"
+            withCheckIcon={false}
+            disabled={
+              llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+            }
+            styles={{
+              input: {
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              },
+            }}
+          />
+        </div>
+      </div>
+
+      {quickAskModelOptions.length > 0 ? (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Quick Ask Model</p>
+            <p className="settings-description">
+              LLM model used to answer Quick Ask questions.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && quickAskModelInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !quickAskModelInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Quick Ask Model override?",
+                      onConfirm: () => {
+                        setQuickAskModelInheriting(true);
+                        setLocalProfileQuickAskModel(
+                          settings?.quick_ask_model ?? settings?.llm_model ?? null
+                        );
+                        saveProfileMetadata({ quick_ask_model: null });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Select
+              data={quickAskModelOptions}
+              value={selectedQuickAskModelForUi}
+              onChange={(value) => {
+                if (!value) return;
+                if (isDefaultScope) {
+                  handleDefaultQuickAskModelChange(value);
+                  return;
+                }
+
+                setQuickAskModelInheriting(false);
+                setLocalProfileQuickAskModel(value);
+                saveProfileMetadata({ quick_ask_model: value });
+              }}
+              placeholder="Select model"
+              withCheckIcon={false}
+              styles={{
+                input: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                  color: "var(--text-primary)",
+                  minWidth: 200,
+                },
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {supportsQuickAskOpenAiThinking && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking</p>
+            <p className="settings-description">
+              Set the reasoning effort for this model.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && quickAskOpenAiReasoningEffortInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !quickAskOpenAiReasoningEffortInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking override?",
+                      onConfirm: () => {
+                        setQuickAskOpenAiReasoningEffortInheriting(true);
+                        setLocalProfileQuickAskOpenAiReasoningEffort(
+                          SELECT_DEFAULT
+                        );
+                        saveProfileMetadata({
+                          quick_ask_openai_reasoning_effort: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            <HintSelect
+              data={quickAskOpenAiThinkingOptions}
+              value={
+                isDefaultScope
+                  ? settings?.quick_ask_openai_reasoning_effort ?? SELECT_DEFAULT
+                  : localProfileQuickAskOpenAiReasoningEffort
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  if (value == null || value === SELECT_DEFAULT) {
+                    updateQuickAskOpenAiReasoningEffort.mutate(null, {
+                      onSuccess: () => {
+                        tauriAPI.emitSettingsChanged();
+                      },
+                    });
+                    return;
+                  }
+
+                  updateQuickAskOpenAiReasoningEffort.mutate(value as any, {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  });
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setQuickAskOpenAiReasoningEffortInheriting(true);
+                  setLocalProfileQuickAskOpenAiReasoningEffort(SELECT_DEFAULT);
+                  saveProfileMetadata({
+                    quick_ask_openai_reasoning_effort: null,
+                  });
+                  return;
+                }
+
+                setQuickAskOpenAiReasoningEffortInheriting(false);
+                setLocalProfileQuickAskOpenAiReasoningEffort(value);
+                saveProfileMetadata({
+                  quick_ask_openai_reasoning_effort: value as any,
+                });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const modelHint = quickAskModelForThinking
+                  ? openAiDefaultReasoningEffortForModel(quickAskModelForThinking)
+                  : "medium";
+                const hint = isDefaultScope
+                  ? modelHint
+                  : settings?.quick_ask_openai_reasoning_effort ?? modelHint;
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const modelHint = quickAskModelForThinking
+                  ? openAiDefaultReasoningEffortForModel(quickAskModelForThinking)
+                  : "medium";
+                const hint = isDefaultScope
+                  ? modelHint
+                  : settings?.quick_ask_openai_reasoning_effort ?? modelHint;
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {supportsQuickAskGeminiThinkingLevel && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking Level</p>
+            <p className="settings-description">
+              {quickAskModelForThinking?.includes("gemini-3-pro")
+                ? "Gemini 3 Pro supports low/high (default high)."
+                : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
+            </p>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && quickAskGeminiThinkingLevelInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+
+            {!isDefaultScope && !quickAskGeminiThinkingLevelInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking Level override?",
+                      onConfirm: () => {
+                        setQuickAskGeminiThinkingLevelInheriting(true);
+                        setLocalProfileQuickAskGeminiThinkingLevel(SELECT_DEFAULT);
+                        saveProfileMetadata({
+                          quick_ask_gemini_thinking_level: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            <HintSelect
+              data={quickAskGeminiThinkingLevelOptions}
+              value={
+                isDefaultScope
+                  ? settings?.quick_ask_gemini_thinking_level ?? SELECT_DEFAULT
+                  : localProfileQuickAskGeminiThinkingLevel
+              }
+              onChange={(value) => {
+                const v =
+                  value === "minimal" ||
+                  value === "low" ||
+                  value === "medium" ||
+                  value === "high"
+                    ? value
+                    : null;
+
+                if (isDefaultScope) {
+                  updateQuickAskGeminiThinkingLevel.mutate(v, {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  });
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setQuickAskGeminiThinkingLevelInheriting(true);
+                  setLocalProfileQuickAskGeminiThinkingLevel(SELECT_DEFAULT);
+                  saveProfileMetadata({
+                    quick_ask_gemini_thinking_level: null,
+                  });
+                  return;
+                }
+
+                if (v == null) return;
+
+                setQuickAskGeminiThinkingLevelInheriting(false);
+                setLocalProfileQuickAskGeminiThinkingLevel(v);
+                saveProfileMetadata({ quick_ask_gemini_thinking_level: v });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? "high"
+                  : settings?.quick_ask_gemini_thinking_level ?? "high";
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? "high"
+                  : settings?.quick_ask_gemini_thinking_level ?? "high";
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {supportsQuickAskGeminiThinkingBudget && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking Budget</p>
+            <p className="settings-description">
+              Token budget for Gemini 2.5 thinking.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && quickAskGeminiThinkingBudgetInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !quickAskGeminiThinkingBudgetInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking Budget override?",
+                      onConfirm: () => {
+                        setQuickAskGeminiThinkingBudgetInheriting(true);
+                        setLocalProfileQuickAskGeminiThinkingBudget(SELECT_DEFAULT);
+                        saveProfileMetadata({
+                          quick_ask_gemini_thinking_budget: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <HintSelect
+              data={quickAskGeminiThinkingBudgetOptions}
+              value={
+                isDefaultScope
+                  ? settings?.quick_ask_gemini_thinking_budget == null
+                    ? SELECT_DEFAULT
+                    : String(settings.quick_ask_gemini_thinking_budget)
+                  : localProfileQuickAskGeminiThinkingBudget
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  if (value == null || value === SELECT_DEFAULT) {
+                    updateQuickAskGeminiThinkingBudget.mutate(null, {
+                      onSuccess: () => {
+                        tauriAPI.emitSettingsChanged();
+                      },
+                    });
+                    return;
+                  }
+
+                  const parsed = Number(value);
+                  if (!Number.isFinite(parsed)) return;
+                  updateQuickAskGeminiThinkingBudget.mutate(Math.trunc(parsed), {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  });
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setQuickAskGeminiThinkingBudgetInheriting(true);
+                  setLocalProfileQuickAskGeminiThinkingBudget(SELECT_DEFAULT);
+                  saveProfileMetadata({
+                    quick_ask_gemini_thinking_budget: null,
+                  });
+                  return;
+                }
+
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return;
+                const asInt = Math.trunc(parsed);
+                setQuickAskGeminiThinkingBudgetInheriting(false);
+                setLocalProfileQuickAskGeminiThinkingBudget(String(asInt));
+                saveProfileMetadata({ quick_ask_gemini_thinking_budget: asInt });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+                if (option.value !== SELECT_DEFAULT)
+                  return <Text size="sm">{option.label}</Text>;
+
+                const inherited = settings?.quick_ask_gemini_thinking_budget;
+                const hint = isDefaultScope
+                  ? "dynamic"
+                  : inherited == null
+                  ? "dynamic"
+                  : inherited === 0
+                  ? "off"
+                  : inherited === -1
+                  ? "dynamic"
+                  : String(inherited);
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const inherited = settings?.quick_ask_gemini_thinking_budget;
+                const hint = isDefaultScope
+                  ? "dynamic"
+                  : inherited == null
+                  ? "dynamic"
+                  : inherited === 0
+                  ? "off"
+                  : inherited === -1
+                  ? "dynamic"
+                  : String(inherited);
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {supportsQuickAskAnthropicThinkingBudget && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking</p>
+            <p className="settings-description">
+              Extended thinking level for Claude models.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && quickAskAnthropicThinkingBudgetInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !quickAskAnthropicThinkingBudgetInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking override?",
+                      onConfirm: () => {
+                        setQuickAskAnthropicThinkingBudgetInheriting(true);
+                        setLocalProfileQuickAskAnthropicThinkingBudget(SELECT_DEFAULT);
+                        saveProfileMetadata({
+                          quick_ask_anthropic_thinking_budget: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <HintSelect
+              data={quickAskAnthropicThinkingLevelOptionsWithCustom}
+              value={
+                isDefaultScope
+                  ? settings?.quick_ask_anthropic_thinking_budget == null
+                    ? SELECT_DEFAULT
+                    : String(settings.quick_ask_anthropic_thinking_budget)
+                  : localProfileQuickAskAnthropicThinkingBudget
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  if (value == null || value === SELECT_DEFAULT) {
+                    updateQuickAskAnthropicThinkingBudget.mutate(null, {
+                      onSuccess: () => {
+                        tauriAPI.emitSettingsChanged();
+                      },
+                    });
+                    return;
+                  }
+
+                  const parsed = Number(value);
+                  if (!Number.isFinite(parsed)) return;
+                  updateQuickAskAnthropicThinkingBudget.mutate(Math.trunc(parsed), {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  });
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setQuickAskAnthropicThinkingBudgetInheriting(true);
+                  setLocalProfileQuickAskAnthropicThinkingBudget(SELECT_DEFAULT);
+                  saveProfileMetadata({
+                    quick_ask_anthropic_thinking_budget: null,
+                  });
+                  return;
+                }
+
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return;
+                const asInt = Math.trunc(parsed);
+                setQuickAskAnthropicThinkingBudgetInheriting(false);
+                setLocalProfileQuickAskAnthropicThinkingBudget(String(asInt));
+                saveProfileMetadata({ quick_ask_anthropic_thinking_budget: asInt });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+
+                if (option.value === SELECT_DEFAULT) {
+                  const inheritedBudget = settings?.quick_ask_anthropic_thinking_budget;
+                  const hint = isDefaultScope
+                    ? "off"
+                    : inheritedBudget == null
+                    ? "off"
+                    : formatThinkingBudgetShort(inheritedBudget);
+
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{option.label}</span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          opacity: 0.9,
+                          lineHeight: 1,
+                        }}
+                      >
+                        · {hint}
+                      </span>
+                    </div>
+                  );
+                }
+
+                if (option.label.startsWith("Custom")) {
+                  const n = Number(option.value);
+                  const suffix = Number.isFinite(n)
+                    ? formatThinkingBudgetShort(n)
+                    : null;
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <Text size="sm">{option.label}</Text>
+                      {suffix && (
+                        <Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
+                          {suffix}
+                        </Text>
+                      )}
+                    </div>
+                  );
+                }
+
+                return <Text size="sm">{option.label}</Text>;
+              }}
+              renderOption={({ option }) => {
+                if (option.value === SELECT_DEFAULT) {
+                  const inheritedBudget = settings?.quick_ask_anthropic_thinking_budget;
+                  const hint = isDefaultScope
+                    ? "off"
+                    : inheritedBudget == null
+                    ? "off"
+                    : formatThinkingBudgetShort(inheritedBudget);
+
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{option.label}</span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          opacity: 0.9,
+                          lineHeight: 1,
+                        }}
+                      >
+                        · {hint}
+                      </span>
+                    </div>
+                  );
+                }
+
+                const n = Number(option.value);
+                const suffix = Number.isFinite(n)
+                  ? formatThinkingBudgetShort(n)
+                  : null;
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <Text size="sm">{option.label}</Text>
+                    {suffix && (
+                      <Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
+                        {suffix}
+                      </Text>
+                    )}
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 0, marginBottom: 16 }}>
+        <Accordion variant="separated" radius="md">
+          <PromptSectionEditor
+            sectionKey={`${activeProfileId}-quick-ask-system-prompt`}
+            title="System Prompt"
+            description="Optional instructions that apply to all Quick Ask answers."
+            enabled={true}
+            hideToggle={true}
+            placeholder="(leave empty to disable)"
+            initialContent={localQuickAskSystemPrompt}
+            defaultContent={
+              isDefaultScope ? "" : settings?.quick_ask_system_prompt ?? ""
+            }
+            hasCustom={
+              isDefaultScope
+                ? (settings?.quick_ask_system_prompt ?? "").trim().length > 0
+                : activeProfile?.quick_ask_system_prompt !== null &&
+                  activeProfile?.quick_ask_system_prompt !== undefined
+            }
+            inheritMode={
+              isDefaultScope
+                ? null
+                : quickAskSystemPromptInheriting
+                  ? "inheriting"
+                  : "overriding"
+            }
+            inheritTooltip={INHERIT_TOOLTIP}
+            disableOverrideTooltip="Disable override (inherit from Default)"
+            onDisableOverride={
+              isDefaultScope
+                ? undefined
+                : () =>
+                    openDisableOverrideDialog({
+                      title: "Disable Quick Ask System Prompt override?",
+                      onConfirm: () => {
+                        setQuickAskSystemPromptInheriting(true);
+                        setLocalQuickAskSystemPrompt(
+                          settings?.quick_ask_system_prompt ?? ""
+                        );
+                        saveProfileMetadata({ quick_ask_system_prompt: null });
+                      },
+                    })
+            }
+            onToggle={() => {}}
+            onSave={(content) => {
+              if (isDefaultScope) {
+                const normalized = content.trim();
+                const toStore: string | null =
+                  normalized.length > 0 ? content : null;
+
+                // Keep the outer state in sync so the editor doesn't snap back.
+                setLocalQuickAskSystemPrompt(content);
+
+                updateQuickAskSystemPrompt.mutate(toStore, {
+                  onSuccess: () => {
+                    tauriAPI.emitSettingsChanged();
+                  },
+                });
+                return;
+              }
+
+              const base = settings?.quick_ask_system_prompt ?? "";
+
+              // If the user saves exactly the inherited value, treat it as inheriting.
+              const toStore = content === base ? null : content;
+              const nextLocal = toStore == null ? base : content;
+
+              setLocalQuickAskSystemPrompt(nextLocal);
+              setQuickAskSystemPromptInheriting(toStore == null);
+              saveProfileMetadata({ quick_ask_system_prompt: toStore });
+            }}
+            onReset={() => {
+              if (isDefaultScope) {
+                setLocalQuickAskSystemPrompt("");
+                updateQuickAskSystemPrompt.mutate(null, {
+                  onSuccess: () => {
+                    tauriAPI.emitSettingsChanged();
+                  },
+                });
+                return;
+              }
+
+              const base = settings?.quick_ask_system_prompt ?? "";
+              setLocalQuickAskSystemPrompt(base);
+              setQuickAskSystemPromptInheriting(true);
+              saveProfileMetadata({ quick_ask_system_prompt: null });
+            }}
+            isSaving={
+              isDefaultScope
+                ? updateQuickAskSystemPrompt.isPending
+                : updateRewriteProgramPromptProfiles.isPending
+            }
+          />
+
+          <Accordion.Item value={`${activeProfileId}-quick-ask-test`}>
+            <Accordion.Control>
+              <div>
+                <p className="settings-label">Test Quick Ask</p>
+                <p className="settings-description">
+                  Ask a question and preview the answer using the Quick Ask
+                  settings above.
+                </p>
+              </div>
+            </Accordion.Control>
+            <Accordion.Panel>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <Text size="sm" c="dimmed">
+                    {quickAskTestPending
+                      ? "Duration: running…"
+                      : quickAskTestDurationMs === null
+                      ? "Duration: —"
+                      : `Duration: ${(quickAskTestDurationMs / 1000).toFixed(2)}s`}
+                  </Text>
+
+                  <Button
+                    color="gray"
+                    loading={quickAskTestPending}
+                    disabled={!effectiveQuickAskProvider || !quickAskTestInput.trim()}
+                    onClick={async () => {
+                      if (!effectiveQuickAskProvider) return;
+                      if (!quickAskTestInput.trim()) return;
+
+                      setQuickAskTestError("");
+                      setQuickAskTestOutput("");
+                      setQuickAskTestDurationMs(null);
+                      quickAskTestStartRef.current = performance.now();
+                      setQuickAskTestPending(true);
+
+                      const openAiReasoningEffort = isDefaultScope
+                        ? settings?.quick_ask_openai_reasoning_effort ?? null
+                        : localProfileQuickAskOpenAiReasoningEffort === SELECT_DEFAULT
+                        ? null
+                        : (localProfileQuickAskOpenAiReasoningEffort as any);
+
+                      const geminiThinkingLevel = isDefaultScope
+                        ? settings?.quick_ask_gemini_thinking_level ?? null
+                        : localProfileQuickAskGeminiThinkingLevel === SELECT_DEFAULT
+                        ? null
+                        : (localProfileQuickAskGeminiThinkingLevel as any);
+
+                      const geminiThinkingBudget = (() => {
+                        if (isDefaultScope) {
+                          return settings?.quick_ask_gemini_thinking_budget ?? null;
+                        }
+                        if (localProfileQuickAskGeminiThinkingBudget === SELECT_DEFAULT)
+                          return null;
+                        const n = Number(localProfileQuickAskGeminiThinkingBudget);
+                        return Number.isFinite(n) ? Math.trunc(n) : null;
+                      })();
+
+                      const anthropicThinkingBudget = (() => {
+                        if (isDefaultScope) {
+                          return settings?.quick_ask_anthropic_thinking_budget ?? null;
+                        }
+                        if (localProfileQuickAskAnthropicThinkingBudget === SELECT_DEFAULT)
+                          return null;
+                        const n = Number(localProfileQuickAskAnthropicThinkingBudget);
+                        return Number.isFinite(n) ? Math.trunc(n) : null;
+                      })();
+
+                      try {
+                        const res = await llmAPI.complete({
+                          provider: effectiveQuickAskProvider,
+                          model: selectedQuickAskModelForUi ?? effectiveQuickAskModel,
+                          systemPrompt: localQuickAskSystemPrompt,
+                          userPrompt: quickAskTestInput,
+                          openAiReasoningEffort,
+                          geminiThinkingBudget,
+                          geminiThinkingLevel,
+                          anthropicThinkingBudget,
+                        });
+
+                        setQuickAskTestOutput(
+                          `[${res.provider_used}/${res.model_used}]\n\n${res.output}`
+                        );
+                      } catch (err) {
+                        setQuickAskTestError(errorToMessage(err));
+                      } finally {
+                        const startedAt = quickAskTestStartRef.current;
+                        quickAskTestStartRef.current = null;
+                        if (typeof startedAt === "number") {
+                          setQuickAskTestDurationMs(performance.now() - startedAt);
+                        }
+                        setQuickAskTestPending(false);
+                      }
+                    }}
+                  >
+                    Test
+                  </Button>
+                </div>
+
+                <div style={{ width: "100%" }}>
+                  <Textarea
+                    value={quickAskTestInput}
+                    onChange={(e) => setQuickAskTestInput(e.currentTarget.value)}
+                    placeholder="Ask a question…"
+                    autosize
+                    minRows={2}
+                    styles={{
+                      input: {
+                        backgroundColor: "var(--bg-elevated)",
+                        borderColor: "var(--border-default)",
+                        color: "var(--text-primary)",
+                        fontFamily: "monospace",
+                        fontSize: "13px",
+                      },
+                    }}
+                  />
+                </div>
+
+                <div style={{ width: "100%" }}>
+                  {quickAskTestError ? (
+                    <Text size="sm" c="red" style={{ marginBottom: 8 }}>
+                      {quickAskTestError}
+                    </Text>
+                  ) : null}
+
+                  <Textarea
+                    value={quickAskTestOutput}
+                    readOnly
+                    placeholder="Answer will appear here"
+                    autosize
+                    minRows={3}
+                    styles={{
+                      input: {
+                        backgroundColor: "var(--bg-elevated)",
+                        borderColor: "var(--border-default)",
+                        color: "var(--text-primary)",
+                        fontFamily: "monospace",
+                        fontSize: "13px",
+                      },
+                    }}
+                  />
+                </div>
+              </div>
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion>
+      </div>
     </>
   );
 }

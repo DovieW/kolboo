@@ -37,7 +37,7 @@ mod tests;
 use audio_mute::AudioMuteManager;
 use history::{HistoryStorage, RequestModelInfo};
 use recordings::RecordingStore;
-use request_log::{RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
+use request_log::{RequestKind, RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
 use settings::HotkeyConfig;
 use state::{AppState, MicTestMeterState, TrayKeepAlive};
 
@@ -67,11 +67,24 @@ tauri_nspanel::tauri_panel! {
 /// Normalize a shortcut string for comparison (handles "ctrl" vs "control" differences)
 #[cfg(desktop)]
 pub(crate) fn normalize_shortcut_string(s: &str) -> String {
-    s.to_lowercase()
-        .replace("ctrl", "control")
-        .replace("cmd", "super")
-        .replace("meta", "super")
-        .replace("win", "super")
+    // Canonicalize for comparison across:
+    // - different modifier aliases (ctrl vs control)
+    // - different output ordering (e.g. "ctrl+shift+f3" vs "shift+control+f3")
+    let mut parts: Vec<String> = s
+        .split('+')
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty())
+        .map(|p| match p.as_str() {
+            "ctrl" => "control".to_string(),
+            "cmd" => "super".to_string(),
+            "meta" => "super".to_string(),
+            "win" => "super".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+
+    parts.sort();
+    parts.join("+")
 }
 
 /// Helper to read a setting from the store with a default fallback
@@ -146,7 +159,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // IMPORTANT: this closure must *not* capture `dirty`, otherwise `dirty` becomes
     // mutably borrowed for the lifetime of the closure and we can't update it
     // elsewhere (Rust E0506).
-    let mut set_default = |key: &str, value: Value, only_if_absent: bool| -> bool {
+    let set_default = |key: &str, value: Value, only_if_absent: bool| -> bool {
         let should_set = if only_if_absent {
             store.get(key).is_none()
         } else {
@@ -289,6 +302,20 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("hold_hotkey", json!(null), true);
     dirty |= set_default("paste_last_hotkey", json!(null), true);
     dirty |= set_default("retry_hotkey", json!(null), true);
+    dirty |= set_default("quick_ask_hotkey", json!(null), true);
+    dirty |= set_default("quick_ask_hold_hotkey", json!(null), true);
+    dirty |= set_default("quick_ask_toggle_hotkey", json!(null), true);
+
+    // Migration: legacy `quick_ask_hotkey` (hold-to-record) -> `quick_ask_hold_hotkey`.
+    // Only migrate when the new key is truly absent (not when explicitly null).
+    if store.get("quick_ask_hold_hotkey").is_none() {
+        if let Some(v) = store.get("quick_ask_hotkey") {
+            if !matches!(v, Value::Null) {
+                store.set("quick_ask_hold_hotkey".to_string(), v);
+                dirty = true;
+            }
+        }
+    }
 
     // VAD settings are used by the pipeline.
     dirty |= set_default(
@@ -859,6 +886,12 @@ fn stop_recording(
     log::info!("{}: stopping recording", source);
     emit_system_event(app, "shortcut", &format!("{}: stopping recording", source), None);
 
+    // If this recording was started via the Quick Ask hotkey, branch the post-transcription
+    // flow into an LLM answer overlay (instead of output/paste).
+    let is_quick_ask_session = state
+        .quick_ask_session_active
+        .swap(false, Ordering::SeqCst);
+
     // If hallucination protection (quiet-audio gate) is enabled and the recording is considered
     // effectively quiet, the pipeline will skip STT and immediately return to Idle.
     // In that case, playing the stop sound is misleading, so we only play it if we actually
@@ -927,6 +960,30 @@ fn stop_recording(
             preset_id: None,
             preset_name: None,
         };
+
+        #[derive(Clone, Debug, Default)]
+        struct QuickAskProfileConfig {
+            provider: Option<String>,
+            model: Option<String>,
+            system_prompt: Option<String>,
+            openai_reasoning_effort: Option<String>,
+            gemini_thinking_budget: Option<i64>,
+            gemini_thinking_level: Option<String>,
+            anthropic_thinking_budget: Option<i64>,
+        }
+
+        let quick_ask_profile_cfg: QuickAskProfileConfig = profile
+            .as_ref()
+            .map(|p| QuickAskProfileConfig {
+                provider: p.quick_ask_provider.clone(),
+                model: p.quick_ask_model.clone(),
+                system_prompt: p.quick_ask_system_prompt.clone(),
+                openai_reasoning_effort: p.quick_ask_openai_reasoning_effort.clone(),
+                gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
+                gemini_thinking_level: p.quick_ask_gemini_thinking_level.clone(),
+                anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
+            })
+            .unwrap_or_default();
 
         // Capture current request id (for history + retry audio).
         //
@@ -1063,21 +1120,24 @@ fn stop_recording(
             }
 
             // Create an in-progress history entry while we transcribe.
-            if let Some(ref req_id) = request_id {
-                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                    let max_saved_recordings: usize = (get_setting_from_store(
-                        &app_clone,
-                        "max_saved_recordings",
-                        1000u64,
-                    ))
-                    .clamp(1, 100_000) as usize;
+            // Quick Ask uses a separate UI surface and should not pollute the main dictation history.
+            if !is_quick_ask_session {
+                if let Some(ref req_id) = request_id {
+                    if let Some(history) = app_clone.try_state::<HistoryStorage>() {
+                        let max_saved_recordings: usize = (get_setting_from_store(
+                            &app_clone,
+                            "max_saved_recordings",
+                            1000u64,
+                        ))
+                        .clamp(1, 100_000) as usize;
 
-                    let _ = history.add_request_entry(
-                        req_id.clone(),
-                        model_info,
-                        max_saved_recordings,
-                    );
-                    let _ = app_clone.emit("history-changed", ());
+                        let _ = history.add_request_entry(
+                            req_id.clone(),
+                            model_info,
+                            max_saved_recordings,
+                        );
+                        let _ = app_clone.emit("history-changed", ());
+                    }
                 }
             }
 
@@ -1100,6 +1160,8 @@ fn stop_recording(
 
                     // Update request log store
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                        let should_complete_now = !is_quick_ask_session;
+
                         log_store.with_current(|log| {
                             // Raw STT output (pre-LLM)
                             log.raw_transcript = Some(result.stt_text.clone());
@@ -1170,7 +1232,11 @@ fn stop_recording(
                                 log.warn("No transcript output (empty/whitespace)");
                             }
 
-                            log.complete_success();
+                            if should_complete_now {
+                                log.complete_success();
+                            } else {
+                                log.info("Transcription completed; Quick Ask answer pending");
+                            }
                         });
 
                         // Persist preset metadata into History (best-effort).
@@ -1190,15 +1256,21 @@ fn stop_recording(
                         }
 
                         // Persist cost/usage stats (best-effort).
-                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                            stats::emit_cost_events_for_current_request(
-                                &app_clone,
-                                stats::EventStatus::Success,
-                                Some(&wav),
-                            );
+                        // For Quick Ask sessions we emit stats after the answer step so we can
+                        // include the answer LLM details.
+                        if should_complete_now {
+                            if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                stats::emit_cost_events_for_current_request(
+                                    &app_clone,
+                                    stats::EventStatus::Success,
+                                    Some(&wav),
+                                );
+                            }
                         }
 
-                        log_store.complete_current();
+                        if should_complete_now {
+                            log_store.complete_current();
+                        }
                     }
 
                     // Persist audio for retry (best-effort)
@@ -1223,31 +1295,327 @@ fn stop_recording(
                     if let Some(ref text) = filtered_transcript {
                         let _ = app_clone.emit("pipeline-transcript-ready", text);
 
-                        // Output the transcript based on mode
-                        if let Err(e) = commands::text::output_text_with_mode(text, output_mode, output_hit_enter) {
-                            log::error!("Failed to output transcript: {}", e);
+                        // Quick Ask: instead of outputting/pasting the transcript, send it to an LLM
+                        // for an answer and show it in a dedicated overlay.
+                        if is_quick_ask_session {
+                            let question = sanitize_transcript(&result.stt_text)
+                                .unwrap_or_else(|| text.clone())
+                                .trim()
+                                .to_string();
 
-                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                log_store.with_current(|log| {
-                                    log.warn(format!("Output failed: {}", e));
-                                });
+                            let emit_to_quick_ask = |app: &AppHandle, event: &str, payload: serde_json::Value| {
+                                if let Some(win) = app.get_webview_window("quick_ask") {
+                                    let _ = win.emit(event, payload);
+                                } else {
+                                    let _ = app.emit(event, payload);
+                                }
+                            };
+
+                            // Ensure the answer window is visible before we start the LLM call.
+                            if let Some(win) = app_clone.get_webview_window("quick_ask") {
+                                let _ = win.set_always_on_top(true);
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+
+                            if question.is_empty() {
+                                // Quick Ask is considered the "request" here, so mark the request log
+                                // accordingly and finalize it.
+                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                    log_store.with_current(|log| {
+                                        log.kind = RequestKind::QuickAsk;
+                                        log.quick_ask_question = Some(String::new());
+                                        log.quick_ask_answer = None;
+                                        log.error("Quick Ask failed: no transcript to answer (empty)");
+                                        log.complete_error("No transcript to answer (empty)");
+                                    });
+
+                                    if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                        stats::emit_cost_events_for_current_request(
+                                            &app_clone,
+                                            stats::EventStatus::Error,
+                                            Some(&wav),
+                                        );
+                                    }
+
+                                    log_store.complete_current();
+                                }
+
+                                emit_to_quick_ask(
+                                    &app_clone,
+                                    "quick-ask-answer",
+                                    serde_json::json!({
+                                        "ok": false,
+                                        "error": "No transcript to answer (empty)"
+                                    }),
+                                );
+                            } else {
+                                // Resolve effective Quick Ask configuration:
+                                // per-profile override -> global Quick Ask defaults -> global rewrite provider -> fallback.
+                                let global_quick_ask_provider: Option<String> =
+                                    get_setting_from_store(&app_clone, "quick_ask_provider", Option::<String>::None);
+                                let global_quick_ask_model: Option<String> =
+                                    get_setting_from_store(&app_clone, "quick_ask_model", Option::<String>::None);
+                                let global_quick_ask_system_prompt: Option<String> = get_setting_from_store(
+                                    &app_clone,
+                                    "quick_ask_system_prompt",
+                                    Option::<String>::None,
+                                );
+
+                                let global_qa_openai_reasoning_effort: Option<String> = get_setting_from_store(
+                                    &app_clone,
+                                    "quick_ask_openai_reasoning_effort",
+                                    Option::<String>::None,
+                                );
+                                let global_qa_gemini_thinking_budget: Option<i64> = get_setting_from_store(
+                                    &app_clone,
+                                    "quick_ask_gemini_thinking_budget",
+                                    Option::<i64>::None,
+                                );
+                                let global_qa_gemini_thinking_level: Option<String> = get_setting_from_store(
+                                    &app_clone,
+                                    "quick_ask_gemini_thinking_level",
+                                    Option::<String>::None,
+                                );
+                                let global_qa_anthropic_thinking_budget: Option<i64> = get_setting_from_store(
+                                    &app_clone,
+                                    "quick_ask_anthropic_thinking_budget",
+                                    Option::<i64>::None,
+                                );
+
+                                let fallback_provider: Option<String> =
+                                    get_setting_from_store(&app_clone, "llm_provider", Option::<String>::None);
+
+                                let provider = quick_ask_profile_cfg
+                                    .provider
+                                    .clone()
+                                    .or(global_quick_ask_provider)
+                                    .or(fallback_provider)
+                                    .unwrap_or_else(|| "openai".to_string());
+                                let model = quick_ask_profile_cfg
+                                    .model
+                                    .clone()
+                                    .or(global_quick_ask_model);
+
+                                let system_prompt = quick_ask_profile_cfg
+                                    .system_prompt
+                                    .clone()
+                                    .or(global_quick_ask_system_prompt)
+                                    .unwrap_or_else(|| {
+                                        "You are a helpful assistant. Answer the user's question based on the transcript.".to_string()
+                                    });
+
+                                let openai_reasoning_effort = quick_ask_profile_cfg
+                                    .openai_reasoning_effort
+                                    .clone()
+                                    .or(global_qa_openai_reasoning_effort);
+                                let gemini_thinking_budget = quick_ask_profile_cfg
+                                    .gemini_thinking_budget
+                                    .or(global_qa_gemini_thinking_budget);
+                                let gemini_thinking_level = quick_ask_profile_cfg
+                                    .gemini_thinking_level
+                                    .clone()
+                                    .or(global_qa_gemini_thinking_level);
+                                let anthropic_thinking_budget = quick_ask_profile_cfg
+                                    .anthropic_thinking_budget
+                                    .or(global_qa_anthropic_thinking_budget);
+
+                                // Attach Quick Ask metadata to the current request log so it shows up
+                                // as a distinct type in the UI.
+                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                    log_store.with_current(|log| {
+                                        log.kind = RequestKind::QuickAsk;
+                                        log.quick_ask_question = Some(question.clone());
+                                        log.quick_ask_provider = Some(provider.clone());
+                                        log.quick_ask_model = model.clone();
+                                        log.quick_ask_request_json = Some(serde_json::json!({
+                                            "system_prompt": system_prompt.clone(),
+                                            "question": question.clone(),
+                                            "provider": provider.clone(),
+                                            "model": model.clone(),
+                                    }));
+                                        log.info("Quick Ask: starting answer generation");
+                                    });
+                                }
+
+                                emit_to_quick_ask(
+                                    &app_clone,
+                                    "quick-ask-started",
+                                    serde_json::json!({
+                                        "question": question.clone(),
+                                        "provider": provider.clone(),
+                                        "model": model.clone(),
+                                    }),
+                                );
+
+                                let cfg = pipeline_clone.config();
+                                let api_key = if provider == "ollama" {
+                                    String::new()
+                                } else {
+                                    cfg.llm_api_keys
+                                        .get(provider.as_str())
+                                        .cloned()
+                                        .unwrap_or_default()
+                                };
+
+                                if provider != "ollama" && api_key.trim().is_empty() {
+                                    let err = format!("No API key configured for provider: {}", provider);
+                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                        log_store.with_current(|log| {
+                                            log.kind = RequestKind::QuickAsk;
+                                            log.error(format!("Quick Ask failed: {}", err));
+                                            log.complete_error(err.clone());
+                                        });
+
+                                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                            stats::emit_cost_events_for_current_request(
+                                                &app_clone,
+                                                stats::EventStatus::Error,
+                                                Some(&wav),
+                                            );
+                                        }
+
+                                        log_store.complete_current();
+                                    }
+
+                                    emit_to_quick_ask(
+                                        &app_clone,
+                                        "quick-ask-answer",
+                                        serde_json::json!({
+                                            "ok": false,
+                                            "error": err,
+                                        }),
+                                    );
+                                } else {
+                                    let provider_cfg = crate::llm::LlmConfig {
+                                        enabled: true,
+                                        provider: provider.clone(),
+                                        api_key,
+                                        model: model.clone(),
+                                        ollama_url: cfg.llm_config.ollama_url.clone(),
+                                        openai_reasoning_effort,
+                                        gemini_thinking_budget,
+                                        gemini_thinking_level,
+                                        anthropic_thinking_budget,
+                                        prompts: crate::llm::PromptSections::default(),
+                                        program_prompt_profiles: Vec::new(),
+                                        timeout: cfg.llm_config.timeout,
+                                    };
+
+                                    let provider_impl =
+                                        crate::commands::llm::create_llm_provider_unstructured(&provider_cfg);
+                                    let t0 = std::time::Instant::now();
+                                    match provider_impl.complete(system_prompt.as_str(), question.as_str()).await {
+                                        Ok(answer) => {
+                                            let answer = answer.trim().to_string();
+                                            let duration_ms = t0.elapsed().as_millis() as u64;
+
+                                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                log_store.with_current(|log| {
+                                                    log.kind = RequestKind::QuickAsk;
+                                                    log.quick_ask_answer = Some(answer.clone());
+                                                    log.quick_ask_provider = Some(provider_impl.name().to_string());
+                                                    log.quick_ask_model = Some(provider_impl.model().to_string());
+                                                    log.quick_ask_duration_ms = Some(duration_ms);
+                                                    log.quick_ask_response_json = Some(serde_json::json!({
+                                                        "ok": true,
+                                                        "answer": answer.clone(),
+                                                        "provider_used": provider_impl.name(),
+                                                        "model_used": provider_impl.model(),
+                                                        "duration_ms": duration_ms,
+                                                    }));
+                                                    log.complete_success();
+                                                });
+
+                                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                                    stats::emit_cost_events_for_current_request(
+                                                        &app_clone,
+                                                        stats::EventStatus::Success,
+                                                        Some(&wav),
+                                                    );
+                                                }
+
+                                                log_store.complete_current();
+                                            }
+
+                                            emit_to_quick_ask(
+                                                &app_clone,
+                                                "quick-ask-answer",
+                                                serde_json::json!({
+                                                    "ok": true,
+                                                    "answer": answer,
+                                                    "provider_used": provider_impl.name(),
+                                                    "model_used": provider_impl.model(),
+                                                    "duration_ms": duration_ms,
+                                                }),
+                                            );
+                                        }
+                                        Err(e) => {
+                                            let err = e.to_string();
+                                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                log_store.with_current(|log| {
+                                                    log.kind = RequestKind::QuickAsk;
+                                                    log.quick_ask_answer = None;
+                                                    log.quick_ask_response_json = Some(serde_json::json!({
+                                                        "ok": false,
+                                                        "error": err.clone(),
+                                                    }));
+                                                    log.error(format!("Quick Ask failed: {}", err.clone()));
+                                                    log.complete_error(err.clone());
+                                                });
+
+                                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                                    stats::emit_cost_events_for_current_request(
+                                                        &app_clone,
+                                                        stats::EventStatus::Error,
+                                                        Some(&wav),
+                                                    );
+                                                }
+
+                                                log_store.complete_current();
+                                            }
+
+                                            emit_to_quick_ask(
+                                                &app_clone,
+                                                "quick-ask-answer",
+                                                serde_json::json!({
+                                                    "ok": false,
+                                                    "error": err,
+                                                }),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Output the transcript based on mode
+                            if let Err(e) = commands::text::output_text_with_mode(text, output_mode, output_hit_enter) {
+                                log::error!("Failed to output transcript: {}", e);
+
+                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                    log_store.with_current(|log| {
+                                        log.warn(format!("Output failed: {}", e));
+                                    });
+                                }
                             }
                         }
 
                         // Save to history
-                        if let Some(ref req_id) = request_id {
-                            if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                if let Err(e) = history.complete_request_success(req_id, text.clone()) {
-                                    log::warn!("Failed to update history: {}", e);
-                                }
+                        if !is_quick_ask_session {
+                            if let Some(ref req_id) = request_id {
+                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
+                                    if let Err(e) = history.complete_request_success(req_id, text.clone()) {
+                                        log::warn!("Failed to update history: {}", e);
+                                    }
 
-                                let (provider, model) = if result.llm_attempted() {
-                                    (result.llm_provider_used.clone(), result.llm_model_used.clone())
-                                } else {
-                                    (None, None)
-                                };
-                                let _ = history.set_request_llm_model(req_id, provider, model);
-                                let _ = app_clone.emit("history-changed", ());
+                                    let (provider, model) = if result.llm_attempted() {
+                                        (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                                    } else {
+                                        (None, None)
+                                    };
+                                    let _ = history.set_request_llm_model(req_id, provider, model);
+                                    let _ = app_clone.emit("history-changed", ());
+                                }
                             }
                         }
 
@@ -1258,18 +1626,68 @@ fn stop_recording(
                         let _ = app_clone.emit("pipeline-transcript-ready", "");
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
-                        // Mark history entry as success with empty text (keeps timeline consistent)
-                        if let Some(ref req_id) = request_id {
-                            if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                let _ = history.complete_request_success(req_id, String::new());
-
-                                let (provider, model) = if result.llm_attempted() {
-                                    (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                        if is_quick_ask_session {
+                            let emit_to_quick_ask = |app: &AppHandle,
+                                                     event: &str,
+                                                     payload: serde_json::Value| {
+                                if let Some(win) = app.get_webview_window("quick_ask") {
+                                    let _ = win.emit(event, payload);
                                 } else {
-                                    (None, None)
-                                };
-                                let _ = history.set_request_llm_model(req_id, provider, model);
-                                let _ = app_clone.emit("history-changed", ());
+                                    let _ = app.emit(event, payload);
+                                }
+                            };
+
+                            // Ensure the answer window is visible so the error is actually seen.
+                            if let Some(win) = app_clone.get_webview_window("quick_ask") {
+                                let _ = win.set_always_on_top(true);
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+
+                            // Finalize the deferred Quick Ask request log.
+                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                log_store.with_current(|log| {
+                                    log.kind = RequestKind::QuickAsk;
+                                    log.quick_ask_question = Some(String::new());
+                                    log.error("Quick Ask failed: no transcript to answer (empty)");
+                                    log.complete_error("No transcript to answer (empty)");
+                                });
+
+                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                    stats::emit_cost_events_for_current_request(
+                                        &app_clone,
+                                        stats::EventStatus::Error,
+                                        Some(&wav),
+                                    );
+                                }
+
+                                log_store.complete_current();
+                            }
+
+                            emit_to_quick_ask(
+                                &app_clone,
+                                "quick-ask-answer",
+                                serde_json::json!({
+                                    "ok": false,
+                                    "error": "No transcript to answer (empty)",
+                                }),
+                            );
+                        }
+
+                        // Mark history entry as success with empty text (keeps timeline consistent)
+                        if !is_quick_ask_session {
+                            if let Some(ref req_id) = request_id {
+                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
+                                    let _ = history.complete_request_success(req_id, String::new());
+
+                                    let (provider, model) = if result.llm_attempted() {
+                                        (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                                    } else {
+                                        (None, None)
+                                    };
+                                    let _ = history.set_request_llm_model(req_id, provider, model);
+                                    let _ = app_clone.emit("history-changed", ());
+                                }
                             }
                         }
 
@@ -1515,6 +1933,11 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     state.is_recording.store(false, Ordering::SeqCst);
     state.toggle_key_held.store(false, Ordering::SeqCst);
     state.ptt_key_held.store(false, Ordering::SeqCst);
+    state.paste_key_held.store(false, Ordering::SeqCst);
+    state.retry_key_held.store(false, Ordering::SeqCst);
+    state.quick_ask_key_held.store(false, Ordering::SeqCst);
+    state.quick_ask_toggle_key_held.store(false, Ordering::SeqCst);
+    state.quick_ask_session_active.store(false, Ordering::SeqCst);
 
     // Restore audio side effects (unmute + resume playback if we paused).
     let sound_enabled: bool = get_setting_from_store(app, "sound_enabled", true);
@@ -1636,6 +2059,34 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
         get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
     let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
 
+    // Quick Ask hotkeys:
+    // - Legacy key: quick_ask_hotkey (hold-to-record)
+    // - New keys: quick_ask_hold_hotkey + quick_ask_toggle_hotkey
+    // For backward compatibility, Quick Ask Hold falls back to the legacy key only
+    // when the new key is absent (not when explicitly null).
+    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
+        use serde_json::Value;
+
+        let store = app.store("settings.json").ok();
+
+        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
+        let hold = match raw_hold {
+            None => get_hotkey_from_store(app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
+            Some(Value::Null) => None,
+            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
+                .ok()
+                .or_else(|| HotkeyConfig::default_quick_ask()),
+        };
+
+        let toggle = get_hotkey_from_store(
+            app,
+            "quick_ask_toggle_hotkey",
+            HotkeyConfig::default_quick_ask,
+        );
+
+        (hold, toggle)
+    };
+
     // Convert to normalized shortcut strings.
     // For disabled hotkeys, we keep None so it can never match.
     let toggle_shortcut_str: Option<String> = toggle_hotkey.map(|hk| {
@@ -1679,6 +2130,30 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
             .ok()
     });
 
+    let quick_ask_hold_shortcut_str: Option<String> = quick_ask_hold_hotkey.and_then(|hk| {
+        hk.to_shortcut()
+            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
+    });
+
+    let quick_ask_toggle_shortcut_str: Option<String> = quick_ask_toggle_hotkey.and_then(|hk| {
+        hk.to_shortcut()
+            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
+    });
+
     // Get audio mute manager if available
     let audio_mute_manager = app.try_state::<AudioMuteManager>();
 
@@ -1687,6 +2162,9 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     let is_hold = hold_shortcut_str.as_deref() == Some(shortcut_str.as_str());
     let is_paste_last = paste_last_shortcut_str.as_deref() == Some(shortcut_str.as_str());
     let is_retry = retry_shortcut_str.as_deref() == Some(shortcut_str.as_str());
+    let is_quick_ask_hold = quick_ask_hold_shortcut_str.as_deref() == Some(shortcut_str.as_str());
+    let is_quick_ask_toggle =
+        quick_ask_toggle_shortcut_str.as_deref() == Some(shortcut_str.as_str());
 
     if is_toggle {
         // Toggle mode: action happens on key release (debounced)
@@ -1847,6 +2325,177 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                 if state.retry_key_held.swap(false, Ordering::SeqCst) {
                     log::info!("Retry: retrying last recording");
                     spawn_retry_last_recording_and_output(app, "Retry");
+                }
+            }
+        }
+    } else if is_quick_ask_hold {
+        // Quick Ask Hold: hold-to-record.
+        // Start capture on press; stop on release, then branch into the Quick Ask answer flow.
+        match event.state {
+            ShortcutState::Pressed => {
+                if !state.quick_ask_key_held.swap(true, Ordering::SeqCst) {
+                    // Only start if pipeline is not already recording/transcribing
+                    let pipeline_state = app
+                        .try_state::<pipeline::SharedPipeline>()
+                        .map(|p| p.state());
+
+                    log::info!("QuickAskHold pressed: pipeline state = {:?}", pipeline_state);
+                    emit_system_event(
+                        app,
+                        "shortcut",
+                        "Quick Ask Hold pressed",
+                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
+                    );
+
+                    // Do not allow starting while we are processing a previous capture.
+                    if matches!(
+                        pipeline_state,
+                        Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                    ) {
+                        log::info!("QuickAskHold ignored (pipeline busy: {:?})", pipeline_state);
+                        return;
+                    }
+
+                    let can_start = pipeline_state
+                        .map(|s| s.can_start_recording())
+                        .unwrap_or(false);
+
+                    if can_start {
+                        state.quick_ask_session_active.store(true, Ordering::SeqCst);
+                        start_recording(
+                            app,
+                            &state,
+                            sound_enabled,
+                            audio_cue,
+                            &audio_mute_manager,
+                            playing_audio_handling,
+                            "QuickAskHold",
+                        );
+
+                        // Defensive: if we failed to enter Recording, clear the intent.
+                        let is_recording = app
+                            .try_state::<pipeline::SharedPipeline>()
+                            .map(|p| p.state() == pipeline::PipelineState::Recording)
+                            .unwrap_or(false);
+                        if !is_recording {
+                            state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                        }
+                    }
+                }
+            }
+            ShortcutState::Released => {
+                if state.quick_ask_key_held.swap(false, Ordering::SeqCst) {
+                    // Only stop if pipeline is actually recording
+                    let is_recording = app
+                        .try_state::<pipeline::SharedPipeline>()
+                        .map(|p| p.state() == pipeline::PipelineState::Recording)
+                        .unwrap_or(false);
+
+                    if is_recording {
+                        stop_recording(
+                            app,
+                            &state,
+                            sound_enabled,
+                            audio_cue,
+                            &audio_mute_manager,
+                            playing_audio_handling,
+                            "QuickAskHold",
+                        );
+                    } else {
+                        // If we never actually started capture, clear the intent.
+                        state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                    }
+                }
+            }
+        }
+    } else if is_quick_ask_toggle {
+        // Quick Ask Toggle: press once to start, press again to stop.
+        // Debounce: action happens on key release.
+        match event.state {
+            ShortcutState::Pressed => {
+                state.quick_ask_toggle_key_held.swap(true, Ordering::SeqCst);
+            }
+            ShortcutState::Released => {
+                if state.quick_ask_toggle_key_held.swap(false, Ordering::SeqCst) {
+                    let pipeline_state = app
+                        .try_state::<pipeline::SharedPipeline>()
+                        .map(|p| p.state());
+
+                    log::info!(
+                        "QuickAskToggle released: pipeline state = {:?}",
+                        pipeline_state
+                    );
+                    emit_system_event(
+                        app,
+                        "shortcut",
+                        "Quick Ask Toggle released",
+                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
+                    );
+
+                    // Do not allow starting while we are processing a previous capture.
+                    if matches!(
+                        pipeline_state,
+                        Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                    ) {
+                        log::info!(
+                            "QuickAskToggle ignored (pipeline busy: {:?})",
+                            pipeline_state
+                        );
+                        return;
+                    }
+
+                    let can_stop = pipeline_state
+                        .map(|s| s.can_stop_recording())
+                        .unwrap_or(false);
+                    let can_start = pipeline_state
+                        .map(|s| s.can_start_recording())
+                        .unwrap_or(false);
+
+                    if can_stop {
+                        // Only stop if this recording session is actually a Quick Ask.
+                        let is_quick_ask_session =
+                            state.quick_ask_session_active.load(Ordering::SeqCst);
+                        if is_quick_ask_session {
+                            stop_recording(
+                                app,
+                                &state,
+                                sound_enabled,
+                                audio_cue,
+                                &audio_mute_manager,
+                                playing_audio_handling,
+                                "QuickAskToggle",
+                            );
+                        } else {
+                            log::info!(
+                                "QuickAskToggle stop ignored (active session is not Quick Ask)"
+                            );
+                        }
+                    } else if can_start {
+                        state.quick_ask_session_active.store(true, Ordering::SeqCst);
+                        start_recording(
+                            app,
+                            &state,
+                            sound_enabled,
+                            audio_cue,
+                            &audio_mute_manager,
+                            playing_audio_handling,
+                            "QuickAskToggle",
+                        );
+
+                        // Defensive: if we failed to enter Recording, clear the intent.
+                        let is_recording = app
+                            .try_state::<pipeline::SharedPipeline>()
+                            .map(|p| p.state() == pipeline::PipelineState::Recording)
+                            .unwrap_or(false);
+                        if !is_recording {
+                            state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                        }
+                    } else {
+                        log::info!(
+                            "QuickAskToggle ignored (pipeline state: {:?})",
+                            pipeline_state
+                        );
+                    }
                 }
             }
         }
@@ -2322,6 +2971,28 @@ pub fn run() {
             .background_throttling(BackgroundThrottlingPolicy::Disabled)
             .build()?;
 
+            // Create Quick Ask answer window (hidden by default).
+            // This is a separate transparent webview that renders an answer + copy button.
+            let quick_ask = tauri::WebviewWindowBuilder::new(
+                app,
+                "quick_ask",
+                tauri::WebviewUrl::App("quick-ask.html".into()),
+            )
+            .title("Kolboo Quick Ask")
+            .inner_size(520.0, 340.0)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focused(false)
+            .accept_first_mouse(true)
+            .visible(false)
+            .visible_on_all_workspaces(true)
+            .background_throttling(BackgroundThrottlingPolicy::Disabled)
+            .build()?;
+
             // On macOS, convert to NSPanel for better fullscreen app behavior
             #[cfg(target_os = "macos")]
             {
@@ -2407,6 +3078,18 @@ pub fn run() {
                     x: x_px.round() as i32,
                     y: y_px.round() as i32,
                 }));
+
+                // Quick Ask should behave like an overlay: cover the current monitor so the
+                // panel can sit bottom-center and the user can dismiss by clicking anywhere.
+                // Use PHYSICAL coordinates to avoid DPI conversion edge cases on Windows.
+                let _ = quick_ask.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                    width: size.width,
+                    height: size.height,
+                }));
+                let _ = quick_ask.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x: pos.x,
+                    y: pos.y,
+                }));
             }
 
             // Set initial overlay visibility based on saved settings
@@ -2446,14 +3129,38 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
     let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
     let paste_last_hotkey = get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
     let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
+    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
+        use serde_json::Value;
+
+        let store = app.store("settings.json").ok();
+        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
+
+        let hold = match raw_hold {
+            None => get_hotkey_from_store(app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
+            Some(Value::Null) => None,
+            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
+                .ok()
+                .or_else(|| HotkeyConfig::default_quick_ask()),
+        };
+
+        let toggle = get_hotkey_from_store(
+            app,
+            "quick_ask_toggle_hotkey",
+            HotkeyConfig::default_quick_ask,
+        );
+
+        (hold, toggle)
+    };
 
     let matches_modifier_only = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == key;
     let is_toggle = toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
     let is_hold = hold_hotkey.as_ref().is_some_and(matches_modifier_only);
     let is_paste_last = paste_last_hotkey.as_ref().is_some_and(matches_modifier_only);
     let is_retry = retry_hotkey.as_ref().is_some_and(matches_modifier_only);
+    let is_quick_ask_hold = quick_ask_hold_hotkey.as_ref().is_some_and(matches_modifier_only);
+    let is_quick_ask_toggle = quick_ask_toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
 
-    if !(is_toggle || is_hold || is_paste_last || is_retry) {
+    if !(is_toggle || is_hold || is_paste_last || is_retry || is_quick_ask_hold || is_quick_ask_toggle) {
         return;
     }
 
@@ -2614,13 +3321,158 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
             state.retry_key_held.swap(true, Ordering::SeqCst);
             return;
         }
-
         if !state.retry_key_held.swap(false, Ordering::SeqCst) {
             return;
         }
 
         log::info!("Retry(AltRight): retrying last recording");
         spawn_retry_last_recording_and_output(app, "Retry(AltRight)");
+
+        return;
+    }
+
+    if is_quick_ask_hold {
+        // Quick Ask Hold: start on press, stop on release.
+        if is_down {
+            if !state.quick_ask_key_held.swap(true, Ordering::SeqCst) {
+                let pipeline_state = app
+                    .try_state::<pipeline::SharedPipeline>()
+                    .map(|p| p.state());
+
+                // Do not allow starting while we are processing a previous capture.
+                if matches!(
+                    pipeline_state,
+                    Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                ) {
+                    log::info!(
+                        "QuickAskHold(AltRight) ignored (pipeline busy: {:?})",
+                        pipeline_state
+                    );
+                    return;
+                }
+
+                let can_start = pipeline_state
+                    .map(|s| s.can_start_recording())
+                    .unwrap_or(false);
+                if can_start {
+                    state.quick_ask_session_active.store(true, Ordering::SeqCst);
+                    start_recording(
+                        app,
+                        &state,
+                        sound_enabled,
+                        audio_cue,
+                        &audio_mute_manager,
+                        playing_audio_handling,
+                        "QuickAskHold(AltRight)",
+                    );
+
+                    let is_recording = app
+                        .try_state::<pipeline::SharedPipeline>()
+                        .map(|p| p.state() == pipeline::PipelineState::Recording)
+                        .unwrap_or(false);
+                    if !is_recording {
+                        state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                    }
+                }
+            }
+        } else {
+            if state.quick_ask_key_held.swap(false, Ordering::SeqCst) {
+                let is_recording = app
+                    .try_state::<pipeline::SharedPipeline>()
+                    .map(|p| p.state() == pipeline::PipelineState::Recording)
+                    .unwrap_or(false);
+                if is_recording {
+                    stop_recording(
+                        app,
+                        &state,
+                        sound_enabled,
+                        audio_cue,
+                        &audio_mute_manager,
+                        playing_audio_handling,
+                        "QuickAskHold(AltRight)",
+                    );
+                } else {
+                    state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                }
+            }
+        }
+
+        return;
+    }
+
+    if is_quick_ask_toggle {
+        // Quick Ask Toggle: action on release (debounced).
+        if is_down {
+            state.quick_ask_toggle_key_held.swap(true, Ordering::SeqCst);
+            return;
+        }
+
+        if !state.quick_ask_toggle_key_held.swap(false, Ordering::SeqCst) {
+            return;
+        }
+
+        let pipeline_state = app
+            .try_state::<pipeline::SharedPipeline>()
+            .map(|p| p.state());
+
+        // Do not allow starting while we are processing a previous capture.
+        if matches!(
+            pipeline_state,
+            Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+        ) {
+            log::info!(
+                "QuickAskToggle(AltRight) ignored (pipeline busy: {:?})",
+                pipeline_state
+            );
+            return;
+        }
+
+        let can_stop = pipeline_state
+            .map(|s| s.can_stop_recording())
+            .unwrap_or(false);
+        let can_start = pipeline_state
+            .map(|s| s.can_start_recording())
+            .unwrap_or(false);
+
+        if can_stop {
+            let is_quick_ask_session = state.quick_ask_session_active.load(Ordering::SeqCst);
+            if is_quick_ask_session {
+                stop_recording(
+                    app,
+                    &state,
+                    sound_enabled,
+                    audio_cue,
+                    &audio_mute_manager,
+                    playing_audio_handling,
+                    "QuickAskToggle(AltRight)",
+                );
+            } else {
+                log::info!(
+                    "QuickAskToggle(AltRight) stop ignored (active session is not Quick Ask)"
+                );
+            }
+        } else if can_start {
+            state.quick_ask_session_active.store(true, Ordering::SeqCst);
+            start_recording(
+                app,
+                &state,
+                sound_enabled,
+                audio_cue,
+                &audio_mute_manager,
+                playing_audio_handling,
+                "QuickAskToggle(AltRight)",
+            );
+
+            let is_recording = app
+                .try_state::<pipeline::SharedPipeline>()
+                .map(|p| p.state() == pipeline::PipelineState::Recording)
+                .unwrap_or(false);
+            if !is_recording {
+                state.quick_ask_session_active.store(false, Ordering::SeqCst);
+            }
+        }
+
+        return;
     }
 }
 
@@ -3062,6 +3914,14 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
                 gemini_thinking_budget: p.gemini_thinking_budget,
                 gemini_thinking_level: p.gemini_thinking_level,
                 anthropic_thinking_budget: p.anthropic_thinking_budget,
+
+                quick_ask_provider: p.quick_ask_provider,
+                quick_ask_model: p.quick_ask_model,
+                quick_ask_system_prompt: p.quick_ask_system_prompt,
+                quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
+                quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
+                quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,
+                quick_ask_anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
             }
         })
         .collect();
@@ -3178,6 +4038,27 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     let paste_last_hotkey =
         get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
     let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
+    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
+        use serde_json::Value;
+
+        let store = app.store("settings.json").ok();
+        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
+        let hold = match raw_hold {
+            None => get_hotkey_from_store(app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
+            Some(Value::Null) => None,
+            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
+                .ok()
+                .or_else(|| HotkeyConfig::default_quick_ask()),
+        };
+
+        let toggle = get_hotkey_from_store(
+            app,
+            "quick_ask_toggle_hotkey",
+            HotkeyConfig::default_quick_ask,
+        );
+
+        (hold, toggle)
+    };
 
     // Convert to shortcut strings with validation.
     //
@@ -3257,12 +4138,48 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
             .ok()
     });
 
+    let quick_ask_hold_shortcut_str: Option<String> = quick_ask_hold_hotkey.and_then(|hk| {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            return None;
+        }
+
+        hk.to_shortcut()
+            .map(|_| hk.to_shortcut_string())
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
+    });
+
+    let quick_ask_toggle_shortcut_str: Option<String> = quick_ask_toggle_hotkey.and_then(|hk| {
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_modifier_only_hotkey(&hk) {
+            return None;
+        }
+
+        hk.to_shortcut()
+            .map(|_| hk.to_shortcut_string())
+            .map_err(|e| {
+                log::warn!(
+                    "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
+                    e
+                )
+            })
+            .ok()
+    });
+
     log::info!(
-        "Registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}",
+        "Registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}, QuickAskHold: {}, QuickAskToggle: {}",
         toggle_shortcut_str.as_deref().unwrap_or("<disabled>"),
         hold_shortcut_str.as_deref().unwrap_or("<disabled>"),
         paste_last_shortcut_str.as_deref().unwrap_or("<disabled>"),
-        retry_shortcut_str.as_deref().unwrap_or("<disabled>")
+        retry_shortcut_str.as_deref().unwrap_or("<disabled>"),
+        quick_ask_hold_shortcut_str.as_deref().unwrap_or("<disabled>"),
+        quick_ask_toggle_shortcut_str.as_deref().unwrap_or("<disabled>")
     );
 
     let shortcut_manager = app.global_shortcut();
@@ -3339,6 +4256,40 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 handle_shortcut_event(app, shortcut, &event);
             }) {
                 failures.push(format!("Retry ({}) => {}", retry_shortcut_str, e));
+            }
+        }
+    }
+
+    if let Some(quick_ask_hold_shortcut_str) = &quick_ask_hold_shortcut_str {
+        let quick_ask_hold_shortcut =
+            <Shortcut as std::str::FromStr>::from_str(quick_ask_hold_shortcut_str).map_err(|e| {
+                failures.push(format!(
+                    "QuickAskHold ({}) => failed to parse shortcut: {:?}",
+                    quick_ask_hold_shortcut_str, e
+                ));
+            });
+        if let Ok(quick_ask_hold_shortcut) = quick_ask_hold_shortcut {
+            if let Err(e) = shortcut_manager.on_shortcut(quick_ask_hold_shortcut, |app, shortcut, event| {
+                handle_shortcut_event(app, shortcut, &event);
+            }) {
+                failures.push(format!("QuickAskHold ({}) => {}", quick_ask_hold_shortcut_str, e));
+            }
+        }
+    }
+
+    if let Some(quick_ask_toggle_shortcut_str) = &quick_ask_toggle_shortcut_str {
+        let quick_ask_toggle_shortcut =
+            <Shortcut as std::str::FromStr>::from_str(quick_ask_toggle_shortcut_str).map_err(|e| {
+                failures.push(format!(
+                    "QuickAskToggle ({}) => failed to parse shortcut: {:?}",
+                    quick_ask_toggle_shortcut_str, e
+                ));
+            });
+        if let Ok(quick_ask_toggle_shortcut) = quick_ask_toggle_shortcut {
+            if let Err(e) = shortcut_manager.on_shortcut(quick_ask_toggle_shortcut, |app, shortcut, event| {
+                handle_shortcut_event(app, shortcut, &event);
+            }) {
+                failures.push(format!("QuickAskToggle ({}) => {}", quick_ask_toggle_shortcut_str, e));
             }
         }
     }

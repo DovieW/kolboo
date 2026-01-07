@@ -221,6 +221,13 @@ impl HotkeyConfig {
         None
     }
 
+    /// Default quick-ask hotkey as a setting value.
+    ///
+    /// Quick Ask is disabled by default.
+    pub fn default_quick_ask() -> Option<Self> {
+        None
+    }
+
     /// Convert to shortcut string format like "ctrl+alt+Space"
     /// Note: modifiers must be lowercase for the parser to recognize them
     pub fn to_shortcut_string(&self) -> String {
@@ -392,6 +399,24 @@ pub struct RewriteProgramPromptProfile {
     pub gemini_thinking_level: Option<String>,
     #[serde(default)]
     pub anthropic_thinking_budget: Option<i64>,
+
+    // Quick Ask (per-profile overrides)
+    #[serde(default)]
+    pub quick_ask_provider: Option<String>,
+    #[serde(default)]
+    pub quick_ask_model: Option<String>,
+    #[serde(default)]
+    pub quick_ask_system_prompt: Option<String>,
+
+    // Optional per-profile provider-specific thinking/reasoning knobs for Quick Ask.
+    #[serde(default)]
+    pub quick_ask_openai_reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub quick_ask_gemini_thinking_budget: Option<i64>,
+    #[serde(default)]
+    pub quick_ask_gemini_thinking_level: Option<String>,
+    #[serde(default)]
+    pub quick_ask_anthropic_thinking_budget: Option<i64>,
 }
 
 // ============================================================================
