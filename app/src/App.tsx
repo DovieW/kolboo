@@ -839,7 +839,7 @@ function SettingsView() {
             <Tabs.Tab value="ui">UI</Tabs.Tab>
             <Tabs.Tab value="audio">Audio</Tabs.Tab>
             <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
-            <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
+            <Tabs.Tab value="api-keys">Providers</Tabs.Tab>
             <Tabs.Tab value="data">Data</Tabs.Tab>
             <Tabs.Tab value="network">Network</Tabs.Tab>
           </Tabs.List>
@@ -1088,7 +1088,7 @@ function SettingsViewWithGuideLauncher({
             <Tabs.Tab value="ui">UI</Tabs.Tab>
             <Tabs.Tab value="audio">Audio</Tabs.Tab>
             <Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
-            <Tabs.Tab value="api-keys">API Keys</Tabs.Tab>
+            <Tabs.Tab value="api-keys">Providers</Tabs.Tab>
             <Tabs.Tab value="data">Data</Tabs.Tab>
             <Tabs.Tab value="network">Network</Tabs.Tab>
           </Tabs.List>

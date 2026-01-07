@@ -602,6 +602,8 @@ export interface AppSettings {
   stt_transcription_prompt: string | null;
   // AquaVoice server override (optional)
   aquavoice_base_url: string | null;
+  // Whisper server base URL (OpenAI-compatible API; optional)
+  whisper_server_base_url: string | null;
 
   // Global proxy configuration for outgoing HTTP requests
   proxy_settings: ProxySettings;
@@ -1535,6 +1537,8 @@ export const tauriAPI = {
         (await store.get<string | null>("stt_transcription_prompt")) ?? null,
       aquavoice_base_url:
         (await store.get<string | null>("aquavoice_base_url")) ?? null,
+      whisper_server_base_url:
+        (await store.get<string | null>("whisper_server_base_url")) ?? null,
       proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
@@ -2022,6 +2026,13 @@ export const tauriAPI = {
   async updateSTTTranscriptionPrompt(prompt: string | null): Promise<void> {
     const store = await getStore();
     await store.set("stt_transcription_prompt", prompt);
+    await store.save();
+  },
+
+  async updateWhisperServerBaseUrl(baseUrl: string | null): Promise<void> {
+    const store = await getStore();
+    const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
+    await store.set("whisper_server_base_url", normalized);
     await store.save();
   },
 

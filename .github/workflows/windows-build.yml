@@ -3,9 +3,12 @@ name: Build (Windows)
 on:
   workflow_call:
     outputs:
-      artifact-name:
-        description: "Name of the uploaded Windows bundle artifact"
-        value: ${{ jobs.build-windows.outputs.artifact-name }}
+      artifact-name-default:
+        description: "Name of the uploaded Windows bundle artifact (default build)"
+        value: ${{ jobs.build-windows.outputs.artifact-name-default }}
+      artifact-name-local-whisper:
+        description: "Name of the uploaded Windows bundle artifact (with local-whisper feature)"
+        value: ${{ jobs.build-windows.outputs.artifact-name-local-whisper }}
   workflow_dispatch:
 
 concurrency:
@@ -122,7 +125,8 @@ jobs:
     runs-on: windows-latest
 
     outputs:
-      artifact-name: ${{ steps.artifact-meta.outputs.artifact_name }}
+      artifact-name-default: ${{ steps.artifact-meta.outputs.artifact_name_default }}
+      artifact-name-local-whisper: ${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}
 
     env:
       CARGO_TERM_COLOR: always
@@ -193,7 +197,7 @@ jobs:
           workspaces: |
             app/src-tauri -> target
 
-      - name: Build Tauri app (release)
+      - name: Build Tauri app (release) - default
         working-directory: app
         shell: bash
         run: |
@@ -212,18 +216,64 @@ jobs:
 
           sccache --show-stats || true
 
+      - name: Collect bundles (default)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/windows-default
+          cp -R app/src-tauri/target/release/bundle artifacts/windows-default/ || true
+          shopt -s nullglob
+          cp app/src-tauri/target/release/*.exe artifacts/windows-default/ || true
+
+      - name: Build Tauri app (release) - with local-whisper
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SCCACHE_NO_DAEMON="1"
+
+          if sccache --version >/dev/null 2>&1; then
+            export RUSTC_WRAPPER=sccache
+            echo "Using sccache: $(sccache --version)"
+            sccache --show-stats || true
+          else
+            echo "sccache not available; building without compiler cache"
+          fi
+
+          # Forward cargo args after `--`.
+          pnpm tauri build -- --features local-whisper
+
+          sccache --show-stats || true
+
+      - name: Collect bundles (local-whisper)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/windows-local-whisper
+          cp -R app/src-tauri/target/release/bundle artifacts/windows-local-whisper/ || true
+          shopt -s nullglob
+          cp app/src-tauri/target/release/*.exe artifacts/windows-local-whisper/ || true
+
       - name: Set artifact metadata
         id: artifact-meta
         shell: bash
         run: |
           set -euo pipefail
-          echo "artifact_name=kolboo-windows-bundles" >> "$GITHUB_OUTPUT"
+          echo "artifact_name_default=kolboo-windows-bundles" >> "$GITHUB_OUTPUT"
+          echo "artifact_name_local_whisper=kolboo-windows-bundles-local-whisper" >> "$GITHUB_OUTPUT"
 
-      - name: Upload bundles
+      - name: Upload bundles (default)
         uses: actions/upload-artifact@v6
         with:
           name: kolboo-windows-bundles
           if-no-files-found: error
           path: |
-            app/src-tauri/target/release/bundle/**
-            app/src-tauri/target/release/*.exe
+            artifacts/windows-default/**
+
+      - name: Upload bundles (local-whisper)
+        uses: actions/upload-artifact@v6
+        with:
+          name: kolboo-windows-bundles-local-whisper
+          if-no-files-found: error
+          path: |
+            artifacts/windows-local-whisper/**

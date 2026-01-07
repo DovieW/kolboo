@@ -125,6 +125,7 @@ const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("assemblyai", "AssemblyAI", false),
     ("speechmatics", "Speechmatics", false),
     ("deepgram", "Deepgram", false),
+    ("whisper-server", "Whisper Server", false),
     ("whisper", "Local Whisper", true),
 ];
 
@@ -158,9 +159,15 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
 
     // Check which STT providers have API keys
     for (id, label, is_local) in STT_PROVIDERS {
+        // If Local Whisper wasn't compiled in, hide it from the UI.
+        if *id == "whisper" && !cfg!(feature = "local-whisper") {
+            continue;
+        }
+
         let key_name = format!("{}_api_key", id);
         // Local providers don't need API keys, remote ones do
-        if *is_local || has_api_key(&app, &key_name) {
+        // Whisper server is keyless (URL-based), so it should always be selectable.
+        if *is_local || *id == "whisper-server" || has_api_key(&app, &key_name) {
             stt_providers.push(ProviderInfo {
                 value: id.to_string(),
                 label: label.to_string(),
@@ -231,6 +238,13 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .store("settings.json")
         .ok()
         .and_then(|store| store.get("stt_transcription_prompt"))
+        .and_then(|v| serde_json::from_value(v).ok());
+
+    // Read Whisper server base URL from store
+    let whisper_server_base_url: Option<String> = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("whisper_server_base_url"))
         .and_then(|v| serde_json::from_value(v).ok());
 
     // Get the appropriate API key based on provider
@@ -624,6 +638,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         stt_api_keys,
         stt_model: stt_model.clone(),
         stt_transcription_prompt,
+        whisper_server_base_url,
         max_duration_secs: 300.0,
         retry_config: RetryConfig::default(),
         vad_config: vad_settings.to_vad_auto_stop_config(),

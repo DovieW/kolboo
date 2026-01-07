@@ -815,7 +815,13 @@ async fn route_preset_id_with_llm(
 
 fn canonicalize_stt_provider_id(id: &str) -> String {
     match id {
-        // Historical UI value
+        // Historical UI value.
+        // If the current build does not include local-whisper support, fall back
+        // to a default cloud provider to avoid a confusing "requires an API key"
+        // error for an unavailable feature.
+        "whisper" | "local-whisper" if !cfg!(feature = "local-whisper") => {
+            "groq".to_string()
+        }
         "whisper" => "local-whisper".to_string(),
         other => other.to_string(),
     }
@@ -1089,6 +1095,11 @@ pub struct PipelineConfig {
     ///
     /// Applied by STT providers that support prompting (currently OpenAI transcription endpoint models).
     pub stt_transcription_prompt: Option<String>,
+
+    /// Base URL for an OpenAI-compatible Whisper transcription server.
+    ///
+    /// Example: http://localhost:8000/v1
+    pub whisper_server_base_url: Option<String>,
     /// Retry configuration for STT requests
     pub retry_config: RetryConfig,
     /// VAD auto-stop configuration
@@ -1168,6 +1179,7 @@ impl Default for PipelineConfig {
             stt_api_keys: HashMap::new(),
             stt_model: None,
             stt_transcription_prompt: None,
+            whisper_server_base_url: None,
             retry_config: RetryConfig::default(),
             vad_config: VadAutoStopConfig::default(),
             transcription_timeout: DEFAULT_TRANSCRIPTION_TIMEOUT,
@@ -1273,6 +1285,27 @@ impl PipelineInner {
             return Err(PipelineError::Config(
                 "Local Whisper selected but no model path configured".to_string(),
             ));
+        }
+
+        if provider_id == "whisper-server" {
+            let base_url = self
+                .config
+                .whisper_server_base_url
+                .clone()
+                .unwrap_or_default();
+
+            let provider = crate::stt::WhisperServerSttProvider::with_client(
+                self.build_http_client_with_timeout(self.config.transcription_timeout)?,
+                base_url,
+                model,
+                self.config.stt_transcription_prompt.clone(),
+            )
+            .map_err(|e| PipelineError::Config(format!("Whisper server init failed: {}", e)))?
+            .with_request_log_store(self.config.request_log_store.clone());
+
+            let provider = Arc::new(provider);
+            self.stt_provider_cache.insert(cache_key, provider.clone());
+            return Ok(provider);
         }
 
         let api_key = self

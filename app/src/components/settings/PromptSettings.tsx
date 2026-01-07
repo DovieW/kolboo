@@ -1178,6 +1178,7 @@ export function PromptSettings({
   const isOpenAiStt = effectiveSttProvider === "openai";
   const isAquavoiceStt = effectiveSttProvider === "aquavoice";
   const isGroqStt = effectiveSttProvider === "groq";
+  const isWhisperServerStt = effectiveSttProvider === "whisper-server";
   const isWhisper1Selected = isOpenAiStt && effectiveSttModel === "whisper-1";
   const isGroqWhisperModel =
     isGroqStt &&
@@ -1186,7 +1187,7 @@ export function PromptSettings({
 
   const promptMaxChars = 224;
   const isPrompt224CharLimited =
-    isWhisper1Selected || isGroqWhisperModel || isAquavoiceStt;
+    isWhisper1Selected || isGroqWhisperModel || isAquavoiceStt || isWhisperServerStt;
 
   const sttPromptSupported =
     (isOpenAiStt &&
@@ -1194,7 +1195,8 @@ export function PromptSettings({
         (Boolean(effectiveSttModel?.includes("transcribe")) &&
           !effectiveSttModel?.includes("diarize")))) ||
     isGroqWhisperModel ||
-    isAquavoiceStt;
+    isAquavoiceStt ||
+    isWhisperServerStt;
 
   const sttPromptDisabledReason = useMemo(() => {
     if (!effectiveSttProvider) {
@@ -1256,6 +1258,8 @@ export function PromptSettings({
   // NOTE: Quick Ask System Prompt uses an explicit Save button (like Rewrite prompts),
   // so we intentionally do NOT auto-save/debounce here.
 
+  const sttProviderIsWhisperServer = effectiveSttProvider === "whisper-server";
+
   const sttModelOptions = effectiveSttProvider
     ? STT_MODELS[effectiveSttProvider] ?? []
     : [];
@@ -1272,6 +1276,13 @@ export function PromptSettings({
       : isDefaultScope
       ? settings?.stt_model ?? sttModelOptions[0]?.value ?? null
       : localProfileSttModel;
+
+  const [whisperServerModelDraft, setWhisperServerModelDraft] = useState("");
+
+  useEffect(() => {
+    if (!sttProviderIsWhisperServer) return;
+    setWhisperServerModelDraft(selectedSttModelForUi ?? "");
+  }, [sttProviderIsWhisperServer, selectedSttModelForUi]);
 
   const selectedQuickAskModelForUi =
     quickAskModelOptions.length === 0
@@ -2404,7 +2415,7 @@ export function PromptSettings({
         </div>
       </div>
 
-      {sttModelOptions.length > 0 ? (
+      {sttProviderIsWhisperServer || sttModelOptions.length > 0 ? (
         <div className="settings-row">
           <div>
             <p className="settings-label">STT Model</p>
@@ -2451,30 +2462,67 @@ export function PromptSettings({
                 {sttPricingLabel}
               </Text>
             ) : null}
-            <Select
-              data={sttModelOptions}
-              value={selectedSttModelForUi}
-              onChange={(value) => {
-                if (!value) return;
-                if (isDefaultScope) {
-                  handleDefaultSTTModelChange(value);
-                  return;
+            {sttProviderIsWhisperServer ? (
+              <TextInput
+                value={whisperServerModelDraft}
+                onChange={(e) =>
+                  setWhisperServerModelDraft(e.currentTarget.value)
                 }
-                setSttModelInheriting(false);
-                setLocalProfileSttModel(value);
-                saveProfileMetadata({ stt_model: value });
-              }}
-              placeholder="Select model"
-              withCheckIcon={false}
-              styles={{
-                input: {
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 200,
-                },
-              }}
-            />
+                onBlur={() => {
+                  const trimmed = whisperServerModelDraft.trim();
+                  const toStore = trimmed.length > 0 ? trimmed : null;
+
+                  if (isDefaultScope) {
+                    const stored = settings?.stt_model?.trim() || null;
+                    if (toStore === stored) return;
+                    updateSTTModel.mutate(toStore, {
+                      onSuccess: () => {
+                        tauriAPI.emitSettingsChanged();
+                      },
+                    });
+                    return;
+                  }
+
+                  setSttModelInheriting(false);
+                  setLocalProfileSttModel(toStore);
+                  saveProfileMetadata({ stt_model: toStore });
+                }}
+                placeholder="whisper-1"
+                styles={{
+                  input: {
+                    backgroundColor: "var(--bg-elevated)",
+                    borderColor: "var(--border-default)",
+                    color: "var(--text-primary)",
+                    minWidth: 200,
+                  },
+                }}
+              />
+            ) : (
+              <Select
+                data={sttModelOptions}
+                value={selectedSttModelForUi}
+                onChange={(value) => {
+                  if (!value) return;
+                  if (isDefaultScope) {
+                    handleDefaultSTTModelChange(value);
+                    return;
+                  }
+                  setSttModelInheriting(false);
+                  setLocalProfileSttModel(value);
+                  saveProfileMetadata({ stt_model: value });
+                }}
+                placeholder="Select model"
+                withCheckIcon={false}
+                styles={{
+                  input: {
+                    backgroundColor: "var(--bg-elevated)",
+                    borderColor: "var(--border-default)",
+                    color: "var(--text-primary)",
+                    minWidth: 200,
+                  },
+                }}
+              />
+            )}
           </div>
         </div>
       ) : null}

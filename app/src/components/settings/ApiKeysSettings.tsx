@@ -3,6 +3,7 @@ import {
   Button,
   Group,
   PasswordInput,
+  TextInput,
   Switch,
   Text,
   Tooltip,
@@ -24,6 +25,7 @@ import {
   useUpdateCohereFreeTier,
   useUpdateGroqFreeTier,
   useUpdateSpeechmaticsFreeTier,
+  useUpdateWhisperServerBaseUrl,
 } from "../../lib/queries";
 
 const GLOBAL_ONLY_TOOLTIP =
@@ -449,11 +451,55 @@ export function ApiKeysSettings({
 }) {
   const isProfileScope = editingProfileId && editingProfileId !== "default";
 
+  const { data: settings } = useSettings();
+  const updateWhisperServerBaseUrl = useUpdateWhisperServerBaseUrl();
+  const [whisperServerBaseUrlDraft, setWhisperServerBaseUrlDraft] = useState(
+    settings?.whisper_server_base_url ?? ""
+  );
+
+  useEffect(() => {
+    setWhisperServerBaseUrlDraft(settings?.whisper_server_base_url ?? "");
+  }, [settings?.whisper_server_base_url]);
+
   const content = (
     <>
       {API_KEYS.map((config) => (
         <ApiKeyInput key={config.id} config={config} />
       ))}
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Whisper server URL</p>
+          <p className="settings-description">
+            Base URL for an OpenAI-compatible transcription API (e.g.
+            http://localhost:8000/v1)
+          </p>
+        </div>
+        <TextInput
+          value={whisperServerBaseUrlDraft}
+          onChange={(e) =>
+            setWhisperServerBaseUrlDraft(e.currentTarget.value)
+          }
+          onBlur={() => {
+            const trimmed = whisperServerBaseUrlDraft.trim();
+            const normalized = trimmed ? trimmed : null;
+            updateWhisperServerBaseUrl.mutate(normalized, {
+              onSuccess: () => {
+                tauriAPI.emitSettingsChanged();
+              },
+            });
+          }}
+          placeholder="http://localhost:8000/v1"
+          styles={{
+            input: {
+              backgroundColor: "var(--bg-elevated)",
+              borderColor: "var(--border-default)",
+              color: "var(--text-primary)",
+              minWidth: 280,
+            },
+          }}
+        />
+      </div>
     </>
   );
 

@@ -185,6 +185,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("assemblyai_free_tier", json!(true), false);
     dirty |= set_default("speechmatics_free_tier", json!(true), false);
     dirty |= set_default("stt_transcription_prompt", json!(null), false);
+    dirty |= set_default("whisper_server_base_url", json!(null), false);
     dirty |= set_default("stt_timeout_seconds", json!(10.0), false);
 
     // Network / proxy settings.
@@ -3955,6 +3956,14 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
     let proxy_settings: settings::ProxySettings =
         get_setting_from_store(app, "proxy_settings", settings::ProxySettings::default());
 
+    let whisper_server_base_url: Option<String> = {
+        let raw: Option<String> = get_setting_from_store(app, "whisper_server_base_url", None);
+        raw.and_then(|s| {
+            let t = s.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        })
+    };
+
     let config = pipeline::PipelineConfig {
         input_device_name,
 
@@ -3967,6 +3976,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         stt_api_keys,
         stt_model,
         stt_transcription_prompt,
+        whisper_server_base_url,
         max_duration_secs: 300.0,
         retry_config: stt::RetryConfig::default(),
         vad_config: vad_settings.to_vad_auto_stop_config(),

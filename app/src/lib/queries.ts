@@ -1305,6 +1305,19 @@ export function useUpdateSTTTranscriptionPrompt() {
   });
 }
 
+export function useUpdateWhisperServerBaseUrl() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (baseUrl: string | null) => {
+      await tauriAPI.updateWhisperServerBaseUrl(baseUrl);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateProxySettings() {
   const queryClient = useQueryClient();
   return useMutation({

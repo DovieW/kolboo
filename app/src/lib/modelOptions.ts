@@ -47,6 +47,11 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
     { value: "enhanced", label: "Enhanced" },
     { value: "standard", label: "Standard" },
   ],
+  "whisper-server": [
+    // Keep this list conservative: most Whisper-compatible servers accept/ignore
+    // the model parameter, and supported values vary by implementation.
+    { value: "whisper-1", label: "Whisper-1" },
+  ],
   whisper: [], // Local whisper has its own model management
 };
 
