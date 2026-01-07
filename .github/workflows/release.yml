@@ -60,19 +60,19 @@ jobs:
           fetch-depth: 0
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: .release
 
       - name: Download Windows bundles
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ needs.build-windows.outputs.artifact-name-default }}
           path: .release/windows/default
 
       - name: Download Windows bundles (local-whisper)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ needs.build-windows.outputs.artifact-name-local-whisper }}
           path: .release/windows/local-whisper
