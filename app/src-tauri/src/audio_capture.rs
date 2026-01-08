@@ -1733,7 +1733,7 @@ fn run_capture_thread(
                         .map(|_| s)
                 }) {
                     Ok(new_stream) => {
-                        stream = new_stream;
+                        let _previous_stream = std::mem::replace(&mut stream, new_stream);
                         consecutive_restart_failures = 0;
                         last_callback_ms.store(now_ms, Ordering::Relaxed);
                         continue;
@@ -1769,7 +1769,7 @@ fn run_capture_thread(
                             .map(|_| s)
                     }) {
                         Ok(new_stream) => {
-                            stream = new_stream;
+                            let _previous_stream = std::mem::replace(&mut stream, new_stream);
                             consecutive_restart_failures = 0;
                             last_callback_ms.store(now_ms, Ordering::Relaxed);
                             continue;

@@ -4,7 +4,6 @@
 //! when speech starts and stops. It uses the webrtc-vad crate and includes
 //! proper handling of pre-roll buffering and hangover periods.
 
-use rubato::Resampler;
 use std::collections::VecDeque;
 use webrtc_vad::{Vad, VadMode};
 
@@ -228,8 +227,10 @@ impl Default for VoiceActivityDetector {
 ///
 /// Uses the rubato library for high-quality resampling.
 pub fn resample_to_16khz(samples: &[f32], source_sample_rate: u32) -> Vec<f32> {
+    use audioadapter_buffers::direct::InterleavedSlice;
     use rubato::{
-        SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+        Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+        WindowFunction,
     };
 
     if source_sample_rate == 16000 {
@@ -248,16 +249,24 @@ pub fn resample_to_16khz(samples: &[f32], source_sample_rate: u32) -> Vec<f32> {
         window: WindowFunction::BlackmanHarris2,
     };
 
-    let resample_ratio = 16000.0 / source_sample_rate as f64;
+    if source_sample_rate == 0 {
+        log::warn!("resample_to_16khz: source_sample_rate=0; returning input unchanged");
+        return samples.to_vec();
+    }
 
-    // Create resampler - chunk_size needs to be reasonable
-    let chunk_size = samples.len().max(1024);
-    let mut resampler = match SincFixedIn::<f32>::new(
+    let resample_ratio = 16000.0 / source_sample_rate as f64;
+    let input_len_frames = samples.len();
+    let chunk_size_frames = input_len_frames.min(1024).max(1);
+
+    // rubato v1 uses AudioAdapter-based input/output buffers.
+    // We only use mono data here.
+    let mut resampler = match Async::<f32>::new_sinc(
         resample_ratio,
-        2.0, // max relative ratio (for variable rate)
-        params,
-        chunk_size,
+        2.0, // max relative ratio (allows some drift if reused for streams)
+        &params,
+        chunk_size_frames,
         1, // mono
+        FixedAsync::Input,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -266,10 +275,30 @@ pub fn resample_to_16khz(samples: &[f32], source_sample_rate: u32) -> Vec<f32> {
         }
     };
 
-    // Process - rubato expects Vec<Vec<f32>> for channels
-    let waves_in = vec![samples.to_vec()];
-    match resampler.process(&waves_in, None) {
-        Ok(waves_out) => waves_out.into_iter().next().unwrap_or_default(),
+    let input_adapter = match InterleavedSlice::new(samples, 1, input_len_frames) {
+        Ok(a) => a,
+        Err(e) => {
+            log::error!("Failed to create input adapter: {}", e);
+            return samples.to_vec();
+        }
+    };
+
+    let output_len_frames = resampler.process_all_needed_output_len(input_len_frames);
+    let mut out = vec![0.0_f32; output_len_frames];
+    let out_capacity_frames = out.len();
+    let mut output_adapter = match InterleavedSlice::new_mut(&mut out, 1, out_capacity_frames) {
+        Ok(a) => a,
+        Err(e) => {
+            log::error!("Failed to create output adapter: {}", e);
+            return samples.to_vec();
+        }
+    };
+
+    match resampler.process_all_into_buffer(&input_adapter, &mut output_adapter, input_len_frames, None) {
+        Ok((_frames_read, frames_written)) => {
+            out.truncate(frames_written);
+            out
+        }
         Err(e) => {
             log::error!("Resampling failed: {}", e);
             samples.to_vec()
