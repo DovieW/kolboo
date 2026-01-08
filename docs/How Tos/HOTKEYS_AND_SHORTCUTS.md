@@ -81,6 +81,19 @@ Keep these aligned with backend defaults.
   - Note: it temporarily unregisters shortcuts while capturing a new hotkey
     (otherwise global shortcuts can intercept key presses).
 
+  **Special key dropdown note:** the backend shortcut parser is provided by
+  `tauri-plugin-global-shortcut` → `global-hotkey`, which only supports a specific set of
+  “main key” strings. A few useful examples that *are* supported:
+
+  - `CapsLock`, `NumLock`, `ScrollLock`
+  - `PrintScreen`, `Pause`
+  - `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`
+  - `F13`–`F24` (for extended keyboards)
+  - Media/volume keys like `MediaPlayPause`, `MediaTrackNext`, `MediaTrackPrevious`, `VolumeUp`
+
+  Some requested keys (notably the **Context Menu / Application** key) are **not supported** by the
+  current parser, so they cannot be registered as global shortcuts without adding new native handling.
+
 - `app/src/components/settings/HotkeySettings.tsx`
   - Wires inputs to React Query mutations.
 
@@ -240,6 +253,43 @@ This exact scenario caused the bug:
 Fix strategy:
 
 - treat modifier-only hotkeys as **hook-handled** and do not fall back.
+
+#### AltGr / Right Alt reliability notes
+
+On Windows, the physical Right Alt key may come through to the low-level hook as:
+
+- `VK_RMENU` (most common), or
+- `VK_MENU` (generic Alt) **with** `LLKHF_EXTENDED` set (right-side Alt).
+
+Some keyboard/input stacks (OEM utilities, RDP/VMs, certain remappers) are more likely to
+emit the second form, which historically made `AltRight` appear “dead” on some machines.
+
+Also: on many non-US layouts, Right Alt behaves as **AltGr** (often synthesized as
+`Ctrl+Alt` internally). That can be:
+
+- great for typing special characters, but
+- awkward as a global “toggle recording” hotkey.
+
+To reduce false positives while typing, the Windows hook suppresses **release-triggered**
+actions (toggle/retry/paste/Quick Ask toggle) if it detects any non-modifier key pressed
+while Right Alt is held.
+
+#### How to debug in a packaged (release) build
+
+Release builds on Windows typically don’t have a visible console, so `RUST_LOG` output isn’t
+easy for end users to collect.
+
+Instead, enable the in-app hotkey diagnostics:
+
+- Set `hotkey_debug_enabled = true` in `settings.json`, or
+- Use the UI toggle in **Request Logs → System Events (Live) → Hotkey debug**.
+
+Then reproduce the issue and copy the events from **System Events (Live)**.
+You should see entries like:
+
+- `Hotkey debug: RightAlt down/up`
+- details containing `vk`, `scan`, `flags`, `extended`, `injected`, and whether the event was
+  suppressed due to AltGr-style typing.
 
 ### 2) Startup registration vs runtime registration
 

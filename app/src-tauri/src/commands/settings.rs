@@ -1,5 +1,5 @@
 use crate::settings::HotkeyConfig;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -9,6 +9,50 @@ use tauri_plugin_store::StoreExt;
 
 #[cfg(desktop)]
 use std::collections::HashSet;
+
+/// Update the backend runtime flag for hotkey debug events.
+///
+/// Why this exists:
+/// The Windows modifier-only hotkey hook runs on a background thread and needs
+/// a cheap, reliable way to know whether it should emit debug `system-event`s.
+/// Reading from the store on every keypress is both expensive and can be stale
+/// (multi-window store instances can lag behind the JS side).
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn set_hotkey_debug_enabled_runtime(app: AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(enabled);
+    }
+
+    #[derive(serde::Serialize, Clone)]
+    struct SystemEvent {
+        timestamp: String,
+        event_type: String,
+        message: String,
+        details: Option<String>,
+    }
+
+    let event = SystemEvent {
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        event_type: "debug".to_string(),
+        message: format!("Hotkey debug runtime enabled={}", enabled),
+        details: Some("(confirmation event from backend)".to_string()),
+    };
+
+    let _ = app.emit("system-event", event);
+    Ok(())
+}
+
+// Stub for non-desktop platforms
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn set_hotkey_debug_enabled_runtime(
+    _app: AppHandle,
+    _enabled: bool,
+) -> Result<(), String> {
+    Ok(())
+}
 
 #[cfg(all(desktop, target_os = "windows"))]
 fn is_windows_modifier_only_hotkey(hk: &HotkeyConfig) -> bool {

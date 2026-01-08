@@ -40,20 +40,36 @@ const STANDALONE_KEYS = new Set([
   "end",
   "pageup",
   "pagedown",
+  "capslock",
   "scrolllock",
+  "numlock",
   "pause",
   "printscreen",
+
+  // Function keys beyond F12 (often not emitted by WebViews)
+  "f13",
+  "f14",
+  "f15",
+  "f16",
+  "f17",
+  "f18",
+  "f19",
+  "f20",
+  "f21",
+  "f22",
+  "f23",
+  "f24",
 
   // Media keys (supported by tauri-plugin-global-shortcut on desktop platforms)
   "mediaplaypause",
   "medianexttrack",
   "mediaprevtrack",
   "mediaprevioustrack",
+  "mediatracknext",
+  "mediatrackprevious",
   "mediastop",
-  "mediaselect",
-  "mediarecord",
-  "mediafastforward",
-  "mediarewind",
+  "mediaplay",
+  "mediapause",
 
   // Volume keys
   "volumeup",
@@ -93,19 +109,50 @@ const STANDALONE_KEYS = new Set([
 
 // Keys that are awkward/unreliable to capture from a WebView keyboard event.
 // We still let users pick them explicitly.
-const SPECIAL_KEY_OPTIONS: Array<{ label: string; value: string }> = [
+const SPECIAL_KEY_OPTIONS: Array<{ label: string; value: string; disabled?: boolean }> = [
   // Modifier-only (Windows-only; requires native hook)
   { label: "Modifier (Windows): Right Alt (AltGr)", value: "AltRight" },
 
+  // Common non-printable keys
+  { label: "System: Caps Lock", value: "CapsLock" },
+  { label: "System: Num Lock", value: "NumLock" },
+  { label: "System: Scroll Lock", value: "ScrollLock" },
+  { label: "System: Print Screen", value: "PrintScreen" },
+  { label: "System: Pause / Break", value: "Pause" },
+  { label: "Navigation: Insert", value: "Insert" },
+  { label: "Navigation: Delete", value: "Delete" },
+  { label: "Navigation: Home", value: "Home" },
+  { label: "Navigation: End", value: "End" },
+  { label: "Navigation: Page Up", value: "PageUp" },
+  { label: "Navigation: Page Down", value: "PageDown" },
+
+  // Function keys (often not emitted by WebViews)
+  { label: "Function: F13", value: "F13" },
+  { label: "Function: F14", value: "F14" },
+  { label: "Function: F15", value: "F15" },
+  { label: "Function: F16", value: "F16" },
+  { label: "Function: F17", value: "F17" },
+  { label: "Function: F18", value: "F18" },
+  { label: "Function: F19", value: "F19" },
+  { label: "Function: F20", value: "F20" },
+  { label: "Function: F21", value: "F21" },
+  { label: "Function: F22", value: "F22" },
+  { label: "Function: F23", value: "F23" },
+  { label: "Function: F24", value: "F24" },
+
   // Media
   { label: "Media: Play/Pause", value: "MediaPlayPause" },
-  { label: "Media: Next Track", value: "MediaNextTrack" },
-  { label: "Media: Previous Track", value: "MediaPrevTrack" },
+  { label: "Media: Play", value: "MediaPlay" },
+  { label: "Media: Pause", value: "MediaPause" },
+  { label: "Media: Next Track", value: "MediaTrackNext" },
+  { label: "Media: Previous Track", value: "MediaTrackPrevious" },
   { label: "Media: Stop", value: "MediaStop" },
-  { label: "Media: Select", value: "MediaSelect" },
-  { label: "Media: Record", value: "MediaRecord" },
-  { label: "Media: Fast Forward", value: "MediaFastForward" },
-  { label: "Media: Rewind", value: "MediaRewind" },
+  // These exist on some keyboards but are not supported by the current
+  // global-hotkey string parser used by tauri-plugin-global-shortcut.
+  { label: "Media: Select (unsupported)", value: "MediaSelect", disabled: true },
+  { label: "Media: Record (unsupported)", value: "MediaRecord", disabled: true },
+  { label: "Media: Fast Forward (unsupported)", value: "MediaFastForward", disabled: true },
+  { label: "Media: Rewind (unsupported)", value: "MediaRewind", disabled: true },
 
   // Volume
   { label: "Volume: Mute", value: "VolumeMute" },
@@ -113,26 +160,26 @@ const SPECIAL_KEY_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "Volume: Down", value: "VolumeDown" },
 
   // Browser
-  { label: "Browser: Back", value: "BrowserBack" },
-  { label: "Browser: Forward", value: "BrowserForward" },
-  { label: "Browser: Refresh", value: "BrowserRefresh" },
-  { label: "Browser: Stop", value: "BrowserStop" },
-  { label: "Browser: Search", value: "BrowserSearch" },
-  { label: "Browser: Favorites", value: "BrowserFavorites" },
-  { label: "Browser: Home", value: "BrowserHome" },
+  { label: "Browser: Back (unsupported)", value: "BrowserBack", disabled: true },
+  { label: "Browser: Forward (unsupported)", value: "BrowserForward", disabled: true },
+  { label: "Browser: Refresh (unsupported)", value: "BrowserRefresh", disabled: true },
+  { label: "Browser: Stop (unsupported)", value: "BrowserStop", disabled: true },
+  { label: "Browser: Search (unsupported)", value: "BrowserSearch", disabled: true },
+  { label: "Browser: Favorites (unsupported)", value: "BrowserFavorites", disabled: true },
+  { label: "Browser: Home (unsupported)", value: "BrowserHome", disabled: true },
 
   // Launch / app keys
-  { label: "Launch: Mail", value: "LaunchMail" },
-  { label: "Launch: Media Player", value: "LaunchMediaPlayer" },
-  { label: "Launch: App 1", value: "LaunchApp1" },
-  { label: "Launch: App 2", value: "LaunchApp2" },
+  { label: "Launch: Mail (unsupported)", value: "LaunchMail", disabled: true },
+  { label: "Launch: Media Player (unsupported)", value: "LaunchMediaPlayer", disabled: true },
+  { label: "Launch: App 1 (unsupported)", value: "LaunchApp1", disabled: true },
+  { label: "Launch: App 2 (unsupported)", value: "LaunchApp2", disabled: true },
 
   // Display / hardware
-  { label: "Display: Brightness Up", value: "BrightnessUp" },
-  { label: "Display: Brightness Down", value: "BrightnessDown" },
-  { label: "Keyboard: Backlight Up", value: "KeyboardBrightnessUp" },
-  { label: "Keyboard: Backlight Down", value: "KeyboardBrightnessDown" },
-  { label: "Keyboard: Backlight Toggle", value: "KeyboardBrightnessToggle" },
+  { label: "Display: Brightness Up (unsupported)", value: "BrightnessUp", disabled: true },
+  { label: "Display: Brightness Down (unsupported)", value: "BrightnessDown", disabled: true },
+  { label: "Keyboard: Backlight Up (unsupported)", value: "KeyboardBrightnessUp", disabled: true },
+  { label: "Keyboard: Backlight Down (unsupported)", value: "KeyboardBrightnessDown", disabled: true },
+  { label: "Keyboard: Backlight Toggle (unsupported)", value: "KeyboardBrightnessToggle", disabled: true },
 
   // Misc
   { label: "Hardware: Microphone Mute", value: "MicMute" },
@@ -140,9 +187,12 @@ const SPECIAL_KEY_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "Hardware: Eject", value: "Eject" },
 
   // Lock/power-ish keys (often unsupported as global shortcuts; still selectable)
-  { label: "System: Sleep", value: "Sleep" },
-  { label: "System: Wake Up", value: "WakeUp" },
-  { label: "System: Power", value: "Power" },
+  { label: "System: Sleep (unsupported)", value: "Sleep", disabled: true },
+  { label: "System: Wake Up (unsupported)", value: "WakeUp", disabled: true },
+  { label: "System: Power (unsupported)", value: "Power", disabled: true },
+
+  // Context Menu / Application key (requested, but not supported by global-hotkey parser)
+  { label: "Keyboard: Context Menu (unsupported)", value: "ContextMenu", disabled: true },
 ];
 
 /**
@@ -174,6 +224,11 @@ const KEY_NAME_MAP: Record<string, string> = {
   end: "End",
   pageup: "PageUp",
   pagedown: "PageDown",
+  capslock: "CapsLock",
+  numlock: "NumLock",
+  scrolllock: "ScrollLock",
+  printscreen: "PrintScreen",
+  pause: "Pause",
   // Arrow keys
   arrowup: "ArrowUp",
   arrowdown: "ArrowDown",
@@ -196,6 +251,18 @@ const KEY_NAME_MAP: Record<string, string> = {
   f10: "F10",
   f11: "F11",
   f12: "F12",
+  f13: "F13",
+  f14: "F14",
+  f15: "F15",
+  f16: "F16",
+  f17: "F17",
+  f18: "F18",
+  f19: "F19",
+  f20: "F20",
+  f21: "F21",
+  f22: "F22",
+  f23: "F23",
+  f24: "F24",
   // Numpad
   numpad0: "Numpad0",
   numpad1: "Numpad1",
@@ -228,10 +295,16 @@ const KEY_NAME_MAP: Record<string, string> = {
 
   // Media keys
   mediaplaypause: "MediaPlayPause",
-  medianexttrack: "MediaNextTrack",
-  mediaprevtrack: "MediaPrevTrack",
-  mediaprevioustrack: "MediaPrevTrack",
+  mediaplay: "MediaPlay",
+  mediapause: "MediaPause",
+  medianexttrack: "MediaTrackNext",
+  mediatracknext: "MediaTrackNext",
+  mediaprevtrack: "MediaTrackPrevious",
+  mediaprevioustrack: "MediaTrackPrevious",
+  mediatrackprevious: "MediaTrackPrevious",
   mediastop: "MediaStop",
+  // NOTE: Some media keys exist on keyboards but are not supported by the current
+  // global-hotkey parser; we still map them for display purposes.
   mediaselect: "MediaSelect",
   mediarecord: "MediaRecord",
   mediafastforward: "MediaFastForward",
@@ -687,6 +760,16 @@ export function HotkeyInput({
           w={260}
         />
       </div>
+
+      {(specialKeySelection === "AltRight" || effectiveValue?.key === "AltRight") && (
+        <div style={{ marginTop: 6 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            Note: Right Alt is AltGr on many keyboard layouts. It can be unreliable on
+            some Windows setups and may interfere with typing special characters. If it
+            doesn’t work well, consider using a key like F3 or Ctrl+Space.
+          </span>
+        </div>
+      )}
     </div>
   );
 }

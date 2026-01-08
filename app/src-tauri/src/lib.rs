@@ -228,6 +228,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // When deleting old transcriptions, optionally also delete their .wav recordings.
     dirty |= set_default("transcription_retention_delete_recordings", json!(false), false);
 
+    // Optional diagnostics: when true, emit additional hotkey debug events to the
+    // in-app "System Events" panel (useful in release builds).
+    dirty |= set_default("hotkey_debug_enabled", json!(false), false);
+
     // Persisted stats retention (usage/cost events).
     // These are stored on disk (unlike request logs which are in-memory).
     // 0 = keep forever.
@@ -2574,6 +2578,7 @@ pub fn run() {
             commands::text::get_server_url,
             commands::settings::register_shortcuts,
             commands::settings::unregister_shortcuts,
+            commands::settings::set_hotkey_debug_enabled_runtime,
             is_audio_mute_supported,
             commands::history::add_history_entry,
             commands::history::get_history,
@@ -2732,6 +2737,25 @@ pub fn run() {
                     let app_handle = app.handle().clone();
                     main.on_window_event(move |event| {
                         if let WindowEvent::CloseRequested { api, .. } = event {
+                            // Hotkey debug is meant to be temporary. If the user closes the
+                            // main window (close-to-tray), disable it so it can't keep
+                            // generating high-volume debug events in the background.
+                            #[cfg(target_os = "windows")]
+                            {
+                                crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(false);
+                            }
+
+                            // Best-effort: persist the flag off so it doesn't remain enabled
+                            // across sessions.
+                            {
+                                use tauri_plugin_store::StoreExt;
+
+                                if let Ok(store) = app_handle.store("settings.json") {
+                                    store.set("hotkey_debug_enabled", serde_json::json!(false));
+                                    let _ = store.save();
+                                }
+                            }
+
                             let behavior: String = get_setting_from_store(
                                 &app_handle,
                                 "main_window_close_behavior",
@@ -2818,7 +2842,7 @@ pub fn run() {
 
                 let retention = RequestLogsRetentionConfig {
                     mode,
-                    amount: amount.max(1).min(1000) as usize,
+                    amount: amount.max(1).min(200) as usize,
                     time_retention: if days == 0 {
                         None
                     } else {
@@ -3200,8 +3224,15 @@ pub fn run() {
 ///
 /// This is used for hotkeys like "AltRight" with no modifiers.
 #[cfg(all(desktop, target_os = "windows"))]
-pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: bool) {
+pub(crate) fn handle_modifier_key_event(
+    app: &AppHandle,
+    key: &str,
+    is_down: bool,
+    suppress_release_actions: bool,
+) {
     let state = app.state::<AppState>();
+
+    let hotkey_debug = crate::windows_modifier_hotkeys::hotkey_debug_runtime_enabled();
 
     // Determine which (if any) configured hotkey uses this modifier-only key.
     let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
@@ -3240,7 +3271,44 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
     let is_quick_ask_toggle = quick_ask_toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
 
     if !(is_toggle || is_hold || is_paste_last || is_retry || is_quick_ask_hold || is_quick_ask_toggle) {
+        if hotkey_debug {
+            let details = format!(
+                "key={key} is_down={is_down} suppress_release_actions={suppress_release_actions} toggle_hotkey={} hold_hotkey={} paste_last_hotkey={} retry_hotkey={} quick_ask_hold_hotkey={} quick_ask_toggle_hotkey={} (no match)",
+                toggle_hotkey
+                    .as_ref()
+                    .map(|h| h.to_shortcut_string())
+                    .unwrap_or_else(|| "<disabled>".to_string()),
+                hold_hotkey
+                    .as_ref()
+                    .map(|h| h.to_shortcut_string())
+                    .unwrap_or_else(|| "<disabled>".to_string()),
+                paste_last_hotkey
+                    .as_ref()
+                    .map(|h| h.to_shortcut_string())
+                    .unwrap_or_else(|| "<disabled>".to_string()),
+                retry_hotkey
+                    .as_ref()
+                    .map(|h| h.to_shortcut_string())
+                    .unwrap_or_else(|| "<disabled>".to_string()),
+                quick_ask_hold_hotkey
+                    .as_ref()
+                    .map(|h| h.to_shortcut_string())
+                    .unwrap_or_else(|| "<disabled>".to_string()),
+                quick_ask_toggle_hotkey
+                    .as_ref()
+                    .map(|h| h.to_shortcut_string())
+                    .unwrap_or_else(|| "<disabled>".to_string()),
+            );
+            emit_system_event(app, "debug", "Modifier-only hotkey event (ignored)", Some(&details));
+        }
         return;
+    }
+
+    if hotkey_debug {
+        let details = format!(
+            "key={key} is_down={is_down} suppress_release_actions={suppress_release_actions} match: toggle={is_toggle} hold={is_hold} paste_last={is_paste_last} retry={is_retry} quick_ask_hold={is_quick_ask_hold} quick_ask_toggle={is_quick_ask_toggle}",
+        );
+        emit_system_event(app, "debug", "Modifier-only hotkey event (matched)", Some(&details));
     }
 
     // Get current settings from store (mirrors handle_shortcut_event behavior)
@@ -3255,10 +3323,32 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
         if is_down {
             state.toggle_key_held.swap(true, Ordering::SeqCst);
         } else {
-            if state.toggle_key_held.swap(false, Ordering::SeqCst) {
+            let was_held = state.toggle_key_held.swap(false, Ordering::SeqCst);
+            if suppress_release_actions {
+                if hotkey_debug {
+                    emit_system_event(
+                        app,
+                        "debug",
+                        "Toggle(AltRight): release suppressed",
+                        Some("AltGr/typing suppression triggered"),
+                    );
+                }
+                return;
+            }
+
+            if was_held {
                 let pipeline_state = app
                     .try_state::<pipeline::SharedPipeline>()
                     .map(|p| p.state());
+
+                if hotkey_debug {
+                    emit_system_event(
+                        app,
+                        "debug",
+                        "Toggle(AltRight): key released",
+                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
+                    );
+                }
 
                 // Do not allow starting a new capture while we are processing a previous one.
                 if matches!(
@@ -3269,6 +3359,15 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
                         "Toggle(AltRight) ignored (pipeline busy: {:?})",
                         pipeline_state
                     );
+
+                    if hotkey_debug {
+                        emit_system_event(
+                            app,
+                            "debug",
+                            "Toggle(AltRight) ignored (pipeline busy)",
+                            Some(&format!("Pipeline state: {:?}", pipeline_state)),
+                        );
+                    }
                     return;
                 }
 
@@ -3304,7 +3403,23 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
                         "Toggle(AltRight) ignored (pipeline state: {:?})",
                         pipeline_state
                     );
+
+                    if hotkey_debug {
+                        emit_system_event(
+                            app,
+                            "debug",
+                            "Toggle(AltRight) ignored (cannot start/stop)",
+                            Some(&format!("Pipeline state: {:?}", pipeline_state)),
+                        );
+                    }
                 }
+            } else if hotkey_debug {
+                emit_system_event(
+                    app,
+                    "debug",
+                    "Toggle(AltRight): key released but was_held=false",
+                    Some("Down event was not observed/latched"),
+                );
             }
         }
 
@@ -3363,7 +3478,12 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
             return;
         }
 
-        if !state.paste_key_held.swap(false, Ordering::SeqCst) {
+        let was_held = state.paste_key_held.swap(false, Ordering::SeqCst);
+        if !was_held {
+            return;
+        }
+
+        if suppress_release_actions {
             return;
         }
 
@@ -3400,7 +3520,13 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
             state.retry_key_held.swap(true, Ordering::SeqCst);
             return;
         }
-        if !state.retry_key_held.swap(false, Ordering::SeqCst) {
+
+        let was_held = state.retry_key_held.swap(false, Ordering::SeqCst);
+        if !was_held {
+            return;
+        }
+
+        if suppress_release_actions {
             return;
         }
 
@@ -3486,7 +3612,12 @@ pub(crate) fn handle_modifier_key_event(app: &AppHandle, key: &str, is_down: boo
             return;
         }
 
-        if !state.quick_ask_toggle_key_held.swap(false, Ordering::SeqCst) {
+        let was_held = state.quick_ask_toggle_key_held.swap(false, Ordering::SeqCst);
+        if !was_held {
+            return;
+        }
+
+        if suppress_release_actions {
             return;
         }
 

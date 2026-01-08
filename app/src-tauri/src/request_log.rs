@@ -20,8 +20,9 @@ const DEFAULT_MAX_LOGS: usize = 50;
 
 /// Defensive hard cap for request logs kept in memory.
 ///
-/// Even when using time-based retention, we don't want unbounded growth.
-const HARD_MAX_LOGS: usize = 1000;
+/// Even when using time-based retention, we don't want unbounded growth. Also,
+/// request logs can include large JSON payloads, so keep this conservative.
+const HARD_MAX_LOGS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestLogsRetentionMode {

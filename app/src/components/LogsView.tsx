@@ -14,6 +14,7 @@ import {
   Paper,
   Popover,
   Stack,
+  Switch,
   Text,
   TextInput,
   Title,
@@ -21,8 +22,8 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { listen } from "@tauri-apps/api/event";
 import { useDisclosure } from "@mantine/hooks";
+import { listen } from "@tauri-apps/api/event";
 import {
   AlertCircle,
   AlertTriangle,
@@ -46,8 +47,14 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useClearRequestLogs, useRequestLogs } from "../lib/queries";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useClearRequestLogs,
+  useRequestLogs,
+  useSettings,
+  useUpdateHotkeyDebugEnabled,
+} from "../lib/queries";
+import { tauriAPI } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
 import { diffTextInline } from "../lib/textDiff";
 import { LogJsonModal } from "./LogJsonModal";
@@ -865,6 +872,8 @@ export function LogsView(
 ) {
   const { jumpToLogId = null, onJumpHandled } = props;
   const { data: logs } = useRequestLogs(50);
+  const { data: settings } = useSettings();
+  const updateHotkeyDebugEnabled = useUpdateHotkeyDebugEnabled();
   const clearLogsMutation = useClearRequestLogs();
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([]);
   const [systemEventsAccordionValue, setSystemEventsAccordionValue] = useState<
@@ -1044,6 +1053,25 @@ export function LogsView(
     const start = (page - 1) * LOGS_PAGE_SIZE;
     return filteredLogs.slice(start, start + LOGS_PAGE_SIZE);
   }, [filteredLogs, page]);
+
+  const hotkeyDebugEnabled = settings?.hotkey_debug_enabled ?? false;
+
+  // Hotkey debug is intentionally ephemeral: if the user navigates away from the
+  // Logs view (or closes the window), turn it off to avoid accidentally leaving
+  // a high-volume debug stream enabled.
+  const hotkeyDebugEnabledRef = useRef(hotkeyDebugEnabled);
+  useEffect(() => {
+    hotkeyDebugEnabledRef.current = hotkeyDebugEnabled;
+  }, [hotkeyDebugEnabled]);
+
+  useEffect(() => {
+    return () => {
+      if (hotkeyDebugEnabledRef.current) {
+        // Best-effort: don't block unmount.
+        void tauriAPI.updateHotkeyDebugEnabled(false);
+      }
+    };
+  }, []);
 
   return (
     <div style={{ width: "100%" }}>
@@ -1363,68 +1391,87 @@ export function LogsView(
         <Stack gap="md" style={{ width: "100%" }}>
 
       {/* System Events Panel */}
-      {systemEvents.length > 0 && (
-        <Accordion
-          variant="contained"
-          radius="md"
-          chevronPosition="right"
-          value={systemEventsAccordionValue}
-          onChange={setSystemEventsAccordionValue}
-        >
-          <Accordion.Item value="system-events">
-            <Accordion.Control>
-              <Group justify="space-between" wrap="nowrap" pr="xs">
-                <Group gap="xs" wrap="nowrap">
-                  <Zap
-                    size={16}
-                    style={{ color: "var(--mantine-color-yellow-5)" }}
-                  />
-                  <Text size="sm" fw={600}>
-                    System Events (Live)
-                  </Text>
-                  <Badge size="xs" variant="light" color="gray">
-                    {systemEvents.length}
-                  </Badge>
-                </Group>
-
-                <Group gap="xs" wrap="nowrap">
-                  <CopyButton value={JSON.stringify(systemEvents, null, 2)}>
-                    {({ copied, copy }) => (
-                      <Button
-                        variant="subtle"
-                        color={copied ? "teal" : "gray"}
-                        size="xs"
-                        leftSection={<Copy size={12} />}
-                        onClick={(e) => {
-                          // Prevent toggling the accordion when clicking actions.
-                          e.preventDefault();
-                          e.stopPropagation();
-                          copy();
-                        }}
-                      >
-                        {copied ? "Copied!" : "Copy All"}
-                      </Button>
-                    )}
-                  </CopyButton>
-
-                  <Button
-                    variant="subtle"
-                    color="gray"
-                    size="xs"
-                    onClick={(e) => {
-                      // Prevent toggling the accordion when clicking actions.
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setSystemEvents([]);
-                      setSystemEventsAccordionValue(null);
-                    }}
-                  >
-                    Clear
-                  </Button>
-                </Group>
+      <Accordion
+        variant="contained"
+        radius="md"
+        chevronPosition="right"
+        value={systemEventsAccordionValue}
+        onChange={setSystemEventsAccordionValue}
+      >
+        <Accordion.Item value="system-events">
+          <Accordion.Control>
+            <Group justify="space-between" wrap="nowrap" pr="xs">
+              <Group gap="xs" wrap="nowrap">
+                <Zap
+                  size={16}
+                  style={{ color: "var(--mantine-color-yellow-5)" }}
+                />
+                <Text size="sm" fw={600}>
+                  System Events (Live)
+                </Text>
+                <Badge size="xs" variant="light" color="gray">
+                  {systemEvents.length}
+                </Badge>
               </Group>
-            </Accordion.Control>
-            <Accordion.Panel>
+            </Group>
+          </Accordion.Control>
+
+          <Accordion.Panel>
+            <Group justify="space-between" align="center" mb={8}>
+              <Tooltip
+                label={
+                  "Enable backend hotkey diagnostics (Right Alt / AltGr). Useful for debugging flaky modifier-only hotkeys in final builds."
+                }
+                withArrow
+              >
+                <Switch
+                  size="xs"
+                  label="Hotkey debug"
+                  checked={hotkeyDebugEnabled}
+                  disabled={!settings || updateHotkeyDebugEnabled.isPending}
+                  onChange={(e) =>
+                    updateHotkeyDebugEnabled.mutate(e.currentTarget.checked)
+                  }
+                />
+              </Tooltip>
+
+              <Group gap="xs">
+                <CopyButton value={JSON.stringify(systemEvents, null, 2)}>
+                  {({ copied, copy }) => (
+                    <Button
+                      variant="subtle"
+                      color={copied ? "teal" : "gray"}
+                      size="xs"
+                      leftSection={<Copy size={12} />}
+                      onClick={copy}
+                      disabled={systemEvents.length === 0}
+                    >
+                      {copied ? "Copied!" : "Copy All"}
+                    </Button>
+                  )}
+                </CopyButton>
+
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  size="xs"
+                  onClick={() => {
+                    setSystemEvents([]);
+                    setSystemEventsAccordionValue(null);
+                  }}
+                  disabled={systemEvents.length === 0}
+                >
+                  Clear
+                </Button>
+              </Group>
+            </Group>
+
+            {systemEvents.length === 0 ? (
+              <Text size="xs" c="dimmed">
+                No system events yet. Turn on Hotkey debug, then press Right Alt
+                (AltGr) to capture low-level key events.
+              </Text>
+            ) : (
               <Stack gap={4} style={{ maxHeight: 120, overflowY: "auto" }}>
                 {systemEvents.map((event, idx) => (
                   <Group
@@ -1474,10 +1521,10 @@ export function LogsView(
                   </Group>
                 ))}
               </Stack>
-            </Accordion.Panel>
-          </Accordion.Item>
-        </Accordion>
-      )}
+            )}
+          </Accordion.Panel>
+        </Accordion.Item>
+      </Accordion>
 
       {pageLogs && pageLogs.length > 0 ? (
         <Accordion

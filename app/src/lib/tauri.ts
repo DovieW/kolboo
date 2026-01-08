@@ -653,6 +653,10 @@ export interface AppSettings {
   retry_hotkey: HotkeyConfig | null;
   quick_ask_hold_hotkey: HotkeyConfig | null;
   quick_ask_toggle_hotkey: HotkeyConfig | null;
+
+  /** When true, backend emits extra hotkey diagnostics to the System Events panel. */
+  hotkey_debug_enabled: boolean;
+
   selected_mic_id: string | null;
   sound_enabled: boolean;
   audio_cue: AudioCue;
@@ -1562,6 +1566,10 @@ export const tauriAPI = {
         await store.get("quick_ask_toggle_hotkey"),
         defaultQuickAskToggleHotkey
       ),
+
+      hotkey_debug_enabled:
+        (await store.get<boolean>("hotkey_debug_enabled")) ?? false,
+
       selected_mic_id:
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
@@ -2008,6 +2016,22 @@ export const tauriAPI = {
     const store = await getStore();
     await store.set("sound_enabled", enabled);
     await store.save();
+  },
+
+  async updateHotkeyDebugEnabled(enabled: boolean): Promise<void> {
+    // Update backend runtime flag immediately so debug events can start flowing
+    // without waiting for store writes / reloads.
+    await invoke("set_hotkey_debug_enabled_runtime", { enabled: !!enabled });
+
+    const store = await getStore();
+    await store.set("hotkey_debug_enabled", !!enabled);
+    await store.save();
+
+    // Notify other windows (overlay) to refresh cached settings.
+    // Without this, a secondary window with a stale Store instance can later
+    // save another setting and inadvertently clobber this flag back to the
+    // default value.
+    await emit("settings-changed", { hotkey_debug_enabled: !!enabled });
   },
 
   async updateAudioCue(cue: AudioCue): Promise<void> {

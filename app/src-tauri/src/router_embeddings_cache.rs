@@ -7,6 +7,13 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 pub const ROUTER_EMBEDDINGS_STORE_KEY: &str = "router_embeddings_cache_v1";
+// IMPORTANT: Do not store large / frequently-mutated caches in settings.json.
+// The store plugin maintains an in-memory map; saving from Rust can overwrite
+// changes made by the JS side (and vice versa) if either side has a stale view.
+// Using a dedicated store file avoids clobbering user settings like
+// `hotkey_debug_enabled`.
+#[cfg(desktop)]
+pub const ROUTER_EMBEDDINGS_STORE_FILE: &str = "router_embeddings_cache.json";
 
 pub fn encode_embedding_b64(v: &[f32]) -> String {
     let mut bytes: Vec<u8> = Vec::with_capacity(v.len() * 4);
@@ -36,12 +43,18 @@ pub fn decode_embedding_b64(s: &str) -> Option<Vec<f32>> {
 
 #[cfg(desktop)]
 pub fn load_router_embeddings_from_store(app: &AppHandle) -> HashMap<String, Vec<f32>> {
-    let store = app.store("settings.json");
-    let Ok(store) = store else {
-        return HashMap::new();
-    };
+    // Prefer the dedicated cache store.
+    let raw = app
+        .store(ROUTER_EMBEDDINGS_STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(ROUTER_EMBEDDINGS_STORE_KEY))
+        // Backward compatibility: older installs stored this cache in settings.json.
+        .or_else(|| {
+            app.store("settings.json")
+                .ok()
+                .and_then(|store| store.get(ROUTER_EMBEDDINGS_STORE_KEY))
+        });
 
-    let raw = store.get(ROUTER_EMBEDDINGS_STORE_KEY);
     let Some(raw) = raw else {
         return HashMap::new();
     };
@@ -72,7 +85,7 @@ pub fn merge_router_embeddings_into_store(
     new_entries: &HashMap<String, Vec<f32>>,
 ) -> Result<(usize, usize), String> {
     let store = app
-        .store("settings.json")
+        .store(ROUTER_EMBEDDINGS_STORE_FILE)
         .map_err(|e| format!("Failed to get store: {e}"))?;
 
     let mut existing: serde_json::Map<String, JsonValue> = store
