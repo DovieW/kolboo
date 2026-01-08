@@ -70,7 +70,7 @@ whisper-rs = { version = "0.15", optional = true }
 dirs = { version = "6.0", optional = true }  # For model storage paths
 
 # HTTP client for STT/LLM API calls
-reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
+reqwest = { version = "0.13", features = ["json", "multipart", "stream"] }
 
 # Hashing (used for validating downloaded local Whisper model files)
 sha2 = "0.10"
