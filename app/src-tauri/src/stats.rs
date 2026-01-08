@@ -20,6 +20,7 @@ use crate::cost::anthropic as anthropic_cost;
 use crate::cost::deepgram as deepgram_cost;
 use crate::cost::assemblyai as assemblyai_cost;
 use crate::cost::speechmatics as speechmatics_cost;
+use crate::cost::fireworks as fireworks_cost;
 use tauri::AppHandle;
 use tauri::{Manager, Emitter};
 use crate::request_log::RequestLogStore;
@@ -643,6 +644,16 @@ pub fn emit_cost_events_for_current_request(
             }
         }
 
+        if inputs.stt_provider == "fireworks" {
+            if ev.estimated_cost_usd_micros.is_none() {
+                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                    if let Some(micros) = fireworks_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                        ev.estimated_cost_usd_micros = Some(micros);
+                    }
+                }
+            }
+        }
+
         // Surface per-call pricing info in the in-memory request log so the UI can show it.
         let _ = log_store.with_current(|log| {
             log.stt_is_free_tier = ev.is_free_tier;
@@ -738,6 +749,24 @@ pub fn emit_cost_events_for_current_request(
                     });
 
                     if let Some(micros) = anthropic_cost::estimate_llm_cost_from_usage(model, u) {
+                        ev.estimated_cost_usd_micros = Some(micros);
+                    }
+                }
+            }
+        }
+
+        if llm_provider == "fireworks" {
+            if let (Some(model), Some(resp)) = (ev.model.as_deref(), inputs.llm_response_json.as_ref()) {
+                if let Some(u) = parse_openai_usage_from_response_json(resp) {
+                    ev.tokens = Some(TokenUsage {
+                        input_tokens: u.input_tokens,
+                        output_tokens: u.output_tokens,
+                        cached_input_tokens: u.cached_input_tokens,
+                        input_audio_tokens: u.input_audio_tokens,
+                        output_audio_tokens: u.output_audio_tokens,
+                    });
+
+                    if let Some(micros) = fireworks_cost::estimate_llm_cost_from_usage(model, u) {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }

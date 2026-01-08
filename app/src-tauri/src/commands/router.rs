@@ -102,7 +102,10 @@ pub async fn cache_router_embeddings(
         .as_deref()
         .unwrap_or("openai")
         .to_string();
-    if embedding_provider != "openai" && embedding_provider != "cohere" {
+    if embedding_provider != "openai"
+        && embedding_provider != "cohere"
+        && embedding_provider != "fireworks"
+    {
         return Err(format!(
             "Embeddings provider '{}' not supported",
             embedding_provider
@@ -111,6 +114,9 @@ pub async fn cache_router_embeddings(
 
     let embedding_model_default = if embedding_provider == "cohere" {
         "embed-english-v3.0"
+    } else if embedding_provider == "fireworks" {
+        // Starter default: keep in sync with the UI model list.
+        "fireworks/qwen3-embedding-0p6b"
     } else {
         "text-embedding-3-small"
     };
@@ -177,6 +183,8 @@ pub async fn cache_router_embeddings(
 
         let cache_key = if embedding_provider == "cohere" {
             format!("cohere::{}::search_document::{}", embedding_model, hint)
+        } else if embedding_provider == "fireworks" {
+            format!("fireworks::{}::{}", embedding_model, hint)
         } else {
             // Back-compat: keep existing OpenAI cache key format.
             format!("openai::{}::{}", embedding_model, hint)
@@ -211,9 +219,15 @@ pub async fn cache_router_embeddings(
             continue;
         }
 
-        let embedding = crate::embeddings::openai::embed_text(&client, api_key, &embedding_model, hint)
-            .await
-            .map_err(|e| format!("Embeddings request failed: {e}"))?;
+        let embedding = if embedding_provider == "fireworks" {
+            crate::embeddings::fireworks::embed_text(&client, api_key, &embedding_model, hint)
+                .await
+                .map_err(|e| format!("Embeddings request failed: {e}"))?
+        } else {
+            crate::embeddings::openai::embed_text(&client, api_key, &embedding_model, hint)
+                .await
+                .map_err(|e| format!("Embeddings request failed: {e}"))?
+        };
 
         if !embedding.is_empty() {
             new_entries.insert(cache_key, embedding);

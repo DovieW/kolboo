@@ -1385,6 +1385,15 @@ export function useWhisperModels(enabled: boolean) {
   });
 }
 
+export function useFireworksModels(enabled: boolean) {
+  return useQuery({
+    queryKey: ["fireworksModels"],
+    enabled,
+    queryFn: () => llmAPI.getFireworksModels(),
+    staleTime: 0,
+  });
+}
+
 export function useIsLocalWhisperModelLoaded(enabled: boolean) {
   return useQuery({
     queryKey: ["localWhisperModelLoaded"],

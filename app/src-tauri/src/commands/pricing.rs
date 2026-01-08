@@ -8,6 +8,7 @@ use crate::cost::anthropic as anthropic_cost;
 use crate::cost::deepgram as deepgram_cost;
 use crate::cost::assemblyai as assemblyai_cost;
 use crate::cost::speechmatics as speechmatics_cost;
+use crate::cost::fireworks as fireworks_cost;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SttModelPricing {
@@ -52,6 +53,21 @@ pub fn get_model_pricing(provider: String, kind: String, model: String) -> Optio
         "stt" => {
             if provider_norm == "openai" {
                 let per_min = openai_cost::transcription_usd_micros_per_minute(&model_norm)?;
+                return Some(ModelPricingResponse {
+                    kind: "stt".into(),
+                    provider: provider_norm,
+                    model: model_norm,
+                    stt: Some(SttModelPricing {
+                        usd_micros_per_minute: Some(per_min),
+                        usd_micros_per_hour: None,
+                        min_billed_secs: None,
+                    }),
+                    llm: None,
+                });
+            }
+
+            if provider_norm == "fireworks" {
+                let per_min = fireworks_cost::stt_usd_micros_per_minute(&model_norm)?;
                 return Some(ModelPricingResponse {
                     kind: "stt".into(),
                     provider: provider_norm,
@@ -145,6 +161,21 @@ pub fn get_model_pricing(provider: String, kind: String, model: String) -> Optio
         "llm" => {
             if provider_norm == "openai" {
                 let rates = openai_cost::text_token_rates(&model_norm)?;
+                return Some(ModelPricingResponse {
+                    kind: "llm".into(),
+                    provider: provider_norm,
+                    model: model_norm,
+                    stt: None,
+                    llm: Some(LlmModelPricing {
+                        input_usd_micros_per_1m: rates.input_usd_micros_per_1m,
+                        cached_input_usd_micros_per_1m: rates.cached_input_usd_micros_per_1m,
+                        output_usd_micros_per_1m: rates.output_usd_micros_per_1m,
+                    }),
+                });
+            }
+
+            if provider_norm == "fireworks" {
+                let rates = fireworks_cost::text_token_rates(&model_norm)?;
                 return Some(ModelPricingResponse {
                     kind: "llm".into(),
                     provider: provider_norm,

@@ -47,6 +47,7 @@ import {
   useUpdateQuickAskAnthropicThinkingBudget,
   useUpdateQuickAskGeminiThinkingBudget,
   useUpdateQuickAskGeminiThinkingLevel,
+  useFireworksModels,
 } from "../../lib/queries";
 import {
   type CleanupPromptSections,
@@ -530,7 +531,9 @@ export function PromptSettings({
           ? r.strategy
           : "off",
       embedding_provider:
-        r.embedding_provider === "openai" || r.embedding_provider === "cohere"
+        r.embedding_provider === "openai" ||
+        r.embedding_provider === "cohere" ||
+        r.embedding_provider === "fireworks"
           ? r.embedding_provider
           : null,
       embedding_model:
@@ -1260,15 +1263,31 @@ export function PromptSettings({
 
   const sttProviderIsWhisperServer = effectiveSttProvider === "whisper-server";
 
+  const routerLlmProvider = effectiveRouter?.llm_provider ?? null;
+
+  const fireworksModelsQuery = useFireworksModels(
+    effectiveLlmProvider === "fireworks" ||
+      effectiveQuickAskProvider === "fireworks" ||
+      routerLlmProvider === "fireworks"
+  );
+
+  const getLlmModelOptionsForProvider = (provider: string | null) => {
+    if (!provider) return [];
+    if (provider === "fireworks") {
+      const dynamic = fireworksModelsQuery.data;
+      if (Array.isArray(dynamic) && dynamic.length > 0) return dynamic;
+    }
+    return LLM_MODELS[provider] ?? [];
+  };
+
   const sttModelOptions = effectiveSttProvider
     ? STT_MODELS[effectiveSttProvider] ?? []
     : [];
-  const llmModelOptions = effectiveLlmProvider
-    ? LLM_MODELS[effectiveLlmProvider] ?? []
-    : [];
-  const quickAskModelOptions = effectiveQuickAskProvider
-    ? LLM_MODELS[effectiveQuickAskProvider] ?? []
-    : [];
+
+  const llmModelOptions = getLlmModelOptionsForProvider(effectiveLlmProvider);
+  const quickAskModelOptions = getLlmModelOptionsForProvider(
+    effectiveQuickAskProvider
+  );
 
   const selectedSttModelForUi =
     sttModelOptions.length === 0
@@ -2014,7 +2033,7 @@ export function PromptSettings({
     if (!value) return;
     updateLLMProvider.mutate(value, {
       onSuccess: () => {
-        const models = LLM_MODELS[value];
+        const models = getLlmModelOptionsForProvider(value);
         const firstModel = models?.[0];
         if (firstModel) {
           updateLLMModel.mutate(firstModel.value);
@@ -2037,7 +2056,7 @@ export function PromptSettings({
     if (!value) return;
     updateQuickAskProvider.mutate(value, {
       onSuccess: () => {
-        const models = LLM_MODELS[value];
+        const models = getLlmModelOptionsForProvider(value);
         const firstModel = models?.[0];
         if (firstModel) {
           updateQuickAskModel.mutate(firstModel.value);
@@ -2995,7 +3014,7 @@ export function PromptSettings({
               setLlmProviderInheriting(false);
               setLlmModelInheriting(false);
               setLocalProfileLlmProvider(value);
-              const models = LLM_MODELS[value] ?? [];
+              const models = getLlmModelOptionsForProvider(value);
               const firstModel = models[0]?.value ?? null;
               setLocalProfileLlmModel(firstModel);
               saveProfileMetadata({
@@ -4807,7 +4826,7 @@ export function PromptSettings({
                             settings?.llm_provider ??
                             effectiveRouter?.llm_provider ??
                             "openai";
-                          const modelOptions = LLM_MODELS[seedProvider] ?? [];
+                          const modelOptions = getLlmModelOptionsForProvider(seedProvider);
                           const seedModel =
                             effectiveRouter?.llm_model ??
                             settings?.llm_model ??
@@ -5111,7 +5130,8 @@ export function PromptSettings({
                             effectiveRouter?.llm_provider ??
                             settings?.llm_provider ??
                             "openai";
-                          const modelOptions = LLM_MODELS[routerProvider] ?? [];
+                          const modelOptions =
+                            getLlmModelOptionsForProvider(routerProvider);
                           const routerModel =
                             effectiveRouter?.llm_model ??
                             settings?.llm_model ??
@@ -5323,6 +5343,7 @@ export function PromptSettings({
                                     { value: "gemini", label: "Gemini" },
                                     { value: "anthropic", label: "Anthropic" },
                                     { value: "groq", label: "Groq" },
+                                    { value: "fireworks", label: "Fireworks" },
                                     { value: "ollama", label: "Ollama" },
                                   ]}
                                   value={routerProvider}
@@ -5332,7 +5353,7 @@ export function PromptSettings({
                                       activeProfile.router
                                     );
                                     const nextModelOptions =
-                                      LLM_MODELS[value] ?? [];
+                                      getLlmModelOptionsForProvider(value);
                                     const nextModel =
                                       nextModelOptions[0]?.value ?? null;
                                     saveRouter({
@@ -6208,7 +6229,7 @@ export function PromptSettings({
               setQuickAskProviderInheriting(false);
               setQuickAskModelInheriting(false);
               setLocalProfileQuickAskProvider(value);
-              const models = LLM_MODELS[value] ?? [];
+              const models = getLlmModelOptionsForProvider(value);
               const firstModel = models[0]?.value ?? null;
               setLocalProfileQuickAskModel(firstModel);
               saveProfileMetadata({

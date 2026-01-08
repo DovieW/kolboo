@@ -122,6 +122,7 @@ const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("groq", "Groq", false),
     ("elevenlabs", "ElevenLabs", false),
     ("openai", "OpenAI", false),
+    ("fireworks", "Fireworks", false),
     ("aquavoice", "Aquavoice (Avalon)", false),
     ("assemblyai", "AssemblyAI", false),
     ("speechmatics", "Speechmatics", false),
@@ -134,6 +135,7 @@ const STT_PROVIDERS: &[(&str, &str, bool)] = &[
 const LLM_PROVIDERS: &[(&str, &str, bool)] = &[
     ("cerebras", "Cerebras", false),
     ("openai", "OpenAI", false),
+    ("fireworks", "Fireworks", false),
     ("gemini", "Google AI Studio", false),
     ("anthropic", "Anthropic", false),
     ("cohere", "Cohere", false),
@@ -304,6 +306,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         std::collections::HashMap::new();
     for provider in [
         "openai",
+        "fireworks",
         "aquavoice",
         "groq",
         "elevenlabs",
@@ -420,7 +423,15 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
     // Read all available LLM API keys (for per-profile provider overrides at runtime)
     let mut llm_api_keys: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for provider in ["openai", "anthropic", "groq", "gemini", "cohere", "cerebras"] {
+    for provider in [
+        "openai",
+        "fireworks",
+        "anthropic",
+        "groq",
+        "gemini",
+        "cohere",
+        "cerebras",
+    ] {
         let key_name = format!("{}_api_key", provider);
         let key: String = app
             .store("settings.json")

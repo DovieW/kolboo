@@ -3,7 +3,7 @@
 use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::llm::{
     format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider, GeminiLlmProvider,
-    GroqLlmProvider, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
+    GroqLlmProvider, FireworksLlmProvider, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
 };
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
@@ -153,6 +153,14 @@ pub(crate) fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn Ll
             };
             Arc::new(provider.with_timeout(config.timeout))
         }
+        "fireworks" => {
+            let provider = if let Some(model) = &config.model {
+                FireworksLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                FireworksLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(provider.with_timeout(config.timeout))
+        }
         "ollama" => {
             let provider = OllamaLlmProvider::with_url(
                 config
@@ -243,6 +251,18 @@ fn create_llm_provider_without_timeout(
                 CohereLlmProvider::with_model(config.api_key.clone(), model.clone())
             } else {
                 CohereLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
+        }
+        "fireworks" => {
+            let provider = if let Some(model) = &config.model {
+                FireworksLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                FireworksLlmProvider::new(config.api_key.clone())
             };
             Arc::new(
                 provider
@@ -408,6 +428,18 @@ pub fn get_llm_providers() -> Vec<LlmProviderInfo> {
                 "command-a-03-2025".to_string(),
                 "command-r-plus-08-2024".to_string(),
                 "command-r-08-2024".to_string(),
+            ],
+        },
+        LlmProviderInfo {
+            id: "fireworks".to_string(),
+            name: "Fireworks".to_string(),
+            requires_api_key: true,
+            default_model: "accounts/fireworks/models/llama-v3p1-8b-instruct".to_string(),
+            // Keep this list short here; the Settings UI fetches the full catalog via
+            // `fireworks_list_models`.
+            models: vec![
+                "accounts/fireworks/models/llama-v3p1-8b-instruct".to_string(),
+                "accounts/fireworks/models/llama-v3p1-70b-instruct".to_string(),
             ],
         },
         LlmProviderInfo {
@@ -1292,12 +1324,13 @@ mod tests {
     #[test]
     fn test_get_llm_providers() {
         let providers = get_llm_providers();
-        assert_eq!(providers.len(), 6);
+        assert_eq!(providers.len(), 7);
         assert!(providers.iter().any(|p| p.id == "openai"));
         assert!(providers.iter().any(|p| p.id == "gemini"));
         assert!(providers.iter().any(|p| p.id == "anthropic"));
         assert!(providers.iter().any(|p| p.id == "groq"));
         assert!(providers.iter().any(|p| p.id == "cohere"));
+        assert!(providers.iter().any(|p| p.id == "fireworks"));
         assert!(providers.iter().any(|p| p.id == "ollama"));
     }
 

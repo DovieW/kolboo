@@ -803,6 +803,10 @@ pub async fn pipeline_stop_and_transcribe(
             log.stt_duration_ms = Some(result.stt_duration_ms);
             log.llm_duration_ms = result.llm_duration_ms;
 
+            log.llm_outcome = Some(result.llm_outcome.code().to_string());
+            log.llm_not_attempted_reason = None;
+            log.llm_error_message = None;
+
             // Useful for stats (and for later UI display).
             let audio_secs = audio_secs_from_wav.or_else(|| {
                 if log.stt_provider == "openai" {
@@ -837,6 +841,10 @@ pub async fn pipeline_stop_and_transcribe(
 
             match &result.llm_outcome {
                 LlmOutcome::NotAttempted(reason) => {
+                    log.llm_not_attempted_reason = Some(reason.code().to_string());
+                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } = reason {
+                        log.llm_error_message = Some(reason.to_log_details());
+                    }
                     log.info_with_details("LLM formatting not attempted", reason.to_log_details());
                 }
                 LlmOutcome::Succeeded => {
@@ -862,6 +870,7 @@ pub async fn pipeline_stop_and_transcribe(
                     }
                 }
                 LlmOutcome::Failed(err) => {
+                    log.llm_error_message = Some(err.clone());
                     log.warn(format!(
                         "LLM formatting failed; fell back to STT transcript ({})",
                         err
@@ -1215,6 +1224,10 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             log.formatted_transcript = Some(result.final_text.clone());
             log.stt_duration_ms = Some(result.stt_duration_ms);
             log.llm_duration_ms = result.llm_duration_ms;
+
+            log.llm_outcome = Some(result.llm_outcome.code().to_string());
+            log.llm_not_attempted_reason = None;
+            log.llm_error_message = None;
 
             // Useful for stats (and for later UI display).
             log.audio_duration_secs = stats::wav_duration_secs(wav.as_slice()).map(|s| s as f32);
@@ -1671,6 +1684,10 @@ pub async fn pipeline_dictate(
 
             match &result.llm_outcome {
                 LlmOutcome::NotAttempted(reason) => {
+                    log.llm_not_attempted_reason = Some(reason.code().to_string());
+                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } = reason {
+                        log.llm_error_message = Some(reason.to_log_details());
+                    }
                     log.info_with_details("LLM formatting not attempted", reason.to_log_details());
                 }
                 LlmOutcome::Succeeded => {
@@ -1696,6 +1713,7 @@ pub async fn pipeline_dictate(
                     }
                 }
                 LlmOutcome::Failed(err) => {
+                    log.llm_error_message = Some(err.clone());
                     log.warn(format!(
                         "LLM formatting failed; fell back to STT transcript ({})",
                         err

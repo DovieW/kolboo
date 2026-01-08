@@ -137,7 +137,7 @@ pub(crate) fn play_sound_blocking(
                 .unwrap_or(Duration::from_millis(500));
 
             {
-                let mut guard = cue_stream().or_else(|e| {
+                let guard = cue_stream().or_else(|e| {
                     // If the default device is in a bad state, a reset can help.
                     // (Users have reported that switching the Windows default device "fixes" it,
                     // which is effectively a reset at the OS level.)
@@ -156,7 +156,7 @@ pub(crate) fn play_sound_blocking(
         _ => {
             let (seq, duration) = build_synth_cue_source(sound_type, cue);
             {
-                let mut guard = cue_stream().or_else(|e| {
+                let guard = cue_stream().or_else(|e| {
                     log::warn!("Failed to open cue stream (will reset and retry once): {e}");
                     reset_cue_stream();
                     cue_stream()

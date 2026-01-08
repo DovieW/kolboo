@@ -213,6 +213,38 @@ pub struct RequestLog {
     /// LLM duration in milliseconds
     pub llm_duration_ms: Option<u64>,
 
+    /// Outcome of the optional LLM rewrite step.
+    ///
+    /// Stored as a stable string for UI display and backward-compatible persistence.
+    ///
+    /// Expected values:
+    /// - "not_attempted"
+    /// - "succeeded"
+    /// - "timed_out"
+    /// - "failed"
+    #[serde(default)]
+    pub llm_outcome: Option<String>,
+
+    /// If `llm_outcome == "not_attempted"`, a stable reason code.
+    ///
+    /// Expected values:
+    /// - "quiet_audio_gate"
+    /// - "no_speech_detected_by_vad"
+    /// - "disabled_default_profile"
+    /// - "disabled_profile"
+    /// - "disabled_preset"
+    /// - "provider_unavailable"
+    /// - "unknown"
+    #[serde(default)]
+    pub llm_not_attempted_reason: Option<String>,
+
+    /// Optional details/error for the LLM rewrite step.
+    ///
+    /// - For `failed`: error message
+    /// - For `not_attempted` + `provider_unavailable`: provider error detail
+    #[serde(default)]
+    pub llm_error_message: Option<String>,
+
     /// Intent router duration in milliseconds (when routing is enabled and actually ran).
     #[serde(default)]
     pub router_duration_ms: Option<u64>,
@@ -305,6 +337,10 @@ impl RequestLog {
             total_duration_ms: None,
             stt_duration_ms: None,
             llm_duration_ms: None,
+
+            llm_outcome: None,
+            llm_not_attempted_reason: None,
+            llm_error_message: None,
 
             router_duration_ms: None,
             router_strategy: None,

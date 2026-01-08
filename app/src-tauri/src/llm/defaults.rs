@@ -10,6 +10,7 @@ pub fn default_llm_model_for_provider(provider: &str) -> Option<&'static str> {
         "cerebras" => Some("llama-3.3-70b"),
         "anthropic" => Some("claude-3-haiku-20240307"),
         "groq" => Some("llama-3.3-70b-versatile"),
+        "fireworks" => Some("accounts/fireworks/models/llama-v3p1-8b-instruct"),
         "cohere" => Some("command-r-08-2024"),
         "gemini" => Some("gemini-2.5-flash"),
         "ollama" => Some("llama3.2"),

@@ -19,7 +19,8 @@ use crate::audio_capture::{AudioCapture, AudioCaptureDiagnostics, AudioCaptureEr
 use crate::embeddings;
 use crate::llm::{
     format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider, GeminiLlmProvider,
-    GroqLlmProvider, LlmConfig, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
+    FireworksLlmProvider, GroqLlmProvider, LlmConfig, LlmError, LlmProvider, OllamaLlmProvider,
+    OpenAiLlmProvider,
 };
 use crate::request_log::RequestLogStore;
 use crate::settings::{IntentRouterStrategy, ProxySettings};
@@ -209,7 +210,10 @@ async fn route_preset_id_with_embeddings(
         .as_deref()
         .unwrap_or("openai");
 
-    if embedding_provider != "openai" && embedding_provider != "cohere" {
+    if embedding_provider != "openai"
+        && embedding_provider != "cohere"
+        && embedding_provider != "fireworks"
+    {
         log::warn!(
             "Intent router: embeddings provider '{}' not supported; routing skipped",
             embedding_provider
@@ -219,6 +223,9 @@ async fn route_preset_id_with_embeddings(
 
     let embedding_model_default = if embedding_provider == "cohere" {
         "embed-english-v3.0"
+    } else if embedding_provider == "fireworks" {
+        // Starter default: keep in sync with the UI model list.
+        "fireworks/qwen3-embedding-0p6b"
     } else {
         "text-embedding-3-small"
     };
@@ -326,6 +333,10 @@ async fn route_preset_id_with_embeddings(
             )
             .await
             .map_err(|e| e.to_string())
+        } else if embedding_provider == "fireworks" {
+            embeddings::fireworks::embed_text_with_debug(&client, api_key, embedding_model, transcript)
+                .await
+                .map_err(|e| e.to_string())
         } else {
             embeddings::openai::embed_text_with_debug(&client, api_key, embedding_model, transcript)
                 .await
@@ -438,6 +449,8 @@ async fn route_preset_id_with_embeddings(
         for hint in hints {
             let cache_key = if embedding_provider == "cohere" {
                 format!("cohere::{}::search_document::{}", embedding_model, hint)
+            } else if embedding_provider == "fireworks" {
+                format!("fireworks::{}::{}", embedding_model, hint)
             } else {
                 // Back-compat: keep existing OpenAI cache key format.
                 format!("openai::{}::{}", embedding_model, hint)
@@ -496,6 +509,10 @@ async fn route_preset_id_with_embeddings(
                     )
                     .await
                     .map_err(|e| e.to_string())
+                } else if embedding_provider == "fireworks" {
+                    embeddings::fireworks::embed_text_with_debug(&client, api_key, embedding_model, &hint)
+                        .await
+                        .map_err(|e| e.to_string())
                 } else {
                     embeddings::openai::embed_text_with_debug(&client, api_key, embedding_model, &hint)
                         .await
@@ -1004,6 +1021,18 @@ pub enum LlmNotAttemptedReason {
 }
 
 impl LlmNotAttemptedReason {
+    pub fn code(&self) -> &'static str {
+        match self {
+            LlmNotAttemptedReason::QuietAudioGate => "quiet_audio_gate",
+            LlmNotAttemptedReason::NoSpeechDetectedByVad => "no_speech_detected_by_vad",
+            LlmNotAttemptedReason::DisabledByDefaultProfile => "disabled_default_profile",
+            LlmNotAttemptedReason::DisabledByProfile => "disabled_profile",
+            LlmNotAttemptedReason::DisabledByPreset => "disabled_preset",
+            LlmNotAttemptedReason::ProviderUnavailable { .. } => "provider_unavailable",
+            LlmNotAttemptedReason::Unknown => "unknown",
+        }
+    }
+
     pub fn to_log_details(&self) -> String {
         match self {
             LlmNotAttemptedReason::QuietAudioGate => {
@@ -1037,6 +1066,17 @@ pub enum LlmOutcome {
     TimedOut,
     /// LLM step failed and the pipeline fell back to the raw STT transcript.
     Failed(String),
+}
+
+impl LlmOutcome {
+    pub fn code(&self) -> &'static str {
+        match self {
+            LlmOutcome::NotAttempted(_) => "not_attempted",
+            LlmOutcome::Succeeded => "succeeded",
+            LlmOutcome::TimedOut => "timed_out",
+            LlmOutcome::Failed(_) => "failed",
+        }
+    }
 }
 
 /// Detailed result for a transcription request.
@@ -1434,6 +1474,15 @@ impl PipelineInner {
                 )
                 .with_request_log_store(self.config.request_log_store.clone()),
             ),
+            "fireworks" => Arc::new(
+                crate::stt::FireworksSttProvider::with_client(
+                    self.build_http_client_with_timeout(Duration::from_secs(120))?,
+                    api_key,
+                    model,
+                    self.config.stt_transcription_prompt.clone(),
+                )
+                .with_request_log_store(self.config.request_log_store.clone()),
+            ),
             "aquavoice" => Arc::new(
                 crate::stt::AquavoiceSttProvider::with_client(
                     self.build_http_client_with_timeout(Duration::from_secs(60))?,
@@ -1698,6 +1747,17 @@ fn create_llm_provider(
         "cohere" => {
             Arc::new(
                 CohereLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone()),
+            )
+        }
+        "fireworks" => {
+            Arc::new(
+                FireworksLlmProvider::with_client(
                     client.clone(),
                     config.api_key.clone(),
                     config.model.clone(),

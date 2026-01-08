@@ -71,6 +71,13 @@ export const API_KEYS: ApiKeyConfig[] = [
     getKeyUrl: "https://platform.openai.com/api-keys",
   },
   {
+    id: "fireworks",
+    label: "Fireworks",
+    placeholder: "Enter API key",
+    storeKey: "fireworks_api_key",
+    getKeyUrl: "https://app.fireworks.ai/settings/users/api-keys",
+  },
+  {
     id: "deepgram",
     label: "Deepgram",
     placeholder: "Enter API key",

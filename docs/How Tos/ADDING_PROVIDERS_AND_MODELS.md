@@ -320,6 +320,65 @@ Ordering matters:
 - when a user switches providers, the UI resets the model to `LLM_MODELS[id][0]`
 - so put your _recommended default_ first
 
+### 8a) Scaling to “too many models”: fetch dynamically (on the fly)
+
+Some providers (example: Fireworks) have **large and fast-changing catalogs** where hardcoding model IDs is both annoying and fragile.
+
+Pattern we use in this repo:
+
+1. **Backend exposes a Tauri command** that returns model options as plain data (`Vec<ModelOption>`).
+2. **Frontend queries it** via React Query, and uses it as a drop-in replacement for the static `LLM_MODELS[provider]` array.
+3. **Fallback**: if dynamic listing fails (offline, API error), the UI can fall back to a small curated list.
+
+#### Fireworks implementation (reference)
+
+Backend (Rust):
+
+- Command: `fireworks_list_models`
+  - File: `app/src-tauri/src/commands/fireworks.rs`
+  - Exported from the command list in: `app/src-tauri/src/lib.rs`
+- Return type is the same shape the UI already expects for a picker:
+  - `ModelOption { value: String, label: String, disabled: bool }`
+
+Frontend (TS/React):
+
+- Invoke wrapper:
+  - `app/src/lib/tauri.ts` → `llmAPI.getFireworksModels()` → `invoke<ModelOption[]>("fireworks_list_models")`
+- Query hook:
+  - `app/src/lib/queries.ts` → `useFireworksModels(enabled)`
+- UI usage:
+  - `app/src/components/settings/PromptSettings.tsx`
+    - When the selected provider is `"fireworks"`, it prefers the dynamic list when available.
+
+#### Important: list only callable models (avoid “catalog-only” 404s)
+
+Some providers expose separate endpoints for:
+
+- “Catalog metadata” (may include models you cannot call with your API key / not deployed)
+- “Inference models” (models that are actually callable)
+
+If you offer catalog-only entries in the picker, the user can select a model ID that later fails with a 404-style error ("not found/inaccessible/not deployed").
+
+What we do for Fireworks:
+
+- Treat the inference list (`/inference/v1/models`) as the **authoritative set of callable model IDs**.
+- Optionally fetch catalog metadata only to improve labels, but **do not** show catalog-only models in the UI.
+- Filter out models that are not relevant to the picker (e.g. rerank or image/diffusion models) so the UI doesn’t present non-chat targets.
+
+#### Caching: make dynamic model pickers feel instant
+
+Dynamic listing can be called frequently (settings screens, Quick Ask, router configs), so we cache results.
+
+Fireworks uses:
+
+- **In-memory TTL cache** (fast path)
+- **Disk cache** under the app data dir (survives restarts)
+  - Location: `<app_data_dir>/cache/fireworks-models.json`
+  - Keying: cache is keyed by an **API key fingerprint hash** (never store the raw API key)
+  - TTL: keep it reasonably long on disk to avoid rate limits / slow settings loads
+
+This is implemented in `app/src-tauri/src/commands/fireworks.rs`.
+
 ### 9) Frontend: (optional) provider-specific settings UI
 
 If your provider has special knobs (like “thinking”), you’ll need:

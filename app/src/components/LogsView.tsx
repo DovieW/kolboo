@@ -243,6 +243,30 @@ function RequestLogItem({
   // NOTE: `llm_provider`/`llm_model` can reflect configured defaults.
   // Use `llm_duration_ms` to indicate whether an LLM rewrite was actually attempted.
   const llmAttempted = typeof log.llm_duration_ms === "number";
+
+   const rewriteOutcome = log.llm_outcome ?? null;
+   const rewriteNotAttemptedReason = log.llm_not_attempted_reason ?? null;
+   const rewriteSkipped = rewriteOutcome === "not_attempted";
+   const rewriteSkippedReasonLabel = (() => {
+     switch (rewriteNotAttemptedReason) {
+       case "quiet_audio_gate":
+         return "quiet audio gate";
+       case "no_speech_detected_by_vad":
+         return "no speech detected";
+       case "disabled_default_profile":
+         return "disabled (default profile)";
+       case "disabled_profile":
+         return "disabled (profile)";
+       case "disabled_preset":
+         return "disabled (preset)";
+       case "provider_unavailable":
+         return "provider unavailable";
+       case "unknown":
+         return "unknown";
+       default:
+         return "unknown";
+     }
+   })();
   const routerAttempted =
     typeof log.router_duration_ms === "number" ||
     !!log.router_strategy ||
@@ -514,6 +538,29 @@ function RequestLogItem({
                     <Text size="xs" fw={600} c="dimmed">
                       Transcript:
                     </Text>
+                    {rewriteSkipped ? (
+                      <>
+                        <Text size="xs" c="dimmed">
+                          Rewrite: skipped ({rewriteSkippedReasonLabel})
+                        </Text>
+                        {log.llm_error_message ? (
+                          <Code
+                            block
+                            mt={6}
+                            style={{
+                              fontSize: "0.75rem",
+                              maxWidth: "100%",
+                              overflowX: "auto",
+                              whiteSpace: "pre-wrap",
+                              overflowWrap: "anywhere",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {log.llm_error_message}
+                          </Code>
+                        ) : null}
+                      </>
+                    ) : null}
                     <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
                       {log.final_text ?? log.raw_transcript ?? "(empty)"}
                     </Text>
@@ -599,6 +646,23 @@ function RequestLogItem({
               <Badge variant="light" size="sm" color="gray">
                 LLM · {llmMetaLabel} · {llmPriceLabel}
               </Badge>
+            ) : null}
+
+            {rewriteSkipped ? (
+              <Tooltip
+                label={
+                  log.llm_error_message
+                    ? log.llm_error_message
+                    : `Rewrite skipped (${rewriteSkippedReasonLabel})`
+                }
+                multiline
+                w={420}
+                withArrow
+              >
+                <Badge variant="light" size="sm" color="yellow">
+                  Rewrite skipped · {rewriteSkippedReasonLabel}
+                </Badge>
+              </Tooltip>
             ) : null}
 
             {routerAttempted ? (

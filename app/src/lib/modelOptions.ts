@@ -11,6 +11,11 @@ export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
     { value: "embed-multilingual-v3.0", label: "Embed Multilingual v3" },
     { value: "embed-english-v3.0", label: "Embed English v3" },
   ],
+  fireworks: [
+    { value: "fireworks/qwen3-embedding-0p6b", label: "Qwen3 Embedding 0.6B" },
+    { value: "fireworks/qwen3-embedding-4b", label: "Qwen3 Embedding 4B" },
+    { value: "fireworks/qwen3-embedding-8b", label: "Qwen3 Embedding 8B" },
+  ],
 };
 
 // Model options for each STT provider.
@@ -30,6 +35,10 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
   groq: [
     { value: "whisper-large-v3-turbo", label: "Whisper Large V3 Turbo" },
     { value: "whisper-large-v3", label: "Whisper Large V3" },
+  ],
+  fireworks: [
+    { value: "whisper-v3", label: "Whisper v3" },
+    { value: "whisper-v3-turbo", label: "Whisper v3 Turbo" },
   ],
   openai: [
     // { value: "gpt-audio", label: "GPT Audio" },
@@ -94,6 +103,16 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
     {
       value: "moonshotai/kimi-k2-instruct-0905",
       label: "Kimi K2 Instruct 0905 (Preview)",
+    },
+  ],
+  fireworks: [
+    {
+      value: "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      label: "Llama 3.1 8B Instruct",
+    },
+    {
+      value: "accounts/fireworks/models/llama-v3p1-70b-instruct",
+      label: "Llama 3.1 70B Instruct",
     },
   ],
   openai: [

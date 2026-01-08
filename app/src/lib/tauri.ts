@@ -2747,6 +2747,12 @@ export interface LlmProviderInfo {
   models: string[];
 }
 
+export interface ModelOption {
+	value: string;
+	label: string;
+  disabled?: boolean;
+}
+
 export interface LlmCompleteResponse {
   output: string;
   provider_used: string;
@@ -2767,6 +2773,8 @@ export interface TestRewriteWithPromptResponse {
 
 export const llmAPI = {
   getLlmProviders: () => invoke<LlmProviderInfo[]>("get_llm_providers"),
+
+	getFireworksModels: () => invoke<ModelOption[]>("fireworks_list_models"),
 
   testLlmRewrite: (params: { transcript: string; profileId?: string | null }) =>
     invoke<TestLlmRewriteResponse>("test_llm_rewrite", {
@@ -2987,6 +2995,19 @@ export interface RequestLog {
   total_duration_ms: number | null;
   stt_duration_ms: number | null;
   llm_duration_ms: number | null;
+
+  // LLM rewrite outcome (optional; added for clearer debugging when rewrite is skipped).
+  llm_outcome?: "not_attempted" | "succeeded" | "timed_out" | "failed" | null;
+  llm_not_attempted_reason?:
+    | "quiet_audio_gate"
+    | "no_speech_detected_by_vad"
+    | "disabled_default_profile"
+    | "disabled_profile"
+    | "disabled_preset"
+    | "provider_unavailable"
+    | "unknown"
+    | null;
+  llm_error_message?: string | null;
 
   // Intent router (preset selection) diagnostics
   router_duration_ms?: number | null;

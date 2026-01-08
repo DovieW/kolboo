@@ -1190,6 +1190,12 @@ fn stop_recording(
                             log.stt_duration_ms = Some(result.stt_duration_ms);
                             log.llm_duration_ms = result.llm_duration_ms;
 
+                            // Persist a structured outcome so the UI can surface
+                            // why rewrite didn't run (common confusion when STT succeeds).
+                            log.llm_outcome = Some(result.llm_outcome.code().to_string());
+                            log.llm_not_attempted_reason = None;
+                            log.llm_error_message = None;
+
                             // Use the provider instance's model (includes provider defaults) so
                             // the UI can show the real model used. If we didn't attempt LLM
                             // formatting, clear any pre-populated provider/model values.
@@ -1209,6 +1215,11 @@ fn stop_recording(
 
                             match &result.llm_outcome {
                                 pipeline::LlmOutcome::NotAttempted(reason) => {
+                                    log.llm_not_attempted_reason =
+                                        Some(reason.code().to_string());
+                                    if let pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } = reason {
+                                        log.llm_error_message = Some(reason.to_log_details());
+                                    }
                                     log.info_with_details(
                                         "LLM formatting not attempted",
                                         reason.to_log_details(),
@@ -1237,6 +1248,7 @@ fn stop_recording(
                                     }
                                 }
                                 pipeline::LlmOutcome::Failed(err) => {
+                                    log.llm_error_message = Some(err.clone());
                                     log.warn(format!(
                                         "LLM formatting failed; fell back to STT transcript ({})",
                                         err
@@ -2651,6 +2663,8 @@ pub fn run() {
             // Request logging commands
             commands::logs::get_request_logs,
             commands::logs::clear_request_logs,
+            // Fireworks helpers
+            commands::fireworks::fireworks_list_models,
             // Usage/cost stats commands
             commands::stats::get_cost_summary,
             commands::stats::get_cost_summary_v2,
@@ -3707,6 +3721,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
     let mut stt_api_keys: HashMap<String, String> = HashMap::new();
     for provider in [
         "openai",
+        "fireworks",
         "aquavoice",
         "groq",
         "elevenlabs",
@@ -3724,6 +3739,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
     // Get the appropriate API key based on provider
     let stt_api_key: String = match stt_provider.as_str() {
         "openai" => get_setting_from_store(app, "openai_api_key", String::new()),
+        "fireworks" => get_setting_from_store(app, "fireworks_api_key", String::new()),
         "aquavoice" => get_setting_from_store(app, "aquavoice_api_key", String::new()),
         "groq" => get_setting_from_store(app, "groq_api_key", String::new()),
         "elevenlabs" => get_setting_from_store(app, "elevenlabs_api_key", String::new()),
@@ -3898,7 +3914,15 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     // Read all available LLM API keys (for per-profile provider overrides at runtime)
     let mut llm_api_keys: HashMap<String, String> = HashMap::new();
-    for provider in ["openai", "anthropic", "groq", "gemini", "cohere", "cerebras"] {
+    for provider in [
+        "openai",
+        "fireworks",
+        "anthropic",
+        "groq",
+        "gemini",
+        "cohere",
+        "cerebras",
+    ] {
         let key_name = format!("{}_api_key", provider);
         let key: String = get_setting_from_store(app, &key_name, String::new());
         if !key.is_empty() {

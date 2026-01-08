@@ -6,3 +6,4 @@ pub mod gemini;
 pub mod anthropic;
 pub mod deepgram;
 pub mod speechmatics;
+pub mod fireworks;
