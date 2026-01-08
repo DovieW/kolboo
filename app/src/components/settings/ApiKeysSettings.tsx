@@ -1,12 +1,17 @@
 import {
   ActionIcon,
+  Alert,
   Badge,
   Button,
   Card,
+  Collapse,
+  Divider,
   Group,
   Progress,
   Select,
+  SegmentedControl,
   PasswordInput,
+  SimpleGrid,
   Stack,
   TextInput,
   Switch,
@@ -510,6 +515,7 @@ function LocalWhisperModelsCard() {
   }, [queryClient]);
 
   const [isLocalWhisperLoading, setIsLocalWhisperLoading] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -655,12 +661,13 @@ function LocalWhisperModelsCard() {
 
     return (
       <Stack gap={10}>
-        <div
+        <Card
+          withBorder
+          radius="md"
+          padding="md"
           style={{
-            border: "1px solid var(--border-default)",
-            borderRadius: 8,
-            padding: 12,
             background: "var(--bg-elevated)",
+            borderColor: "var(--border-default)",
           }}
         >
           <Text size="sm" c="dimmed" mb={10}>
@@ -670,7 +677,7 @@ function LocalWhisperModelsCard() {
               : ` Currently selected: ${sttProvider ?? "(none)"}.`}
           </Text>
 
-          <Group justify="space-between" align="center" wrap="wrap" gap={10}>
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing={10}>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <Text size="sm" fw={600}>
                 Active model
@@ -719,19 +726,14 @@ function LocalWhisperModelsCard() {
                   backgroundColor: "var(--bg-elevated)",
                   borderColor: "var(--border-default)",
                   color: "var(--text-primary)",
-                  minWidth: 260,
                 },
               }}
             />
-          </Group>
+          </SimpleGrid>
 
-          <Group
-            justify="space-between"
-            align="center"
-            wrap="wrap"
-            gap={10}
-            mt={10}
-          >
+          <Divider my={10} />
+
+          <Group justify="space-between" align="center" wrap="wrap" gap={10}>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <Text size="sm" fw={600}>
                 Model load
@@ -742,29 +744,21 @@ function LocalWhisperModelsCard() {
             </div>
 
             <Group gap={8} wrap="wrap">
-              <Select
+              <SegmentedControl
+                size="sm"
+                value={localWhisperLoadMode}
+                disabled={!isAvailable}
                 data={[
                   { value: "manual", label: "Manual" },
                   { value: "on_transcribe", label: "On transcribe" },
                   { value: "on_launch", label: "On launch" },
                 ]}
-                value={localWhisperLoadMode}
-                disabled={!isAvailable}
                 onChange={(value) => {
-                  if (!value) return;
                   updateLocalWhisperLoadMode.mutate(value as any, {
                     onSuccess: () => {
                       tauriAPI.emitSettingsChanged();
                     },
                   });
-                }}
-                styles={{
-                  input: {
-                    backgroundColor: "var(--bg-elevated)",
-                    borderColor: "var(--border-default)",
-                    color: "var(--text-primary)",
-                    minWidth: 200,
-                  },
                 }}
               />
 
@@ -789,84 +783,121 @@ function LocalWhisperModelsCard() {
               >
                 {isModelLoaded ? "Unload model" : "Load model"}
               </Button>
-
-              <Badge
-                size="sm"
-                color={isModelLoaded ? "green" : "gray"}
-                variant="light"
-              >
-                {isModelLoaded ? "Loaded" : "Not loaded"}
-              </Badge>
-
-              <Badge
-                size="sm"
-                color={computeColor}
-                variant="light"
-                title={backend?.reason ?? undefined}
-              >
-                Compute: {computeLabel}
-              </Badge>
-
-              <Badge size="sm" color={observedColor} variant="light">
-                {observedLabel}
-              </Badge>
             </Group>
           </Group>
 
-          {compute === "cuda" ? (
-            <Text size="xs" c="dimmed" mt={6}>
-              Compute shows what Kolboo thinks it can use
-              (availability/request). Observed shows what nvidia-smi reports for
-              this process.
-            </Text>
-          ) : null}
+          <Group gap={8} wrap="wrap" mt={10}>
+            <Badge
+              size="sm"
+              color={isModelLoaded ? "green" : "gray"}
+              variant="light"
+            >
+              {isModelLoaded ? "Loaded" : "Not loaded"}
+            </Badge>
 
-          {observed ? (
-            <div style={{ marginTop: 6 }}>
-              <Text size="xs" c="dimmed">
-                PID: {observed.pid}
-              </Text>
-              {observed.nvidia_smi_available ? (
-                <Text size="xs" c="dimmed">
-                  nvidia-smi used GPU memory (MB):{" "}
-                  {observed.used_gpu_memory_mb ?? "unknown"}
-                </Text>
-              ) : (
-                <Text size="xs" c="dimmed">
-                  nvidia-smi error: {observed.error ?? "unknown"}
-                </Text>
-              )}
-            </div>
-          ) : null}
+            <Tooltip
+              label={backend?.reason ?? null}
+              withArrow
+              disabled={!backend?.reason}
+            >
+              <Badge size="sm" color={computeColor} variant="light">
+                Compute: {computeLabel}
+              </Badge>
+            </Tooltip>
 
-          {backend && backend.compute === "cpu" && backend.build_has_cuda ? (
-            <div style={{ marginTop: 10 }}>
-              <Text size="xs" c="dimmed">
-                GPU unavailable: {backend.reason ?? "Unknown reason"}
-              </Text>
-              {backend.missing_dlls?.length ? (
-                <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>
-                  Missing: {backend.missing_dlls.join(", ")}
-                </Text>
+            <Badge size="sm" color={observedColor} variant="light">
+              {observedLabel}
+            </Badge>
+
+            <Button
+              size="xs"
+              variant="subtle"
+              color="gray"
+              onClick={() => setShowDiagnostics((v) => !v)}
+            >
+              {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
+            </Button>
+          </Group>
+
+          <Text size="xs" c="dimmed" mt={6}>
+            Compute shows what Kolboo thinks it can use (availability/request).
+            Observed shows what nvidia-smi reports for this process.
+          </Text>
+
+          <Collapse in={showDiagnostics}>
+            <Stack gap={6} mt={10}>
+              {observed ? (
+                <Alert
+                  color="gray"
+                  variant="light"
+                  title="Observed (nvidia-smi)"
+                >
+                  <Text size="xs" c="dimmed">
+                    PID: {observed.pid}
+                  </Text>
+                  {observed.nvidia_smi_available ? (
+                    <Text size="xs" c="dimmed">
+                      Used GPU memory (MB):{" "}
+                      {observed.used_gpu_memory_mb ?? "unknown"}
+                    </Text>
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      nvidia-smi error: {observed.error ?? "unknown"}
+                    </Text>
+                  )}
+                </Alert>
               ) : null}
-            </div>
-          ) : null}
+
+              {backend &&
+              backend.compute === "cpu" &&
+              backend.build_has_cuda ? (
+                <Alert color="yellow" variant="light" title="CUDA unavailable">
+                  <Text size="xs" c="dimmed">
+                    {backend.reason ?? "Unknown reason"}
+                  </Text>
+                  {backend.missing_dlls?.length ? (
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      style={{ fontFamily: "monospace" }}
+                    >
+                      Missing: {backend.missing_dlls.join(", ")}
+                    </Text>
+                  ) : null}
+                </Alert>
+              ) : null}
+            </Stack>
+          </Collapse>
 
           {storedActiveModelId && !activeModel?.is_downloaded ? (
-            <Text size="xs" mt={10} c="red">
-              Active model “{activeModelId}” isn’t downloaded yet.
-            </Text>
+            <Alert
+              color="red"
+              variant="light"
+              mt={10}
+              title="Active model missing"
+            >
+              <Text size="xs" c="dimmed">
+                Active model “{activeModelId}” isn’t downloaded yet.
+              </Text>
+            </Alert>
           ) : null}
 
           {isAvailable &&
           activeModel?.is_downloaded &&
           !isModelLoaded &&
           localWhisperLoadMode === "manual" ? (
-            <Text size="xs" mt={10} c="dimmed">
-              Manual load is enabled. Click “Load model” before transcribing.
-            </Text>
+            <Alert
+              color="gray"
+              variant="light"
+              mt={10}
+              title="Manual load enabled"
+            >
+              <Text size="xs" c="dimmed">
+                Click “Load model” before transcribing.
+              </Text>
+            </Alert>
           ) : null}
-        </div>
+        </Card>
 
         {modelsSortedBySizeDesc.map((m) => {
           const progress = progressById[m.id];
@@ -880,13 +911,14 @@ function LocalWhisperModelsCard() {
           const error = errorById[m.id];
 
           return (
-            <div
+            <Card
               key={m.id}
+              withBorder
+              radius="md"
+              padding="md"
               style={{
-                border: "1px solid var(--border-default)",
-                borderRadius: 8,
-                padding: 12,
                 background: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
               }}
             >
               <Group
@@ -905,6 +937,11 @@ function LocalWhisperModelsCard() {
                         Active
                       </Badge>
                     ) : null}
+                    {m.is_downloaded ? (
+                      <Badge size="sm" color="green" variant="light">
+                        Downloaded
+                      </Badge>
+                    ) : null}
                   </Group>
                   <Text size="xs" c="dimmed">
                     {m.filename} • {m.size_display}
@@ -916,7 +953,7 @@ function LocalWhisperModelsCard() {
                     <>
                       <Button
                         size="sm"
-                        color="orange"
+                        color="green"
                         onClick={() => {
                           setErrorById((prev) => ({ ...prev, [m.id]: null }));
                           // Optimistic UI: show queued immediately so the user sees
@@ -1063,7 +1100,7 @@ function LocalWhisperModelsCard() {
                   {error}
                 </Text>
               ) : null}
-            </div>
+            </Card>
           );
         })}
       </Stack>
@@ -1088,15 +1125,22 @@ function LocalWhisperModelsCard() {
               Unavailable
             </Badge>
           ) : (
-            <Badge size="sm" variant="light" color="orange">
+            <Badge size="sm" variant="light" color="green">
               Offline
             </Badge>
           )}
         </Group>
 
-        <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>
-          {modelsDir ?? ""}
-        </Text>
+        <Tooltip label={modelsDir ?? ""} withArrow disabled={!modelsDir}>
+          <Text
+            size="xs"
+            c="dimmed"
+            style={{ fontFamily: "monospace", maxWidth: 420 }}
+            lineClamp={1}
+          >
+            {modelsDir ?? ""}
+          </Text>
+        </Tooltip>
       </Group>
 
       <Text size="sm" c="dimmed" mb={12}>
