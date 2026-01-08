@@ -37,7 +37,7 @@ tauri-plugin-store = "2.4.1"
 # and the Rust crate (tauri-plugin-dialog) match on major/minor. Cargo's default
 # caret requirement would allow 2.5.x, which can break CI when the JS side is
 # still 2.4.x.
-tauri-plugin-dialog = "~2.4.2"
+tauri-plugin-dialog = "~2.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 log = "0.4.29"
@@ -67,14 +67,14 @@ hound = "3.5"  # WAV encoding
 
 # Voice Activity Detection
 webrtc-vad = "0.4"
-rubato = "0.16"  # High-quality audio resampling
+rubato = "1.0"  # High-quality audio resampling
 
 # Local Whisper (whisper.cpp bindings) - Optional feature
 whisper-rs = { version = "0.15", optional = true }
 dirs = { version = "6.0", optional = true }  # For model storage paths
 
 # HTTP client for STT/LLM API calls
-reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
+reqwest = { version = "0.13", features = ["json", "multipart", "stream"] }
 
 # Hashing (used for validating downloaded local Whisper model files)
 sha2 = "0.10"
