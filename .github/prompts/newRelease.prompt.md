@@ -87,6 +87,31 @@ If the branch is protected and direct pushes are blocked:
 - Create a PR for the release prep commit.
 - After merge, tag `v$VERSION` on the merge commit (or on `main/master` HEAD), then push the tag.
 
+## 8.5) Build CUDA variant + upload to the Release (optional)
+
+Kolboo does **not** build CUDA artifacts in GitHub Actions. If this release should include a Windows CUDA build, build it locally and upload it to the GitHub Release assets.
+
+### Build locally (Windows)
+
+- Use the helper script:
+   - `./scripts/build-windows-artifacts.ps1 -Cuda`
+
+This produces:
+
+- `artifacts/windows-local-whisper-cuda/` (plus the default/CPU artifacts)
+
+### Upload to the GitHub Release
+
+After the tag `v$VERSION` exists and the Release is created on GitHub:
+
+- Upload the CUDA build output as additional assets.
+- Prefer uploading the **installer/bundle** outputs from `artifacts/windows-local-whisper-cuda/bundle/**`.
+
+Notes:
+
+- CUDA compatibility depends on what CUDA runtime/toolkit you built against and what users have installed; keep the CPU build available as a fallback.
+- If you want a consistent naming scheme, include `v$VERSION` in the uploaded asset names.
+
 ## 9) Confirm release workflow started
 
 - After pushing the tag, confirm GitHub Actions has a running workflow for the tag.
@@ -101,3 +126,4 @@ When you finish, summarize:
 - Which files were updated/verified
 - The exact commit SHA and tag SHA
 - Whether the release workflow started successfully
+- Whether a CUDA build was built and uploaded (and which assets)
