@@ -15,6 +15,12 @@ default = []
 # Enable local Whisper STT (requires whisper.cpp build dependencies)
 local-whisper = ["dep:whisper-rs", "dep:dirs"]
 
+# Local Whisper build variant: compile whisper.cpp with CUDA support.
+#
+# This enables GPU acceleration on supported systems, but requires the CUDA toolkit
+# and a working C/C++ toolchain for building whisper.cpp.
+local-whisper-cuda = ["local-whisper", "whisper-rs/cuda"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.3", features = [] }
 
@@ -65,6 +71,9 @@ dirs = { version = "6.0", optional = true }  # For model storage paths
 
 # HTTP client for STT/LLM API calls
 reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
+
+# Hashing (used for validating downloaded local Whisper model files)
+sha2 = "0.10"
 
 # WebSocket client (Speechmatics realtime STT)
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }

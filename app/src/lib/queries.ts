@@ -33,6 +33,7 @@ import {
   type ModelPricingKind,
   type ProxySettings,
   type OpenAiReasoningEffort,
+  type WhisperModelInfo,
 } from "./tauri";
 
 export function useModelPricing(
@@ -1327,6 +1328,141 @@ export function useUpdateWhisperServerBaseUrl() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateLocalWhisperModelId() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (modelId: string | null) => {
+      await tauriAPI.updateLocalWhisperModelId(modelId);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateLocalWhisperLoadMode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (mode: "manual" | "on_transcribe" | "on_launch") => {
+      await tauriAPI.updateLocalWhisperLoadMode(mode);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["localWhisperModelLoaded"] });
+    },
+  });
+}
+
+export function useIsLocalWhisperAvailable() {
+  return useQuery({
+    queryKey: ["localWhisperAvailable"],
+    queryFn: () => tauriAPI.isLocalWhisperAvailable(),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+export function useLocalWhisperBackendStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: ["localWhisperBackendStatus"],
+    enabled,
+    queryFn: () => tauriAPI.getLocalWhisperBackendStatus(),
+    staleTime: 0,
+  });
+}
+
+export function useWhisperModels(enabled: boolean) {
+  return useQuery<WhisperModelInfo[]>({
+    queryKey: ["whisperModels"],
+    enabled,
+    queryFn: () => tauriAPI.getWhisperModels(),
+    staleTime: 0,
+  });
+}
+
+export function useIsLocalWhisperModelLoaded(enabled: boolean) {
+  return useQuery({
+    queryKey: ["localWhisperModelLoaded"],
+    enabled,
+    queryFn: () => tauriAPI.isLocalWhisperModelLoaded(),
+    staleTime: 0,
+  });
+}
+
+export function useLoadLocalWhisperModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await tauriAPI.loadLocalWhisperModel();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["localWhisperModelLoaded"] });
+    },
+  });
+}
+
+export function useUnloadLocalWhisperModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await tauriAPI.unloadLocalWhisperModel();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["localWhisperModelLoaded"] });
+    },
+  });
+}
+
+export function useWhisperModelsDir() {
+  return useQuery({
+    queryKey: ["whisperModelsDir"],
+    queryFn: () => tauriAPI.getWhisperModelsDir(),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+export function useDownloadWhisperModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (modelId: string) => {
+      await tauriAPI.downloadWhisperModel(modelId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whisperModels"] });
+    },
+  });
+}
+
+export function useCancelWhisperModelDownload() {
+  return useMutation({
+    mutationFn: async (modelId: string) => {
+      await tauriAPI.cancelWhisperModelDownload(modelId);
+    },
+  });
+}
+
+export function useDeleteWhisperModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (modelId: string) => {
+      await tauriAPI.deleteWhisperModel(modelId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whisperModels"] });
+    },
+  });
+}
+
+export function useValidateWhisperModel() {
+  return useMutation({
+    mutationFn: async (modelId: string) => {
+      const ok = await tauriAPI.validateWhisperModel(modelId);
+      return ok;
     },
   });
 }

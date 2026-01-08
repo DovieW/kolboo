@@ -45,7 +45,7 @@ import {
   UiSettings,
 } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
-import { API_KEY_STORE_KEYS } from "./components/settings/ApiKeysSettings";
+import { API_KEY_STORE_KEYS } from "./lib/apiKeys";
 import {
   DEFAULT_HOLD_HOTKEY,
   DEFAULT_PASTE_LAST_HOTKEY,

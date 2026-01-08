@@ -21,6 +21,293 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+#[cfg(target_os = "windows")]
+fn get_nvidia_smi_reported_cuda_version_windows() -> Option<f32> {
+    use std::process::Command;
+
+    // `nvidia-smi -q` includes a line like:
+    // "CUDA Version                              : 12.9"
+    let out = Command::new("nvidia-smi").args(["-q"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for line in stdout.lines() {
+        let line = line.trim();
+        if !line.to_ascii_lowercase().starts_with("cuda version") {
+            continue;
+        }
+
+        let (_k, v) = line.split_once(':')?;
+        let v = v.trim();
+        // Parse as float (e.g., 12.9)
+        if let Ok(parsed) = v.parse::<f32>() {
+            return Some(parsed);
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_nvidia_smi_reported_cuda_version_windows() -> Option<f32> {
+    None
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalWhisperComputeBackend {
+    Cpu,
+    Cuda,
+}
+
+/// Diagnostic information about which compute backend Local Whisper will use.
+///
+/// This is primarily for UI/debugging so users can see whether Kolboo is using
+/// GPU acceleration (CUDA) or falling back to CPU, and why.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LocalWhisperBackendStatus {
+    pub build_has_local_whisper: bool,
+    pub build_has_cuda: bool,
+    pub compute: LocalWhisperComputeBackend,
+    pub reason: Option<String>,
+    pub missing_dlls: Vec<String>,
+}
+
+fn find_dll_windows(name: &str) -> Option<std::path::PathBuf> {
+    use std::path::Path;
+
+    if !cfg!(target_os = "windows") {
+        return None;
+    }
+
+    let candidates: Vec<std::path::PathBuf> = (|| {
+        let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+
+        // 1) exe directory
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                dirs.push(parent.to_path_buf());
+            }
+        }
+
+        // 2) System32 / SysWOW64
+        if let Ok(windir) = std::env::var("WINDIR") {
+            let w = std::path::PathBuf::from(windir);
+            dirs.push(w.join("System32"));
+            dirs.push(w.join("SysWOW64"));
+        }
+
+        // 3) PATH entries
+        if let Some(path) = std::env::var_os("PATH") {
+            for p in std::env::split_paths(&path) {
+                dirs.push(p);
+            }
+        }
+
+        dirs
+    })();
+
+    for dir in candidates {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        let candidate = Path::new(&dir).join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn find_cuda_toolkit_bin_candidates_windows() -> Vec<std::path::PathBuf> {
+    // Common CUDA Toolkit install root on Windows.
+    // Example: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\x64
+    let root = std::path::PathBuf::from(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA");
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        let mut version_dirs: Vec<std::path::PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.starts_with('v'))
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        // Prefer highest version directory (rough lexicographic works for vX.Y in practice).
+        version_dirs.sort_by(|a, b| b.cmp(a));
+
+        for vdir in version_dirs.into_iter().take(5) {
+            let bin = vdir.join("bin").join("x64");
+            if bin.exists() {
+                out.push(bin);
+            }
+        }
+    }
+
+    out
+}
+
+/// Best-effort check for CUDA runtime availability.
+///
+/// whisper.cpp's CUDA backend on Windows typically requires both:
+/// - NVIDIA driver (nvcuda.dll)
+/// - CUDA runtime DLLs (cudart + cublas)
+///
+/// If these DLLs are missing, whisper.cpp may print messages like:
+/// "ggml_cuda_init: failed to initialize CUDA" and fall back to CPU.
+pub fn get_local_whisper_backend_status() -> LocalWhisperBackendStatus {
+    let build_has_local_whisper = cfg!(feature = "local-whisper");
+    let build_has_cuda = cfg!(feature = "local-whisper-cuda");
+
+    if !build_has_local_whisper {
+        return LocalWhisperBackendStatus {
+            build_has_local_whisper,
+            build_has_cuda,
+            compute: LocalWhisperComputeBackend::Cpu,
+            reason: Some("Local Whisper feature is not enabled in this build.".to_string()),
+            missing_dlls: Vec::new(),
+        };
+    }
+
+    if !build_has_cuda {
+        return LocalWhisperBackendStatus {
+            build_has_local_whisper,
+            build_has_cuda,
+            compute: LocalWhisperComputeBackend::Cpu,
+            reason: Some(
+                "This build does not include CUDA support; Local Whisper will run on CPU.".to_string(),
+            ),
+            missing_dlls: Vec::new(),
+        };
+    }
+
+    // CUDA build: preflight DLL presence. This is cheap and gives actionable UI feedback.
+    // If any required DLL is missing, we *intentionally* do not request GPU so we avoid
+    // confusing stderr spam and can provide a clear reason.
+    let mut missing: Vec<String> = Vec::new();
+    let nvcuda_ok = find_dll_windows("nvcuda.dll").is_some();
+    if !nvcuda_ok {
+        missing.push("nvcuda.dll".to_string());
+    }
+
+    // Common CUDA runtime / BLAS DLLs used by ggml/whisper.cpp on Windows.
+    // Note: the CUDA build is typically tied to a specific major version (11/12/13)
+    // for these DLL names. We still check multiple versions to provide a better
+    // error message, but later we also guard against driver/runtime incompatibility.
+    let cudart_13 = find_dll_windows("cudart64_13.dll").is_some();
+    let cudart_12 = find_dll_windows("cudart64_12.dll").is_some();
+    let cudart_11 = find_dll_windows("cudart64_11.dll").is_some();
+    let cudart_ok = cudart_13 || cudart_12 || cudart_11;
+    if !cudart_ok {
+        missing.push("cudart64_13.dll (or cudart64_12.dll / cudart64_11.dll)".to_string());
+    }
+
+    let cublas_13 = find_dll_windows("cublas64_13.dll").is_some();
+    let cublas_12 = find_dll_windows("cublas64_12.dll").is_some();
+    let cublas_11 = find_dll_windows("cublas64_11.dll").is_some();
+    let cublas_ok = cublas_13 || cublas_12 || cublas_11;
+    if !cublas_ok {
+        missing.push("cublas64_13.dll (or cublas64_12.dll / cublas64_11.dll)".to_string());
+    }
+
+    let cublaslt_13 = find_dll_windows("cublasLt64_13.dll").is_some();
+    let cublaslt_12 = find_dll_windows("cublasLt64_12.dll").is_some();
+    let cublaslt_11 = find_dll_windows("cublasLt64_11.dll").is_some();
+    let cublaslt_ok = cublaslt_13 || cublaslt_12 || cublaslt_11;
+    if !cublaslt_ok {
+        missing.push("cublasLt64_13.dll (or cublasLt64_12.dll / cublasLt64_11.dll)".to_string());
+    }
+
+    if !missing.is_empty() {
+        #[cfg(target_os = "windows")]
+        {
+            // If CUDA Toolkit is installed but its bin folder isn't on PATH, whisper.cpp won't
+            // be able to LoadLibrary the required DLLs. Provide a more actionable hint.
+            let bins = find_cuda_toolkit_bin_candidates_windows();
+            for bin in bins {
+                let has_any = bin.join("cudart64_13.dll").exists()
+                    || bin.join("cudart64_12.dll").exists()
+                    || bin.join("cudart64_11.dll").exists();
+                if has_any {
+                    return LocalWhisperBackendStatus {
+                        build_has_local_whisper,
+                        build_has_cuda,
+                        compute: LocalWhisperComputeBackend::Cpu,
+                        reason: Some(format!(
+                            "CUDA Toolkit detected, but its DLL directory isn't on the DLL search path. Add this folder to PATH (or copy the DLLs next to the app): {}",
+                            bin.display()
+                        )),
+                        missing_dlls: missing,
+                    };
+                }
+            }
+        }
+
+        return LocalWhisperBackendStatus {
+            build_has_local_whisper,
+            build_has_cuda,
+            compute: LocalWhisperComputeBackend::Cpu,
+            reason: Some(
+                "CUDA build detected, but the CUDA runtime libraries were not found. Local Whisper will run on CPU.".to_string(),
+            ),
+            missing_dlls: missing,
+        };
+    }
+
+    // Extra guard: CUDA runtime DLLs can be present but still unusable if the NVIDIA driver
+    // is too old for the CUDA runtime major version.
+    // Example: driver reports CUDA 12.9, but PATH points to cudart64_13.dll.
+    #[cfg(target_os = "windows")]
+    {
+        let runtime_major = if cudart_13 || cublas_13 || cublaslt_13 {
+            Some(13u32)
+        } else if cudart_12 || cublas_12 || cublaslt_12 {
+            Some(12u32)
+        } else if cudart_11 || cublas_11 || cublaslt_11 {
+            Some(11u32)
+        } else {
+            None
+        };
+
+        if let (Some(runtime_major), Some(driver_cuda)) =
+            (runtime_major, get_nvidia_smi_reported_cuda_version_windows())
+        {
+            let driver_major = driver_cuda.floor() as u32;
+            if driver_major < runtime_major {
+                return LocalWhisperBackendStatus {
+                    build_has_local_whisper,
+                    build_has_cuda,
+                    compute: LocalWhisperComputeBackend::Cpu,
+                    reason: Some(format!(
+                        "CUDA runtime {} detected, but NVIDIA driver reports CUDA {} support. This usually means the driver is too old for the runtime, so whisper.cpp will fall back to CPU. Upgrade your NVIDIA driver or use a CUDA {} build.",
+                        runtime_major,
+                        driver_cuda,
+                        driver_major,
+                    )),
+                    missing_dlls: Vec::new(),
+                };
+            }
+        }
+    }
+
+    LocalWhisperBackendStatus {
+        build_has_local_whisper,
+        build_has_cuda,
+        compute: LocalWhisperComputeBackend::Cuda,
+        reason: None,
+        missing_dlls: Vec::new(),
+    }
+}
+
 /// Available Whisper model sizes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WhisperModel {
@@ -65,6 +352,27 @@ impl WhisperModel {
         )
     }
 
+    /// Expected SHA-256 for the model file (hex-encoded, lowercase).
+    ///
+    /// These are pinned to the Hugging Face LFS pointer metadata for
+    /// `ggerganov/whisper.cpp` and are used to validate downloads.
+    pub fn expected_sha256(&self) -> &'static str {
+        match self {
+            Self::Tiny => "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+            Self::TinyEn => "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+            Self::Base => "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+            Self::BaseEn => "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+            Self::Small => "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+            Self::SmallEn => "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+            Self::Medium => "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+            Self::MediumEn => "cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356",
+            Self::LargeV1 => "7d99f41a10525d0206bddadd86760181fa920438b6b33237e3118ff6c83bb53d",
+            Self::LargeV2 => "9a423fe4d40c82774b6af34115b8b935f34152246eb19e80e376071d3f999487",
+            Self::LargeV3 => "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+            Self::LargeV3Turbo => "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+        }
+    }
+
     /// Get approximate model size in bytes
     pub fn size_bytes(&self) -> u64 {
         match self {
@@ -80,18 +388,18 @@ impl WhisperModel {
     /// Get human-readable model name
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::Tiny => "Tiny (75MB)",
-            Self::TinyEn => "Tiny English (75MB)",
-            Self::Base => "Base (142MB)",
-            Self::BaseEn => "Base English (142MB)",
-            Self::Small => "Small (466MB)",
-            Self::SmallEn => "Small English (466MB)",
-            Self::Medium => "Medium (1.5GB)",
-            Self::MediumEn => "Medium English (1.5GB)",
-            Self::LargeV1 => "Large v1 (2.9GB)",
-            Self::LargeV2 => "Large v2 (2.9GB)",
-            Self::LargeV3 => "Large v3 (2.9GB)",
-            Self::LargeV3Turbo => "Large v3 Turbo (1.6GB)",
+            Self::Tiny => "Tiny",
+            Self::TinyEn => "Tiny English",
+            Self::Base => "Base",
+            Self::BaseEn => "Base English",
+            Self::Small => "Small",
+            Self::SmallEn => "Small English",
+            Self::Medium => "Medium",
+            Self::MediumEn => "Medium English",
+            Self::LargeV1 => "Large v1",
+            Self::LargeV2 => "Large v2",
+            Self::LargeV3 => "Large v3",
+            Self::LargeV3Turbo => "Large v3 Turbo",
         }
     }
 
@@ -139,6 +447,12 @@ pub struct LocalWhisperConfig {
     pub translate: bool,
     /// Number of threads to use (0 = auto)
     pub n_threads: u32,
+
+    /// Optional transcription prompt/context (biases decoding).
+    ///
+    /// This maps to Whisper's "initial prompt" capability and is useful for
+    /// domain-specific vocabulary (project names, acronyms, etc.).
+    pub transcription_prompt: Option<String>,
 }
 
 impl Default for LocalWhisperConfig {
@@ -148,6 +462,7 @@ impl Default for LocalWhisperConfig {
             language: Some("en".to_string()),
             translate: false,
             n_threads: 0, // Auto-detect
+            transcription_prompt: None,
         }
     }
 }
@@ -176,7 +491,17 @@ impl LocalWhisperProvider {
             )));
         }
 
-        let ctx_params = WhisperContextParameters::default();
+        let mut ctx_params = WhisperContextParameters::default();
+
+        // Decide whether to request GPU based on runtime availability.
+        // This prevents confusing "no GPU found" logs when the CUDA runtime DLLs
+        // aren't installed/bundled (common on Windows).
+        #[cfg(feature = "local-whisper-cuda")]
+        {
+
+            let status = get_local_whisper_backend_status();
+            ctx_params.use_gpu(matches!(status.compute, LocalWhisperComputeBackend::Cuda));
+        }
 
         let ctx = WhisperContext::new_with_params(
             config.model_path.to_str().ok_or_else(|| {
@@ -220,6 +545,14 @@ impl SttProvider for LocalWhisperProvider {
         let language = self.config.language.clone();
         let translate = self.config.translate;
         let n_threads = self.config.n_threads;
+        let transcription_prompt = self
+            .config
+            .transcription_prompt
+            .clone()
+            .and_then(|p| {
+                let trimmed = p.trim().to_string();
+                if trimmed.is_empty() { None } else { Some(trimmed) }
+            });
 
         // whisper-rs is synchronous, so we use spawn_blocking
         let result = tokio::task::spawn_blocking(move || {
@@ -236,6 +569,13 @@ impl SttProvider for LocalWhisperProvider {
 
             // Set translate mode
             params.set_translate(translate);
+
+            // Optional initial prompt / context
+            if let Some(prompt) = transcription_prompt.as_deref() {
+                // whisper-rs exposes this as "initial prompt".
+                // If the upstream API changes, this will fail to compile and we can adjust.
+                params.set_initial_prompt(prompt);
+            }
 
             // Set thread count
             if n_threads > 0 {
@@ -254,14 +594,23 @@ impl SttProvider for LocalWhisperProvider {
                 .map_err(|e| SttError::Audio(format!("Whisper inference failed: {}", e)))?;
 
             // Collect results
-            let num_segments = state.full_n_segments().map_err(|e| {
-                SttError::Audio(format!("Failed to get segment count: {}", e))
-            })?;
+            let num_segments = state.full_n_segments();
+
+            if num_segments < 0 {
+                return Err(SttError::Audio(format!(
+                    "Whisper returned negative segment count: {}",
+                    num_segments
+                )));
+            }
 
             let mut text = String::new();
             for i in 0..num_segments {
-                if let Ok(segment_text) = state.full_get_segment_text(i) {
-                    text.push_str(&segment_text);
+                let Some(segment) = state.get_segment(i) else {
+                    continue;
+                };
+
+                if let Ok(segment_text) = segment.to_str() {
+                    text.push_str(segment_text);
                 }
             }
 

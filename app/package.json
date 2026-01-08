@@ -5,8 +5,12 @@
 	"packageManager": "pnpm@10.26.2",
 	"scripts": {
 		"dev": "tauri dev",
+		"dev:local-whisper": "tauri dev --features local-whisper",
+		"dev:local-whisper:cuda": "tauri dev --features local-whisper-cuda",
 		"dev:vite": "vite",
 		"build": "tauri build",
+		"build:local-whisper": "tauri build --features local-whisper",
+		"build:local-whisper:cuda": "tauri build --features local-whisper-cuda",
 		"build:vite": "vite build",
 		"lint": "biome check --write",
 		"typecheck": "tsc --noEmit",

@@ -1,126 +1,61 @@
 import {
   ActionIcon,
+  Badge,
   Button,
+  Card,
   Group,
+  Progress,
+  Select,
   PasswordInput,
+  Stack,
   TextInput,
   Switch,
   Text,
   Tooltip,
 } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
+import { notifications } from "@mantine/notifications";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Link as LinkIcon } from "lucide-react";
+import type {
+  WhisperModelDownloadProgress,
+  WhisperModelInfo,
+} from "../../lib/tauri";
 import { configAPI, tauriAPI } from "../../lib/tauri";
+import { API_KEYS } from "../../lib/apiKeys";
 import {
   EMBEDDING_MODELS,
   LLM_MODELS,
   STT_MODELS,
 } from "../../lib/modelOptions";
 import {
+  useCancelWhisperModelDownload,
+  useDeleteWhisperModel,
+  useDownloadWhisperModel,
+  useIsLocalWhisperAvailable,
+  useLocalWhisperBackendStatus,
+  useIsLocalWhisperModelLoaded,
+  useLoadLocalWhisperModel,
   useSettings,
+  useUnloadLocalWhisperModel,
+  useValidateWhisperModel,
+  useWhisperModels,
+  useWhisperModelsDir,
   useUpdateAssemblyAiFreeTier,
   useUpdateCerebrasFreeTier,
   useUpdateCohereFreeTier,
   useUpdateElevenLabsFreeTier,
   useUpdateGroqFreeTier,
   useUpdateSpeechmaticsFreeTier,
+  useUpdateLocalWhisperModelId,
+  useUpdateLocalWhisperLoadMode,
   useUpdateWhisperServerBaseUrl,
 } from "../../lib/queries";
 
 const GLOBAL_ONLY_TOOLTIP =
   "This setting can only be changed in the Default profile";
-
-interface ApiKeyConfig {
-  id: string;
-  label: string;
-  placeholder: string;
-  storeKey: string;
-  getKeyUrl: string;
-}
-
-const API_KEYS: ApiKeyConfig[] = [
-  {
-    id: "groq",
-    label: "Groq",
-    placeholder: "Enter API key",
-    storeKey: "groq_api_key",
-    getKeyUrl: "https://console.groq.com/keys",
-  },
-  {
-    id: "elevenlabs",
-    label: "ElevenLabs",
-    placeholder: "Enter API key",
-    storeKey: "elevenlabs_api_key",
-    getKeyUrl: "https://elevenlabs.io/app/settings/api-keys",
-  },
-  {
-    id: "cerebras",
-    label: "Cerebras",
-    placeholder: "Enter API key",
-    storeKey: "cerebras_api_key",
-    getKeyUrl: "https://cloud.cerebras.ai/platform",
-  },
-  {
-    id: "cohere",
-    label: "Cohere",
-    placeholder: "Enter API key",
-    storeKey: "cohere_api_key",
-    getKeyUrl: "https://dashboard.cohere.com/api-keys",
-  },
-  {
-    id: "assemblyai",
-    label: "AssemblyAI",
-    placeholder: "Enter API key",
-    storeKey: "assemblyai_api_key",
-    getKeyUrl: "https://www.assemblyai.com/dashboard/api-keys",
-  },
-  {
-    id: "speechmatics",
-    label: "Speechmatics",
-    placeholder: "Enter API key",
-    storeKey: "speechmatics_api_key",
-    getKeyUrl: "https://portal.speechmatics.com/settings/api-keys",
-  },
-  {
-    id: "aquavoice",
-    label: "Aquavoice (Avalon)",
-    placeholder: "Enter API key",
-    storeKey: "aquavoice_api_key",
-    getKeyUrl: "https://app.aquavoice.com/api-dashboard?tab=keys",
-  },
-  {
-    id: "gemini",
-    label: "Google AI Studio",
-    placeholder: "Enter API key",
-    storeKey: "gemini_api_key",
-    getKeyUrl: "https://aistudio.google.com/apikey",
-  },
-  {
-    id: "openai",
-    label: "OpenAI",
-    placeholder: "Enter API key",
-    storeKey: "openai_api_key",
-    getKeyUrl: "https://platform.openai.com/api-keys",
-  },
-  {
-    id: "deepgram",
-    label: "Deepgram",
-    placeholder: "Enter API key",
-    storeKey: "deepgram_api_key",
-    getKeyUrl: "https://console.deepgram.com/project",
-  },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    placeholder: "Enter API key",
-    storeKey: "anthropic_api_key",
-    getKeyUrl: "https://platform.claude.com/settings/keys",
-  },
-];
-
-export const API_KEY_STORE_KEYS = API_KEYS.map((k) => k.storeKey);
 
 function formatProviderModelCounts(providerId: string): string | null {
   const sttCount = STT_MODELS[providerId]?.length ?? 0;
@@ -477,6 +412,707 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
   );
 }
 
+const WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT = "whisper-model-download-progress";
+const LOCAL_WHISPER_MODEL_LOAD_EVENT = "local-whisper-model-load";
+
+type LocalWhisperModelLoadStatus = "started" | "completed" | "error";
+type LocalWhisperModelLoadEvent = {
+  status: LocalWhisperModelLoadStatus;
+  message: string | null;
+};
+
+function LocalWhisperModelsCard() {
+  const queryClient = useQueryClient();
+
+  const { data: settings } = useSettings();
+  const { data: isAvailable } = useIsLocalWhisperAvailable();
+  const localWhisperBackendStatus = useLocalWhisperBackendStatus(!!isAvailable);
+  const { data: modelsDir } = useWhisperModelsDir();
+  const whisperModels = useWhisperModels(!!isAvailable);
+
+  const downloadModel = useDownloadWhisperModel();
+  const cancelDownload = useCancelWhisperModelDownload();
+  const deleteModel = useDeleteWhisperModel();
+  const validateModel = useValidateWhisperModel();
+  const updateLocalWhisperModelId = useUpdateLocalWhisperModelId();
+  const updateLocalWhisperLoadMode = useUpdateLocalWhisperLoadMode();
+
+  const localWhisperLoaded = useIsLocalWhisperModelLoaded(!!isAvailable);
+  const loadLocalWhisperModel = useLoadLocalWhisperModel();
+  const unloadLocalWhisperModel = useUnloadLocalWhisperModel();
+
+  const [progressById, setProgressById] = useState<
+    Record<string, WhisperModelDownloadProgress>
+  >({});
+  const [validateResultById, setValidateResultById] = useState<
+    Record<string, boolean | null>
+  >({});
+  const [errorById, setErrorById] = useState<Record<string, string | null>>({});
+  const [validatingModelId, setValidatingModelId] = useState<string | null>(
+    null
+  );
+  const [deletingModelId, setDeletingModelId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    (async () => {
+      const nextUnlisten = await listen<WhisperModelDownloadProgress>(
+        WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT,
+        (event) => {
+          const payload = event.payload;
+
+          // Normalize nulls (Rust Option -> null)
+          const normalized: WhisperModelDownloadProgress = {
+            ...payload,
+            total_bytes: payload.total_bytes ?? null,
+            percent: payload.percent ?? null,
+            message: payload.message ?? null,
+          };
+
+          setProgressById((prev) => ({
+            ...prev,
+            [normalized.model_id]: normalized,
+          }));
+
+          if (normalized.status === "error") {
+            setErrorById((prev) => ({
+              ...prev,
+              [normalized.model_id]: normalized.message ?? "Download failed",
+            }));
+          }
+
+          if (
+            normalized.status === "completed" ||
+            normalized.status === "cancelled" ||
+            normalized.status === "error"
+          ) {
+            queryClient.invalidateQueries({ queryKey: ["whisperModels"] });
+          }
+        }
+      );
+
+      // React StrictMode (dev) mounts effects twice; if we were disposed before
+      // `listen()` resolves, immediately unregister to avoid leaked duplicate listeners.
+      if (disposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    })();
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [queryClient]);
+
+  const [isLocalWhisperLoading, setIsLocalWhisperLoading] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    (async () => {
+      const nextUnlisten = await listen<LocalWhisperModelLoadEvent>(
+        LOCAL_WHISPER_MODEL_LOAD_EVENT,
+        (event) => {
+          const payload = event.payload;
+          const status = payload.status;
+
+          if (status === "started") {
+            setIsLocalWhisperLoading(true);
+            notifications.show({
+              title: "Local Whisper",
+              message: "Loading model…",
+              color: "orange",
+            });
+            return;
+          }
+
+          if (status === "completed") {
+            setIsLocalWhisperLoading(false);
+            notifications.show({
+              title: "Local Whisper",
+              message: "Model loaded.",
+              color: "green",
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["localWhisperModelLoaded"],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["localWhisperBackendStatus"],
+            });
+            return;
+          }
+
+          // error
+          setIsLocalWhisperLoading(false);
+          notifications.show({
+            title: "Local Whisper",
+            message: payload.message ?? "Model load failed",
+            color: "red",
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["localWhisperModelLoaded"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["localWhisperBackendStatus"],
+          });
+        }
+      );
+
+      // React StrictMode (dev) mounts effects twice; if we were disposed before
+      // `listen()` resolves, immediately unregister to avoid leaked duplicate listeners.
+      if (disposed) {
+        nextUnlisten();
+        return;
+      }
+
+      unlisten = nextUnlisten;
+    })();
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [queryClient]);
+
+  const contentDisabled = !isAvailable;
+
+  const models: WhisperModelInfo[] = whisperModels.data ?? [];
+  const modelsSortedBySizeDesc = [...models].sort(
+    (a, b) => b.size_bytes - a.size_bytes
+  );
+
+  const storedActiveModelId = settings?.local_whisper_model_id ?? null;
+  const activeModelId = (storedActiveModelId ?? "base").toLowerCase();
+  const activeModel = models.find((m) => m.id === activeModelId) ?? null;
+  const localWhisperLoadMode = settings?.local_whisper_load_mode ?? "manual";
+  const sttProvider = settings?.stt_provider ?? null;
+  const isSttProviderLocalWhisper =
+    sttProvider === "whisper" || sttProvider === "local-whisper";
+
+  const isModelLoaded = localWhisperLoaded.data ?? false;
+
+  const backend = localWhisperBackendStatus.data ?? null;
+  const compute = backend?.compute ?? null;
+  const computeLabel =
+    compute === "cuda" ? "GPU (CUDA)" : compute === "cpu" ? "CPU" : "Unknown";
+  const computeColor = compute === "cuda" ? "green" : "gray";
+  const observed = backend?.observed ?? null;
+  const observedLabel = (() => {
+    if (!observed) return "Observed: Unknown";
+    if (!observed.nvidia_smi_available)
+      return "Observed: nvidia-smi unavailable";
+    if (observed.cuda_process_present) return "Observed: CUDA active";
+    return "Observed: not seen";
+  })();
+  const observedColor = (() => {
+    if (!observed) return "gray";
+    if (!observed.nvidia_smi_available) return "gray";
+    if (observed.cuda_process_present) return "green";
+    return "gray";
+  })();
+
+  const downloadedModelOptions = modelsSortedBySizeDesc
+    .filter((m) => m.is_downloaded)
+    .map((m) => ({ value: m.id, label: m.name }));
+
+  const selectedModelValue = downloadedModelOptions.some(
+    (o) => o.value === activeModelId
+  )
+    ? activeModelId
+    : null;
+
+  const renderModels = () => {
+    if (!isAvailable) {
+      return (
+        <Text size="sm" c="dimmed">
+          This build of Kolboo was compiled without Local Whisper. Download the
+          “local-whisper” build variant to enable offline transcription.
+        </Text>
+      );
+    }
+
+    if (whisperModels.isLoading) {
+      return (
+        <Text size="sm" c="dimmed">
+          Loading models…
+        </Text>
+      );
+    }
+
+    if (whisperModels.isError) {
+      return (
+        <Text size="sm" c="dimmed">
+          Unable to load models.
+        </Text>
+      );
+    }
+
+    return (
+      <Stack gap={10}>
+        <div
+          style={{
+            border: "1px solid var(--border-default)",
+            borderRadius: 8,
+            padding: 12,
+            background: "var(--bg-elevated)",
+          }}
+        >
+          <Text size="sm" c="dimmed" mb={10}>
+            Local Whisper runs when your STT provider is set to Local Whisper.
+            {isSttProviderLocalWhisper
+              ? ""
+              : ` Currently selected: ${sttProvider ?? "(none)"}.`}
+          </Text>
+
+          <Group justify="space-between" align="center" wrap="wrap" gap={10}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <Text size="sm" fw={600}>
+                Active model
+              </Text>
+              <Text size="xs" c="dimmed">
+                {activeModel?.is_downloaded
+                  ? "Changing the model unloads the current model. The new model won’t auto-load."
+                  : "Download the active model (or pick another downloaded model)."}
+              </Text>
+            </div>
+
+            <Select
+              data={downloadedModelOptions}
+              value={selectedModelValue}
+              placeholder={
+                downloadedModelOptions.length > 0
+                  ? "Choose a downloaded model"
+                  : "Download a model to select"
+              }
+              disabled={!isAvailable || downloadedModelOptions.length === 0}
+              onChange={(value) => {
+                if (!value) return;
+
+                const update = () => {
+                  updateLocalWhisperModelId.mutate(value, {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  });
+                };
+
+                // Model selection should NOT auto-load the new model.
+                // If a model is currently loaded, unload it first.
+                if (isModelLoaded) {
+                  unloadLocalWhisperModel.mutate(undefined, {
+                    onSettled: () => {
+                      update();
+                    },
+                  });
+                } else {
+                  update();
+                }
+              }}
+              styles={{
+                input: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                  color: "var(--text-primary)",
+                  minWidth: 260,
+                },
+              }}
+            />
+          </Group>
+
+          <Group
+            justify="space-between"
+            align="center"
+            wrap="wrap"
+            gap={10}
+            mt={10}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <Text size="sm" fw={600}>
+                Model load
+              </Text>
+              <Text size="xs" c="dimmed">
+                Manual prevents auto-loading during transcription.
+              </Text>
+            </div>
+
+            <Group gap={8} wrap="wrap">
+              <Select
+                data={[
+                  { value: "manual", label: "Manual" },
+                  { value: "on_transcribe", label: "On transcribe" },
+                  { value: "on_launch", label: "On launch" },
+                ]}
+                value={localWhisperLoadMode}
+                disabled={!isAvailable}
+                onChange={(value) => {
+                  if (!value) return;
+                  updateLocalWhisperLoadMode.mutate(value as any, {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  });
+                }}
+                styles={{
+                  input: {
+                    backgroundColor: "var(--bg-elevated)",
+                    borderColor: "var(--border-default)",
+                    color: "var(--text-primary)",
+                    minWidth: 200,
+                  },
+                }}
+              />
+
+              <Button
+                size="sm"
+                color={isModelLoaded ? "gray" : "orange"}
+                variant={isModelLoaded ? "light" : "filled"}
+                disabled={!isAvailable || !activeModel?.is_downloaded}
+                loading={
+                  isLocalWhisperLoading ||
+                  loadLocalWhisperModel.isPending ||
+                  unloadLocalWhisperModel.isPending
+                }
+                onClick={() => {
+                  if (isModelLoaded) {
+                    unloadLocalWhisperModel.mutate();
+                    return;
+                  }
+
+                  loadLocalWhisperModel.mutate();
+                }}
+              >
+                {isModelLoaded ? "Unload model" : "Load model"}
+              </Button>
+
+              <Badge
+                size="sm"
+                color={isModelLoaded ? "green" : "gray"}
+                variant="light"
+              >
+                {isModelLoaded ? "Loaded" : "Not loaded"}
+              </Badge>
+
+              <Badge
+                size="sm"
+                color={computeColor}
+                variant="light"
+                title={backend?.reason ?? undefined}
+              >
+                Compute: {computeLabel}
+              </Badge>
+
+              <Badge size="sm" color={observedColor} variant="light">
+                {observedLabel}
+              </Badge>
+            </Group>
+          </Group>
+
+          {compute === "cuda" ? (
+            <Text size="xs" c="dimmed" mt={6}>
+              Compute shows what Kolboo thinks it can use
+              (availability/request). Observed shows what nvidia-smi reports for
+              this process.
+            </Text>
+          ) : null}
+
+          {observed ? (
+            <div style={{ marginTop: 6 }}>
+              <Text size="xs" c="dimmed">
+                PID: {observed.pid}
+              </Text>
+              {observed.nvidia_smi_available ? (
+                <Text size="xs" c="dimmed">
+                  nvidia-smi used GPU memory (MB):{" "}
+                  {observed.used_gpu_memory_mb ?? "unknown"}
+                </Text>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  nvidia-smi error: {observed.error ?? "unknown"}
+                </Text>
+              )}
+            </div>
+          ) : null}
+
+          {backend && backend.compute === "cpu" && backend.build_has_cuda ? (
+            <div style={{ marginTop: 10 }}>
+              <Text size="xs" c="dimmed">
+                GPU unavailable: {backend.reason ?? "Unknown reason"}
+              </Text>
+              {backend.missing_dlls?.length ? (
+                <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>
+                  Missing: {backend.missing_dlls.join(", ")}
+                </Text>
+              ) : null}
+            </div>
+          ) : null}
+
+          {storedActiveModelId && !activeModel?.is_downloaded ? (
+            <Text size="xs" mt={10} c="red">
+              Active model “{activeModelId}” isn’t downloaded yet.
+            </Text>
+          ) : null}
+
+          {isAvailable &&
+          activeModel?.is_downloaded &&
+          !isModelLoaded &&
+          localWhisperLoadMode === "manual" ? (
+            <Text size="xs" mt={10} c="dimmed">
+              Manual load is enabled. Click “Load model” before transcribing.
+            </Text>
+          ) : null}
+        </div>
+
+        {modelsSortedBySizeDesc.map((m) => {
+          const progress = progressById[m.id];
+          const isDownloading =
+            progress &&
+            progress.status !== "completed" &&
+            progress.status !== "cancelled" &&
+            progress.status !== "error";
+
+          const validation = validateResultById[m.id];
+          const error = errorById[m.id];
+
+          return (
+            <div
+              key={m.id}
+              style={{
+                border: "1px solid var(--border-default)",
+                borderRadius: 8,
+                padding: 12,
+                background: "var(--bg-elevated)",
+              }}
+            >
+              <Group
+                justify="space-between"
+                align="center"
+                wrap="wrap"
+                gap={10}
+              >
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 2 }}
+                >
+                  <Group gap={8} align="center" wrap="wrap">
+                    <Text fw={600}>{m.name}</Text>
+                    {m.id === activeModelId ? (
+                      <Badge size="sm" color="orange" variant="light">
+                        Active
+                      </Badge>
+                    ) : null}
+                  </Group>
+                  <Text size="xs" c="dimmed">
+                    {m.filename} • {m.size_display}
+                  </Text>
+                </div>
+
+                <Group gap={8}>
+                  {!m.is_downloaded ? (
+                    <>
+                      <Button
+                        size="sm"
+                        color="orange"
+                        onClick={() => {
+                          setErrorById((prev) => ({ ...prev, [m.id]: null }));
+                          // Optimistic UI: show queued immediately so the user sees
+                          // something even before the first progress event arrives.
+                          setProgressById((prev) => ({
+                            ...prev,
+                            [m.id]: {
+                              model_id: m.id,
+                              status: "queued",
+                              downloaded_bytes: 0,
+                              total_bytes: null,
+                              percent: null,
+                              message: null,
+                            },
+                          }));
+
+                          downloadModel.mutate(m.id, {
+                            onError: (err) => {
+                              const msg =
+                                err instanceof Error
+                                  ? err.message
+                                  : String(err);
+
+                              setErrorById((prev) => ({
+                                ...prev,
+                                [m.id]: msg,
+                              }));
+
+                              setProgressById((prev) => ({
+                                ...prev,
+                                [m.id]: {
+                                  model_id: m.id,
+                                  status: "error",
+                                  downloaded_bytes: 0,
+                                  total_bytes: null,
+                                  percent: null,
+                                  message: msg,
+                                },
+                              }));
+                            },
+                          });
+                        }}
+                        disabled={isDownloading}
+                      >
+                        Download
+                      </Button>
+                      {isDownloading ? (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => cancelDownload.mutate(m.id)}
+                        >
+                          Cancel
+                        </Button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => {
+                          setValidateResultById((prev) => ({
+                            ...prev,
+                            [m.id]: null,
+                          }));
+
+                          setValidatingModelId(m.id);
+
+                          validateModel.mutate(m.id, {
+                            onSuccess: (ok) => {
+                              setValidateResultById((prev) => ({
+                                ...prev,
+                                [m.id]: ok,
+                              }));
+                            },
+                            onSettled: () => {
+                              setValidatingModelId((current) =>
+                                current === m.id ? null : current
+                              );
+                            },
+                          });
+                        }}
+                        loading={validatingModelId === m.id}
+                        disabled={
+                          validatingModelId != null &&
+                          validatingModelId !== m.id
+                        }
+                      >
+                        Validate
+                      </Button>
+                      <Button
+                        size="sm"
+                        color="red"
+                        variant="light"
+                        onClick={() => {
+                          setDeletingModelId(m.id);
+                          deleteModel.mutate(m.id, {
+                            onSettled: () => {
+                              setDeletingModelId((current) =>
+                                current === m.id ? null : current
+                              );
+                            },
+                          });
+                        }}
+                        loading={deletingModelId === m.id}
+                        disabled={
+                          deletingModelId != null && deletingModelId !== m.id
+                        }
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                </Group>
+              </Group>
+
+              {isDownloading ? (
+                <div style={{ marginTop: 10 }}>
+                  <Text size="xs" c="dimmed" mb={6}>
+                    {progress.status === "queued" ? "Queued" : null}
+                    {progress.status === "downloading" ? "Downloading" : null}
+                    {progress.status === "verifying" ? "Verifying" : null}
+                    {progress.message ? ` • ${progress.message}` : null}
+                  </Text>
+                  <Progress
+                    value={progress.percent ?? 0}
+                    animated
+                    color="orange"
+                  />
+                </div>
+              ) : null}
+
+              {validation != null ? (
+                <Text size="xs" mt={8} c={validation ? "green" : "red"}>
+                  {validation
+                    ? "Model file verified (SHA-256)."
+                    : "Model file looks invalid/corrupt. Try re-downloading."}
+                </Text>
+              ) : null}
+
+              {error ? (
+                <Text size="xs" mt={8} c="red">
+                  {error}
+                </Text>
+              ) : null}
+            </div>
+          );
+        })}
+      </Stack>
+    );
+  };
+
+  return (
+    <Card
+      withBorder
+      mt={18}
+      padding="md"
+      style={{
+        background: "var(--bg-elevated)",
+        borderColor: "var(--border-default)",
+      }}
+    >
+      <Group justify="space-between" align="center" mb={6}>
+        <Group gap={10} align="center">
+          <Text fw={700}>Local Whisper models</Text>
+          {!isAvailable ? (
+            <Badge size="sm" variant="light" color="gray">
+              Unavailable
+            </Badge>
+          ) : (
+            <Badge size="sm" variant="light" color="orange">
+              Offline
+            </Badge>
+          )}
+        </Group>
+
+        <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>
+          {modelsDir ?? ""}
+        </Text>
+      </Group>
+
+      <Text size="sm" c="dimmed" mb={12}>
+        Download and manage offline Whisper models used by the Local Whisper STT
+        provider. Downloads are verified with SHA-256.
+      </Text>
+
+      {contentDisabled ? (
+        <div style={{ opacity: 0.55 }}>{renderModels()}</div>
+      ) : (
+        renderModels()
+      )}
+    </Card>
+  );
+}
+
 export function ApiKeysSettings({
   editingProfileId,
 }: {
@@ -510,9 +1146,7 @@ export function ApiKeysSettings({
         </div>
         <TextInput
           value={whisperServerBaseUrlDraft}
-          onChange={(e) =>
-            setWhisperServerBaseUrlDraft(e.currentTarget.value)
-          }
+          onChange={(e) => setWhisperServerBaseUrlDraft(e.currentTarget.value)}
           onBlur={() => {
             const trimmed = whisperServerBaseUrlDraft.trim();
             const normalized = trimmed ? trimmed : null;
@@ -533,6 +1167,8 @@ export function ApiKeysSettings({
           }}
         />
       </div>
+
+      <LocalWhisperModelsCard />
     </>
   );
 

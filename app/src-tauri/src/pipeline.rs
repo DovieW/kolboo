@@ -887,6 +887,7 @@ fn is_effectively_quiet(
 
 /// Errors that can occur in the recording pipeline
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 pub enum PipelineError {
     #[error("Audio capture error: {0}")]
     AudioCapture(#[from] AudioCaptureError),
@@ -921,6 +922,8 @@ pub enum PipelineError {
     #[error("Recording too large: {0} bytes exceeds limit of {1} bytes")]
     RecordingTooLarge(usize, usize),
 }
+
+// Backwards-compatibility: `PipelineError::NoProvider` is still part of the public API.
 
 /// Pipeline state machine
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -961,7 +964,7 @@ impl PipelineState {
 }
 
 /// Events emitted by the pipeline
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
     /// Recording has started
@@ -1167,6 +1170,14 @@ pub struct PipelineConfig {
     /// Path to local Whisper model (for local-whisper feature)
     #[cfg(feature = "local-whisper")]
     pub whisper_model_path: Option<std::path::PathBuf>,
+
+    /// When to load the local whisper.cpp model file.
+    ///
+    /// Values:
+    /// - "manual": require explicit UI load
+    /// - "on_transcribe": load when first needed
+    /// - "on_launch": best-effort preload at startup
+    pub local_whisper_load_mode: String,
 }
 
 impl Default for PipelineConfig {
@@ -1211,6 +1222,8 @@ impl Default for PipelineConfig {
             request_log_store: None,
             #[cfg(feature = "local-whisper")]
             whisper_model_path: None,
+
+            local_whisper_load_mode: "manual".to_string(),
         }
     }
 }
@@ -1234,6 +1247,72 @@ struct PipelineInner {
 }
 
 impl PipelineInner {
+    fn local_whisper_model_key_for_cache(&self) -> String {
+        #[cfg(feature = "local-whisper")]
+        {
+            self.config
+                .whisper_model_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "<missing-model-path>".to_string())
+        }
+
+        #[cfg(not(feature = "local-whisper"))]
+        {
+            "<local-whisper-disabled>".to_string()
+        }
+    }
+
+    fn local_whisper_cache_key(&self) -> String {
+        format!("local-whisper::{}", self.local_whisper_model_key_for_cache())
+    }
+
+    fn is_local_whisper_loaded(&self) -> bool {
+        let key = self.local_whisper_cache_key();
+        self.stt_provider_cache.contains_key(&key)
+    }
+
+    fn unload_local_whisper(&mut self) {
+        self.stt_provider_cache
+            .retain(|k, _| !k.starts_with("local-whisper::"));
+    }
+
+    fn force_load_local_whisper(&mut self) -> Result<(), PipelineError> {
+        let cache_key = self.local_whisper_cache_key();
+
+        if self.stt_provider_cache.contains_key(&cache_key) {
+            return Ok(());
+        }
+
+        #[cfg(feature = "local-whisper")]
+        {
+            let Some(model_path) = &self.config.whisper_model_path else {
+                return Err(PipelineError::Config(
+                    "Local Whisper: no model path configured".to_string(),
+                ));
+            };
+
+            let provider = crate::stt::LocalWhisperProvider::with_config(
+                crate::stt::LocalWhisperConfig {
+                    model_path: model_path.clone(),
+                    transcription_prompt: self.config.stt_transcription_prompt.clone(),
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| PipelineError::Config(format!("Local Whisper init failed: {}", e)))?;
+            let provider = Arc::new(provider);
+            self.stt_provider_cache.insert(cache_key, provider);
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "local-whisper"))]
+        {
+            Err(PipelineError::Config(
+                "Local Whisper feature is not enabled".to_string(),
+            ))
+        }
+    }
+
     fn build_http_client_with_timeout(
         &self,
         timeout: Duration,
@@ -1265,17 +1344,40 @@ impl PipelineInner {
         model: Option<String>,
     ) -> Result<Arc<dyn SttProvider>, PipelineError> {
         let provider_id = canonicalize_stt_provider_id(provider_id);
-        let model_key = model.clone().unwrap_or_else(|| "<default>".to_string());
+
+        // NOTE: for Local Whisper, the "model" setting is not meaningful (Whisper model is
+        // selected via `whisper_model_path`). Using the global `stt_model` here can cause
+        // unnecessary cache misses and, worse, repeated expensive model loads.
+        let model_key = if provider_id == "local-whisper" {
+            self.local_whisper_model_key_for_cache()
+        } else {
+            model.clone().unwrap_or_else(|| "<default>".to_string())
+        };
+
         let cache_key = format!("{}::{}", provider_id, model_key);
 
         if let Some(p) = self.stt_provider_cache.get(&cache_key) {
             return Ok(p.clone());
         }
 
+        // Manual local-whisper mode: require explicit preload to avoid surprise UI stalls
+        // during stop/transcribe.
+        if provider_id == "local-whisper" && self.config.local_whisper_load_mode == "manual" {
+            return Err(PipelineError::Config(
+                "Local Whisper is set to Manual load. Click 'Load model' in Settings (or switch load mode to 'On transcribe').".to_string(),
+            ));
+        }
+
         #[cfg(feature = "local-whisper")]
         if provider_id == "local-whisper" {
             if let Some(model_path) = &self.config.whisper_model_path {
-                let provider = crate::stt::LocalWhisperProvider::new(model_path.clone())
+                let provider = crate::stt::LocalWhisperProvider::with_config(
+                    crate::stt::LocalWhisperConfig {
+                        model_path: model_path.clone(),
+                        transcription_prompt: self.config.stt_transcription_prompt.clone(),
+                        ..Default::default()
+                    },
+                )
                     .map_err(|e| PipelineError::Config(format!("Local Whisper init failed: {}", e)))?;
                 let provider = Arc::new(provider);
                 self.stt_provider_cache.insert(cache_key, provider.clone());
@@ -1474,19 +1576,35 @@ impl PipelineInner {
     }
 
     fn initialize_providers(&mut self, config: &PipelineConfig) {
-        // Clear caches on any config update.
-        self.stt_provider_cache.clear();
+        // Clear caches on config updates.
+        // IMPORTANT: keep any cached local-whisper models unless we explicitly evicted them
+        // (e.g. model path / transcription prompt changed). This prevents expensive model
+        // reloads during routine config sync and makes "on_launch" preload actually stick.
+        self.stt_provider_cache
+            .retain(|k, _| k.starts_with("local-whisper::"));
         self.llm_provider_cache.clear();
 
         // Initialize STT providers
         self.stt_registry = SttRegistry::new();
         let canonical = canonicalize_stt_provider_id(&config.stt_provider);
+
+        // Avoid blocking the pipeline lock during config sync.
+        // Local Whisper model initialization can take noticeable time and should be done
+        // lazily (when we actually need to transcribe).
+        #[cfg(feature = "local-whisper")]
+        if canonical == "local-whisper" {
+            self.stt_registry.set_current_name_for_ui(&canonical);
+            return;
+        }
+
         match self.get_or_create_stt_provider(&canonical, config.stt_model.clone()) {
             Ok(provider) => {
                 self.stt_registry.register(&canonical, provider);
                 let _ = self.stt_registry.set_current(&canonical);
             }
             Err(e) => {
+                // Keep the name for UI/telemetry even if provider init fails.
+                self.stt_registry.set_current_name_for_ui(&canonical);
                 log::warn!(
                     "Pipeline: Default STT provider '{}' not initialized: {}",
                     canonical,
@@ -1612,6 +1730,7 @@ struct SessionPresetLock {
     preset_id: String,
 }
 
+#[derive(Clone)]
 pub struct SharedPipeline {
     inner: Arc<Mutex<PipelineInner>>,
     level_meter: crate::audio_capture::SharedAudioLevelMeter,
@@ -1988,6 +2107,26 @@ impl SharedPipeline {
                 .and_then(|p| p.stt_model.clone())
                 .or_else(|| config.stt_model.clone());
 
+            let mut stt_provider_id_used = desired_stt_provider.clone();
+            let mut stt_model_used: Option<String> = desired_stt_model.clone();
+
+            #[cfg(feature = "local-whisper")]
+            if stt_provider_id_used == "local-whisper" {
+                stt_model_used = inner
+                    .config
+                    .whisper_model_path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|f| f.to_string_lossy().to_string());
+            }
+
+            if let Some(store) = inner.config.request_log_store.as_ref() {
+                store.with_current(|log| {
+                    log.stt_provider = stt_provider_id_used.clone();
+                    log.stt_model = stt_model_used.clone();
+                });
+            }
+
             let stt_provider = match inner.get_or_create_stt_provider(
                 &desired_stt_provider,
                 desired_stt_model.clone(),
@@ -2005,6 +2144,26 @@ impl SharedPipeline {
                         );
 
                         let global_model = config.stt_model.clone();
+                        stt_provider_id_used = global_provider.clone();
+                        stt_model_used = global_model.clone();
+
+                        #[cfg(feature = "local-whisper")]
+                        if stt_provider_id_used == "local-whisper" {
+                            stt_model_used = inner
+                                .config
+                                .whisper_model_path
+                                .as_ref()
+                                .and_then(|p| p.file_name())
+                                .map(|f| f.to_string_lossy().to_string());
+                        }
+
+                        if let Some(store) = inner.config.request_log_store.as_ref() {
+                            store.with_current(|log| {
+                                log.stt_provider = stt_provider_id_used.clone();
+                                log.stt_model = stt_model_used.clone();
+                            });
+                        }
+
                         inner
                             .get_or_create_stt_provider(&global_provider, global_model)
                             .map_err(|err| {
@@ -2012,11 +2171,11 @@ impl SharedPipeline {
                                     "No STT provider configured: {}",
                                     err
                                 ));
-                                PipelineError::NoProvider
+                                err
                             })?
                     } else {
-                        inner.set_error(&format!("No STT provider configured: {}", e));
-                        return Err(PipelineError::NoProvider);
+                        inner.set_error(&format!("STT provider init failed: {}", e));
+                        return Err(e);
                     }
                 }
             };
@@ -2237,6 +2396,29 @@ impl SharedPipeline {
                 .map(|s| seconds_to_duration_or(s, inner.config.transcription_timeout))
                 .unwrap_or(inner.config.transcription_timeout);
 
+            let mut stt_provider_id_used = desired_stt_provider.clone();
+            let mut stt_model_used: Option<String> = desired_stt_model.clone();
+
+            #[cfg(feature = "local-whisper")]
+            if stt_provider_id_used == "local-whisper" {
+                stt_model_used = inner
+                    .config
+                    .whisper_model_path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|f| f.to_string_lossy().to_string());
+            }
+
+            // Persist the *intended/effective* provider/model into the request log before
+            // provider initialization. This keeps logs accurate even when provider creation
+            // fails (e.g., Local Whisper manual mode without preload).
+            if let Some(store) = inner.config.request_log_store.as_ref() {
+                store.with_current(|log| {
+                    log.stt_provider = stt_provider_id_used.clone();
+                    log.stt_model = stt_model_used.clone();
+                });
+            }
+
             let stt_provider = match inner.get_or_create_stt_provider(&desired_stt_provider, desired_stt_model.clone()) {
                 Ok(p) => p,
                 Err(e) => {
@@ -2250,14 +2432,36 @@ impl SharedPipeline {
                             global_provider
                         );
                         let global_model = inner.config.stt_model.clone();
+                        stt_provider_id_used = global_provider.clone();
+                        stt_model_used = global_model.clone();
+
+                        #[cfg(feature = "local-whisper")]
+                        if stt_provider_id_used == "local-whisper" {
+                            stt_model_used = inner
+                                .config
+                                .whisper_model_path
+                                .as_ref()
+                                .and_then(|p| p.file_name())
+                                .map(|f| f.to_string_lossy().to_string());
+                        }
+
+                        if let Some(store) = inner.config.request_log_store.as_ref() {
+                            store.with_current(|log| {
+                                log.stt_provider = stt_provider_id_used.clone();
+                                log.stt_model = stt_model_used.clone();
+                            });
+                        }
+
                         inner.get_or_create_stt_provider(&global_provider, global_model)
                             .map_err(|err| {
                                 inner.set_error(&format!("No STT provider configured: {}", err));
-                                PipelineError::NoProvider
+                                err
                             })?
                     } else {
-                        inner.set_error(&format!("No STT provider configured: {}", e));
-                        return Err(PipelineError::NoProvider);
+                        // Preserve the real failure reason (e.g. missing API key, manual local-whisper not loaded)
+                        // instead of collapsing into the generic NoProvider.
+                        inner.set_error(&format!("STT provider init failed: {}", e));
+                        return Err(e);
                     }
                 }
             };
@@ -2986,6 +3190,7 @@ impl SharedPipeline {
     /// Transcribe provided WAV bytes using the same STT + optional LLM logic as the main pipeline.
     ///
     /// This is used for retrying failed requests from persisted audio.
+    #[allow(dead_code)]
     pub async fn transcribe_wav_bytes_detailed(
         &self,
         wav_bytes: Vec<u8>,
@@ -3081,6 +3286,26 @@ impl SharedPipeline {
                 .map(|s| seconds_to_duration_or(s, inner.config.transcription_timeout))
                 .unwrap_or(inner.config.transcription_timeout);
 
+            let mut stt_provider_id_used = desired_stt_provider.clone();
+            let mut stt_model_used: Option<String> = desired_stt_model.clone();
+
+            #[cfg(feature = "local-whisper")]
+            if stt_provider_id_used == "local-whisper" {
+                stt_model_used = inner
+                    .config
+                    .whisper_model_path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|f| f.to_string_lossy().to_string());
+            }
+
+            if let Some(store) = inner.config.request_log_store.as_ref() {
+                store.with_current(|log| {
+                    log.stt_provider = stt_provider_id_used.clone();
+                    log.stt_model = stt_model_used.clone();
+                });
+            }
+
             let stt_provider = match inner.get_or_create_stt_provider(&desired_stt_provider, desired_stt_model.clone()) {
                 Ok(p) => p,
                 Err(e) => {
@@ -3094,14 +3319,34 @@ impl SharedPipeline {
                             global_provider
                         );
                         let global_model = inner.config.stt_model.clone();
+                        stt_provider_id_used = global_provider.clone();
+                        stt_model_used = global_model.clone();
+
+                        #[cfg(feature = "local-whisper")]
+                        if stt_provider_id_used == "local-whisper" {
+                            stt_model_used = inner
+                                .config
+                                .whisper_model_path
+                                .as_ref()
+                                .and_then(|p| p.file_name())
+                                .map(|f| f.to_string_lossy().to_string());
+                        }
+
+                        if let Some(store) = inner.config.request_log_store.as_ref() {
+                            store.with_current(|log| {
+                                log.stt_provider = stt_provider_id_used.clone();
+                                log.stt_model = stt_model_used.clone();
+                            });
+                        }
+
                         inner.get_or_create_stt_provider(&global_provider, global_model)
                             .map_err(|err| {
                                 inner.set_error(&format!("No STT provider configured: {}", err));
-                                PipelineError::NoProvider
+                                err
                             })?
                     } else {
-                        inner.set_error(&format!("No STT provider configured: {}", e));
-                        return Err(PipelineError::NoProvider);
+                        inner.set_error(&format!("STT provider init failed: {}", e));
+                        return Err(e);
                     }
                 }
             };
@@ -3776,7 +4021,7 @@ impl SharedPipeline {
     /// Stop recording and transcribe the audio.
     ///
     /// Kept for backwards compatibility. Prefer `stop_and_transcribe_detailed`.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub async fn stop_and_transcribe(&self) -> Result<String, PipelineError> {
         self.stop_and_transcribe_detailed()
             .await
@@ -3789,12 +4034,29 @@ impl SharedPipeline {
     pub fn update_config(&self, config: PipelineConfig) -> Result<(), PipelineError> {
         let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
 
+        // If the local-whisper model path changed, evict cached models.
+        // Otherwise switching models could keep multiple large GGML files resident.
+        let old_local_whisper_key = inner.local_whisper_model_key_for_cache();
+        let old_stt_prompt = inner.config.stt_transcription_prompt.clone();
+
         // Don't update config while recording - could cause issues
         if inner.state == PipelineState::Recording {
             log::warn!("Pipeline: Config update requested while recording, will take effect after current session");
         }
 
         inner.config = config.clone();
+
+        let new_local_whisper_key = inner.local_whisper_model_key_for_cache();
+        if old_local_whisper_key != new_local_whisper_key {
+            inner.unload_local_whisper();
+        }
+
+        // If the transcription prompt changed, the model should be reloaded so the new
+        // prompt is applied. We unload only (no auto-load) to respect the user's load mode.
+        if old_stt_prompt != inner.config.stt_transcription_prompt {
+            inner.unload_local_whisper();
+        }
+
         inner.stt_registry = SttRegistry::new();
         inner.initialize_providers(&config);
         // Update VAD config on audio capture
@@ -3873,7 +4135,7 @@ impl SharedPipeline {
     /// Poll for VAD events (non-blocking)
     ///
     /// Returns the next VAD event if one is available, or None if no events are pending.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn poll_vad_event(&self) -> Option<AudioCaptureEvent> {
         self.inner
             .lock()
@@ -3882,7 +4144,7 @@ impl SharedPipeline {
     }
 
     /// Check if VAD auto-stop is enabled
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn is_vad_auto_stop_enabled(&self) -> bool {
         self.inner
             .lock()
@@ -3949,7 +4211,7 @@ impl SharedPipeline {
     ///
     /// This is cheap and intended for UI metering (e.g., overlay waveform). The snapshot is
     /// updated from the CPAL input callback while recording.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn audio_level_snapshot(&self) -> AudioLevelSnapshot {
         self.inner
             .lock()
@@ -3962,7 +4224,7 @@ impl SharedPipeline {
     }
 
     /// Get the name of the current STT provider
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn current_provider_name(&self) -> String {
         self.inner
             .lock()
@@ -3976,6 +4238,92 @@ impl SharedPipeline {
             .lock()
             .map(|inner| inner.config.clone())
             .unwrap_or_default()
+    }
+
+    pub fn is_local_whisper_loaded(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.is_local_whisper_loaded())
+            .unwrap_or(false)
+    }
+
+    pub fn unload_local_whisper(&self) -> Result<(), PipelineError> {
+        let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+        if inner.state == PipelineState::Recording {
+            return Err(PipelineError::AlreadyRecording);
+        }
+
+        inner.unload_local_whisper();
+        Ok(())
+    }
+
+    pub fn force_load_local_whisper(&self) -> Result<(), PipelineError> {
+        #[cfg(feature = "local-whisper")]
+        {
+            // Phase 1: fast path + capture config while holding the lock briefly.
+            let (cache_key, model_path, transcription_prompt) = {
+                let inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+                if inner.state == PipelineState::Recording {
+                    return Err(PipelineError::AlreadyRecording);
+                }
+
+                let cache_key = inner.local_whisper_cache_key();
+                if inner.stt_provider_cache.contains_key(&cache_key) {
+                    return Ok(());
+                }
+
+                let Some(model_path) = inner.config.whisper_model_path.clone() else {
+                    return Err(PipelineError::Config(
+                        "Local Whisper: no model path configured".to_string(),
+                    ));
+                };
+
+                (
+                    cache_key,
+                    model_path,
+                    inner.config.stt_transcription_prompt.clone(),
+                )
+            };
+
+            // Phase 2: load the model outside the lock (this can take seconds).
+            let provider = crate::stt::LocalWhisperProvider::with_config(
+                crate::stt::LocalWhisperConfig {
+                    model_path,
+                    transcription_prompt,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| PipelineError::Config(format!("Local Whisper init failed: {}", e)))?;
+            let provider = Arc::new(provider);
+
+            // Phase 3: insert into cache under lock.
+            let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+            // If recording started while we were loading, don't mutate pipeline state/caches.
+            if inner.state == PipelineState::Recording {
+                return Err(PipelineError::AlreadyRecording);
+            }
+
+            inner
+                .stt_provider_cache
+                .entry(cache_key)
+                .or_insert(provider);
+
+            Ok(())
+        }
+
+        #[cfg(not(feature = "local-whisper"))]
+        {
+            let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+            if inner.state == PipelineState::Recording {
+                return Err(PipelineError::AlreadyRecording);
+            }
+
+            inner.force_load_local_whisper()
+        }
     }
 
     /// Check if the pipeline is in an error state
@@ -3996,7 +4344,7 @@ impl SharedPipeline {
     }
 
     /// Get the cancellation token for external use (e.g., for coordinating with other async tasks)
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn get_cancel_token(&self) -> Option<CancellationToken> {
         self.inner
             .lock()
@@ -4008,19 +4356,6 @@ impl SharedPipeline {
 impl Default for SharedPipeline {
     fn default() -> Self {
         Self::new(PipelineConfig::default())
-    }
-}
-
-impl Clone for SharedPipeline {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            level_meter: self.level_meter.clone(),
-            waveform_meter: self.waveform_meter.clone(),
-            embedding_cache: self.embedding_cache.clone(),
-            session_preset_lock: self.session_preset_lock.clone(),
-            session_profile_override: self.session_profile_override.clone(),
-        }
     }
 }
 

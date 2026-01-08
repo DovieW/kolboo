@@ -194,6 +194,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     #[cfg(feature = "local-whisper")]
     {
         dirty |= set_default("local_whisper_model_id", json!("base"), false);
+        // When to load the local whisper.cpp model file.
+        // - manual: only load when user clicks Load
+        // - on_transcribe: lazily load the first time transcription needs it
+        // - on_launch: best-effort preload shortly after app launch
+        dirty |= set_default("local_whisper_load_mode", json!("manual"), false);
     }
 
     dirty |= set_default("stt_timeout_seconds", json!(10.0), false);
@@ -2545,6 +2550,7 @@ pub fn run() {
         .manage(AppState::default())
         .manage(TrayKeepAlive::default())
         .manage(MicTestMeterState::default())
+        .manage(commands::whisper::WhisperDownloadManager::default())
         .invoke_handler(tauri::generate_handler![
             commands::audio::play_audio_cue_preview,
             commands::audio::list_audio_input_devices,
@@ -2630,12 +2636,18 @@ pub fn run() {
             commands::router::cache_router_embeddings,
             // Local Whisper model management commands
             commands::whisper::is_local_whisper_available,
+            commands::whisper::get_local_whisper_backend_status,
+            commands::whisper::is_local_whisper_model_loaded,
+            commands::whisper::load_local_whisper_model,
+            commands::whisper::unload_local_whisper_model,
             commands::whisper::get_whisper_models,
             commands::whisper::get_whisper_models_dir,
             commands::whisper::is_whisper_model_downloaded,
             commands::whisper::get_whisper_model_url,
             commands::whisper::delete_whisper_model,
             commands::whisper::validate_whisper_model,
+            commands::whisper::download_whisper_model,
+            commands::whisper::cancel_whisper_model_download,
             // Request logging commands
             commands::logs::get_request_logs,
             commands::logs::clear_request_logs,
@@ -2819,6 +2831,48 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 let pipeline = initialize_pipeline_from_settings(app.handle());
+
+                // Best-effort: preload local-whisper model at launch.
+                // Do this in the background so startup remains snappy.
+                #[cfg(feature = "local-whisper")]
+                {
+                    let preload_pipeline = pipeline.clone();
+                    if preload_pipeline.config().local_whisper_load_mode == "on_launch"
+                        && !preload_pipeline.is_local_whisper_loaded()
+                    {
+                        // Emit load events so the UI can update (and so users can see
+                        // that on-launch loading is actually happening).
+                        let app_handle_for_emit = app.handle().clone();
+                        let _ = app_handle_for_emit.emit(
+                            commands::whisper::LOCAL_WHISPER_MODEL_LOAD_EVENT,
+                            commands::whisper::LocalWhisperModelLoadEvent {
+                                status: commands::whisper::LocalWhisperModelLoadStatus::Started,
+                                message: None,
+                            },
+                        );
+
+                        let app_handle_for_emit_done = app_handle_for_emit.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let result = preload_pipeline.force_load_local_whisper();
+
+                            let payload = match result {
+                                Ok(()) => commands::whisper::LocalWhisperModelLoadEvent {
+                                    status: commands::whisper::LocalWhisperModelLoadStatus::Completed,
+                                    message: None,
+                                },
+                                Err(e) => commands::whisper::LocalWhisperModelLoadEvent {
+                                    status: commands::whisper::LocalWhisperModelLoadStatus::Error,
+                                    message: Some(e.to_string()),
+                                },
+                            };
+
+                            let _ = app_handle_for_emit_done.emit(
+                                commands::whisper::LOCAL_WHISPER_MODEL_LOAD_EVENT,
+                                payload,
+                            );
+                        });
+                    }
+                }
 
                 // Preload persisted router embeddings cache once at startup.
                 // Routing uses the in-memory cache and does not read the store per request.
@@ -4006,6 +4060,12 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         })
     };
 
+    let local_whisper_load_mode: String = get_setting_from_store(
+        app,
+        "local_whisper_load_mode",
+        "manual".to_string(),
+    );
+
     let config = pipeline::PipelineConfig {
         input_device_name,
 
@@ -4062,6 +4122,8 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
         #[cfg(feature = "local-whisper")]
         whisper_model_path,
+
+        local_whisper_load_mode,
     };
 
     log::info!(

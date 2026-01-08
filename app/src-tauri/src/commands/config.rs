@@ -282,6 +282,13 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         })
     };
 
+    let local_whisper_load_mode: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("local_whisper_load_mode"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| "manual".to_string());
+
     // Get the appropriate API key based on provider
     let stt_api_key: String = {
         let key_name = format!("{}_api_key", stt_provider);
@@ -722,6 +729,8 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
 
         #[cfg(feature = "local-whisper")]
         whisper_model_path,
+
+        local_whisper_load_mode,
     };
 
     // Update the pipeline
@@ -729,6 +738,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         pipeline
             .update_config(config)
             .map_err(|e| format!("Failed to update pipeline config: {}", e))?;
+
         log::info!(
             "Pipeline config synced - STT: {} ({}), LLM: {} ({}), VAD: {}, program_profiles: {}",
             stt_provider,

@@ -30,7 +30,7 @@ import {
   useUpdateTranscriptionRetention,
   useUpdateTranscriptionRetentionDeleteRecordings,
 } from "../../lib/queries";
-import { API_KEY_STORE_KEYS } from "./ApiKeysSettings";
+import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
 import {
   configAPI,
   dataAPI,

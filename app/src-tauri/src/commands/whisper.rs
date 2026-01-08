@@ -3,9 +3,169 @@
 //! These commands are only available when the `local-whisper` feature is enabled.
 
 #[cfg(feature = "local-whisper")]
-use crate::stt::{LocalWhisperConfig, LocalWhisperProvider, WhisperModel};
+use crate::stt::WhisperModel;
+#[cfg(feature = "local-whisper")]
+use sha2::{Digest, Sha256};
+use serde_json::json;
+use std::collections::HashMap;
 use std::path::PathBuf;
-use tauri::Manager;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
+use tokio::sync::{Mutex, Semaphore};
+use tokio_util::sync::CancellationToken;
+
+#[cfg(target_os = "windows")]
+fn observe_cuda_usage_via_nvidia_smi() -> serde_json::Value {
+    use std::process::Command;
+
+    let pid = std::process::id();
+
+    let output = Command::new("nvidia-smi")
+        .args([
+            "--query-compute-apps=pid,used_gpu_memory",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+
+    let Ok(output) = output else {
+        return json!({
+            "nvidia_smi_available": false,
+            "pid": pid,
+            "cuda_process_present": null,
+            "used_gpu_memory_mb": null,
+            "error": "Failed to launch nvidia-smi",
+        });
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return json!({
+            "nvidia_smi_available": false,
+            "pid": pid,
+            "cuda_process_present": null,
+            "used_gpu_memory_mb": null,
+            "error": if stderr.is_empty() { "nvidia-smi failed" } else { stderr.as_str() },
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut present = false;
+    let mut used_mb: Option<u64> = None;
+
+    for line in stdout.lines() {
+        // Expected: "1234, 256" (csv, no header, no units)
+        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let Ok(row_pid) = parts[0].parse::<u32>() else {
+            continue;
+        };
+        if row_pid != pid {
+            continue;
+        }
+
+        present = true;
+        if let Ok(mb) = parts[1].parse::<u64>() {
+            used_mb = Some(mb);
+        }
+        break;
+    }
+
+    json!({
+        "nvidia_smi_available": true,
+        "pid": pid,
+        "cuda_process_present": present,
+        "used_gpu_memory_mb": used_mb,
+        "error": null,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn observe_cuda_usage_via_nvidia_smi() -> serde_json::Value {
+    json!({
+        "nvidia_smi_available": false,
+        "pid": std::process::id(),
+        "cuda_process_present": null,
+        "used_gpu_memory_mb": null,
+        "error": "nvidia-smi observation is only implemented on Windows",
+    })
+}
+
+#[cfg(feature = "local-whisper")]
+pub const WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT: &str = "whisper-model-download-progress";
+
+pub const LOCAL_WHISPER_MODEL_LOAD_EVENT: &str = "local-whisper-model-load";
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalWhisperModelLoadStatus {
+    Started,
+    Completed,
+    Error,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LocalWhisperModelLoadEvent {
+    pub status: LocalWhisperModelLoadStatus,
+    pub message: Option<String>,
+}
+
+#[cfg(feature = "local-whisper")]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WhisperModelDownloadStatus {
+    Queued,
+    Downloading,
+    Verifying,
+    Completed,
+    Cancelled,
+    Error,
+}
+
+#[cfg(feature = "local-whisper")]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WhisperModelDownloadProgress {
+    pub model_id: String,
+    pub status: WhisperModelDownloadStatus,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub percent: Option<f64>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug)]
+struct DownloadJob {
+    cancel: CancellationToken,
+}
+
+/// Manages concurrent Whisper model downloads (shared across windows).
+///
+/// This is always constructed (even when the feature flag is off) so the frontend
+/// can call commands and get a consistent error message.
+#[cfg_attr(not(feature = "local-whisper"), allow(dead_code))]
+#[derive(Debug)]
+pub struct WhisperDownloadManager {
+    client: reqwest::Client,
+    semaphore: Arc<Semaphore>,
+    jobs: Arc<Mutex<HashMap<String, DownloadJob>>>,
+}
+
+impl Default for WhisperDownloadManager {
+    fn default() -> Self {
+        Self::new(3)
+    }
+}
+
+impl WhisperDownloadManager {
+    pub fn new(max_concurrent: usize) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            semaphore: Arc::new(Semaphore::new(max_concurrent)),
+            jobs: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
 
 /// Error type for Whisper commands
 #[derive(Debug, serde::Serialize)]
@@ -28,6 +188,7 @@ pub struct WhisperModelInfo {
     pub size_bytes: u64,
     pub size_display: String,
     pub download_url: String,
+    pub expected_sha256: String,
     pub is_english_only: bool,
     pub is_downloaded: bool,
 }
@@ -36,6 +197,98 @@ pub struct WhisperModelInfo {
 #[tauri::command]
 pub fn is_local_whisper_available() -> bool {
     cfg!(feature = "local-whisper")
+}
+
+/// Returns diagnostic information about whether Local Whisper will use CPU or CUDA.
+///
+/// This is used by the UI to show "GPU vs CPU" and why GPU might be unavailable.
+#[tauri::command]
+pub fn get_local_whisper_backend_status() -> serde_json::Value {
+    #[cfg(feature = "local-whisper")]
+    {
+        let s = crate::stt::get_local_whisper_backend_status();
+        let observed = observe_cuda_usage_via_nvidia_smi();
+
+        return json!({
+            "build_has_local_whisper": s.build_has_local_whisper,
+            "build_has_cuda": s.build_has_cuda,
+            "compute": s.compute,
+            "reason": s.reason,
+            "missing_dlls": s.missing_dlls,
+            "observed": observed,
+        });
+    }
+
+    #[cfg(not(feature = "local-whisper"))]
+    {
+        json!({
+            "build_has_local_whisper": false,
+            "build_has_cuda": false,
+            "compute": "cpu",
+            "reason": "Local Whisper feature is not enabled in this build.",
+            "missing_dlls": [],
+            "observed": observe_cuda_usage_via_nvidia_smi(),
+        })
+    }
+}
+
+fn get_pipeline(app: &tauri::AppHandle) -> Result<crate::pipeline::SharedPipeline, WhisperCommandError> {
+    app.try_state::<crate::pipeline::SharedPipeline>()
+        .map(|s| s.inner().clone())
+        .ok_or_else(|| WhisperCommandError::from("Pipeline not initialized".to_string()))
+}
+
+/// Returns true if the current local-whisper model is already loaded in-memory.
+#[tauri::command]
+pub fn is_local_whisper_model_loaded(app: tauri::AppHandle) -> Result<bool, WhisperCommandError> {
+    let pipeline = get_pipeline(&app)?;
+    Ok(pipeline.is_local_whisper_loaded())
+}
+
+/// Force-load the local-whisper model into memory.
+///
+/// This is intended for the UI "Load model" button when load mode is "manual".
+#[tauri::command]
+pub fn load_local_whisper_model(app: tauri::AppHandle) -> Result<(), WhisperCommandError> {
+    let pipeline = get_pipeline(&app)?;
+
+    // Emit a "started" event immediately so the UI can show a toast / spinner.
+    let _ = app.emit(
+        LOCAL_WHISPER_MODEL_LOAD_EVENT,
+        LocalWhisperModelLoadEvent {
+            status: LocalWhisperModelLoadStatus::Started,
+            message: None,
+        },
+    );
+
+    let app_for_emit = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = pipeline.force_load_local_whisper();
+
+        let payload = match result {
+            Ok(()) => LocalWhisperModelLoadEvent {
+                status: LocalWhisperModelLoadStatus::Completed,
+                message: None,
+            },
+            Err(e) => LocalWhisperModelLoadEvent {
+                status: LocalWhisperModelLoadStatus::Error,
+                message: Some(e.to_string()),
+            },
+        };
+
+        let _ = app_for_emit.emit(LOCAL_WHISPER_MODEL_LOAD_EVENT, payload);
+    });
+
+    Ok(())
+}
+
+/// Unload (evict) any cached local-whisper models.
+#[tauri::command]
+pub fn unload_local_whisper_model(app: tauri::AppHandle) -> Result<(), WhisperCommandError> {
+    let pipeline = get_pipeline(&app)?;
+    pipeline
+        .unload_local_whisper()
+        .map_err(|e| WhisperCommandError::from(e.to_string()))
 }
 
 /// Get list of available Whisper models with download status
@@ -58,6 +311,7 @@ pub fn get_whisper_models(app: tauri::AppHandle) -> Result<Vec<WhisperModelInfo>
                     size_bytes: model.size_bytes(),
                     size_display: format_size(model.size_bytes()),
                     download_url: model.download_url(),
+                    expected_sha256: model.expected_sha256().to_string(),
                     is_english_only: model.is_english_only(),
                     is_downloaded,
                 }
@@ -171,7 +425,7 @@ pub fn validate_whisper_model(
             return Ok(false);
         }
 
-        // Check file size is reasonable (at least 50% of expected)
+        // Quick size sanity check (at least 50% of expected)
         let metadata = std::fs::metadata(&model_path).map_err(|e| {
             WhisperCommandError::from(format!("Failed to read model metadata: {}", e))
         })?;
@@ -190,6 +444,37 @@ pub fn validate_whisper_model(
             return Ok(false);
         }
 
+        // SHA-256 validation (streamed; does not load the whole file into memory)
+        let expected = model.expected_sha256();
+        let mut hasher = Sha256::new();
+
+        let mut file = std::fs::File::open(&model_path).map_err(|e| {
+            WhisperCommandError::from(format!("Failed to open model file: {}", e))
+        })?;
+
+        use std::io::Read;
+        let mut buf = vec![0u8; 8 * 1024 * 1024];
+        loop {
+            let n = file.read(&mut buf).map_err(|e| {
+                WhisperCommandError::from(format!("Failed reading model file: {}", e))
+            })?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+
+        let actual = format!("{:x}", hasher.finalize());
+        if actual != expected {
+            log::warn!(
+                "Model {} SHA mismatch. Expected {}, got {}",
+                model_id,
+                expected,
+                actual
+            );
+            return Ok(false);
+        }
+
         Ok(true)
     }
 
@@ -200,6 +485,276 @@ pub fn validate_whisper_model(
             "Local Whisper feature is not enabled".to_string(),
         ))
     }
+}
+
+/// Download a Whisper model to the app data directory.
+///
+/// Emits progress events to `WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT`.
+#[tauri::command]
+pub async fn download_whisper_model(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, WhisperDownloadManager>,
+    model_id: String,
+) -> Result<(), WhisperCommandError> {
+    #[cfg(feature = "local-whisper")]
+    {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let model = parse_model_id(&model_id)?;
+        let models_dir = get_models_dir(&app)?;
+        let model_path = models_dir.join(model.filename());
+
+        // Basic validation: don't re-download if already present.
+        if model_path.exists() {
+            return Err(WhisperCommandError::from(format!(
+                "Model already downloaded: {}",
+                model_id
+            )));
+        }
+
+        // Prevent duplicate in-flight downloads.
+        let jobs = state.jobs.clone();
+        let cancel = CancellationToken::new();
+
+        {
+            let mut jobs_guard = jobs.lock().await;
+            if jobs_guard.contains_key(&model_id) {
+                return Err(WhisperCommandError::from(format!(
+                    "Model is already downloading: {}",
+                    model_id
+                )));
+            }
+
+            jobs_guard.insert(
+                model_id.clone(),
+                DownloadJob {
+                    cancel: cancel.clone(),
+                },
+            );
+        }
+
+        app.emit(
+            WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT,
+            WhisperModelDownloadProgress {
+                model_id: model_id.clone(),
+                status: WhisperModelDownloadStatus::Queued,
+                downloaded_bytes: 0,
+                total_bytes: None,
+                percent: None,
+                message: None,
+            },
+        )
+        .ok();
+
+        let client = state.client.clone();
+        let semaphore = state.semaphore.clone();
+        let app_handle = app.clone();
+        let jobs_for_task = jobs.clone();
+
+        tauri::async_runtime::spawn(async move {
+            let _permit = match semaphore.acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => {
+                    app_handle
+                        .emit(
+                            WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT,
+                            WhisperModelDownloadProgress {
+                                model_id: model_id.clone(),
+                                status: WhisperModelDownloadStatus::Error,
+                                downloaded_bytes: 0,
+                                total_bytes: None,
+                                percent: None,
+                                message: Some("Download semaphore closed".to_string()),
+                            },
+                        )
+                        .ok();
+                    let mut jobs = jobs_for_task.lock().await;
+                    jobs.remove(&model_id);
+                    return;
+                }
+            };
+
+            let filename = model.filename().to_string();
+            let tmp_path = models_dir.join(format!("{}.part", filename));
+            let url = model.download_url();
+            let expected_sha = model.expected_sha256().to_string();
+
+            let send_progress = |status: WhisperModelDownloadStatus,
+                                 downloaded_bytes: u64,
+                                 total_bytes: Option<u64>,
+                                 message: Option<String>| {
+                let percent = total_bytes.and_then(|t| {
+                    if t == 0 {
+                        None
+                    } else {
+                        Some((downloaded_bytes as f64 / t as f64) * 100.0)
+                    }
+                });
+
+                app_handle
+                    .emit(
+                        WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT,
+                        WhisperModelDownloadProgress {
+                            model_id: model_id.clone(),
+                            status,
+                            downloaded_bytes,
+                            total_bytes,
+                            percent,
+                            message,
+                        },
+                    )
+                    .ok();
+            };
+
+            let result: Result<(), String> = async {
+                send_progress(
+                    WhisperModelDownloadStatus::Downloading,
+                    0,
+                    None,
+                    Some("Starting download".to_string()),
+                );
+
+                let resp = client
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(|e| format!("Request failed: {}", e))?;
+
+                if !resp.status().is_success() {
+                    return Err(format!("Download failed (HTTP {})", resp.status()));
+                }
+
+                let total = resp.content_length();
+
+                if let Some(parent) = tmp_path.parent() {
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|e| format!("Failed to create models dir: {}", e))?;
+                }
+
+                let mut file = tokio::fs::File::create(&tmp_path)
+                    .await
+                    .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+                let mut hasher = Sha256::new();
+                let mut downloaded: u64 = 0;
+                let mut stream = resp.bytes_stream();
+                let mut last_emit = std::time::Instant::now();
+
+                while let Some(next) = stream.next().await {
+                    if cancel.is_cancelled() {
+                        return Err("cancelled".to_string());
+                    }
+
+                    let chunk = next.map_err(|e| format!("Stream error: {}", e))?;
+                    hasher.update(&chunk);
+                    file.write_all(&chunk)
+                        .await
+                        .map_err(|e| format!("Write failed: {}", e))?;
+                    downloaded = downloaded.saturating_add(chunk.len() as u64);
+
+                    let should_emit = last_emit.elapsed() >= std::time::Duration::from_millis(250);
+                    if should_emit {
+                        last_emit = std::time::Instant::now();
+                        send_progress(
+                            WhisperModelDownloadStatus::Downloading,
+                            downloaded,
+                            total,
+                            None,
+                        );
+                    }
+                }
+
+                file.flush()
+                    .await
+                    .map_err(|e| format!("Flush failed: {}", e))?;
+                drop(file);
+
+                send_progress(
+                    WhisperModelDownloadStatus::Verifying,
+                    downloaded,
+                    total,
+                    Some("Verifying SHA-256".to_string()),
+                );
+
+                let actual_sha = format!("{:x}", hasher.finalize());
+                if actual_sha != expected_sha {
+                    return Err(format!(
+                        "SHA-256 mismatch (expected {}, got {})",
+                        expected_sha, actual_sha
+                    ));
+                }
+
+                // Move into place.
+                if model_path.exists() {
+                    let _ = tokio::fs::remove_file(&model_path).await;
+                }
+
+                tokio::fs::rename(&tmp_path, &model_path)
+                    .await
+                    .map_err(|e| format!("Failed to finalize model file: {}", e))?;
+
+                send_progress(
+                    WhisperModelDownloadStatus::Completed,
+                    downloaded,
+                    total,
+                    Some("Download complete".to_string()),
+                );
+
+                Ok(())
+            }
+            .await;
+
+            match result {
+                Ok(()) => {}
+                Err(e) if e == "cancelled" => {
+                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                    send_progress(
+                        WhisperModelDownloadStatus::Cancelled,
+                        0,
+                        None,
+                        Some("Cancelled".to_string()),
+                    );
+                }
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                    send_progress(
+                        WhisperModelDownloadStatus::Error,
+                        0,
+                        None,
+                        Some(e),
+                    );
+                }
+            }
+
+            let mut jobs = jobs_for_task.lock().await;
+            jobs.remove(&model_id);
+        });
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "local-whisper"))]
+    {
+        let _ = (app, state, model_id);
+        Err(WhisperCommandError::from(
+            "Local Whisper feature is not enabled".to_string(),
+        ))
+    }
+}
+
+/// Cancel an in-flight model download.
+#[tauri::command]
+pub async fn cancel_whisper_model_download(
+    state: tauri::State<'_, WhisperDownloadManager>,
+    model_id: String,
+) -> Result<(), WhisperCommandError> {
+    let jobs = state.jobs.lock().await;
+    if let Some(job) = jobs.get(&model_id) {
+        job.cancel.cancel();
+    }
+    Ok(())
 }
 
 // Helper functions

@@ -31,6 +31,9 @@ pub use retry::is_retryable_error;
 #[cfg(feature = "local-whisper")]
 pub use whisper::{LocalWhisperConfig, LocalWhisperProvider, WhisperModel};
 
+#[cfg(feature = "local-whisper")]
+pub use whisper::{get_local_whisper_backend_status, LocalWhisperBackendStatus, LocalWhisperComputeBackend};
+
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -137,26 +140,34 @@ impl SttRegistry {
         }
     }
 
+    /// Set the current provider name without requiring it to be registered.
+    ///
+    /// This is intended for UI/telemetry only. The pipeline uses its own provider
+    /// cache and will lazily create providers as needed.
+    pub fn set_current_name_for_ui(&mut self, name: &str) {
+        self.current = name.to_string();
+    }
+
     /// Get the current active provider
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn get_current(&self) -> Option<Arc<dyn SttProvider>> {
         self.providers.get(&self.current).cloned()
     }
 
     /// Get a provider by name
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn get(&self, name: &str) -> Option<Arc<dyn SttProvider>> {
         self.providers.get(name).cloned()
     }
 
     /// List all registered provider names
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn list_providers(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
     }
 
     /// Get the name of the current provider
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn current_name(&self) -> &str {
         &self.current
     }

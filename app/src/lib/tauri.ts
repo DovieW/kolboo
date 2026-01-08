@@ -419,6 +419,52 @@ export type AudioCue = "kolboo" | "maraca" | "clave" | "legacy";
 
 export type OverlayMode = "always" | "never" | "recording_only";
 
+export interface WhisperModelInfo {
+  id: string;
+  name: string;
+  filename: string;
+  size_bytes: number;
+  size_display: string;
+  download_url: string;
+  expected_sha256: string;
+  is_english_only: boolean;
+  is_downloaded: boolean;
+}
+
+export type WhisperModelDownloadStatus =
+  | "queued"
+  | "downloading"
+  | "verifying"
+  | "completed"
+  | "cancelled"
+  | "error";
+
+export interface WhisperModelDownloadProgress {
+  model_id: string;
+  status: WhisperModelDownloadStatus;
+  downloaded_bytes: number;
+  total_bytes: number | null;
+  percent: number | null;
+  message: string | null;
+}
+
+export type LocalWhisperComputeBackend = "cpu" | "cuda";
+
+export interface LocalWhisperBackendStatus {
+  build_has_local_whisper: boolean;
+  build_has_cuda: boolean;
+  compute: LocalWhisperComputeBackend;
+  reason: string | null;
+  missing_dlls: string[];
+  observed?: {
+    nvidia_smi_available: boolean;
+    pid: number;
+    cuda_process_present: boolean | null;
+    used_gpu_memory_mb: number | null;
+    error: string | null;
+  };
+}
+
 export type WidgetPosition =
   | "center"
   | "top-left"
@@ -562,6 +608,26 @@ function normalizeOverlayMode(value: unknown): OverlayMode {
   return "recording_only";
 }
 
+function normalizeLocalWhisperModelId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.toLowerCase();
+}
+
+export type LocalWhisperLoadMode = "manual" | "on_transcribe" | "on_launch";
+
+function normalizeLocalWhisperLoadMode(value: unknown): LocalWhisperLoadMode {
+  if (
+    value === "manual" ||
+    value === "on_transcribe" ||
+    value === "on_launch"
+  ) {
+    return value;
+  }
+  return "manual";
+}
+
 // What the window close (X) button does for the main/settings window.
 //
 // NOTE: We previously used "close_window" (destroy the window but keep the tray app running).
@@ -604,6 +670,13 @@ export interface AppSettings {
   aquavoice_base_url: string | null;
   // Whisper server base URL (OpenAI-compatible API; optional)
   whisper_server_base_url: string | null;
+
+  // Local Whisper model id (e.g. "base", "tinyen"). Only meaningful when the
+  // Local Whisper feature is compiled in.
+  local_whisper_model_id: string | null;
+
+  // When to load the local whisper.cpp model file.
+  local_whisper_load_mode: LocalWhisperLoadMode;
 
   // Global proxy configuration for outgoing HTTP requests
   proxy_settings: ProxySettings;
@@ -1493,7 +1566,7 @@ export const tauriAPI = {
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
       audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: await (async () => {
+      accent_color: await(async () => {
         const raw = (await store.get<string | null>("accent_color")) ?? null;
         const normalized = normalizeHexColor(raw);
 
@@ -1509,7 +1582,7 @@ export const tauriAPI = {
       })(),
       rewrite_llm_enabled:
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
-      cleanup_prompt_sections: await (async () => {
+      cleanup_prompt_sections: await(async () => {
         const raw = await store.get<any>("cleanup_prompt_sections");
         const normalized = normalizeCleanupPromptSections(raw);
 
@@ -1542,6 +1615,12 @@ export const tauriAPI = {
         (await store.get<string | null>("aquavoice_base_url")) ?? null,
       whisper_server_base_url:
         (await store.get<string | null>("whisper_server_base_url")) ?? null,
+      local_whisper_model_id: normalizeLocalWhisperModelId(
+        await store.get("local_whisper_model_id")
+      ),
+      local_whisper_load_mode: normalizeLocalWhisperLoadMode(
+        await store.get("local_whisper_load_mode")
+      ),
       proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
       llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
       llm_model: (await store.get<string | null>("llm_model")) ?? null,
@@ -1626,7 +1705,7 @@ export const tauriAPI = {
       mic_auto_recover_enabled:
         (await store.get<boolean>("mic_auto_recover_enabled")) ?? false,
 
-      noise_gate_threshold_dbfs: await (async () => {
+      noise_gate_threshold_dbfs: await(async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -1665,7 +1744,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -1687,14 +1766,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })()),
+      })(),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -1708,7 +1787,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })()),
+      })(),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
@@ -1886,7 +1965,9 @@ export const tauriAPI = {
     await store.save();
   },
 
-  async updateQuickAskGeminiThinkingBudget(budget: number | null): Promise<void> {
+  async updateQuickAskGeminiThinkingBudget(
+    budget: number | null
+  ): Promise<void> {
     const store = await getStore();
     if (budget == null) {
       await store.delete("quick_ask_gemini_thinking_budget");
@@ -2045,6 +2126,66 @@ export const tauriAPI = {
     const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
     await store.set("whisper_server_base_url", normalized);
     await store.save();
+  },
+
+  async updateLocalWhisperModelId(modelId: string | null): Promise<void> {
+    const store = await getStore();
+    const normalized = modelId?.trim() ? modelId.trim().toLowerCase() : null;
+    await store.set("local_whisper_model_id", normalized);
+    await store.save();
+  },
+
+  async updateLocalWhisperLoadMode(mode: LocalWhisperLoadMode): Promise<void> {
+    const store = await getStore();
+    await store.set(
+      "local_whisper_load_mode",
+      normalizeLocalWhisperLoadMode(mode)
+    );
+    await store.save();
+  },
+
+  async isLocalWhisperAvailable(): Promise<boolean> {
+    return invoke("is_local_whisper_available");
+  },
+
+  async getLocalWhisperBackendStatus(): Promise<LocalWhisperBackendStatus> {
+    return invoke("get_local_whisper_backend_status");
+  },
+
+  async getWhisperModels(): Promise<WhisperModelInfo[]> {
+    return invoke("get_whisper_models");
+  },
+
+  async getWhisperModelsDir(): Promise<string> {
+    return invoke("get_whisper_models_dir");
+  },
+
+  async downloadWhisperModel(modelId: string): Promise<void> {
+    await invoke("download_whisper_model", { modelId });
+  },
+
+  async cancelWhisperModelDownload(modelId: string): Promise<void> {
+    await invoke("cancel_whisper_model_download", { modelId });
+  },
+
+  async deleteWhisperModel(modelId: string): Promise<void> {
+    await invoke("delete_whisper_model", { modelId });
+  },
+
+  async validateWhisperModel(modelId: string): Promise<boolean> {
+    return invoke("validate_whisper_model", { modelId });
+  },
+
+  async isLocalWhisperModelLoaded(): Promise<boolean> {
+    return invoke("is_local_whisper_model_loaded");
+  },
+
+  async loadLocalWhisperModel(): Promise<void> {
+    await invoke("load_local_whisper_model");
+  },
+
+  async unloadLocalWhisperModel(): Promise<void> {
+    await invoke("unload_local_whisper_model");
   },
 
   async updateProxySettings(proxySettings: ProxySettings): Promise<void> {
