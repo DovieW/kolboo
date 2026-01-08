@@ -50,6 +50,18 @@ pub fn text_token_rates(model: &str) -> Option<TokenRates> {
             output_usd_micros_per_1m: usd_micros(790_000),
         },
 
+        // Meta Llama 4 (Preview)
+        "meta-llama/llama-4-scout-17b-16e-instruct" => TokenRates {
+            input_usd_micros_per_1m: usd_micros(110_000),
+            cached_input_usd_micros_per_1m: None,
+            output_usd_micros_per_1m: usd_micros(340_000),
+        },
+        "meta-llama/llama-4-maverick-17b-128e-instruct" => TokenRates {
+            input_usd_micros_per_1m: usd_micros(200_000),
+            cached_input_usd_micros_per_1m: None,
+            output_usd_micros_per_1m: usd_micros(600_000),
+        },
+
         // OpenAI GPT-OSS
         "openai/gpt-oss-120b" => TokenRates {
             input_usd_micros_per_1m: usd_micros(150_000),
@@ -60,6 +72,20 @@ pub fn text_token_rates(model: &str) -> Option<TokenRates> {
             input_usd_micros_per_1m: usd_micros(75_000),
             cached_input_usd_micros_per_1m: None,
             output_usd_micros_per_1m: usd_micros(300_000),
+        },
+
+        // Qwen (Preview)
+        "qwen/qwen3-32b" => TokenRates {
+            input_usd_micros_per_1m: usd_micros(290_000),
+            cached_input_usd_micros_per_1m: None,
+            output_usd_micros_per_1m: usd_micros(590_000),
+        },
+
+        // Moonshot (Preview)
+        "moonshotai/kimi-k2-instruct-0905" => TokenRates {
+            input_usd_micros_per_1m: usd_micros(1_000_000),
+            cached_input_usd_micros_per_1m: None,
+            output_usd_micros_per_1m: usd_micros(3_000_000),
         },
 
         _ => return None,

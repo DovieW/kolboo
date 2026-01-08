@@ -77,6 +77,24 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
     { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" },
     { value: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
     { value: "openai/gpt-oss-20b", label: "GPT-OSS 20B" },
+
+    // Preview models (Groq docs: https://console.groq.com/docs/models)
+    {
+      value: "meta-llama/llama-4-scout-17b-16e-instruct",
+      label: "Llama 4 Scout 17B 16E Instruct (Preview)",
+    },
+    {
+      value: "meta-llama/llama-4-maverick-17b-128e-instruct",
+      label: "Llama 4 Maverick 17B 128E Instruct (Preview)",
+    },
+    {
+      value: "qwen/qwen3-32b",
+      label: "Qwen3 32B Instruct (Preview)",
+    },
+    {
+      value: "moonshotai/kimi-k2-instruct-0905",
+      label: "Kimi K2 Instruct 0905 (Preview)",
+    },
   ],
   openai: [
     { value: "gpt-5.2", label: "GPT-5.2" },
