@@ -418,6 +418,12 @@ export type AudioCue = "kolboo" | "maraca" | "clave" | "legacy";
 
 export type OverlayMode = "always" | "never" | "recording_only";
 
+// Which monitor to place always-on-top overlay windows on.
+// - main: primary monitor
+// - cursor: monitor that currently contains the mouse cursor
+// - active_window: monitor that currently contains the active/foreground window
+export type OverlayMonitorTarget = "main" | "cursor" | "active_window";
+
 export interface WhisperModelInfo {
   id: string;
   name: string;
@@ -607,6 +613,17 @@ function normalizeOverlayMode(value: unknown): OverlayMode {
   return "recording_only";
 }
 
+function normalizeOverlayMonitorTarget(value: unknown): OverlayMonitorTarget {
+  if (value === "main" || value === "cursor" || value === "active_window") {
+    return value;
+  }
+
+  // Legacy / typo-tolerant values
+  if (value === "activeWindow") return "active_window";
+
+  return "main";
+}
+
 function normalizeLocalWhisperModelId(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -727,6 +744,8 @@ export interface AppSettings {
   overlay_mode: OverlayMode;
   /** When true, show detailed phase text (routing/transcribing/rewriting) in the overlay. */
   overlay_show_detailed_loading: boolean;
+  /** Which monitor the overlay windows should appear on. */
+  overlay_monitor_target: OverlayMonitorTarget;
   widget_position: WidgetPosition;
   output_mode: OutputMode;
   output_hit_enter: boolean;
@@ -1686,6 +1705,9 @@ export const tauriAPI = {
         (await store.get<OverlayMode>("overlay_mode")) ?? "recording_only",
       overlay_show_detailed_loading:
         (await store.get<boolean>("overlay_show_detailed_loading")) ?? false,
+      overlay_monitor_target: normalizeOverlayMonitorTarget(
+        (await store.get("overlay_monitor_target")) ?? "main"
+      ),
       widget_position:
         (await store.get<WidgetPosition>("widget_position")) ?? "bottom-center",
       output_mode: normalizeOutputMode(await store.get("output_mode")),
@@ -2319,6 +2341,36 @@ export const tauriAPI = {
     await emit("settings-changed", {
       overlay_show_detailed_loading: !!enabled,
     });
+  },
+
+  async updateOverlayMonitorTarget(target: OverlayMonitorTarget): Promise<void> {
+    const store = await getStore();
+    const normalized = normalizeOverlayMonitorTarget(target);
+
+    await store.set("overlay_monitor_target", normalized);
+    await store.save();
+
+    // Best-effort: immediately re-snap overlay windows to the selected monitor.
+    // This uses the user's saved widget_position.
+    try {
+      const raw = await store.get("widget_position");
+      const position =
+        raw === "center" ||
+        raw === "top-left" ||
+        raw === "top-center" ||
+        raw === "top-right" ||
+        raw === "bottom-left" ||
+        raw === "bottom-center" ||
+        raw === "bottom-right"
+          ? (raw as WidgetPosition)
+          : ("bottom-center" as WidgetPosition);
+      await invoke("set_widget_position", { position });
+    } catch {
+      // ignore
+    }
+
+    // Notify other windows (overlay) to refresh cached settings.
+    await emit("settings-changed", { overlay_monitor_target: normalized });
   },
 
   async updateWidgetPosition(position: WidgetPosition): Promise<void> {

@@ -34,6 +34,7 @@ import {
   type ProxySettings,
   type OpenAiReasoningEffort,
   type WhisperModelInfo,
+  type OverlayMonitorTarget,
 } from "./tauri";
 
 export function useModelPricing(
@@ -660,6 +661,17 @@ export function useUpdateOverlayShowDetailedLoading() {
   return useMutation({
     mutationFn: (enabled: boolean) =>
       tauriAPI.updateOverlayShowDetailedLoading(enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateOverlayMonitorTarget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (target: OverlayMonitorTarget) =>
+      tauriAPI.updateOverlayMonitorTarget(target),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
     },

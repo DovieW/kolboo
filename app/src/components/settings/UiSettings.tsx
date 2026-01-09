@@ -21,6 +21,7 @@ import {
   useUpdateOutputHitEnter,
   useUpdateOutputMode,
   useUpdateOverlayMode,
+  useUpdateOverlayMonitorTarget,
   useUpdateOverlayShowDetailedLoading,
   useUpdatePlayingAudioHandling,
   useUpdateRewriteProgramPromptProfiles,
@@ -33,6 +34,7 @@ import type {
   MainWindowCloseBehavior,
   OutputMode,
   OverlayMode,
+  OverlayMonitorTarget,
   PlayingAudioHandling,
   RewriteProgramPromptProfile,
   WidgetPosition,
@@ -62,6 +64,15 @@ const WIDGET_POSITION_OPTIONS = [
   { value: "bottom-left", label: "Bottom Left" },
   { value: "bottom-center", label: "Bottom Center" },
   { value: "bottom-right", label: "Bottom Right" },
+];
+
+const OVERLAY_MONITOR_TARGET_OPTIONS: Array<{
+  value: OverlayMonitorTarget;
+  label: string;
+}> = [
+  { value: "main", label: "Main monitor" },
+  { value: "cursor", label: "Monitor with cursor" },
+  { value: "active_window", label: "Monitor with active window" },
 ];
 
 function outputModeToFlags(mode: OutputMode): {
@@ -125,6 +136,7 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
   const updatePlayingAudioHandling = useUpdatePlayingAudioHandling();
   const updateOverlayMode = useUpdateOverlayMode();
   const updateOverlayShowDetailedLoading = useUpdateOverlayShowDetailedLoading();
+  const updateOverlayMonitorTarget = useUpdateOverlayMonitorTarget();
   const updateWidgetPosition = useUpdateWidgetPosition();
   const updateOutputMode = useUpdateOutputMode();
   const updateOutputHitEnter = useUpdateOutputHitEnter();
@@ -203,6 +215,9 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
 
   const overlayShowDetailedLoading =
     settings?.overlay_show_detailed_loading ?? false;
+
+  const overlayMonitorTarget: OverlayMonitorTarget =
+    settings?.overlay_monitor_target ?? "main";
 
   const globalWidgetPosition: WidgetPosition =
     settings?.widget_position ?? "bottom-center";
@@ -319,6 +334,13 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     // Global-only setting
     if (isProfileScope) return;
     updateOverlayShowDetailedLoading.mutate(checked);
+  };
+
+  const handleOverlayMonitorTargetChange = (value: string | null) => {
+    // Global-only setting
+    if (!value) return;
+    if (isProfileScope) return;
+    updateOverlayMonitorTarget.mutate(value as OverlayMonitorTarget);
   };
 
   const handleWidgetPositionChange = (value: string | null) => {
@@ -720,6 +742,41 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
               },
             }}
           />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Overlay monitor</p>
+          <p className="settings-description">
+            Which display the overlay windows should appear on
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Tooltip
+            label={GLOBAL_ONLY_TOOLTIP}
+            disabled={!isProfileScope}
+            withArrow
+            position="top-start"
+          >
+            <div style={isProfileScope ? { opacity: 0.5 } : undefined}>
+              <Select
+                data={OVERLAY_MONITOR_TARGET_OPTIONS}
+                value={overlayMonitorTarget}
+                onChange={handleOverlayMonitorTargetChange}
+                disabled={isLoading || isProfileScope}
+                withCheckIcon={false}
+                styles={{
+                  input: {
+                    backgroundColor: "var(--bg-elevated)",
+                    borderColor: "var(--border-default)",
+                    color: "var(--text-primary)",
+                    minWidth: 220,
+                  },
+                }}
+              />
+            </div>
+          </Tooltip>
         </div>
       </div>
 

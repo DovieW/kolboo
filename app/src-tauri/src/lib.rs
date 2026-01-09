@@ -244,6 +244,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // (e.g. "transcribing…", "routing…", "rewriting…"). When false, the overlay
     // uses a waveform animation instead.
     dirty |= set_default("overlay_show_detailed_loading", json!(false), false);
+    // Which monitor overlay windows should appear on.
+    // - main: primary monitor
+    // - cursor: monitor containing cursor
+    // - active_window: monitor containing the active/foreground window
+    dirty |= set_default("overlay_monitor_target", json!("main"), false);
     dirty |= set_default("widget_position", json!("bottom-center"), false);
     // Whether clicking the window X exits the app or closes the main window to the tray.
     // - "exit_program": exit the application process
@@ -1355,6 +1360,7 @@ fn stop_recording(
                             };
 
                             // Ensure the answer window is visible before we start the LLM call.
+                            let _ = commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
                             if let Some(win) = app_clone.get_webview_window("quick_ask") {
                                 let _ = win.set_always_on_top(true);
                                 let _ = win.show();
@@ -1681,6 +1687,7 @@ fn stop_recording(
                             };
 
                             // Ensure the answer window is visible so the error is actually seen.
+                            let _ = commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
                             if let Some(win) = app_clone.get_webview_window("quick_ask") {
                                 let _ = win.set_always_on_top(true);
                                 let _ = win.show();
@@ -3087,7 +3094,7 @@ pub fn run() {
 
             // Create Quick Ask answer window (hidden by default).
             // This is a separate transparent webview that renders an answer + copy button.
-            let quick_ask = tauri::WebviewWindowBuilder::new(
+            let _quick_ask = tauri::WebviewWindowBuilder::new(
                 app,
                 "quick_ask",
                 tauri::WebviewUrl::App("quick-ask.html".into()),
@@ -3135,75 +3142,16 @@ pub fn run() {
                 }
             }
 
-            // Position overlay based on saved setting
-            if let Ok(Some(monitor)) = overlay.current_monitor() {
-                let size = monitor.size();
-                let pos = monitor.position();
-                let scale = monitor.scale_factor();
-                // Use PHYSICAL coordinates for initial placement to avoid DPI conversion
-                // edge cases on Windows.
-                let screen_width_px = size.width as f64;
-                let screen_height_px = size.height as f64;
-                let origin_x_px = pos.x as f64;
-                let origin_y_px = pos.y as f64;
-
-                // Estimate initial widget size (before content loads). The frontend will
-                // auto-resize after mount, but using a closer estimate prevents off-screen drift.
-                let window_width_px = (224.0 * scale).round();
-                let window_height_px = (56.0 * scale).round();
-                let margin_px = (50.0 * scale).round();
-
-                let widget_position: String = get_setting_from_store(
-                    app.handle(),
-                    "widget_position",
-                    "bottom-center".to_string(),
-                );
-
-                let (x_px, y_px) = match widget_position.as_str() {
-                    "top-left" => (origin_x_px + margin_px, origin_y_px + margin_px),
-                    "top-center" => (
-                        origin_x_px + (screen_width_px - window_width_px) / 2.0,
-                        origin_y_px + margin_px,
-                    ),
-                    "top-right" => (
-                        origin_x_px + screen_width_px - window_width_px - margin_px,
-                        origin_y_px + margin_px,
-                    ),
-                    "center" => (
-                        origin_x_px + (screen_width_px - window_width_px) / 2.0,
-                        origin_y_px + (screen_height_px - window_height_px) / 2.0,
-                    ),
-                    "bottom-left" => (
-                        origin_x_px + margin_px,
-                        origin_y_px + screen_height_px - window_height_px - margin_px,
-                    ),
-                    "bottom-center" => (
-                        origin_x_px + (screen_width_px - window_width_px) / 2.0,
-                        origin_y_px + screen_height_px - window_height_px - margin_px,
-                    ),
-                    _ => (
-                        // "bottom-right" or unknown
-                        origin_x_px + screen_width_px - window_width_px - margin_px,
-                        origin_y_px + screen_height_px - window_height_px - margin_px,
-                    ),
-                };
-
-                let _ = overlay.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                    x: x_px.round() as i32,
-                    y: y_px.round() as i32,
-                }));
-
-                // Quick Ask should behave like an overlay: cover the current monitor so the
-                // panel can sit bottom-center and the user can dismiss by clicking anywhere.
-                // Use PHYSICAL coordinates to avoid DPI conversion edge cases on Windows.
-                let _ = quick_ask.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                    width: size.width,
-                    height: size.height,
-                }));
-                let _ = quick_ask.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                    x: pos.x,
-                    y: pos.y,
-                }));
+            // Best-effort: position overlay + quick-ask windows using persisted settings.
+            // This includes monitor targeting (main/cursor/active window).
+            #[cfg(desktop)]
+            {
+                if let Err(e) = commands::overlay::snap_overlay_to_saved_position(app.handle()) {
+                    log::warn!("Failed to position overlay at startup: {}", e);
+                }
+                if let Err(e) = commands::overlay::position_quick_ask_to_target_monitor(app.handle()) {
+                    log::warn!("Failed to position Quick Ask at startup: {}", e);
+                }
             }
 
             // Set initial overlay visibility based on saved settings

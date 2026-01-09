@@ -2,6 +2,9 @@ use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Emitter, Manager};
 
+#[cfg(desktop)]
+use tauri::window::Monitor;
+
 use crate::state::AppState;
 
 #[cfg(desktop)]
@@ -16,26 +19,153 @@ fn get_setting_from_store<T: serde::de::DeserializeOwned>(app: &AppHandle, key: 
         .unwrap_or(default)
 }
 
+// ----------------------------------------------------------------------------
+// Overlay monitor targeting
+// ----------------------------------------------------------------------------
+
+#[cfg(desktop)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverlayMonitorTarget {
+    Main,
+    Cursor,
+    ActiveWindow,
+}
+
+#[cfg(desktop)]
+fn parse_overlay_monitor_target(raw: &str) -> OverlayMonitorTarget {
+    match raw.trim() {
+        "cursor" => OverlayMonitorTarget::Cursor,
+        "active_window" => OverlayMonitorTarget::ActiveWindow,
+        // Default + unknown values
+        _ => OverlayMonitorTarget::Main,
+    }
+}
+
+#[cfg(desktop)]
+fn get_overlay_monitor_target(app: &AppHandle) -> OverlayMonitorTarget {
+    let raw: String = get_setting_from_store(app, "overlay_monitor_target", "main".to_string());
+    parse_overlay_monitor_target(raw.as_str())
+}
+
+#[cfg(desktop)]
+fn monitor_contains_point(monitor: &Monitor, x: i32, y: i32) -> bool {
+    let pos = monitor.position();
+    let size = monitor.size();
+    let left = pos.x;
+    let top = pos.y;
+    let right = left.saturating_add(size.width as i32);
+    let bottom = top.saturating_add(size.height as i32);
+    x >= left && x < right && y >= top && y < bottom
+}
+
+#[cfg(desktop)]
+fn find_monitor_by_point(
+    window: &tauri::WebviewWindow,
+    x: i32,
+    y: i32,
+) -> Option<Monitor> {
+    window
+        .available_monitors()
+        .ok()
+        .and_then(|monitors| {
+            monitors
+                .into_iter()
+                .find(|m| monitor_contains_point(m, x, y))
+        })
+}
+
+#[cfg(all(desktop, target_os = "windows"))]
+fn get_cursor_pos_px() -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    unsafe {
+        let mut pt = POINT::default();
+        if GetCursorPos(&mut pt).is_ok() {
+            Some((pt.x, pt.y))
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(all(desktop, target_os = "windows"))]
+fn get_foreground_window_center_px() -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return None;
+        }
+
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return None;
+        }
+
+        let cx = rect.left.saturating_add(rect.right).saturating_div(2);
+        let cy = rect.top.saturating_add(rect.bottom).saturating_div(2);
+        Some((cx, cy))
+    }
+}
+
+#[cfg(desktop)]
+fn resolve_target_monitor(window: &tauri::WebviewWindow, app: &AppHandle) -> Option<Monitor> {
+    let target = get_overlay_monitor_target(app);
+
+    // Primary intent: honor requested target.
+    let preferred = match target {
+        OverlayMonitorTarget::Main => window.primary_monitor().ok().flatten(),
+
+        OverlayMonitorTarget::Cursor => {
+            #[cfg(all(desktop, target_os = "windows"))]
+            {
+                if let Some((x, y)) = get_cursor_pos_px() {
+                    if let Some(m) = find_monitor_by_point(window, x, y) {
+                        return Some(m);
+                    }
+                }
+            }
+
+            None
+        }
+
+        OverlayMonitorTarget::ActiveWindow => {
+            #[cfg(all(desktop, target_os = "windows"))]
+            {
+                if let Some((x, y)) = get_foreground_window_center_px() {
+                    if let Some(m) = find_monitor_by_point(window, x, y) {
+                        return Some(m);
+                    }
+                }
+            }
+
+            None
+        }
+    };
+
+    if preferred.is_some() {
+        return preferred;
+    }
+
+    // Fallbacks: preserve previous behavior.
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| window.available_monitors().ok().and_then(|mut m| m.pop()))
+}
+
 fn set_widget_position_impl(app: &AppHandle, position: &str) -> Result<(), String> {
     let Some(window) = app.get_webview_window("overlay") else {
         return Err("Overlay window not found".to_string());
     };
 
-    // Prefer the monitor the window is currently on, but fall back to primary/available monitors.
-    // This helps when the window was previously on a disconnected display or current_monitor()
-    // is temporarily unavailable right after show/hide transitions.
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten())
-        .or_else(|| {
-            window
-                .available_monitors()
-                .ok()
-                .and_then(|mut monitors| monitors.pop())
-        })
-        .ok_or("No monitor found")?;
+    // Select a monitor based on settings (main/cursor/active window), with fallbacks.
+    let monitor = resolve_target_monitor(&window, app).ok_or("No monitor found")?;
 
     // Use PHYSICAL coordinates for all window placement.
     // This avoids DPI conversion edge cases where logical math + LogicalPosition
@@ -557,4 +687,32 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
 #[tauri::command]
 pub async fn set_widget_position(app: AppHandle, position: String) -> Result<(), String> {
     set_widget_position_impl(&app, position.as_str())
+}
+
+/// Best-effort: position the Quick Ask overlay window to the configured monitor.
+///
+/// Quick Ask is implemented as a transparent always-on-top window that covers a full monitor.
+#[cfg(desktop)]
+pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> Result<(), String> {
+    let Some(win) = app.get_webview_window("quick_ask") else {
+        return Err("Quick Ask window not found".to_string());
+    };
+
+    let monitor = resolve_target_monitor(&win, app).ok_or("No monitor found")?;
+    let size = monitor.size();
+    let pos = monitor.position();
+
+    // Use PHYSICAL coordinates to avoid DPI conversion edge cases (especially on Windows).
+    win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: size.width,
+        height: size.height,
+    }))
+    .map_err(|e| e.to_string())?;
+    win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: pos.x,
+        y: pos.y,
+    }))
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
