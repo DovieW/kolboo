@@ -80,6 +80,10 @@ const DEFAULT_SECTIONS: CleanupPromptSections = {
 // Keep this default aligned with backend fallbacks so "unset" settings don't lie.
 const DEFAULT_STT_TIMEOUT = 10;
 
+// Keep this aligned with the backend default seeding in `ensure_default_settings(...)`.
+const DEFAULT_QUICK_ASK_SYSTEM_PROMPT =
+  "Try to answer the question in a single word, sentence or paragraph when possible. Use markdown for formatting when necessary.";
+
 function formatUsdRateFromMicros(micros: number): string {
   const safeMicros =
     typeof micros === "number" && Number.isFinite(micros) ? micros : 0;
@@ -7090,11 +7094,26 @@ export function PromptSettings({
             placeholder="(leave empty to disable)"
             initialContent={localQuickAskSystemPrompt}
             defaultContent={
-              isDefaultScope ? "" : settings?.quick_ask_system_prompt ?? ""
+              isDefaultScope
+                ? DEFAULT_QUICK_ASK_SYSTEM_PROMPT
+                : settings?.quick_ask_system_prompt ?? ""
             }
             hasCustom={
               isDefaultScope
-                ? (settings?.quick_ask_system_prompt ?? "").trim().length > 0
+                ? (() => {
+                    // While settings are loading, avoid flickering the reset button.
+                    if (settings?.quick_ask_system_prompt === undefined)
+                      return false;
+
+                    // `null` means explicitly disabled, which is a deviation from the default.
+                    if (settings?.quick_ask_system_prompt === null) return true;
+
+                    // Otherwise, enable reset only if the stored value differs from the default.
+                    return (
+                      settings?.quick_ask_system_prompt !==
+                      DEFAULT_QUICK_ASK_SYSTEM_PROMPT
+                    );
+                  })()
                 : activeProfile?.quick_ask_system_prompt !== null &&
                   activeProfile?.quick_ask_system_prompt !== undefined
             }
@@ -7152,12 +7171,15 @@ export function PromptSettings({
             }}
             onReset={() => {
               if (isDefaultScope) {
-                setLocalQuickAskSystemPrompt("");
-                updateQuickAskSystemPrompt.mutate(null, {
-                  onSuccess: () => {
-                    tauriAPI.emitSettingsChanged();
-                  },
-                });
+                setLocalQuickAskSystemPrompt(DEFAULT_QUICK_ASK_SYSTEM_PROMPT);
+                updateQuickAskSystemPrompt.mutate(
+                  DEFAULT_QUICK_ASK_SYSTEM_PROMPT,
+                  {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  }
+                );
                 return;
               }
 

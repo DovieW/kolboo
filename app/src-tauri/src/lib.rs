@@ -328,6 +328,15 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("quick_ask_hold_hotkey", json!(null), true);
     dirty |= set_default("quick_ask_toggle_hotkey", json!(null), true);
 
+    // Quick Ask system prompt:
+    // - missing key => seed the default
+    // - explicit null => user disabled it, don't overwrite
+    dirty |= set_default(
+        "quick_ask_system_prompt",
+        json!("Try to answer the question in a single word, sentence or paragraph when possible. Use markdown for formatting when necessary."),
+        true,
+    );
+
     // Migration: legacy `quick_ask_hotkey` (hold-to-record) -> `quick_ask_hold_hotkey`.
     // Only migrate when the new key is truly absent (not when explicitly null).
     if store.get("quick_ask_hold_hotkey").is_none() {
