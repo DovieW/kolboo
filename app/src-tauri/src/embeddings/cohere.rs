@@ -27,6 +27,8 @@ struct CohereErrorResponse {
     error: Option<String>,
 }
 
+// Convenience wrapper for single-input embedding. Not all builds use this directly.
+#[allow(dead_code)]
 pub async fn embed_text(
     client: &Client,
     api_key: &str,

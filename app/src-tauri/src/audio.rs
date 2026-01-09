@@ -71,7 +71,7 @@ fn reset_cue_stream() {
 ///
 /// Used to avoid cutting off cues when we do side-effects (like system mute) shortly after
 /// starting playback.
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 pub fn estimated_duration(sound_type: SoundType, cue: AudioCue) -> Duration {
     match cue {
         // For the legacy MP3 cue, use the decoder's total duration when available.

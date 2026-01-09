@@ -29,7 +29,7 @@ impl Default for RetryConfig {
 
 impl RetryConfig {
     /// Create a new retry config with custom max retries
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn with_max_retries(max_retries: u32) -> Self {
         Self {
             max_retries,

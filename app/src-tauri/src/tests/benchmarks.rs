@@ -125,7 +125,10 @@ mod audio_benchmarks {
             per_iter
         );
         #[cfg(debug_assertions)]
-        println!("Note: Skipping assertion in debug mode (use --release for accurate benchmarks)");
+        println!(
+            "Note: Skipping assertion in debug mode (use --release for accurate benchmarks); per-iter: {:?}",
+            per_iter
+        );
     }
 
     /// Benchmark resampling from 44.1kHz to 16kHz.
@@ -147,7 +150,10 @@ mod audio_benchmarks {
             per_iter
         );
         #[cfg(debug_assertions)]
-        println!("Note: Skipping assertion in debug mode (use --release for accurate benchmarks)");
+        println!(
+            "Note: Skipping assertion in debug mode (use --release for accurate benchmarks); per-iter: {:?}",
+            per_iter
+        );
     }
 
     /// Measure resampling overhead for short chunks.

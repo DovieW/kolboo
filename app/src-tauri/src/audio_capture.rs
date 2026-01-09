@@ -360,11 +360,11 @@ pub enum AudioCaptureError {
     Encoding(String),
 
     #[error("Audio capture not active")]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     NotActive,
 
     #[error("Capture thread error: {0}")]
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     ThreadError(String),
 }
 
@@ -1222,7 +1222,7 @@ impl AudioCapture {
     }
 
     /// Get the current VAD configuration
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn vad_config(&self) -> &VadAutoStopConfig {
         &self.vad_config
     }
@@ -1233,7 +1233,7 @@ impl AudioCapture {
     ///
     /// # Arguments
     /// * `max_duration_secs` - Maximum recording duration in seconds (for buffer sizing)
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn start(&mut self, max_duration_secs: f32) -> Result<(), AudioCaptureError> {
         self.start_with_device_name(max_duration_secs, None)
     }
@@ -1258,7 +1258,7 @@ impl AudioCapture {
     }
 
     /// Stop recording and return the captured audio as WAV bytes
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn stop_and_get_wav(&mut self) -> Result<Vec<u8>, AudioCaptureError> {
         self.stop_and_get_wav_with_noise_gate(0)
     }
@@ -1266,6 +1266,7 @@ impl AudioCapture {
     /// Stop recording and return the captured audio as WAV bytes, applying an optional noise gate.
     ///
     /// `noise_gate_strength` is 0..=100 where 0 disables the noise gate.
+    #[allow(dead_code)]
     pub fn stop_and_get_wav_with_noise_gate(
         &mut self,
         noise_gate_strength: u8,
@@ -1275,7 +1276,7 @@ impl AudioCapture {
     }
 
     /// Stop recording and return the captured audio as WAV bytes along with level stats.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn stop_and_get_wav_with_stats(
         &mut self,
     ) -> Result<(Vec<u8>, AudioLevelStats), AudioCaptureError> {
@@ -1285,6 +1286,7 @@ impl AudioCapture {
     /// Stop recording and return WAV bytes + level stats, optionally applying an experimental noise gate.
     ///
     /// Note: stats are computed on the *raw* (pre-gate) samples.
+    #[allow(dead_code)]
     pub fn stop_and_get_wav_with_stats_with_noise_gate(
         &mut self,
         noise_gate_strength: u8,
@@ -1382,7 +1384,7 @@ impl AudioCapture {
     }
 
     /// Check if currently recording
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn is_recording(&self) -> bool {
         self.recording_active.load(Ordering::Relaxed)
     }
@@ -1407,7 +1409,7 @@ impl AudioCapture {
     }
 
     /// Get the duration of recorded audio in seconds
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn duration_secs(&self) -> f32 {
         self.buffer
             .lock()
@@ -1416,13 +1418,13 @@ impl AudioCapture {
     }
 
     /// Get the sample rate
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
     /// Get the number of channels
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn channels(&self) -> u16 {
         self.channels
     }

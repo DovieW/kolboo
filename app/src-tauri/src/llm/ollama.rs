@@ -89,7 +89,7 @@ impl OllamaLlmProvider {
     }
 
     /// Check if Ollama is available at the configured URL
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub async fn is_available(&self) -> bool {
         let url = format!("{}/api/tags", self.base_url);
         self.client
@@ -101,7 +101,7 @@ impl OllamaLlmProvider {
     }
 
     /// List available models
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub async fn list_models(&self) -> Result<Vec<String>, LlmError> {
         let url = format!("{}/api/tags", self.base_url);
         let response = self
@@ -152,13 +152,13 @@ struct ChatOptions {
     num_predict: i32,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct TagsResponse {
     models: Vec<ModelInfo>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct ModelInfo {
     name: String,

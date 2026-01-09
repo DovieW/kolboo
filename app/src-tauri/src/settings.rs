@@ -246,6 +246,7 @@ impl HotkeyConfig {
 
     /// Convert to a tauri Shortcut, falling back to a default if parsing fails
     #[cfg(desktop)]
+    #[allow(dead_code)]
     pub fn to_shortcut_or_default(&self, default_fn: fn() -> Self) -> Shortcut {
         self.to_shortcut().unwrap_or_else(|_| {
             default_fn()

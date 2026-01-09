@@ -101,13 +101,13 @@ pub trait LlmProvider: Send + Sync {
 }
 
 /// Registry of available LLM providers
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 pub struct LlmRegistry {
     providers: Vec<Arc<dyn LlmProvider>>,
     current: String,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 impl LlmRegistry {
     /// Create a new empty registry
     pub fn new() -> Self {
