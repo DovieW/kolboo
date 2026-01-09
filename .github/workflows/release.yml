@@ -72,6 +72,7 @@ jobs:
           path: .release/windows/default
 
       - name: Download Windows bundles (local-whisper)
+        if: ${{ needs.build-windows.outputs.artifact-name-local-whisper != '' }}
         uses: actions/download-artifact@v7
         with:
           name: ${{ needs.build-windows.outputs.artifact-name-local-whisper }}

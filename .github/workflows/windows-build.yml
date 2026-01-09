@@ -2,14 +2,26 @@ name: Build (Windows)
 
 on:
   workflow_call:
+    inputs:
+      build_local_whisper:
+        description: "Whether to build and upload the local-whisper Windows bundle artifact"
+        required: false
+        type: boolean
+        default: true
     outputs:
       artifact-name-default:
         description: "Name of the uploaded Windows bundle artifact (default build)"
         value: ${{ jobs.build-windows.outputs.artifact-name-default }}
       artifact-name-local-whisper:
-        description: "Name of the uploaded Windows bundle artifact (with local-whisper feature)"
+        description: "Name of the uploaded Windows bundle artifact (with local-whisper feature). Empty when build_local_whisper=false."
         value: ${{ jobs.build-windows.outputs.artifact-name-local-whisper }}
   workflow_dispatch:
+    inputs:
+      build_local_whisper:
+        description: "Whether to build and upload the local-whisper Windows bundle artifact"
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: windows-build-${{ github.ref }}
@@ -226,6 +238,7 @@ jobs:
           cp app/src-tauri/target/release/*.exe artifacts/windows-default/ || true
 
       - name: Build Tauri app (release) - with local-whisper
+        if: ${{ inputs.build_local_whisper }}
         working-directory: app
         shell: bash
         run: |
@@ -246,6 +259,7 @@ jobs:
           sccache --show-stats || true
 
       - name: Collect bundles (local-whisper)
+        if: ${{ inputs.build_local_whisper }}
         shell: bash
         run: |
           set -euo pipefail
@@ -260,7 +274,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "artifact_name_default=kolboo-windows-bundles" >> "$GITHUB_OUTPUT"
-          echo "artifact_name_local_whisper=kolboo-windows-bundles-local-whisper" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs.build_local_whisper }}" == "true" ]]; then
+            echo "artifact_name_local_whisper=kolboo-windows-bundles-local-whisper" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact_name_local_whisper=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload bundles (default)
         uses: actions/upload-artifact@v6
@@ -271,6 +289,7 @@ jobs:
             artifacts/windows-default/**
 
       - name: Upload bundles (local-whisper)
+        if: ${{ inputs.build_local_whisper }}
         uses: actions/upload-artifact@v6
         with:
           name: kolboo-windows-bundles-local-whisper
