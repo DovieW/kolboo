@@ -335,7 +335,8 @@ body {
 	inset: 0;
 	width: 100%;
 	height: 100%;
-	background: rgba(0, 0, 0, 0.26);
+	/* Keep the overlay interactive, but don't dim the screen behind it. */
+	background: transparent;
 	opacity: 1;
 	display: flex;
 	align-items: flex-end;
@@ -355,7 +356,8 @@ body {
 	max-width: 100%;
 	border-radius: 16px;
 	border: 1px solid rgba(255, 255, 255, 0.10);
-	background: rgba(10, 10, 10, 0.86);
+	/* Make the panel more readable by reducing transparency. */
+	background: rgba(10, 10, 10, 0.96);
 	backdrop-filter: blur(12px);
 	opacity: 1;
 	transform: translateY(0) scale(1);
@@ -367,7 +369,7 @@ body {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
-	max-height: min(360px, calc(100vh - 76px));
+	max-height: min(440px, calc(100vh - 76px));
 	animation: tv-quick-ask-panel-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 	transition:
 		opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
@@ -419,16 +421,148 @@ body {
 }
 
 .quick-ask-answer {
-	max-height: 240px;
+	max-height: 320px;
+	/* Allow ScrollArea to shrink inside the panel and keep scrolling working. */
+	flex: 1 1 auto;
+	min-height: 0;
 	border-radius: 12px;
 	background: rgba(255, 255, 255, 0.05);
 	border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Mantine ScrollArea needs an actual constrained viewport to become scrollable. */
+.quick-ask-answer .mantine-ScrollArea-viewport {
+	max-height: 320px;
 }
 
 .quick-ask-answer-text {
 	padding: 10px 12px;
 	white-space: pre-wrap;
 	line-height: 1.35;
+}
+
+.quick-ask-answer-md {
+	padding: 10px 12px;
+	font-size: 14px;
+	line-height: 1.35;
+	color: rgba(255, 255, 255, 0.92);
+	/* Let markdown flow naturally without inheriting the old pre-wrap behavior */
+	white-space: normal;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+
+.quick-ask-answer-md > :first-child {
+	margin-top: 0;
+}
+
+.quick-ask-answer-md > :last-child {
+	margin-bottom: 0;
+}
+
+.quick-ask-answer-md p {
+	margin: 0 0 10px;
+}
+
+.quick-ask-answer-md a {
+	color: rgba(var(--accent-rgb) / 0.92);
+	text-decoration: underline;
+	text-decoration-color: rgba(var(--accent-rgb) / 0.40);
+	text-underline-offset: 3px;
+}
+
+.quick-ask-answer-md a:hover {
+	color: var(--accent-hover);
+	text-decoration-color: rgba(var(--accent-rgb) / 0.60);
+}
+
+.quick-ask-answer-md a:focus-visible {
+	outline: 2px solid rgba(var(--accent-rgb) / 0.25);
+	outline-offset: 2px;
+	border-radius: 6px;
+}
+
+.quick-ask-answer-md ul,
+.quick-ask-answer-md ol {
+	margin: 0 0 10px;
+	padding-left: 18px;
+}
+
+.quick-ask-answer-md li {
+	margin: 4px 0;
+}
+
+.quick-ask-answer-md :not(pre) > code {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+		"Liberation Mono", "Courier New", monospace;
+	font-size: 12.5px;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	padding: 1px 6px;
+}
+
+/* Code blocks: render full content (no nested scrollbars).
+	We wrap long lines to avoid horizontal scrolling.
+*/
+.quick-ask-codeblock {
+	margin: 0 0 10px;
+	padding: 10px 12px;
+	background: rgba(0, 0, 0, 0.28);
+	border: 1px solid rgba(255, 255, 255, 0.10);
+	border-radius: 10px;
+	max-width: 100%;
+	overflow: visible;
+}
+
+.quick-ask-codeblock-wrap {
+	margin: 0 0 10px;
+}
+
+.quick-ask-codeblock-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin: 0 0 6px;
+}
+
+.quick-ask-codeblock-lang {
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.60);
+}
+
+.quick-ask-codeblock-copy {
+	appearance: none;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	background: rgba(255, 255, 255, 0.06);
+	color: rgba(255, 255, 255, 0.88);
+	border-radius: 999px;
+	padding: 4px 10px;
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.02em;
+	cursor: pointer;
+}
+
+.quick-ask-codeblock-copy:hover {
+	border-color: rgba(255, 255, 255, 0.18);
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.quick-ask-codeblock-copy:focus-visible {
+	outline: 2px solid rgba(var(--accent-rgb) / 0.25);
+	outline-offset: 2px;
+}
+
+.quick-ask-codeblock code {
+	display: block;
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .quick-ask-hint {
