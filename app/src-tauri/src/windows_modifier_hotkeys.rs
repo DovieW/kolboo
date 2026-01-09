@@ -73,6 +73,10 @@ static LAST_WIN_DOWN_TIME: AtomicU32 = AtomicU32::new(0);
 // this flag via a command when the user toggles the setting.
 static HOTKEY_DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
 
+// Runtime flag: whether RightAlt should be treated as an app hotkey and swallowed so
+// other apps don't see it (e.g. to prevent menu-focus behavior in browsers).
+static ALT_RIGHT_HOTKEY_ENABLED: AtomicBool = AtomicBool::new(false);
+
 // Tracks whether Right Alt is currently held (for AltGr / pressed-alone gating).
 static ALT_RIGHT_HELD: AtomicBool = AtomicBool::new(false);
 // Tracks whether any non-modifier key was pressed while Right Alt was held.
@@ -136,6 +140,25 @@ fn hotkey_debug_enabled(_app: &AppHandle) -> bool {
 /// This is called from a Tauri command when the user toggles the setting.
 pub fn set_hotkey_debug_enabled(enabled: bool) {
     HOTKEY_DEBUG_ENABLED.store(enabled, Ordering::SeqCst);
+}
+
+/// Enable/disable AltRight hotkey interception.
+///
+/// When enabled, the hook will swallow the RightAlt key events (down/up) so foreground
+/// apps won't treat Alt as a menu accelerator.
+#[allow(dead_code)]
+pub fn set_alt_right_hotkey_enabled(enabled: bool) {
+    ALT_RIGHT_HOTKEY_ENABLED.store(enabled, Ordering::SeqCst);
+
+    if let Some(app) = APP_HANDLE.get() {
+        if hotkey_debug_enabled(app) {
+            emit_hotkey_debug_event(
+                app,
+                "AltRight hotkey interception enabled changed",
+                Some(format!("{enabled}")),
+            );
+        }
+    }
 }
 
 /// Enable/disable Copilot hotkey interception.
@@ -494,6 +517,12 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 tauri::async_runtime::spawn(async move {
                     crate::handle_modifier_key_event(&app, "AltRight", is_down, suppressed);
                 });
+            }
+
+            // If AltRight is configured as a hotkey, swallow the key events so other apps
+            // (e.g. Chrome) don't treat Alt as a menu accelerator / focus-stealer.
+            if ALT_RIGHT_HOTKEY_ENABLED.load(Ordering::Relaxed) {
+                return LRESULT(1);
             }
         }
     }

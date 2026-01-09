@@ -174,6 +174,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let matches_copilot = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "Copilot";
+        let matches_alt_right = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "AltRight";
 
         let copilot_enabled = toggle_hotkey.as_ref().is_some_and(matches_copilot)
             || hold_hotkey.as_ref().is_some_and(matches_copilot)
@@ -182,7 +183,15 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             || quick_ask_hold_hotkey.as_ref().is_some_and(matches_copilot)
             || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_copilot);
 
+        let alt_right_enabled = toggle_hotkey.as_ref().is_some_and(matches_alt_right)
+            || hold_hotkey.as_ref().is_some_and(matches_alt_right)
+            || paste_last_hotkey.as_ref().is_some_and(matches_alt_right)
+            || retry_hotkey.as_ref().is_some_and(matches_alt_right)
+            || quick_ask_hold_hotkey.as_ref().is_some_and(matches_alt_right)
+            || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_alt_right);
+
         crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
+        crate::windows_modifier_hotkeys::set_alt_right_hotkey_enabled(alt_right_enabled);
     }
 
     log::info!(
