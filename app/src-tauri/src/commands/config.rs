@@ -485,7 +485,6 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
                     crate::llm::ProgramPreset {
                         id: preset.id,
                         name: preset.name,
-                        description: preset.description,
                         routing_hints: preset.routing_hints,
                         prompts: preset_prompts,
                         rewrite_llm_enabled: preset.rewrite_llm_enabled,
@@ -511,6 +510,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
                 presets,
                 default_preset_id: p.default_preset_id,
                 default_preset_description: p.default_preset_description,
+                default_target_rewrite_llm_enabled: p.default_target_rewrite_llm_enabled,
                 active_preset_id: p.active_preset_id,
                 router: p.router,
 

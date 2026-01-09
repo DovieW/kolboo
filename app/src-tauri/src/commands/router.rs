@@ -27,7 +27,7 @@ fn collect_candidate_hints(profile: &crate::llm::ProgramPromptProfile) -> Vec<(S
     let mut out: Vec<(String, String)> = Vec::new();
 
     for preset in &profile.presets {
-        // If there are no hints, fall back to using the preset name/description as a weak hint.
+        // If there are no hints, fall back to using the preset name as a weak hint.
         let mut hints: Vec<String> = Vec::new();
         for h in &preset.routing_hints {
             let t = h.trim();
@@ -36,15 +36,11 @@ fn collect_candidate_hints(profile: &crate::llm::ProgramPromptProfile) -> Vec<(S
             }
         }
         if hints.is_empty() {
-            if let Some(desc) = preset
-                .description
-                .as_ref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-            {
-                hints.push(format!("{} — {}", preset.name.trim(), desc));
+            let name = preset.name.trim();
+            if name.is_empty() {
+                hints.push(preset.id.trim().to_string());
             } else {
-                hints.push(preset.name.trim().to_string());
+                hints.push(name.to_string());
             }
         }
 

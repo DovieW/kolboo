@@ -269,6 +269,8 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         "presets": [],
         "default_preset_id": null,
         "default_preset_description": null,
+        // Implicit Default (no preset) should rewrite by default.
+        "default_target_rewrite_llm_enabled": true,
         "active_preset_id": null,
         "router": null,
         // Default profile inherits the global rewrite toggle.
@@ -4097,7 +4099,6 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
                     llm::ProgramPreset {
                         id: preset.id,
                         name: preset.name,
-                        description: preset.description,
                         routing_hints: preset.routing_hints,
                         prompts: preset_prompts,
                         rewrite_llm_enabled: preset.rewrite_llm_enabled,
@@ -4123,6 +4124,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
                 presets,
                 default_preset_id: p.default_preset_id,
                 default_preset_description: p.default_preset_description,
+                default_target_rewrite_llm_enabled: p.default_target_rewrite_llm_enabled,
                 active_preset_id: p.active_preset_id,
                 router: p.router,
 

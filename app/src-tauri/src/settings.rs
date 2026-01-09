@@ -367,6 +367,13 @@ pub struct RewriteProgramPromptProfile {
     /// Description for the implicit "Default" (no preset) routing target.
     #[serde(default)]
     pub default_preset_description: Option<String>,
+    /// Per-profile gate for the rewrite step when routed to the implicit "Default" target
+    /// (i.e., no preset selected).
+    ///
+    /// This is independent of per-preset rewrite gates. The global/per-profile rewrite gate
+    /// remains a hard gate that can disable rewrite for *all* presets.
+    #[serde(default = "default_true")]
+    pub default_target_rewrite_llm_enabled: bool,
     /// Persisted manual selection (if set, can be used as an override for routing).
     #[serde(default)]
     pub active_preset_id: Option<String>,
@@ -429,8 +436,6 @@ pub struct RewritePreset {
     pub id: String,
     #[serde(default)]
     pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
 
     /// Example utterances / short hints used by the intent router.
     // Some historical frontend versions wrote `routing_hints: null`.

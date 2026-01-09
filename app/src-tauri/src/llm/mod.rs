@@ -213,7 +213,6 @@ pub struct LlmConfig {
 pub struct ProgramPreset {
     pub id: String,
     pub name: String,
-    pub description: Option<String>,
 
     /// Example utterances / short hints used by the intent router.
     pub routing_hints: Vec<String>,
@@ -262,6 +261,11 @@ pub struct ProgramPromptProfile {
     pub default_preset_id: Option<String>,
     /// Description for the implicit "Default" (no preset) routing target.
     pub default_preset_description: Option<String>,
+    /// Gate for running the rewrite step when routed to the implicit "Default" target
+    /// (i.e., no preset selected). Defaults to true.
+    ///
+    /// Note: global/per-profile rewrite gates are applied separately as hard gates.
+    pub default_target_rewrite_llm_enabled: bool,
     /// Persisted manual selection (if set, can be used as an override for routing).
     pub active_preset_id: Option<String>,
     /// Optional intent router configuration.

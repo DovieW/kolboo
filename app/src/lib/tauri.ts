@@ -119,8 +119,6 @@ function normalizeRewritePreset(value: unknown): RewritePreset | null {
   const id = typeof p.id === "string" ? p.id : "";
   const name = typeof p.name === "string" ? p.name : "";
   if (!id) return null;
-
-  const description = typeof p.description === "string" ? p.description : null;
   const routing_hints = Array.isArray(p.routing_hints)
     ? p.routing_hints
         .map((x: any) => (typeof x === "string" ? x.trim() : ""))
@@ -194,7 +192,6 @@ function normalizeRewritePreset(value: unknown): RewritePreset | null {
   return {
     id,
     name,
-    description,
     routing_hints,
     cleanup_prompt_sections,
     rewrite_llm_enabled,
@@ -319,7 +316,6 @@ export interface IntentRouterSettings {
 export interface RewritePreset {
   id: string;
   name: string;
-  description?: string | null;
 
   // Routing hints used by the intent router
   routing_hints?: string[] | null;
@@ -362,6 +358,9 @@ export interface RewriteProgramPromptProfile {
   default_preset_id?: string | null;
   // Description for the implicit "Default" (no preset) target, used by the intent router.
   default_preset_description?: string | null;
+  // Gate for whether rewrite runs when routed to the implicit "Default" target (no preset).
+  // Defaults to true. This does not override the global/per-profile rewrite gate.
+  default_target_rewrite_llm_enabled?: boolean | null;
   // Router configuration for auto-selecting a preset based on dictation intent.
   router?: IntentRouterSettings | null;
   // Manually selected active preset for this profile (persisted selection).

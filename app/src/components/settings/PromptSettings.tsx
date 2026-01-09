@@ -15,7 +15,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { Info, RotateCcw } from "lucide-react";
+import { Info, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useDefaultSections,
@@ -194,6 +194,7 @@ export function PromptSettings({
         presets: [],
         default_preset_id: null,
         default_preset_description: null,
+        default_target_rewrite_llm_enabled: true,
         router: null,
         active_preset_id: null,
         rewrite_llm_enabled: null,
@@ -254,14 +255,22 @@ export function PromptSettings({
     string | number
   >(DEFAULT_STT_TIMEOUT);
 
-  const [localProfileQuickAskOpenAiReasoningEffort, setLocalProfileQuickAskOpenAiReasoningEffort] =
-    useState<string>("default");
-  const [localProfileQuickAskGeminiThinkingLevel, setLocalProfileQuickAskGeminiThinkingLevel] =
-    useState<string>("default");
-  const [localProfileQuickAskGeminiThinkingBudget, setLocalProfileQuickAskGeminiThinkingBudget] =
-    useState<string>("default");
-  const [localProfileQuickAskAnthropicThinkingBudget, setLocalProfileQuickAskAnthropicThinkingBudget] =
-    useState<string>("default");
+  const [
+    localProfileQuickAskOpenAiReasoningEffort,
+    setLocalProfileQuickAskOpenAiReasoningEffort,
+  ] = useState<string>("default");
+  const [
+    localProfileQuickAskGeminiThinkingLevel,
+    setLocalProfileQuickAskGeminiThinkingLevel,
+  ] = useState<string>("default");
+  const [
+    localProfileQuickAskGeminiThinkingBudget,
+    setLocalProfileQuickAskGeminiThinkingBudget,
+  ] = useState<string>("default");
+  const [
+    localProfileQuickAskAnthropicThinkingBudget,
+    setLocalProfileQuickAskAnthropicThinkingBudget,
+  ] = useState<string>("default");
 
   const [rewriteTestInput, setRewriteTestInput] = useState<string>("");
   const [rewriteTestOutput, setRewriteTestOutput] = useState<string>("");
@@ -291,7 +300,9 @@ export function PromptSettings({
     return Array.isArray(activeProfile.presets) ? activeProfile.presets : [];
   }, [activeProfile]);
 
-  const getPresetsForProfile = (p: RewriteProgramPromptProfile): RewritePreset[] => {
+  const getPresetsForProfile = (
+    p: RewriteProgramPromptProfile
+  ): RewritePreset[] => {
     const raw = (p as any).presets;
     return Array.isArray(raw) ? raw : [];
   };
@@ -314,10 +325,16 @@ export function PromptSettings({
   };
 
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const pendingPresetIdRef = useRef<string | null>(null);
   const [localPresetName, setLocalPresetName] = useState<string>("");
-  const [localPresetDescription, setLocalPresetDescription] =
-    useState<string>("");
   const [localPresetHintsText, setLocalPresetHintsText] = useState<string>("");
+
+  const [presetEditorOpen, setPresetEditorOpen] = useState(false);
+  const [deletePresetDialog, setDeletePresetDialog] = useState<null | {
+    presetId: string;
+    presetName: string;
+    isShared: boolean;
+  }>(null);
 
   const [linkPresetModalOpen, setLinkPresetModalOpen] = useState(false);
   const [linkSourceProfileId, setLinkSourceProfileId] = useState<string | null>(
@@ -341,6 +358,7 @@ export function PromptSettings({
   useEffect(() => {
     if (!activeProfile) {
       setEditingPresetId(null);
+      pendingPresetIdRef.current = null;
       return;
     }
 
@@ -350,6 +368,18 @@ export function PromptSettings({
       (editingPresetId === EDIT_DEFAULT_PRESET ||
         presets.some((p) => p.id === editingPresetId))
     ) {
+      if (
+        pendingPresetIdRef.current === editingPresetId &&
+        presets.some((p) => p.id === editingPresetId)
+      ) {
+        pendingPresetIdRef.current = null;
+      }
+      return;
+    }
+
+    // We may have just created/linked a preset and are waiting for settings to
+    // propagate back into `activeProfile.presets`. Don't snap the selection back.
+    if (editingPresetId && pendingPresetIdRef.current === editingPresetId) {
       return;
     }
 
@@ -359,13 +389,11 @@ export function PromptSettings({
   useEffect(() => {
     if (!selectedPreset) {
       setLocalPresetName("");
-      setLocalPresetDescription("");
       setLocalPresetHintsText("");
       return;
     }
 
     setLocalPresetName(selectedPreset.name);
-    setLocalPresetDescription(selectedPreset.description ?? "");
     const lines = (selectedPreset.routing_hints ?? []).filter(Boolean);
     setLocalPresetHintsText(lines.join("\n"));
   }, [selectedPreset?.id]);
@@ -441,7 +469,6 @@ export function PromptSettings({
     const p: RewritePreset = {
       id,
       name: "New preset",
-      description: null,
       routing_hints: null,
       cleanup_prompt_sections: null,
       // Default presets to rewrite "On".
@@ -465,6 +492,7 @@ export function PromptSettings({
 
     const next = [...presets, p];
     savePresets(next);
+    pendingPresetIdRef.current = id;
     setEditingPresetId(id);
   };
 
@@ -490,7 +518,9 @@ export function PromptSettings({
   const linkSourcePreset = useMemo(() => {
     if (!linkSourceProfile) return null;
     if (!linkSourcePresetId) return null;
-    return linkSourceProfile.presets.find((p) => p.id === linkSourcePresetId) ?? null;
+    return (
+      linkSourceProfile.presets.find((p) => p.id === linkSourcePresetId) ?? null
+    );
   }, [linkSourceProfile, linkSourcePresetId]);
 
   const openLinkPresetModal = () => {
@@ -516,6 +546,7 @@ export function PromptSettings({
     // We still store an object in this profile, but updates propagate by id.
     const next = [...presets, { ...linkSourcePreset }];
     savePresets(next);
+    pendingPresetIdRef.current = linkSourcePreset.id;
     setEditingPresetId(linkSourcePreset.id);
     setLinkPresetModalOpen(false);
   };
@@ -857,7 +888,9 @@ export function PromptSettings({
       setQuickAskOpenAiReasoningEffortInheriting(
         quickAskOpenAiReasoningEffortIsNull
       );
-      setQuickAskGeminiThinkingLevelInheriting(quickAskGeminiThinkingLevelIsNull);
+      setQuickAskGeminiThinkingLevelInheriting(
+        quickAskGeminiThinkingLevelIsNull
+      );
       setQuickAskGeminiThinkingBudgetInheriting(
         quickAskGeminiThinkingBudgetIsNull
       );
@@ -1030,6 +1063,7 @@ export function PromptSettings({
       presets: [],
       default_preset_id: null,
       default_preset_description: null,
+      default_target_rewrite_llm_enabled: true,
       router: null,
       active_preset_id: null,
       // Default profile uses the global rewrite toggle.
@@ -1190,7 +1224,10 @@ export function PromptSettings({
 
   const promptMaxChars = 224;
   const isPrompt224CharLimited =
-    isWhisper1Selected || isGroqWhisperModel || isAquavoiceStt || isWhisperServerStt;
+    isWhisper1Selected ||
+    isGroqWhisperModel ||
+    isAquavoiceStt ||
+    isWhisperServerStt;
 
   const sttPromptSupported =
     (isOpenAiStt &&
@@ -1817,7 +1854,9 @@ export function PromptSettings({
     });
   };
 
-  const handleQuickAskAnthropicThinkingBudgetChange = (value: string | null) => {
+  const handleQuickAskAnthropicThinkingBudgetChange = (
+    value: string | null
+  ) => {
     if (value == null || value === SELECT_DEFAULT) {
       updateQuickAskAnthropicThinkingBudget.mutate(null, {
         onSuccess: () => {
@@ -1949,6 +1988,7 @@ export function PromptSettings({
         presets: [],
         default_preset_id: null,
         default_preset_description: null,
+        default_target_rewrite_llm_enabled: true,
         router: null,
         active_preset_id: null,
         rewrite_llm_enabled: null,
@@ -2116,11 +2156,8 @@ export function PromptSettings({
     };
   });
 
-  const defaultPresetRewriteStepValue = (() => {
-    if (isDefaultScope) return defaultRewriteEnabled ? "on" : "off";
-    if (rewriteEnabledInheriting) return "inherit";
-    return localProfileRewriteEnabled ? "on" : "off";
-  })();
+  const defaultPresetRewriteStepValue =
+    activeProfile?.default_target_rewrite_llm_enabled ?? true ? "on" : "off";
 
   const defaultPresetValue =
     !activeProfile || !activeProfile.default_preset_id
@@ -2183,16 +2220,15 @@ export function PromptSettings({
         onClose={() => setLinkPresetModalOpen(false)}
         title="Add preset from another profile"
         centered
+        zIndex={1200}
       >
-        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }} mb="sm">
-          This links a preset (shared like a hard link). Editing the preset in
-          either profile will update it everywhere it’s linked.
-        </Text>
-
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <Select
             label="Source profile"
-            data={linkableProfiles.map((p) => ({ value: p.id, label: p.label }))}
+            data={linkableProfiles.map((p) => ({
+              value: p.id,
+              label: p.label,
+            }))}
             value={linkSourceProfileId}
             onChange={(value) => {
               if (!value) return;
@@ -2201,7 +2237,11 @@ export function PromptSettings({
                 linkableProfiles.find((p) => p.id === value) ?? null;
               setLinkSourcePresetId(nextProfile?.presets[0]?.id ?? null);
             }}
-            placeholder={linkableProfiles.length === 0 ? "No other profiles" : "Select profile"}
+            placeholder={
+              linkableProfiles.length === 0
+                ? "No other profiles"
+                : "Select profile"
+            }
             withCheckIcon={false}
           />
 
@@ -2217,13 +2257,18 @@ export function PromptSettings({
               setLinkSourcePresetId(value);
             }}
             disabled={!linkSourceProfile}
-            placeholder={!linkSourceProfile ? "Select a profile first" : "Select preset"}
+            placeholder={
+              !linkSourceProfile ? "Select a profile first" : "Select preset"
+            }
             withCheckIcon={false}
           />
         </div>
 
         <Group justify="flex-end" mt="md" gap="sm">
-          <Button variant="default" onClick={() => setLinkPresetModalOpen(false)}>
+          <Button
+            variant="default"
+            onClick={() => setLinkPresetModalOpen(false)}
+          >
             Cancel
           </Button>
           <Button
@@ -2232,6 +2277,41 @@ export function PromptSettings({
             disabled={!linkSourcePreset}
           >
             Add Preset
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={deletePresetDialog !== null}
+        onClose={() => setDeletePresetDialog(null)}
+        title="Delete preset?"
+        centered
+        zIndex={1300}
+      >
+        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
+          {deletePresetDialog?.isShared
+            ? "This preset is shared. Deleting it here only removes it from this profile; other profiles will keep it."
+            : "This will remove the preset from this profile."}
+        </Text>
+
+        <Text size="sm" mt="xs" style={{ lineHeight: 1.4 }}>
+          {deletePresetDialog?.presetName ?? ""}
+        </Text>
+
+        <Group justify="flex-end" mt="md" gap="sm">
+          <Button variant="default" onClick={() => setDeletePresetDialog(null)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            onClick={() => {
+              const args = deletePresetDialog;
+              if (!args) return;
+              setDeletePresetDialog(null);
+              deletePreset(args.presetId);
+            }}
+          >
+            Delete
           </Button>
         </Group>
       </Modal>
@@ -2337,25 +2417,9 @@ export function PromptSettings({
         }}
       />
 
-      <Divider
-        mt="xs"
-        mb="xs"
-        label="Transcribe"
-        labelPosition="left"
-        styles={{
-          root: {
-            borderTopWidth: 2,
-            borderColor: "var(--border-default)",
-          },
-          label: {
-            color: "var(--text-primary)",
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          },
-        }}
-      />
+      <div className="settings-mini-header settings-mini-header--first">
+        <span className="settings-mini-header__text">Transcription</span>
+      </div>
 
       <div className="settings-row">
         <div>
@@ -2654,17 +2718,6 @@ export function PromptSettings({
         </div>
       </div>
 
-      <Divider
-        mt={0}
-        mb="sm"
-        styles={{
-          root: {
-            borderTopWidth: 1,
-            borderColor: "var(--border-subtle)",
-          },
-        }}
-      />
-
       <div style={{ marginTop: 0, marginBottom: 16 }}>
         <Accordion variant="separated" radius="md">
           <Accordion.Item value={`${activeProfileId}-stt-prompt`}>
@@ -2881,25 +2934,9 @@ export function PromptSettings({
         </Accordion>
       </div>
 
-      <Divider
-        mt="md"
-        mb="xs"
-        label="Rewrite"
-        labelPosition="left"
-        styles={{
-          root: {
-            borderTopWidth: 2,
-            borderColor: "var(--border-default)",
-          },
-          label: {
-            color: "var(--text-primary)",
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          },
-        }}
-      />
+      <div className="settings-mini-header">
+        <span className="settings-mini-header__text">Rewrite</span>
+      </div>
 
       <div className="settings-row">
         <div>
@@ -3797,31 +3834,14 @@ export function PromptSettings({
         </div>
       )}
 
-      <Divider
-        mt="md"
-        mb="xs"
-        label="Quick Ask"
-        labelPosition="left"
-        styles={{
-          root: {
-            borderTopWidth: 2,
-            borderColor: "var(--border-default)",
-          },
-          label: {
-            color: "var(--text-primary)",
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          },
-        }}
-      />
-
       {/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
 
       {activeProfile ? (
         <>
-          <div style={{ marginTop: 0, marginBottom: 16 }}>
+          <div
+            className="settings-accordion-block"
+            style={{ marginTop: 0, marginBottom: 16 }}
+          >
             <Accordion variant="separated" radius="md">
               <Accordion.Item value={`${activeProfileId}-presets`}>
                 <Accordion.Control>
@@ -3919,43 +3939,36 @@ export function PromptSettings({
                         </div>
                       </div>
 
-                      <Group gap={8} wrap="wrap">
-                        <Button color="gray" onClick={newPreset}>
-                          New Preset
-                        </Button>
-                        <Tooltip
-                          label={
-                            linkableProfiles.length === 0
-                              ? "No presets found in other profiles"
-                              : "Add a shared preset from another profile"
-                          }
-                          disabled={linkableProfiles.length > 0}
-                        >
-                          <Button
-                            color="gray"
-                            variant="light"
-                            onClick={openLinkPresetModal}
-                            disabled={linkableProfiles.length === 0}
-                          >
-                            Add Preset
-                          </Button>
-                        </Tooltip>
-                      </Group>
+                      <Button
+                        color="gray"
+                        variant="light"
+                        onClick={() => setPresetEditorOpen(true)}
+                      >
+                        Edit Presets
+                      </Button>
                     </Group>
 
-                    {presets.length === 0 ? (
-                      <Text size="sm" c="dimmed">
-                        No additional presets yet. You can still configure the
-                        Default preset below; add presets for routing and quick
-                        switching.
-                      </Text>
-                    ) : null}
-
+                    <Modal
+                      opened={presetEditorOpen}
+                      onClose={() => setPresetEditorOpen(false)}
+                      title="Edit presets"
+                      centered
+                      size="xl"
+                      keepMounted={false}
+                      zIndex={1000}
+                      styles={{
+                        body: {
+                          height: "70vh",
+                          overflowY: "auto",
+                        },
+                      }}
+                    >
                       <Group
                         justify="space-between"
                         align="flex-end"
                         wrap="wrap"
                         gap={12}
+                        mb="sm"
                       >
                         <div style={{ flex: 1, minWidth: 260 }}>
                           <Text size="xs" c="dimmed" mb={4}>
@@ -3973,6 +3986,7 @@ export function PromptSettings({
                             onChange={(value) => {
                               setEditingPresetId(value ?? EDIT_DEFAULT_PRESET);
                             }}
+                            comboboxProps={{ withinPortal: true, zIndex: 1400 }}
                             placeholder="Default"
                             withCheckIcon={false}
                             styles={{
@@ -3985,19 +3999,66 @@ export function PromptSettings({
                           />
                         </div>
 
-                        {selectedPreset ? (
-                          <Button
-                            color="red"
-                            variant="light"
-                            onClick={() => deletePreset(selectedPreset.id)}
-                          >
-                            Delete preset
+                        <Group gap={8} wrap="wrap">
+                          <Button color="gray" onClick={newPreset}>
+                            New
                           </Button>
-                        ) : null}
+                          <Tooltip
+                            label={
+                              linkableProfiles.length === 0
+                                ? "No presets found in other profiles"
+                                : "Add a shared preset from another profile"
+                            }
+                            disabled={linkableProfiles.length > 0}
+                          >
+                            <Button
+                              color="gray"
+                              variant="light"
+                              onClick={openLinkPresetModal}
+                              disabled={linkableProfiles.length === 0}
+                            >
+                              Add
+                            </Button>
+                          </Tooltip>
+
+                          <ActionIcon
+                            variant="light"
+                            color="red"
+                            size={36}
+                            disabled={isEditingDefaultPreset || !selectedPreset}
+                            onClick={() => {
+                              if (isEditingDefaultPreset) return;
+                              if (!selectedPreset) return;
+                              setDeletePresetDialog({
+                                presetId: selectedPreset.id,
+                                presetName:
+                                  selectedPreset.name?.trim() ||
+                                  selectedPreset.id,
+                                isShared: isSharedPresetId(selectedPreset.id),
+                              });
+                            }}
+                            aria-label="Delete preset"
+                          >
+                            <Trash2 size={16} />
+                          </ActionIcon>
+                        </Group>
                       </Group>
 
-                      {selectedPreset ? (
-                        <>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 12,
+                        }}
+                      >
+                        {selectedPreset ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 12,
+                            }}
+                          >
                             <TextInput
                               label="Preset name"
                               value={localPresetName}
@@ -4022,36 +4083,6 @@ export function PromptSettings({
                               }}
                             />
 
-                            <Textarea
-                              label="Description (optional)"
-                              value={localPresetDescription}
-                              onChange={(e) =>
-                                setLocalPresetDescription(e.currentTarget.value)
-                              }
-                              onBlur={() => {
-                                const trimmed = localPresetDescription.trim();
-                                const next =
-                                  trimmed.length === 0 ? null : trimmed;
-                                if (
-                                  (selectedPreset.description ?? null) !== next
-                                ) {
-                                  updatePreset(selectedPreset.id, {
-                                    description: next,
-                                  });
-                                }
-                              }}
-                              autosize
-                              minRows={2}
-                              styles={{
-                                label: { fontSize: 12 },
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                },
-                              }}
-                            />
-
                             <div>
                               <Text size="xs" c="dimmed" mb={4}>
                                 Rewrite step
@@ -4059,16 +4090,22 @@ export function PromptSettings({
                               <Select
                                 data={[
                                   { value: "on", label: "On" },
-                                  { value: "off", label: "Off (skip rewrite)" },
+                                  { value: "off", label: "Off" },
                                 ]}
                                 value={
-                                  selectedPreset.rewrite_llm_enabled ? "on" : "off"
+                                  selectedPreset.rewrite_llm_enabled
+                                    ? "on"
+                                    : "off"
                                 }
                                 onChange={(value) => {
                                   if (!value) return;
                                   updatePreset(selectedPreset.id, {
                                     rewrite_llm_enabled: value === "on",
                                   });
+                                }}
+                                comboboxProps={{
+                                  withinPortal: true,
+                                  zIndex: 1400,
                                 }}
                                 withCheckIcon={false}
                                 styles={{
@@ -4084,7 +4121,7 @@ export function PromptSettings({
 
                             <Textarea
                               label="Routing hints (one per line)"
-                              description="If empty, the router falls back to preset name/description."
+                              description="If empty, the router falls back to the preset name."
                               value={localPresetHintsText}
                               onChange={(e) =>
                                 setLocalPresetHintsText(e.currentTarget.value)
@@ -4238,13 +4275,16 @@ export function PromptSettings({
                                         Test rewrite
                                       </p>
                                       <p className="settings-description">
-                                        Paste a raw transcript and run it through this preset’s effective System Prompt.
+                                        Paste a raw transcript and run it
+                                        through this preset’s effective System
+                                        Prompt.
                                       </p>
                                     </div>
                                   </Accordion.Control>
                                   <Accordion.Panel>
                                     {(() => {
-                                      const baseContent = profilePromptDefaultContent;
+                                      const baseContent =
+                                        profilePromptDefaultContent;
                                       const override = getPresetPromptOverride(
                                         selectedPreset,
                                         "system"
@@ -4269,7 +4309,9 @@ export function PromptSettings({
                                           }}
                                         >
                                           <Text size="xs" c="dimmed">
-                                            Testing: {activeProfileLabel} · {selectedPreset.name}
+                                            Testing: {activeProfileLabel} ·{" "}
+                                            {selectedPreset.name?.trim() ||
+                                              selectedPreset.id}
                                           </Text>
 
                                           <Textarea
@@ -4332,8 +4374,7 @@ export function PromptSettings({
                                                 : rewriteTestDurationMs === null
                                                 ? "Duration: —"
                                                 : `Duration: ${(
-                                                    rewriteTestDurationMs /
-                                                    1000
+                                                    rewriteTestDurationMs / 1000
                                                   ).toFixed(2)}s`}
                                             </Text>
                                           </div>
@@ -4370,7 +4411,7 @@ export function PromptSettings({
                                 </Accordion.Item>
                               </Accordion>
                             </div>
-                          </>
+                          </div>
                         ) : isEditingDefaultPreset ? (
                           <>
                             <div
@@ -4386,60 +4427,21 @@ export function PromptSettings({
                                   Rewrite step
                                 </Text>
                                 <Select
-                                  data={
-                                    isDefaultScope
-                                      ? [
-                                          { value: "on", label: "On" },
-                                          {
-                                            value: "off",
-                                            label: "Off (skip rewrite)",
-                                          },
-                                        ]
-                                      : [
-                                          {
-                                            value: "inherit",
-                                            label: "Inherit from Default profile",
-                                          },
-                                          { value: "on", label: "On" },
-                                          {
-                                            value: "off",
-                                            label: "Off (skip rewrite)",
-                                          },
-                                        ]
-                                  }
+                                  data={[
+                                    { value: "on", label: "On" },
+                                    { value: "off", label: "Off" },
+                                  ]}
                                   value={defaultPresetRewriteStepValue}
                                   onChange={(value) => {
                                     if (!value) return;
-
-                                    if (isDefaultScope) {
-                                      updateRewriteLlmEnabled.mutate(
-                                        value === "on",
-                                        {
-                                          onSuccess: () => {
-                                            tauriAPI.emitSettingsChanged();
-                                          },
-                                        }
-                                      );
-                                      return;
-                                    }
-
-                                    if (value === "inherit") {
-                                      setRewriteEnabledInheriting(true);
-                                      setLocalProfileRewriteEnabled(
-                                        defaultRewriteEnabled
-                                      );
-                                      saveProfileMetadata({
-                                        rewrite_llm_enabled: null,
-                                      });
-                                      return;
-                                    }
-
-                                    const enabled = value === "on";
-                                    setRewriteEnabledInheriting(false);
-                                    setLocalProfileRewriteEnabled(enabled);
                                     saveProfileMetadata({
-                                      rewrite_llm_enabled: enabled,
+                                      default_target_rewrite_llm_enabled:
+                                        value === "on",
                                     });
+                                  }}
+                                  comboboxProps={{
+                                    withinPortal: true,
+                                    zIndex: 1400,
                                   }}
                                   withCheckIcon={false}
                                   styles={{
@@ -4514,17 +4516,19 @@ export function PromptSettings({
                                               const current: CleanupPromptSectionsOverride =
                                                 activeProfile?.cleanup_prompt_sections ??
                                                 {};
-                                              const next = normalizePromptOverrides({
-                                                ...current,
-                                                system: null,
-                                              });
+                                              const next =
+                                                normalizePromptOverrides({
+                                                  ...current,
+                                                  system: null,
+                                                });
                                               profilePromptOverridesRef.current =
                                                 next;
 
-                                              const resolved: CleanupPromptSections = {
-                                                system:
-                                                  next?.system ?? base.system,
-                                              };
+                                              const resolved: CleanupPromptSections =
+                                                {
+                                                  system:
+                                                    next?.system ?? base.system,
+                                                };
 
                                               setLocalSections({
                                                 system: {
@@ -4554,7 +4558,7 @@ export function PromptSettings({
                             </div>
 
                             <Textarea
-                              label="Routing hints / description (optional)"
+                              label="Default target routing hints (optional)"
                               description="Used by the intent router when deciding to use the profile defaults (no preset). You can put multiple lines here; the router will treat them as additional hints."
                               value={localDefaultPresetDescription}
                               onChange={(e) =>
@@ -4599,7 +4603,8 @@ export function PromptSettings({
                                         Test rewrite
                                       </p>
                                       <p className="settings-description">
-                                        Paste a raw transcript and run it through the Default preset.
+                                        Paste a raw transcript and run it
+                                        through the Default preset.
                                       </p>
                                     </div>
                                   </Accordion.Control>
@@ -4622,7 +4627,8 @@ export function PromptSettings({
                                           }}
                                         >
                                           <Text size="xs" c="dimmed">
-                                            Testing: {activeProfileLabel} · Default
+                                            Testing: {activeProfileLabel} ·
+                                            Default
                                           </Text>
 
                                           <Textarea
@@ -4685,8 +4691,7 @@ export function PromptSettings({
                                                 : rewriteTestDurationMs === null
                                                 ? "Duration: —"
                                                 : `Duration: ${(
-                                                    rewriteTestDurationMs /
-                                                    1000
+                                                    rewriteTestDurationMs / 1000
                                                   ).toFixed(2)}s`}
                                             </Text>
                                           </div>
@@ -4723,9 +4728,10 @@ export function PromptSettings({
                                 </Accordion.Item>
                               </Accordion>
                             </div>
-                        </>
-
-                      ) : null}
+                          </>
+                        ) : null}
+                      </div>
+                    </Modal>
                   </div>
                 </Accordion.Panel>
               </Accordion.Item>
@@ -4826,7 +4832,8 @@ export function PromptSettings({
                             settings?.llm_provider ??
                             effectiveRouter?.llm_provider ??
                             "openai";
-                          const modelOptions = getLlmModelOptionsForProvider(seedProvider);
+                          const modelOptions =
+                            getLlmModelOptionsForProvider(seedProvider);
                           const seedModel =
                             effectiveRouter?.llm_model ??
                             settings?.llm_model ??
@@ -6151,25 +6158,9 @@ export function PromptSettings({
         </>
       ) : null}
 
-      <Divider
-        mt="md"
-        mb="xs"
-        label="Quick Ask"
-        labelPosition="left"
-        styles={{
-          root: {
-            borderTopWidth: 2,
-            borderColor: "var(--border-default)",
-          },
-          label: {
-            color: "var(--text-primary)",
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-          },
-        }}
-      />
+      <div className="settings-mini-header">
+        <span className="settings-mini-header__text">Quick Ask</span>
+      </div>
 
       <div className="settings-row">
         <div>
@@ -6283,7 +6274,9 @@ export function PromptSettings({
                       onConfirm: () => {
                         setQuickAskModelInheriting(true);
                         setLocalProfileQuickAskModel(
-                          settings?.quick_ask_model ?? settings?.llm_model ?? null
+                          settings?.quick_ask_model ??
+                            settings?.llm_model ??
+                            null
                         );
                         saveProfileMetadata({ quick_ask_model: null });
                       },
@@ -6370,7 +6363,8 @@ export function PromptSettings({
               data={quickAskOpenAiThinkingOptions}
               value={
                 isDefaultScope
-                  ? settings?.quick_ask_openai_reasoning_effort ?? SELECT_DEFAULT
+                  ? settings?.quick_ask_openai_reasoning_effort ??
+                    SELECT_DEFAULT
                   : localProfileQuickAskOpenAiReasoningEffort
               }
               onChange={(value) => {
@@ -6428,7 +6422,9 @@ export function PromptSettings({
                 }
 
                 const modelHint = quickAskModelForThinking
-                  ? openAiDefaultReasoningEffortForModel(quickAskModelForThinking)
+                  ? openAiDefaultReasoningEffortForModel(
+                      quickAskModelForThinking
+                    )
                   : "medium";
                 const hint = isDefaultScope
                   ? modelHint
@@ -6462,7 +6458,9 @@ export function PromptSettings({
                 }
 
                 const modelHint = quickAskModelForThinking
-                  ? openAiDefaultReasoningEffortForModel(quickAskModelForThinking)
+                  ? openAiDefaultReasoningEffortForModel(
+                      quickAskModelForThinking
+                    )
                   : "medium";
                 const hint = isDefaultScope
                   ? modelHint
@@ -6527,7 +6525,9 @@ export function PromptSettings({
                       title: "Disable Thinking Level override?",
                       onConfirm: () => {
                         setQuickAskGeminiThinkingLevelInheriting(true);
-                        setLocalProfileQuickAskGeminiThinkingLevel(SELECT_DEFAULT);
+                        setLocalProfileQuickAskGeminiThinkingLevel(
+                          SELECT_DEFAULT
+                        );
                         saveProfileMetadata({
                           quick_ask_gemini_thinking_level: null,
                         });
@@ -6689,7 +6689,9 @@ export function PromptSettings({
                       title: "Disable Thinking Budget override?",
                       onConfirm: () => {
                         setQuickAskGeminiThinkingBudgetInheriting(true);
-                        setLocalProfileQuickAskGeminiThinkingBudget(SELECT_DEFAULT);
+                        setLocalProfileQuickAskGeminiThinkingBudget(
+                          SELECT_DEFAULT
+                        );
                         saveProfileMetadata({
                           quick_ask_gemini_thinking_budget: null,
                         });
@@ -6723,11 +6725,14 @@ export function PromptSettings({
 
                   const parsed = Number(value);
                   if (!Number.isFinite(parsed)) return;
-                  updateQuickAskGeminiThinkingBudget.mutate(Math.trunc(parsed), {
-                    onSuccess: () => {
-                      tauriAPI.emitSettingsChanged();
-                    },
-                  });
+                  updateQuickAskGeminiThinkingBudget.mutate(
+                    Math.trunc(parsed),
+                    {
+                      onSuccess: () => {
+                        tauriAPI.emitSettingsChanged();
+                      },
+                    }
+                  );
                   return;
                 }
 
@@ -6745,7 +6750,9 @@ export function PromptSettings({
                 const asInt = Math.trunc(parsed);
                 setQuickAskGeminiThinkingBudgetInheriting(false);
                 setLocalProfileQuickAskGeminiThinkingBudget(String(asInt));
-                saveProfileMetadata({ quick_ask_gemini_thinking_budget: asInt });
+                saveProfileMetadata({
+                  quick_ask_gemini_thinking_budget: asInt,
+                });
               }}
               placeholder="Default"
               inputStyle={{
@@ -6869,7 +6876,9 @@ export function PromptSettings({
                       title: "Disable Thinking override?",
                       onConfirm: () => {
                         setQuickAskAnthropicThinkingBudgetInheriting(true);
-                        setLocalProfileQuickAskAnthropicThinkingBudget(SELECT_DEFAULT);
+                        setLocalProfileQuickAskAnthropicThinkingBudget(
+                          SELECT_DEFAULT
+                        );
                         saveProfileMetadata({
                           quick_ask_anthropic_thinking_budget: null,
                         });
@@ -6903,17 +6912,22 @@ export function PromptSettings({
 
                   const parsed = Number(value);
                   if (!Number.isFinite(parsed)) return;
-                  updateQuickAskAnthropicThinkingBudget.mutate(Math.trunc(parsed), {
-                    onSuccess: () => {
-                      tauriAPI.emitSettingsChanged();
-                    },
-                  });
+                  updateQuickAskAnthropicThinkingBudget.mutate(
+                    Math.trunc(parsed),
+                    {
+                      onSuccess: () => {
+                        tauriAPI.emitSettingsChanged();
+                      },
+                    }
+                  );
                   return;
                 }
 
                 if (value == null || value === SELECT_DEFAULT) {
                   setQuickAskAnthropicThinkingBudgetInheriting(true);
-                  setLocalProfileQuickAskAnthropicThinkingBudget(SELECT_DEFAULT);
+                  setLocalProfileQuickAskAnthropicThinkingBudget(
+                    SELECT_DEFAULT
+                  );
                   saveProfileMetadata({
                     quick_ask_anthropic_thinking_budget: null,
                   });
@@ -6925,7 +6939,9 @@ export function PromptSettings({
                 const asInt = Math.trunc(parsed);
                 setQuickAskAnthropicThinkingBudgetInheriting(false);
                 setLocalProfileQuickAskAnthropicThinkingBudget(String(asInt));
-                saveProfileMetadata({ quick_ask_anthropic_thinking_budget: asInt });
+                saveProfileMetadata({
+                  quick_ask_anthropic_thinking_budget: asInt,
+                });
               }}
               placeholder="Default"
               inputStyle={{
@@ -6944,7 +6960,8 @@ export function PromptSettings({
                 }
 
                 if (option.value === SELECT_DEFAULT) {
-                  const inheritedBudget = settings?.quick_ask_anthropic_thinking_budget;
+                  const inheritedBudget =
+                    settings?.quick_ask_anthropic_thinking_budget;
                   const hint = isDefaultScope
                     ? "off"
                     : inheritedBudget == null
@@ -7001,7 +7018,8 @@ export function PromptSettings({
               }}
               renderOption={({ option }) => {
                 if (option.value === SELECT_DEFAULT) {
-                  const inheritedBudget = settings?.quick_ask_anthropic_thinking_budget;
+                  const inheritedBudget =
+                    settings?.quick_ask_anthropic_thinking_budget;
                   const hint = isDefaultScope
                     ? "off"
                     : inheritedBudget == null
@@ -7058,7 +7076,10 @@ export function PromptSettings({
         </div>
       )}
 
-      <div style={{ marginTop: 0, marginBottom: 16 }}>
+      <div
+        className="settings-accordion-block"
+        style={{ marginTop: 0, marginBottom: 16 }}
+      >
         <Accordion variant="separated" radius="md">
           <PromptSectionEditor
             sectionKey={`${activeProfileId}-quick-ask-system-prompt`}
@@ -7081,8 +7102,8 @@ export function PromptSettings({
               isDefaultScope
                 ? null
                 : quickAskSystemPromptInheriting
-                  ? "inheriting"
-                  : "overriding"
+                ? "inheriting"
+                : "overriding"
             }
             inheritTooltip={INHERIT_TOOLTIP}
             disableOverrideTooltip="Disable override (inherit from Default)"
@@ -7163,7 +7184,9 @@ export function PromptSettings({
               </div>
             </Accordion.Control>
             <Accordion.Panel>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
                 <div
                   style={{
                     display: "flex",
@@ -7177,13 +7200,17 @@ export function PromptSettings({
                       ? "Duration: running…"
                       : quickAskTestDurationMs === null
                       ? "Duration: —"
-                      : `Duration: ${(quickAskTestDurationMs / 1000).toFixed(2)}s`}
+                      : `Duration: ${(quickAskTestDurationMs / 1000).toFixed(
+                          2
+                        )}s`}
                   </Text>
 
                   <Button
                     color="gray"
                     loading={quickAskTestPending}
-                    disabled={!effectiveQuickAskProvider || !quickAskTestInput.trim()}
+                    disabled={
+                      !effectiveQuickAskProvider || !quickAskTestInput.trim()
+                    }
                     onClick={async () => {
                       if (!effectiveQuickAskProvider) return;
                       if (!quickAskTestInput.trim()) return;
@@ -7196,40 +7223,59 @@ export function PromptSettings({
 
                       const openAiReasoningEffort = isDefaultScope
                         ? settings?.quick_ask_openai_reasoning_effort ?? null
-                        : localProfileQuickAskOpenAiReasoningEffort === SELECT_DEFAULT
+                        : localProfileQuickAskOpenAiReasoningEffort ===
+                          SELECT_DEFAULT
                         ? null
                         : (localProfileQuickAskOpenAiReasoningEffort as any);
 
                       const geminiThinkingLevel = isDefaultScope
                         ? settings?.quick_ask_gemini_thinking_level ?? null
-                        : localProfileQuickAskGeminiThinkingLevel === SELECT_DEFAULT
+                        : localProfileQuickAskGeminiThinkingLevel ===
+                          SELECT_DEFAULT
                         ? null
                         : (localProfileQuickAskGeminiThinkingLevel as any);
 
                       const geminiThinkingBudget = (() => {
                         if (isDefaultScope) {
-                          return settings?.quick_ask_gemini_thinking_budget ?? null;
+                          return (
+                            settings?.quick_ask_gemini_thinking_budget ?? null
+                          );
                         }
-                        if (localProfileQuickAskGeminiThinkingBudget === SELECT_DEFAULT)
+                        if (
+                          localProfileQuickAskGeminiThinkingBudget ===
+                          SELECT_DEFAULT
+                        )
                           return null;
-                        const n = Number(localProfileQuickAskGeminiThinkingBudget);
+                        const n = Number(
+                          localProfileQuickAskGeminiThinkingBudget
+                        );
                         return Number.isFinite(n) ? Math.trunc(n) : null;
                       })();
 
                       const anthropicThinkingBudget = (() => {
                         if (isDefaultScope) {
-                          return settings?.quick_ask_anthropic_thinking_budget ?? null;
+                          return (
+                            settings?.quick_ask_anthropic_thinking_budget ??
+                            null
+                          );
                         }
-                        if (localProfileQuickAskAnthropicThinkingBudget === SELECT_DEFAULT)
+                        if (
+                          localProfileQuickAskAnthropicThinkingBudget ===
+                          SELECT_DEFAULT
+                        )
                           return null;
-                        const n = Number(localProfileQuickAskAnthropicThinkingBudget);
+                        const n = Number(
+                          localProfileQuickAskAnthropicThinkingBudget
+                        );
                         return Number.isFinite(n) ? Math.trunc(n) : null;
                       })();
 
                       try {
                         const res = await llmAPI.complete({
                           provider: effectiveQuickAskProvider,
-                          model: selectedQuickAskModelForUi ?? effectiveQuickAskModel,
+                          model:
+                            selectedQuickAskModelForUi ??
+                            effectiveQuickAskModel,
                           systemPrompt: localQuickAskSystemPrompt,
                           userPrompt: quickAskTestInput,
                           openAiReasoningEffort,
@@ -7247,7 +7293,9 @@ export function PromptSettings({
                         const startedAt = quickAskTestStartRef.current;
                         quickAskTestStartRef.current = null;
                         if (typeof startedAt === "number") {
-                          setQuickAskTestDurationMs(performance.now() - startedAt);
+                          setQuickAskTestDurationMs(
+                            performance.now() - startedAt
+                          );
                         }
                         setQuickAskTestPending(false);
                       }
@@ -7260,7 +7308,9 @@ export function PromptSettings({
                 <div style={{ width: "100%" }}>
                   <Textarea
                     value={quickAskTestInput}
-                    onChange={(e) => setQuickAskTestInput(e.currentTarget.value)}
+                    onChange={(e) =>
+                      setQuickAskTestInput(e.currentTarget.value)
+                    }
                     placeholder="Ask a question…"
                     autosize
                     minRows={2}

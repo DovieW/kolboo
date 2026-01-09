@@ -439,6 +439,42 @@ a:focus-visible {
 	content: none;
 }
 
+/*
+	Settings: centered mini header with accent bars.
+	Used in the AI settings tab to separate Transcription / Rewrite / Quick Ask.
+*/
+.settings-mini-header {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px;
+	margin: 18px 0 12px;
+}
+
+.settings-mini-header--first {
+	margin-top: 0;
+}
+
+.settings-mini-header::before,
+.settings-mini-header::after {
+	content: "";
+	flex: 1;
+	height: 2px;
+	border-radius: 999px;
+	background: var(--accent-primary);
+	opacity: 0.7;
+}
+
+.settings-mini-header__text {
+	font-family: "Sora", sans-serif;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	white-space: nowrap;
+}
+
 /* History Feed */
 .history-feed {
 	display: flex;
@@ -714,6 +750,35 @@ a:focus-visible {
  */
 .settings-row.no-divider {
 	border-bottom: none;
+}
+
+/*
+ * When a settings row is immediately followed by an accordion section, the
+ * row's bottom border looks like a stray divider "sitting on" the accordion.
+ * Remove that border in this specific layout.
+ */
+.settings-row:has(+ .settings-accordion-block) {
+	border-bottom: none;
+}
+
+/*
+ * WebView/CSS selector support can vary. As a robust fallback, let accordion
+ * blocks paint over the 1px separator line that sometimes appears directly
+ * above them.
+ */
+.settings-accordion-block {
+	position: relative;
+}
+
+.settings-accordion-block::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: -1px;
+	height: 1px;
+	background: var(--bg-card);
+	pointer-events: none;
 }
 
 .settings-row:last-child {

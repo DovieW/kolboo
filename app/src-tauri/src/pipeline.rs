@@ -416,7 +416,7 @@ async fn route_preset_id_with_embeddings(
     // - optionally, the implicit Default target (returns None)
     let mut candidates: Vec<(String, Vec<String>)> = Vec::new();
     for preset in &profile.presets {
-        // If there are no hints, fall back to using the preset name/description as a weak hint.
+        // If there are no hints, fall back to using the preset name as a weak hint.
         let mut hints: Vec<String> = Vec::new();
         for h in &preset.routing_hints {
             let t = h.trim();
@@ -425,15 +425,11 @@ async fn route_preset_id_with_embeddings(
             }
         }
         if hints.is_empty() {
-            if let Some(desc) = preset
-                .description
-                .as_ref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-            {
-                hints.push(format!("{} — {}", preset.name.trim(), desc));
+            let name = preset.name.trim();
+            if name.is_empty() {
+                hints.push(preset.id.trim().to_string());
             } else {
-                hints.push(preset.name.trim().to_string());
+                hints.push(name.to_string());
             }
         }
 
@@ -719,13 +715,14 @@ async fn route_preset_id_with_llm(
         options.push_str(&format!("- default: {}\n", desc));
     }
     for p in &profile.presets {
-        let desc = p.description.clone().unwrap_or_default();
+        let name = p.name.trim();
+        let label = if name.is_empty() { p.id.as_str() } else { name };
         let hints = if p.routing_hints.is_empty() {
             String::new()
         } else {
             format!(" Hints: {}", p.routing_hints.join(" | "))
         };
-        options.push_str(&format!("- {}: {}{}\n", p.id, desc, hints));
+        options.push_str(&format!("- {}: {}{}\n", p.id, label, hints));
     }
 
     let default_system = "You are an intent router. Choose the best preset id for the transcript.\n\nRules:\n- Output a JSON object matching the provided JSON Schema.\n- Choose exactly one preset_id from the allowed list.\n- If you are not confident, choose preset_id = 'default'.\n";
@@ -1014,6 +1011,8 @@ pub enum LlmNotAttemptedReason {
     DisabledByProfile,
     /// Selected preset explicitly disabled rewrite.
     DisabledByPreset,
+    /// Routed to the implicit "Default" target (no preset), which explicitly disabled rewrite.
+    DisabledByDefaultTarget,
     /// Rewrite was enabled, but the provider couldn't be constructed/used.
     ProviderUnavailable { provider: String, error: String },
     /// Fallback for unexpected paths.
@@ -1028,6 +1027,7 @@ impl LlmNotAttemptedReason {
             LlmNotAttemptedReason::DisabledByDefaultProfile => "disabled_default_profile",
             LlmNotAttemptedReason::DisabledByProfile => "disabled_profile",
             LlmNotAttemptedReason::DisabledByPreset => "disabled_preset",
+            LlmNotAttemptedReason::DisabledByDefaultTarget => "disabled_default_target",
             LlmNotAttemptedReason::ProviderUnavailable { .. } => "provider_unavailable",
             LlmNotAttemptedReason::Unknown => "unknown",
         }
@@ -1046,6 +1046,9 @@ impl LlmNotAttemptedReason {
             }
             LlmNotAttemptedReason::DisabledByProfile => "reason=disabled_profile".to_string(),
             LlmNotAttemptedReason::DisabledByPreset => "reason=disabled_preset".to_string(),
+            LlmNotAttemptedReason::DisabledByDefaultTarget => {
+                "reason=disabled_default_target".to_string()
+            }
             LlmNotAttemptedReason::ProviderUnavailable { provider, error } => format!(
                 "reason=provider_unavailable\nprovider={}\nerror={}",
                 provider, error
@@ -3028,6 +3031,9 @@ impl SharedPipeline {
             let llm_timeout = llm_config.timeout;
 
             let selected_preset_rewrite_enabled = selected_preset.map(|p| p.rewrite_llm_enabled);
+            let default_target_rewrite_enabled = selected_profile
+                .map(|p| p.default_target_rewrite_llm_enabled)
+                .unwrap_or(true);
 
             // Rewrite gates:
             // - Each profile has its own enable toggle.
@@ -3054,7 +3060,7 @@ impl SharedPipeline {
             let effective_llm_enabled = if let Some(preset) = selected_preset {
                 profile_enabled && preset.rewrite_llm_enabled
             } else {
-                profile_enabled
+                profile_enabled && default_target_rewrite_enabled
             };
 
             let disabled_reason = if !profile_enabled {
@@ -3071,6 +3077,8 @@ impl SharedPipeline {
                 }
             } else if selected_preset_rewrite_enabled == Some(false) {
                 Some(LlmNotAttemptedReason::DisabledByPreset)
+            } else if selected_preset.is_none() && !default_target_rewrite_enabled {
+                Some(LlmNotAttemptedReason::DisabledByDefaultTarget)
             } else {
                 None
             };
@@ -3896,6 +3904,9 @@ impl SharedPipeline {
                 profile_enabled && preset.rewrite_llm_enabled
             } else {
                 profile_enabled
+                    && selected_profile
+                        .map(|p| p.default_target_rewrite_llm_enabled)
+                        .unwrap_or(true)
             };
 
             let disabled_reason = if !profile_enabled {
@@ -3911,6 +3922,12 @@ impl SharedPipeline {
                 }
             } else if selected_preset_rewrite_enabled == Some(false) {
                 Some(LlmNotAttemptedReason::DisabledByPreset)
+            } else if selected_preset.is_none()
+                && !selected_profile
+                    .map(|p| p.default_target_rewrite_llm_enabled)
+                    .unwrap_or(true)
+            {
+                Some(LlmNotAttemptedReason::DisabledByDefaultTarget)
             } else {
                 None
             };
