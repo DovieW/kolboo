@@ -22,7 +22,7 @@ export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
 // This is intentionally shared between Settings pickers and History filters so
 // they always list the same models.
 export const STT_MODELS: Record<string, ModelOption[]> = {
-  aquavoice: [{ value: "avalon-v1-en", label: "Avalon v1 (English)" }],
+  aquavoice: [{ value: "avalon-v1-en", label: "Avalon v1" }],
   assemblyai: [
     { value: "universal", label: "Universal" },
     { value: "slam-1", label: "Slam-1" },

@@ -22,9 +22,9 @@ Notes:
 - `gpt-4o-mini-transcribe` — GPT-4o Mini Transcribe
 - `whisper-1` — Whisper-1
 
-### `aquavoice` (Aquavoice (Avalon))
+### `aquavoice` (Aquavoice)
 
-- `avalon-v1-en` — Avalon v1 (English)
+- `avalon-v1-en` — Avalon v1
 
 ### `groq` (Groq)
 

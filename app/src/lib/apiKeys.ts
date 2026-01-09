@@ -51,7 +51,7 @@ export const API_KEYS: ApiKeyConfig[] = [
   },
   {
     id: "aquavoice",
-    label: "Aquavoice (Avalon)",
+    label: "Aquavoice",
     placeholder: "Enter API key",
     storeKey: "aquavoice_api_key",
     getKeyUrl: "https://app.aquavoice.com/api-dashboard?tab=keys",

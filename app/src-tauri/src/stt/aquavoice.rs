@@ -1,4 +1,4 @@
-//! Aquavoice (Avalon) STT provider implementation.
+//! Aquavoice STT provider implementation (Avalon API).
 //!
 //! Avalon is an OpenAI Whisper-compatible transcription API.
 //! Docs: https://aquavoice.com/avalon-api

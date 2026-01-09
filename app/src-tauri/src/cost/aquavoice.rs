@@ -1,4 +1,4 @@
-//! Aquavoice (Avalon) pricing tables and cost estimation helpers.
+//! Aquavoice pricing tables and cost estimation helpers (Avalon API).
 //!
 //! Source: https://aquavoice.com/avalon-api (fetched 2025-12-28)
 //! - Pricing: $0.39 / hour of audio
