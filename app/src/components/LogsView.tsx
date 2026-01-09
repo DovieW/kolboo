@@ -849,7 +849,7 @@ function RequestLogItem({
                 jsonModal.open();
               }}
             >
-              JSON
+              Payloads
             </Button>
           </Group>
 

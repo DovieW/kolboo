@@ -63,7 +63,7 @@ function JsonPanel({ value }: { value: unknown }) {
       <CodeHighlight
         code={code}
         language="json"
-        copyLabel="Copy JSON"
+        copyLabel="Copy payload"
         copiedLabel="Copied"
         styles={{
           codeHighlight: {
@@ -106,13 +106,13 @@ export function LogJsonModal({
   useEffect(() => {
     if (!opened) return;
     setTab("full");
-  }, [opened, log.id, hasLlmPayload, hasQuickAskPayload, hasRouterPayload]);
+  }, [opened, log.id, hasSttPayload, hasLlmPayload, hasQuickAskPayload, hasRouterPayload]);
 
   return (
     <Modal
       opened={opened}
       onClose={onClose}
-      title="JSON"
+      title="Payloads"
       size="xl"
       centered
       overlayProps={{ opacity: 0.55, blur: 2 }}
@@ -132,6 +132,16 @@ export function LogJsonModal({
       }}
     >
       <Stack gap="sm" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <Text size="xs" c="dimmed">
+          Payloads are captured for debugging.
+          {" "}
+          STT requests often use a debug preview with <code>&lt;binary audio omitted&gt;</code>
+          placeholders (multipart/raw bodies can’t be shown verbatim). LLM request/response JSON is
+          typically the actual API body. Quick Ask payloads are the logical prompt/question/answer
+          metadata (not necessarily the provider’s raw wire format). Embeddings payloads include an
+          input preview and redact raw embedding floats.
+        </Text>
+
         <Tabs
           value={tab}
           onChange={(v) => setTab((v as TabKey) ?? "full")}
@@ -144,11 +154,11 @@ export function LogJsonModal({
           }}
         >
           <Tabs.List>
-            <Tabs.Tab value="full">Full</Tabs.Tab>
+            <Tabs.Tab value="full">Log</Tabs.Tab>
 
             {hasSttPayload && (
               <>
-                <Tabs.Tab value="stt-request">STT Request</Tabs.Tab>
+                <Tabs.Tab value="stt-request">STT Request (preview)</Tabs.Tab>
                 <Tabs.Tab value="stt-response">STT Response</Tabs.Tab>
               </>
             )}
@@ -162,15 +172,15 @@ export function LogJsonModal({
 
             {hasQuickAskPayload && (
               <>
-                <Tabs.Tab value="quick-ask-request">Quick Ask Request</Tabs.Tab>
-                <Tabs.Tab value="quick-ask-response">Quick Ask Response</Tabs.Tab>
+                <Tabs.Tab value="quick-ask-request">Quick Ask (logical)</Tabs.Tab>
+                <Tabs.Tab value="quick-ask-response">Quick Ask Result</Tabs.Tab>
               </>
             )}
 
             {hasRouterPayload && (
               <>
-                <Tabs.Tab value="router-request">Router Request</Tabs.Tab>
-                <Tabs.Tab value="router-response">Router Response</Tabs.Tab>
+                <Tabs.Tab value="router-request">Router (redacted)</Tabs.Tab>
+                <Tabs.Tab value="router-response">Router Result</Tabs.Tab>
               </>
             )}
           </Tabs.List>
