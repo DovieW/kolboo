@@ -55,8 +55,10 @@ pub async fn set_hotkey_debug_enabled_runtime(
 }
 
 #[cfg(all(desktop, target_os = "windows"))]
-fn is_windows_modifier_only_hotkey(hk: &HotkeyConfig) -> bool {
-    hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight")
+fn is_windows_hook_handled_hotkey(hk: &HotkeyConfig) -> bool {
+    // These are handled by a low-level Windows keyboard hook, not by
+    // tauri-plugin-global-shortcut.
+    hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight" | "Copilot")
 }
 
 /// Temporarily unregister all global shortcuts.
@@ -168,6 +170,21 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
         (hold, toggle)
     };
 
+    // Keep Windows hook behavior in sync with settings.
+    #[cfg(target_os = "windows")]
+    {
+        let matches_copilot = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "Copilot";
+
+        let copilot_enabled = toggle_hotkey.as_ref().is_some_and(matches_copilot)
+            || hold_hotkey.as_ref().is_some_and(matches_copilot)
+            || paste_last_hotkey.as_ref().is_some_and(matches_copilot)
+            || retry_hotkey.as_ref().is_some_and(matches_copilot)
+            || quick_ask_hold_hotkey.as_ref().is_some_and(matches_copilot)
+            || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_copilot);
+
+        crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
+    }
+
     log::info!(
         "Re-registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}, QuickAskHold: {}, QuickAskToggle: {}",
         toggle_hotkey
@@ -219,7 +236,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     };
     if let Some(hk) = toggle_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             // handled by Windows hook (not tauri-plugin-global-shortcut)
         } else {
             match hk.to_shortcut() {
@@ -244,7 +261,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     }
     if let Some(hk) = hold_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
@@ -267,7 +284,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     }
     if let Some(hk) = paste_last_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
@@ -291,7 +308,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 
     if let Some(hk) = retry_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
@@ -315,7 +332,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 
     if let Some(hk) = quick_ask_hold_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
@@ -339,7 +356,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 
     if let Some(hk) = quick_ask_toggle_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {

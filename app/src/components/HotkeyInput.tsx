@@ -20,6 +20,9 @@ interface HotkeyInputProps {
 // Known modifier keys (lowercase, as returned by react-hotkeys-hook)
 const MODIFIER_KEYS = new Set(["ctrl", "alt", "shift", "meta", "mod"]);
 
+const IS_WINDOWS =
+  typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+
 // Keys that can be used alone without modifiers (function keys, etc.)
 const STANDALONE_KEYS = new Set([
   "f1",
@@ -105,6 +108,9 @@ const STANDALONE_KEYS = new Set([
   "calculator",
   "eject",
   "micmute",
+
+  // Windows Copilot key (when emitted as a distinct key; otherwise captured via special dropdown)
+  "copilot",
 ]);
 
 // Keys that are awkward/unreliable to capture from a WebView keyboard event.
@@ -112,6 +118,13 @@ const STANDALONE_KEYS = new Set([
 const SPECIAL_KEY_OPTIONS: Array<{ label: string; value: string; disabled?: boolean }> = [
   // Modifier-only (Windows-only; requires native hook)
   { label: "Modifier (Windows): Right Alt (AltGr)", value: "AltRight" },
+
+  // Windows-only: Copilot key (implemented via native hook; typically maps to the Win+C system shortcut)
+  {
+    label: "System (Windows): Copilot key",
+    value: "Copilot",
+    disabled: !IS_WINDOWS,
+  },
 
   // Common non-printable keys
   { label: "System: Caps Lock", value: "CapsLock" },
@@ -349,6 +362,9 @@ const KEY_NAME_MAP: Record<string, string> = {
   sleep: "Sleep",
   wakeup: "WakeUp",
   power: "Power",
+
+  // Windows Copilot key (if it ever comes through via WebView)
+  copilot: "Copilot",
 };
 
 /**
@@ -767,6 +783,16 @@ export function HotkeyInput({
             Note: Right Alt is AltGr on many keyboard layouts. It can be unreliable on
             some Windows setups and may interfere with typing special characters. If it
             doesn’t work well, consider using a key like F3 or Ctrl+Space.
+          </span>
+        </div>
+      )}
+
+      {(specialKeySelection === "Copilot" || effectiveValue?.key === "Copilot") && (
+        <div style={{ marginTop: 6 }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            Note: On Windows, the Copilot key is typically treated as the system shortcut
+            Win+C. If you bind it here, Kolboo will intercept that shortcut so Windows
+            Copilot doesn’t pop up. This may also override Win+C when pressed normally.
           </span>
         </div>
       )}

@@ -3234,6 +3234,12 @@ pub(crate) fn handle_modifier_key_event(
 ) {
     let state = app.state::<AppState>();
 
+    let toggle_label = format!("Toggle({key})");
+    let hold_label = format!("Hold({key})");
+    let paste_last_label = format!("OutputLast({key})");
+    let quick_ask_hold_label = format!("QuickAskHold({key})");
+    let quick_ask_toggle_label = format!("QuickAskToggle({key})");
+
     let hotkey_debug = crate::windows_modifier_hotkeys::hotkey_debug_runtime_enabled();
 
     // Determine which (if any) configured hotkey uses this modifier-only key.
@@ -3331,7 +3337,7 @@ pub(crate) fn handle_modifier_key_event(
                     emit_system_event(
                         app,
                         "debug",
-                        "Toggle(AltRight): release suppressed",
+                        &format!("{toggle_label}: release suppressed"),
                         Some("AltGr/typing suppression triggered"),
                     );
                 }
@@ -3347,7 +3353,7 @@ pub(crate) fn handle_modifier_key_event(
                     emit_system_event(
                         app,
                         "debug",
-                        "Toggle(AltRight): key released",
+                        &format!("{toggle_label}: key released"),
                         Some(&format!("Pipeline state: {:?}", pipeline_state)),
                     );
                 }
@@ -3358,7 +3364,8 @@ pub(crate) fn handle_modifier_key_event(
                     Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
                 ) {
                     log::info!(
-                        "Toggle(AltRight) ignored (pipeline busy: {:?})",
+                        "{} ignored (pipeline busy: {:?})",
+                        toggle_label,
                         pipeline_state
                     );
 
@@ -3366,7 +3373,7 @@ pub(crate) fn handle_modifier_key_event(
                         emit_system_event(
                             app,
                             "debug",
-                            "Toggle(AltRight) ignored (pipeline busy)",
+                            &format!("{toggle_label} ignored (pipeline busy)"),
                             Some(&format!("Pipeline state: {:?}", pipeline_state)),
                         );
                     }
@@ -3388,7 +3395,7 @@ pub(crate) fn handle_modifier_key_event(
                         audio_cue,
                         &audio_mute_manager,
                         playing_audio_handling,
-                        "Toggle(AltRight)",
+                        &toggle_label,
                     );
                 } else if can_start {
                     start_recording(
@@ -3398,19 +3405,16 @@ pub(crate) fn handle_modifier_key_event(
                         audio_cue,
                         &audio_mute_manager,
                         playing_audio_handling,
-                        "Toggle(AltRight)",
+                        &toggle_label,
                     );
                 } else {
-                    log::info!(
-                        "Toggle(AltRight) ignored (pipeline state: {:?})",
-                        pipeline_state
-                    );
+                    log::info!("{} ignored (pipeline state: {:?})", toggle_label, pipeline_state);
 
                     if hotkey_debug {
                         emit_system_event(
                             app,
                             "debug",
-                            "Toggle(AltRight) ignored (cannot start/stop)",
+                            &format!("{toggle_label} ignored (cannot start/stop)"),
                             Some(&format!("Pipeline state: {:?}", pipeline_state)),
                         );
                     }
@@ -3419,7 +3423,7 @@ pub(crate) fn handle_modifier_key_event(
                 emit_system_event(
                     app,
                     "debug",
-                    "Toggle(AltRight): key released but was_held=false",
+                    &format!("{toggle_label}: key released but was_held=false"),
                     Some("Down event was not observed/latched"),
                 );
             }
@@ -3446,7 +3450,7 @@ pub(crate) fn handle_modifier_key_event(
                         audio_cue,
                         &audio_mute_manager,
                         playing_audio_handling,
-                        "Hold(AltRight)",
+                        &hold_label,
                     );
                 }
             }
@@ -3464,7 +3468,7 @@ pub(crate) fn handle_modifier_key_event(
                         audio_cue,
                         &audio_mute_manager,
                         playing_audio_handling,
-                        "Hold(AltRight)",
+                        &hold_label,
                     );
                 }
             }
@@ -3490,7 +3494,7 @@ pub(crate) fn handle_modifier_key_event(
         }
 
         // Key released - output based on configured mode
-        log::info!("OutputLast(AltRight): outputting last transcription");
+        log::info!("{}: outputting last transcription", paste_last_label);
 
         let output_mode_str: String =
             get_setting_from_store(app, "output_mode", "paste".to_string());
@@ -3509,7 +3513,7 @@ pub(crate) fn handle_modifier_key_event(
                     log::error!("Failed to output last transcription: {}", e);
                 }
             } else {
-                log::info!("OutputLast(AltRight): no history entries available");
+                log::info!("{}: no history entries available", paste_last_label);
             }
         }
 
@@ -3517,6 +3521,8 @@ pub(crate) fn handle_modifier_key_event(
     }
 
     if is_retry {
+        let retry_label = format!("RetryLast({key})");
+
         // Retry-last-recording: action on release (debounced)
         if is_down {
             state.retry_key_held.swap(true, Ordering::SeqCst);
@@ -3532,8 +3538,8 @@ pub(crate) fn handle_modifier_key_event(
             return;
         }
 
-        log::info!("Retry(AltRight): retrying last recording");
-        spawn_retry_last_recording_and_output(app, "Retry(AltRight)");
+        log::info!("{}: retrying last recording", retry_label);
+        spawn_retry_last_recording_and_output(app, &retry_label);
 
         return;
     }
@@ -3552,7 +3558,8 @@ pub(crate) fn handle_modifier_key_event(
                     Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
                 ) {
                     log::info!(
-                        "QuickAskHold(AltRight) ignored (pipeline busy: {:?})",
+                        "{} ignored (pipeline busy: {:?})",
+                        quick_ask_hold_label,
                         pipeline_state
                     );
                     return;
@@ -3570,7 +3577,7 @@ pub(crate) fn handle_modifier_key_event(
                         audio_cue,
                         &audio_mute_manager,
                         playing_audio_handling,
-                        "QuickAskHold(AltRight)",
+                        &quick_ask_hold_label,
                     );
 
                     let is_recording = app
@@ -3596,7 +3603,7 @@ pub(crate) fn handle_modifier_key_event(
                         audio_cue,
                         &audio_mute_manager,
                         playing_audio_handling,
-                        "QuickAskHold(AltRight)",
+                        &quick_ask_hold_label,
                     );
                 } else {
                     state.quick_ask_session_active.store(false, Ordering::SeqCst);
@@ -3633,7 +3640,8 @@ pub(crate) fn handle_modifier_key_event(
             Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
         ) {
             log::info!(
-                "QuickAskToggle(AltRight) ignored (pipeline busy: {:?})",
+                "{} ignored (pipeline busy: {:?})",
+                quick_ask_toggle_label,
                 pipeline_state
             );
             return;
@@ -3656,11 +3664,12 @@ pub(crate) fn handle_modifier_key_event(
                     audio_cue,
                     &audio_mute_manager,
                     playing_audio_handling,
-                    "QuickAskToggle(AltRight)",
+                    &quick_ask_toggle_label,
                 );
             } else {
                 log::info!(
-                    "QuickAskToggle(AltRight) stop ignored (active session is not Quick Ask)"
+                    "{} stop ignored (active session is not Quick Ask)",
+                    quick_ask_toggle_label
                 );
             }
         } else if can_start {
@@ -3672,7 +3681,7 @@ pub(crate) fn handle_modifier_key_event(
                 audio_cue,
                 &audio_mute_manager,
                 playing_audio_handling,
-                "QuickAskToggle(AltRight)",
+                &quick_ask_toggle_label,
             );
 
             let is_recording = app
@@ -4298,8 +4307,8 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
     #[cfg(all(desktop, target_os = "windows"))]
-    fn is_windows_modifier_only_hotkey(hk: &HotkeyConfig) -> bool {
-        hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight")
+    fn is_windows_hook_handled_hotkey(hk: &HotkeyConfig) -> bool {
+        hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight" | "Copilot")
     }
 
     // Read hotkeys from store.
@@ -4334,6 +4343,21 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
         (hold, toggle)
     };
 
+    // Keep Windows hook behavior in sync with settings at startup.
+    #[cfg(target_os = "windows")]
+    {
+        let matches_copilot = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "Copilot";
+
+        let copilot_enabled = toggle_hotkey.as_ref().is_some_and(matches_copilot)
+            || hold_hotkey.as_ref().is_some_and(matches_copilot)
+            || paste_last_hotkey.as_ref().is_some_and(matches_copilot)
+            || retry_hotkey.as_ref().is_some_and(matches_copilot)
+            || quick_ask_hold_hotkey.as_ref().is_some_and(matches_copilot)
+            || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_copilot);
+
+        crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
+    }
+
     // Convert to shortcut strings with validation.
     //
     // Windows-only note:
@@ -4347,7 +4371,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     // (e.g. another app already using Ctrl+F3) doesn't prevent the app from starting.
     let toggle_shortcut_str: Option<String> = toggle_hotkey.and_then(|hk| {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             return None;
         }
 
@@ -4364,7 +4388,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     });
     let hold_shortcut_str: Option<String> = hold_hotkey.and_then(|hk| {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             return None;
         }
 
@@ -4380,7 +4404,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     });
     let paste_last_shortcut_str: Option<String> = paste_last_hotkey.and_then(|hk| {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             return None;
         }
 
@@ -4397,7 +4421,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
 
     let retry_shortcut_str: Option<String> = retry_hotkey.and_then(|hk| {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             return None;
         }
 
@@ -4414,7 +4438,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
 
     let quick_ask_hold_shortcut_str: Option<String> = quick_ask_hold_hotkey.and_then(|hk| {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             return None;
         }
 
@@ -4431,7 +4455,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
 
     let quick_ask_toggle_shortcut_str: Option<String> = quick_ask_toggle_hotkey.and_then(|hk| {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_modifier_only_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(&hk) {
             return None;
         }
 
