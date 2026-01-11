@@ -5,6 +5,7 @@
 	"packageManager": "pnpm@10.26.2",
 	"scripts": {
 		"dev": "tauri dev",
+		"dev:sccache": "node scripts/dev-sccache.mjs",
 		"dev:local-whisper": "tauri dev --features local-whisper",
 		"dev:local-whisper:cuda": "tauri dev --features local-whisper-cuda",
 		"dev:vite": "vite",
