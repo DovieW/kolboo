@@ -424,7 +424,11 @@ export interface RewriteProgramPromptProfile {
   output_hit_enter?: boolean | null;
 }
 
-export type ContextGrabMethod = "ctrl_c" | "ctrl_shift_c";
+export type ContextGrabMethod =
+  | "none"
+  | "ctrl_c"
+  | "ctrl_shift_c"
+  | "ctrl_insert";
 
 export type PlayingAudioHandling = "none" | "mute" | "pause" | "mute_and_pause";
 
@@ -1433,8 +1437,10 @@ export const tauriAPI = {
 
       const context_grab_method_raw = (p as any).context_grab_method;
       const context_grab_method: ContextGrabMethod | null =
+        context_grab_method_raw === "none" ||
         context_grab_method_raw === "ctrl_c" ||
-        context_grab_method_raw === "ctrl_shift_c"
+        context_grab_method_raw === "ctrl_shift_c" ||
+        context_grab_method_raw === "ctrl_insert"
           ? context_grab_method_raw
           : null;
 

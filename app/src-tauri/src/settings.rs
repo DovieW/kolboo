@@ -420,8 +420,10 @@ pub struct RewriteProgramPromptProfile {
     ///
     /// Controls what shortcut Kolboo uses to copy the current selection when probing.
     /// Expected values:
+    /// - "none" (disable selection capture)
     /// - "ctrl_c" (default)
     /// - "ctrl_shift_c" (common in terminals on Windows)
+    /// - "ctrl_insert" (alternative terminal-friendly copy on Windows)
     #[serde(default)]
     pub context_grab_method: Option<String>,
 

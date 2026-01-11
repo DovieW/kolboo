@@ -120,6 +120,9 @@ const AUDIO_CUE_OPTIONS: Array<{ value: AudioCue; label: string }> = [
   { value: "legacy", label: "Tambourine" },
 ];
 
+const IS_WINDOWS =
+	typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+
 function getProfileValue<T>(
   profileValue: T | null | undefined,
   globalValue: T
@@ -244,9 +247,13 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
 
   const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
   const defaultContextGrabMethod: ContextGrabMethod =
-    defaultProfile?.context_grab_method === "ctrl_shift_c"
-      ? "ctrl_shift_c"
-      : "ctrl_c";
+    defaultProfile?.context_grab_method === "none"
+      ? "none"
+      : defaultProfile?.context_grab_method === "ctrl_insert"
+        ? "ctrl_insert"
+      : defaultProfile?.context_grab_method === "ctrl_shift_c"
+        ? "ctrl_shift_c"
+        : "ctrl_c";
   const contextGrabMethod: ContextGrabMethod = isProfileScope
     ? (profile?.context_grab_method ?? defaultContextGrabMethod)
     : defaultContextGrabMethod;
@@ -905,7 +912,9 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
           )}
           <Select
             data={[
+              { value: "none", label: "None" },
               { value: "ctrl_c", label: "Ctrl+C" },
+              { value: "ctrl_insert", label: "Ctrl+Insert", disabled: !IS_WINDOWS },
               {
                 value: "ctrl_shift_c",
                 label: "Ctrl+Shift+C",
@@ -914,7 +923,13 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
             value={contextGrabMethod}
             onChange={(value) => {
               if (!value) return;
-              if (value !== "ctrl_c" && value !== "ctrl_shift_c") return;
+              if (
+				value !== "none" &&
+				value !== "ctrl_c" &&
+				value !== "ctrl_shift_c" &&
+				value !== "ctrl_insert"
+			)
+			return;
 
               const method: ContextGrabMethod = value;
 

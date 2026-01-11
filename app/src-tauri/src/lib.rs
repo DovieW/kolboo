@@ -1077,6 +1077,7 @@ fn stop_recording(
             match method_str.as_deref() {
                 Some("none") => crate::commands::text::ContextGrabMethod::None,
                 Some("ctrl_shift_c") => crate::commands::text::ContextGrabMethod::CtrlShiftC,
+                Some("ctrl_insert") => crate::commands::text::ContextGrabMethod::CtrlInsert,
                 _ => crate::commands::text::ContextGrabMethod::CtrlC,
             }
         };

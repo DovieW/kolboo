@@ -9,12 +9,22 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextGrabMethod {
+    /// Disable highlighted-selection capture entirely.
+    ///
+    /// When set, Kolboo will not inject any copy shortcut (and will not touch the clipboard)
+    /// for Quick Ask / Quick Replace context capture.
+    None,
     /// Standard copy shortcut (Cmd+C on macOS, Ctrl+C elsewhere).
     CtrlC,
     /// Terminal-friendly copy shortcut on Windows (Ctrl+Shift+C).
     ///
     /// This is opt-in via settings; Kolboo will not auto-detect.
     CtrlShiftC,
+    /// Alternative copy shortcut on Windows (Ctrl+Insert).
+    ///
+    /// Some console hosts treat Ctrl+Shift+C as a Ctrl+C cancel event. Ctrl+Insert is
+    /// commonly bound to copy-selection and avoids the Ctrl+C cancel semantics.
+    CtrlInsert,
 }
 
 /// Delay after clipboard operations to ensure system stability
@@ -409,6 +419,11 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
 /// - We only preserve/restore *text* clipboard content (same limitation as paste mode).
 /// - On Windows, we exclude our transient clipboard writes from Win+V history.
 pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<String>, String> {
+    if method == ContextGrabMethod::None {
+        log::debug!("Selection probe: disabled (method=None)");
+        return Ok(None);
+    }
+
     // Serialize with output injections so key events can't interleave.
     let _guard = output_injection_lock()
         .lock()
@@ -468,56 +483,73 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
     thread::sleep(Duration::from_millis(120));
 
     #[cfg(target_os = "windows")]
-    if method == ContextGrabMethod::CtrlShiftC {
-        log::info!("Selection probe: injecting Ctrl+Shift+C");
-    } else {
-        log::info!("Selection probe: injecting Ctrl+C");
+    match method {
+        ContextGrabMethod::CtrlShiftC => log::info!("Selection probe: injecting Ctrl+Shift+C"),
+        ContextGrabMethod::CtrlInsert => log::info!("Selection probe: injecting Ctrl+Insert"),
+        _ => log::info!("Selection probe: injecting Ctrl+C"),
     }
 
     // Important: ensure we always release modifiers, even if something errors mid-injection.
     // Otherwise keys can appear "stuck" at the OS level.
-    let injection_result: Result<(), String> = with_pressed_key(&mut enigo, modifier, |enigo| {
-        #[cfg(target_os = "windows")]
-        if method == ContextGrabMethod::CtrlShiftC {
-            return with_pressed_key(enigo, Key::Shift, |enigo| {
-                thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
-                // NOTE: physical 'C' key (scancode set 1).
-                const SCANCODE_C: u16 = 0x2E;
-                enigo
-                    .raw(SCANCODE_C, Direction::Press)
-                    .map_err(|e| e.to_string())?;
-                thread::sleep(Duration::from_millis(50));
-                enigo
-                    .raw(SCANCODE_C, Direction::Release)
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            });
-        }
-
-        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
-
+    let injection_result: Result<(), String> = {
         #[cfg(target_os = "windows")]
         {
+            // Scancode set 1:
+            // - C: 0x2E
+            // - Insert: 0x52
             const SCANCODE_C: u16 = 0x2E;
-            enigo
-                .raw(SCANCODE_C, Direction::Press)
-                .map_err(|e| e.to_string())?;
-            thread::sleep(Duration::from_millis(50));
-            enigo
-                .raw(SCANCODE_C, Direction::Release)
-                .map_err(|e| e.to_string())?;
-            return Ok(());
+            const SCANCODE_INSERT: u16 = 0x52;
+
+            match method {
+                ContextGrabMethod::CtrlShiftC => with_pressed_key(&mut enigo, Key::Shift, |enigo| {
+                    // Hold Shift first, then press Ctrl+<key>.
+                    // NOTE: Some console hosts still treat this as a Ctrl+C cancel event; users
+                    // can opt into Ctrl+Insert or None if this is unsafe in their shell.
+                    with_pressed_key(enigo, Key::Control, |enigo| {
+                        enigo.raw(SCANCODE_C, Direction::Press).map_err(|e| e.to_string())?;
+                        thread::sleep(Duration::from_millis(50));
+                        enigo
+                            .raw(SCANCODE_C, Direction::Release)
+                            .map_err(|e| e.to_string())?;
+                        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                        Ok(())
+                    })
+                }),
+                ContextGrabMethod::CtrlInsert => with_pressed_key(&mut enigo, Key::Control, |enigo| {
+                    enigo
+                        .raw(SCANCODE_INSERT, Direction::Press)
+                        .map_err(|e| e.to_string())?;
+                    thread::sleep(Duration::from_millis(50));
+                    enigo
+                        .raw(SCANCODE_INSERT, Direction::Release)
+                        .map_err(|e| e.to_string())?;
+                    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                    Ok(())
+                }),
+                _ => with_pressed_key(&mut enigo, Key::Control, |enigo| {
+                    enigo.raw(SCANCODE_C, Direction::Press).map_err(|e| e.to_string())?;
+                    thread::sleep(Duration::from_millis(50));
+                    enigo
+                        .raw(SCANCODE_C, Direction::Release)
+                        .map_err(|e| e.to_string())?;
+                    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                    Ok(())
+                }),
+            }
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            enigo
-                .key(Key::Unicode('c'), Direction::Click)
-                .map_err(|e| e.to_string())?;
-            thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
-            Ok(())
+            // Non-Windows: treat CtrlInsert the same as CtrlC.
+            with_pressed_key(&mut enigo, modifier, |enigo| {
+                enigo
+                    .key(Key::Unicode('c'), Direction::Click)
+                    .map_err(|e| e.to_string())?;
+                thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                Ok(())
+            })
         }
-    });
+    };
 
     #[cfg(target_os = "windows")]
     {
