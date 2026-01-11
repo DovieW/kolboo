@@ -60,9 +60,12 @@ fn maybe_hit_enter(enigo: &mut Enigo, hit_enter: bool) -> Result<(), String> {
 
     Ok(())
 }
-
-fn set_clipboard_text_with_barrier(clipboard: &mut Clipboard, text: &str) -> Result<(), String> {
-    clipboard.set_text(text).map_err(|e| e.to_string())?;
+fn set_clipboard_text_with_barrier(
+    clipboard: &mut Clipboard,
+    text: &str,
+    exclude_from_clipboard_history: bool,
+) -> Result<(), String> {
+    set_clipboard_text_platform(clipboard, text, exclude_from_clipboard_history)?;
 
     // Try to confirm the clipboard reflects the new text before we issue Ctrl+V.
     // If reading fails (clipboard is busy), keep retrying briefly.
@@ -82,6 +85,54 @@ fn set_clipboard_text_with_barrier(clipboard: &mut Clipboard, text: &str) -> Res
         "Clipboard barrier: could not confirm clipboard contents after {} attempts; proceeding",
         CLIPBOARD_VERIFY_ATTEMPTS
     );
+    Ok(())
+}
+
+fn set_clipboard_text_platform(
+    clipboard: &mut Clipboard,
+    text: &str,
+    exclude_from_clipboard_history: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        if exclude_from_clipboard_history {
+            return set_clipboard_text_windows_excluding_history(text);
+        }
+    }
+
+    clipboard.set_text(text).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn set_clipboard_text_windows_excluding_history(text: &str) -> Result<(), String> {
+    use windows::ApplicationModel::DataTransfer::{Clipboard, ClipboardContentOptions, DataPackage};
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+
+    // WinRT clipboard APIs require COM initialization on the current thread.
+    // Best-effort: tolerate "already initialized" / "wrong apartment" scenarios.
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+
+    let package = DataPackage::new().map_err(|e| e.to_string())?;
+    package
+        .SetText(&HSTRING::from(text))
+        .map_err(|e| e.to_string())?;
+
+    let options = ClipboardContentOptions::new().map_err(|e| e.to_string())?;
+    options
+        .SetIsAllowedInHistory(false)
+        .map_err(|e| e.to_string())?;
+    options
+        .SetIsRoamable(false)
+        .map_err(|e| e.to_string())?;
+
+    Clipboard::SetContentWithOptions(&package, &options).map_err(|e| e.to_string())?;
+
+    // Encourage the system to commit the content promptly.
+    let _ = Clipboard::Flush();
+
     Ok(())
 }
 
@@ -162,7 +213,7 @@ pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), Strin
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
     // Set new text and wait for it to become visible to readers (best-effort).
-    set_clipboard_text_with_barrier(&mut clipboard, text)?;
+    set_clipboard_text_with_barrier(&mut clipboard, text, false)?;
 
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
@@ -194,7 +245,7 @@ pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), Strin
 /// Copy text to clipboard only (no paste)
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
-    set_clipboard_text_with_barrier(&mut clipboard, text)?;
+    set_clipboard_text_with_barrier(&mut clipboard, text, false)?;
     log::info!("Copied {} chars to clipboard", text.len());
     Ok(())
 }
@@ -215,7 +266,9 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
     let previous: Option<String> = clipboard.get_text().ok();
 
     // Set new text and wait for it to become visible to readers (best-effort).
-    set_clipboard_text_with_barrier(&mut clipboard, text)?;
+    // In the default "Paste" mode, we restore the clipboard afterwards, so on Windows we also
+    // try to exclude the injected text from the OS clipboard history.
+    set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
 
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
@@ -256,7 +309,8 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
             .is_some_and(|current| current == text);
 
         if should_restore {
-            let _ = clipboard.set_text(&previous);
+            // Avoid creating a duplicate clipboard-history entry for the restored content.
+            let _ = set_clipboard_text_platform(&mut clipboard, &previous, true);
         } else {
             log::debug!("Clipboard restore skipped (clipboard changed after paste)");
         }
