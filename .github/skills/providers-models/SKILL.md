@@ -1,3 +1,8 @@
+---
+name: Providers and Models
+description: Instructions on working with providers and models in this app
+---
+
 # Adding Providers & Models (LLM + STT)
 
 This repo is a **Tauri (Rust) backend + React/TS frontend** desktop app.
