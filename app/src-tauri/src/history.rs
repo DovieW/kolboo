@@ -7,6 +7,20 @@ use std::collections::HashSet;
 use std::sync::RwLock;
 use uuid::Uuid;
 
+/// Hard safety cap to prevent unbounded growth of `history.json`.
+///
+/// This is intentionally high so users can effectively keep history forever,
+/// while still bounding worst-case disk/memory usage.
+const HARD_MAX_HISTORY_ENTRIES: usize = 100_000;
+
+fn effective_history_max(max_entries: Option<usize>) -> usize {
+    let hard = HARD_MAX_HISTORY_ENTRIES.max(1);
+    match max_entries {
+        Some(n) => n.max(1).min(hard),
+        None => hard,
+    }
+}
+
 /// Status of a transcription attempt in history.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -180,7 +194,7 @@ impl HistoryStorage {
     }
 
     /// Add a new entry to the history
-    pub fn add_entry(&self, text: String, max_entries: usize) -> Result<HistoryEntry, String> {
+    pub fn add_entry(&self, text: String, max_entries: Option<usize>) -> Result<HistoryEntry, String> {
         let entry = HistoryEntry::new(text);
         {
             let mut data = self
@@ -191,7 +205,7 @@ impl HistoryStorage {
             // Add to the beginning (newest first)
             data.entries.insert(0, entry.clone());
 
-            let max = max_entries.max(1);
+            let max = effective_history_max(max_entries);
             if data.entries.len() > max {
                 data.entries.truncate(max);
             }
@@ -208,7 +222,7 @@ impl HistoryStorage {
         &self,
         request_id: String,
         model_info: RequestModelInfo,
-        max_entries: usize,
+        max_entries: Option<usize>,
     ) -> Result<HistoryEntry, String> {
         let entry = HistoryEntry::new_request_in_progress(request_id, model_info);
         {
@@ -220,13 +234,21 @@ impl HistoryStorage {
             // Add to the beginning (newest first)
             data.entries.insert(0, entry.clone());
 
-            let max = max_entries.max(1);
+            let max = effective_history_max(max_entries);
             if data.entries.len() > max {
                 data.entries.truncate(max);
             }
         }
         self.save()?;
         Ok(entry)
+    }
+
+    /// Truncate history to the effective configured max.
+    ///
+    /// When `max_entries` is None, we still apply the hard safety cap.
+    pub fn trim_to_configured(&self, max_entries: Option<usize>) -> Result<(), String> {
+        let max = effective_history_max(max_entries);
+        self.trim_to(max)
     }
 
     /// Truncate history to at most `max_entries` entries.
@@ -764,4 +786,48 @@ pub struct HistoryPageResult {
     pub page_size: usize,
     pub stt_model_usage: Vec<ModelUsageCount>,
     pub llm_model_usage: Vec<ModelUsageCount>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_temp_app_dir() -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("kolboo-history-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("failed to create temp test dir");
+        dir
+    }
+
+    #[test]
+    fn add_entry_without_configured_cap_does_not_truncate_small_history() {
+        let dir = make_temp_app_dir();
+        let history = HistoryStorage::new(dir);
+
+        for i in 0..60 {
+            history
+                .add_entry(format!("entry {i}"), None)
+                .expect("add_entry failed");
+        }
+
+        let entries = history.get_all(None).expect("get_all failed");
+        assert_eq!(entries.len(), 60);
+    }
+
+    #[test]
+    fn add_entry_with_amount_cap_truncates() {
+        let dir = make_temp_app_dir();
+        let history = HistoryStorage::new(dir);
+
+        for i in 0..25 {
+            history
+                .add_entry(format!("entry {i}"), Some(10))
+                .expect("add_entry failed");
+        }
+
+        let entries = history.get_all(None).expect("get_all failed");
+        assert_eq!(entries.len(), 10);
+        // Newest first.
+        assert_eq!(entries[0].text, "entry 24");
+    }
 }

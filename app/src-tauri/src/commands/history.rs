@@ -29,6 +29,56 @@ pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
     }
 }
 
+/// Optional max entries for transcription history.
+///
+/// This is intentionally decoupled from recordings retention.
+/// - If retention mode is "amount", we cap history to that amount.
+/// - If retention mode is "time" (or missing), history is not capped by settings
+///   (but will still be bounded by a hard safety cap in `HistoryStorage`).
+pub(crate) fn get_history_max_entries(app: &AppHandle) -> Option<usize> {
+    #[cfg(desktop)]
+    {
+        let store = app.store("settings.json").ok();
+
+        // Ensure we see the latest persisted settings (the store is cached across calls).
+        if let Some(s) = store.as_ref() {
+            let _ = s.reload();
+        }
+
+        let mode: String = store
+            .as_ref()
+            .and_then(|s| s.get("transcription_retention_mode"))
+            .and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s),
+                _ => None,
+            })
+            .unwrap_or_else(|| "time".to_string());
+
+        if mode != "amount" {
+            return None;
+        }
+
+        let default_amount: u64 = 1000;
+        let raw = store
+            .as_ref()
+            .and_then(|s| s.get("transcription_retention_amount"))
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_f64().map(|f| f as u64))
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+            })
+            .unwrap_or(default_amount);
+
+        // Be defensive: avoid runaway values if settings.json was edited.
+        Some((raw.clamp(1, 100_000)) as usize)
+    }
+
+    #[cfg(not(desktop))]
+    {
+        None
+    }
+}
+
 /// Add a new entry to the dictation history
 #[tauri::command]
 pub async fn add_history_entry(
@@ -36,7 +86,7 @@ pub async fn add_history_entry(
     text: String,
     history: State<'_, HistoryStorage>,
 ) -> Result<HistoryEntry, String> {
-    let max = get_max_saved_recordings(&app);
+    let max = get_history_max_entries(&app);
     history.add_entry(text, max)
 }
 

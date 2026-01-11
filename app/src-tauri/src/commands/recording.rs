@@ -9,7 +9,7 @@ use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, 
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
 use crate::stats::{self, EventStatus};
-use crate::commands::history::get_max_saved_recordings;
+use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
 use tauri::{AppHandle, Manager, State, Emitter};
 use chrono::{Duration as ChronoDuration, Utc};
 use std::time::{Duration, Instant};
@@ -498,6 +498,7 @@ pub async fn pipeline_stop_and_transcribe(
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<String, CommandError> {
     let max_saved_recordings = get_max_saved_recordings(&app);
+    let max_history_entries = get_history_max_entries(&app);
 
     // Ensure Escape-to-cancel is available during the transcription phase.
     #[cfg(desktop)]
@@ -563,7 +564,7 @@ pub async fn pipeline_stop_and_transcribe(
             let _ = history.add_request_entry(
                 req_id.to_string(),
                 model_info,
-                max_saved_recordings,
+                max_history_entries,
             );
             let _ = app.emit("history-changed", ());
         }
@@ -987,7 +988,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     pipeline: SharedPipeline,
     request_id: String,
 ) -> Result<String, CommandError> {
-    let max_saved_recordings = get_max_saved_recordings(&app);
+    let max_history_entries = get_history_max_entries(&app);
 
     // Allow Escape-to-cancel while the retry transcription is running.
     #[cfg(desktop)]
@@ -1069,7 +1070,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     // Create a history entry for the retry attempt.
     if let Some(req_id) = new_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.add_request_entry(req_id.to_string(), model_info, max_saved_recordings);
+            let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
 
             // Ensure play/rerun for this new entry points at the original recording.
             let _ = history.set_request_recording_id(req_id, Some(recording_source_id.clone()));
@@ -1424,6 +1425,7 @@ pub async fn pipeline_dictate(
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<String, CommandError> {
     let max_saved_recordings = get_max_saved_recordings(&app);
+    let max_history_entries = get_history_max_entries(&app);
 
     // Ensure Escape-to-cancel remains available while we transcribe.
     #[cfg(desktop)]
@@ -1479,7 +1481,7 @@ pub async fn pipeline_dictate(
     // Create an in-progress history entry so the History view shows a running request.
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.add_request_entry(req_id.to_string(), model_info, max_saved_recordings);
+            let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
             let _ = app.emit("history-changed", ());
         }
     }

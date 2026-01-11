@@ -1075,6 +1075,7 @@ fn stop_recording(
                 .or_else(|| default_profile.and_then(|p| p.context_grab_method.clone()));
 
             match method_str.as_deref() {
+                Some("none") => crate::commands::text::ContextGrabMethod::None,
                 Some("ctrl_shift_c") => crate::commands::text::ContextGrabMethod::CtrlShiftC,
                 _ => crate::commands::text::ContextGrabMethod::CtrlC,
             }
@@ -1131,7 +1132,9 @@ fn stop_recording(
 
         // Quick replace: if enabled for this profile, probe for currently highlighted text while
         // transcription runs. This must not block transcription.
-        let quick_replace_epoch: u64 = if quick_replace_cfg.enabled {
+        let quick_replace_epoch: u64 = if quick_replace_cfg.enabled
+            && context_grab_method != crate::commands::text::ContextGrabMethod::None
+        {
             let epoch = state
                 .quick_replace_probe_epoch
                 .fetch_add(1, Ordering::SeqCst)
@@ -1166,7 +1169,9 @@ fn stop_recording(
 
         // Quick Ask: if this was a Quick Ask session, probe for currently highlighted text to use
         // as additional context for the question. This must not block transcription.
-        let quick_ask_epoch: u64 = if is_quick_ask_session {
+        let quick_ask_epoch: u64 = if is_quick_ask_session
+            && context_grab_method != crate::commands::text::ContextGrabMethod::None
+        {
             let epoch = state
                 .quick_ask_probe_epoch
                 .fetch_add(1, Ordering::SeqCst)
@@ -1338,17 +1343,10 @@ fn stop_recording(
             if !is_quick_ask_session {
                 if let Some(ref req_id) = request_id {
                     if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                        let max_saved_recordings: usize = (get_setting_from_store(
-                            &app_clone,
-                            "max_saved_recordings",
-                            1000u64,
-                        ))
-                        .clamp(1, 100_000) as usize;
-
                         let _ = history.add_request_entry(
                             req_id.clone(),
                             model_info,
-                            max_saved_recordings,
+                            commands::history::get_history_max_entries(&app_clone),
                         );
                         let _ = app_clone.emit("history-changed", ());
                     }
@@ -3396,14 +3394,13 @@ pub fn run() {
                 }
             }
 
-            // Apply the configured history retention limit immediately so existing installs
+            // Apply the configured history retention policy immediately so existing installs
             // don't keep more entries than the UI/backend intend.
             #[cfg(desktop)]
             {
-                let max_saved_recordings: u64 =
-                    get_setting_from_store(app.handle(), "max_saved_recordings", 1000u64);
                 if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.trim_to(max_saved_recordings as usize);
+                    let max_entries = commands::history::get_history_max_entries(app.handle());
+                    let _ = history.trim_to_configured(max_entries);
                 }
             }
 
