@@ -297,6 +297,40 @@ impl HistoryStorage {
         Ok(removed)
     }
 
+    /// Convert any entries still marked as `in_progress` into `error`.
+    ///
+    /// This is primarily a safety net for app restarts/crashes so the UI doesn't show
+    /// stale "Transcribing..." indicators for old history rows.
+    ///
+    /// Returns the number of entries updated.
+    pub fn finalize_all_in_progress_as_error(
+        &self,
+        error_message: String,
+    ) -> Result<usize, String> {
+        let mut updated = 0usize;
+
+        {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            for entry in data.entries.iter_mut() {
+                if entry.status == HistoryStatus::InProgress {
+                    entry.status = HistoryStatus::Error;
+                    entry.error_message = Some(error_message.clone());
+                    updated += 1;
+                }
+            }
+        }
+
+        if updated > 0 {
+            self.save()?;
+        }
+
+        Ok(updated)
+    }
+
     /// Mark an existing request entry as successful and set the final text.
     pub fn complete_request_success(&self, request_id: &str, text: String) -> Result<(), String> {
         {
@@ -829,5 +863,36 @@ mod tests {
         assert_eq!(entries.len(), 10);
         // Newest first.
         assert_eq!(entries[0].text, "entry 24");
+    }
+
+    #[test]
+    fn finalize_all_in_progress_marks_entries_as_error_and_persists() {
+        let dir = make_temp_app_dir();
+        let history = HistoryStorage::new(dir.clone());
+
+        let req_id = "req-123".to_string();
+        history
+            .add_request_entry(req_id.clone(), RequestModelInfo::default(), None)
+            .expect("add_request_entry failed");
+
+        let before = history
+            .get_by_id(&req_id)
+            .expect("get_by_id failed")
+            .expect("missing entry");
+        assert_eq!(before.status, HistoryStatus::InProgress);
+
+        let updated = history
+            .finalize_all_in_progress_as_error("Interrupted (app restarted)".to_string())
+            .expect("finalize_all_in_progress_as_error failed");
+        assert_eq!(updated, 1);
+
+        // Reload from disk to ensure persistence.
+        let history2 = HistoryStorage::new(dir);
+        let after = history2
+            .get_by_id(&req_id)
+            .expect("get_by_id failed")
+            .expect("missing entry");
+        assert_eq!(after.status, HistoryStatus::Error);
+        assert_eq!(after.error_message.as_deref(), Some("Interrupted (app restarted)"));
     }
 }

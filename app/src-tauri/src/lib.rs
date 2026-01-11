@@ -2369,6 +2369,15 @@ fn stop_recording(
                         // Notify frontend and hide overlay if needed.
                         let _ = app_clone.emit("pipeline-cancelled", ());
 
+                        // Best-effort: remove any in-progress history entry for this request
+                        // so it doesn't remain stuck in "in_progress".
+                        if let Some(ref req_id) = request_id {
+                            if let Some(history) = app_clone.try_state::<HistoryStorage>() {
+                                let _ = history.delete(req_id);
+                                let _ = app_clone.emit("history-changed", ());
+                            }
+                        }
+
                         if overlay_mode_clone == "recording_only" {
                             let _ = app_clone.emit("overlay-hide-requested", ());
                             if let Some(window) = app_clone.get_webview_window("overlay") {
@@ -3399,6 +3408,12 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
+                    // Safety net: if the app was closed/crashed mid-transcription, the
+                    // placeholder history rows would otherwise remain stuck as "in_progress".
+                    let _ = history.finalize_all_in_progress_as_error(
+                        "Interrupted (app restarted)".to_string(),
+                    );
+
                     let max_entries = commands::history::get_history_max_entries(app.handle());
                     let _ = history.trim_to_configured(max_entries);
                 }

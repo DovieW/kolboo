@@ -727,6 +727,15 @@ pub async fn pipeline_stop_and_transcribe(
                 log_store.complete_current();
             }
 
+            // Best-effort: remove the in-progress history entry so it doesn't linger as
+            // "Transcribing..." forever.
+            if let Some(req_id) = active_request_id.as_deref() {
+                if let Some(history) = app.try_state::<HistoryStorage>() {
+                    let _ = history.delete(req_id);
+                    let _ = app.emit("history-changed", ());
+                }
+            }
+
             let _ = app.emit("pipeline-cancelled", ());
             return Ok(String::new());
         }
