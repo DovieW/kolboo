@@ -9,11 +9,30 @@ use tauri::AppHandle;
 /// Delay after clipboard operations to ensure system stability
 const CLIPBOARD_STABILIZATION_DELAY_MS: u64 = 50;
 
+/// How many times we try to confirm the clipboard contains our injected text.
+///
+/// This mitigates a race where we press Ctrl+V before the clipboard update is fully visible
+/// to the target application (or before Windows has finished committing the clipboard write).
+const CLIPBOARD_VERIFY_ATTEMPTS: u32 = 10;
+
+/// Delay between clipboard verification attempts.
+const CLIPBOARD_VERIFY_DELAY_MS: u64 = 20;
+
 /// Delay between keyboard key press and release events
 const KEY_EVENT_DELAY_MS: u64 = 50;
 
 /// Delay before restoring previous clipboard content
 const CLIPBOARD_RESTORE_DELAY_MS: u64 = 100;
+
+/// Extra delay after issuing the paste keystroke before we attempt to restore the clipboard.
+///
+/// Some target apps fetch clipboard contents *after* receiving the paste shortcut (lazy paste).
+/// If we restore too soon, they can end up pasting the previous clipboard instead.
+#[cfg(target_os = "windows")]
+const CLIPBOARD_POST_PASTE_DELAY_MS: u64 = 450;
+
+#[cfg(not(target_os = "windows"))]
+const CLIPBOARD_POST_PASTE_DELAY_MS: u64 = 250;
 
 const SERVER_URL: &str = "http://127.0.0.1:8765";
 
@@ -39,6 +58,30 @@ fn maybe_hit_enter(enigo: &mut Enigo, hit_enter: bool) -> Result<(), String> {
         .key(Key::Return, Direction::Click)
         .map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+fn set_clipboard_text_with_barrier(clipboard: &mut Clipboard, text: &str) -> Result<(), String> {
+    clipboard.set_text(text).map_err(|e| e.to_string())?;
+
+    // Try to confirm the clipboard reflects the new text before we issue Ctrl+V.
+    // If reading fails (clipboard is busy), keep retrying briefly.
+    for _ in 0..CLIPBOARD_VERIFY_ATTEMPTS {
+        thread::sleep(Duration::from_millis(CLIPBOARD_VERIFY_DELAY_MS));
+        match clipboard.get_text() {
+            Ok(current) if current == text => return Ok(()),
+            Ok(_) => continue,
+            Err(_) => continue,
+        }
+    }
+
+    // Fall back to a small stabilization delay. Even if verification failed,
+    // the clipboard write may still succeed; this avoids making failure worse.
+    thread::sleep(Duration::from_millis(CLIPBOARD_STABILIZATION_DELAY_MS));
+    log::debug!(
+        "Clipboard barrier: could not confirm clipboard contents after {} attempts; proceeding",
+        CLIPBOARD_VERIFY_ATTEMPTS
+    );
     Ok(())
 }
 
@@ -118,11 +161,8 @@ pub fn output_text_with_mode(text: &str, mode: OutputMode, hit_enter: bool) -> R
 pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
-    // Set new text
-    clipboard.set_text(text).map_err(|e| e.to_string())?;
-
-    // Small delay for clipboard to stabilize
-    thread::sleep(Duration::from_millis(CLIPBOARD_STABILIZATION_DELAY_MS));
+    // Set new text and wait for it to become visible to readers (best-effort).
+    set_clipboard_text_with_barrier(&mut clipboard, text)?;
 
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
@@ -154,7 +194,7 @@ pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), Strin
 /// Copy text to clipboard only (no paste)
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
-    clipboard.set_text(text).map_err(|e| e.to_string())?;
+    set_clipboard_text_with_barrier(&mut clipboard, text)?;
     log::info!("Copied {} chars to clipboard", text.len());
     Ok(())
 }
@@ -170,14 +210,12 @@ pub fn type_as_keystrokes(_text: &str) -> Result<(), String> {
 pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
-    // Save previous clipboard content
-    let previous = clipboard.get_text().unwrap_or_default();
+    // Save previous clipboard content (text only). If the previous clipboard isn't text,
+    // don't try to "restore" it as an empty string.
+    let previous: Option<String> = clipboard.get_text().ok();
 
-    // Set new text
-    clipboard.set_text(text).map_err(|e| e.to_string())?;
-
-    // Small delay for clipboard to stabilize
-    thread::sleep(Duration::from_millis(CLIPBOARD_STABILIZATION_DELAY_MS));
+    // Set new text and wait for it to become visible to readers (best-effort).
+    set_clipboard_text_with_barrier(&mut clipboard, text)?;
 
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
@@ -201,9 +239,30 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
 
     maybe_hit_enter(&mut enigo, hit_enter)?;
 
+    // Give the target app time to fetch clipboard contents after the paste shortcut.
+    // (Some apps fetch lazily, and restoring too soon causes the *previous* clipboard to paste.)
+    thread::sleep(Duration::from_millis(CLIPBOARD_POST_PASTE_DELAY_MS));
+
     // Restore previous clipboard after a delay
     thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS));
-    let _ = clipboard.set_text(&previous);
+
+    // Only restore if:
+    // 1) we actually captured a previous text value, and
+    // 2) the clipboard still contains our injected text (avoid clobbering user changes).
+    if let Some(previous) = previous {
+        let should_restore = clipboard
+            .get_text()
+            .ok()
+            .is_some_and(|current| current == text);
+
+        if should_restore {
+            let _ = clipboard.set_text(&previous);
+        } else {
+            log::debug!("Clipboard restore skipped (clipboard changed after paste)");
+        }
+    } else {
+        log::debug!("Clipboard restore skipped (previous clipboard was not text)");
+    }
 
     Ok(())
 }
