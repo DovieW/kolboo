@@ -31,6 +31,7 @@ import {
 import { DEFAULT_ACCENT_HEX, applyAccentColor } from "../../lib/accentColor";
 import type {
   AudioCue,
+  ContextGrabMethod,
   MainWindowCloseBehavior,
   OutputMode,
   OverlayMode,
@@ -240,6 +241,17 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     : globalOutputHitEnter;
   const outputHitEnterInheriting =
     isProfileScope && isInheriting(profile?.output_hit_enter);
+
+  const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
+  const defaultContextGrabMethod: ContextGrabMethod =
+    defaultProfile?.context_grab_method === "ctrl_shift_c"
+      ? "ctrl_shift_c"
+      : "ctrl_c";
+  const contextGrabMethod: ContextGrabMethod = isProfileScope
+    ? (profile?.context_grab_method ?? defaultContextGrabMethod)
+    : defaultContextGrabMethod;
+  const contextGrabMethodInheriting =
+    isProfileScope && isInheriting(profile?.context_grab_method);
 
   const mainWindowCloseBehavior: MainWindowCloseBehavior =
     settings?.main_window_close_behavior ?? "minimize_to_tray";
@@ -857,6 +869,86 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
               size="sm"
             />
           </div>
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Context grabbing method</p>
+          <p className="settings-description">
+            Shortcut used to copy highlighted text for Quick Ask / Quick Replace.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {isProfileScope && !contextGrabMethodInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                disabled={isLoading}
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Context grabbing method override?",
+                    onConfirm: () => updateProfile({ context_grab_method: null }),
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          {isProfileScope && contextGrabMethodInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          <Select
+            data={[
+              { value: "ctrl_c", label: "Ctrl+C" },
+              {
+                value: "ctrl_shift_c",
+                label: "Ctrl+Shift+C",
+              },
+            ]}
+            value={contextGrabMethod}
+            onChange={(value) => {
+              if (!value) return;
+              if (value !== "ctrl_c" && value !== "ctrl_shift_c") return;
+
+              const method: ContextGrabMethod = value;
+
+              // Default scope: store on the persisted Default profile.
+              if (!isProfileScope) {
+                if (!defaultProfile) return;
+                const next = profiles.map((p) =>
+                  p.id === defaultProfile.id
+                    ? {
+                        ...p,
+                        // Store explicitly. (Null means "inherit" in profile scope,
+                        // and we don't want smart behavior here.)
+                        context_grab_method: method,
+                      }
+                    : p
+                );
+                updateRewriteProgramPromptProfiles.mutate(next);
+                return;
+              }
+
+              // Per-profile: store explicitly. Use the reset button to inherit.
+              updateProfile({ context_grab_method: method });
+            }}
+            disabled={isLoading}
+            withCheckIcon={false}
+            styles={{
+              input: {
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 240,
+              },
+            }}
+          />
         </div>
       </div>
 

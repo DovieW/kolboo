@@ -1066,6 +1066,20 @@ fn stop_recording(
             .iter()
             .find(|p| p.id == "default");
 
+        // Context grabbing method (highlighted selection capture).
+        // This is a per-profile setting; when unset, we default to Ctrl+C.
+        let context_grab_method: crate::commands::text::ContextGrabMethod = {
+            let method_str = profile
+                .as_ref()
+                .and_then(|p| p.context_grab_method.clone())
+                .or_else(|| default_profile.and_then(|p| p.context_grab_method.clone()));
+
+            match method_str.as_deref() {
+                Some("ctrl_shift_c") => crate::commands::text::ContextGrabMethod::CtrlShiftC,
+                _ => crate::commands::text::ContextGrabMethod::CtrlC,
+            }
+        };
+
         let quick_replace_cfg: QuickReplaceProfileConfig = {
             let enabled_opt = profile
                 .as_ref()
@@ -1131,10 +1145,47 @@ fn stop_recording(
 
             let app_for_probe = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let selection = crate::commands::text::probe_selected_text_via_copy().ok().flatten();
+                let selection = crate::commands::text::probe_selected_text_via_copy(context_grab_method)
+                    .ok()
+                    .flatten();
 
                 let state = app_for_probe.state::<AppState>();
                 let lock_result = state.quick_replace_probe.lock();
+                if let Ok(mut probe) = lock_result {
+                    if probe.epoch == epoch {
+                        probe.selection_text = selection;
+                        probe.ready = true;
+                    }
+                }
+            });
+
+            epoch
+        } else {
+            0
+        };
+
+        // Quick Ask: if this was a Quick Ask session, probe for currently highlighted text to use
+        // as additional context for the question. This must not block transcription.
+        let quick_ask_epoch: u64 = if is_quick_ask_session {
+            let epoch = state
+                .quick_ask_probe_epoch
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1);
+
+            if let Ok(mut probe) = state.quick_ask_probe.lock() {
+                probe.epoch = epoch;
+                probe.ready = false;
+                probe.selection_text = None;
+            }
+
+            let app_for_probe = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let selection = crate::commands::text::probe_selected_text_via_copy(context_grab_method)
+                    .ok()
+                    .flatten();
+
+                let state = app_for_probe.state::<AppState>();
+                let lock_result = state.quick_ask_probe.lock();
                 if let Ok(mut probe) = lock_result {
                     if probe.epoch == epoch {
                         probe.selection_text = selection;
@@ -1475,6 +1526,13 @@ fn stop_recording(
                         // Quick Replace may overwrite this when a selection is present.
                         let mut output_value = text.clone();
 
+                        // If Quick Replace was intended (selection present) but the rewrite failed,
+                        // capture the error here so we can:
+                        // - mark the request log + history as error
+                        // - show the overlay error state with retry
+                        // - avoid pasting the plain transcript into the selection
+                        let mut quick_replace_failure: Option<String> = None;
+
                         // Quick Ask: instead of outputting/pasting the transcript, send it to an LLM
                         // for an answer and show it in a dedicated overlay.
                         if is_quick_ask_session {
@@ -1685,8 +1743,97 @@ fn stop_recording(
 
                                     let provider_impl =
                                         crate::commands::llm::create_llm_provider_unstructured(&provider_cfg);
+
+                                    // Best-effort: attach any highlighted text captured at recording stop.
+                                    // We keep this bounded so we don't blow up token usage.
+                                    let selected_context: Option<String> = if quick_ask_epoch != 0 {
+                                        let deadline = Instant::now() + Duration::from_millis(700);
+                                        loop {
+                                            let (ready, selection) = {
+                                                let state = app_clone.state::<AppState>();
+                                                let lock_result = state.quick_ask_probe.lock();
+                                                match lock_result {
+                                                    Ok(probe) if probe.epoch == quick_ask_epoch => {
+                                                        (probe.ready, probe.selection_text.clone())
+                                                    }
+                                                    _ => (true, None),
+                                                }
+                                            };
+
+                                            if ready {
+                                                break selection;
+                                            }
+                                            if Instant::now() >= deadline {
+                                                break None;
+                                            }
+                                            tokio::time::sleep(Duration::from_millis(20)).await;
+                                        }
+                                    } else {
+                                        None
+                                    };
+
+                                    let selected_context_trimmed = selected_context
+                                        .as_deref()
+                                        .map(str::trim)
+                                        .filter(|s| !s.is_empty());
+
+                                    let mut quick_ask_context_text_for_log: Option<String> = None;
+                                    let question_with_context = if let Some(ctx) = selected_context_trimmed {
+                                        // Bound context to keep Quick Ask snappy and cheap.
+                                        let cap = 8_000usize;
+                                        let ctx_capped = if ctx.len() > cap {
+                                            format!("{}\n\n… (truncated)", &ctx[..cap])
+                                        } else {
+                                            ctx.to_string()
+                                        };
+
+                                        // Store the exact context string we attached to the question.
+                                        quick_ask_context_text_for_log = Some(ctx_capped.clone());
+
+                                        format!(
+                                            "CONTEXT (highlighted text):\n{}\n\nQUESTION:\n{}",
+                                            ctx_capped,
+                                            question
+                                        )
+                                    } else {
+                                        question.clone()
+                                    };
+
+                                    // Update the logical request payload to indicate context was used.
+                                    // We avoid logging the raw context string by default (it may contain secrets).
+                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                        let context_chars = selected_context_trimmed.map(|s| s.len());
+                                        let quick_ask_context_text_for_log = quick_ask_context_text_for_log.clone();
+                                        log_store.with_current(|log| {
+                                            log.quick_ask_context_text = quick_ask_context_text_for_log;
+
+                                            if let Some(req) = log.quick_ask_request_json.as_mut() {
+                                                // If it's our JSON object, add a couple extra fields.
+                                                if let serde_json::Value::Object(map) = req {
+                                                    map.insert(
+                                                        "context_present".to_string(),
+                                                        serde_json::Value::Bool(context_chars.is_some()),
+                                                    );
+                                                    map.insert(
+                                                        "context_chars".to_string(),
+                                                        context_chars
+                                                            .map(|n| {
+                                                                serde_json::Value::Number(
+                                                                    serde_json::Number::from(n as u64),
+                                                                )
+                                                            })
+                                                            .unwrap_or(serde_json::Value::Null),
+                                                    );
+                                                }
+                                            }
+                                        });
+                                    }
+
                                     let t0 = std::time::Instant::now();
-                                    match provider_impl.complete(system_prompt.as_str(), question.as_str()).await {
+                                    match provider_impl
+                                        .complete(system_prompt.as_str(), question_with_context.as_str())
+                                        .await
+                                    {
                                         Ok(answer) => {
                                             let answer = answer.trim().to_string();
                                             let duration_ms = t0.elapsed().as_millis() as u64;
@@ -1860,14 +2007,28 @@ fn stop_recording(
                                     };
 
                                     if provider != "ollama" && api_key.trim().is_empty() {
+                                        let err = format!(
+                                            "Quick Replace failed: no API key configured for provider: {}",
+                                            provider
+                                        );
                                         if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                             log_store.with_current(|log| {
                                                 log.warn(format!(
                                                     "Quick replace: skipped (no API key configured for provider: {})",
                                                     provider
                                                 ));
+                                                log.quick_replace_provider = Some(provider.clone());
+                                                log.quick_replace_model = quick_replace_cfg.model.clone();
+                                                log.quick_replace_response_json = Some(serde_json::json!({
+                                                    "ok": false,
+                                                    "error": err.clone(),
+                                                }));
+                                                log.error(err.clone());
+                                                log.complete_error(err.clone());
                                             });
                                         }
+
+                                        quick_replace_failure = Some(err);
                                     } else {
                                         // NOTE: Keep prompts minimal and instruct the model to output only the rewritten text.
                                         let system_prompt = quick_replace_cfg.system_prompt.clone();
@@ -1901,7 +2062,25 @@ fn stop_recording(
                                         {
                                             Ok(rewritten) => {
                                                 let rewritten = rewritten.trim().to_string();
-                                                if !rewritten.is_empty() {
+                                                if rewritten.is_empty() {
+                                                    let err = "Quick Replace failed: model returned empty output".to_string();
+                                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                        log_store.with_current(|log| {
+                                                            log.kind = RequestKind::QuickReplace;
+                                                            log.quick_replace_provider =
+                                                                Some(provider_impl.name().to_string());
+                                                            log.quick_replace_model =
+                                                                Some(provider_impl.model().to_string());
+                                                            log.quick_replace_response_json = Some(serde_json::json!({
+                                                                "ok": false,
+                                                                "error": err.clone(),
+                                                            }));
+                                                            log.error(err.clone());
+                                                            log.complete_error(err.clone());
+                                                        });
+                                                    }
+                                                    quick_replace_failure = Some(err);
+                                                } else {
                                                     output_value = rewritten;
                                                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                                         let ms = t0.elapsed().as_millis() as u64;
@@ -1941,6 +2120,7 @@ fn stop_recording(
                                                 }
                                             }
                                             Err(e) => {
+                                                let err = e.to_string();
                                                 if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                                     log_store.with_current(|log| {
                                                         log.kind = RequestKind::QuickReplace;
@@ -1953,14 +2133,20 @@ fn stop_recording(
                                                         }));
                                                         log.quick_replace_response_json = Some(serde_json::json!({
                                                             "ok": false,
-                                                            "error": e.to_string(),
+                                                            "error": err.clone(),
                                                         }));
                                                         log.warn(format!(
-                                                            "Quick replace: rewrite failed; falling back to transcript ({})",
-                                                            e
+                                                            "Quick replace: rewrite failed ({})",
+                                                            err
                                                         ));
+
+                                                        // Treat rewrite failure as a request error; do not pretend success.
+                                                        log.error(format!("Quick Replace failed: {}", err.clone()));
+                                                        log.complete_error(err.clone());
                                                     });
                                                 }
+
+                                                quick_replace_failure = Some(err);
                                             }
                                         }
                                     }
@@ -1973,14 +2159,22 @@ fn stop_recording(
                                 if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                     log_store.with_current(|log| {
                                         if log.status == crate::request_log::RequestStatus::InProgress {
-                                            log.complete_success();
+                                            if quick_replace_failure.is_some() {
+                                                // Preserve error status set earlier.
+                                            } else {
+                                                log.complete_success();
+                                            }
                                         }
                                     });
 
                                     if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
                                         stats::emit_cost_events_for_current_request(
                                             &app_clone,
-                                            stats::EventStatus::Success,
+                                            if quick_replace_failure.is_some() {
+                                                stats::EventStatus::Error
+                                            } else {
+                                                stats::EventStatus::Success
+                                            },
                                             Some(&wav),
                                         );
                                     }
@@ -1989,18 +2183,33 @@ fn stop_recording(
                                 }
                             }
 
-                            // Output using the selected output mode.
-                            if let Err(e) = commands::text::output_text_with_mode(
-                                &output_value,
-                                output_mode,
-                                output_hit_enter,
-                            ) {
-                                log::error!("Failed to output transcript: {}", e);
+                            // If Quick Replace was intended but failed, surface an error instead of
+                            // pasting the transcript into the selection.
+                            if let Some(err) = quick_replace_failure.as_deref() {
+                                // In hotkey-triggered flows, the overlay webview may not be created
+                                // (or visible) yet. Show it so the error state + Retry UI is actually seen.
+                                let _ = commands::overlay::show_overlay(app_clone.clone()).await;
 
-                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                    log_store.with_current(|log| {
-                                        log.warn(format!("Output failed: {}", e));
-                                    });
+                                // Emit pipeline-error so overlay shows error state + retry affordance.
+                                let payload = serde_json::json!({
+                                    "message": err,
+                                    "request_id": request_id.clone(),
+                                });
+                                let _ = app_clone.emit("pipeline-error", payload);
+                            } else {
+                                // Output using the selected output mode.
+                                if let Err(e) = commands::text::output_text_with_mode(
+                                    &output_value,
+                                    output_mode,
+                                    output_hit_enter,
+                                ) {
+                                    log::error!("Failed to output transcript: {}", e);
+
+                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                        log_store.with_current(|log| {
+                                            log.warn(format!("Output failed: {}", e));
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -2010,7 +2219,9 @@ fn stop_recording(
                             if let Some(ref req_id) = request_id {
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                     // Store the actual output (Quick Replace may have changed it).
-                                    if let Err(e) = history.complete_request_success(req_id, output_value.clone()) {
+                                    if let Some(err) = quick_replace_failure.as_deref() {
+                                        let _ = history.complete_request_error(req_id, err.to_string());
+                                    } else if let Err(e) = history.complete_request_success(req_id, output_value.clone()) {
                                         log::warn!("Failed to update history: {}", e);
                                     }
 
@@ -4467,6 +4678,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
                 quick_ask_provider: p.quick_ask_provider,
                 quick_ask_model: p.quick_ask_model,
                 quick_ask_system_prompt: p.quick_ask_system_prompt,
+                context_grab_method: p.context_grab_method,
 
                 quick_replace_enabled: p.quick_replace_enabled,
                 quick_replace_provider: p.quick_replace_provider,

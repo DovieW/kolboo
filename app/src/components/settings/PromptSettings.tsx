@@ -208,6 +208,8 @@ export function PromptSettings({
         active_preset_id: null,
         rewrite_llm_enabled: null,
 
+        context_grab_method: null,
+
         quick_replace_enabled: null,
         quick_replace_provider: null,
         quick_replace_model: null,

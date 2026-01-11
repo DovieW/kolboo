@@ -50,9 +50,18 @@ pub struct AppState {
     /// Each transcription session can kick off at most one probe.
     pub quick_replace_probe_epoch: AtomicU64,
 
+    /// Monotonic id for Quick Ask selection probes.
+    ///
+    /// Each Quick Ask session can kick off at most one probe.
+    pub quick_ask_probe_epoch: AtomicU64,
+
     /// Latest Quick Replace selection probe result (ephemeral; never persisted).
     #[cfg(desktop)]
     pub quick_replace_probe: Mutex<QuickReplaceProbe>,
+
+    /// Latest Quick Ask selection probe result (ephemeral; never persisted).
+    #[cfg(desktop)]
+    pub quick_ask_probe: Mutex<QuickAskProbe>,
 }
 
 /// Ephemeral selection probe state used by the Quick Replace feature.
@@ -66,6 +75,26 @@ pub struct QuickReplaceProbe {
 
 #[cfg(desktop)]
 impl Default for QuickReplaceProbe {
+    fn default() -> Self {
+        Self {
+            epoch: 0,
+            ready: true,
+            selection_text: None,
+        }
+    }
+}
+
+/// Ephemeral selection probe state used by Quick Ask to capture highlighted context.
+#[cfg(desktop)]
+#[derive(Debug, Clone)]
+pub struct QuickAskProbe {
+    pub epoch: u64,
+    pub ready: bool,
+    pub selection_text: Option<String>,
+}
+
+#[cfg(desktop)]
+impl Default for QuickAskProbe {
     fn default() -> Self {
         Self {
             epoch: 0,

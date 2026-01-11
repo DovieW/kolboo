@@ -388,6 +388,10 @@ export interface RewriteProgramPromptProfile {
   quick_ask_model?: string | null;
   quick_ask_system_prompt?: string | null;
 
+  // Context grabbing method for highlighted-text capture (per-profile override).
+  // Controls what shortcut Kolboo uses to copy the current selection.
+  context_grab_method?: ContextGrabMethod | null;
+
   // Quick Replace (per-profile overrides)
   // When enabled and there is highlighted text when transcription starts, treat the transcript
   // as an instruction to rewrite the selected text.
@@ -419,6 +423,8 @@ export interface RewriteProgramPromptProfile {
   // (May be ignored by backend until runtime/profile routing supports it.)
   output_hit_enter?: boolean | null;
 }
+
+export type ContextGrabMethod = "ctrl_c" | "ctrl_shift_c";
 
 export type PlayingAudioHandling = "none" | "mute" | "pause" | "mute_and_pause";
 
@@ -1425,6 +1431,13 @@ export const tauriAPI = {
           ? quick_ask_system_prompt_raw
           : null;
 
+      const context_grab_method_raw = (p as any).context_grab_method;
+      const context_grab_method: ContextGrabMethod | null =
+        context_grab_method_raw === "ctrl_c" ||
+        context_grab_method_raw === "ctrl_shift_c"
+          ? context_grab_method_raw
+          : null;
+
       const quick_replace_enabled =
         typeof (p as any).quick_replace_enabled === "boolean"
           ? (p as any).quick_replace_enabled
@@ -1559,6 +1572,7 @@ export const tauriAPI = {
         quick_ask_provider,
         quick_ask_model,
         quick_ask_system_prompt,
+        context_grab_method,
 
         quick_replace_enabled,
         quick_replace_provider,
@@ -3117,6 +3131,7 @@ export interface RequestLog {
 
   // Quick Ask fields (when kind === "quick_ask")
   quick_ask_question?: string | null;
+  quick_ask_context_text?: string | null;
   quick_ask_answer?: string | null;
   quick_ask_provider?: string | null;
   quick_ask_model?: string | null;

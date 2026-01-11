@@ -166,6 +166,11 @@ pub struct RequestLog {
     /// Quick Ask: the question sent to the answering LLM (usually based on the transcript).
     #[serde(default)]
     pub quick_ask_question: Option<String>,
+    /// Quick Ask: highlighted text context that was attached to the question and sent to the answering LLM.
+    ///
+    /// This is intentionally bounded (see Quick Ask prompt assembly) to keep request logs usable.
+    #[serde(default)]
+    pub quick_ask_context_text: Option<String>,
     /// Quick Ask: the answer returned by the answering LLM.
     #[serde(default)]
     pub quick_ask_answer: Option<String>,
@@ -349,6 +354,7 @@ impl RequestLog {
             formatted_transcript: None,
 
             quick_ask_question: None,
+            quick_ask_context_text: None,
             quick_ask_answer: None,
             quick_ask_provider: None,
             quick_ask_model: None,

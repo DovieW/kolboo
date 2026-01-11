@@ -293,6 +293,11 @@ pub struct ProgramPromptProfile {
     pub quick_ask_model: Option<String>,
     pub quick_ask_system_prompt: Option<String>,
 
+    /// Context grabbing method for highlighted-text capture.
+    ///
+    /// Controls what shortcut Kolboo uses to copy the current selection when probing.
+    pub context_grab_method: Option<String>,
+
     // Quick Replace (per-profile overrides)
     pub quick_replace_enabled: Option<bool>,
     pub quick_replace_provider: Option<String>,

@@ -416,6 +416,15 @@ pub struct RewriteProgramPromptProfile {
     #[serde(default)]
     pub quick_ask_system_prompt: Option<String>,
 
+    /// Context grabbing method for highlighted-text capture.
+    ///
+    /// Controls what shortcut Kolboo uses to copy the current selection when probing.
+    /// Expected values:
+    /// - "ctrl_c" (default)
+    /// - "ctrl_shift_c" (common in terminals on Windows)
+    #[serde(default)]
+    pub context_grab_method: Option<String>,
+
     // Quick Replace (per-profile overrides)
     // When enabled and there is highlighted text when transcription starts, treat the transcript
     // as an instruction to rewrite the selected text.

@@ -557,6 +557,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
                 quick_ask_provider: p.quick_ask_provider,
                 quick_ask_model: p.quick_ask_model,
                 quick_ask_system_prompt: p.quick_ask_system_prompt,
+                context_grab_method: p.context_grab_method,
 
                 quick_replace_enabled: p.quick_replace_enabled,
                 quick_replace_provider: p.quick_replace_provider,

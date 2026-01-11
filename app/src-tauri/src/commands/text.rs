@@ -5,6 +5,17 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextGrabMethod {
+    /// Standard copy shortcut (Cmd+C on macOS, Ctrl+C elsewhere).
+    CtrlC,
+    /// Terminal-friendly copy shortcut on Windows (Ctrl+Shift+C).
+    ///
+    /// This is opt-in via settings; Kolboo will not auto-detect.
+    CtrlShiftC,
+}
 
 /// Delay after clipboard operations to ensure system stability
 const CLIPBOARD_STABILIZATION_DELAY_MS: u64 = 50;
@@ -44,6 +55,30 @@ static OUTPUT_INJECTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn output_injection_lock() -> &'static Mutex<()> {
     OUTPUT_INJECTION_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn with_pressed_key<T>(
+    enigo: &mut Enigo,
+    key: Key,
+    work: impl FnOnce(&mut Enigo) -> Result<T, String>,
+) -> Result<T, String> {
+    enigo
+        .key(key, Direction::Press)
+        .map_err(|e| e.to_string())?;
+
+    // Ensure we always release, even if `work` fails.
+    let result = work(enigo);
+    let _ = enigo.key(key, Direction::Release);
+    result
+}
+
+fn release_common_modifiers_best_effort(enigo: &mut Enigo) {
+    // If we ever miss a key-up (or a release fails), users can experience "stuck" modifiers.
+    // Best-effort attempt to reset common modifiers.
+    let _ = enigo.key(Key::Shift, Direction::Release);
+    let _ = enigo.key(Key::Control, Direction::Release);
+    let _ = enigo.key(Key::Alt, Direction::Release);
+    let _ = enigo.key(Key::Meta, Direction::Release);
 }
 
 fn maybe_hit_enter(enigo: &mut Enigo, hit_enter: bool) -> Result<(), String> {
@@ -224,17 +259,36 @@ pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), Strin
     #[cfg(not(target_os = "macos"))]
     let modifier = Key::Control;
 
-    enigo
-        .key(modifier, Direction::Press)
-        .map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-    enigo
-        .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-    enigo
-        .key(modifier, Direction::Release)
-        .map_err(|e| e.to_string())?;
+    let result = with_pressed_key(&mut enigo, modifier, |enigo| {
+        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+
+        #[cfg(target_os = "windows")]
+        {
+            // Physical 'V' key (scancode set 1). More reliable for modifier shortcuts.
+            const SCANCODE_V: u16 = 0x2F;
+            enigo
+                .raw(SCANCODE_V, Direction::Press)
+                .map_err(|e| e.to_string())?;
+            thread::sleep(Duration::from_millis(30));
+            enigo
+                .raw(SCANCODE_V, Direction::Release)
+                .map_err(|e| e.to_string())?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            enigo
+                .key(Key::Unicode('v'), Direction::Click)
+                .map_err(|e| e.to_string())?;
+        }
+
+        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+        Ok(())
+    });
+
+    // Extra safety: try to ensure no modifiers remain logically held down.
+    release_common_modifiers_best_effort(&mut enigo);
+    result?;
 
     maybe_hit_enter(&mut enigo, hit_enter)?;
 
@@ -280,17 +334,36 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     let modifier = Key::Control;
 
-    enigo
-        .key(modifier, Direction::Press)
-        .map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-    enigo
-        .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-    enigo
-        .key(modifier, Direction::Release)
-        .map_err(|e| e.to_string())?;
+    let result = with_pressed_key(&mut enigo, modifier, |enigo| {
+        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+
+        #[cfg(target_os = "windows")]
+        {
+            // Physical 'V' key (scancode set 1). More reliable for modifier shortcuts.
+            const SCANCODE_V: u16 = 0x2F;
+            enigo
+                .raw(SCANCODE_V, Direction::Press)
+                .map_err(|e| e.to_string())?;
+            thread::sleep(Duration::from_millis(30));
+            enigo
+                .raw(SCANCODE_V, Direction::Release)
+                .map_err(|e| e.to_string())?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            enigo
+                .key(Key::Unicode('v'), Direction::Click)
+                .map_err(|e| e.to_string())?;
+        }
+
+        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+        Ok(())
+    });
+
+    // Extra safety: try to ensure no modifiers remain logically held down.
+    release_common_modifiers_best_effort(&mut enigo);
+    result?;
 
     maybe_hit_enter(&mut enigo, hit_enter)?;
 
@@ -335,18 +408,52 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
 /// - This is inherently best-effort; not all apps expose copyable selection.
 /// - We only preserve/restore *text* clipboard content (same limitation as paste mode).
 /// - On Windows, we exclude our transient clipboard writes from Win+V history.
-pub fn probe_selected_text_via_copy() -> Result<Option<String>, String> {
+pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<String>, String> {
     // Serialize with output injections so key events can't interleave.
     let _guard = output_injection_lock()
         .lock()
         .map_err(|_| "Output lock poisoned".to_string())?;
 
+    log::info!(
+        "Selection probe: attempting copy (method={:?})",
+        method
+    );
+
+    #[cfg(target_os = "windows")]
+    {
+        let fg = crate::windows_apps::get_foreground_process_path();
+        log::info!(
+            "Selection probe: foreground_process={}",
+            fg.as_deref().unwrap_or("<unknown>")
+        );
+    }
+
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
     // Save previous clipboard content (text only).
+    // NOTE: If this is None, we avoid any technique that would overwrite a non-text clipboard.
     let previous: Option<String> = clipboard.get_text().ok();
 
-    // Simulate Ctrl+C / Cmd+C.
+    // Important: without any guard, if Ctrl+C doesn't actually copy (common in terminals),
+    // reading the clipboard will just return whatever text was already there (stale).
+    //
+    // If we have a previous text clipboard, we temporarily write a unique sentinel value and
+    // only accept a selection if the clipboard changes away from that sentinel.
+    let mut sentinel: Option<String> = None;
+    if previous.is_some() {
+        let token = format!("__kolboo_selection_probe__{}", Uuid::new_v4());
+        if set_clipboard_text_platform(&mut clipboard, &token, true).is_ok() {
+            sentinel = Some(token);
+        }
+    }
+
+    log::debug!(
+        "Selection probe: sentinel_set={} (previous_clipboard_text={})",
+        sentinel.is_some(),
+        previous.is_some()
+    );
+
+    // Simulate a copy shortcut.
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
 
     #[cfg(target_os = "macos")]
@@ -354,17 +461,80 @@ pub fn probe_selected_text_via_copy() -> Result<Option<String>, String> {
     #[cfg(not(target_os = "macos"))]
     let modifier = Key::Control;
 
-    enigo
-        .key(modifier, Direction::Press)
-        .map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-    enigo
-        .key(Key::Unicode('c'), Direction::Click)
-        .map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-    enigo
-        .key(modifier, Direction::Release)
-        .map_err(|e| e.to_string())?;
+    // Key sequence: press modifiers -> click 'c' -> release.
+
+    // Give the OS a moment to finish processing any key-up events from the record-stop hotkey.
+    // (Without this, the target app can miss the subsequent chord.)
+    thread::sleep(Duration::from_millis(120));
+
+    #[cfg(target_os = "windows")]
+    if method == ContextGrabMethod::CtrlShiftC {
+        log::info!("Selection probe: injecting Ctrl+Shift+C");
+    } else {
+        log::info!("Selection probe: injecting Ctrl+C");
+    }
+
+    // Important: ensure we always release modifiers, even if something errors mid-injection.
+    // Otherwise keys can appear "stuck" at the OS level.
+    let injection_result: Result<(), String> = with_pressed_key(&mut enigo, modifier, |enigo| {
+        #[cfg(target_os = "windows")]
+        if method == ContextGrabMethod::CtrlShiftC {
+            return with_pressed_key(enigo, Key::Shift, |enigo| {
+                thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                // NOTE: physical 'C' key (scancode set 1).
+                const SCANCODE_C: u16 = 0x2E;
+                enigo
+                    .raw(SCANCODE_C, Direction::Press)
+                    .map_err(|e| e.to_string())?;
+                thread::sleep(Duration::from_millis(50));
+                enigo
+                    .raw(SCANCODE_C, Direction::Release)
+                    .map_err(|e| e.to_string())?;
+                Ok(())
+            });
+        }
+
+        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+
+        #[cfg(target_os = "windows")]
+        {
+            const SCANCODE_C: u16 = 0x2E;
+            enigo
+                .raw(SCANCODE_C, Direction::Press)
+                .map_err(|e| e.to_string())?;
+            thread::sleep(Duration::from_millis(50));
+            enigo
+                .raw(SCANCODE_C, Direction::Release)
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            enigo
+                .key(Key::Unicode('c'), Direction::Click)
+                .map_err(|e| e.to_string())?;
+            thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+            Ok(())
+        }
+    });
+
+    #[cfg(target_os = "windows")]
+    {
+        let fg = crate::windows_apps::get_foreground_process_path();
+        log::debug!(
+            "Selection probe: foreground_process_after_key={}",
+            fg.as_deref().unwrap_or("<unknown>")
+        );
+    }
+
+    if let Err(e) = injection_result {
+        log::warn!("Selection probe: key injection failed: {}", e);
+        // Keep going: we'll still restore sentinel/clipboard state below.
+    }
+
+    // Even on success, try to reset modifiers (best-effort) so we never leave keys "stuck".
+    release_common_modifiers_best_effort(&mut enigo);
 
     // Wait briefly for clipboard to update and then read it.
     let mut captured: Option<String> = None;
@@ -374,8 +544,32 @@ pub fn probe_selected_text_via_copy() -> Result<Option<String>, String> {
             if current.trim().is_empty() {
                 continue;
             }
+
+            // If we set a sentinel, only accept a capture if the clipboard changed away from it.
+            if sentinel.as_deref().is_some_and(|s| s == current) {
+                continue;
+            }
+
+            // If we didn't set a sentinel (e.g. previous clipboard wasn't readable as text),
+            // avoid treating an unchanged clipboard as a "capture".
+            if sentinel.is_none() && previous.as_deref().is_some_and(|p| p == current) {
+                continue;
+            }
+
             captured = Some(current);
             break;
+        }
+    }
+
+    match captured.as_deref() {
+        Some(text) => {
+            log::info!(
+                "Selection probe: capture succeeded (len={})",
+                text.chars().count()
+            );
+        }
+        None => {
+            log::info!("Selection probe: capture failed (no clipboard change detected)");
         }
     }
 
@@ -389,21 +583,28 @@ pub fn probe_selected_text_via_copy() -> Result<Option<String>, String> {
         let _ = set_clipboard_text_platform(&mut clipboard, captured_text, true);
     }
 
-    // Restore previous clipboard text (best-effort) if we captured something.
-    // If we didn't capture anything, restoring is unnecessary and can be risky
-    // (could clobber user clipboard changes).
-    if let (Some(prev), Some(captured_text)) = (previous, captured.as_ref()) {
-        let should_restore = clipboard
-            .get_text()
-            .ok()
-            .map(|current| current == captured_text.as_str())
-            .unwrap_or(false);
+    // Restore previous clipboard text (best-effort).
+    //
+    // - If we set a sentinel, we MUST attempt to restore (otherwise we leave the sentinel behind).
+    // - Even when restoring, avoid clobbering if the user/app changed clipboard after our copy.
+    if let Some(prev) = previous {
+        let expected_current = captured
+            .as_deref()
+            .or(sentinel.as_deref());
+
+        let should_restore = match expected_current {
+            Some(expected) => clipboard
+                .get_text()
+                .ok()
+                .is_some_and(|current| current == expected),
+            None => false,
+        };
 
         if should_restore {
             // Avoid creating a duplicate clipboard-history entry for the restored content.
             let _ = set_clipboard_text_platform(&mut clipboard, &prev, true);
-        } else {
-            log::debug!("Quick replace probe: clipboard changed; skipping restore");
+        } else if sentinel.is_some() {
+            log::debug!("Selection probe: clipboard changed after copy; skipping restore");
         }
     }
 

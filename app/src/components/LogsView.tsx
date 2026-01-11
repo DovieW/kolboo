@@ -348,9 +348,10 @@ function RequestLogItem({
   const finalOutputTrimmed = (log.final_text ?? "").trim();
   const hasAnyTranscriptText = !!(rawTranscriptTrimmed || finalOutputTrimmed);
   const quickAskQuestionTrimmed = (log.quick_ask_question ?? "").trim();
+  const quickAskContextTrimmed = (log.quick_ask_context_text ?? "").trim();
   const quickAskAnswerTrimmed = (log.quick_ask_answer ?? "").trim();
   const hasAnyQuickAskText = !!(
-    quickAskQuestionTrimmed || quickAskAnswerTrimmed
+    quickAskContextTrimmed || quickAskQuestionTrimmed || quickAskAnswerTrimmed
   );
 
   const quickReplaceInstructionsTrimmed = (
@@ -503,10 +504,21 @@ function RequestLogItem({
           {isQuickAsk && hasAnyQuickAskText ? (
             <Paper withBorder p="sm">
               <Stack gap="xs">
+                {quickAskContextTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Context:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_ask_context_text}
+                    </Text>
+                  </Box>
+                ) : null}
+
                 {quickAskQuestionTrimmed ? (
                   <Box>
                     <Text size="xs" fw={600} c="dimmed">
-                      Quick Ask Question:
+                      Question:
                     </Text>
                     <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
                       {log.quick_ask_question}
@@ -517,7 +529,7 @@ function RequestLogItem({
                 {quickAskAnswerTrimmed ? (
                   <Box>
                     <Text size="xs" fw={600} c="dimmed">
-                      Quick Ask Answer:
+                      Answer:
                     </Text>
                     <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
                       {log.quick_ask_answer}
@@ -568,7 +580,9 @@ function RequestLogItem({
           ) : null}
 
           {/* Transcript info */}
-          {(log.raw_transcript || log.final_text) && (!isQuickReplace || !hasAnyQuickReplaceText) && (
+          {(log.raw_transcript || log.final_text) &&
+            !isQuickAsk &&
+            (!isQuickReplace || !hasAnyQuickReplaceText) && (
             <Paper withBorder p="sm">
               <Stack gap="xs">
                 {llmAttempted ? (
@@ -938,7 +952,7 @@ function RequestLogItem({
                 )}
               </CopyButton>
             )}
-            {hasAnyTranscriptText && !isQuickReplace && (
+            {hasAnyTranscriptText && !isQuickReplace && !isQuickAsk && (
               <CopyButton value={rawTranscriptTrimmed}>
                 {({ copied, copy }) => (
                   <Button
@@ -953,7 +967,7 @@ function RequestLogItem({
                 )}
               </CopyButton>
             )}
-            {hasAnyTranscriptText && !isQuickReplace && (
+            {hasAnyTranscriptText && !isQuickReplace && !isQuickAsk && (
               <CopyButton value={finalOutputTrimmed}>
                 {({ copied, copy }) => (
                   <Button
@@ -1123,6 +1137,7 @@ export function LogsView(
           log.raw_transcript ?? "",
           log.final_text ?? "",
           log.quick_ask_question ?? "",
+          log.quick_ask_context_text ?? "",
           log.quick_ask_answer ?? "",
           log.quick_replace_instructions ?? "",
           log.quick_replace_selected_text ?? "",
