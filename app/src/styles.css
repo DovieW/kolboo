@@ -541,6 +541,10 @@ a:focus-visible {
 	font-size: 14px;
 	color: var(--text-primary);
 	line-height: 1.5;
+	/* Prevent long CLI output / URLs from overflowing the row */
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .history-actions {
