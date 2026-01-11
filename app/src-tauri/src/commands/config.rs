@@ -127,7 +127,8 @@ const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("assemblyai", "AssemblyAI", false),
     ("speechmatics", "Speechmatics", false),
     ("deepgram", "Deepgram", false),
-    ("whisper-server", "Whisper Server", false),
+    // Self-hosted/local network endpoint.
+    ("whisper-server", "Whisper Server", true),
     ("whisper", "Local Whisper", true),
 ];
 
@@ -140,8 +141,18 @@ const LLM_PROVIDERS: &[(&str, &str, bool)] = &[
     ("anthropic", "Anthropic", false),
     ("cohere", "Cohere", false),
     ("groq", "Groq", false),
-    ("ollama", "Ollama", true),
+    ("ollama", "Ollama Server", true),
 ];
+
+/// Helper to check if a string-valued setting exists and is non-empty.
+#[cfg(desktop)]
+fn has_nonempty_setting(app: &AppHandle, key: &str) -> bool {
+    app.store("settings.json")
+        .ok()
+        .and_then(|store| store.get(key))
+        .and_then(|v| v.as_str().map(|s| !s.trim().is_empty()))
+        .unwrap_or(false)
+}
 
 /// Helper to check if an API key is configured in the store
 #[cfg(desktop)]
@@ -181,6 +192,12 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
 
     // Check which LLM providers have API keys
     for (id, label, is_local) in LLM_PROVIDERS {
+        // Only show Ollama when the user has configured its server URL.
+        // This keeps the provider dropdown clean on fresh installs.
+        if *id == "ollama" && !has_nonempty_setting(&app, "ollama_url") {
+            continue;
+        }
+
         let key_name = format!("{}_api_key", id);
         // Local providers don't need API keys, remote ones do
         if *is_local || has_api_key(&app, &key_name) {
@@ -249,6 +266,18 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .ok()
         .and_then(|store| store.get("whisper_server_base_url"))
         .and_then(|v| serde_json::from_value(v).ok());
+
+    // Read Ollama base URL from store (optional)
+    let ollama_url: Option<String> = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ollama_url"))
+        .and_then(|v| serde_json::from_value::<Option<String>>(v).ok())
+        .and_then(|s| s)
+        .and_then(|s| {
+            let t = s.trim().trim_end_matches('/').to_string();
+            if t.is_empty() { None } else { Some(t) }
+        });
 
     #[cfg(feature = "local-whisper")]
     let whisper_model_path: Option<std::path::PathBuf> = {
@@ -725,6 +754,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
             provider: llm_provider_effective,
             api_key: llm_api_key,
             model: llm_model_effective.clone(),
+            ollama_url,
             openai_reasoning_effort,
             gemini_thinking_budget,
             gemini_thinking_level,

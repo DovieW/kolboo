@@ -444,7 +444,7 @@ pub fn get_llm_providers() -> Vec<LlmProviderInfo> {
         },
         LlmProviderInfo {
             id: "ollama".to_string(),
-            name: "Ollama".to_string(),
+            name: "Ollama Server".to_string(),
             requires_api_key: false,
             default_model: "llama3.2".to_string(),
             models: vec![

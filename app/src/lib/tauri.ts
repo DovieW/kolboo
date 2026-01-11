@@ -691,6 +691,9 @@ export interface AppSettings {
   // Whisper server base URL (OpenAI-compatible API; optional)
   whisper_server_base_url: string | null;
 
+  // Ollama server base URL (optional). If unset, backend defaults to http://localhost:11434.
+  ollama_url: string | null;
+
   // Local Whisper model id (e.g. "base", "tinyen"). Only meaningful when the
   // Local Whisper feature is compiled in.
   local_whisper_model_id: string | null;
@@ -1641,6 +1644,7 @@ export const tauriAPI = {
         (await store.get<string | null>("aquavoice_base_url")) ?? null,
       whisper_server_base_url:
         (await store.get<string | null>("whisper_server_base_url")) ?? null,
+      ollama_url: (await store.get<string | null>("ollama_url")) ?? null,
       local_whisper_model_id: normalizeLocalWhisperModelId(
         await store.get("local_whisper_model_id")
       ),
@@ -2170,6 +2174,14 @@ export const tauriAPI = {
     const store = await getStore();
     const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
     await store.set("whisper_server_base_url", normalized);
+    await store.save();
+  },
+
+  async updateOllamaUrl(baseUrl: string | null): Promise<void> {
+    const store = await getStore();
+    const trimmed = baseUrl?.trim() ? baseUrl.trim() : null;
+    const normalized = trimmed ? trimmed.replace(/\/+$/, "") : null;
+    await store.set("ollama_url", normalized);
     await store.save();
   },
 
@@ -2850,6 +2862,7 @@ export const llmAPI = {
   getLlmProviders: () => invoke<LlmProviderInfo[]>("get_llm_providers"),
 
 	getFireworksModels: () => invoke<ModelOption[]>("fireworks_list_models"),
+  getOllamaModels: () => invoke<ModelOption[]>("ollama_list_models"),
 
   testLlmRewrite: (params: { transcript: string; profileId?: string | null }) =>
     invoke<TestLlmRewriteResponse>("test_llm_rewrite", {

@@ -48,6 +48,7 @@ import {
   useUpdateQuickAskGeminiThinkingBudget,
   useUpdateQuickAskGeminiThinkingLevel,
   useFireworksModels,
+  useOllamaModels,
 } from "../../lib/queries";
 import {
   type CleanupPromptSections,
@@ -1312,10 +1313,20 @@ export function PromptSettings({
       routerLlmProvider === "fireworks"
   );
 
+  const ollamaModelsQuery = useOllamaModels(
+    effectiveLlmProvider === "ollama" ||
+      effectiveQuickAskProvider === "ollama" ||
+      routerLlmProvider === "ollama"
+  );
+
   const getLlmModelOptionsForProvider = (provider: string | null) => {
     if (!provider) return [];
     if (provider === "fireworks") {
       const dynamic = fireworksModelsQuery.data;
+      if (Array.isArray(dynamic) && dynamic.length > 0) return dynamic;
+    }
+    if (provider === "ollama") {
+      const dynamic = ollamaModelsQuery.data;
       if (Array.isArray(dynamic) && dynamic.length > 0) return dynamic;
     }
     return LLM_MODELS[provider] ?? [];
@@ -1329,6 +1340,33 @@ export function PromptSettings({
   const quickAskModelOptions = getLlmModelOptionsForProvider(
     effectiveQuickAskProvider
   );
+
+  // If Ollama is selected and no explicit model is set yet, automatically
+  // persist the first discovered model so backend and UI stay in sync.
+  useEffect(() => {
+    if (!isDefaultScope) return;
+    if (effectiveLlmProvider !== "ollama") return;
+    if (updateLLMModel.isPending) return;
+    if (settings?.llm_model) return;
+
+    const models = ollamaModelsQuery.data;
+    if (!Array.isArray(models) || models.length === 0) return;
+
+    const first = models[0]?.value ?? null;
+    if (!first) return;
+
+    updateLLMModel.mutate(first, {
+      onSuccess: () => {
+        tauriAPI.emitSettingsChanged();
+      },
+    });
+  }, [
+    isDefaultScope,
+    effectiveLlmProvider,
+    settings?.llm_model,
+    ollamaModelsQuery.data,
+    updateLLMModel,
+  ]);
 
   const selectedSttModelForUi =
     sttModelOptions.length === 0
@@ -1349,7 +1387,9 @@ export function PromptSettings({
       ? null
       : isDefaultScope
       ? settings?.quick_ask_model ??
-        settings?.llm_model ??
+        (effectiveQuickAskProvider === effectiveLlmProvider
+          ? settings?.llm_model
+          : null) ??
         quickAskModelOptions[0]?.value ??
         null
       : localProfileQuickAskModel;
@@ -1511,7 +1551,10 @@ export function PromptSettings({
           },
           ...openAiThinkingEffortsForModel(effectiveLlmModel).map((v) => ({
             value: v,
-            label: v === "none" ? "None" : v[0].toUpperCase() + v.slice(1),
+            label:
+              v === "none"
+                ? "None"
+                : v.charAt(0).toUpperCase() + v.slice(1),
           })),
         ];
 
@@ -1526,7 +1569,10 @@ export function PromptSettings({
           ...openAiThinkingEffortsForModel(quickAskModelForThinking).map(
             (v) => ({
               value: v,
-              label: v === "none" ? "None" : v[0].toUpperCase() + v.slice(1),
+              label:
+                v === "none"
+                  ? "None"
+                  : v.charAt(0).toUpperCase() + v.slice(1),
             })
           ),
         ];
@@ -1745,8 +1791,15 @@ export function PromptSettings({
       return;
     }
 
-    // Keep this permissive; backend will validate per-model too.
-    const v = value;
+    const v: OpenAiReasoningEffort | null =
+      value === "none" ||
+      value === "low" ||
+      value === "medium" ||
+      value === "high"
+        ? value
+        : null;
+    if (v == null) return;
+
     updateOpenAiReasoningEffort.mutate(v, {
       onSuccess: () => {
         tauriAPI.emitSettingsChanged();
@@ -5170,7 +5223,7 @@ export function PromptSettings({
                                     label:
                                       v === "none"
                                         ? "None"
-                                        : v[0].toUpperCase() + v.slice(1),
+                                        : v.charAt(0).toUpperCase() + v.slice(1),
                                   })),
                                 ];
 

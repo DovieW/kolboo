@@ -188,6 +188,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("speechmatics_free_tier", json!(true), false);
     dirty |= set_default("stt_transcription_prompt", json!(null), false);
     dirty |= set_default("whisper_server_base_url", json!(null), false);
+    dirty |= set_default("ollama_url", json!(null), false);
 
     // Local Whisper model selection (only meaningful when compiled with the feature).
     // This is the *model file* used by whisper.cpp (not the remote STT model dropdown).
@@ -2688,6 +2689,8 @@ pub fn run() {
             commands::logs::clear_request_logs,
             // Fireworks helpers
             commands::fireworks::fireworks_list_models,
+            // Ollama helpers
+            commands::ollama::ollama_list_models,
             // Usage/cost stats commands
             commands::stats::get_cost_summary,
             commands::stats::get_cost_summary_v2,
@@ -4153,6 +4156,14 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         })
     };
 
+    let ollama_url: Option<String> = {
+        let raw: Option<String> = get_setting_from_store(app, "ollama_url", None);
+        raw.and_then(|s| {
+            let t = s.trim().trim_end_matches('/').to_string();
+            if t.is_empty() { None } else { Some(t) }
+        })
+    };
+
     #[cfg(feature = "local-whisper")]
     let whisper_model_path: Option<std::path::PathBuf> = {
         use crate::stt::WhisperModel;
@@ -4230,6 +4241,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
             provider: llm_provider_effective,
             api_key: llm_api_key,
             model: llm_model_effective,
+            ollama_url,
             openai_reasoning_effort,
             gemini_thinking_budget,
             gemini_thinking_level,

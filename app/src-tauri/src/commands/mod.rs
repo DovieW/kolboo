@@ -11,6 +11,7 @@ pub mod recording;
 pub mod router;
 pub mod settings;
 pub mod fireworks;
+pub mod ollama;
 pub mod stats;
 pub mod text;
 pub mod windows;

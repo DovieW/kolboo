@@ -1372,6 +1372,19 @@ export function useUpdateWhisperServerBaseUrl() {
   });
 }
 
+export function useUpdateOllamaUrl() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (baseUrl: string | null) => {
+      await tauriAPI.updateOllamaUrl(baseUrl);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateLocalWhisperModelId() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -1430,6 +1443,15 @@ export function useFireworksModels(enabled: boolean) {
     queryKey: ["fireworksModels"],
     enabled,
     queryFn: () => llmAPI.getFireworksModels(),
+    staleTime: 0,
+  });
+}
+
+export function useOllamaModels(enabled: boolean) {
+  return useQuery({
+    queryKey: ["ollamaModels"],
+    enabled,
+    queryFn: () => llmAPI.getOllamaModels(),
     staleTime: 0,
   });
 }

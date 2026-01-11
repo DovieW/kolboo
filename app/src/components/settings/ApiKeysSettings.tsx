@@ -56,6 +56,7 @@ import {
   useUpdateSpeechmaticsFreeTier,
   useUpdateLocalWhisperModelId,
   useUpdateLocalWhisperLoadMode,
+  useUpdateOllamaUrl,
   useUpdateWhisperServerBaseUrl,
 } from "../../lib/queries";
 
@@ -1165,20 +1166,58 @@ export function ApiKeysSettings({
   const isProfileScope = editingProfileId && editingProfileId !== "default";
 
   const { data: settings } = useSettings();
+  const updateOllamaUrl = useUpdateOllamaUrl();
   const updateWhisperServerBaseUrl = useUpdateWhisperServerBaseUrl();
+
+  const [ollamaUrlDraft, setOllamaUrlDraft] = useState(
+    settings?.ollama_url ?? ""
+  );
   const [whisperServerBaseUrlDraft, setWhisperServerBaseUrlDraft] = useState(
     settings?.whisper_server_base_url ?? ""
   );
 
   useEffect(() => {
+    setOllamaUrlDraft(settings?.ollama_url ?? "");
     setWhisperServerBaseUrlDraft(settings?.whisper_server_base_url ?? "");
-  }, [settings?.whisper_server_base_url]);
+  }, [settings?.ollama_url, settings?.whisper_server_base_url]);
 
   const content = (
     <>
       {API_KEYS.map((config) => (
         <ApiKeyInput key={config.id} config={config} />
       ))}
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Ollama server URL</p>
+          <p className="settings-description">
+            Base URL for your local Ollama server (e.g. http://localhost:11434).
+            Models are discovered automatically.
+          </p>
+        </div>
+        <TextInput
+          value={ollamaUrlDraft}
+          onChange={(e) => setOllamaUrlDraft(e.currentTarget.value)}
+          onBlur={() => {
+            const trimmed = ollamaUrlDraft.trim();
+            const normalized = trimmed ? trimmed : null;
+            updateOllamaUrl.mutate(normalized, {
+              onSuccess: () => {
+                tauriAPI.emitSettingsChanged();
+              },
+            });
+          }}
+          placeholder="http://localhost:11434"
+          styles={{
+            input: {
+              backgroundColor: "var(--bg-elevated)",
+              borderColor: "var(--border-default)",
+              color: "var(--text-primary)",
+              minWidth: 280,
+            },
+          }}
+        />
+      </div>
 
       <div className="settings-row">
         <div>
