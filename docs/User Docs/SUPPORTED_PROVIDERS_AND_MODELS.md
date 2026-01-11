@@ -65,6 +65,7 @@ Notes:
 - `gpt-oss-120b` — GPT-OSS 120B
 - `qwen-3-32b` — Qwen 3 32B
 - `qwen-3-235b-a22b-instruct-2507` — Qwen 3 235B Instruct (Preview)
+- `zai-glm-4.7` — GLM 4.7 (Preview)
 - `zai-glm-4.6` — GLM 4.6 (Preview)
 
 ### `openai` (OpenAI, LLM)

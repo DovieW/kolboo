@@ -79,6 +79,7 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
       value: "qwen-3-235b-a22b-instruct-2507",
       label: "Qwen 3 235B Instruct (Preview)",
     },
+    { value: "zai-glm-4.7", label: "GLM 4.7 (Preview)" },
     { value: "zai-glm-4.6", label: "GLM 4.6 (Preview)" },
   ],
   groq: [
