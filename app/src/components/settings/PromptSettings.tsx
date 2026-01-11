@@ -2475,7 +2475,7 @@ export function PromptSettings({
       />
 
       <div className="settings-mini-header settings-mini-header--first">
-        <span className="settings-mini-header__text">Transcription</span>
+        <span className="settings-mini-header__text">Transcribe</span>
       </div>
 
       <div className="settings-row">
