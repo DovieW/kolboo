@@ -557,6 +557,11 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
                 quick_ask_provider: p.quick_ask_provider,
                 quick_ask_model: p.quick_ask_model,
                 quick_ask_system_prompt: p.quick_ask_system_prompt,
+
+                quick_replace_enabled: p.quick_replace_enabled,
+                quick_replace_provider: p.quick_replace_provider,
+                quick_replace_model: p.quick_replace_model,
+                quick_replace_system_prompt: p.quick_replace_system_prompt,
                 quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
                 quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
                 quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,

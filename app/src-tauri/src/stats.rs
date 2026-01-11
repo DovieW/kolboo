@@ -490,22 +490,26 @@ pub fn emit_cost_events_for_current_request(
     };
 
     let inputs = log_store.with_current(|log| {
-        let (llm_provider, llm_model, llm_response_json) = if log.kind
-            == crate::request_log::RequestKind::QuickAsk
-        {
-            (
+        let (llm_provider, llm_model, llm_response_json) = match log.kind {
+            crate::request_log::RequestKind::QuickAsk => (
                 log.quick_ask_provider.clone().or_else(|| log.llm_provider.clone()),
                 log.quick_ask_model.clone().or_else(|| log.llm_model.clone()),
                 log.quick_ask_response_json
                     .clone()
                     .or_else(|| log.llm_response_json.clone()),
-            )
-        } else {
-            (
+            ),
+            crate::request_log::RequestKind::QuickReplace => (
+                log.quick_replace_provider.clone().or_else(|| log.llm_provider.clone()),
+                log.quick_replace_model.clone().or_else(|| log.llm_model.clone()),
+                log.quick_replace_response_json
+                    .clone()
+                    .or_else(|| log.llm_response_json.clone()),
+            ),
+            _ => (
                 log.llm_provider.clone(),
                 log.llm_model.clone(),
                 log.llm_response_json.clone(),
-            )
+            ),
         };
 
         CurrentInputsForStats {

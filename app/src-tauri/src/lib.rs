@@ -263,6 +263,9 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("playing_audio_handling", json!("none"), false);
     dirty |= set_default("sound_enabled", json!(true), false);
     dirty |= set_default("rewrite_llm_enabled", json!(false), false);
+    // When true, if there is highlighted text when transcription starts, treat the transcript
+    // as an instruction to rewrite the selected text (Quick replace).
+    dirty |= set_default("quick_replace_enabled", json!(false), false);
 
     // Rewrite profiles: historically this was an empty array with the Default profile
     // represented implicitly by global settings. We now want Default to be a real,
@@ -777,6 +780,12 @@ fn start_recording(
             (Some("default".to_string()), Some("Default".to_string()))
         };
 
+        // Keep a per-session copy so stop_recording can use the same profile resolution
+        // even if the overlay briefly becomes the foreground window.
+        if let Ok(mut slot) = state.recording_session_profile_id.lock() {
+            *slot = profile_id.clone();
+        }
+
         if let Err(e) = pipeline.start_recording() {
             log::error!("{}: Failed to start pipeline recording: {} (state was: {:?})", source, e, current_state);
             let _ = pipeline.set_session_profile_override(None);
@@ -973,6 +982,14 @@ fn stop_recording(
     // Optional: after pasting, press Enter.
     let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
 
+    // Resolve the program profile id captured at recording start (before overlays can steal focus).
+    // We "take" it (read and clear) so it can't leak across sessions.
+    let session_profile_id: Option<String> = state
+        .recording_session_profile_id
+        .lock()
+        .ok()
+        .and_then(|mut g| g.take());
+
     // Stop pipeline and trigger transcription in background
     if let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() {
         let pipeline_clone = (*pipeline).clone();
@@ -981,7 +998,17 @@ fn stop_recording(
 
         // Capture model info from pipeline config for persistence in history.
         let config = pipeline.config();
-        let profile = pipeline::select_profile_for_foreground_app(&config.llm_config);
+        let profile: Option<crate::llm::ProgramPromptProfile> = session_profile_id
+            .as_deref()
+            .and_then(|id| {
+                config
+                    .llm_config
+                    .program_prompt_profiles
+                    .iter()
+                    .find(|p| p.id == id)
+                    .cloned()
+            })
+            .or_else(|| pipeline::select_profile_for_foreground_app(&config.llm_config));
 
         let model_info = RequestModelInfo {
             stt_provider: Some(config.stt_provider.clone()),
@@ -1021,6 +1048,105 @@ fn stop_recording(
                 anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
             })
             .unwrap_or_default();
+
+        const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT: &str =
+            "You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
+
+        #[derive(Clone, Debug, Default)]
+        struct QuickReplaceProfileConfig {
+            enabled: bool,
+            provider: Option<String>,
+            model: Option<String>,
+            system_prompt: String,
+        }
+
+        let default_profile = config
+            .llm_config
+            .program_prompt_profiles
+            .iter()
+            .find(|p| p.id == "default");
+
+        let quick_replace_cfg: QuickReplaceProfileConfig = {
+            let enabled_opt = profile
+                .as_ref()
+                .and_then(|p| p.quick_replace_enabled)
+                .or_else(|| default_profile.and_then(|p| p.quick_replace_enabled));
+
+            // Backward-compatible fallback to the legacy global key (pre per-profile settings).
+            let enabled_legacy: bool = get_setting_from_store(app, "quick_replace_enabled", false);
+
+            let enabled = !is_quick_ask_session && enabled_opt.unwrap_or(enabled_legacy);
+
+            let provider = profile
+                .as_ref()
+                .and_then(|p| p.quick_replace_provider.clone())
+                .or_else(|| default_profile.and_then(|p| p.quick_replace_provider.clone()))
+                .or_else(|| profile.as_ref().and_then(|p| p.llm_provider.clone()))
+                .or_else(|| default_profile.and_then(|p| p.llm_provider.clone()))
+                .or(Some(config.llm_config.provider.clone()));
+
+            let provider_for_default_model = provider
+                .as_deref()
+                .unwrap_or("openai");
+
+            let model = profile
+                .as_ref()
+                .and_then(|p| p.quick_replace_model.clone())
+                .or_else(|| default_profile.and_then(|p| p.quick_replace_model.clone()))
+                .or_else(|| profile.as_ref().and_then(|p| p.llm_model.clone()))
+                .or_else(|| default_profile.and_then(|p| p.llm_model.clone()))
+                .or_else(|| config.llm_config.model.clone())
+                .or_else(|| {
+                    llm::default_llm_model_for_provider(provider_for_default_model)
+                        .map(|m| m.to_string())
+                });
+
+            let system_prompt = profile
+                .as_ref()
+                .and_then(|p| p.quick_replace_system_prompt.clone())
+                .or_else(|| default_profile.and_then(|p| p.quick_replace_system_prompt.clone()))
+                .unwrap_or_else(|| DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT.to_string());
+
+            QuickReplaceProfileConfig {
+                enabled,
+                provider,
+                model,
+                system_prompt,
+            }
+        };
+
+        // Quick replace: if enabled for this profile, probe for currently highlighted text while
+        // transcription runs. This must not block transcription.
+        let quick_replace_epoch: u64 = if quick_replace_cfg.enabled {
+            let epoch = state
+                .quick_replace_probe_epoch
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1);
+
+            if let Ok(mut probe) = state.quick_replace_probe.lock() {
+                probe.epoch = epoch;
+                probe.ready = false;
+                probe.selection_text = None;
+            }
+
+            let app_for_probe = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let selection = crate::commands::text::probe_selected_text_via_copy().ok().flatten();
+
+                let state = app_for_probe.state::<AppState>();
+                let lock_result = state.quick_replace_probe.lock();
+                if let Ok(mut probe) = lock_result {
+                    if probe.epoch == epoch {
+                        probe.selection_text = selection;
+                        probe.ready = true;
+                    }
+                }
+            });
+
+            epoch
+        } else {
+            0
+        };
 
         // Capture current request id (for history + retry audio).
         //
@@ -1197,7 +1323,11 @@ fn stop_recording(
 
                     // Update request log store
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                        let should_complete_now = !is_quick_ask_session;
+                        // Like Quick Ask, Quick Replace needs to keep the request log open
+                        // until the extra LLM step completes, otherwise the UI won't capture
+                        // the additional diagnostics.
+                        let should_complete_now = !is_quick_ask_session
+                            && !(quick_replace_cfg.enabled && quick_replace_epoch != 0);
 
                         log_store.with_current(|log| {
                             // Raw STT output (pre-LLM)
@@ -1315,9 +1445,6 @@ fn stop_recording(
                                     Some(&wav),
                                 );
                             }
-                        }
-
-                        if should_complete_now {
                             log_store.complete_current();
                         }
                     }
@@ -1343,6 +1470,10 @@ fn stop_recording(
 
                     if let Some(ref text) = filtered_transcript {
                         let _ = app_clone.emit("pipeline-transcript-ready", text);
+
+                        // Default output is the (possibly rewritten) pipeline transcript.
+                        // Quick Replace may overwrite this when a selection is present.
+                        let mut output_value = text.clone();
 
                         // Quick Ask: instead of outputting/pasting the transcript, send it to an LLM
                         // for an answer and show it in a dedicated overlay.
@@ -1638,8 +1769,232 @@ fn stop_recording(
                                 }
                             }
                         } else {
-                            // Output the transcript based on mode
-                            if let Err(e) = commands::text::output_text_with_mode(text, output_mode, output_hit_enter) {
+                            // Output the transcript based on mode.
+                            // If Quick Replace is enabled and we captured highlighted text when transcription started,
+                            // rewrite the selection using the transcript as an instruction.
+                            if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
+                                // Wait briefly for the selection probe to finish (best-effort).
+                                let selected_text: Option<String> = {
+                                    let deadline = Instant::now()
+                                        + Duration::from_millis(700);
+                                    loop {
+                                        let (ready, selection) = {
+                                            let state = app_clone.state::<AppState>();
+                                            let lock_result = state.quick_replace_probe.lock();
+                                            let x = match lock_result {
+                                                Ok(probe) if probe.epoch == quick_replace_epoch => {
+                                                    (probe.ready, probe.selection_text.clone())
+                                                }
+                                                _ => (true, None),
+                                            };
+
+                                            x
+                                        };
+
+                                        if ready {
+                                            break selection;
+                                        }
+
+                                        if Instant::now() >= deadline {
+                                            break None;
+                                        }
+
+                                        tokio::time::sleep(Duration::from_millis(20)).await;
+                                    }
+                                };
+
+                                if let Some(selected) = selected_text
+                                    .as_ref()
+                                    .map(|s| s.trim())
+                                    .filter(|s| !s.is_empty())
+                                {
+                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                        log_store.with_current(|log| {
+                                            log.kind = RequestKind::QuickReplace;
+                                            log.info(format!(
+                                                "Quick replace: rewriting selection ({} chars)",
+                                                selected.len()
+                                            ));
+
+                                            // Best-effort: keep these bounded so request logs stay usable.
+                                            let cap = 8_000usize;
+                                            let selected_capped = if selected.len() > cap {
+                                                format!("{}\n\n… (truncated)", &selected[..cap])
+                                            } else {
+                                                selected.to_string()
+                                            };
+
+                                            let instructions = output_value.trim().to_string();
+                                            let instructions_capped = if instructions.len() > cap {
+                                                format!("{}\n\n… (truncated)", &instructions[..cap])
+                                            } else {
+                                                instructions
+                                            };
+
+                                            log.quick_replace_selected_text = Some(selected_capped);
+                                            log.quick_replace_instructions = Some(instructions_capped);
+                                        });
+                                    }
+
+                                    // Resolve effective LLM config from the Quick Replace profile settings.
+                                    let cfg = pipeline_clone.config();
+                                    let provider = quick_replace_cfg
+                                        .provider
+                                        .clone()
+                                        .unwrap_or_else(|| cfg.llm_config.provider.clone());
+                                    let model = quick_replace_cfg
+                                        .model
+                                        .clone()
+                                        .or_else(|| cfg.llm_config.model.clone())
+                                        .or_else(|| {
+                                            llm::default_llm_model_for_provider(provider.as_str())
+                                                .map(|m| m.to_string())
+                                        });
+                                    let api_key = if provider == "ollama" {
+                                        String::new()
+                                    } else {
+                                        cfg.llm_api_keys
+                                            .get(provider.as_str())
+                                            .cloned()
+                                            .unwrap_or_default()
+                                    };
+
+                                    if provider != "ollama" && api_key.trim().is_empty() {
+                                        if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                            log_store.with_current(|log| {
+                                                log.warn(format!(
+                                                    "Quick replace: skipped (no API key configured for provider: {})",
+                                                    provider
+                                                ));
+                                            });
+                                        }
+                                    } else {
+                                        // NOTE: Keep prompts minimal and instruct the model to output only the rewritten text.
+                                        let system_prompt = quick_replace_cfg.system_prompt.clone();
+                                        let instructions_text = output_value.trim().to_string();
+                                        let user_prompt = format!(
+                                            "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}\n\nReturn only the updated text.",
+                                            instructions_text,
+                                            selected
+                                        );
+
+                                        let provider_cfg = crate::llm::LlmConfig {
+                                            enabled: true,
+                                            provider: provider.clone(),
+                                            api_key,
+                                            model,
+                                            ollama_url: cfg.llm_config.ollama_url.clone(),
+                                            openai_reasoning_effort: cfg.llm_config.openai_reasoning_effort.clone(),
+                                            gemini_thinking_budget: cfg.llm_config.gemini_thinking_budget,
+                                            gemini_thinking_level: cfg.llm_config.gemini_thinking_level.clone(),
+                                            anthropic_thinking_budget: cfg.llm_config.anthropic_thinking_budget,
+                                            prompts: crate::llm::PromptSections::default(),
+                                            program_prompt_profiles: Vec::new(),
+                                            timeout: cfg.llm_config.timeout,
+                                        };
+
+                                        let provider_impl = crate::commands::llm::create_llm_provider_unstructured(&provider_cfg);
+                                        let t0 = Instant::now();
+                                        match provider_impl
+                                            .complete(&system_prompt, &user_prompt)
+                                            .await
+                                        {
+                                            Ok(rewritten) => {
+                                                let rewritten = rewritten.trim().to_string();
+                                                if !rewritten.is_empty() {
+                                                    output_value = rewritten;
+                                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                        let ms = t0.elapsed().as_millis() as u64;
+                                                        log_store.with_current(|log| {
+                                                            log.kind = RequestKind::QuickReplace;
+                                                            log.info(format!(
+                                                                "Quick replace: rewrite succeeded in {}ms ({} chars)",
+                                                                ms,
+                                                                output_value.len()
+                                                            ));
+
+                                                            log.quick_replace_provider =
+                                                                Some(provider_impl.name().to_string());
+                                                            log.quick_replace_model =
+                                                                Some(provider_impl.model().to_string());
+                                                            log.quick_replace_duration_ms = Some(ms);
+                                                            log.quick_replace_output_text = Some(output_value.clone());
+                                                            log.quick_replace_request_json = Some(serde_json::json!({
+                                                                "provider": provider.clone(),
+                                                                "model": provider_impl.model(),
+                                                                "system_prompt": system_prompt.clone(),
+                                                                "instructions_chars": instructions_text.len(),
+                                                                "selected_text_chars": selected.len(),
+                                                            }));
+                                                            log.quick_replace_response_json = Some(serde_json::json!({
+                                                                "ok": true,
+                                                                "provider_used": provider_impl.name(),
+                                                                "model_used": provider_impl.model(),
+                                                                "duration_ms": ms,
+                                                                "output_chars": output_value.len(),
+                                                            }));
+
+                                                            // The effective final output for this request.
+                                                            log.formatted_transcript = Some(output_value.clone());
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                    log_store.with_current(|log| {
+                                                        log.kind = RequestKind::QuickReplace;
+                                                        log.quick_replace_provider = Some(provider.clone());
+                                                        log.quick_replace_model = quick_replace_cfg.model.clone();
+                                                        log.quick_replace_request_json = Some(serde_json::json!({
+                                                            "provider": provider.clone(),
+                                                            "system_prompt": system_prompt.clone(),
+                                                            "selected_text_chars": selected.len(),
+                                                        }));
+                                                        log.quick_replace_response_json = Some(serde_json::json!({
+                                                            "ok": false,
+                                                            "error": e.to_string(),
+                                                        }));
+                                                        log.warn(format!(
+                                                            "Quick replace: rewrite failed; falling back to transcript ({})",
+                                                            e
+                                                        ));
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // If we deferred request-log completion for Quick Replace, finalize it now.
+                            // (Quick Ask handles its own completion in its branch.)
+                            if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
+                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                    log_store.with_current(|log| {
+                                        if log.status == crate::request_log::RequestStatus::InProgress {
+                                            log.complete_success();
+                                        }
+                                    });
+
+                                    if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                        stats::emit_cost_events_for_current_request(
+                                            &app_clone,
+                                            stats::EventStatus::Success,
+                                            Some(&wav),
+                                        );
+                                    }
+
+                                    log_store.complete_current();
+                                }
+                            }
+
+                            // Output using the selected output mode.
+                            if let Err(e) = commands::text::output_text_with_mode(
+                                &output_value,
+                                output_mode,
+                                output_hit_enter,
+                            ) {
                                 log::error!("Failed to output transcript: {}", e);
 
                                 if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
@@ -1654,7 +2009,8 @@ fn stop_recording(
                         if !is_quick_ask_session {
                             if let Some(ref req_id) = request_id {
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                    if let Err(e) = history.complete_request_success(req_id, text.clone()) {
+                                    // Store the actual output (Quick Replace may have changed it).
+                                    if let Err(e) = history.complete_request_success(req_id, output_value.clone()) {
                                         log::warn!("Failed to update history: {}", e);
                                     }
 
@@ -4111,6 +4467,11 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
                 quick_ask_provider: p.quick_ask_provider,
                 quick_ask_model: p.quick_ask_model,
                 quick_ask_system_prompt: p.quick_ask_system_prompt,
+
+                quick_replace_enabled: p.quick_replace_enabled,
+                quick_replace_provider: p.quick_replace_provider,
+                quick_replace_model: p.quick_replace_model,
+                quick_replace_system_prompt: p.quick_replace_system_prompt,
                 quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
                 quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
                 quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,

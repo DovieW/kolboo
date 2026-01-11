@@ -85,6 +85,10 @@ const DEFAULT_STT_TIMEOUT = 10;
 const DEFAULT_QUICK_ASK_SYSTEM_PROMPT =
   "Try to answer the question in a single word, sentence or paragraph when possible. Use markdown for formatting when necessary.";
 
+// Keep this aligned with backend defaults (see Quick Replace config resolution in `src-tauri/src/lib.rs`).
+const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT =
+  "You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
+
 function formatUsdRateFromMicros(micros: number): string {
   const safeMicros =
     typeof micros === "number" && Number.isFinite(micros) ? micros : 0;
@@ -203,6 +207,11 @@ export function PromptSettings({
         router: null,
         active_preset_id: null,
         rewrite_llm_enabled: null,
+
+        quick_replace_enabled: null,
+        quick_replace_provider: null,
+        quick_replace_model: null,
+        quick_replace_system_prompt: null,
       } as any;
     }
 
@@ -236,6 +245,15 @@ export function PromptSettings({
     string | null
   >(null);
   const [localQuickAskSystemPrompt, setLocalQuickAskSystemPrompt] =
+    useState<string>("");
+
+  const [localProfileQuickReplaceEnabled, setLocalProfileQuickReplaceEnabled] =
+    useState<boolean>(false);
+  const [localProfileQuickReplaceProvider, setLocalProfileQuickReplaceProvider] =
+    useState<string | null>(null);
+  const [localProfileQuickReplaceModel, setLocalProfileQuickReplaceModel] =
+    useState<string | null>(null);
+  const [localQuickReplaceSystemPrompt, setLocalQuickReplaceSystemPrompt] =
     useState<string>("");
 
   // Per-profile thinking/reasoning knobs (stored on the profile object).
@@ -739,6 +757,17 @@ export function PromptSettings({
   const [quickAskSystemPromptInheriting, setQuickAskSystemPromptInheriting] =
     useState(false);
 
+  const [quickReplaceEnabledInheriting, setQuickReplaceEnabledInheriting] =
+    useState(false);
+  const [quickReplaceProviderInheriting, setQuickReplaceProviderInheriting] =
+    useState(false);
+  const [quickReplaceModelInheriting, setQuickReplaceModelInheriting] =
+    useState(false);
+  const [
+    quickReplaceSystemPromptInheriting,
+    setQuickReplaceSystemPromptInheriting,
+  ] = useState(false);
+
   const [
     quickAskOpenAiReasoningEffortInheriting,
     setQuickAskOpenAiReasoningEffortInheriting,
@@ -861,6 +890,36 @@ export function PromptSettings({
         activeProfile.quick_ask_system_prompt === null ||
         activeProfile.quick_ask_system_prompt === undefined;
 
+      const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
+
+      // Quick Replace inherits from the Default profile. If Default has never been
+      // configured, we fall back to the legacy global toggle for backward
+      // compatibility.
+      const baseQuickReplaceEnabled =
+        typeof defaultProfile?.quick_replace_enabled === "boolean"
+          ? defaultProfile.quick_replace_enabled
+          : settings?.quick_replace_enabled ?? false;
+      const baseQuickReplaceProvider =
+        defaultProfile?.quick_replace_provider ?? settings?.llm_provider ?? null;
+      const baseQuickReplaceModel =
+        defaultProfile?.quick_replace_model ?? settings?.llm_model ?? null;
+      const baseQuickReplaceSystemPrompt =
+        defaultProfile?.quick_replace_system_prompt ??
+        DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT;
+
+      const quickReplaceEnabledIsNull =
+        activeProfile.quick_replace_enabled === null ||
+        activeProfile.quick_replace_enabled === undefined;
+      const quickReplaceProviderIsNull =
+        activeProfile.quick_replace_provider === null ||
+        activeProfile.quick_replace_provider === undefined;
+      const quickReplaceModelIsNull =
+        activeProfile.quick_replace_model === null ||
+        activeProfile.quick_replace_model === undefined;
+      const quickReplaceSystemPromptIsNull =
+        activeProfile.quick_replace_system_prompt === null ||
+        activeProfile.quick_replace_system_prompt === undefined;
+
       const quickAskOpenAiReasoningEffortIsNull =
         activeProfile.quick_ask_openai_reasoning_effort === null ||
         activeProfile.quick_ask_openai_reasoning_effort === undefined;
@@ -889,6 +948,11 @@ export function PromptSettings({
       setQuickAskProviderInheriting(quickAskProviderIsNull);
       setQuickAskModelInheriting(quickAskModelIsNull);
       setQuickAskSystemPromptInheriting(quickAskSystemPromptIsNull);
+
+      setQuickReplaceEnabledInheriting(quickReplaceEnabledIsNull);
+      setQuickReplaceProviderInheriting(quickReplaceProviderIsNull);
+      setQuickReplaceModelInheriting(quickReplaceModelIsNull);
+      setQuickReplaceSystemPromptInheriting(quickReplaceSystemPromptIsNull);
 
       setQuickAskOpenAiReasoningEffortInheriting(
         quickAskOpenAiReasoningEffortIsNull
@@ -933,6 +997,30 @@ export function PromptSettings({
         activeProfile.quick_ask_system_prompt ??
           settings?.quick_ask_system_prompt ??
           ""
+      );
+
+      setLocalProfileQuickReplaceEnabled(
+        activeProfileId === "default"
+          ? typeof activeProfile.quick_replace_enabled === "boolean"
+            ? activeProfile.quick_replace_enabled
+            : settings?.quick_replace_enabled ?? false
+          : activeProfile.quick_replace_enabled ?? baseQuickReplaceEnabled
+      );
+      setLocalProfileQuickReplaceProvider(
+        activeProfileId === "default"
+          ? activeProfile.quick_replace_provider ?? settings?.llm_provider ?? null
+          : activeProfile.quick_replace_provider ?? baseQuickReplaceProvider
+      );
+      setLocalProfileQuickReplaceModel(
+        activeProfileId === "default"
+          ? activeProfile.quick_replace_model ?? settings?.llm_model ?? null
+          : activeProfile.quick_replace_model ?? baseQuickReplaceModel
+      );
+      setLocalQuickReplaceSystemPrompt(
+        activeProfileId === "default"
+          ? activeProfile.quick_replace_system_prompt ??
+              DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
+          : activeProfile.quick_replace_system_prompt ?? baseQuickReplaceSystemPrompt
       );
 
       setLocalProfileOpenAiReasoningEffort(
@@ -994,6 +1082,11 @@ export function PromptSettings({
       setQuickAskModelInheriting(false);
       setQuickAskSystemPromptInheriting(false);
 
+      setQuickReplaceEnabledInheriting(false);
+      setQuickReplaceProviderInheriting(false);
+      setQuickReplaceModelInheriting(false);
+      setQuickReplaceSystemPromptInheriting(false);
+
       setQuickAskOpenAiReasoningEffortInheriting(false);
       setQuickAskGeminiThinkingLevelInheriting(false);
       setQuickAskGeminiThinkingBudgetInheriting(false);
@@ -1006,6 +1099,11 @@ export function PromptSettings({
       setLocalProfileQuickAskProvider(null);
       setLocalProfileQuickAskModel(null);
       setLocalQuickAskSystemPrompt(settings?.quick_ask_system_prompt ?? "");
+
+      setLocalProfileQuickReplaceEnabled(settings?.quick_replace_enabled ?? false);
+      setLocalProfileQuickReplaceProvider(settings?.llm_provider ?? null);
+      setLocalProfileQuickReplaceModel(settings?.llm_model ?? null);
+      setLocalQuickReplaceSystemPrompt(DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT);
       setLocalProfileRewriteEnabled(defaultRewriteEnabled);
       setLocalProfileSttTimeout(
         settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT
@@ -1033,6 +1131,8 @@ export function PromptSettings({
     settings?.quick_ask_model,
     settings?.quick_ask_system_prompt,
     defaultRewriteEnabled,
+    profiles,
+    settings?.quick_replace_enabled,
   ]);
 
   const isLoading =
@@ -1207,6 +1307,29 @@ export function PromptSettings({
       ? rawQuickAskProvider
       : null;
 
+  const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
+
+  const defaultQuickReplaceEnabled =
+    typeof defaultProfile?.quick_replace_enabled === "boolean"
+      ? defaultProfile.quick_replace_enabled
+      : settings?.quick_replace_enabled ?? false;
+  const defaultQuickReplaceProvider =
+    defaultProfile?.quick_replace_provider ?? settings?.llm_provider ?? null;
+  const defaultQuickReplaceModel =
+    defaultProfile?.quick_replace_model ?? settings?.llm_model ?? null;
+  const defaultQuickReplaceSystemPrompt =
+    defaultProfile?.quick_replace_system_prompt ??
+    DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT;
+
+  const rawQuickReplaceProvider =
+    activeProfileId === "default"
+      ? localProfileQuickReplaceProvider ?? settings?.llm_provider ?? null
+      : localProfileQuickReplaceProvider ?? defaultQuickReplaceProvider;
+  const effectiveQuickReplaceProvider =
+    rawQuickReplaceProvider && llmProviderValueSet.has(rawQuickReplaceProvider)
+      ? rawQuickReplaceProvider
+      : null;
+
   const effectiveQuickAskModel =
     effectiveQuickAskProvider === null
       ? null
@@ -1310,12 +1433,14 @@ export function PromptSettings({
   const fireworksModelsQuery = useFireworksModels(
     effectiveLlmProvider === "fireworks" ||
       effectiveQuickAskProvider === "fireworks" ||
+      effectiveQuickReplaceProvider === "fireworks" ||
       routerLlmProvider === "fireworks"
   );
 
   const ollamaModelsQuery = useOllamaModels(
     effectiveLlmProvider === "ollama" ||
       effectiveQuickAskProvider === "ollama" ||
+      effectiveQuickReplaceProvider === "ollama" ||
       routerLlmProvider === "ollama"
   );
 
@@ -1339,6 +1464,9 @@ export function PromptSettings({
   const llmModelOptions = getLlmModelOptionsForProvider(effectiveLlmProvider);
   const quickAskModelOptions = getLlmModelOptionsForProvider(
     effectiveQuickAskProvider
+  );
+  const quickReplaceModelOptions = getLlmModelOptionsForProvider(
+    effectiveQuickReplaceProvider
   );
 
   // If Ollama is selected and no explicit model is set yet, automatically
@@ -1393,6 +1521,18 @@ export function PromptSettings({
         quickAskModelOptions[0]?.value ??
         null
       : localProfileQuickAskModel;
+
+  const selectedQuickReplaceModelForUi =
+    quickReplaceModelOptions.length === 0
+      ? null
+      : isDefaultScope
+      ? localProfileQuickReplaceModel ??
+        (effectiveQuickReplaceProvider === effectiveLlmProvider
+          ? settings?.llm_model
+          : null) ??
+        quickReplaceModelOptions[0]?.value ??
+        null
+      : localProfileQuickReplaceModel;
 
   const effectiveLlmModel =
     effectiveLlmProvider === null
@@ -6214,6 +6354,326 @@ export function PromptSettings({
           </div>
         </>
       ) : null}
+
+      <div className="settings-mini-header">
+        <span className="settings-mini-header__text">Quick Replace</span>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Quick Replace</p>
+          <p className="settings-description">
+            If you have text highlighted when transcription starts, Kolboo will
+            copy the selection, treat your transcript as instructions, rewrite
+            the selected text with an LLM, then output using your output mode
+            (Paste replaces the selection).
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && quickReplaceEnabledInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope && !quickReplaceEnabledInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Quick Replace override?",
+                    onConfirm: () => {
+                      setQuickReplaceEnabledInheriting(true);
+                      setLocalProfileQuickReplaceEnabled(
+                        defaultQuickReplaceEnabled
+                      );
+                      saveProfileMetadata({ quick_replace_enabled: null });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Switch
+            checked={localProfileQuickReplaceEnabled}
+            onChange={(e) => {
+              const enabled = e.currentTarget.checked;
+              if (!isDefaultScope) setQuickReplaceEnabledInheriting(false);
+              setLocalProfileQuickReplaceEnabled(enabled);
+              saveProfileMetadata({ quick_replace_enabled: enabled });
+            }}
+            color="gray"
+            size="md"
+          />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Provider</p>
+          <p className="settings-description">
+            AI service used to rewrite the highlighted text.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && quickReplaceProviderInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {isDefaultScope &&
+            (activeProfile?.quick_replace_provider != null ||
+              activeProfile?.quick_replace_model != null) && (
+              <Tooltip label="Use Rewrite provider/model" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() => {
+                    setLocalProfileQuickReplaceProvider(
+                      settings?.llm_provider ?? null
+                    );
+                    setLocalProfileQuickReplaceModel(settings?.llm_model ?? null);
+                    saveProfileMetadata({
+                      quick_replace_provider: null,
+                      quick_replace_model: null,
+                    });
+                  }}
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          {!isDefaultScope && !quickReplaceProviderInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Quick Replace Provider override?",
+                    onConfirm: () => {
+                      setQuickReplaceProviderInheriting(true);
+                      setQuickReplaceModelInheriting(true);
+                      setLocalProfileQuickReplaceProvider(
+                        defaultQuickReplaceProvider
+                      );
+                      setLocalProfileQuickReplaceModel(defaultQuickReplaceModel);
+                      saveProfileMetadata({
+                        quick_replace_provider: null,
+                        quick_replace_model: null,
+                      });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Select
+            data={llmProviderOptions}
+            value={effectiveQuickReplaceProvider}
+            onChange={(value) => {
+              if (!value) return;
+
+              if (!isDefaultScope) {
+                setQuickReplaceProviderInheriting(false);
+                setQuickReplaceModelInheriting(false);
+              }
+
+              setLocalProfileQuickReplaceProvider(value);
+              const models = getLlmModelOptionsForProvider(value);
+              const firstModel = models[0]?.value ?? null;
+              setLocalProfileQuickReplaceModel(firstModel);
+              saveProfileMetadata({
+                quick_replace_provider: value,
+                quick_replace_model: firstModel,
+              });
+            }}
+            placeholder="Select provider"
+            withCheckIcon={false}
+            disabled={
+              llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+            }
+            styles={{
+              input: {
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              },
+            }}
+          />
+        </div>
+      </div>
+
+      {quickReplaceModelOptions.length > 0 ? (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Model</p>
+            <p className="settings-description">
+              LLM model used to rewrite the highlighted text.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && quickReplaceModelInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !quickReplaceModelInheriting && (
+              <Tooltip label="Disable override (inherit from Default)" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Quick Replace Model override?",
+                      onConfirm: () => {
+                        setQuickReplaceModelInheriting(true);
+                        setLocalProfileQuickReplaceModel(
+                          defaultQuickReplaceModel
+                        );
+                        saveProfileMetadata({ quick_replace_model: null });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Select
+              data={quickReplaceModelOptions}
+              value={selectedQuickReplaceModelForUi}
+              onChange={(value) => {
+                if (!value) return;
+                if (!isDefaultScope) setQuickReplaceModelInheriting(false);
+                setLocalProfileQuickReplaceModel(value);
+                saveProfileMetadata({ quick_replace_model: value });
+              }}
+              placeholder="Select model"
+              withCheckIcon={false}
+              styles={{
+                input: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                  color: "var(--text-primary)",
+                  minWidth: 200,
+                },
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div
+        className="settings-accordion-block"
+        style={{ marginTop: 0, marginBottom: 16 }}
+      >
+        <Accordion variant="separated" radius="md">
+          <PromptSectionEditor
+            sectionKey={`${activeProfileId}-quick-replace-system-prompt`}
+            title="System Prompt"
+            description="Optional instructions that apply to all Quick Replace rewrites."
+            enabled={true}
+            hideToggle={true}
+            placeholder="(leave empty to use the default prompt)"
+            initialContent={localQuickReplaceSystemPrompt}
+            defaultContent={
+              isDefaultScope
+                ? DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
+                : defaultQuickReplaceSystemPrompt
+            }
+            hasCustom={
+              isDefaultScope
+                ? (() => {
+                    const stored = activeProfile?.quick_replace_system_prompt;
+                    if (stored == null) return false;
+                    return stored !== DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT;
+                  })()
+                : activeProfile?.quick_replace_system_prompt !== null &&
+                  activeProfile?.quick_replace_system_prompt !== undefined
+            }
+            inheritMode={
+              isDefaultScope
+                ? null
+                : quickReplaceSystemPromptInheriting
+                ? "inheriting"
+                : "overriding"
+            }
+            inheritTooltip={INHERIT_TOOLTIP}
+            disableOverrideTooltip="Disable override (inherit from Default)"
+            onDisableOverride={
+              isDefaultScope
+                ? undefined
+                : () =>
+                    openDisableOverrideDialog({
+                      title: "Disable Quick Replace System Prompt override?",
+                      onConfirm: () => {
+                        setQuickReplaceSystemPromptInheriting(true);
+                        setLocalQuickReplaceSystemPrompt(
+                          defaultQuickReplaceSystemPrompt
+                        );
+                        saveProfileMetadata({
+                          quick_replace_system_prompt: null,
+                        });
+                      },
+                    })
+            }
+            onToggle={() => {}}
+            onSave={(content) => {
+              if (isDefaultScope) {
+                const normalized = content.trim();
+                const toStore: string | null =
+                  normalized.length > 0 &&
+                  content !== DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
+                    ? content
+                    : null;
+
+                const nextLocal =
+                  toStore == null
+                    ? DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
+                    : content;
+
+                setLocalQuickReplaceSystemPrompt(nextLocal);
+                saveProfileMetadata({ quick_replace_system_prompt: toStore });
+                return;
+              }
+
+              const base = defaultQuickReplaceSystemPrompt;
+              const toStore = content === base ? null : content;
+              const nextLocal = toStore == null ? base : content;
+
+              setLocalQuickReplaceSystemPrompt(nextLocal);
+              setQuickReplaceSystemPromptInheriting(toStore == null);
+              saveProfileMetadata({ quick_replace_system_prompt: toStore });
+            }}
+            onReset={() => {
+              if (isDefaultScope) {
+                setLocalQuickReplaceSystemPrompt(
+                  DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
+                );
+                saveProfileMetadata({ quick_replace_system_prompt: null });
+                return;
+              }
+
+              const base = defaultQuickReplaceSystemPrompt;
+              setLocalQuickReplaceSystemPrompt(base);
+              setQuickReplaceSystemPromptInheriting(true);
+              saveProfileMetadata({ quick_replace_system_prompt: null });
+            }}
+            isSaving={updateRewriteProgramPromptProfiles.isPending}
+          />
+        </Accordion>
+      </div>
 
       <div className="settings-mini-header">
         <span className="settings-mini-header__text">Quick Ask</span>

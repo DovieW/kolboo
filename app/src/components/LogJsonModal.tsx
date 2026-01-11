@@ -11,6 +11,8 @@ type TabKey =
   | "llm-response"
   | "quick-ask-request"
   | "quick-ask-response"
+  | "quick-replace-request"
+  | "quick-replace-response"
   | "router-request"
   | "router-response";
 
@@ -96,6 +98,9 @@ export function LogJsonModal({
   const hasQuickAskPayload =
     log.quick_ask_request_json !== undefined ||
     log.quick_ask_response_json !== undefined;
+  const hasQuickReplacePayload =
+    log.quick_replace_request_json !== undefined ||
+    log.quick_replace_response_json !== undefined;
   const hasRouterPayload =
     log.router_request_json !== undefined ||
     log.router_response_json !== undefined;
@@ -106,7 +111,15 @@ export function LogJsonModal({
   useEffect(() => {
     if (!opened) return;
     setTab("full");
-  }, [opened, log.id, hasSttPayload, hasLlmPayload, hasQuickAskPayload, hasRouterPayload]);
+  }, [
+    opened,
+    log.id,
+    hasSttPayload,
+    hasLlmPayload,
+    hasQuickAskPayload,
+    hasQuickReplacePayload,
+    hasRouterPayload,
+  ]);
 
   return (
     <Modal
@@ -137,9 +150,9 @@ export function LogJsonModal({
           {" "}
           STT requests often use a debug preview with <code>&lt;binary audio omitted&gt;</code>
           placeholders (multipart/raw bodies can’t be shown verbatim). LLM request/response JSON is
-          typically the actual API body. Quick Ask payloads are the logical prompt/question/answer
-          metadata (not necessarily the provider’s raw wire format). Embeddings payloads include an
-          input preview and redact raw embedding floats.
+          typically the actual API body. Quick Ask/Quick Replace payloads are the logical
+          prompt/question/answer metadata (not necessarily the provider’s raw wire format).
+          Embeddings payloads include an input preview and redact raw embedding floats.
         </Text>
 
         <Tabs
@@ -174,6 +187,17 @@ export function LogJsonModal({
               <>
                 <Tabs.Tab value="quick-ask-request">Quick Ask (logical)</Tabs.Tab>
                 <Tabs.Tab value="quick-ask-response">Quick Ask Result</Tabs.Tab>
+              </>
+            )}
+
+            {hasQuickReplacePayload && (
+              <>
+                <Tabs.Tab value="quick-replace-request">
+                  Quick Replace (logical)
+                </Tabs.Tab>
+                <Tabs.Tab value="quick-replace-response">
+                  Quick Replace Result
+                </Tabs.Tab>
               </>
             )}
 
@@ -250,6 +274,25 @@ export function LogJsonModal({
             </>
           )}
 
+          {hasQuickReplacePayload && (
+            <>
+              <Tabs.Panel
+                value="quick-replace-request"
+                pt="sm"
+                style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+              >
+                <JsonPanel value={log.quick_replace_request_json} />
+              </Tabs.Panel>
+              <Tabs.Panel
+                value="quick-replace-response"
+                pt="sm"
+                style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+              >
+                <JsonPanel value={log.quick_replace_response_json} />
+              </Tabs.Panel>
+            </>
+          )}
+
           {hasRouterPayload && (
             <>
               <Tabs.Panel
@@ -270,9 +313,13 @@ export function LogJsonModal({
           )}
         </Tabs>
 
-        {!hasSttPayload && !hasLlmPayload && !hasQuickAskPayload && !hasRouterPayload && (
+        {!hasSttPayload &&
+          !hasLlmPayload &&
+          !hasQuickAskPayload &&
+          !hasQuickReplacePayload &&
+          !hasRouterPayload && (
           <Text size="xs" c="dimmed">
-            No STT/LLM/Quick Ask/Router payloads captured for this request.
+            No STT/LLM/Quick Ask/Quick Replace/Router payloads captured for this request.
           </Text>
         )}
       </Stack>

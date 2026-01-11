@@ -213,7 +213,8 @@ pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), Strin
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
     // Set new text and wait for it to become visible to readers (best-effort).
-    set_clipboard_text_with_barrier(&mut clipboard, text, false)?;
+    // Even when we keep the text on the clipboard, avoid adding it to Win+V history.
+    set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
 
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
@@ -245,7 +246,8 @@ pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), Strin
 /// Copy text to clipboard only (no paste)
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
-    set_clipboard_text_with_barrier(&mut clipboard, text, false)?;
+    // Avoid adding our output to Win+V history.
+    set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
     log::info!("Copied {} chars to clipboard", text.len());
     Ok(())
 }
@@ -319,4 +321,91 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Best-effort: attempt to capture highlighted/selected text from the currently focused app.
+///
+/// Strategy:
+/// - (Optionally) save the current clipboard text (text-only)
+/// - send Ctrl+C / Cmd+C to copy selection
+/// - read clipboard text
+/// - restore the previous clipboard text when safe
+///
+/// Notes / tradeoffs:
+/// - This is inherently best-effort; not all apps expose copyable selection.
+/// - We only preserve/restore *text* clipboard content (same limitation as paste mode).
+/// - On Windows, we exclude our transient clipboard writes from Win+V history.
+pub fn probe_selected_text_via_copy() -> Result<Option<String>, String> {
+    // Serialize with output injections so key events can't interleave.
+    let _guard = output_injection_lock()
+        .lock()
+        .map_err(|_| "Output lock poisoned".to_string())?;
+
+    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+
+    // Save previous clipboard content (text only).
+    let previous: Option<String> = clipboard.get_text().ok();
+
+    // Simulate Ctrl+C / Cmd+C.
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    let modifier = Key::Meta;
+    #[cfg(not(target_os = "macos"))]
+    let modifier = Key::Control;
+
+    enigo
+        .key(modifier, Direction::Press)
+        .map_err(|e| e.to_string())?;
+    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+    enigo
+        .key(Key::Unicode('c'), Direction::Click)
+        .map_err(|e| e.to_string())?;
+    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
+    enigo
+        .key(modifier, Direction::Release)
+        .map_err(|e| e.to_string())?;
+
+    // Wait briefly for clipboard to update and then read it.
+    let mut captured: Option<String> = None;
+    for _ in 0..CLIPBOARD_VERIFY_ATTEMPTS {
+        thread::sleep(Duration::from_millis(CLIPBOARD_VERIFY_DELAY_MS));
+        if let Ok(current) = clipboard.get_text() {
+            if current.trim().is_empty() {
+                continue;
+            }
+            captured = Some(current);
+            break;
+        }
+    }
+
+    // On Windows, the copy action is performed by the *target application* and may be recorded
+    // by Win+V clipboard history. We can't directly control that, but we can try to reduce
+    // history pollution by immediately rewriting the captured content using WinRT clipboard
+    // options with history disabled.
+    #[cfg(target_os = "windows")]
+    if let Some(captured_text) = captured.as_deref() {
+        // Best-effort: if this fails, we still proceed with restoration below.
+        let _ = set_clipboard_text_platform(&mut clipboard, captured_text, true);
+    }
+
+    // Restore previous clipboard text (best-effort) if we captured something.
+    // If we didn't capture anything, restoring is unnecessary and can be risky
+    // (could clobber user clipboard changes).
+    if let (Some(prev), Some(captured_text)) = (previous, captured.as_ref()) {
+        let should_restore = clipboard
+            .get_text()
+            .ok()
+            .map(|current| current == captured_text.as_str())
+            .unwrap_or(false);
+
+        if should_restore {
+            // Avoid creating a duplicate clipboard-history entry for the restored content.
+            let _ = set_clipboard_text_platform(&mut clipboard, &prev, true);
+        } else {
+            log::debug!("Quick replace probe: clipboard changed; skipping restore");
+        }
+    }
+
+    Ok(captured)
 }

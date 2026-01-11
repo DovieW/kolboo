@@ -38,6 +38,41 @@ pub struct AppState {
     pub quick_ask_session_active: AtomicBool,
     /// Tracks if toggle key is currently held down (for debouncing - action happens on release)
     pub toggle_key_held: AtomicBool,
+
+    /// The program prompt profile id resolved at recording start (before overlays can steal focus).
+    ///
+    /// Used to apply per-profile behavior consistently during stop/transcribe.
+    #[cfg(desktop)]
+    pub recording_session_profile_id: Mutex<Option<String>>,
+
+    /// Monotonic id for Quick Replace selection probes.
+    ///
+    /// Each transcription session can kick off at most one probe.
+    pub quick_replace_probe_epoch: AtomicU64,
+
+    /// Latest Quick Replace selection probe result (ephemeral; never persisted).
+    #[cfg(desktop)]
+    pub quick_replace_probe: Mutex<QuickReplaceProbe>,
+}
+
+/// Ephemeral selection probe state used by the Quick Replace feature.
+#[cfg(desktop)]
+#[derive(Debug, Clone)]
+pub struct QuickReplaceProbe {
+    pub epoch: u64,
+    pub ready: bool,
+    pub selection_text: Option<String>,
+}
+
+#[cfg(desktop)]
+impl Default for QuickReplaceProbe {
+    fn default() -> Self {
+        Self {
+            epoch: 0,
+            ready: true,
+            selection_text: None,
+        }
+    }
 }
 
 /// Keeps the tray icon handle alive for the lifetime of the app.

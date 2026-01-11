@@ -293,6 +293,12 @@ pub struct ProgramPromptProfile {
     pub quick_ask_model: Option<String>,
     pub quick_ask_system_prompt: Option<String>,
 
+    // Quick Replace (per-profile overrides)
+    pub quick_replace_enabled: Option<bool>,
+    pub quick_replace_provider: Option<String>,
+    pub quick_replace_model: Option<String>,
+    pub quick_replace_system_prompt: Option<String>,
+
     // Optional per-profile provider-specific thinking/reasoning knobs for Quick Ask.
     pub quick_ask_openai_reasoning_effort: Option<String>,
     pub quick_ask_gemini_thinking_budget: Option<i64>,

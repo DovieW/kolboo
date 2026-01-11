@@ -416,6 +416,18 @@ pub struct RewriteProgramPromptProfile {
     #[serde(default)]
     pub quick_ask_system_prompt: Option<String>,
 
+    // Quick Replace (per-profile overrides)
+    // When enabled and there is highlighted text when transcription starts, treat the transcript
+    // as an instruction to rewrite the selected text.
+    #[serde(default)]
+    pub quick_replace_enabled: Option<bool>,
+    #[serde(default)]
+    pub quick_replace_provider: Option<String>,
+    #[serde(default)]
+    pub quick_replace_model: Option<String>,
+    #[serde(default)]
+    pub quick_replace_system_prompt: Option<String>,
+
     // Optional per-profile provider-specific thinking/reasoning knobs for Quick Ask.
     #[serde(default)]
     pub quick_ask_openai_reasoning_effort: Option<String>,

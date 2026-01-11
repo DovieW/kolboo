@@ -388,6 +388,14 @@ export interface RewriteProgramPromptProfile {
   quick_ask_model?: string | null;
   quick_ask_system_prompt?: string | null;
 
+  // Quick Replace (per-profile overrides)
+  // When enabled and there is highlighted text when transcription starts, treat the transcript
+  // as an instruction to rewrite the selected text.
+  quick_replace_enabled?: boolean | null;
+  quick_replace_provider?: string | null;
+  quick_replace_model?: string | null;
+  quick_replace_system_prompt?: string | null;
+
   quick_ask_openai_reasoning_effort?: OpenAiReasoningEffort | null;
   quick_ask_gemini_thinking_budget?: number | null;
   quick_ask_gemini_thinking_level?:
@@ -680,6 +688,9 @@ export interface AppSettings {
   accent_color: string | null;
   // Global gate for the optional LLM rewrite step
   rewrite_llm_enabled: boolean;
+  // When true, if there is highlighted text when transcription starts, treat the transcript
+  // as an instruction to rewrite the selected text.
+  quick_replace_enabled: boolean;
   cleanup_prompt_sections: CleanupPromptSections | null;
   rewrite_program_prompt_profiles: RewriteProgramPromptProfile[];
   stt_provider: string | null;
@@ -1414,6 +1425,24 @@ export const tauriAPI = {
           ? quick_ask_system_prompt_raw
           : null;
 
+      const quick_replace_enabled =
+        typeof (p as any).quick_replace_enabled === "boolean"
+          ? (p as any).quick_replace_enabled
+          : null;
+      const quick_replace_provider =
+        typeof (p as any).quick_replace_provider === "string"
+          ? (p as any).quick_replace_provider
+          : null;
+      const quick_replace_model =
+        typeof (p as any).quick_replace_model === "string"
+          ? (p as any).quick_replace_model
+          : null;
+      const quick_replace_system_prompt_raw = (p as any).quick_replace_system_prompt;
+      const quick_replace_system_prompt =
+        typeof quick_replace_system_prompt_raw === "string"
+          ? quick_replace_system_prompt_raw
+          : null;
+
       const quick_ask_openai_reasoning_effort = normalizeOpenAiReasoningEffort(
         (p as any).quick_ask_openai_reasoning_effort
       );
@@ -1530,6 +1559,11 @@ export const tauriAPI = {
         quick_ask_provider,
         quick_ask_model,
         quick_ask_system_prompt,
+
+        quick_replace_enabled,
+        quick_replace_provider,
+        quick_replace_model,
+        quick_replace_system_prompt,
         quick_ask_openai_reasoning_effort,
         quick_ask_gemini_thinking_budget,
         quick_ask_gemini_thinking_level,
@@ -1611,6 +1645,8 @@ export const tauriAPI = {
       })(),
       rewrite_llm_enabled:
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
+      quick_replace_enabled:
+        (await store.get<boolean>("quick_replace_enabled")) ?? false,
       cleanup_prompt_sections: await(async () => {
         const raw = await store.get<any>("cleanup_prompt_sections");
         const normalized = normalizeCleanupPromptSections(raw);
@@ -2071,6 +2107,12 @@ export const tauriAPI = {
   async updateRewriteLlmEnabled(enabled: boolean): Promise<void> {
     const store = await getStore();
     await store.set("rewrite_llm_enabled", enabled);
+    await store.save();
+  },
+
+  async updateQuickReplaceEnabled(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_replace_enabled", !!enabled);
     await store.save();
   },
 
@@ -3042,7 +3084,7 @@ export const configAPI = {
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type RequestStatus = "in_progress" | "success" | "error" | "cancelled";
-export type RequestKind = "transcription" | "quick_ask";
+export type RequestKind = "transcription" | "quick_ask" | "quick_replace";
 
 export interface LogEntry {
   timestamp: string;
@@ -3079,6 +3121,14 @@ export interface RequestLog {
   quick_ask_provider?: string | null;
   quick_ask_model?: string | null;
   quick_ask_duration_ms?: number | null;
+
+  // Quick Replace fields (when kind === "quick_replace")
+  quick_replace_instructions?: string | null;
+  quick_replace_selected_text?: string | null;
+  quick_replace_output_text?: string | null;
+  quick_replace_provider?: string | null;
+  quick_replace_model?: string | null;
+  quick_replace_duration_ms?: number | null;
   // Total request processing duration (ms). Excludes recording time when available.
   total_duration_ms: number | null;
   stt_duration_ms: number | null;
@@ -3125,6 +3175,10 @@ export interface RequestLog {
   // Quick Ask payloads (optional)
   quick_ask_request_json?: unknown;
   quick_ask_response_json?: unknown;
+
+  // Quick Replace payloads (optional)
+  quick_replace_request_json?: unknown;
+  quick_replace_response_json?: unknown;
 
   // Optional router payloads for debugging.
   // For embeddings this may be an array of calls/responses.

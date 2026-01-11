@@ -246,15 +246,17 @@ function RequestLogItem({
 
   const kind = log.kind ?? "transcription";
   const isQuickAsk = kind === "quick_ask";
+  const isQuickReplace = kind === "quick_replace";
+  const isTranscription = kind === "transcription";
 
   // NOTE: `llm_provider`/`llm_model` can reflect configured defaults.
   // Use `llm_duration_ms` to indicate whether an LLM rewrite was actually attempted.
   const llmAttempted = typeof log.llm_duration_ms === "number";
 
-   const rewriteOutcome = log.llm_outcome ?? null;
-   const rewriteNotAttemptedReason = log.llm_not_attempted_reason ?? null;
-   const rewriteSkipped = rewriteOutcome === "not_attempted";
-   const rewriteSkippedReasonLabel = (() => {
+  const rewriteOutcome = log.llm_outcome ?? null;
+  const rewriteNotAttemptedReason = log.llm_not_attempted_reason ?? null;
+  const rewriteSkipped = rewriteOutcome === "not_attempted";
+  const rewriteSkippedReasonLabel = (() => {
      switch (rewriteNotAttemptedReason) {
        case "quiet_audio_gate":
          return "quiet audio gate";
@@ -305,6 +307,14 @@ function RequestLogItem({
     return provider || model;
   })();
 
+  const quickReplaceMetaLabel = (() => {
+    const provider = (log.quick_replace_provider ?? "").trim();
+    const model = (log.quick_replace_model ?? "").trim();
+    if (!provider && !model) return null;
+    if (provider && model) return `${provider} / ${model}`;
+    return provider || model;
+  })();
+
   // Always show a profile badge in request logs.
   // If the backend didn't populate profile fields (legacy logs), assume Default.
   const profileLabel = (() => {
@@ -341,6 +351,19 @@ function RequestLogItem({
   const quickAskAnswerTrimmed = (log.quick_ask_answer ?? "").trim();
   const hasAnyQuickAskText = !!(
     quickAskQuestionTrimmed || quickAskAnswerTrimmed
+  );
+
+  const quickReplaceInstructionsTrimmed = (
+    log.quick_replace_instructions ?? ""
+  ).trim();
+  const quickReplaceSelectedTextTrimmed = (
+    log.quick_replace_selected_text ?? ""
+  ).trim();
+  const quickReplaceOutputTextTrimmed = (log.quick_replace_output_text ?? "").trim();
+  const hasAnyQuickReplaceText = !!(
+    quickReplaceInstructionsTrimmed ||
+    quickReplaceSelectedTextTrimmed ||
+    quickReplaceOutputTextTrimmed
   );
   const playDisabled = log.status === "in_progress";
   const showRewriteDiff =
@@ -451,6 +474,16 @@ function RequestLogItem({
                 Quick Ask
               </Badge>
             ) : null}
+            {isQuickReplace ? (
+              <Badge
+                variant="light"
+                size="sm"
+                color="cyan"
+                leftSection={<Zap size={12} />}
+              >
+                Quick Replace
+              </Badge>
+            ) : null}
             {totalDurationMs !== null && (
               <Badge
                 variant="light"
@@ -495,8 +528,47 @@ function RequestLogItem({
             </Paper>
           ) : null}
 
+          {isQuickReplace && hasAnyQuickReplaceText ? (
+            <Paper withBorder p="sm">
+              <Stack gap="xs">
+                {quickReplaceSelectedTextTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Selected Text:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_replace_selected_text}
+                    </Text>
+                  </Box>
+                ) : null}
+
+                {quickReplaceInstructionsTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Instructions:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_replace_instructions}
+                    </Text>
+                  </Box>
+                ) : null}
+
+                {quickReplaceOutputTextTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Output:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_replace_output_text}
+                    </Text>
+                  </Box>
+                ) : null}
+              </Stack>
+            </Paper>
+          ) : null}
+
           {/* Transcript info */}
-          {(log.raw_transcript || log.final_text) && (
+          {(log.raw_transcript || log.final_text) && (!isQuickReplace || !hasAnyQuickReplaceText) && (
             <Paper withBorder p="sm">
               <Stack gap="xs">
                 {llmAttempted ? (
@@ -543,9 +615,9 @@ function RequestLogItem({
                 ) : (
                   <Box>
                     <Text size="xs" fw={600} c="dimmed">
-                      Transcript:
+                      {isQuickReplace ? "Instructions (transcript):" : "Transcript:"}
                     </Text>
-                    {rewriteSkipped ? (
+                    {isTranscription && rewriteSkipped ? (
                       <>
                         <Text size="xs" c="dimmed">
                           Rewrite: skipped ({rewriteSkippedReasonLabel})
@@ -644,18 +716,30 @@ function RequestLogItem({
                 {quickAskMetaLabel ? ` · ${quickAskMetaLabel}` : ""}
               </Badge>
             ) : null}
+
+            {isQuickReplace &&
+            (quickReplaceMetaLabel ||
+              typeof log.quick_replace_duration_ms === "number") ? (
+              <Badge variant="light" size="sm" color="gray">
+                Quick Replace
+                {typeof log.quick_replace_duration_ms === "number"
+                  ? ` ${formatDuration(log.quick_replace_duration_ms)}`
+                  : ""}
+                {quickReplaceMetaLabel ? ` · ${quickReplaceMetaLabel}` : ""}
+              </Badge>
+            ) : null}
             {log.llm_duration_ms ? (
               <Badge variant="light" size="sm" color="gray">
                 LLM {formatDuration(log.llm_duration_ms)} · {llmMetaLabel} ·{" "}
                 {llmPriceLabel}
               </Badge>
-            ) : llmAttempted || log.llm_provider ? (
+            ) : isTranscription && (llmAttempted || log.llm_provider) ? (
               <Badge variant="light" size="sm" color="gray">
                 LLM · {llmMetaLabel} · {llmPriceLabel}
               </Badge>
             ) : null}
 
-            {rewriteSkipped ? (
+            {isTranscription && rewriteSkipped ? (
               <Tooltip
                 label={
                   log.llm_error_message
@@ -683,7 +767,8 @@ function RequestLogItem({
             ) : null}
 
             <Badge variant="light" size="sm" color="gray">
-              Profile · {profileLabel}: {presetLabel}
+              Profile · {profileLabel}
+              {isTranscription ? `: ${presetLabel}` : ""}
             </Badge>
           </Group>
 
@@ -808,7 +893,52 @@ function RequestLogItem({
                 )}
               </CopyButton>
             )}
-            {hasAnyTranscriptText && (
+            {quickReplaceSelectedTextTrimmed && (
+              <CopyButton value={quickReplaceSelectedTextTrimmed}>
+                {({ copied, copy }) => (
+                  <Button
+                    variant="subtle"
+                    color={copied ? "teal" : "gray"}
+                    size="xs"
+                    leftSection={<Copy size={14} />}
+                    onClick={copy}
+                  >
+                    {copied ? "Copied!" : "Copy Selection"}
+                  </Button>
+                )}
+              </CopyButton>
+            )}
+            {quickReplaceInstructionsTrimmed && (
+              <CopyButton value={quickReplaceInstructionsTrimmed}>
+                {({ copied, copy }) => (
+                  <Button
+                    variant="subtle"
+                    color={copied ? "teal" : "gray"}
+                    size="xs"
+                    leftSection={<Copy size={14} />}
+                    onClick={copy}
+                  >
+                    {copied ? "Copied!" : "Copy Instructions"}
+                  </Button>
+                )}
+              </CopyButton>
+            )}
+            {quickReplaceOutputTextTrimmed && (
+              <CopyButton value={quickReplaceOutputTextTrimmed}>
+                {({ copied, copy }) => (
+                  <Button
+                    variant="subtle"
+                    color={copied ? "teal" : "gray"}
+                    size="xs"
+                    leftSection={<Copy size={14} />}
+                    onClick={copy}
+                  >
+                    {copied ? "Copied!" : "Copy Output"}
+                  </Button>
+                )}
+              </CopyButton>
+            )}
+            {hasAnyTranscriptText && !isQuickReplace && (
               <CopyButton value={rawTranscriptTrimmed}>
                 {({ copied, copy }) => (
                   <Button
@@ -823,7 +953,7 @@ function RequestLogItem({
                 )}
               </CopyButton>
             )}
-            {hasAnyTranscriptText && (
+            {hasAnyTranscriptText && !isQuickReplace && (
               <CopyButton value={finalOutputTrimmed}>
                 {({ copied, copy }) => (
                   <Button
@@ -994,6 +1124,9 @@ export function LogsView(
           log.final_text ?? "",
           log.quick_ask_question ?? "",
           log.quick_ask_answer ?? "",
+          log.quick_replace_instructions ?? "",
+          log.quick_replace_selected_text ?? "",
+          log.quick_replace_output_text ?? "",
         ]
           .join("\n")
           .toLowerCase();

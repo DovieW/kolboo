@@ -95,6 +95,7 @@ pub struct RouterPresetScore {
 pub enum RequestKind {
     Transcription,
     QuickAsk,
+    QuickReplace,
 }
 
 impl Default for RequestKind {
@@ -184,6 +185,32 @@ pub struct RequestLog {
     /// Quick Ask: payload received from the answering LLM.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quick_ask_response_json: Option<JsonValue>,
+
+    /// Quick Replace: the user's instruction (usually derived from the transcript).
+    #[serde(default)]
+    pub quick_replace_instructions: Option<String>,
+    /// Quick Replace: the selected/highlighted text captured at recording start.
+    #[serde(default)]
+    pub quick_replace_selected_text: Option<String>,
+    /// Quick Replace: the rewritten output returned by the LLM.
+    #[serde(default)]
+    pub quick_replace_output_text: Option<String>,
+    /// Quick Replace: provider used for the rewrite.
+    #[serde(default)]
+    pub quick_replace_provider: Option<String>,
+    /// Quick Replace: model used for the rewrite.
+    #[serde(default)]
+    pub quick_replace_model: Option<String>,
+    /// Quick Replace: duration of the rewrite call in milliseconds.
+    #[serde(default)]
+    pub quick_replace_duration_ms: Option<u64>,
+
+    /// Quick Replace: payload sent to the rewriting LLM.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quick_replace_request_json: Option<JsonValue>,
+    /// Quick Replace: payload received from the rewriting LLM.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quick_replace_response_json: Option<JsonValue>,
 
     /// Exact-ish payload sent to STT provider (with binary audio redacted).
     ///
@@ -328,6 +355,15 @@ impl RequestLog {
             quick_ask_duration_ms: None,
             quick_ask_request_json: None,
             quick_ask_response_json: None,
+
+            quick_replace_instructions: None,
+            quick_replace_selected_text: None,
+            quick_replace_output_text: None,
+            quick_replace_provider: None,
+            quick_replace_model: None,
+            quick_replace_duration_ms: None,
+            quick_replace_request_json: None,
+            quick_replace_response_json: None,
             stt_request_json: None,
             stt_response_json: None,
             llm_request_json: None,
