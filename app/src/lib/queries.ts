@@ -1632,6 +1632,19 @@ export function useUpdateQuickAskSystemPrompt() {
   });
 }
 
+export function useUpdateQuickAskIncludeSelectedText() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateQuickAskIncludeSelectedText(enabled);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateQuickAskConversationHistoryEnabled() {
   const queryClient = useQueryClient();
   return useMutation({

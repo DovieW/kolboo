@@ -353,6 +353,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // How many previous Q/A turns to include when enabled.
     dirty |= set_default("quick_ask_conversation_history_count", json!(3), false);
 
+    // Quick Ask highlighted selection context (disabled by default).
+    // When false, we won't probe/capture the currently highlighted text for Quick Ask.
+    dirty |= set_default("quick_ask_include_selected_text", json!(false), false);
+
     // Migration: legacy `quick_ask_hotkey` (hold-to-record) -> `quick_ask_hold_hotkey`.
     // Only migrate when the new key is truly absent (not when explicitly null).
     if store.get("quick_ask_hold_hotkey").is_none() {
@@ -1199,9 +1203,14 @@ fn stop_recording(
             0
         };
 
-        // Quick Ask: if this was a Quick Ask session, probe for currently highlighted text to use
-        // as additional context for the question. This must not block transcription.
+        // Quick Ask: if this was a Quick Ask session (and enabled by settings), probe for
+        // currently highlighted text to use as additional context for the question.
+        // This must not block transcription.
+        let quick_ask_include_selected_text: bool =
+            get_setting_from_store(app, "quick_ask_include_selected_text", false);
+
         let quick_ask_epoch: u64 = if is_quick_ask_session
+            && quick_ask_include_selected_text
             && context_grab_method != crate::commands::text::ContextGrabMethod::None
         {
             let epoch = state

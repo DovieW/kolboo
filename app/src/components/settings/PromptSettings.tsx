@@ -43,6 +43,7 @@ import {
   useUpdateQuickAskProvider,
   useUpdateQuickAskModel,
   useUpdateQuickAskSystemPrompt,
+  useUpdateQuickAskIncludeSelectedText,
   useUpdateQuickAskConversationHistoryEnabled,
   useUpdateQuickAskConversationHistoryCount,
   useUpdateQuickAskOpenAiReasoningEffort,
@@ -178,6 +179,7 @@ export function PromptSettings({
   const updateQuickAskProvider = useUpdateQuickAskProvider();
   const updateQuickAskModel = useUpdateQuickAskModel();
   const updateQuickAskSystemPrompt = useUpdateQuickAskSystemPrompt();
+  const updateQuickAskIncludeSelectedText = useUpdateQuickAskIncludeSelectedText();
   const updateQuickAskConversationHistoryEnabled =
     useUpdateQuickAskConversationHistoryEnabled();
   const updateQuickAskConversationHistoryCount =
@@ -1454,6 +1456,9 @@ export function PromptSettings({
     typeof defaultProfile?.quick_ask_include_clipboard_context === "boolean"
       ? defaultProfile.quick_ask_include_clipboard_context
       : false;
+
+  const quickAskIncludeSelectedText =
+    settings?.quick_ask_include_selected_text ?? false;
 
   const quickAskConversationHistoryEnabled =
     settings?.quick_ask_conversation_history_enabled ?? false;
@@ -6943,6 +6948,39 @@ export function PromptSettings({
 
       <div className="settings-mini-header">
         <span className="settings-mini-header__text">Quick Ask</span>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Include Highlighted Text</p>
+          <p className="settings-description">
+            When enabled, Kolboo will try to copy your highlighted text and
+            include it as optional context during Quick Ask.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {!isDefaultScope && (
+            <Tooltip label="Global setting (edit in Default profile)" withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+
+          <Switch
+            checked={quickAskIncludeSelectedText}
+            onChange={(e) => {
+              if (!isDefaultScope) return;
+              const enabled = e.currentTarget.checked;
+              updateQuickAskIncludeSelectedText.mutate(enabled, {
+                onSuccess: () => {
+                  tauriAPI.emitSettingsChanged();
+                },
+              });
+            }}
+            color="gray"
+            size="md"
+            disabled={!isDefaultScope}
+          />
+        </div>
       </div>
 
       <div className="settings-row">

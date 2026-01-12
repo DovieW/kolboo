@@ -733,6 +733,11 @@ export interface AppSettings {
   quick_ask_model: string | null;
   quick_ask_system_prompt: string | null;
 
+  // When enabled, Quick Ask will attempt to capture the currently highlighted text
+  // (via a copy probe) and include it as additional context.
+  // NOTE: This is a global setting (not per-profile) and is disabled by default.
+  quick_ask_include_selected_text: boolean;
+
   // Quick Ask conversation history (ephemeral; in-memory only)
   quick_ask_conversation_history_enabled: boolean;
   // How many previous Q/A turns to include when enabled.
@@ -1748,6 +1753,9 @@ export const tauriAPI = {
       quick_ask_system_prompt:
         (await store.get<string | null>("quick_ask_system_prompt")) ?? null,
 
+      quick_ask_include_selected_text:
+        (await store.get<boolean>("quick_ask_include_selected_text")) ?? false,
+
       quick_ask_conversation_history_enabled:
         (await store.get<boolean>("quick_ask_conversation_history_enabled")) ??
         true,
@@ -2058,6 +2066,12 @@ export const tauriAPI = {
       "quick_ask_system_prompt",
       normalized.length > 0 ? normalized : null
     );
+    await store.save();
+  },
+
+  async updateQuickAskIncludeSelectedText(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_ask_include_selected_text", Boolean(enabled));
     await store.save();
   },
 
