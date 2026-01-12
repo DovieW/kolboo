@@ -394,7 +394,7 @@ pub fn delete_whisper_model(
             std::fs::remove_file(&model_path).map_err(|e| {
                 WhisperCommandError::from(format!("Failed to delete model: {}", e))
             })?;
-            log::info!("Deleted Whisper model: {}", model_path.display());
+            log::info!("Deleted Whisper model: {}", model.filename());
         }
 
         Ok(())

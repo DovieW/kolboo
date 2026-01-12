@@ -18,10 +18,24 @@ mod imp {
         GetWindowThreadProcessId, IsWindowVisible,
     };
 
+    fn basename_for_log(path: &str) -> &str {
+        let trimmed = path.trim().trim_matches('"');
+        trimmed
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or(trimmed)
+    }
+
     #[derive(Debug, Clone, serde::Serialize)]
     pub struct OpenWindowInfo {
         pub title: String,
         pub process_path: String,
+    }
+
+    #[derive(Debug)]
+    struct EnumWindowsState {
+        include_titles: bool,
+        windows: *mut Vec<OpenWindowInfo>,
     }
 
     fn query_process_path(pid: u32) -> Option<String> {
@@ -146,7 +160,7 @@ mod imp {
                     log::debug!(
                         "[windows_apps] Foreground is Kolboo pid {}; using recent external foreground: {}",
                         current_pid,
-                        path
+                        basename_for_log(&path)
                     );
                     return Some(path);
                 }
@@ -157,7 +171,7 @@ mod imp {
                 log::debug!(
                     "[windows_apps] Foreground is Kolboo pid {}; recovered external foreground from z-order: {}",
                     current_pid,
-                    path
+                    basename_for_log(&path)
                 );
                 record_external_foreground(&path);
                 return Some(path);
@@ -169,10 +183,11 @@ mod imp {
         }
     }
 
-    pub fn list_open_windows() -> Vec<OpenWindowInfo> {
+    pub fn list_open_windows(include_titles: bool) -> Vec<OpenWindowInfo> {
         unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-            // Safety: caller passes a valid mutable Vec pointer via LPARAM.
-            let windows = unsafe { &mut *(lparam.0 as *mut Vec<OpenWindowInfo>) };
+            // Safety: caller passes a valid mutable EnumWindowsState pointer via LPARAM.
+            let state = unsafe { &mut *(lparam.0 as *mut EnumWindowsState) };
+            let windows = unsafe { &mut *state.windows };
 
             unsafe {
                 if !IsWindowVisible(hwnd).as_bool() {
@@ -184,16 +199,24 @@ mod imp {
                     return BOOL(1);
                 }
 
-                let mut title_buf: Vec<u16> = vec![0; (title_len as usize) + 1];
-                let copied = GetWindowTextW(hwnd, &mut title_buf);
-                if copied == 0 {
-                    return BOOL(1);
-                }
+                // Title collection can expose sensitive info (doc names, URLs, chat previews).
+                // For a good privacy default, allow callers to opt out.
+                let title = if state.include_titles {
+                    let mut title_buf: Vec<u16> = vec![0; (title_len as usize) + 1];
+                    let copied = GetWindowTextW(hwnd, &mut title_buf);
+                    if copied == 0 {
+                        return BOOL(1);
+                    }
 
-                let title = String::from_utf16_lossy(&title_buf[..copied as usize]).trim().to_string();
-                if title.is_empty() {
-                    return BOOL(1);
-                }
+                    let title =
+                        String::from_utf16_lossy(&title_buf[..copied as usize]).trim().to_string();
+                    if title.is_empty() {
+                        return BOOL(1);
+                    }
+                    title
+                } else {
+                    String::new()
+                };
 
                 let mut pid: u32 = 0;
                 GetWindowThreadProcessId(hwnd, Some(&mut pid));
@@ -211,8 +234,13 @@ mod imp {
         }
 
         let mut windows: Vec<OpenWindowInfo> = Vec::new();
+        let mut state = EnumWindowsState {
+            include_titles,
+            windows: (&mut windows as *mut Vec<OpenWindowInfo>),
+        };
+
         unsafe {
-            let _ = EnumWindows(Some(enum_proc), LPARAM((&mut windows as *mut _) as isize));
+            let _ = EnumWindows(Some(enum_proc), LPARAM((&mut state as *mut _) as isize));
         }
 
         windows
@@ -234,7 +262,7 @@ mod imp_stub {
         None
     }
 
-    pub fn list_open_windows() -> Vec<OpenWindowInfo> {
+    pub fn list_open_windows(_include_titles: bool) -> Vec<OpenWindowInfo> {
         Vec::new()
     }
 }

@@ -2232,7 +2232,10 @@ export const tauriAPI = {
     await emit("settings-changed", {});
   },
 
-  async listOpenWindows(): Promise<OpenWindowInfo[]> {
+  async listOpenWindows(params?: { includeTitles?: boolean }): Promise<OpenWindowInfo[]> {
+    if (params?.includeTitles) {
+      return invoke("list_open_windows", { includeTitles: true });
+    }
     return invoke("list_open_windows");
   },
 

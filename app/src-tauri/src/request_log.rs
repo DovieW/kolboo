@@ -15,6 +15,81 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+fn should_redact_key(key: &str) -> bool {
+    let k = key.trim().to_lowercase();
+    k == "authorization"
+        || k == "proxy-authorization"
+        || k == "x-api-key"
+        || k == "api_key"
+        || k == "api-key"
+        || k.ends_with("_api_key")
+        || k == "access_token"
+        || k == "refresh_token"
+        || k == "id_token"
+}
+
+fn redact_string_value(s: &str) -> Option<&'static str> {
+    let trimmed = s.trim();
+
+    // Common token formats
+    if trimmed.starts_with("Bearer ") {
+        return Some("<redacted>");
+    }
+    // OpenAI-ish prefixes, etc.
+    if trimmed.starts_with("sk-") || trimmed.starts_with("rk-") {
+        return Some("<redacted>");
+    }
+
+    None
+}
+
+/// Best-effort redaction of secrets from JSON payloads stored in request logs.
+///
+/// This is intentionally conservative and errs on the side of removing sensitive fields.
+pub fn redact_json(value: JsonValue) -> JsonValue {
+    match value {
+        JsonValue::Object(mut map) => {
+            // Redact by key name.
+            for (k, v) in map.iter_mut() {
+                if should_redact_key(k) {
+                    *v = JsonValue::String("<redacted>".to_string());
+                    continue;
+                }
+
+                // Recurse.
+                let next = std::mem::take(v);
+                *v = redact_json(next);
+            }
+            JsonValue::Object(map)
+        }
+        JsonValue::Array(arr) => {
+            JsonValue::Array(arr.into_iter().map(redact_json).collect())
+        }
+        JsonValue::String(s) => {
+            if let Some(replacement) = redact_string_value(&s) {
+                JsonValue::String(replacement.to_string())
+            } else {
+                JsonValue::String(s)
+            }
+        }
+        other => other,
+    }
+}
+
+fn redact_request_log_json_fields(mut log: RequestLog) -> RequestLog {
+    log.stt_request_json = log.stt_request_json.map(redact_json);
+    log.stt_response_json = log.stt_response_json.map(redact_json);
+    log.llm_request_json = log.llm_request_json.map(redact_json);
+    log.llm_response_json = log.llm_response_json.map(redact_json);
+    log.router_request_json = log.router_request_json.map(redact_json);
+    log.router_response_json = log.router_response_json.map(redact_json);
+    log.quick_ask_request_json = log.quick_ask_request_json.map(redact_json);
+    log.quick_ask_response_json = log.quick_ask_response_json.map(redact_json);
+    log.quick_replace_request_json = log.quick_replace_request_json.map(redact_json);
+    log.quick_replace_response_json = log.quick_replace_response_json.map(redact_json);
+    log
+}
+
 /// Default number of request logs to keep (matches UI default)
 const DEFAULT_MAX_LOGS: usize = 50;
 
@@ -630,6 +705,10 @@ impl RequestLogStore {
 
     /// Store a completed log
     fn store_log(&self, log: RequestLog) {
+        // Redact sensitive fields before keeping them in memory (and before UI export/copy).
+        // Providers should also avoid logging secrets, but this is a last line of defense.
+        let log = redact_request_log_json_fields(log);
+
         let mut logs = self.logs.lock().unwrap();
         logs.push_back(log);
 
@@ -644,11 +723,15 @@ impl RequestLogStore {
         let logs = self.logs.lock().unwrap();
         let current = self.current.lock().unwrap();
 
-        let mut result: Vec<RequestLog> = logs.iter().cloned().collect();
+        let mut result: Vec<RequestLog> = logs
+            .iter()
+            .cloned()
+            .map(redact_request_log_json_fields)
+            .collect();
 
         // Add current request if exists
         if let Some(ref c) = *current {
-            result.push(c.clone());
+            result.push(redact_request_log_json_fields(c.clone()));
         }
 
         // Reverse to get most recent first
@@ -680,6 +763,7 @@ impl RequestLogStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_request_log_creation() {
@@ -725,5 +809,44 @@ mod tests {
         assert_eq!(logs.len(), 2);
         assert_eq!(logs[0].id, id2); // Most recent first
         assert_eq!(logs[1].id, id1);
+    }
+
+    #[test]
+    fn test_redact_json_redacts_sensitive_keys() {
+        let value = json!({
+            "Authorization": "Bearer sk-live-should-not-appear",
+            "nested": {
+                "api_key": "sk-123",
+                "access_token": "Bearer abc",
+                "safe": "hello",
+            },
+            "array": [
+                { "x-api-key": "rk-456" },
+                "ok",
+            ],
+        });
+
+        let redacted = redact_json(value);
+
+        assert_eq!(redacted["Authorization"], "<redacted>");
+        assert_eq!(redacted["nested"]["api_key"], "<redacted>");
+        assert_eq!(redacted["nested"]["access_token"], "<redacted>");
+        assert_eq!(redacted["nested"]["safe"], "hello");
+        assert_eq!(redacted["array"][0]["x-api-key"], "<redacted>");
+        assert_eq!(redacted["array"][1], "ok");
+    }
+
+    #[test]
+    fn test_redact_json_redacts_token_like_strings() {
+        let value = json!({
+            "freeform": "Bearer abc.def.ghi",
+            "openai": "sk-abcdef",
+            "other": "hello",
+        });
+
+        let redacted = redact_json(value);
+        assert_eq!(redacted["freeform"], "<redacted>");
+        assert_eq!(redacted["openai"], "<redacted>");
+        assert_eq!(redacted["other"], "hello");
     }
 }

@@ -56,6 +56,18 @@ fn strip_exe_suffix(name: &str) -> &str {
     name.strip_suffix(".exe").unwrap_or(name)
 }
 
+fn program_basename_for_log(path: &str) -> String {
+    // Only log the executable basename to avoid leaking sensitive filesystem paths
+    // (usernames, install locations) into logs.
+    let norm = normalize_program_path(path);
+    let base = program_basename_lower(&norm);
+    if base.is_empty() {
+        "<unknown>".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
 pub(crate) fn select_profile_for_foreground_app(
     llm_config: &LlmConfig,
 ) -> Option<crate::llm::ProgramPromptProfile> {
@@ -112,7 +124,7 @@ pub(crate) fn select_profile_for_foreground_app(
             log::debug!(
                 "Pipeline: Using profile '{}' for foreground app {}",
                 profile.name,
-                foreground
+                program_basename_for_log(&foreground)
             );
             return Some(profile.clone());
         }
@@ -121,10 +133,8 @@ pub(crate) fn select_profile_for_foreground_app(
     // Helpful when users report everything is always "Default".
     // Keep this at debug to avoid noisy logs, but include key derived values.
     log::debug!(
-        "Pipeline: No program profile match for foreground='{}' (norm='{}', base='{}', profiles={})",
-        foreground,
-        foreground_norm,
-        foreground_base,
+        "Pipeline: No program profile match for foreground_base='{}' (profiles={})",
+        program_basename_for_log(&foreground),
         llm_config.program_prompt_profiles.len()
     );
 

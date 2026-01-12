@@ -8,24 +8,13 @@ Legend:
 - **P1**: high-impact improvement (stability, UX, privacy, perf)
 - **P2**: nice-to-have / cleanup
 
----
-
-## P0 — Bugs / correctness
-
-### Fix the LLM command config path (currently a stub)
-
-(fixed)
-
----
-
 ## P1 — Security & privacy hardening
 
-### Keep CSP restrictive (and prevent accidental regression)
+### Consider tightening CSP directives further
 
-- **Where:** `app/src-tauri/tauri.conf.json`
-- **Current state:** CSP is enabled, and a looser `devCsp` is configured for development.
+- **Where:** `app/src-tauri/tauri.conf.json`, release guardrail in `app/src-tauri/build.rs`
+- **Current state:** CSP is enabled; `build.rs` fails release builds if `security.csp` is missing/empty.
 - **Todo:**
-  - Add a simple guardrail so release builds can’t accidentally ship with `security.csp: null`.
   - Review whether any directives can be tightened further (e.g. reduce `connect-src` surface) without breaking Tauri/Vite.
 
 ### Store API keys in OS secure storage
@@ -36,30 +25,6 @@ Legend:
   - Migrate secrets to secure storage (e.g., Tauri Stronghold / OS credential vault).
   - Add migration: read old keys once, write to secure store, delete from settings.
   - Add “export/import settings” that defaults to _excluding_ secrets.
-
-### Tighten request-log redaction guarantees
-
-- **Where:** request log captures `stt_request_json`, `stt_response_json`, `llm_request_json`, `llm_response_json` in `app/src-tauri/src/request_log.rs` and provider implementations.
-- **What’s good already:** some providers explicitly omit Authorization in logged request JSON.
-- **Todo:**
-  - Centralize a `redact_json(Value) -> Value` helper and ensure every provider uses it.
-  - Add tests that assert no captured log JSON contains common key patterns (e.g., `Bearer`, `sk-`, etc.).
-
-### Add explicit consent + minimization for window enumeration
-
-- **Where:** `app/src-tauri/src/windows_apps.rs` (+ commands in `commands/windows.rs`)
-- **Problem:** window titles can contain sensitive content; API exposes title + executable path.
-- **Todo:**
-  - Add a permission/consent gate before enabling window title collection.
-  - Add a setting to collect only process path (no title) for the per-program profile picker.
-
-### Avoid logging sensitive foreground app paths/titles
-
-- **Where:** `app/src-tauri/src/pipeline.rs` (debug log includes full foreground executable path)
-- **Problem:** even if never sent off-device, logs can wind up in bug reports. Full paths can reveal usernames, installed apps, and work context.
-- **Todo:**
-  - Redact paths in logs by default (e.g., log basename only) or gate behind a “verbose diagnostics” toggle.
-  - Ensure window titles are never logged unless explicitly enabled.
 
 ### Restrict Tauri capabilities to least privilege
 

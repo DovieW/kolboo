@@ -96,6 +96,14 @@ fn clipboard_only_last_text_lock() -> &'static Mutex<Option<String>> {
     CLIPBOARD_ONLY_LAST_TEXT.get_or_init(|| Mutex::new(None))
 }
 
+fn basename_for_log(path: &str) -> &str {
+    let trimmed = path.trim().trim_matches('"');
+    trimmed
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(trimmed)
+}
+
 fn with_pressed_key<T>(
     enigo: &mut Enigo,
     key: Key,
@@ -568,7 +576,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
         let fg = crate::windows_apps::get_foreground_process_path();
         log::info!(
             "Selection probe: foreground_process={}",
-            fg.as_deref().unwrap_or("<unknown>")
+            fg.as_deref().map(basename_for_log).unwrap_or("<unknown>")
         );
     }
 
@@ -693,7 +701,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
             let fg = crate::windows_apps::get_foreground_process_path();
             log::debug!(
                 "Selection probe: foreground_process_after_key={}",
-                fg.as_deref().unwrap_or("<unknown>")
+                fg.as_deref().map(basename_for_log).unwrap_or("<unknown>")
             );
         }
 

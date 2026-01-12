@@ -311,9 +311,19 @@ export function ProfileConfigModal({
       }
     }
 
+    const basename = (p: string) => {
+      const trimmed = p.trim().replaceAll("\"", "");
+      // Windows paths, but keep it tolerant.
+      return trimmed.split(/[/\\]+/).pop() || trimmed;
+    };
+
     return Array.from(byPath.values()).map((w) => ({
       value: w.process_path,
-      label: `${w.title} — ${w.process_path}`,
+      // Avoid showing full filesystem paths in the picker by default.
+      // Titles may be omitted by the backend for privacy.
+      label: w.title?.trim()
+        ? `${w.title} — ${basename(w.process_path)}`
+        : basename(w.process_path),
     }));
   }, [openWindows]);
 
