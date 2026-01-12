@@ -1,6 +1,14 @@
 name: Build (Windows)
 
 on:
+  pull_request:
+    branches:
+      - main
+      - master
+  push:
+    branches:
+      - main
+      - master
   workflow_call:
     inputs:
       build_local_whisper:
@@ -29,8 +37,7 @@ concurrency:
 
 jobs:
   test-windows:
-    # Tests disabled for now.
-    if: ${{ false }}
+    # Lightweight PR/branch checks (kept separate from release bundling).
     runs-on: windows-latest
 
     env:

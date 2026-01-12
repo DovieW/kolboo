@@ -78,3 +78,16 @@ You can also pass features directly through Tauri, e.g. `pnpm dev -- --features 
 ## License
 
 [AGPL-3.0](LICENSE)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+Please report security issues privately. See [SECURITY.md](SECURITY.md).
+
+## Privacy & data
+
+This app can record audio and may send audio/transcripts to third-party providers depending on your settings.
+See [docs/User Docs/PRIVACY_AND_DATA.md](docs/User%20Docs/PRIVACY_AND_DATA.md).

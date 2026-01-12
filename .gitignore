@@ -16,6 +16,9 @@ node_modules/
 /pnpm-lock.yaml
 
 # Build outputs
+artifacts/
+target/
+app/src-tauri/target/
 release/
 dist/
 out/
