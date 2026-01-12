@@ -10,6 +10,8 @@ use serde_json::Value as JsonValue;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::cost::openai as openai_cost;
@@ -130,6 +132,16 @@ pub struct StatsRetentionConfig {
 #[derive(Debug, Clone)]
 pub struct StatsStore {
     dir: PathBuf,
+    writer_state: Arc<StdMutex<StatsWriterState>>,
+}
+
+#[derive(Debug)]
+struct StatsWriterState {
+    current_date: Option<String>,
+    current_path: Option<PathBuf>,
+    writer: Option<BufWriter<fs::File>>,
+    pending_appends: u32,
+    last_flush_at: Instant,
 }
 
 impl StatsStore {
@@ -138,29 +150,98 @@ impl StatsStore {
         if let Err(e) = fs::create_dir_all(&dir) {
             log::warn!("Failed to create stats dir {:?}: {}", dir, e);
         }
-        Self { dir }
+        Self {
+            dir,
+            writer_state: Arc::new(StdMutex::new(StatsWriterState {
+                current_date: None,
+                current_path: None,
+                writer: None,
+                pending_appends: 0,
+                last_flush_at: Instant::now(),
+            })),
+        }
     }
 
     pub fn append_cost_event(&self, event: &CostEvent) -> Result<(), String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
 
-        let date = event.created_at.format("%Y-%m-%d");
+        let date = event.created_at.format("%Y-%m-%d").to_string();
         let file_path = self.dir.join(format!("cost-events-{}.jsonl", date));
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&file_path)
-            .map_err(|e| format!("Failed to open stats file {:?}: {}", file_path, e))?;
 
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer(&mut writer, event).map_err(|e| e.to_string())?;
+        let mut st = self
+            .writer_state
+            .lock()
+            .map_err(|_| "StatsStore writer_state lock poisoned".to_string())?;
+
+        let needs_rotate = st
+            .current_date
+            .as_deref()
+            .map(|d| d != date.as_str())
+            .unwrap_or(true);
+
+        if needs_rotate {
+            // Best-effort flush old writer before rotating.
+            if let Some(ref mut w) = st.writer {
+                let _ = w.flush();
+            }
+
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&file_path)
+                .map_err(|e| format!("Failed to open stats file {:?}: {}", file_path, e))?;
+
+            st.writer = Some(BufWriter::new(file));
+            st.current_date = Some(date);
+            st.current_path = Some(file_path);
+            st.pending_appends = 0;
+        }
+
+        let Some(ref mut writer) = st.writer else {
+            return Err("StatsStore writer missing".to_string());
+        };
+
+        serde_json::to_writer(writer, event).map_err(|e| e.to_string())?;
         writer.write_all(b"\n").map_err(|e| e.to_string())?;
-        writer.flush().map_err(|e| e.to_string())?;
+        st.pending_appends = st.pending_appends.saturating_add(1);
         Ok(())
+    }
+
+    /// Flush any buffered stats writes to disk.
+    ///
+    /// This does *not* fsync; it only ensures other readers can see appended lines.
+    pub fn flush(&self) -> Result<(), String> {
+        let mut st = self
+            .writer_state
+            .lock()
+            .map_err(|_| "StatsStore writer_state lock poisoned".to_string())?;
+
+        // Skip redundant flushes if nothing changed.
+        if st.pending_appends == 0 {
+            return Ok(());
+        }
+
+        if let Some(ref mut writer) = st.writer {
+            writer.flush().map_err(|e| e.to_string())?;
+        }
+
+        st.pending_appends = 0;
+        st.last_flush_at = Instant::now();
+        Ok(())
+    }
+
+    fn current_open_path(&self) -> Option<PathBuf> {
+        self.writer_state
+            .lock()
+            .ok()
+            .and_then(|st| st.current_path.clone())
     }
 
     pub fn prune(&self, cfg: StatsRetentionConfig) -> Result<(), String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+
+        // Avoid deleting the currently-open shard file.
+        let open_path = self.current_open_path();
 
         let now = Utc::now();
 
@@ -172,6 +253,10 @@ impl StatsStore {
                 let entry = entry.map_err(|e| e.to_string())?;
                 let path = entry.path();
                 if !path.is_file() {
+                    continue;
+                }
+
+                if open_path.as_ref().is_some_and(|p| p == &path) {
                     continue;
                 }
                 let name = entry.file_name();
@@ -199,6 +284,10 @@ impl StatsStore {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             if !path.is_file() {
+                continue;
+            }
+
+            if open_path.as_ref().is_some_and(|p| p == &path) {
                 continue;
             }
             let meta = entry.metadata().map_err(|e| e.to_string())?;
@@ -791,6 +880,12 @@ pub fn emit_cost_events_for_current_request(
     }
 
     // Best-effort pruning after each write.
+    // Flush once per request so the Stats UI can read newly-appended lines immediately,
+    // but avoid paying a flush cost for every individual cost event.
+    if let Err(e) = stats_store.flush() {
+        log::warn!("Failed to flush stats writer: {}", e);
+    }
+
     let cfg = read_stats_retention_config(app);
     let _ = stats_store.prune(cfg);
 

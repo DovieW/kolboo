@@ -59,11 +59,11 @@ Legend:
   - Add an incremental index/cache (daily totals, per-provider totals) updated on append.
   - Support a “rebuild index” path if shards are corrupted.
 
-### Reduce fsync/flush overhead for stats writes
+### Reduce fsync/flush overhead for stats writes (done)
 
-- **Where:** `app/src-tauri/src/stats.rs` (`StatsStore::append_cost_event` flushes every event)
-- **Todo:**
-  - Consider batching appends (buffered writer per day file, periodic flush) while keeping crash-safety reasonable.
+- **Where:** `app/src-tauri/src/stats.rs`
+- **Previous problem:** `StatsStore::append_cost_event` opened a file + created a writer + flushed on every event.
+- **Current state:** the stats shard file is kept open with a buffered writer and is flushed once per request (after all cost events are appended), reducing overhead while keeping the UI reads fresh.
 
 ---
 
