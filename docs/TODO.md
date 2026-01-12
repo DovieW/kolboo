@@ -54,10 +54,10 @@ Legend:
 ### Improve stats aggregation performance
 
 - **Where:** `app/src-tauri/src/commands/stats.rs`
-- **Problem:** cost summary endpoints scan all JSONL lines each query.
-- **Todo:**
-  - Add an incremental index/cache (daily totals, per-provider totals) updated on append.
-  - Support a “rebuild index” path if shards are corrupted.
+- **Previous problem:** cost summary endpoints scanned all JSONL lines on every query.
+- **Current state:** stats queries are now cached in-memory and invalidated whenever a new cost event is appended.
+- **Todo (optional follow-up):**
+  - Add an on-disk incremental index (for instant stats even after restart) and a “rebuild index” path if shards are corrupted.
 
 ### Reduce fsync/flush overhead for stats writes (done)
 

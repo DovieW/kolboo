@@ -44,6 +44,49 @@ pub struct GetCostSummaryParams {
     pub exclude_free_tier: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct StatsCacheKey {
+    kind: Option<String>,
+    timeframe: String,
+    stt_model_keys: Vec<String>,
+    llm_model_keys: Vec<String>,
+    exclude_free_tier: bool,
+}
+
+fn make_cache_key_for_summary(
+    timeframe: &str,
+    kind: &Option<String>,
+    stt_model_keys: &Option<Vec<String>>,
+    llm_model_keys: &Option<Vec<String>>,
+    exclude_free_tier: bool,
+) -> String {
+    let mut stt = stt_model_keys.clone().unwrap_or_default();
+    let mut llm = llm_model_keys.clone().unwrap_or_default();
+    stt.sort();
+    llm.sort();
+
+    let key = StatsCacheKey {
+        kind: kind.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        timeframe: timeframe.trim().to_string(),
+        stt_model_keys: stt,
+        llm_model_keys: llm,
+        exclude_free_tier,
+    };
+
+    serde_json::to_string(&key).unwrap_or_else(|_| format!("{}:{}", timeframe, exclude_free_tier))
+}
+
+fn make_cache_key_for_by_provider(params: &GetCostSummaryParams) -> String {
+    make_cache_key_for_summary(
+        params.timeframe.as_str(),
+        &params.kind,
+        &params.stt_model_keys,
+        &params.llm_model_keys,
+        params.exclude_free_tier.unwrap_or(false),
+    )
+}
+
 fn cutoff_for_timeframe(timeframe: &str) -> Option<DateTime<Utc>> {
     let now = Utc::now();
     match timeframe {
@@ -83,6 +126,19 @@ pub fn get_cost_summary(
     llm_model_keys: Option<Vec<String>>,
     exclude_free_tier: Option<bool>,
 ) -> Result<CostSummaryResponse, String> {
+    let exclude_free_tier = exclude_free_tier.unwrap_or(false);
+    let cache_key = make_cache_key_for_summary(
+        timeframe.as_str(),
+        &kind,
+        &stt_model_keys,
+        &llm_model_keys,
+        exclude_free_tier,
+    );
+
+    if let Some(cached) = stats_store.cache_get_cost_summary::<CostSummaryResponse>(&cache_key) {
+        return Ok(cached);
+    }
+
     let timeframe = timeframe.trim().to_string();
     let cutoff = cutoff_for_timeframe(&timeframe);
     let kind_filter = parse_kind_filter(kind);
@@ -92,7 +148,6 @@ pub fn get_cost_summary(
     let selected_llm_model_keys: Option<std::collections::HashSet<String>> = llm_model_keys
         .filter(|v| !v.is_empty())
         .map(|v| v.into_iter().collect());
-    let exclude_free_tier = exclude_free_tier.unwrap_or(false);
 
     let mut total_usd_micros: u128 = 0;
     let mut events_total: u64 = 0;
@@ -196,14 +251,17 @@ pub fn get_cost_summary(
         }
     }
 
-    Ok(CostSummaryResponse {
+    let out = CostSummaryResponse {
         timeframe,
         total_usd_micros: (total_usd_micros.min(u128::from(u64::MAX))) as u64,
         events_total,
         events_with_cost,
         earliest_included_at,
         latest_included_at,
-    })
+    };
+
+    stats_store.cache_put_cost_summary(cache_key, &out);
+    Ok(out)
 }
 
 /// Same as `get_cost_summary`, but takes a single params object and supports both
@@ -233,6 +291,11 @@ pub fn get_cost_by_provider_v2(
     stats_store: State<'_, StatsStore>,
     params: GetCostSummaryParams,
 ) -> Result<CostByProviderResponse, String> {
+    let cache_key = make_cache_key_for_by_provider(&params);
+    if let Some(cached) = stats_store.cache_get_cost_by_provider::<CostByProviderResponse>(&cache_key) {
+        return Ok(cached);
+    }
+
     let timeframe = params.timeframe.trim().to_string();
     let cutoff = cutoff_for_timeframe(&timeframe);
     let kind_filter = parse_kind_filter(params.kind);
@@ -350,5 +413,7 @@ pub fn get_cost_by_provider_v2(
             .then_with(|| a.provider.cmp(&b.provider))
     });
 
-    Ok(CostByProviderResponse { timeframe, providers })
+    let out = CostByProviderResponse { timeframe, providers };
+    stats_store.cache_put_cost_by_provider(cache_key, &out);
+    Ok(out)
 }

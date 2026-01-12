@@ -7,10 +7,12 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use serde::de::DeserializeOwned;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -26,6 +28,18 @@ use crate::cost::fireworks as fireworks_cost;
 use tauri::AppHandle;
 use tauri::{Manager, Emitter};
 use crate::request_log::RequestLogStore;
+
+#[derive(Debug, Clone)]
+struct StatsQueryCacheEntry {
+    revision: u64,
+    value: JsonValue,
+}
+
+#[derive(Debug, Default)]
+struct StatsQueryCacheState {
+    cost_summary: std::collections::HashMap<String, StatsQueryCacheEntry>,
+    cost_by_provider: std::collections::HashMap<String, StatsQueryCacheEntry>,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -129,10 +143,23 @@ pub struct StatsRetentionConfig {
 ///
 /// Files are stored under `<app_data_dir>/stats/`.
 /// We shard by day in JSONL for cheap appends and easy retention.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StatsStore {
     dir: PathBuf,
     writer_state: Arc<StdMutex<StatsWriterState>>,
+    revision: AtomicU64,
+    query_cache: Arc<StdMutex<StatsQueryCacheState>>,
+}
+
+impl Clone for StatsStore {
+    fn clone(&self) -> Self {
+        Self {
+            dir: self.dir.clone(),
+            writer_state: self.writer_state.clone(),
+            revision: AtomicU64::new(self.revision.load(Ordering::Relaxed)),
+            query_cache: self.query_cache.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -159,6 +186,75 @@ impl StatsStore {
                 pending_appends: 0,
                 last_flush_at: Instant::now(),
             })),
+            revision: AtomicU64::new(0),
+            query_cache: Arc::new(StdMutex::new(StatsQueryCacheState::default())),
+        }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
+    }
+
+    fn bump_revision(&self) {
+        self.revision.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn cache_get_cost_summary<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
+        let rev = self.revision();
+        let lock = self.query_cache.lock().ok()?;
+        let entry = lock.cost_summary.get(key)?;
+        if entry.revision != rev {
+            return None;
+        }
+        serde_json::from_value(entry.value.clone()).ok()
+    }
+
+    pub fn cache_put_cost_summary<T: Serialize>(&self, key: String, value: &T) {
+        let Ok(v) = serde_json::to_value(value) else {
+            return;
+        };
+        let rev = self.revision();
+        if let Ok(mut lock) = self.query_cache.lock() {
+            // Keep the cache bounded.
+            if lock.cost_summary.len() >= 64 {
+                lock.cost_summary.clear();
+            }
+            lock.cost_summary.insert(
+                key,
+                StatsQueryCacheEntry {
+                    revision: rev,
+                    value: v,
+                },
+            );
+        }
+    }
+
+    pub fn cache_get_cost_by_provider<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
+        let rev = self.revision();
+        let lock = self.query_cache.lock().ok()?;
+        let entry = lock.cost_by_provider.get(key)?;
+        if entry.revision != rev {
+            return None;
+        }
+        serde_json::from_value(entry.value.clone()).ok()
+    }
+
+    pub fn cache_put_cost_by_provider<T: Serialize>(&self, key: String, value: &T) {
+        let Ok(v) = serde_json::to_value(value) else {
+            return;
+        };
+        let rev = self.revision();
+        if let Ok(mut lock) = self.query_cache.lock() {
+            if lock.cost_by_provider.len() >= 64 {
+                lock.cost_by_provider.clear();
+            }
+            lock.cost_by_provider.insert(
+                key,
+                StatsQueryCacheEntry {
+                    revision: rev,
+                    value: v,
+                },
+            );
         }
     }
 
@@ -201,9 +297,12 @@ impl StatsStore {
             return Err("StatsStore writer missing".to_string());
         };
 
-        serde_json::to_writer(writer, event).map_err(|e| e.to_string())?;
-        writer.write_all(b"\n").map_err(|e| e.to_string())?;
+        serde_json::to_writer(&mut *writer, event).map_err(|e| e.to_string())?;
+        (&mut *writer).write_all(b"\n").map_err(|e| e.to_string())?;
         st.pending_appends = st.pending_appends.saturating_add(1);
+
+        // Any append means stats queries are stale.
+        self.bump_revision();
         Ok(())
     }
 
