@@ -191,6 +191,14 @@ function getLogLevelColor(level: LogLevel): string {
   }
 }
 
+function logEntryKey(entry: LogEntry): string {
+  // The backend doesn't provide a stable ID for each log entry, so derive a
+  // deterministic key from the entry contents.
+  return `${entry.timestamp}-${entry.level}-${entry.message}-${
+    entry.details ?? ""
+  }`;
+}
+
 function LogEntryItem({ entry }: { entry: LogEntry }) {
   const time = new Date(entry.timestamp).toLocaleTimeString(undefined, {
     hour: "2-digit",
@@ -908,11 +916,8 @@ function RequestLogItem({
                   style={{ background: "var(--mantine-color-dark-8)" }}
                 >
                   <Stack gap={4}>
-                    {log.entries.map((entry, index) => (
-                      <LogEntryItem
-                        key={`${entry.timestamp}-${index}`}
-                        entry={entry}
-                      />
+                    {log.entries.map((entry) => (
+                      <LogEntryItem key={logEntryKey(entry)} entry={entry} />
                     ))}
                   </Stack>
                 </Paper>
@@ -1582,168 +1587,175 @@ export function LogsView(
 
       <div className="main-content-inner">
         <Stack gap="md" style={{ width: "100%" }}>
+          {/* System Events Panel */}
+          <Accordion
+            variant="contained"
+            radius="md"
+            chevronPosition="right"
+            value={systemEventsAccordionValue}
+            onChange={setSystemEventsAccordionValue}
+          >
+            <Accordion.Item value="system-events">
+              <Accordion.Control>
+                <Group justify="space-between" wrap="nowrap" pr="xs">
+                  <Group gap="xs" wrap="nowrap">
+                    <Zap
+                      size={16}
+                      style={{ color: "var(--mantine-color-yellow-5)" }}
+                    />
+                    <Text size="sm" fw={600}>
+                      System Events (Live)
+                    </Text>
+                    <Badge size="xs" variant="light" color="gray">
+                      {systemEvents.length}
+                    </Badge>
+                  </Group>
+                </Group>
+              </Accordion.Control>
 
-      {/* System Events Panel */}
-      <Accordion
-        variant="contained"
-        radius="md"
-        chevronPosition="right"
-        value={systemEventsAccordionValue}
-        onChange={setSystemEventsAccordionValue}
-      >
-        <Accordion.Item value="system-events">
-          <Accordion.Control>
-            <Group justify="space-between" wrap="nowrap" pr="xs">
-              <Group gap="xs" wrap="nowrap">
-                <Zap
-                  size={16}
-                  style={{ color: "var(--mantine-color-yellow-5)" }}
-                />
-                <Text size="sm" fw={600}>
-                  System Events (Live)
-                </Text>
-                <Badge size="xs" variant="light" color="gray">
-                  {systemEvents.length}
-                </Badge>
-              </Group>
-            </Group>
-          </Accordion.Control>
+              <Accordion.Panel>
+                <Group justify="space-between" align="center" mb={8}>
+                  <Tooltip
+                    label={
+                      "Enable backend hotkey diagnostics (Right Alt / AltGr). Useful for debugging flaky modifier-only hotkeys in final builds."
+                    }
+                    withArrow
+                  >
+                    <Switch
+                      size="xs"
+                      label="Hotkey debug"
+                      checked={hotkeyDebugEnabled}
+                      disabled={!settings || updateHotkeyDebugEnabled.isPending}
+                      onChange={(e) =>
+                        updateHotkeyDebugEnabled.mutate(e.currentTarget.checked)
+                      }
+                    />
+                  </Tooltip>
 
-          <Accordion.Panel>
-            <Group justify="space-between" align="center" mb={8}>
-              <Tooltip
-                label={
-                  "Enable backend hotkey diagnostics (Right Alt / AltGr). Useful for debugging flaky modifier-only hotkeys in final builds."
-                }
-                withArrow
-              >
-                <Switch
-                  size="xs"
-                  label="Hotkey debug"
-                  checked={hotkeyDebugEnabled}
-                  disabled={!settings || updateHotkeyDebugEnabled.isPending}
-                  onChange={(e) =>
-                    updateHotkeyDebugEnabled.mutate(e.currentTarget.checked)
-                  }
-                />
-              </Tooltip>
+                  <Group gap="xs">
+                    <CopyButton value={JSON.stringify(systemEvents, null, 2)}>
+                      {({ copied, copy }) => (
+                        <Button
+                          variant="subtle"
+                          color={copied ? "teal" : "gray"}
+                          size="xs"
+                          leftSection={<Copy size={12} />}
+                          onClick={copy}
+                          disabled={systemEvents.length === 0}
+                        >
+                          {copied ? "Copied!" : "Copy All"}
+                        </Button>
+                      )}
+                    </CopyButton>
 
-              <Group gap="xs">
-                <CopyButton value={JSON.stringify(systemEvents, null, 2)}>
-                  {({ copied, copy }) => (
                     <Button
                       variant="subtle"
-                      color={copied ? "teal" : "gray"}
+                      color="gray"
                       size="xs"
-                      leftSection={<Copy size={12} />}
-                      onClick={copy}
+                      onClick={() => {
+                        setSystemEvents([]);
+                        setSystemEventsAccordionValue(null);
+                      }}
                       disabled={systemEvents.length === 0}
                     >
-                      {copied ? "Copied!" : "Copy All"}
+                      Clear
                     </Button>
-                  )}
-                </CopyButton>
-
-                <Button
-                  variant="subtle"
-                  color="gray"
-                  size="xs"
-                  onClick={() => {
-                    setSystemEvents([]);
-                    setSystemEventsAccordionValue(null);
-                  }}
-                  disabled={systemEvents.length === 0}
-                >
-                  Clear
-                </Button>
-              </Group>
-            </Group>
-
-            {systemEvents.length === 0 ? (
-              <Text size="xs" c="dimmed">
-                No system events yet. Turn on Hotkey debug, then press Right Alt
-                (AltGr) to capture low-level key events.
-              </Text>
-            ) : (
-              <Stack gap={4} style={{ maxHeight: 120, overflowY: "auto" }}>
-                {systemEvents.map((event, idx) => (
-                  <Group
-                    key={`${event.timestamp}-${idx}`}
-                    gap="xs"
-                    wrap="nowrap"
-                    align="flex-start"
-                  >
-                    <Text
-                      size="xs"
-                      c="dimmed"
-                      ff="monospace"
-                      style={{
-                        whiteSpace: "nowrap",
-                        minWidth: 92,
-                        textAlign: "right",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {new Date(event.timestamp).toLocaleTimeString(undefined, {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                      })}
-                    </Text>
-                    <Badge
-                      size="xs"
-                      color={
-                        event.event_type === "error"
-                          ? "red"
-                          : event.event_type === "shortcut"
-                          ? "blue"
-                          : "gray"
-                      }
-                    >
-                      {event.event_type}
-                    </Badge>
-                    <Text size="xs" style={{ flex: 1 }}>
-                      {event.message}
-                      {event.details && (
-                        <Text span c="dimmed" size="xs">
-                          {" "}
-                          - {event.details}
-                        </Text>
-                      )}
-                    </Text>
                   </Group>
-                ))}
-              </Stack>
-            )}
-          </Accordion.Panel>
-        </Accordion.Item>
-      </Accordion>
+                </Group>
 
-      {pageLogs && pageLogs.length > 0 ? (
-        <Accordion
-          variant="contained"
-          radius="md"
-          chevronPosition="left"
-          value={openedLogId}
-          onChange={setOpenedLogId}
-        >
-          {pageLogs.map((log) => (
-            <RequestLogItem key={log.id} log={log} player={player} />
-          ))}
-        </Accordion>
-      ) : (
-        <Paper withBorder p="xl" ta="center">
-          <Info
-            size={32}
-            style={{ color: "var(--mantine-color-dimmed)", margin: "0 auto" }}
-          />
-          <Text size="sm" c="dimmed" mt="sm">
-            {logs && logs.length > 0
-              ? "No matches. Try a different filter."
-              : "No request logs yet. Start a voice transcription to see logs here."}
-          </Text>
-        </Paper>
-      )}
+                {systemEvents.length === 0 ? (
+                  <Text size="xs" c="dimmed">
+                    No system events yet. Turn on Hotkey debug, then press Right
+                    Alt (AltGr) to capture low-level key events.
+                  </Text>
+                ) : (
+                  <Stack gap={4} style={{ maxHeight: 120, overflowY: "auto" }}>
+                    {systemEvents.map((event) => (
+                      <Group
+                        key={`${event.timestamp}-${event.event_type}-${
+                          event.message
+                        }-${event.details ?? ""}`}
+                        gap="xs"
+                        wrap="nowrap"
+                        align="flex-start"
+                      >
+                        <Text
+                          size="xs"
+                          c="dimmed"
+                          ff="monospace"
+                          style={{
+                            whiteSpace: "nowrap",
+                            minWidth: 92,
+                            textAlign: "right",
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {new Date(event.timestamp).toLocaleTimeString(
+                            undefined,
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            }
+                          )}
+                        </Text>
+                        <Badge
+                          size="xs"
+                          color={
+                            event.event_type === "error"
+                              ? "red"
+                              : event.event_type === "shortcut"
+                              ? "blue"
+                              : "gray"
+                          }
+                        >
+                          {event.event_type}
+                        </Badge>
+                        <Text size="xs" style={{ flex: 1 }}>
+                          {event.message}
+                          {event.details && (
+                            <Text span c="dimmed" size="xs">
+                              {" "}
+                              - {event.details}
+                            </Text>
+                          )}
+                        </Text>
+                      </Group>
+                    ))}
+                  </Stack>
+                )}
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+
+          {pageLogs && pageLogs.length > 0 ? (
+            <Accordion
+              variant="contained"
+              radius="md"
+              chevronPosition="left"
+              value={openedLogId}
+              onChange={setOpenedLogId}
+            >
+              {pageLogs.map((log) => (
+                <RequestLogItem key={log.id} log={log} player={player} />
+              ))}
+            </Accordion>
+          ) : (
+            <Paper withBorder p="xl" ta="center">
+              <Info
+                size={32}
+                style={{
+                  color: "var(--mantine-color-dimmed)",
+                  margin: "0 auto",
+                }}
+              />
+              <Text size="sm" c="dimmed" mt="sm">
+                {logs && logs.length > 0
+                  ? "No matches. Try a different filter."
+                  : "No request logs yet. Start a voice transcription to see logs here."}
+              </Text>
+            </Paper>
+          )}
         </Stack>
       </div>
     </div>

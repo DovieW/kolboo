@@ -291,7 +291,7 @@ export function DeviceSelector() {
     const t = (dbfs - minDb) / (maxDb - minDb);
 
     // Slight curve so low-mid levels are easier to see.
-    const curved = Math.pow(Math.max(0, Math.min(1, t)), 0.75);
+    const curved = Math.max(0, Math.min(1, t)) ** 0.75;
     return Math.max(0, Math.min(1, curved));
   })();
 
@@ -336,7 +336,11 @@ export function DeviceSelector() {
               ? "mic-test-meter mic-test-meter--active"
               : "mic-test-meter"
           }
+          role="progressbar"
           aria-label="Microphone level"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(meterLevel * 100)}
           title={
             isMicTesting
               ? "Speak into the mic to see the level"

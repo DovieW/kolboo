@@ -116,15 +116,13 @@ export function PromptSectionEditor({
               // propagation on its own capture handlers.
             >
               {headerActions ? (
+                // biome-ignore lint/a11y/noStaticElementInteractions: wrapper only prevents accordion toggle when interacting with nested controls
                 <span
                   // Prevent accordion toggle when interacting with header actions.
                   onPointerDown={(e) => {
                     e.stopPropagation();
                   }}
                   onMouseDown={(e) => {
-                    e.stopPropagation();
-                  }}
-                  onClick={(e) => {
                     e.stopPropagation();
                   }}
                 >
@@ -179,6 +177,7 @@ export function PromptSectionEditor({
               )}
 
               {!hideToggle && (
+                // biome-ignore lint/a11y/noStaticElementInteractions: wrapper only prevents accordion toggle when interacting with the Switch
                 <span
                   // IMPORTANT: Don't stop propagation in *capture* phase here.
                   // Doing so can prevent the Switch's underlying input from
@@ -187,9 +186,6 @@ export function PromptSectionEditor({
                     e.stopPropagation();
                   }}
                   onMouseDown={(e) => {
-                    e.stopPropagation();
-                  }}
-                  onClick={(e) => {
                     e.stopPropagation();
                   }}
                 >

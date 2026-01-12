@@ -508,8 +508,8 @@ export function NetworkSettings({
           {trustedCertNames.length > 0 && (
             <div style={{ maxHeight: 160, overflow: "auto" }}>
               <Stack gap={4}>
-                {trustedCertNames.slice(0, 10).map((name, idx) => (
-                  <Text key={`${name}-${idx}`} size="xs" c="dimmed">
+                {trustedCertNames.slice(0, 10).map((name) => (
+                  <Text key={name} size="xs" c="dimmed">
                     • {name}
                   </Text>
                 ))}
@@ -614,100 +614,97 @@ export function NetworkSettings({
       )}
 
       {modeDraft === "system" && (
-        <>
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            {isLoadingSystemProxyInfo || isFetchingSystemProxyInfo ? (
-              <Group gap={8}>
-                <Loader size="sm" color="orange" />
-                <Text size="sm" c="dimmed">
-                  Detecting system proxy settings…
-                </Text>
-              </Group>
-            ) : (
-              <>
-                <Text size="sm" c="dimmed" mt={6}>
-                  Environment Variables
-                </Text>
-                <TextInput
-                  label="HTTP_PROXY (env)"
-                  value={systemProxyInfo?.env_http_proxy ?? ""}
-                  readOnly
-                />
-                <TextInput
-                  label="HTTPS_PROXY (env)"
-                  value={systemProxyInfo?.env_https_proxy ?? ""}
-                  readOnly
-                />
-                <TextInput
-                  label="NO_PROXY (env)"
-                  value={systemProxyInfo?.env_no_proxy ?? ""}
-                  readOnly
-                />
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          {isLoadingSystemProxyInfo || isFetchingSystemProxyInfo ? (
+            <Group gap={8}>
+              <Loader size="sm" color="orange" />
+              <Text size="sm" c="dimmed">
+                Detecting system proxy settings…
+              </Text>
+            </Group>
+          ) : (
+            <>
+              <Text size="sm" c="dimmed" mt={6}>
+                Environment Variables
+              </Text>
+              <TextInput
+                label="HTTP_PROXY (env)"
+                value={systemProxyInfo?.env_http_proxy ?? ""}
+                readOnly
+              />
+              <TextInput
+                label="HTTPS_PROXY (env)"
+                value={systemProxyInfo?.env_https_proxy ?? ""}
+                readOnly
+              />
+              <TextInput
+                label="NO_PROXY (env)"
+                value={systemProxyInfo?.env_no_proxy ?? ""}
+                readOnly
+              />
 
-                {systemProxyInfo?.windows_internet_settings && (
-                  <>
-                    <Text size="sm" c="dimmed" mt={6}>
-                      Windows Internet Settings
-                    </Text>
-                    <TextInput
-                      label="ProxyEnable"
-                      value={
-                        systemProxyInfo.windows_internet_settings
-                          .proxy_enable === null
-                          ? ""
-                          : systemProxyInfo.windows_internet_settings
-                              .proxy_enable
-                          ? "1"
-                          : "0"
-                      }
-                      readOnly
-                    />
-                    <TextInput
-                      label="ProxyServer"
-                      value={
-                        systemProxyInfo.windows_internet_settings
-                          .proxy_server ?? ""
-                      }
-                      readOnly
-                    />
-                    <TextInput
-                      label="ProxyOverride"
-                      value={
-                        systemProxyInfo.windows_internet_settings
-                          .proxy_override ?? ""
-                      }
-                      readOnly
-                    />
-                    <TextInput
-                      label="AutoConfigURL"
-                      value={
-                        systemProxyInfo.windows_internet_settings
-                          .auto_config_url ?? ""
-                      }
-                      readOnly
-                    />
-                  </>
-                )}
-              </>
+              {systemProxyInfo?.windows_internet_settings && (
+                <>
+                  <Text size="sm" c="dimmed" mt={6}>
+                    Windows Internet Settings
+                  </Text>
+                  <TextInput
+                    label="ProxyEnable"
+                    value={
+                      systemProxyInfo.windows_internet_settings.proxy_enable ===
+                      null
+                        ? ""
+                        : systemProxyInfo.windows_internet_settings.proxy_enable
+                        ? "1"
+                        : "0"
+                    }
+                    readOnly
+                  />
+                  <TextInput
+                    label="ProxyServer"
+                    value={
+                      systemProxyInfo.windows_internet_settings.proxy_server ??
+                      ""
+                    }
+                    readOnly
+                  />
+                  <TextInput
+                    label="ProxyOverride"
+                    value={
+                      systemProxyInfo.windows_internet_settings
+                        .proxy_override ?? ""
+                    }
+                    readOnly
+                  />
+                  <TextInput
+                    label="AutoConfigURL"
+                    value={
+                      systemProxyInfo.windows_internet_settings
+                        .auto_config_url ?? ""
+                    }
+                    readOnly
+                  />
+                </>
+              )}
+            </>
+          )}
+
+          {!!systemProxyInfo &&
+            (systemProxyInfo.env_http_proxy ||
+              systemProxyInfo.env_https_proxy ||
+              systemProxyInfo.env_no_proxy) &&
+            !!systemProxyInfo.windows_internet_settings && (
+              <Text size="xs" c="dimmed">
+                Both environment variables and Windows proxy settings are
+                present. In System mode, env vars usually “win”.
+              </Text>
             )}
 
-            {!!systemProxyInfo &&
-              (systemProxyInfo.env_http_proxy ||
-                systemProxyInfo.env_https_proxy ||
-                systemProxyInfo.env_no_proxy) &&
-              !!systemProxyInfo.windows_internet_settings && (
-                <Text size="xs" c="dimmed">
-                  Both environment variables and Windows proxy settings are
-                  present. In System mode, env vars usually “win”.
-                </Text>
-              )}
-
-            <Text size="xs" c="dimmed">
-              Note: depending on your OS configuration (e.g. PAC scripts), the
-              actual proxy used may not be directly visible here.
-            </Text>
-          </div>
-        </>
+          <Text size="xs" c="dimmed">
+            Note: depending on your OS configuration (e.g. PAC scripts), the
+            actual proxy used may not be directly visible here.
+          </Text>
+        </div>
       )}
 
       {modeDraft === "manual" && (

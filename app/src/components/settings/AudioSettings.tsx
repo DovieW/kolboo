@@ -28,7 +28,7 @@ import {
   useUpdateQuietAudioRequireSpeech,
   useUpdateQuietAudioRmsDbfsThreshold,
 } from "../../lib/queries";
-import { type RewriteProgramPromptProfile } from "../../lib/tauri";
+import type { RewriteProgramPromptProfile } from "../../lib/tauri";
 import { DeviceSelector } from "../DeviceSelector";
 
 const GLOBAL_ONLY_TOOLTIP =
@@ -345,6 +345,7 @@ export function AudioSettings({
                     <Text size="xs" c="dimmed" mb={6}>
                       Raw capture (no filters applied)
                     </Text>
+                    {/* biome-ignore lint/a11y/useMediaCaption: this is a dev/test audio playback widget; captions/tracks are not applicable for raw diagnostic audio */}
                     <audio
                       controls
                       src={testRawSrc ?? undefined}
@@ -360,6 +361,7 @@ export function AudioSettings({
                       Your current audio settings applied (noise gate, mono,
                       HPF, AGC, etc.)
                     </Text>
+                    {/* biome-ignore lint/a11y/useMediaCaption: this is a dev/test audio playback widget; captions/tracks are not applicable for processed diagnostic audio */}
                     <audio
                       controls
                       src={testProcessedSrc ?? undefined}

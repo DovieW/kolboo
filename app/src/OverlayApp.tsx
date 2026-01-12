@@ -282,6 +282,7 @@ function RecordingDot({ state }: { state: PipelineState }) {
     <div
       className="overlay-dot"
       data-state={dotState}
+      role="img"
       aria-label={
         dotState === "recording"
           ? "Recording"
@@ -528,7 +529,7 @@ function BackendAudioWave({
           let level = Math.max(rmsNorm * 1.25, peakNorm);
           // Visual gain + curve so typical speaking doesn't look near-flat.
           level = Math.min(1, level * 1.6);
-          level = Math.pow(level, 0.72);
+          level = level ** 0.72;
           if (!Number.isFinite(level) || level < 0.003) level = 0;
 
           hasFrameRef.current = true;
@@ -614,7 +615,7 @@ function BackendAudioWave({
         // - render curve is slightly gentler so peaks still stand out
         const CURVE_GAIN = 0.45;
         const CURVE_RENDER = 0.58;
-        const effectiveAbs = Math.pow(Math.max(1e-6, rawAbs), CURVE_GAIN);
+        const effectiveAbs = Math.max(1e-6, rawAbs) ** CURVE_GAIN;
 
         // Auto-gain target is deliberately < 1 so we keep headroom and avoid
         // living at full-scale all the time.
@@ -689,8 +690,7 @@ function BackendAudioWave({
             const v1 = hist[rf1 * n + b1] ?? 0;
             const half = v0 * (1 - tt) + v1 * tt;
 
-            const curved =
-              Math.sign(half) * Math.pow(Math.abs(half), CURVE_RENDER);
+            const curved = Math.sign(half) * Math.abs(half) ** CURVE_RENDER;
             const v = softLimit(curved * g);
             const yTop = midY - clamp11(v) * trueAmp;
             const yBot = midY + clamp11(v) * trueAmp;
@@ -1270,7 +1270,7 @@ function AudioWave({
           0,
           Math.min(1, (speechRatio - 1.0) * 8)
         );
-        const rawEnergy = Math.pow(Math.min(1, aboveFloor / 0.015), 0.6);
+        const rawEnergy = Math.min(1, aboveFloor / 0.015) ** 0.6;
         const voiceEnergyInstant = rawEnergy * (0.2 + voiceLikelihood * 0.8);
 
         const prevVE = voiceEnergyRef.current;
@@ -2568,7 +2568,7 @@ function RecordingControl() {
   const renderLeftIndicator = () => {
     if (isError) {
       return (
-        <div style={{ color: "#ef4444" }} aria-label="Error">
+        <div style={{ color: "#ef4444" }}>
           <ErrorIcon />
         </div>
       );
@@ -2669,16 +2669,17 @@ function RecordingControl() {
                 <div
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
-                  <div
+                  <button
+                    type="button"
                     className="overlay-error-text"
                     title={lastError.message}
-                    tabIndex={0}
+                    style={{ all: "unset", display: "block" }}
                     onFocus={(e) => {
                       e.currentTarget.scrollLeft = 0;
                     }}
                   >
                     {lastError.message}
-                  </div>
+                  </button>
                 </div>
               ) : centerPhaseText && showDetailedLoading ? (
                 <div className="overlay-phase-text" aria-live="polite">
@@ -2710,47 +2711,31 @@ function RecordingControl() {
               {isError ? (
                 <>
                   {lastFailedRequestId ? (
-                    <div
+                    <button
+                      type="button"
                       className="overlay-pill"
                       data-variant="dim"
-                      role="button"
-                      tabIndex={0}
                       onClick={(e) => {
                         e.stopPropagation();
                         onRetry();
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onRetry();
-                        }
-                      }}
                     >
                       Retry
-                    </div>
+                    </button>
                   ) : null}
 
-                  <div
+                  <button
+                    type="button"
                     className="overlay-pill overlay-pill--close"
-                    role="button"
-                    tabIndex={0}
                     aria-label="Close"
                     title="Close"
                     onClick={(e) => {
                       e.stopPropagation();
                       dismissError();
                     }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        dismissError();
-                      }
-                    }}
                   >
                     ×
-                  </div>
+                  </button>
                 </>
               ) : null}
             </div>

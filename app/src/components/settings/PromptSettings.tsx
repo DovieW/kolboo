@@ -4232,159 +4232,243 @@ export function PromptSettings({
       {/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
 
       {activeProfile ? (
-        <>
-          <div
-            className="settings-accordion-block"
-            style={{ marginTop: 0, marginBottom: 16 }}
-          >
-            <Accordion variant="separated" radius="md">
-              <Accordion.Item value={`${activeProfileId}-presets`}>
-                <Accordion.Control>
-                  <div>
-                    <p className="settings-label">Presets</p>
-                    <p className="settings-description">
-                      Create multiple dictation modes for this program, then
-                      choose one manually or let the intent router auto-select.
-                    </p>
-                  </div>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
+        <div
+          className="settings-accordion-block"
+          style={{ marginTop: 0, marginBottom: 16 }}
+        >
+          <Accordion variant="separated" radius="md">
+            <Accordion.Item value={`${activeProfileId}-presets`}>
+              <Accordion.Control>
+                <div>
+                  <p className="settings-label">Presets</p>
+                  <p className="settings-description">
+                    Create multiple dictation modes for this program, then
+                    choose one manually or let the intent router auto-select.
+                  </p>
+                </div>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  <Group
+                    justify="space-between"
+                    align="center"
+                    wrap="wrap"
+                    gap={12}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Default preset
+                        </Text>
+                        <Select
+                          data={[
+                            { value: "__none__", label: "Default" },
+                            ...presetSelectOptions,
+                          ]}
+                          value={defaultPresetValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            saveProfileMetadata({
+                              default_preset_id:
+                                value === "__none__" ? null : value,
+                            });
+                          }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 220,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Manual preset override (persisted)
+                        </Text>
+                        <Select
+                          data={[
+                            {
+                              value: "__none__",
+                              label: "No override (use router/default)",
+                            },
+                            ...presetSelectOptions,
+                          ]}
+                          value={activePresetValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            saveProfileMetadata({
+                              active_preset_id:
+                                value === "__none__" ? null : value,
+                            });
+                          }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 260,
+                            },
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <Button
+                      color="gray"
+                      variant="light"
+                      onClick={() => setPresetEditorOpen(true)}
+                    >
+                      Edit Presets
+                    </Button>
+                  </Group>
+
+                  <Modal
+                    opened={presetEditorOpen}
+                    onClose={() => setPresetEditorOpen(false)}
+                    title="Edit presets"
+                    centered
+                    size="xl"
+                    keepMounted={false}
+                    zIndex={1000}
+                    styles={{
+                      body: {
+                        height: "70vh",
+                        overflowY: "auto",
+                      },
                     }}
                   >
                     <Group
                       justify="space-between"
-                      align="center"
+                      align="flex-end"
                       wrap="wrap"
                       gap={12}
+                      mb="sm"
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <div>
-                          <Text size="xs" c="dimmed" mb={4}>
-                            Default preset
-                          </Text>
-                          <Select
-                            data={[
-                              { value: "__none__", label: "Default" },
-                              ...presetSelectOptions,
-                            ]}
-                            value={defaultPresetValue}
-                            onChange={(value) => {
-                              if (!value) return;
-                              saveProfileMetadata({
-                                default_preset_id:
-                                  value === "__none__" ? null : value,
-                              });
-                            }}
-                            placeholder="Default"
-                            withCheckIcon={false}
-                            styles={{
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                minWidth: 220,
-                              },
-                            }}
-                          />
-                        </div>
-
-                        <div>
-                          <Text size="xs" c="dimmed" mb={4}>
-                            Manual preset override (persisted)
-                          </Text>
-                          <Select
-                            data={[
-                              {
-                                value: "__none__",
-                                label: "No override (use router/default)",
-                              },
-                              ...presetSelectOptions,
-                            ]}
-                            value={activePresetValue}
-                            onChange={(value) => {
-                              if (!value) return;
-                              saveProfileMetadata({
-                                active_preset_id:
-                                  value === "__none__" ? null : value,
-                              });
-                            }}
-                            placeholder="Default"
-                            withCheckIcon={false}
-                            styles={{
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                minWidth: 260,
-                              },
-                            }}
-                          />
-                        </div>
+                      <div style={{ flex: 1, minWidth: 260 }}>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Editing preset
+                        </Text>
+                        <Select
+                          data={[
+                            {
+                              value: EDIT_DEFAULT_PRESET,
+                              label: "Default",
+                            },
+                            ...presetSelectOptions,
+                          ]}
+                          value={editingPresetId ?? EDIT_DEFAULT_PRESET}
+                          onChange={(value) => {
+                            setEditingPresetId(value ?? EDIT_DEFAULT_PRESET);
+                          }}
+                          comboboxProps={{ withinPortal: true, zIndex: 1400 }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                            },
+                          }}
+                        />
                       </div>
 
-                      <Button
-                        color="gray"
-                        variant="light"
-                        onClick={() => setPresetEditorOpen(true)}
-                      >
-                        Edit Presets
-                      </Button>
+                      <Group gap={8} wrap="wrap">
+                        <Button color="gray" onClick={newPreset}>
+                          New
+                        </Button>
+                        <Tooltip
+                          label={
+                            linkableProfiles.length === 0
+                              ? "No presets found in other profiles"
+                              : "Add a shared preset from another profile"
+                          }
+                          disabled={linkableProfiles.length > 0}
+                        >
+                          <Button
+                            color="gray"
+                            variant="light"
+                            onClick={openLinkPresetModal}
+                            disabled={linkableProfiles.length === 0}
+                          >
+                            Add
+                          </Button>
+                        </Tooltip>
+
+                        <ActionIcon
+                          variant="light"
+                          color="red"
+                          size={36}
+                          disabled={isEditingDefaultPreset || !selectedPreset}
+                          onClick={() => {
+                            if (isEditingDefaultPreset) return;
+                            if (!selectedPreset) return;
+                            setDeletePresetDialog({
+                              presetId: selectedPreset.id,
+                              presetName:
+                                selectedPreset.name?.trim() ||
+                                selectedPreset.id,
+                              isShared: isSharedPresetId(selectedPreset.id),
+                            });
+                          }}
+                          aria-label="Delete preset"
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
                     </Group>
 
-                    <Modal
-                      opened={presetEditorOpen}
-                      onClose={() => setPresetEditorOpen(false)}
-                      title="Edit presets"
-                      centered
-                      size="xl"
-                      keepMounted={false}
-                      zIndex={1000}
-                      styles={{
-                        body: {
-                          height: "70vh",
-                          overflowY: "auto",
-                        },
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 12,
                       }}
                     >
-                      <Group
-                        justify="space-between"
-                        align="flex-end"
-                        wrap="wrap"
-                        gap={12}
-                        mb="sm"
-                      >
-                        <div style={{ flex: 1, minWidth: 260 }}>
-                          <Text size="xs" c="dimmed" mb={4}>
-                            Editing preset
-                          </Text>
-                          <Select
-                            data={[
-                              {
-                                value: EDIT_DEFAULT_PRESET,
-                                label: "Default",
-                              },
-                              ...presetSelectOptions,
-                            ]}
-                            value={editingPresetId ?? EDIT_DEFAULT_PRESET}
-                            onChange={(value) => {
-                              setEditingPresetId(value ?? EDIT_DEFAULT_PRESET);
+                      {selectedPreset ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 12,
+                          }}
+                        >
+                          <TextInput
+                            label="Preset name"
+                            value={localPresetName}
+                            onChange={(e) =>
+                              setLocalPresetName(e.currentTarget.value)
+                            }
+                            onBlur={() => {
+                              const next = localPresetName.trim();
+                              if (next && next !== selectedPreset.name) {
+                                updatePreset(selectedPreset.id, {
+                                  name: next,
+                                });
+                              }
                             }}
-                            comboboxProps={{ withinPortal: true, zIndex: 1400 }}
-                            placeholder="Default"
-                            withCheckIcon={false}
                             styles={{
+                              label: { fontSize: 12 },
                               input: {
                                 backgroundColor: "var(--bg-elevated)",
                                 borderColor: "var(--border-default)",
@@ -4392,92 +4476,342 @@ export function PromptSettings({
                               },
                             }}
                           />
-                        </div>
 
-                        <Group gap={8} wrap="wrap">
-                          <Button color="gray" onClick={newPreset}>
-                            New
-                          </Button>
-                          <Tooltip
-                            label={
-                              linkableProfiles.length === 0
-                                ? "No presets found in other profiles"
-                                : "Add a shared preset from another profile"
-                            }
-                            disabled={linkableProfiles.length > 0}
-                          >
-                            <Button
-                              color="gray"
-                              variant="light"
-                              onClick={openLinkPresetModal}
-                              disabled={linkableProfiles.length === 0}
-                            >
-                              Add
-                            </Button>
-                          </Tooltip>
-
-                          <ActionIcon
-                            variant="light"
-                            color="red"
-                            size={36}
-                            disabled={isEditingDefaultPreset || !selectedPreset}
-                            onClick={() => {
-                              if (isEditingDefaultPreset) return;
-                              if (!selectedPreset) return;
-                              setDeletePresetDialog({
-                                presetId: selectedPreset.id,
-                                presetName:
-                                  selectedPreset.name?.trim() ||
-                                  selectedPreset.id,
-                                isShared: isSharedPresetId(selectedPreset.id),
-                              });
-                            }}
-                            aria-label="Delete preset"
-                          >
-                            <Trash2 size={16} />
-                          </ActionIcon>
-                        </Group>
-                      </Group>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 12,
-                        }}
-                      >
-                        {selectedPreset ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 12,
-                            }}
-                          >
-                            <TextInput
-                              label="Preset name"
-                              value={localPresetName}
-                              onChange={(e) =>
-                                setLocalPresetName(e.currentTarget.value)
+                          <div>
+                            <Text size="xs" c="dimmed" mb={4}>
+                              Rewrite step
+                            </Text>
+                            <Select
+                              data={[
+                                { value: "on", label: "On" },
+                                { value: "off", label: "Off" },
+                              ]}
+                              value={
+                                selectedPreset.rewrite_llm_enabled
+                                  ? "on"
+                                  : "off"
                               }
-                              onBlur={() => {
-                                const next = localPresetName.trim();
-                                if (next && next !== selectedPreset.name) {
-                                  updatePreset(selectedPreset.id, {
-                                    name: next,
-                                  });
-                                }
+                              onChange={(value) => {
+                                if (!value) return;
+                                updatePreset(selectedPreset.id, {
+                                  rewrite_llm_enabled: value === "on",
+                                });
                               }}
+                              comboboxProps={{
+                                withinPortal: true,
+                                zIndex: 1400,
+                              }}
+                              withCheckIcon={false}
                               styles={{
-                                label: { fontSize: 12 },
                                 input: {
                                   backgroundColor: "var(--bg-elevated)",
                                   borderColor: "var(--border-default)",
                                   color: "var(--text-primary)",
+                                  minWidth: 220,
                                 },
                               }}
                             />
+                          </div>
 
+                          <Textarea
+                            label="Routing hints (one per line)"
+                            description="If empty, the router falls back to the preset name."
+                            value={localPresetHintsText}
+                            onChange={(e) =>
+                              setLocalPresetHintsText(e.currentTarget.value)
+                            }
+                            onBlur={() => {
+                              const lines = localPresetHintsText
+                                .split(/\r?\n/)
+                                .map((s) => s.trim())
+                                .filter(Boolean);
+                              const next = lines.length === 0 ? null : lines;
+                              const current =
+                                selectedPreset.routing_hints ?? null;
+                              if (
+                                JSON.stringify(current) !== JSON.stringify(next)
+                              ) {
+                                updatePreset(selectedPreset.id, {
+                                  routing_hints: next,
+                                });
+                              }
+                            }}
+                            autosize
+                            minRows={3}
+                            styles={{
+                              label: { fontSize: 12 },
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                fontFamily: "monospace",
+                                fontSize: "13px",
+                              },
+                            }}
+                          />
+
+                          <div>
+                            <Text size="sm" fw={600} mb={6}>
+                              System Prompt override (relative to this profile)
+                            </Text>
+
+                            <Accordion variant="separated" radius="md">
+                              {(() => {
+                                const key: SectionKey = "system";
+                                const override = getPresetPromptOverride(
+                                  selectedPreset,
+                                  key
+                                );
+                                const baseContent = profilePromptDefaultContent;
+
+                                const initialContent =
+                                  override && override.content != null
+                                    ? override.content
+                                    : baseContent;
+
+                                const presetLabel =
+                                  selectedPreset.name?.trim() ||
+                                  selectedPreset.id;
+
+                                return (
+                                  <PromptSectionEditor
+                                    key={`${activeProfileId}-${selectedPreset.id}-${key}`}
+                                    sectionKey={`${activeProfileId}-preset-${selectedPreset.id}-${key}`}
+                                    title="System Prompt"
+                                    description="Override the profile System Prompt for this preset."
+                                    enabled={true}
+                                    hideToggle={true}
+                                    headerActions={
+                                      <Button
+                                        variant="light"
+                                        color="gray"
+                                        disabled={
+                                          updateRewriteProgramPromptProfiles.isPending
+                                        }
+                                        onClick={() => {
+                                          setPromptLabContextPrompt(
+                                            (initialContent ?? "").trim()
+                                          );
+                                          setPromptLabContextLabel(
+                                            `${activeProfileLabel} · ${presetLabel}`
+                                          );
+                                          setPromptLabApplyTarget({
+                                            type: "preset",
+                                            presetId: selectedPreset.id,
+                                            key,
+                                          });
+                                          setPromptLabOpen(true);
+                                        }}
+                                      >
+                                        Prompt Lab
+                                      </Button>
+                                    }
+                                    initialContent={initialContent}
+                                    defaultContent={baseContent}
+                                    hasCustom={override != null}
+                                    inheritMode={
+                                      override == null
+                                        ? "inheriting"
+                                        : "overriding"
+                                    }
+                                    inheritTooltip="Inheriting from the profile System Prompt"
+                                    disableOverrideTooltip="Disable override (inherit from profile)"
+                                    onDisableOverride={() =>
+                                      savePresetSectionOverride(
+                                        selectedPreset,
+                                        key,
+                                        null
+                                      )
+                                    }
+                                    resetLabel="Reset to Profile"
+                                    onToggle={() => {}}
+                                    onSave={(content) => {
+                                      const contentToStore =
+                                        content === baseContent
+                                          ? null
+                                          : content || null;
+                                      const next = {
+                                        content: contentToStore,
+                                      };
+                                      savePresetSectionOverride(
+                                        selectedPreset,
+                                        key,
+                                        next
+                                      );
+                                    }}
+                                    onReset={() =>
+                                      savePresetSectionOverride(
+                                        selectedPreset,
+                                        key,
+                                        null
+                                      )
+                                    }
+                                    isSaving={
+                                      updateRewriteProgramPromptProfiles.isPending
+                                    }
+                                  />
+                                );
+                              })()}
+                            </Accordion>
+                          </div>
+
+                          <div style={{ marginTop: 12 }}>
+                            <Accordion variant="separated" radius="md">
+                              <Accordion.Item
+                                value={`${activeProfileId}-${selectedPreset.id}-test-rewrite`}
+                              >
+                                <Accordion.Control>
+                                  <div>
+                                    <p className="settings-label">
+                                      Test rewrite
+                                    </p>
+                                    <p className="settings-description">
+                                      Paste a raw transcript and run it through
+                                      this preset’s effective System Prompt.
+                                    </p>
+                                  </div>
+                                </Accordion.Control>
+                                <Accordion.Panel>
+                                  {(() => {
+                                    const baseContent =
+                                      profilePromptDefaultContent;
+                                    const override = getPresetPromptOverride(
+                                      selectedPreset,
+                                      "system"
+                                    );
+                                    const promptForTest =
+                                      override && override.content != null
+                                        ? override.content
+                                        : baseContent;
+
+                                    const isDisabled =
+                                      rewriteTestInput.trim().length === 0 ||
+                                      updateRewriteProgramPromptProfiles.isPending ||
+                                      updateCleanupPromptSections.isPending ||
+                                      updateRewriteLlmEnabled.isPending;
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          gap: 10,
+                                        }}
+                                      >
+                                        <Text size="xs" c="dimmed">
+                                          Testing: {activeProfileLabel} ·{" "}
+                                          {selectedPreset.name?.trim() ||
+                                            selectedPreset.id}
+                                        </Text>
+
+                                        <Textarea
+                                          value={rewriteTestInput}
+                                          onChange={(e) => {
+                                            setRewriteTestInput(
+                                              e.currentTarget.value
+                                            );
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (
+                                              (e.ctrlKey || e.metaKey) &&
+                                              e.key === "Enter"
+                                            ) {
+                                              e.preventDefault();
+                                              if (!isDisabled) {
+                                                runRewriteTest(promptForTest);
+                                              }
+                                            }
+                                          }}
+                                          placeholder="Raw transcript"
+                                          autosize
+                                          minRows={3}
+                                          styles={{
+                                            input: {
+                                              backgroundColor:
+                                                "var(--bg-elevated)",
+                                              borderColor:
+                                                "var(--border-default)",
+                                              color: "var(--text-primary)",
+                                              fontFamily: "monospace",
+                                              fontSize: "13px",
+                                            },
+                                          }}
+                                        />
+
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 12,
+                                          }}
+                                        >
+                                          <Button
+                                            color="gray"
+                                            loading={
+                                              testRewriteWithPrompt.isPending
+                                            }
+                                            disabled={isDisabled}
+                                            onClick={() =>
+                                              runRewriteTest(promptForTest)
+                                            }
+                                          >
+                                            Test
+                                          </Button>
+
+                                          <Text size="sm" c="dimmed">
+                                            {testRewriteWithPrompt.isPending
+                                              ? "Duration: running…"
+                                              : rewriteTestDurationMs === null
+                                              ? "Duration: —"
+                                              : `Duration: ${(
+                                                  rewriteTestDurationMs / 1000
+                                                ).toFixed(2)}s`}
+                                          </Text>
+                                        </div>
+
+                                        {rewriteTestError ? (
+                                          <Text size="sm" c="red">
+                                            {rewriteTestError}
+                                          </Text>
+                                        ) : null}
+
+                                        {rewriteTestOutput ? (
+                                          <Textarea
+                                            value={rewriteTestOutput}
+                                            readOnly
+                                            autosize
+                                            minRows={3}
+                                            styles={{
+                                              input: {
+                                                backgroundColor:
+                                                  "var(--bg-elevated)",
+                                                borderColor:
+                                                  "var(--border-default)",
+                                                color: "var(--text-primary)",
+                                                fontFamily: "monospace",
+                                                fontSize: "13px",
+                                              },
+                                            }}
+                                          />
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })()}
+                                </Accordion.Panel>
+                              </Accordion.Item>
+                            </Accordion>
+                          </div>
+                        </div>
+                      ) : isEditingDefaultPreset ? (
+                        <>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: 12,
+                              alignItems: "flex-end",
+                            }}
+                          >
                             <div>
                               <Text size="xs" c="dimmed" mb={4}>
                                 Rewrite step
@@ -4487,15 +4821,12 @@ export function PromptSettings({
                                   { value: "on", label: "On" },
                                   { value: "off", label: "Off" },
                                 ]}
-                                value={
-                                  selectedPreset.rewrite_llm_enabled
-                                    ? "on"
-                                    : "off"
-                                }
+                                value={defaultPresetRewriteStepValue}
                                 onChange={(value) => {
                                   if (!value) return;
-                                  updatePreset(selectedPreset.id, {
-                                    rewrite_llm_enabled: value === "on",
+                                  saveProfileMetadata({
+                                    default_target_rewrite_llm_enabled:
+                                      value === "on",
                                   });
                                 }}
                                 comboboxProps={{
@@ -4508,226 +4839,266 @@ export function PromptSettings({
                                     backgroundColor: "var(--bg-elevated)",
                                     borderColor: "var(--border-default)",
                                     color: "var(--text-primary)",
-                                    minWidth: 220,
+                                    minWidth: 240,
                                   },
                                 }}
                               />
                             </div>
+                          </div>
 
-                            <Textarea
-                              label="Routing hints (one per line)"
-                              description="If empty, the router falls back to the preset name."
-                              value={localPresetHintsText}
-                              onChange={(e) =>
-                                setLocalPresetHintsText(e.currentTarget.value)
-                              }
-                              onBlur={() => {
-                                const lines = localPresetHintsText
-                                  .split(/\r?\n/)
-                                  .map((s) => s.trim())
-                                  .filter(Boolean);
-                                const next = lines.length === 0 ? null : lines;
-                                const current =
-                                  selectedPreset.routing_hints ?? null;
-                                if (
-                                  JSON.stringify(current) !==
-                                  JSON.stringify(next)
-                                ) {
-                                  updatePreset(selectedPreset.id, {
-                                    routing_hints: next,
-                                  });
-                                }
-                              }}
-                              autosize
-                              minRows={3}
-                              styles={{
-                                label: { fontSize: 12 },
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                  fontFamily: "monospace",
-                                  fontSize: "13px",
-                                },
-                              }}
-                            />
-
-                            <div>
-                              <Text size="sm" fw={600} mb={6}>
-                                System Prompt override (relative to this
-                                profile)
-                              </Text>
-
-                              <Accordion variant="separated" radius="md">
-                                {(() => {
-                                  const key: SectionKey = "system";
-                                  const override = getPresetPromptOverride(
-                                    selectedPreset,
-                                    key
-                                  );
-                                  const baseContent =
-                                    profilePromptDefaultContent;
-
-                                  const initialContent =
-                                    override && override.content != null
-                                      ? override.content
-                                      : baseContent;
-
-                                  const presetLabel =
-                                    selectedPreset.name?.trim() ||
-                                    selectedPreset.id;
-
-                                  return (
-                                    <PromptSectionEditor
-                                      key={`${activeProfileId}-${selectedPreset.id}-${key}`}
-                                      sectionKey={`${activeProfileId}-preset-${selectedPreset.id}-${key}`}
-                                      title="System Prompt"
-                                      description="Override the profile System Prompt for this preset."
-                                      enabled={true}
-                                      hideToggle={true}
-                                      headerActions={
-                                        <Button
-                                          variant="light"
-                                          color="gray"
-                                          disabled={
-                                            updateRewriteProgramPromptProfiles.isPending
-                                          }
-                                          onClick={() => {
-                                            setPromptLabContextPrompt(
-                                              (initialContent ?? "").trim()
-                                            );
-                                            setPromptLabContextLabel(
-                                              `${activeProfileLabel} · ${presetLabel}`
-                                            );
-                                            setPromptLabApplyTarget({
-                                              type: "preset",
-                                              presetId: selectedPreset.id,
-                                              key,
-                                            });
-                                            setPromptLabOpen(true);
-                                          }}
-                                        >
-                                          Prompt Lab
-                                        </Button>
-                                      }
-                                      initialContent={initialContent}
-                                      defaultContent={baseContent}
-                                      hasCustom={override != null}
-                                      inheritMode={
-                                        override == null
-                                          ? "inheriting"
-                                          : "overriding"
-                                      }
-                                      inheritTooltip="Inheriting from the profile System Prompt"
-                                      disableOverrideTooltip="Disable override (inherit from profile)"
-                                      onDisableOverride={() =>
-                                        savePresetSectionOverride(
-                                          selectedPreset,
-                                          key,
-                                          null
-                                        )
-                                      }
-                                      resetLabel="Reset to Profile"
-                                      onToggle={() => {}}
-                                      onSave={(content) => {
-                                        const contentToStore =
-                                          content === baseContent
-                                            ? null
-                                            : content || null;
-                                        const next = {
-                                          content: contentToStore,
-                                        };
-                                        savePresetSectionOverride(
-                                          selectedPreset,
-                                          key,
-                                          next
-                                        );
-                                      }}
-                                      onReset={() =>
-                                        savePresetSectionOverride(
-                                          selectedPreset,
-                                          key,
-                                          null
-                                        )
-                                      }
-                                      isSaving={
-                                        updateRewriteProgramPromptProfiles.isPending
-                                      }
-                                    />
-                                  );
-                                })()}
-                              </Accordion>
-                            </div>
-
-                            <div style={{ marginTop: 12 }}>
-                              <Accordion variant="separated" radius="md">
-                                <Accordion.Item
-                                  value={`${activeProfileId}-${selectedPreset.id}-test-rewrite`}
-                                >
-                                  <Accordion.Control>
-                                    <div>
-                                      <p className="settings-label">
-                                        Test rewrite
-                                      </p>
-                                      <p className="settings-description">
-                                        Paste a raw transcript and run it
-                                        through this preset’s effective System
-                                        Prompt.
-                                      </p>
-                                    </div>
-                                  </Accordion.Control>
-                                  <Accordion.Panel>
-                                    {(() => {
-                                      const baseContent =
-                                        profilePromptDefaultContent;
-                                      const override = getPresetPromptOverride(
-                                        selectedPreset,
-                                        "system"
+                          <div style={{ marginTop: 8 }}>
+                            <Accordion variant="separated" radius="md">
+                              <PromptSectionEditor
+                                sectionKey={`${activeProfileId}-default-system-prompt`}
+                                title="System Prompt"
+                                description="Instructions used when rewriting the transcript"
+                                enabled={true}
+                                hideToggle={true}
+                                headerActions={
+                                  <Button
+                                    variant="light"
+                                    color="gray"
+                                    disabled={
+                                      updateCleanupPromptSections.isPending ||
+                                      updateRewriteProgramPromptProfiles.isPending ||
+                                      updateRewriteLlmEnabled.isPending
+                                    }
+                                    onClick={() => {
+                                      setPromptLabContextPrompt(
+                                        effectiveCurrentPrompt
                                       );
-                                      const promptForTest =
-                                        override && override.content != null
-                                          ? override.content
-                                          : baseContent;
+                                      setPromptLabContextLabel(
+                                        activeProfileLabel
+                                      );
+                                      setPromptLabApplyTarget({
+                                        type: "profile",
+                                        key: "system",
+                                      });
+                                      setPromptLabOpen(true);
+                                    }}
+                                  >
+                                    Prompt Lab
+                                  </Button>
+                                }
+                                initialContent={
+                                  localSections?.system.content ?? ""
+                                }
+                                defaultContent={defaultSections?.system ?? ""}
+                                hasCustom={hasCustomContent.system}
+                                inheritMode={
+                                  isDefaultScope
+                                    ? null
+                                    : activeProfile?.cleanup_prompt_sections
+                                        ?.system == null
+                                    ? "inheriting"
+                                    : "overriding"
+                                }
+                                onDisableOverride={
+                                  isDefaultScope
+                                    ? undefined
+                                    : () =>
+                                        openDisableOverrideDialog({
+                                          title:
+                                            "Disable System Prompt override?",
+                                          onConfirm: () => {
+                                            const base =
+                                              settings?.cleanup_prompt_sections ??
+                                              DEFAULT_SECTIONS;
 
-                                      const isDisabled =
-                                        rewriteTestInput.trim().length === 0 ||
-                                        updateRewriteProgramPromptProfiles.isPending ||
-                                        updateCleanupPromptSections.isPending ||
-                                        updateRewriteLlmEnabled.isPending;
+                                            const current: CleanupPromptSectionsOverride =
+                                              activeProfile?.cleanup_prompt_sections ??
+                                              {};
+                                            const next =
+                                              normalizePromptOverrides({
+                                                ...current,
+                                                system: null,
+                                              });
+                                            profilePromptOverridesRef.current =
+                                              next;
 
-                                      return (
+                                            const resolved: CleanupPromptSections =
+                                              {
+                                                system:
+                                                  next?.system ?? base.system,
+                                              };
+
+                                            setLocalSections({
+                                              system: {
+                                                content:
+                                                  resolved.system.content ??
+                                                  defaultSections?.system ??
+                                                  "",
+                                              },
+                                            });
+
+                                            saveProfileMetadata({
+                                              cleanup_prompt_sections: next,
+                                            });
+                                          },
+                                        })
+                                }
+                                onToggle={() => {}}
+                                onSave={(content) =>
+                                  handleSave("system", content)
+                                }
+                                onReset={() => handleReset("system")}
+                                isSaving={
+                                  updateCleanupPromptSections.isPending ||
+                                  updateRewriteProgramPromptProfiles.isPending
+                                }
+                              />
+                            </Accordion>
+                          </div>
+
+                          <Textarea
+                            label="Default target routing hints (optional)"
+                            description="Used by the intent router when deciding to use the profile defaults (no preset). You can put multiple lines here; the router will treat them as additional hints."
+                            value={localDefaultPresetDescription}
+                            onChange={(e) =>
+                              setLocalDefaultPresetDescription(
+                                e.currentTarget.value
+                              )
+                            }
+                            onBlur={() => {
+                              const trimmed =
+                                localDefaultPresetDescription.trim();
+                              const next =
+                                trimmed.length === 0 ? null : trimmed;
+                              if (
+                                (activeProfile?.default_preset_description ??
+                                  null) !== next
+                              ) {
+                                saveProfileMetadata({
+                                  default_preset_description: next,
+                                });
+                              }
+                            }}
+                            autosize
+                            minRows={2}
+                            styles={{
+                              label: { fontSize: 12 },
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                              },
+                            }}
+                          />
+
+                          <div style={{ marginTop: 12 }}>
+                            <Accordion variant="separated" radius="md">
+                              <Accordion.Item
+                                value={`${activeProfileId}-default-test-rewrite`}
+                              >
+                                <Accordion.Control>
+                                  <div>
+                                    <p className="settings-label">
+                                      Test rewrite
+                                    </p>
+                                    <p className="settings-description">
+                                      Paste a raw transcript and run it through
+                                      the Default preset.
+                                    </p>
+                                  </div>
+                                </Accordion.Control>
+                                <Accordion.Panel>
+                                  {(() => {
+                                    const promptForTest =
+                                      localSections?.system.content ?? "";
+                                    const isDisabled =
+                                      rewriteTestInput.trim().length === 0 ||
+                                      updateRewriteProgramPromptProfiles.isPending ||
+                                      updateCleanupPromptSections.isPending ||
+                                      updateRewriteLlmEnabled.isPending;
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          gap: 10,
+                                        }}
+                                      >
+                                        <Text size="xs" c="dimmed">
+                                          Testing: {activeProfileLabel} ·
+                                          Default
+                                        </Text>
+
+                                        <Textarea
+                                          value={rewriteTestInput}
+                                          onChange={(e) => {
+                                            setRewriteTestInput(
+                                              e.currentTarget.value
+                                            );
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (
+                                              (e.ctrlKey || e.metaKey) &&
+                                              e.key === "Enter"
+                                            ) {
+                                              e.preventDefault();
+                                              if (!isDisabled) {
+                                                runRewriteTest(promptForTest);
+                                              }
+                                            }
+                                          }}
+                                          placeholder="Raw transcript"
+                                          autosize
+                                          minRows={3}
+                                          styles={{
+                                            input: {
+                                              backgroundColor:
+                                                "var(--bg-elevated)",
+                                              borderColor:
+                                                "var(--border-default)",
+                                              color: "var(--text-primary)",
+                                              fontFamily: "monospace",
+                                              fontSize: "13px",
+                                            },
+                                          }}
+                                        />
+
                                         <div
                                           style={{
                                             display: "flex",
-                                            flexDirection: "column",
-                                            gap: 10,
+                                            alignItems: "center",
+                                            gap: 12,
                                           }}
                                         >
-                                          <Text size="xs" c="dimmed">
-                                            Testing: {activeProfileLabel} ·{" "}
-                                            {selectedPreset.name?.trim() ||
-                                              selectedPreset.id}
-                                          </Text>
+                                          <Button
+                                            color="gray"
+                                            loading={
+                                              testRewriteWithPrompt.isPending
+                                            }
+                                            disabled={isDisabled}
+                                            onClick={() =>
+                                              runRewriteTest(promptForTest)
+                                            }
+                                          >
+                                            Test
+                                          </Button>
 
+                                          <Text size="sm" c="dimmed">
+                                            {testRewriteWithPrompt.isPending
+                                              ? "Duration: running…"
+                                              : rewriteTestDurationMs === null
+                                              ? "Duration: —"
+                                              : `Duration: ${(
+                                                  rewriteTestDurationMs / 1000
+                                                ).toFixed(2)}s`}
+                                          </Text>
+                                        </div>
+
+                                        {rewriteTestError ? (
+                                          <Text size="sm" c="red">
+                                            {rewriteTestError}
+                                          </Text>
+                                        ) : null}
+
+                                        {rewriteTestOutput ? (
                                           <Textarea
-                                            value={rewriteTestInput}
-                                            onChange={(e) => {
-                                              setRewriteTestInput(
-                                                e.currentTarget.value
-                                              );
-                                            }}
-                                            onKeyDown={(e) => {
-                                              if (
-                                                (e.ctrlKey || e.metaKey) &&
-                                                e.key === "Enter"
-                                              ) {
-                                                e.preventDefault();
-                                                if (!isDisabled) {
-                                                  runRewriteTest(promptForTest);
-                                                }
-                                              }
-                                            }}
-                                            placeholder="Raw transcript"
+                                            value={rewriteTestOutput}
+                                            readOnly
                                             autosize
                                             minRows={3}
                                             styles={{
@@ -4742,101 +5113,671 @@ export function PromptSettings({
                                               },
                                             }}
                                           />
-
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              alignItems: "center",
-                                              gap: 12,
-                                            }}
-                                          >
-                                            <Button
-                                              color="gray"
-                                              loading={
-                                                testRewriteWithPrompt.isPending
-                                              }
-                                              disabled={isDisabled}
-                                              onClick={() =>
-                                                runRewriteTest(promptForTest)
-                                              }
-                                            >
-                                              Test
-                                            </Button>
-
-                                            <Text size="sm" c="dimmed">
-                                              {testRewriteWithPrompt.isPending
-                                                ? "Duration: running…"
-                                                : rewriteTestDurationMs === null
-                                                ? "Duration: —"
-                                                : `Duration: ${(
-                                                    rewriteTestDurationMs / 1000
-                                                  ).toFixed(2)}s`}
-                                            </Text>
-                                          </div>
-
-                                          {rewriteTestError ? (
-                                            <Text size="sm" c="red">
-                                              {rewriteTestError}
-                                            </Text>
-                                          ) : null}
-
-                                          {rewriteTestOutput ? (
-                                            <Textarea
-                                              value={rewriteTestOutput}
-                                              readOnly
-                                              autosize
-                                              minRows={3}
-                                              styles={{
-                                                input: {
-                                                  backgroundColor:
-                                                    "var(--bg-elevated)",
-                                                  borderColor:
-                                                    "var(--border-default)",
-                                                  color: "var(--text-primary)",
-                                                  fontFamily: "monospace",
-                                                  fontSize: "13px",
-                                                },
-                                              }}
-                                            />
-                                          ) : null}
-                                        </div>
-                                      );
-                                    })()}
-                                  </Accordion.Panel>
-                                </Accordion.Item>
-                              </Accordion>
-                            </div>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })()}
+                                </Accordion.Panel>
+                              </Accordion.Item>
+                            </Accordion>
                           </div>
-                        ) : isEditingDefaultPreset ? (
+                        </>
+                      ) : null}
+                    </div>
+                  </Modal>
+                </div>
+              </Accordion.Panel>
+            </Accordion.Item>
+
+            <Accordion.Item value={`${activeProfileId}-intent-router`}>
+              <Accordion.Control>
+                <div>
+                  <p className="settings-label">Intent router</p>
+                  <p className="settings-description">
+                    Automatically select a preset based on the transcript.
+                  </p>
+                </div>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  {presets.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      Add at least one preset to enable routing.
+                    </Text>
+                  ) : null}
+
+                  <div
+                    className="settings-row no-divider"
+                    style={{ paddingTop: 0 }}
+                  >
+                    <div>
+                      <p className="settings-label">Router strategy</p>
+                      <p className="settings-description">
+                        Off disables routing completely. Embeddings is fast and
+                        deterministic; LLM can be more flexible but costs more.
+                      </p>
+                    </div>
+                    <Select
+                      data={[
+                        { value: "off", label: "Off" },
+                        { value: "embeddings", label: "Embeddings" },
+                        { value: "llm", label: "LLM" },
+                      ]}
+                      value={routerStrategyValue}
+                      onChange={(value) => {
+                        if (!value) return;
+                        if (value === "off") {
+                          saveRouter({
+                            enabled: false,
+                            strategy: "off",
+                            embedding_provider: null,
+                            embedding_model: null,
+                            pick_highest_score: null,
+                            similarity_threshold: null,
+                            similarity_margin: null,
+                            llm_provider: null,
+                            llm_model: null,
+                            openai_reasoning_effort: null,
+                            gemini_thinking_budget: null,
+                            gemini_thinking_level: null,
+                            anthropic_thinking_budget: null,
+                            llm_system_prompt: null,
+                          });
+                          return;
+                        }
+
+                        if (value === "embeddings") {
+                          const provider = "openai";
+                          const modelOptions = EMBEDDING_MODELS[provider] ?? [];
+                          const modelValue = modelOptions[0]?.value ?? null;
+
+                          saveRouter({
+                            enabled: true,
+                            strategy: "embeddings",
+                            embedding_provider: provider,
+                            embedding_model: modelValue,
+                            pick_highest_score:
+                              effectiveRouter?.pick_highest_score ?? true,
+                            similarity_threshold:
+                              effectiveRouter?.similarity_threshold ?? null,
+                            similarity_margin:
+                              effectiveRouter?.similarity_margin ?? null,
+                            llm_provider: null,
+                            llm_model: null,
+                            openai_reasoning_effort: null,
+                            gemini_thinking_budget: null,
+                            gemini_thinking_level: null,
+                            anthropic_thinking_budget: null,
+                            llm_system_prompt: null,
+                          });
+                          return;
+                        }
+
+                        const seedProvider =
+                          settings?.llm_provider ??
+                          effectiveRouter?.llm_provider ??
+                          "openai";
+                        const modelOptions =
+                          getLlmModelOptionsForProvider(seedProvider);
+                        const seedModel =
+                          effectiveRouter?.llm_model ??
+                          settings?.llm_model ??
+                          modelOptions[0]?.value ??
+                          null;
+
+                        saveRouter({
+                          enabled: true,
+                          strategy: "llm",
+                          embedding_provider: null,
+                          embedding_model: null,
+                          pick_highest_score: null,
+                          similarity_threshold: null,
+                          similarity_margin: null,
+
+                          llm_provider: seedProvider,
+                          llm_model: seedModel,
+                          openai_reasoning_effort:
+                            settings?.openai_reasoning_effort ?? null,
+                          gemini_thinking_budget:
+                            settings?.gemini_thinking_budget ?? null,
+                          gemini_thinking_level:
+                            settings?.gemini_thinking_level ?? null,
+                          anthropic_thinking_budget:
+                            settings?.anthropic_thinking_budget ?? null,
+                          llm_system_prompt: null,
+                        });
+                      }}
+                      withCheckIcon={false}
+                      disabled={presets.length === 0}
+                      styles={{
+                        input: {
+                          backgroundColor: "var(--bg-elevated)",
+                          borderColor: "var(--border-default)",
+                          color: "var(--text-primary)",
+                          minWidth: 200,
+                        },
+                      }}
+                    />
+                  </div>
+
+                  {routerStrategyValue === "embeddings" ? (
+                    <>
+                      <Text size="xs" c="dimmed">
+                        Uses your{" "}
+                        {embeddingProviderValue === "cohere"
+                          ? "Cohere"
+                          : "OpenAI"}{" "}
+                        API key. Configure it in API Keys.
+                      </Text>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Embedding provider</p>
+                          <p className="settings-description">
+                            Provider used to embed the transcript and hints.
+                          </p>
+                        </div>
+                        <Select
+                          data={[
+                            { value: "openai", label: "OpenAI" },
+                            { value: "cohere", label: "Cohere" },
+                          ]}
+                          value={embeddingProviderValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            const models = EMBEDDING_MODELS[value] ?? [];
+                            const nextModel = models[0]?.value ?? null;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              embedding_provider: value as any,
+                              embedding_model: nextModel,
+                            });
+                          }}
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 200,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Embedding model</p>
+                          <p className="settings-description">
+                            Model used to embed the transcript and hints.
+                          </p>
+                        </div>
+                        <Select
+                          data={embeddingModels}
+                          value={embeddingModelValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              embedding_provider: embeddingProviderValue as any,
+                              embedding_model: value,
+                            });
+                          }}
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 240,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Pick highest score</p>
+                          <p className="settings-description">
+                            Always selects the candidate with the highest
+                            similarity score. Disables threshold + margin.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={Boolean(effectiveRouter?.pick_highest_score)}
+                          onChange={(e) => {
+                            const enabled = e.currentTarget.checked;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              pick_highest_score: enabled,
+                            });
+                          }}
+                          color="gray"
+                          size="md"
+                          disabled={presets.length === 0}
+                        />
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">
+                            Store preset embeddings
+                          </p>
+                          <p className="settings-description">
+                            Precompute and store embeddings for preset hints so
+                            routing doesn’t re-embed them every run.
+                          </p>
+                        </div>
+                        <Button
+                          color="gray"
+                          loading={isCachingRouterEmbeddings}
+                          disabled={
+                            isCachingRouterEmbeddings ||
+                            presets.length === 0 ||
+                            activeProfileId === "default" ||
+                            !embeddingModelValue
+                          }
+                          onClick={async () => {
+                            if (activeProfileId === "default") return;
+                            setIsCachingRouterEmbeddings(true);
+                            try {
+                              const res = await tauriAPI.cacheRouterEmbeddings({
+                                profileId: activeProfileId,
+                              });
+                              notifications.show({
+                                title: "Stored router embeddings",
+                                message: `Cached ${res.cached_now} / ${res.total_hints} hints (${res.skipped_existing} already cached) · ${res.provider} / ${res.model}`,
+                                color: "gray",
+                              });
+                            } catch (e) {
+                              notifications.show({
+                                title: "Failed to store embeddings",
+                                message: errorToMessage(e),
+                                color: "red",
+                              });
+                            } finally {
+                              setIsCachingRouterEmbeddings(false);
+                            }
+                          }}
+                        >
+                          Store embeddings
+                        </Button>
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Similarity threshold</p>
+                          <p className="settings-description">
+                            Minimum cosine similarity to accept a match.
+                          </p>
+                        </div>
+                        <NumberInput
+                          value={effectiveRouter?.similarity_threshold ?? 0.78}
+                          onChange={(value) => {
+                            if (
+                              typeof value !== "number" ||
+                              Number.isNaN(value)
+                            )
+                              return;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              similarity_threshold: value,
+                            });
+                          }}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          clampBehavior="blur"
+                          disabled={Boolean(
+                            effectiveRouter?.pick_highest_score
+                          )}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              width: 140,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div className="settings-row no-divider">
+                        <div>
+                          <p className="settings-label">Similarity margin</p>
+                          <p className="settings-description">
+                            Required gap between the best and second-best
+                            preset.
+                          </p>
+                        </div>
+                        <NumberInput
+                          value={effectiveRouter?.similarity_margin ?? 0.05}
+                          onChange={(value) => {
+                            if (
+                              typeof value !== "number" ||
+                              Number.isNaN(value)
+                            )
+                              return;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              similarity_margin: value,
+                            });
+                          }}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          clampBehavior="blur"
+                          disabled={Boolean(
+                            effectiveRouter?.pick_highest_score
+                          )}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              width: 140,
+                            },
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : null}
+
+                  {routerStrategyValue === "llm"
+                    ? (() => {
+                        const routerProvider =
+                          effectiveRouter?.llm_provider ??
+                          settings?.llm_provider ??
+                          "openai";
+                        const modelOptions =
+                          getLlmModelOptionsForProvider(routerProvider);
+                        const routerModel =
+                          effectiveRouter?.llm_model ??
+                          settings?.llm_model ??
+                          modelOptions[0]?.value ??
+                          null;
+
+                        const supportsRouterOpenAiThinking =
+                          routerProvider === "openai" &&
+                          !!routerModel &&
+                          (routerModel.startsWith("gpt-5") ||
+                            routerModel.startsWith("o"));
+
+                        const routerOpenAiThinkingOptions =
+                          !supportsRouterOpenAiThinking || !routerModel
+                            ? []
+                            : [
+                                {
+                                  value: SELECT_DEFAULT,
+                                  label: "Default",
+                                },
+                                ...openAiThinkingEffortsForModel(
+                                  routerModel
+                                ).map((v) => ({
+                                  value: v,
+                                  label:
+                                    v === "none"
+                                      ? "None"
+                                      : v.charAt(0).toUpperCase() + v.slice(1),
+                                })),
+                              ];
+
+                        const supportsRouterGeminiThinkingLevel =
+                          routerProvider === "gemini" &&
+                          !!routerModel &&
+                          routerModel.includes("gemini-3");
+
+                        const routerIsGemini3Flash =
+                          supportsRouterGeminiThinkingLevel &&
+                          routerModel.includes("gemini-3-flash");
+
+                        const routerIsGemini3Pro =
+                          supportsRouterGeminiThinkingLevel &&
+                          routerModel.includes("gemini-3-pro");
+
+                        const routerGeminiThinkingLevelOptions =
+                          !supportsRouterGeminiThinkingLevel
+                            ? []
+                            : routerIsGemini3Flash
+                            ? [
+                                {
+                                  value: SELECT_DEFAULT,
+                                  label: "Default",
+                                },
+                                { value: "minimal", label: "Minimal" },
+                                { value: "low", label: "Low" },
+                                { value: "medium", label: "Medium" },
+                                { value: "high", label: "High" },
+                              ]
+                            : [
+                                {
+                                  value: SELECT_DEFAULT,
+                                  label: "Default",
+                                },
+                                { value: "low", label: "Low" },
+                                { value: "high", label: "High" },
+                              ];
+
+                        const supportsRouterGeminiThinkingBudget =
+                          routerProvider === "gemini" &&
+                          !!routerModel &&
+                          routerModel.includes("gemini-2.5") &&
+                          !routerModel.includes("flash-lite");
+
+                        const routerCanDisableGemini25Thinking =
+                          supportsRouterGeminiThinkingBudget &&
+                          routerModel.includes("gemini-2.5-flash") &&
+                          !routerModel.includes("gemini-2.5-pro");
+
+                        const routerIsGemini25Pro =
+                          supportsRouterGeminiThinkingBudget &&
+                          routerModel.includes("gemini-2.5-pro");
+
+                        const routerGemini25MaxBudget = routerIsGemini25Pro
+                          ? 32768
+                          : 24576;
+
+                        const routerGemini25MinBudget = routerIsGemini25Pro
+                          ? 128
+                          : 0;
+
+                        const routerGeminiThinkingBudgetOptions: Array<{
+                          value: string;
+                          label: string;
+                        }> = !supportsRouterGeminiThinkingBudget
+                          ? []
+                          : [
+                              { value: SELECT_DEFAULT, label: "Default" },
+                              { value: "-1", label: "Dynamic (-1)" },
+                              ...(routerCanDisableGemini25Thinking
+                                ? [{ value: "0", label: "Off (0)" }]
+                                : []),
+                              ...(routerIsGemini25Pro
+                                ? [
+                                    {
+                                      value: String(routerGemini25MinBudget),
+                                      label: "Minimal (128)",
+                                    },
+                                  ]
+                                : []),
+                              { value: "1024", label: "Light (1024)" },
+                              { value: "4096", label: "Medium (4096)" },
+                              { value: "16384", label: "High (16384)" },
+                              ...(routerGemini25MaxBudget > 16384
+                                ? [
+                                    {
+                                      value: String(routerGemini25MaxBudget),
+                                      label: `Max (${routerGemini25MaxBudget})`,
+                                    },
+                                  ]
+                                : []),
+                            ];
+
+                        const supportsRouterAnthropicThinkingBudget =
+                          routerProvider === "anthropic" &&
+                          !!routerModel &&
+                          // Extended thinking is supported by newer Claude families. Keep conservative.
+                          (routerModel.includes("claude-3-7") ||
+                            routerModel.includes("claude-4") ||
+                            routerModel.includes("-4-"));
+
+                        const routerAnthropicThinkingLevelOptions: Array<{
+                          value: string;
+                          label: string;
+                        }> = !supportsRouterAnthropicThinkingBudget
+                          ? []
+                          : [
+                              { value: SELECT_DEFAULT, label: "Default" },
+                              { value: "0", label: "Off" },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[0]
+                                ),
+                                label: "Low",
+                              },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[1]
+                                ),
+                                label: "Medium",
+                              },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[2]
+                                ),
+                                label: "High",
+                              },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[3]
+                                ),
+                                label: "Max",
+                              },
+                            ];
+
+                        const routerAnthropicThinkingLevelOptionsWithCustom =
+                          (() => {
+                            const vRaw =
+                              effectiveRouter?.anthropic_thinking_budget;
+                            const v =
+                              typeof vRaw === "number" && Number.isFinite(vRaw)
+                                ? Math.trunc(vRaw)
+                                : null;
+                            if (v == null)
+                              return routerAnthropicThinkingLevelOptions;
+
+                            const asString = String(v);
+                            const exists =
+                              routerAnthropicThinkingLevelOptions.some(
+                                (o) => o.value === asString
+                              );
+                            if (exists)
+                              return routerAnthropicThinkingLevelOptions;
+
+                            return [
+                              ...routerAnthropicThinkingLevelOptions,
+                              { value: asString, label: `Custom (${v})` },
+                            ];
+                          })();
+
+                        return (
                           <>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexWrap: "wrap",
-                                gap: 12,
-                                alignItems: "flex-end",
-                              }}
-                            >
+                            <Text size="xs" c="dimmed">
+                              Configure the provider/model used for routing. The
+                              router uses structured output (JSON) when the
+                              selected provider/model supports it.
+                            </Text>
+
+                            <div className="settings-row">
                               <div>
-                                <Text size="xs" c="dimmed" mb={4}>
-                                  Rewrite step
-                                </Text>
+                                <p className="settings-label">Provider</p>
+                                <p className="settings-description">
+                                  LLM provider used only for routing.
+                                </p>
+                              </div>
+                              <Select
+                                data={[
+                                  { value: "openai", label: "OpenAI" },
+                                  { value: "gemini", label: "Gemini" },
+                                  { value: "anthropic", label: "Anthropic" },
+                                  { value: "groq", label: "Groq" },
+                                  { value: "fireworks", label: "Fireworks" },
+                                  { value: "ollama", label: "Ollama" },
+                                ]}
+                                value={routerProvider}
+                                onChange={(value) => {
+                                  if (!value) return;
+                                  const next = normalizeRouter(
+                                    activeProfile.router
+                                  );
+                                  const nextModelOptions =
+                                    getLlmModelOptionsForProvider(value);
+                                  const nextModel =
+                                    nextModelOptions[0]?.value ?? null;
+                                  saveRouter({
+                                    ...next,
+                                    enabled: true,
+                                    strategy: "llm",
+                                    llm_provider: value,
+                                    llm_model: nextModel,
+                                  });
+                                }}
+                                withCheckIcon={false}
+                                styles={{
+                                  input: {
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  },
+                                }}
+                              />
+                            </div>
+
+                            <div className="settings-row">
+                              <div>
+                                <p className="settings-label">Model</p>
+                                <p className="settings-description">
+                                  Model used for routing decisions.
+                                </p>
+                              </div>
+                              {modelOptions.length > 0 ? (
                                 <Select
-                                  data={[
-                                    { value: "on", label: "On" },
-                                    { value: "off", label: "Off" },
-                                  ]}
-                                  value={defaultPresetRewriteStepValue}
+                                  data={modelOptions}
+                                  value={routerModel}
                                   onChange={(value) => {
                                     if (!value) return;
-                                    saveProfileMetadata({
-                                      default_target_rewrite_llm_enabled:
-                                        value === "on",
+                                    const next = normalizeRouter(
+                                      activeProfile.router
+                                    );
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: value,
                                     });
-                                  }}
-                                  comboboxProps={{
-                                    withinPortal: true,
-                                    zIndex: 1400,
                                   }}
                                   withCheckIcon={false}
                                   styles={{
@@ -4848,1631 +5789,577 @@ export function PromptSettings({
                                     },
                                   }}
                                 />
-                              </div>
-                            </div>
-
-                            <div style={{ marginTop: 8 }}>
-                              <Accordion variant="separated" radius="md">
-                                <PromptSectionEditor
-                                  sectionKey={`${activeProfileId}-default-system-prompt`}
-                                  title="System Prompt"
-                                  description="Instructions used when rewriting the transcript"
-                                  enabled={true}
-                                  hideToggle={true}
-                                  headerActions={
-                                    <Button
-                                      variant="light"
-                                      color="gray"
-                                      disabled={
-                                        updateCleanupPromptSections.isPending ||
-                                        updateRewriteProgramPromptProfiles.isPending ||
-                                        updateRewriteLlmEnabled.isPending
-                                      }
-                                      onClick={() => {
-                                        setPromptLabContextPrompt(
-                                          effectiveCurrentPrompt
-                                        );
-                                        setPromptLabContextLabel(
-                                          activeProfileLabel
-                                        );
-                                        setPromptLabApplyTarget({
-                                          type: "profile",
-                                          key: "system",
-                                        });
-                                        setPromptLabOpen(true);
-                                      }}
-                                    >
-                                      Prompt Lab
-                                    </Button>
-                                  }
-                                  initialContent={localSections!.system.content}
-                                  defaultContent={defaultSections?.system ?? ""}
-                                  hasCustom={hasCustomContent.system}
-                                  inheritMode={
-                                    isDefaultScope
-                                      ? null
-                                      : activeProfile?.cleanup_prompt_sections
-                                          ?.system == null
-                                      ? "inheriting"
-                                      : "overriding"
-                                  }
-                                  onDisableOverride={
-                                    isDefaultScope
-                                      ? undefined
-                                      : () =>
-                                          openDisableOverrideDialog({
-                                            title:
-                                              "Disable System Prompt override?",
-                                            onConfirm: () => {
-                                              const base =
-                                                settings?.cleanup_prompt_sections ??
-                                                DEFAULT_SECTIONS;
-
-                                              const current: CleanupPromptSectionsOverride =
-                                                activeProfile?.cleanup_prompt_sections ??
-                                                {};
-                                              const next =
-                                                normalizePromptOverrides({
-                                                  ...current,
-                                                  system: null,
-                                                });
-                                              profilePromptOverridesRef.current =
-                                                next;
-
-                                              const resolved: CleanupPromptSections =
-                                                {
-                                                  system:
-                                                    next?.system ?? base.system,
-                                                };
-
-                                              setLocalSections({
-                                                system: {
-                                                  content:
-                                                    resolved.system.content ??
-                                                    defaultSections!.system,
-                                                },
-                                              });
-
-                                              saveProfileMetadata({
-                                                cleanup_prompt_sections: next,
-                                              });
-                                            },
-                                          })
-                                  }
-                                  onToggle={() => {}}
-                                  onSave={(content) =>
-                                    handleSave("system", content)
-                                  }
-                                  onReset={() => handleReset("system")}
-                                  isSaving={
-                                    updateCleanupPromptSections.isPending ||
-                                    updateRewriteProgramPromptProfiles.isPending
-                                  }
-                                />
-                              </Accordion>
-                            </div>
-
-                            <Textarea
-                              label="Default target routing hints (optional)"
-                              description="Used by the intent router when deciding to use the profile defaults (no preset). You can put multiple lines here; the router will treat them as additional hints."
-                              value={localDefaultPresetDescription}
-                              onChange={(e) =>
-                                setLocalDefaultPresetDescription(
-                                  e.currentTarget.value
-                                )
-                              }
-                              onBlur={() => {
-                                const trimmed =
-                                  localDefaultPresetDescription.trim();
-                                const next =
-                                  trimmed.length === 0 ? null : trimmed;
-                                if (
-                                  (activeProfile?.default_preset_description ??
-                                    null) !== next
-                                ) {
-                                  saveProfileMetadata({
-                                    default_preset_description: next,
-                                  });
-                                }
-                              }}
-                              autosize
-                              minRows={2}
-                              styles={{
-                                label: { fontSize: 12 },
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                },
-                              }}
-                            />
-
-                            <div style={{ marginTop: 12 }}>
-                              <Accordion variant="separated" radius="md">
-                                <Accordion.Item
-                                  value={`${activeProfileId}-default-test-rewrite`}
-                                >
-                                  <Accordion.Control>
-                                    <div>
-                                      <p className="settings-label">
-                                        Test rewrite
-                                      </p>
-                                      <p className="settings-description">
-                                        Paste a raw transcript and run it
-                                        through the Default preset.
-                                      </p>
-                                    </div>
-                                  </Accordion.Control>
-                                  <Accordion.Panel>
-                                    {(() => {
-                                      const promptForTest =
-                                        localSections!.system.content ?? "";
-                                      const isDisabled =
-                                        rewriteTestInput.trim().length === 0 ||
-                                        updateRewriteProgramPromptProfiles.isPending ||
-                                        updateCleanupPromptSections.isPending ||
-                                        updateRewriteLlmEnabled.isPending;
-
-                                      return (
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            gap: 10,
-                                          }}
-                                        >
-                                          <Text size="xs" c="dimmed">
-                                            Testing: {activeProfileLabel} ·
-                                            Default
-                                          </Text>
-
-                                          <Textarea
-                                            value={rewriteTestInput}
-                                            onChange={(e) => {
-                                              setRewriteTestInput(
-                                                e.currentTarget.value
-                                              );
-                                            }}
-                                            onKeyDown={(e) => {
-                                              if (
-                                                (e.ctrlKey || e.metaKey) &&
-                                                e.key === "Enter"
-                                              ) {
-                                                e.preventDefault();
-                                                if (!isDisabled) {
-                                                  runRewriteTest(promptForTest);
-                                                }
-                                              }
-                                            }}
-                                            placeholder="Raw transcript"
-                                            autosize
-                                            minRows={3}
-                                            styles={{
-                                              input: {
-                                                backgroundColor:
-                                                  "var(--bg-elevated)",
-                                                borderColor:
-                                                  "var(--border-default)",
-                                                color: "var(--text-primary)",
-                                                fontFamily: "monospace",
-                                                fontSize: "13px",
-                                              },
-                                            }}
-                                          />
-
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              alignItems: "center",
-                                              gap: 12,
-                                            }}
-                                          >
-                                            <Button
-                                              color="gray"
-                                              loading={
-                                                testRewriteWithPrompt.isPending
-                                              }
-                                              disabled={isDisabled}
-                                              onClick={() =>
-                                                runRewriteTest(promptForTest)
-                                              }
-                                            >
-                                              Test
-                                            </Button>
-
-                                            <Text size="sm" c="dimmed">
-                                              {testRewriteWithPrompt.isPending
-                                                ? "Duration: running…"
-                                                : rewriteTestDurationMs === null
-                                                ? "Duration: —"
-                                                : `Duration: ${(
-                                                    rewriteTestDurationMs / 1000
-                                                  ).toFixed(2)}s`}
-                                            </Text>
-                                          </div>
-
-                                          {rewriteTestError ? (
-                                            <Text size="sm" c="red">
-                                              {rewriteTestError}
-                                            </Text>
-                                          ) : null}
-
-                                          {rewriteTestOutput ? (
-                                            <Textarea
-                                              value={rewriteTestOutput}
-                                              readOnly
-                                              autosize
-                                              minRows={3}
-                                              styles={{
-                                                input: {
-                                                  backgroundColor:
-                                                    "var(--bg-elevated)",
-                                                  borderColor:
-                                                    "var(--border-default)",
-                                                  color: "var(--text-primary)",
-                                                  fontFamily: "monospace",
-                                                  fontSize: "13px",
-                                                },
-                                              }}
-                                            />
-                                          ) : null}
-                                        </div>
-                                      );
-                                    })()}
-                                  </Accordion.Panel>
-                                </Accordion.Item>
-                              </Accordion>
-                            </div>
-                          </>
-                        ) : null}
-                      </div>
-                    </Modal>
-                  </div>
-                </Accordion.Panel>
-              </Accordion.Item>
-
-              <Accordion.Item value={`${activeProfileId}-intent-router`}>
-                <Accordion.Control>
-                  <div>
-                    <p className="settings-label">Intent router</p>
-                    <p className="settings-description">
-                      Automatically select a preset based on the transcript.
-                    </p>
-                  </div>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
-                    }}
-                  >
-                    {presets.length === 0 ? (
-                      <Text size="sm" c="dimmed">
-                        Add at least one preset to enable routing.
-                      </Text>
-                    ) : null}
-
-                    <div
-                      className="settings-row no-divider"
-                      style={{ paddingTop: 0 }}
-                    >
-                      <div>
-                        <p className="settings-label">Router strategy</p>
-                        <p className="settings-description">
-                          Off disables routing completely. Embeddings is fast
-                          and deterministic; LLM can be more flexible but costs
-                          more.
-                        </p>
-                      </div>
-                      <Select
-                        data={[
-                          { value: "off", label: "Off" },
-                          { value: "embeddings", label: "Embeddings" },
-                          { value: "llm", label: "LLM" },
-                        ]}
-                        value={routerStrategyValue}
-                        onChange={(value) => {
-                          if (!value) return;
-                          if (value === "off") {
-                            saveRouter({
-                              enabled: false,
-                              strategy: "off",
-                              embedding_provider: null,
-                              embedding_model: null,
-                              pick_highest_score: null,
-                              similarity_threshold: null,
-                              similarity_margin: null,
-                              llm_provider: null,
-                              llm_model: null,
-                              openai_reasoning_effort: null,
-                              gemini_thinking_budget: null,
-                              gemini_thinking_level: null,
-                              anthropic_thinking_budget: null,
-                              llm_system_prompt: null,
-                            });
-                            return;
-                          }
-
-                          if (value === "embeddings") {
-                            const provider = "openai";
-                            const modelOptions =
-                              EMBEDDING_MODELS[provider] ?? [];
-                            const modelValue = modelOptions[0]?.value ?? null;
-
-                            saveRouter({
-                              enabled: true,
-                              strategy: "embeddings",
-                              embedding_provider: provider,
-                              embedding_model: modelValue,
-                              pick_highest_score:
-                                effectiveRouter?.pick_highest_score ?? true,
-                              similarity_threshold:
-                                effectiveRouter?.similarity_threshold ?? null,
-                              similarity_margin:
-                                effectiveRouter?.similarity_margin ?? null,
-                              llm_provider: null,
-                              llm_model: null,
-                              openai_reasoning_effort: null,
-                              gemini_thinking_budget: null,
-                              gemini_thinking_level: null,
-                              anthropic_thinking_budget: null,
-                              llm_system_prompt: null,
-                            });
-                            return;
-                          }
-
-                          const seedProvider =
-                            settings?.llm_provider ??
-                            effectiveRouter?.llm_provider ??
-                            "openai";
-                          const modelOptions =
-                            getLlmModelOptionsForProvider(seedProvider);
-                          const seedModel =
-                            effectiveRouter?.llm_model ??
-                            settings?.llm_model ??
-                            modelOptions[0]?.value ??
-                            null;
-
-                          saveRouter({
-                            enabled: true,
-                            strategy: "llm",
-                            embedding_provider: null,
-                            embedding_model: null,
-                            pick_highest_score: null,
-                            similarity_threshold: null,
-                            similarity_margin: null,
-
-                            llm_provider: seedProvider,
-                            llm_model: seedModel,
-                            openai_reasoning_effort:
-                              settings?.openai_reasoning_effort ?? null,
-                            gemini_thinking_budget:
-                              settings?.gemini_thinking_budget ?? null,
-                            gemini_thinking_level:
-                              settings?.gemini_thinking_level ?? null,
-                            anthropic_thinking_budget:
-                              settings?.anthropic_thinking_budget ?? null,
-                            llm_system_prompt: null,
-                          });
-                        }}
-                        withCheckIcon={false}
-                        disabled={presets.length === 0}
-                        styles={{
-                          input: {
-                            backgroundColor: "var(--bg-elevated)",
-                            borderColor: "var(--border-default)",
-                            color: "var(--text-primary)",
-                            minWidth: 200,
-                          },
-                        }}
-                      />
-                    </div>
-
-                    {routerStrategyValue === "embeddings" ? (
-                      <>
-                        <Text size="xs" c="dimmed">
-                          Uses your{" "}
-                          {embeddingProviderValue === "cohere"
-                            ? "Cohere"
-                            : "OpenAI"}{" "}
-                          API key. Configure it in API Keys.
-                        </Text>
-
-                        <div className="settings-row">
-                          <div>
-                            <p className="settings-label">Embedding provider</p>
-                            <p className="settings-description">
-                              Provider used to embed the transcript and hints.
-                            </p>
-                          </div>
-                          <Select
-                            data={[
-                              { value: "openai", label: "OpenAI" },
-                              { value: "cohere", label: "Cohere" },
-                            ]}
-                            value={embeddingProviderValue}
-                            onChange={(value) => {
-                              if (!value) return;
-                              const models = EMBEDDING_MODELS[value] ?? [];
-                              const nextModel = models[0]?.value ?? null;
-                              const next = normalizeRouter(
-                                activeProfile.router
-                              );
-                              saveRouter({
-                                ...next,
-                                enabled: true,
-                                strategy: "embeddings",
-                                embedding_provider: value as any,
-                                embedding_model: nextModel,
-                              });
-                            }}
-                            withCheckIcon={false}
-                            styles={{
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                minWidth: 200,
-                              },
-                            }}
-                          />
-                        </div>
-
-                        <div className="settings-row">
-                          <div>
-                            <p className="settings-label">Embedding model</p>
-                            <p className="settings-description">
-                              Model used to embed the transcript and hints.
-                            </p>
-                          </div>
-                          <Select
-                            data={embeddingModels}
-                            value={embeddingModelValue}
-                            onChange={(value) => {
-                              if (!value) return;
-                              const next = normalizeRouter(
-                                activeProfile.router
-                              );
-                              saveRouter({
-                                ...next,
-                                enabled: true,
-                                strategy: "embeddings",
-                                embedding_provider:
-                                  embeddingProviderValue as any,
-                                embedding_model: value,
-                              });
-                            }}
-                            withCheckIcon={false}
-                            styles={{
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                minWidth: 240,
-                              },
-                            }}
-                          />
-                        </div>
-
-                        <div className="settings-row">
-                          <div>
-                            <p className="settings-label">Pick highest score</p>
-                            <p className="settings-description">
-                              Always selects the candidate with the highest
-                              similarity score. Disables threshold + margin.
-                            </p>
-                          </div>
-                          <Switch
-                            checked={Boolean(
-                              effectiveRouter?.pick_highest_score
-                            )}
-                            onChange={(e) => {
-                              const enabled = e.currentTarget.checked;
-                              const next = normalizeRouter(
-                                activeProfile.router
-                              );
-                              saveRouter({
-                                ...next,
-                                enabled: true,
-                                strategy: "embeddings",
-                                pick_highest_score: enabled,
-                              });
-                            }}
-                            color="gray"
-                            size="md"
-                            disabled={presets.length === 0}
-                          />
-                        </div>
-
-                        <div className="settings-row">
-                          <div>
-                            <p className="settings-label">
-                              Store preset embeddings
-                            </p>
-                            <p className="settings-description">
-                              Precompute and store embeddings for preset hints
-                              so routing doesn’t re-embed them every run.
-                            </p>
-                          </div>
-                          <Button
-                            color="gray"
-                            loading={isCachingRouterEmbeddings}
-                            disabled={
-                              isCachingRouterEmbeddings ||
-                              presets.length === 0 ||
-                              activeProfileId === "default" ||
-                              !embeddingModelValue
-                            }
-                            onClick={async () => {
-                              if (activeProfileId === "default") return;
-                              setIsCachingRouterEmbeddings(true);
-                              try {
-                                const res =
-                                  await tauriAPI.cacheRouterEmbeddings({
-                                    profileId: activeProfileId,
-                                  });
-                                notifications.show({
-                                  title: "Stored router embeddings",
-                                  message: `Cached ${res.cached_now} / ${res.total_hints} hints (${res.skipped_existing} already cached) · ${res.provider} / ${res.model}`,
-                                  color: "gray",
-                                });
-                              } catch (e) {
-                                notifications.show({
-                                  title: "Failed to store embeddings",
-                                  message: errorToMessage(e),
-                                  color: "red",
-                                });
-                              } finally {
-                                setIsCachingRouterEmbeddings(false);
-                              }
-                            }}
-                          >
-                            Store embeddings
-                          </Button>
-                        </div>
-
-                        <div className="settings-row">
-                          <div>
-                            <p className="settings-label">
-                              Similarity threshold
-                            </p>
-                            <p className="settings-description">
-                              Minimum cosine similarity to accept a match.
-                            </p>
-                          </div>
-                          <NumberInput
-                            value={
-                              effectiveRouter?.similarity_threshold ?? 0.78
-                            }
-                            onChange={(value) => {
-                              if (
-                                typeof value !== "number" ||
-                                Number.isNaN(value)
-                              )
-                                return;
-                              const next = normalizeRouter(
-                                activeProfile.router
-                              );
-                              saveRouter({
-                                ...next,
-                                enabled: true,
-                                strategy: "embeddings",
-                                similarity_threshold: value,
-                              });
-                            }}
-                            min={0}
-                            max={1}
-                            step={0.01}
-                            clampBehavior="blur"
-                            disabled={Boolean(
-                              effectiveRouter?.pick_highest_score
-                            )}
-                            styles={{
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                width: 140,
-                              },
-                            }}
-                          />
-                        </div>
-
-                        <div className="settings-row no-divider">
-                          <div>
-                            <p className="settings-label">Similarity margin</p>
-                            <p className="settings-description">
-                              Required gap between the best and second-best
-                              preset.
-                            </p>
-                          </div>
-                          <NumberInput
-                            value={effectiveRouter?.similarity_margin ?? 0.05}
-                            onChange={(value) => {
-                              if (
-                                typeof value !== "number" ||
-                                Number.isNaN(value)
-                              )
-                                return;
-                              const next = normalizeRouter(
-                                activeProfile.router
-                              );
-                              saveRouter({
-                                ...next,
-                                enabled: true,
-                                strategy: "embeddings",
-                                similarity_margin: value,
-                              });
-                            }}
-                            min={0}
-                            max={1}
-                            step={0.01}
-                            clampBehavior="blur"
-                            disabled={Boolean(
-                              effectiveRouter?.pick_highest_score
-                            )}
-                            styles={{
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                width: 140,
-                              },
-                            }}
-                          />
-                        </div>
-                      </>
-                    ) : null}
-
-                    {routerStrategyValue === "llm"
-                      ? (() => {
-                          const routerProvider =
-                            effectiveRouter?.llm_provider ??
-                            settings?.llm_provider ??
-                            "openai";
-                          const modelOptions =
-                            getLlmModelOptionsForProvider(routerProvider);
-                          const routerModel =
-                            effectiveRouter?.llm_model ??
-                            settings?.llm_model ??
-                            modelOptions[0]?.value ??
-                            null;
-
-                          const supportsRouterOpenAiThinking =
-                            routerProvider === "openai" &&
-                            !!routerModel &&
-                            (routerModel.startsWith("gpt-5") ||
-                              routerModel.startsWith("o"));
-
-                          const routerOpenAiThinkingOptions =
-                            !supportsRouterOpenAiThinking || !routerModel
-                              ? []
-                              : [
-                                  {
-                                    value: SELECT_DEFAULT,
-                                    label: "Default",
-                                  },
-                                  ...openAiThinkingEffortsForModel(
-                                    routerModel
-                                  ).map((v) => ({
-                                    value: v,
-                                    label:
-                                      v === "none"
-                                        ? "None"
-                                        : v.charAt(0).toUpperCase() +
-                                          v.slice(1),
-                                  })),
-                                ];
-
-                          const supportsRouterGeminiThinkingLevel =
-                            routerProvider === "gemini" &&
-                            !!routerModel &&
-                            routerModel.includes("gemini-3");
-
-                          const routerIsGemini3Flash =
-                            supportsRouterGeminiThinkingLevel &&
-                            routerModel.includes("gemini-3-flash");
-
-                          const routerIsGemini3Pro =
-                            supportsRouterGeminiThinkingLevel &&
-                            routerModel.includes("gemini-3-pro");
-
-                          const routerGeminiThinkingLevelOptions =
-                            !supportsRouterGeminiThinkingLevel
-                              ? []
-                              : routerIsGemini3Flash
-                              ? [
-                                  {
-                                    value: SELECT_DEFAULT,
-                                    label: "Default",
-                                  },
-                                  { value: "minimal", label: "Minimal" },
-                                  { value: "low", label: "Low" },
-                                  { value: "medium", label: "Medium" },
-                                  { value: "high", label: "High" },
-                                ]
-                              : [
-                                  {
-                                    value: SELECT_DEFAULT,
-                                    label: "Default",
-                                  },
-                                  { value: "low", label: "Low" },
-                                  { value: "high", label: "High" },
-                                ];
-
-                          const supportsRouterGeminiThinkingBudget =
-                            routerProvider === "gemini" &&
-                            !!routerModel &&
-                            routerModel.includes("gemini-2.5") &&
-                            !routerModel.includes("flash-lite");
-
-                          const routerCanDisableGemini25Thinking =
-                            supportsRouterGeminiThinkingBudget &&
-                            routerModel.includes("gemini-2.5-flash") &&
-                            !routerModel.includes("gemini-2.5-pro");
-
-                          const routerIsGemini25Pro =
-                            supportsRouterGeminiThinkingBudget &&
-                            routerModel.includes("gemini-2.5-pro");
-
-                          const routerGemini25MaxBudget = routerIsGemini25Pro
-                            ? 32768
-                            : 24576;
-
-                          const routerGemini25MinBudget = routerIsGemini25Pro
-                            ? 128
-                            : 0;
-
-                          const routerGeminiThinkingBudgetOptions: Array<{
-                            value: string;
-                            label: string;
-                          }> = !supportsRouterGeminiThinkingBudget
-                            ? []
-                            : [
-                                { value: SELECT_DEFAULT, label: "Default" },
-                                { value: "-1", label: "Dynamic (-1)" },
-                                ...(routerCanDisableGemini25Thinking
-                                  ? [{ value: "0", label: "Off (0)" }]
-                                  : []),
-                                ...(routerIsGemini25Pro
-                                  ? [
-                                      {
-                                        value: String(routerGemini25MinBudget),
-                                        label: "Minimal (128)",
-                                      },
-                                    ]
-                                  : []),
-                                { value: "1024", label: "Light (1024)" },
-                                { value: "4096", label: "Medium (4096)" },
-                                { value: "16384", label: "High (16384)" },
-                                ...(routerGemini25MaxBudget > 16384
-                                  ? [
-                                      {
-                                        value: String(routerGemini25MaxBudget),
-                                        label: `Max (${routerGemini25MaxBudget})`,
-                                      },
-                                    ]
-                                  : []),
-                              ];
-
-                          const supportsRouterAnthropicThinkingBudget =
-                            routerProvider === "anthropic" &&
-                            !!routerModel &&
-                            // Extended thinking is supported by newer Claude families. Keep conservative.
-                            (routerModel.includes("claude-3-7") ||
-                              routerModel.includes("claude-4") ||
-                              routerModel.includes("-4-"));
-
-                          const routerAnthropicThinkingLevelOptions: Array<{
-                            value: string;
-                            label: string;
-                          }> = !supportsRouterAnthropicThinkingBudget
-                            ? []
-                            : [
-                                { value: SELECT_DEFAULT, label: "Default" },
-                                { value: "0", label: "Off" },
-                                {
-                                  value: String(
-                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[0]
-                                  ),
-                                  label: "Low",
-                                },
-                                {
-                                  value: String(
-                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[1]
-                                  ),
-                                  label: "Medium",
-                                },
-                                {
-                                  value: String(
-                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[2]
-                                  ),
-                                  label: "High",
-                                },
-                                {
-                                  value: String(
-                                    ANTHROPIC_THINKING_LEVEL_BUDGETS[3]
-                                  ),
-                                  label: "Max",
-                                },
-                              ];
-
-                          const routerAnthropicThinkingLevelOptionsWithCustom =
-                            (() => {
-                              const vRaw =
-                                effectiveRouter?.anthropic_thinking_budget;
-                              const v =
-                                typeof vRaw === "number" &&
-                                Number.isFinite(vRaw)
-                                  ? Math.trunc(vRaw)
-                                  : null;
-                              if (v == null)
-                                return routerAnthropicThinkingLevelOptions;
-
-                              const asString = String(v);
-                              const exists =
-                                routerAnthropicThinkingLevelOptions.some(
-                                  (o) => o.value === asString
-                                );
-                              if (exists)
-                                return routerAnthropicThinkingLevelOptions;
-
-                              return [
-                                ...routerAnthropicThinkingLevelOptions,
-                                { value: asString, label: `Custom (${v})` },
-                              ];
-                            })();
-
-                          return (
-                            <>
-                              <Text size="xs" c="dimmed">
-                                Configure the provider/model used for routing.
-                                The router uses structured output (JSON) when
-                                the selected provider/model supports it.
-                              </Text>
-
-                              <div className="settings-row">
-                                <div>
-                                  <p className="settings-label">Provider</p>
-                                  <p className="settings-description">
-                                    LLM provider used only for routing.
-                                  </p>
-                                </div>
-                                <Select
-                                  data={[
-                                    { value: "openai", label: "OpenAI" },
-                                    { value: "gemini", label: "Gemini" },
-                                    { value: "anthropic", label: "Anthropic" },
-                                    { value: "groq", label: "Groq" },
-                                    { value: "fireworks", label: "Fireworks" },
-                                    { value: "ollama", label: "Ollama" },
-                                  ]}
-                                  value={routerProvider}
-                                  onChange={(value) => {
-                                    if (!value) return;
+                              ) : (
+                                <TextInput
+                                  value={routerModel ?? ""}
+                                  placeholder="Enter model id"
+                                  onChange={(e) => {
+                                    const value = e.currentTarget.value;
                                     const next = normalizeRouter(
                                       activeProfile.router
                                     );
-                                    const nextModelOptions =
-                                      getLlmModelOptionsForProvider(value);
-                                    const nextModel =
-                                      nextModelOptions[0]?.value ?? null;
                                     saveRouter({
                                       ...next,
                                       enabled: true,
                                       strategy: "llm",
-                                      llm_provider: value,
-                                      llm_model: nextModel,
+                                      llm_provider: routerProvider,
+                                      llm_model: value.trim().length
+                                        ? value
+                                        : null,
                                     });
                                   }}
-                                  withCheckIcon={false}
                                   styles={{
                                     input: {
                                       backgroundColor: "var(--bg-elevated)",
                                       borderColor: "var(--border-default)",
                                       color: "var(--text-primary)",
-                                      minWidth: 200,
+                                      minWidth: 240,
                                     },
                                   }}
                                 />
-                              </div>
+                              )}
+                            </div>
 
+                            {supportsRouterOpenAiThinking ? (
                               <div className="settings-row">
                                 <div>
-                                  <p className="settings-label">Model</p>
+                                  <p className="settings-label">Thinking</p>
                                   <p className="settings-description">
-                                    Model used for routing decisions.
+                                    Reasoning effort for supported OpenAI
+                                    models.
                                   </p>
                                 </div>
-                                {modelOptions.length > 0 ? (
-                                  <Select
-                                    data={modelOptions}
-                                    value={routerModel}
-                                    onChange={(value) => {
-                                      if (!value) return;
-                                      const next = normalizeRouter(
-                                        activeProfile.router
-                                      );
-                                      saveRouter({
-                                        ...next,
-                                        enabled: true,
-                                        strategy: "llm",
-                                        llm_provider: routerProvider,
-                                        llm_model: value,
-                                      });
-                                    }}
-                                    withCheckIcon={false}
-                                    styles={{
-                                      input: {
-                                        backgroundColor: "var(--bg-elevated)",
-                                        borderColor: "var(--border-default)",
-                                        color: "var(--text-primary)",
-                                        minWidth: 240,
-                                      },
-                                    }}
-                                  />
-                                ) : (
-                                  <TextInput
-                                    value={routerModel ?? ""}
-                                    placeholder="Enter model id"
-                                    onChange={(e) => {
-                                      const value = e.currentTarget.value;
-                                      const next = normalizeRouter(
-                                        activeProfile.router
-                                      );
-                                      saveRouter({
-                                        ...next,
-                                        enabled: true,
-                                        strategy: "llm",
-                                        llm_provider: routerProvider,
-                                        llm_model: value.trim().length
-                                          ? value
-                                          : null,
-                                      });
-                                    }}
-                                    styles={{
-                                      input: {
-                                        backgroundColor: "var(--bg-elevated)",
-                                        borderColor: "var(--border-default)",
-                                        color: "var(--text-primary)",
-                                        minWidth: 240,
-                                      },
-                                    }}
-                                  />
-                                )}
-                              </div>
-
-                              {supportsRouterOpenAiThinking ? (
-                                <div className="settings-row">
-                                  <div>
-                                    <p className="settings-label">Thinking</p>
-                                    <p className="settings-description">
-                                      Reasoning effort for supported OpenAI
-                                      models.
-                                    </p>
-                                  </div>
-                                  <HintSelect
-                                    data={routerOpenAiThinkingOptions}
-                                    value={
-                                      effectiveRouter?.openai_reasoning_effort ??
-                                      SELECT_DEFAULT
-                                    }
-                                    onChange={(value) => {
-                                      const next = normalizeRouter(
-                                        activeProfile.router
-                                      );
-                                      if (
-                                        value == null ||
-                                        value === SELECT_DEFAULT
-                                      ) {
-                                        saveRouter({
-                                          ...next,
-                                          enabled: true,
-                                          strategy: "llm",
-                                          llm_provider: routerProvider,
-                                          llm_model: routerModel,
-                                          openai_reasoning_effort: null,
-                                        });
-                                        return;
-                                      }
-
+                                <HintSelect
+                                  data={routerOpenAiThinkingOptions}
+                                  value={
+                                    effectiveRouter?.openai_reasoning_effort ??
+                                    SELECT_DEFAULT
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router
+                                    );
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
                                       saveRouter({
                                         ...next,
                                         enabled: true,
                                         strategy: "llm",
                                         llm_provider: routerProvider,
                                         llm_model: routerModel,
-                                        openai_reasoning_effort: value as any,
+                                        openai_reasoning_effort: null,
                                       });
-                                    }}
-                                    placeholder="Default"
-                                    inputStyle={{
-                                      backgroundColor: "var(--bg-elevated)",
-                                      borderColor: "var(--border-default)",
-                                      color: "var(--text-primary)",
-                                      minWidth: 200,
-                                    }}
-                                    renderSelected={({
-                                      option,
-                                      placeholder,
-                                    }) => {
-                                      if (!option) {
-                                        return (
-                                          <Text size="sm" c="dimmed">
-                                            {placeholder}
-                                          </Text>
-                                        );
-                                      }
-
-                                      if (option.value !== SELECT_DEFAULT) {
-                                        return (
-                                          <Text size="sm">{option.label}</Text>
-                                        );
-                                      }
-
-                                      const hint = routerModel
-                                        ? settings?.openai_reasoning_effort ??
-                                          openAiDefaultReasoningEffortForModel(
-                                            routerModel
-                                          )
-                                        : settings?.openai_reasoning_effort ??
-                                          "medium";
-
-                                      return (
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "baseline",
-                                            gap: 8,
-                                          }}
-                                        >
-                                          <span style={{ fontSize: 14 }}>
-                                            {option.label}
-                                          </span>
-                                          <span
-                                            style={{
-                                              fontSize: 11,
-                                              color: "var(--text-muted)",
-                                              opacity: 0.9,
-                                              lineHeight: 1,
-                                            }}
-                                          >
-                                            · {hint}
-                                          </span>
-                                        </div>
-                                      );
-                                    }}
-                                    renderOption={({ option }) => {
-                                      if (option.value !== SELECT_DEFAULT) {
-                                        return (
-                                          <Text size="sm">{option.label}</Text>
-                                        );
-                                      }
-
-                                      const hint = routerModel
-                                        ? settings?.openai_reasoning_effort ??
-                                          openAiDefaultReasoningEffortForModel(
-                                            routerModel
-                                          )
-                                        : settings?.openai_reasoning_effort ??
-                                          "medium";
-
-                                      return (
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "baseline",
-                                            gap: 8,
-                                          }}
-                                        >
-                                          <span style={{ fontSize: 14 }}>
-                                            {option.label}
-                                          </span>
-                                          <span
-                                            style={{
-                                              fontSize: 11,
-                                              color: "var(--text-muted)",
-                                              opacity: 0.9,
-                                              lineHeight: 1,
-                                            }}
-                                          >
-                                            · {hint}
-                                          </span>
-                                        </div>
-                                      );
-                                    }}
-                                  />
-                                </div>
-                              ) : null}
-
-                              {supportsRouterGeminiThinkingLevel ? (
-                                <>
-                                  <div className="settings-row">
-                                    <div>
-                                      <p className="settings-label">
-                                        Thinking level
-                                      </p>
-                                      <p className="settings-description">
-                                        {routerIsGemini3Pro
-                                          ? "Gemini 3 Pro supports low/high (default high)."
-                                          : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
-                                      </p>
-                                    </div>
-                                    <HintSelect
-                                      data={routerGeminiThinkingLevelOptions}
-                                      value={
-                                        effectiveRouter?.gemini_thinking_level ??
-                                        SELECT_DEFAULT
-                                      }
-                                      onChange={(value) => {
-                                        const next = normalizeRouter(
-                                          activeProfile.router
-                                        );
-                                        if (
-                                          value == null ||
-                                          value === SELECT_DEFAULT
-                                        ) {
-                                          saveRouter({
-                                            ...next,
-                                            enabled: true,
-                                            strategy: "llm",
-                                            llm_provider: routerProvider,
-                                            llm_model: routerModel,
-                                            gemini_thinking_level: null,
-                                          });
-                                          return;
-                                        }
-
-                                        const v =
-                                          value === "minimal" ||
-                                          value === "low" ||
-                                          value === "medium" ||
-                                          value === "high"
-                                            ? value
-                                            : null;
-                                        if (v == null) return;
-
-                                        saveRouter({
-                                          ...next,
-                                          enabled: true,
-                                          strategy: "llm",
-                                          llm_provider: routerProvider,
-                                          llm_model: routerModel,
-                                          gemini_thinking_level: v,
-                                        });
-                                      }}
-                                      placeholder="Default"
-                                      inputStyle={{
-                                        backgroundColor: "var(--bg-elevated)",
-                                        borderColor: "var(--border-default)",
-                                        color: "var(--text-primary)",
-                                        minWidth: 200,
-                                      }}
-                                      renderSelected={({
-                                        option,
-                                        placeholder,
-                                      }) => {
-                                        if (!option) {
-                                          return (
-                                            <Text size="sm" c="dimmed">
-                                              {placeholder}
-                                            </Text>
-                                          );
-                                        }
-                                        if (option.value !== SELECT_DEFAULT) {
-                                          return (
-                                            <Text size="sm">
-                                              {option.label}
-                                            </Text>
-                                          );
-                                        }
-
-                                        const hint =
-                                          settings?.gemini_thinking_level ??
-                                          "high";
-                                        return (
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              alignItems: "baseline",
-                                              gap: 8,
-                                            }}
-                                          >
-                                            <span style={{ fontSize: 14 }}>
-                                              {option.label}
-                                            </span>
-                                            <span
-                                              style={{
-                                                fontSize: 11,
-                                                color: "var(--text-muted)",
-                                                opacity: 0.9,
-                                                lineHeight: 1,
-                                              }}
-                                            >
-                                              · {hint}
-                                            </span>
-                                          </div>
-                                        );
-                                      }}
-                                      renderOption={({ option }) => {
-                                        if (option.value !== SELECT_DEFAULT) {
-                                          return (
-                                            <Text size="sm">
-                                              {option.label}
-                                            </Text>
-                                          );
-                                        }
-
-                                        const hint =
-                                          settings?.gemini_thinking_level ??
-                                          "high";
-                                        return (
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              alignItems: "baseline",
-                                              gap: 8,
-                                            }}
-                                          >
-                                            <span style={{ fontSize: 14 }}>
-                                              {option.label}
-                                            </span>
-                                            <span
-                                              style={{
-                                                fontSize: 11,
-                                                color: "var(--text-muted)",
-                                                opacity: 0.9,
-                                                lineHeight: 1,
-                                              }}
-                                            >
-                                              · {hint}
-                                            </span>
-                                          </div>
-                                        );
-                                      }}
-                                    />
-                                  </div>
-                                </>
-                              ) : null}
-
-                              {supportsRouterGeminiThinkingBudget ? (
-                                <div className="settings-row">
-                                  <div>
-                                    <p className="settings-label">
-                                      Thinking budget
-                                    </p>
-                                    <p className="settings-description">
-                                      Token budget for Gemini 2.5 thinking.
-                                    </p>
-                                  </div>
-                                  <HintSelect
-                                    data={routerGeminiThinkingBudgetOptions}
-                                    value={
-                                      effectiveRouter?.gemini_thinking_budget ==
-                                      null
-                                        ? SELECT_DEFAULT
-                                        : String(
-                                            effectiveRouter.gemini_thinking_budget
-                                          )
+                                      return;
                                     }
-                                    onChange={(value) => {
-                                      const next = normalizeRouter(
-                                        activeProfile.router
-                                      );
 
-                                      if (
-                                        value == null ||
-                                        value === SELECT_DEFAULT
-                                      ) {
-                                        saveRouter({
-                                          ...next,
-                                          enabled: true,
-                                          strategy: "llm",
-                                          llm_provider: routerProvider,
-                                          llm_model: routerModel,
-                                          gemini_thinking_budget: null,
-                                        });
-                                        return;
-                                      }
-
-                                      const parsed = Number(value);
-                                      if (!Number.isFinite(parsed)) return;
-                                      const asInt = Math.trunc(parsed);
-                                      saveRouter({
-                                        ...next,
-                                        enabled: true,
-                                        strategy: "llm",
-                                        llm_provider: routerProvider,
-                                        llm_model: routerModel,
-                                        gemini_thinking_budget: asInt,
-                                      });
-                                    }}
-                                    placeholder="Default"
-                                    inputStyle={{
-                                      backgroundColor: "var(--bg-elevated)",
-                                      borderColor: "var(--border-default)",
-                                      color: "var(--text-primary)",
-                                      minWidth: 200,
-                                    }}
-                                    renderSelected={({
-                                      option,
-                                      placeholder,
-                                    }) => {
-                                      if (!option) {
-                                        return (
-                                          <Text size="sm" c="dimmed">
-                                            {placeholder}
-                                          </Text>
-                                        );
-                                      }
-                                      if (option.value !== SELECT_DEFAULT)
-                                        return (
-                                          <Text size="sm">{option.label}</Text>
-                                        );
-
-                                      const inherited =
-                                        settings?.gemini_thinking_budget;
-                                      const hint =
-                                        inherited == null
-                                          ? "dynamic"
-                                          : inherited === 0
-                                          ? "off"
-                                          : inherited === -1
-                                          ? "dynamic"
-                                          : String(inherited);
-
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      openai_reasoning_effort: value as any,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
                                       return (
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "baseline",
-                                            gap: 8,
-                                          }}
-                                        >
-                                          <span style={{ fontSize: 14 }}>
-                                            {option.label}
-                                          </span>
-                                          <span
-                                            style={{
-                                              fontSize: 11,
-                                              color: "var(--text-muted)",
-                                              opacity: 0.9,
-                                              lineHeight: 1,
-                                            }}
-                                          >
-                                            · {hint}
-                                          </span>
-                                        </div>
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
                                       );
-                                    }}
-                                    renderOption={({ option }) => {
-                                      if (option.value !== SELECT_DEFAULT) {
-                                        return (
-                                          <Text size="sm">{option.label}</Text>
-                                        );
-                                      }
-
-                                      const inherited =
-                                        settings?.gemini_thinking_budget;
-                                      const hint =
-                                        inherited == null
-                                          ? "dynamic"
-                                          : inherited === 0
-                                          ? "off"
-                                          : inherited === -1
-                                          ? "dynamic"
-                                          : String(inherited);
-
-                                      return (
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "baseline",
-                                            gap: 8,
-                                          }}
-                                        >
-                                          <span style={{ fontSize: 14 }}>
-                                            {option.label}
-                                          </span>
-                                          <span
-                                            style={{
-                                              fontSize: 11,
-                                              color: "var(--text-muted)",
-                                              opacity: 0.9,
-                                              lineHeight: 1,
-                                            }}
-                                          >
-                                            · {hint}
-                                          </span>
-                                        </div>
-                                      );
-                                    }}
-                                  />
-                                </div>
-                              ) : null}
-
-                              {supportsRouterAnthropicThinkingBudget ? (
-                                <div className="settings-row">
-                                  <div>
-                                    <p className="settings-label">Thinking</p>
-                                    <p className="settings-description">
-                                      Extended thinking level for Claude models.
-                                    </p>
-                                  </div>
-                                  <HintSelect
-                                    data={
-                                      routerAnthropicThinkingLevelOptionsWithCustom
                                     }
-                                    value={
-                                      effectiveRouter?.anthropic_thinking_budget ==
-                                      null
-                                        ? SELECT_DEFAULT
-                                        : String(
-                                            effectiveRouter.anthropic_thinking_budget
-                                          )
-                                    }
-                                    onChange={(value) => {
-                                      const next = normalizeRouter(
-                                        activeProfile.router
-                                      );
 
-                                      if (
-                                        value == null ||
-                                        value === SELECT_DEFAULT
-                                      ) {
-                                        saveRouter({
-                                          ...next,
-                                          enabled: true,
-                                          strategy: "llm",
-                                          llm_provider: routerProvider,
-                                          llm_model: routerModel,
-                                          anthropic_thinking_budget: null,
-                                        });
-                                        return;
-                                      }
-
-                                      const parsed = Number(value);
-                                      if (!Number.isFinite(parsed)) return;
-                                      const asInt = Math.trunc(parsed);
-                                      saveRouter({
-                                        ...next,
-                                        enabled: true,
-                                        strategy: "llm",
-                                        llm_provider: routerProvider,
-                                        llm_model: routerModel,
-                                        anthropic_thinking_budget: asInt,
-                                      });
-                                    }}
-                                    placeholder="Default"
-                                    inputStyle={{
-                                      backgroundColor: "var(--bg-elevated)",
-                                      borderColor: "var(--border-default)",
-                                      color: "var(--text-primary)",
-                                      minWidth: 200,
-                                    }}
-                                    renderSelected={({
-                                      option,
-                                      placeholder,
-                                    }) => {
-                                      if (!option) {
-                                        return (
-                                          <Text size="sm" c="dimmed">
-                                            {placeholder}
-                                          </Text>
-                                        );
-                                      }
-
-                                      if (option.value === SELECT_DEFAULT) {
-                                        const inheritedBudget =
-                                          settings?.anthropic_thinking_budget;
-                                        const hint =
-                                          inheritedBudget == null
-                                            ? "off"
-                                            : formatThinkingBudgetShort(
-                                                inheritedBudget
-                                              );
-
-                                        return (
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              alignItems: "baseline",
-                                              gap: 8,
-                                            }}
-                                          >
-                                            <span style={{ fontSize: 14 }}>
-                                              {option.label}
-                                            </span>
-                                            <span
-                                              style={{
-                                                fontSize: 11,
-                                                color: "var(--text-muted)",
-                                                opacity: 0.9,
-                                                lineHeight: 1,
-                                              }}
-                                            >
-                                              · {hint}
-                                            </span>
-                                          </div>
-                                        );
-                                      }
-
-                                      if (option.label.startsWith("Custom")) {
-                                        const n = Number(option.value);
-                                        const suffix = Number.isFinite(n)
-                                          ? formatThinkingBudgetShort(n)
-                                          : null;
-                                        return (
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              alignItems: "baseline",
-                                              gap: 8,
-                                            }}
-                                          >
-                                            <Text size="sm">
-                                              {option.label}
-                                            </Text>
-                                            {suffix && (
-                                              <Text
-                                                size="xs"
-                                                c="dimmed"
-                                                style={{ lineHeight: 1 }}
-                                              >
-                                                {suffix}
-                                              </Text>
-                                            )}
-                                          </div>
-                                        );
-                                      }
-
+                                    if (option.value !== SELECT_DEFAULT) {
                                       return (
                                         <Text size="sm">{option.label}</Text>
                                       );
-                                    }}
-                                    renderOption={({ option }) => {
-                                      if (option.value === SELECT_DEFAULT) {
-                                        const inheritedBudget =
-                                          settings?.anthropic_thinking_budget;
-                                        const hint =
-                                          inheritedBudget == null
-                                            ? "off"
-                                            : formatThinkingBudgetShort(
-                                                inheritedBudget
-                                              );
+                                    }
 
-                                        return (
-                                          <div
+                                    const hint = routerModel
+                                      ? settings?.openai_reasoning_effort ??
+                                        openAiDefaultReasoningEffortForModel(
+                                          routerModel
+                                        )
+                                      : settings?.openai_reasoning_effort ??
+                                        "medium";
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                  renderOption={({ option }) => {
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const hint = routerModel
+                                      ? settings?.openai_reasoning_effort ??
+                                        openAiDefaultReasoningEffortForModel(
+                                          routerModel
+                                        )
+                                      : settings?.openai_reasoning_effort ??
+                                        "medium";
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+
+                            {supportsRouterGeminiThinkingLevel ? (
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">
+                                    Thinking level
+                                  </p>
+                                  <p className="settings-description">
+                                    {routerIsGemini3Pro
+                                      ? "Gemini 3 Pro supports low/high (default high)."
+                                      : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
+                                  </p>
+                                </div>
+                                <HintSelect
+                                  data={routerGeminiThinkingLevelOptions}
+                                  value={
+                                    effectiveRouter?.gemini_thinking_level ??
+                                    SELECT_DEFAULT
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router
+                                    );
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        gemini_thinking_level: null,
+                                      });
+                                      return;
+                                    }
+
+                                    const v =
+                                      value === "minimal" ||
+                                      value === "low" ||
+                                      value === "medium" ||
+                                      value === "high"
+                                        ? value
+                                        : null;
+                                    if (v == null) return;
+
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      gemini_thinking_level: v,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
+                                      return (
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
+                                      );
+                                    }
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const hint =
+                                      settings?.gemini_thinking_level ?? "high";
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                  renderOption={({ option }) => {
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const hint =
+                                      settings?.gemini_thinking_level ?? "high";
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+
+                            {supportsRouterGeminiThinkingBudget ? (
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">
+                                    Thinking budget
+                                  </p>
+                                  <p className="settings-description">
+                                    Token budget for Gemini 2.5 thinking.
+                                  </p>
+                                </div>
+                                <HintSelect
+                                  data={routerGeminiThinkingBudgetOptions}
+                                  value={
+                                    effectiveRouter?.gemini_thinking_budget ==
+                                    null
+                                      ? SELECT_DEFAULT
+                                      : String(
+                                          effectiveRouter.gemini_thinking_budget
+                                        )
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router
+                                    );
+
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        gemini_thinking_budget: null,
+                                      });
+                                      return;
+                                    }
+
+                                    const parsed = Number(value);
+                                    if (!Number.isFinite(parsed)) return;
+                                    const asInt = Math.trunc(parsed);
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      gemini_thinking_budget: asInt,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
+                                      return (
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
+                                      );
+                                    }
+                                    if (option.value !== SELECT_DEFAULT)
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+
+                                    const inherited =
+                                      settings?.gemini_thinking_budget;
+                                    const hint =
+                                      inherited == null
+                                        ? "dynamic"
+                                        : inherited === 0
+                                        ? "off"
+                                        : inherited === -1
+                                        ? "dynamic"
+                                        : String(inherited);
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                  renderOption={({ option }) => {
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const inherited =
+                                      settings?.gemini_thinking_budget;
+                                    const hint =
+                                      inherited == null
+                                        ? "dynamic"
+                                        : inherited === 0
+                                        ? "off"
+                                        : inherited === -1
+                                        ? "dynamic"
+                                        : String(inherited);
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+
+                            {supportsRouterAnthropicThinkingBudget ? (
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">Thinking</p>
+                                  <p className="settings-description">
+                                    Extended thinking level for Claude models.
+                                  </p>
+                                </div>
+                                <HintSelect
+                                  data={
+                                    routerAnthropicThinkingLevelOptionsWithCustom
+                                  }
+                                  value={
+                                    effectiveRouter?.anthropic_thinking_budget ==
+                                    null
+                                      ? SELECT_DEFAULT
+                                      : String(
+                                          effectiveRouter.anthropic_thinking_budget
+                                        )
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router
+                                    );
+
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        anthropic_thinking_budget: null,
+                                      });
+                                      return;
+                                    }
+
+                                    const parsed = Number(value);
+                                    if (!Number.isFinite(parsed)) return;
+                                    const asInt = Math.trunc(parsed);
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      anthropic_thinking_budget: asInt,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
+                                      return (
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
+                                      );
+                                    }
+
+                                    if (option.value === SELECT_DEFAULT) {
+                                      const inheritedBudget =
+                                        settings?.anthropic_thinking_budget;
+                                      const hint =
+                                        inheritedBudget == null
+                                          ? "off"
+                                          : formatThinkingBudgetShort(
+                                              inheritedBudget
+                                            );
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
                                             style={{
-                                              display: "flex",
-                                              alignItems: "baseline",
-                                              gap: 8,
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
                                             }}
                                           >
-                                            <span style={{ fontSize: 14 }}>
-                                              {option.label}
-                                            </span>
-                                            <span
-                                              style={{
-                                                fontSize: 11,
-                                                color: "var(--text-muted)",
-                                                opacity: 0.9,
-                                                lineHeight: 1,
-                                              }}
-                                            >
-                                              · {hint}
-                                            </span>
-                                          </div>
-                                        );
-                                      }
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
 
+                                    if (option.label.startsWith("Custom")) {
                                       const n = Number(option.value);
                                       const suffix = Number.isFinite(n)
                                         ? formatThinkingBudgetShort(n)
                                         : null;
-
                                       return (
                                         <div
                                           style={{
@@ -6493,65 +6380,129 @@ export function PromptSettings({
                                           )}
                                         </div>
                                       );
-                                    }}
-                                  />
-                                </div>
-                              ) : null}
+                                    }
 
-                              <div className="settings-row no-divider">
-                                <div>
-                                  <p className="settings-label">
-                                    System prompt (advanced)
-                                  </p>
-                                  <p className="settings-description">
-                                    Optional override for the router’s system
-                                    prompt. Structured output rules are still
-                                    enforced.
-                                  </p>
-                                </div>
-                                <Textarea
-                                  value={
-                                    effectiveRouter?.llm_system_prompt ?? ""
-                                  }
-                                  placeholder="(leave empty to use default router prompt)"
-                                  onChange={(e) => {
-                                    const value = e.currentTarget.value;
-                                    const next = normalizeRouter(
-                                      activeProfile.router
+                                    return (
+                                      <Text size="sm">{option.label}</Text>
                                     );
-                                    saveRouter({
-                                      ...next,
-                                      enabled: true,
-                                      strategy: "llm",
-                                      llm_provider: routerProvider,
-                                      llm_model: routerModel,
-                                      llm_system_prompt: value.trim().length
-                                        ? value
-                                        : null,
-                                    });
                                   }}
-                                  autosize
-                                  minRows={2}
-                                  styles={{
-                                    input: {
-                                      backgroundColor: "var(--bg-elevated)",
-                                      borderColor: "var(--border-default)",
-                                      color: "var(--text-primary)",
-                                      minWidth: 320,
-                                    },
+                                  renderOption={({ option }) => {
+                                    if (option.value === SELECT_DEFAULT) {
+                                      const inheritedBudget =
+                                        settings?.anthropic_thinking_budget;
+                                      const hint =
+                                        inheritedBudget == null
+                                          ? "off"
+                                          : formatThinkingBudgetShort(
+                                              inheritedBudget
+                                            );
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
+
+                                    const n = Number(option.value);
+                                    const suffix = Number.isFinite(n)
+                                      ? formatThinkingBudgetShort(n)
+                                      : null;
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <Text size="sm">{option.label}</Text>
+                                        {suffix && (
+                                          <Text
+                                            size="xs"
+                                            c="dimmed"
+                                            style={{ lineHeight: 1 }}
+                                          >
+                                            {suffix}
+                                          </Text>
+                                        )}
+                                      </div>
+                                    );
                                   }}
                                 />
                               </div>
-                            </>
-                          );
-                        })()
-                      : null}
-                  </div>
-                </Accordion.Panel>
-              </Accordion.Item>
-            </Accordion>
-          </div>
-        </>
+                            ) : null}
+
+                            <div className="settings-row no-divider">
+                              <div>
+                                <p className="settings-label">
+                                  System prompt (advanced)
+                                </p>
+                                <p className="settings-description">
+                                  Optional override for the router’s system
+                                  prompt. Structured output rules are still
+                                  enforced.
+                                </p>
+                              </div>
+                              <Textarea
+                                value={effectiveRouter?.llm_system_prompt ?? ""}
+                                placeholder="(leave empty to use default router prompt)"
+                                onChange={(e) => {
+                                  const value = e.currentTarget.value;
+                                  const next = normalizeRouter(
+                                    activeProfile.router
+                                  );
+                                  saveRouter({
+                                    ...next,
+                                    enabled: true,
+                                    strategy: "llm",
+                                    llm_provider: routerProvider,
+                                    llm_model: routerModel,
+                                    llm_system_prompt: value.trim().length
+                                      ? value
+                                      : null,
+                                  });
+                                }}
+                                autosize
+                                minRows={2}
+                                styles={{
+                                  input: {
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 320,
+                                  },
+                                }}
+                              />
+                            </div>
+                          </>
+                        );
+                      })()
+                    : null}
+                </div>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+        </div>
       ) : null}
 
       <div className="settings-mini-header">
@@ -7041,17 +6992,14 @@ export function PromptSettings({
         <div>
           <p className="settings-label">Conversation History</p>
           <p className="settings-description">
-            When enabled, Quick Ask will include the last few Quick Ask questions
-            and answers as additional context. This is kept in memory only (not
-            saved to disk).
+            When enabled, Quick Ask will include the last few Quick Ask
+            questions and answers as additional context. This is kept in memory
+            only (not saved to disk).
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {!isDefaultScope && (
-            <Tooltip
-              label="Global setting (edit in Default profile)"
-              withArrow
-            >
+            <Tooltip label="Global setting (edit in Default profile)" withArrow>
               <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
             </Tooltip>
           )}

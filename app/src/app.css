@@ -591,15 +591,6 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
 	.quick-ask-backdrop,
-	.quick-ask-panel,
-	.quick-ask-backdrop.closing,
-	.quick-ask-panel.closing {
-		animation: none !important;
-	}
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.quick-ask-backdrop,
 	.quick-ask-panel {
 		animation: none;
 	}

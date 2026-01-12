@@ -656,6 +656,7 @@ export function HotkeyInput({
       <p className="settings-label">{label}</p>
       {description && <p className="settings-description">{description}</p>}
 
+      {/* biome-ignore lint/a11y/useSemanticElements: cannot use a real <button> here because this container includes nested interactive controls (Save/Cancel/etc.) */}
       <div
         role="button"
         tabIndex={disabled ? -1 : 0}
@@ -724,7 +725,13 @@ export function HotkeyInput({
             <>
               <span className="hotkey-hint">
                 {isSaving ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
                     <Loader size="xs" color="gray" />
                     Saving…
                   </span>
@@ -755,10 +762,10 @@ export function HotkeyInput({
 
       {captureError && <div className="hotkey-error">{captureError}</div>}
 
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: wrapper only prevents click-through while interacting with the Select */}
       <div
         className="hotkey-special-row"
         onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="hotkey-special-meta">
           <div className="hotkey-special-label">Special key</div>
@@ -777,22 +784,26 @@ export function HotkeyInput({
         />
       </div>
 
-      {(specialKeySelection === "AltRight" || effectiveValue?.key === "AltRight") && (
+      {(specialKeySelection === "AltRight" ||
+        effectiveValue?.key === "AltRight") && (
         <div style={{ marginTop: 6 }}>
           <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-            Note: Right Alt is AltGr on many keyboard layouts. It can be unreliable on
-            some Windows setups and may interfere with typing special characters. If it
-            doesn’t work well, consider using a key like F3 or Ctrl+Space.
+            Note: Right Alt is AltGr on many keyboard layouts. It can be
+            unreliable on some Windows setups and may interfere with typing
+            special characters. If it doesn’t work well, consider using a key
+            like F3 or Ctrl+Space.
           </span>
         </div>
       )}
 
-      {(specialKeySelection === "Copilot" || effectiveValue?.key === "Copilot") && (
+      {(specialKeySelection === "Copilot" ||
+        effectiveValue?.key === "Copilot") && (
         <div style={{ marginTop: 6 }}>
           <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-            Note: On Windows, the Copilot key is typically treated as the system shortcut
-            Win+C. If you bind it here, Kolboo will intercept that shortcut so Windows
-            Copilot doesn’t pop up. This may also override Win+C when pressed normally.
+            Note: On Windows, the Copilot key is typically treated as the system
+            shortcut Win+C. If you bind it here, Kolboo will intercept that
+            shortcut so Windows Copilot doesn’t pop up. This may also override
+            Win+C when pressed normally.
           </span>
         </div>
       )}

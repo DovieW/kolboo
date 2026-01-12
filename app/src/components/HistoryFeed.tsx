@@ -1971,6 +1971,7 @@ export function HistoryFeed({
                 const hasCopyValue = Boolean(copyValue?.trim());
 
                 return (
+                  // biome-ignore lint/a11y/noStaticElementInteractions: clickable row uses role+keyboard handlers; cannot be a <button> due to nested controls
                   <div
                     key={entry.id}
                     className="history-item"

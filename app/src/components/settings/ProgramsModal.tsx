@@ -373,7 +373,7 @@ export function ProfileConfigModal({
       deduped.push(v);
     }
 
-    const focusIndex = deduped.findIndex((p) => p === trimmed);
+    const focusIndex = deduped.indexOf(trimmed);
     if (focusIndex >= 0) {
       setPendingProgramPathFocusIndex(focusIndex);
     }

@@ -75,7 +75,7 @@ class OverlayErrorBoundary extends Component<
           textOverflow: "ellipsis",
         }}
         role="alert"
-        title={[this.state.message, stackHint ? "\n\n" + stackHint : ""].join(
+        title={[this.state.message, stackHint ? `\n\n${stackHint}` : ""].join(
           ""
         )}
       >

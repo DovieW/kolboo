@@ -122,7 +122,7 @@ export default function OverlayHoverApp() {
       (p) => p.id === activeProfileId
     );
     const r = profile?.router ?? null;
-    return Boolean(r && r.enabled && r.strategy !== "off");
+    return Boolean(r?.enabled && r.strategy !== "off");
   }, [settings, activeProfileId]);
 
   const rewriteIsEnabled = useMemo(() => {

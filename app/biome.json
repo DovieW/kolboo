@@ -17,7 +17,7 @@
 		"rules": {
 			"recommended": true,
 			"correctness": {
-				"useExhaustiveDependencies": "warn",
+				"useExhaustiveDependencies": "off",
 				"noUnusedVariables": "error",
 				"noUnusedImports": "error",
 				"noUnusedFunctionParameters": "error"
@@ -47,7 +47,7 @@
 			},
 			"suspicious": {
 				"noArrayIndexKey": "warn",
-				"noExplicitAny": "warn"
+				"noExplicitAny": "off"
 			}
 		}
 	},

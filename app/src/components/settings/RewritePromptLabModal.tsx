@@ -113,7 +113,7 @@ export function RewritePromptLabModal(props: {
       const exists = preferred
         ? llmProviders.some((p) => p.id === preferred)
         : false;
-      setSelectedProvider(exists ? preferred : llmProviders[0]!.id);
+      setSelectedProvider(exists ? preferred : llmProviders[0]?.id ?? null);
     }
   }, [llmProviders, props.initialLlmProvider, props.opened, selectedProvider]);
 
@@ -134,7 +134,7 @@ export function RewritePromptLabModal(props: {
     if (!selectedModel || !models.includes(selectedModel)) {
       const preferred = props.initialLlmModel ?? null;
       const usePreferred = preferred && models.includes(preferred);
-      setSelectedModel(usePreferred ? preferred : models[0]!);
+      setSelectedModel(usePreferred ? preferred : models[0] ?? null);
     }
   }, [
     llmProviders,
@@ -223,7 +223,7 @@ export function RewritePromptLabModal(props: {
         { value: "default", label: "Default" },
         ...openAiThinkingEffortsForModel(model).map((v) => ({
           value: v,
-          label: v === "none" ? "None" : v[0]!.toUpperCase() + v.slice(1),
+          label: v === "none" ? "None" : v.charAt(0).toUpperCase() + v.slice(1),
         })),
       ];
     }

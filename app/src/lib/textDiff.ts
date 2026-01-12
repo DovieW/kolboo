@@ -113,7 +113,8 @@ function myersDiff(a: string[], b: string[]): TextDiffChunk[] {
   > = [];
 
   for (let d = dFound; d > 0; d -= 1) {
-    const vPrev = trace[d - 1]!;
+    const vPrev = trace[d - 1];
+    if (!vPrev) break;
     const k = x - y;
 
     const kPrev =
@@ -127,17 +128,20 @@ function myersDiff(a: string[], b: string[]): TextDiffChunk[] {
 
     // Walk back along the diagonal (matching tokens).
     while (x > xPrev && y > yPrev) {
-      ops.push({ type: "equal", tok: a[x - 1]! });
+      const tok = a[x - 1];
+      if (tok !== undefined) ops.push({ type: "equal", tok });
       x -= 1;
       y -= 1;
     }
 
     // One edit step.
     if (x === xPrev) {
-      ops.push({ type: "insert", tok: b[y - 1]! });
+      const tok = b[y - 1];
+      if (tok !== undefined) ops.push({ type: "insert", tok });
       y -= 1;
     } else {
-      ops.push({ type: "delete", tok: a[x - 1]! });
+      const tok = a[x - 1];
+      if (tok !== undefined) ops.push({ type: "delete", tok });
       x -= 1;
     }
   }
@@ -145,21 +149,25 @@ function myersDiff(a: string[], b: string[]): TextDiffChunk[] {
   // Finish remaining common prefix.
   while (x > 0 && y > 0) {
     if (a[x - 1] === b[y - 1]) {
-      ops.push({ type: "equal", tok: a[x - 1]! });
+      const tok = a[x - 1];
+      if (tok !== undefined) ops.push({ type: "equal", tok });
       x -= 1;
       y -= 1;
     } else {
       // If we diverged early, fall back to deletes/inserts.
-      ops.push({ type: "delete", tok: a[x - 1]! });
+      const tok = a[x - 1];
+      if (tok !== undefined) ops.push({ type: "delete", tok });
       x -= 1;
     }
   }
   while (x > 0) {
-    ops.push({ type: "delete", tok: a[x - 1]! });
+    const tok = a[x - 1];
+    if (tok !== undefined) ops.push({ type: "delete", tok });
     x -= 1;
   }
   while (y > 0) {
-    ops.push({ type: "insert", tok: b[y - 1]! });
+    const tok = b[y - 1];
+    if (tok !== undefined) ops.push({ type: "insert", tok });
     y -= 1;
   }
 

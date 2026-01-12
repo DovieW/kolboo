@@ -1277,14 +1277,14 @@ export const tauriAPI = {
       const v = value as any;
 
       // New shape
-      if (Object.prototype.hasOwnProperty.call(v, "system")) {
+      if (Object.hasOwn(v, "system")) {
         const system = normalizePromptSection(v.system) ?? { content: null };
         return { system };
       }
 
       // Legacy shape: { main, advanced, dictionary }
       // We keep only the old "main" section as the new System Prompt.
-      if (Object.prototype.hasOwnProperty.call(v, "main")) {
+      if (Object.hasOwn(v, "main")) {
         const main = v.main;
         const legacyContent =
           typeof main === "string"
@@ -1310,7 +1310,7 @@ export const tauriAPI = {
       const v = value as any;
       const out: CleanupPromptSectionsOverride = {};
 
-      if (Object.prototype.hasOwnProperty.call(v, "system")) {
+      if (Object.hasOwn(v, "system")) {
         out.system = normalizePromptSection(v.system);
       }
 
@@ -1618,7 +1618,7 @@ export const tauriAPI = {
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
       audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: await (async () => {
+      accent_color: await(async () => {
         const raw = (await store.get<string | null>("accent_color")) ?? null;
         const normalized = normalizeHexColor(raw);
 
@@ -1636,18 +1636,16 @@ export const tauriAPI = {
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
       quick_replace_enabled:
         (await store.get<boolean>("quick_replace_enabled")) ?? false,
-      cleanup_prompt_sections: await (async () => {
+      cleanup_prompt_sections: await(async () => {
         const raw = await store.get<any>("cleanup_prompt_sections");
         const normalized = normalizeCleanupPromptSections(raw);
 
         // If we had legacy/invalid shapes, write back the normalized value to
         // avoid runtime errors and keep the store clean.
         const rawIsObject = raw && typeof raw === "object";
-        const rawHasSystem = rawIsObject
-          ? Object.prototype.hasOwnProperty.call(raw, "system")
-          : false;
+        const rawHasSystem = rawIsObject ? Object.hasOwn(raw, "system") : false;
         const rawHasLegacyMain = rawIsObject
-          ? Object.prototype.hasOwnProperty.call(raw, "main")
+          ? Object.hasOwn(raw, "main")
           : false;
 
         if (
@@ -1693,9 +1691,10 @@ export const tauriAPI = {
       quick_ask_conversation_history_enabled:
         (await store.get<boolean>("quick_ask_conversation_history_enabled")) ??
         true,
-      quick_ask_conversation_history_count: normalizeQuickAskConversationHistoryCount(
-        await store.get("quick_ask_conversation_history_count")
-      ),
+      quick_ask_conversation_history_count:
+        normalizeQuickAskConversationHistoryCount(
+          await store.get("quick_ask_conversation_history_count")
+        ),
 
       quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(
         await store.get("quick_ask_openai_reasoning_effort")
@@ -1775,7 +1774,7 @@ export const tauriAPI = {
       mic_auto_recover_enabled:
         (await store.get<boolean>("mic_auto_recover_enabled")) ?? false,
 
-      noise_gate_threshold_dbfs: await (async () => {
+      noise_gate_threshold_dbfs: await(async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -1814,7 +1813,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -1836,14 +1835,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })()),
+      })(),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...(await (async () => {
+      ...await(async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -1857,7 +1856,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })()),
+      })(),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),

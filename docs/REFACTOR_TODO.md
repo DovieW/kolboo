@@ -49,3 +49,13 @@ This file is a parking lot for larger refactors that came up while working on sm
     - Pick one rule at a time (e.g. `lint/correctness/useExhaustiveDependencies`) and fix the existing findings.
     - Flip it back to `error` once the repo is clean.
   - Goal: keep CI green while steadily improving quality instead of “big bang” lint migrations.
+
+## A11y lint follow-ups
+
+- **Audit and reduce inline Biome a11y ignores added during the “0 warnings now” push.**
+
+  - Some UI patterns are genuinely constrained (e.g., interactive elements inside Mantine `Accordion.Control`, which renders as a `<button>` and can’t legally contain nested `<button>`s).
+  - But where we used ignores as a pragmatic workaround, a follow-up could:
+    - refactor nested interactive regions to avoid button-in-button structure,
+    - replace `role="button"` containers with real buttons where valid,
+    - and re-evaluate `lint/a11y/useMediaCaption` for the audio-test UI (captions likely not applicable, but confirm intent).

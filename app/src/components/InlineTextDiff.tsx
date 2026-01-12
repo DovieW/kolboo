@@ -23,6 +23,7 @@ export function InlineTextDiff({ chunks }: { chunks: TextDiffChunk[] }) {
       };
 
       return (
+        // biome-ignore lint/suspicious/noArrayIndexKey: diff chunks don't have stable IDs; index key is acceptable for this static render
         <span key={idx} style={style}>
           {c.value}
         </span>

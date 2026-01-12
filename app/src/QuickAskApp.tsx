@@ -125,6 +125,7 @@ function QuickAskCodeBlock({
           className={`hljs language-${language}`}
           // highlight.js returns escaped HTML with span wrappers.
           // We do NOT allow arbitrary raw HTML from markdown.
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js output is escaped; we only add span wrappers.
           dangerouslySetInnerHTML={{ __html: highlighted }}
         />
       </pre>
@@ -336,10 +337,6 @@ export default function QuickAskApp() {
       <div
         className={`quick-ask-panel${closing ? " closing" : ""}`}
         key={panelKey}
-        onMouseDown={(e) => {
-          // Prevent the backdrop click handler.
-          e.stopPropagation();
-        }}
       >
         {question ? (
           <Text
@@ -379,28 +376,28 @@ export default function QuickAskApp() {
                 remarkPlugins={[remarkGfm]}
                 components={{
                   a: ({ href, children, ...props }) => {
-                      const safeHref = sanitizeExternalHref(href);
+                    const safeHref = sanitizeExternalHref(href);
 
-                      return (
-                        <a
-                          {...props}
-                          href={safeHref ?? undefined}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          onClick={(e) => {
-                            // Never navigate inside the webview.
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (!safeHref) return;
-                            openUrl(safeHref).catch(() => {
-                              // ignore
-                            });
-                          }}
-                        >
-                          {children}
-                        </a>
-                      );
-                    },
+                    return (
+                      <a
+                        {...props}
+                        href={safeHref ?? undefined}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        onClick={(e) => {
+                          // Never navigate inside the webview.
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (!safeHref) return;
+                          openUrl(safeHref).catch(() => {
+                            // ignore
+                          });
+                        }}
+                      >
+                        {children}
+                      </a>
+                    );
+                  },
                   code: ({ className, children, ...props }) => {
                     const raw = String(children ?? "");
                     const code = raw.endsWith("\n") ? raw.slice(0, -1) : raw;

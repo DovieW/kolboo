@@ -33,6 +33,8 @@ function HotkeyCombo({ config }: { config: HotkeyConfig | null }) {
     return [...mods, config.key];
   }, [config]);
 
+  const comboKey = useMemo(() => (parts ? parts.join("+") : ""), [parts]);
+
   if (!parts) {
     return <Kbd className="hotkey-placeholder">Unassigned</Kbd>;
   }
@@ -40,7 +42,7 @@ function HotkeyCombo({ config }: { config: HotkeyConfig | null }) {
   return (
     <span className="tang-guide-kbd-combo">
       {parts.map((part, idx) => (
-        <span key={`${part}-${idx}`}>
+        <span key={`${comboKey}-${part}`}>
           <Kbd>{part}</Kbd>
           {idx < parts.length - 1 && <span className="kbd-plus">+</span>}
         </span>
