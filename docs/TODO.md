@@ -26,15 +26,6 @@ Legend:
   - Add migration: read old keys once, write to secure store, delete from settings.
   - Add “export/import settings” that defaults to _excluding_ secrets.
 
-### Restrict Tauri capabilities to least privilege
-
-- **Where:** `app/src-tauri/capabilities/default.json`
-- **Problem:** `opener:default`, `store:default`, and other broad permissions are enabled for both `main` and `overlay` windows.
-- **Todo:**
-  - Split capabilities by window: give `overlay` only what it needs (likely window + event listening) and keep `store` writes confined to `main`.
-  - Restrict opener to safe schemes/hosts (e.g., `https:` only) and document what can be opened.
-  - Add a short “permissions inventory” section in-app (see disclosures section below).
-
 ---
 
 ## P1 — Performance & responsiveness
