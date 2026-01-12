@@ -906,7 +906,7 @@ function normalizeProxySettings(value: unknown): ProxySettings {
   const trusted_ca_certificates: TrustedCaCertificate[] = Array.isArray(
     v.trusted_ca_certificates
   )
-    ? v.trusted_ca_certificates
+    ? (v.trusted_ca_certificates as unknown[])
         .map(normalizeTrustedCaCertificate)
         .filter((c): c is TrustedCaCertificate => c !== null)
     : [];
