@@ -17,6 +17,7 @@ use std::sync::mpsc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 const MIC_DEVICE_ID_PREFIX: &str = "mic:v1:";
 
@@ -1376,10 +1377,37 @@ impl AudioCapture {
         self.recording_active.store(false, Ordering::Relaxed);
         if let Some(handle) = self.capture_handle.take() {
             log::info!("Stopping audio capture");
-            // Send stop command (ignore error if thread already stopped)
+
+            // Send stop command (ignore error if thread already stopped).
             let _ = handle.command_tx.send(CaptureCommand::Stop);
-            // Wait for thread to finish (with timeout in case of issues)
-            let _ = handle.thread_handle.join();
+
+            // Join can block forever if the capture thread is stuck (e.g. callback stalls).
+            // We use a helper joiner thread + recv_timeout so stop() itself is bounded.
+            let (join_tx, join_rx) = mpsc::channel();
+            thread::spawn(move || {
+                let res = handle.thread_handle.join();
+                let _ = join_tx.send(res);
+            });
+
+            const STOP_JOIN_TIMEOUT_MS: u64 = 2500;
+            match join_rx.recv_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS)) {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(e))) => {
+                    log::warn!("Audio capture thread stopped with error: {}", e);
+                }
+                Ok(Err(_panic)) => {
+                    log::warn!("Audio capture thread panicked while stopping");
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    log::warn!(
+                        "AudioCapture::stop() timed out after {}ms; continuing without blocking",
+                        STOP_JOIN_TIMEOUT_MS
+                    );
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    log::warn!("AudioCapture::stop(): join waiter disconnected unexpectedly");
+                }
+            }
         }
     }
 
