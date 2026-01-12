@@ -2305,7 +2305,15 @@ impl SharedPipeline {
         let session_profile_override = self.take_session_profile_override();
 
         // Phase 1: Stop recording and prepare for transcription (synchronous, holds lock briefly)
-        let (wav_bytes, stt_provider, retry_config, timeout, cancel_token, active_profile) = {
+        let (
+            wav_bytes,
+            stt_provider,
+            retry_config,
+            timeout,
+            cancel_token,
+            active_profile,
+            default_rewrite_include_clipboard_context,
+        ) = {
             let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
 
             if !inner.state.can_stop_recording() {
@@ -2418,6 +2426,10 @@ impl SharedPipeline {
                 })
                 .or_else(|| select_profile_for_foreground_app(&llm_config))
                 .or_else(|| select_default_profile(&llm_config));
+
+            let default_rewrite_include_clipboard_context = select_default_profile(&llm_config)
+                .and_then(|p| p.rewrite_include_clipboard_context)
+                .unwrap_or(false);
 
             let active_preset = active_profile
                 .as_ref()
@@ -2539,6 +2551,7 @@ impl SharedPipeline {
                 desired_timeout,
                 cancel_token,
                 active_profile,
+                default_rewrite_include_clipboard_context,
             )
         };
 
@@ -3180,6 +3193,22 @@ impl SharedPipeline {
             llm_outcome = LlmOutcome::Succeeded; // may be overwritten by fallback paths
             let llm_start = std::time::Instant::now();
 
+            let rewrite_include_clipboard_context = active_profile
+                .as_ref()
+                .and_then(|p| p.rewrite_include_clipboard_context)
+                .unwrap_or(default_rewrite_include_clipboard_context);
+
+            let clipboard_text = if rewrite_include_clipboard_context {
+                crate::clipboard_context::read_clipboard_text_best_effort_async(8000).await
+            } else {
+                None
+            };
+
+            let rewrite_user_message = crate::clipboard_context::build_rewrite_user_message(
+                &stt_text,
+                clipboard_text.as_deref(),
+            );
+
             // Apply LLM formatting with timeout
             let llm_result = tokio::select! {
                 biased;
@@ -3196,7 +3225,7 @@ impl SharedPipeline {
                     Ok(stt_text.clone())
                 }
 
-                result = format_text(llm.as_ref(), &stt_text, &llm_prompts) => {
+                result = format_text(llm.as_ref(), rewrite_user_message.as_str(), &llm_prompts) => {
                     match result {
                         Ok(formatted) => {
                             log::info!("Pipeline: LLM formatted {} -> {} chars", stt_text.len(), formatted.len());
@@ -3221,6 +3250,7 @@ impl SharedPipeline {
                 store.with_current(|log| {
                     log.llm_provider = llm_provider_used.clone();
                     log.llm_model = llm_model_used.clone();
+                    log.rewrite_clipboard_context = clipboard_text.clone();
                 });
             }
 
@@ -3277,7 +3307,14 @@ impl SharedPipeline {
         profile_id_override: Option<&str>,
     ) -> Result<TranscriptionResult, PipelineError> {
         // Phase 1: Resolve providers/config under lock.
-        let (stt_provider, retry_config, timeout, cancel_token, active_profile) = {
+        let (
+            stt_provider,
+            retry_config,
+            timeout,
+            cancel_token,
+            active_profile,
+            default_rewrite_include_clipboard_context,
+        ) = {
             let mut inner = self.inner.lock().map_err(|e| PipelineError::Lock(e.to_string()))?;
 
             // Guard: don't run a retry while actively recording.
@@ -3315,6 +3352,10 @@ impl SharedPipeline {
                 })
                 .or_else(|| select_profile_for_foreground_app(&llm_config))
                 .or_else(|| select_default_profile(&llm_config));
+
+            let default_rewrite_include_clipboard_context = select_default_profile(&llm_config)
+                .and_then(|p| p.rewrite_include_clipboard_context)
+                .unwrap_or(false);
 
             let active_preset = active_profile
                 .as_ref()
@@ -3427,6 +3468,7 @@ impl SharedPipeline {
                 desired_timeout,
                 cancel_token,
                 active_profile,
+                default_rewrite_include_clipboard_context,
             )
         };
 
@@ -4025,6 +4067,22 @@ impl SharedPipeline {
             llm_outcome = LlmOutcome::Succeeded;
             let llm_start = std::time::Instant::now();
 
+            let rewrite_include_clipboard_context = active_profile
+                .as_ref()
+                .and_then(|p| p.rewrite_include_clipboard_context)
+                .unwrap_or(default_rewrite_include_clipboard_context);
+
+            let clipboard_text = if rewrite_include_clipboard_context {
+                crate::clipboard_context::read_clipboard_text_best_effort_async(8000).await
+            } else {
+                None
+            };
+
+            let rewrite_user_message = crate::clipboard_context::build_rewrite_user_message(
+                &stt_text,
+                clipboard_text.as_deref(),
+            );
+
             let llm_result = tokio::select! {
                 biased;
 
@@ -4039,7 +4097,7 @@ impl SharedPipeline {
                     Ok(stt_text.clone())
                 }
 
-                result = format_text(llm.as_ref(), &stt_text, &llm_prompts) => {
+                result = format_text(llm.as_ref(), rewrite_user_message.as_str(), &llm_prompts) => {
                     match result {
                         Ok(formatted) => {
                             log::info!("Pipeline: Retry LLM formatted {} -> {} chars", stt_text.len(), formatted.len());
@@ -4061,6 +4119,7 @@ impl SharedPipeline {
                 store.with_current(|log| {
                     log.llm_provider = llm_provider_used.clone();
                     log.llm_model = llm_model_used.clone();
+                    log.rewrite_clipboard_context = clipboard_text.clone();
                 });
             }
 

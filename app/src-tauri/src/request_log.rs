@@ -163,6 +163,10 @@ pub struct RequestLog {
     #[serde(rename = "final_text")]
     pub formatted_transcript: Option<String>,
 
+    /// LLM rewrite: clipboard text that was included as context for the rewrite (when enabled).
+    #[serde(default)]
+    pub rewrite_clipboard_context: Option<String>,
+
     /// Quick Ask: the question sent to the answering LLM (usually based on the transcript).
     #[serde(default)]
     pub quick_ask_question: Option<String>,
@@ -171,6 +175,9 @@ pub struct RequestLog {
     /// This is intentionally bounded (see Quick Ask prompt assembly) to keep request logs usable.
     #[serde(default)]
     pub quick_ask_context_text: Option<String>,
+    /// Quick Ask: clipboard text that was included as additional context (when enabled).
+    #[serde(default)]
+    pub quick_ask_clipboard_context: Option<String>,
     /// Quick Ask: the answer returned by the answering LLM.
     #[serde(default)]
     pub quick_ask_answer: Option<String>,
@@ -209,6 +216,9 @@ pub struct RequestLog {
     /// Quick Replace: duration of the rewrite call in milliseconds.
     #[serde(default)]
     pub quick_replace_duration_ms: Option<u64>,
+    /// Quick Replace: clipboard text that was included as additional context (when enabled).
+    #[serde(default)]
+    pub quick_replace_clipboard_context: Option<String>,
 
     /// Quick Replace: payload sent to the rewriting LLM.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -352,9 +362,11 @@ impl RequestLog {
             sample_rate: None,
             raw_transcript: None,
             formatted_transcript: None,
+            rewrite_clipboard_context: None,
 
             quick_ask_question: None,
             quick_ask_context_text: None,
+            quick_ask_clipboard_context: None,
             quick_ask_answer: None,
             quick_ask_provider: None,
             quick_ask_model: None,
@@ -368,6 +380,7 @@ impl RequestLog {
             quick_replace_provider: None,
             quick_replace_model: None,
             quick_replace_duration_ms: None,
+            quick_replace_clipboard_context: None,
             quick_replace_request_json: None,
             quick_replace_response_json: None,
             stt_request_json: None,

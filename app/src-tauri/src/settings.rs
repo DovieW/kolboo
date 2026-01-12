@@ -427,6 +427,19 @@ pub struct RewriteProgramPromptProfile {
     #[serde(default)]
     pub context_grab_method: Option<String>,
 
+    // Clipboard context (per-profile toggles)
+    // When enabled, Kolboo will read the current clipboard text and include it as optional
+    // context when constructing LLM inputs.
+    //
+    // NOTE: These toggles are independent of `context_grab_method` (highlighted-selection
+    // capture). Clipboard context never injects keys.
+    #[serde(default)]
+    pub rewrite_include_clipboard_context: Option<bool>,
+    #[serde(default)]
+    pub quick_replace_include_clipboard_context: Option<bool>,
+    #[serde(default)]
+    pub quick_ask_include_clipboard_context: Option<bool>,
+
     // Quick Replace (per-profile overrides)
     // When enabled and there is highlighted text when transcription starts, treat the transcript
     // as an instruction to rewrite the selected text.

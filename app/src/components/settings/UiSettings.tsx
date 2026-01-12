@@ -120,8 +120,15 @@ const AUDIO_CUE_OPTIONS: Array<{ value: AudioCue; label: string }> = [
   { value: "legacy", label: "Tambourine" },
 ];
 
-const IS_WINDOWS =
-	typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+const CONTEXT_GRAB_METHOD_OPTIONS: Array<{
+  value: ContextGrabMethod;
+  label: string;
+}> = [
+  { value: "ctrl_c", label: "Ctrl+C" },
+  { value: "ctrl_shift_c", label: "Ctrl+Shift+C" },
+  { value: "ctrl_insert", label: "Ctrl+Insert" },
+  { value: "none", label: "None" },
+];
 
 function getProfileValue<T>(
   profileValue: T | null | undefined,
@@ -130,7 +137,11 @@ function getProfileValue<T>(
   return profileValue ?? globalValue;
 }
 
-export function UiSettings({ editingProfileId }: { editingProfileId?: string }) {
+export function UiSettings({
+  editingProfileId,
+}: {
+  editingProfileId?: string;
+}) {
   const { data: settings, isLoading } = useSettings();
   const { data: isAudioMuteSupported } = useIsAudioMuteSupported();
   const updateSoundEnabled = useUpdateSoundEnabled();
@@ -139,7 +150,8 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
   const updateMainWindowCloseBehavior = useUpdateMainWindowCloseBehavior();
   const updatePlayingAudioHandling = useUpdatePlayingAudioHandling();
   const updateOverlayMode = useUpdateOverlayMode();
-  const updateOverlayShowDetailedLoading = useUpdateOverlayShowDetailedLoading();
+  const updateOverlayShowDetailedLoading =
+    useUpdateOverlayShowDetailedLoading();
   const updateOverlayMonitorTarget = useUpdateOverlayMonitorTarget();
   const updateWidgetPosition = useUpdateWidgetPosition();
   const updateOutputMode = useUpdateOutputMode();
@@ -148,6 +160,7 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     useUpdateRewriteProgramPromptProfiles();
 
   const profiles = settings?.rewrite_program_prompt_profiles ?? [];
+  const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
   const profile: RewriteProgramPromptProfile | null =
     editingProfileId && editingProfileId !== "default"
       ? profiles.find((p) => p.id === editingProfileId) ?? null
@@ -172,6 +185,21 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     const next = profiles.map((p) =>
       p.id === profile.id ? { ...p, ...partial } : p
     );
+    updateRewriteProgramPromptProfiles.mutate(next);
+  };
+
+  const updateDefaultProfile = (
+    partial: Partial<RewriteProgramPromptProfile>
+  ) => {
+    const existing = profiles.find((p) => p.id === "default") ?? null;
+    const base: RewriteProgramPromptProfile =
+      existing ??
+      ({ id: "default", name: "Default" } as RewriteProgramPromptProfile);
+
+    const next = existing
+      ? profiles.map((p) => (p.id === "default" ? { ...p, ...partial } : p))
+      : [{ ...base, ...partial }, ...profiles];
+
     updateRewriteProgramPromptProfiles.mutate(next);
   };
 
@@ -203,7 +231,8 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     isProfileScope && isInheriting(profile?.playing_audio_handling);
 
   const cueDisabledByMuteHandling =
-    playingAudioHandling === "mute" || playingAudioHandling === "mute_and_pause";
+    playingAudioHandling === "mute" ||
+    playingAudioHandling === "mute_and_pause";
 
   const cueDisabledReason = cueDisabledByMuteHandling
     ? "Sound cues are disabled while Playing audio handling includes mute. Choose 'none' or 'pause' to enable cues."
@@ -245,20 +274,19 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
   const outputHitEnterInheriting =
     isProfileScope && isInheriting(profile?.output_hit_enter);
 
-  const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
-  const defaultContextGrabMethod: ContextGrabMethod =
-    defaultProfile?.context_grab_method === "none"
-      ? "none"
-      : defaultProfile?.context_grab_method === "ctrl_insert"
-        ? "ctrl_insert"
-      : defaultProfile?.context_grab_method === "ctrl_shift_c"
-        ? "ctrl_shift_c"
-        : "ctrl_c";
-  const contextGrabMethod: ContextGrabMethod = isProfileScope
-    ? (profile?.context_grab_method ?? defaultContextGrabMethod)
-    : defaultContextGrabMethod;
+  const globalContextGrabMethod: ContextGrabMethod =
+    defaultProfile?.context_grab_method ?? "ctrl_c";
+  const contextGrabMethod = isProfileScope
+    ? getProfileValue(profile?.context_grab_method, globalContextGrabMethod)
+    : globalContextGrabMethod;
   const contextGrabMethodInheriting =
     isProfileScope && isInheriting(profile?.context_grab_method);
+
+  // Backward compatible: older settings may contain the deprecated value
+  // "clipboard_only". We no longer show it as an option; display it as Ctrl+C
+  // so the dropdown doesn't appear blank.
+  const contextGrabMethodUiValue: ContextGrabMethod =
+    contextGrabMethod === "clipboard_only" ? "ctrl_c" : contextGrabMethod;
 
   const mainWindowCloseBehavior: MainWindowCloseBehavior =
     settings?.main_window_close_behavior ?? "minimize_to_tray";
@@ -403,6 +431,20 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
     updateOutputMode.mutate(nextMode);
   };
 
+  const handleContextGrabMethodChange = (value: string | null) => {
+    if (!value) return;
+    const next = value as ContextGrabMethod;
+
+    if (next === contextGrabMethod) return;
+
+    if (isProfileScope) {
+      updateProfile({ context_grab_method: next });
+      return;
+    }
+
+    updateDefaultProfile({ context_grab_method: next });
+  };
+
   const handleMainWindowCloseBehaviorChange = (next: string) => {
     if (isProfileScope) return;
 
@@ -516,9 +558,7 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
 
           <Tooltip
             label={
-              isProfileScope
-                ? GLOBAL_ONLY_TOOLTIP
-                : cueDisabledReason ?? ""
+              isProfileScope ? GLOBAL_ONLY_TOOLTIP : cueDisabledReason ?? ""
             }
             disabled={!(isProfileScope || cueDisabledByMuteHandling)}
             withArrow
@@ -529,7 +569,9 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
                 data={AUDIO_CUE_OPTIONS}
                 value={audioCueDropdownValue}
                 onChange={handleAudioCueChange}
-                disabled={isLoading || isProfileScope || cueDisabledByMuteHandling}
+                disabled={
+                  isLoading || isProfileScope || cueDisabledByMuteHandling
+                }
                 withCheckIcon={false}
                 styles={{
                   input: {
@@ -659,8 +701,8 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
         <div>
           <p className="settings-label">Overlay detailed loading</p>
           <p className="settings-description">
-            Show text like “transcribing…”, “routing…”, “rewriting…” instead of a
-            loading waveform
+            Show text like “transcribing…”, “routing…”, “rewriting…” instead of
+            a loading waveform
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -818,7 +860,7 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
                   disabled={isLoading}
                   onClick={() =>
                     openDisableOverrideDialog({
-                      title: "Disable Output mode override?",
+                      title: "Disable Output override?",
                       onConfirm: () =>
                         updateProfile({
                           output_mode: null,
@@ -881,9 +923,10 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
 
       <div className="settings-row">
         <div>
-          <p className="settings-label">Context grabbing method</p>
+          <p className="settings-label">Context Grab Shortcut</p>
           <p className="settings-description">
-            Shortcut used to copy highlighted text for Quick Ask / Quick Replace.
+            Shortcut Kolboo uses to copy your highlighted selection when a
+            feature needs selected-text context
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -896,8 +939,9 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
                 disabled={isLoading}
                 onClick={() =>
                   openDisableOverrideDialog({
-                    title: "Disable Context grabbing method override?",
-                    onConfirm: () => updateProfile({ context_grab_method: null }),
+                    title: "Disable Context Grab Shortcut override?",
+                    onConfirm: () =>
+                      updateProfile({ context_grab_method: null }),
                   })
                 }
               >
@@ -911,56 +955,18 @@ export function UiSettings({ editingProfileId }: { editingProfileId?: string }) 
             </Tooltip>
           )}
           <Select
-            data={[
-              { value: "none", label: "None" },
-              { value: "ctrl_c", label: "Ctrl+C" },
-              { value: "ctrl_insert", label: "Ctrl+Insert", disabled: !IS_WINDOWS },
-              {
-                value: "ctrl_shift_c",
-                label: "Ctrl+Shift+C",
-              },
-            ]}
-            value={contextGrabMethod}
-            onChange={(value) => {
-              if (!value) return;
-              if (
-				value !== "none" &&
-				value !== "ctrl_c" &&
-				value !== "ctrl_shift_c" &&
-				value !== "ctrl_insert"
-			)
-			return;
-
-              const method: ContextGrabMethod = value;
-
-              // Default scope: store on the persisted Default profile.
-              if (!isProfileScope) {
-                if (!defaultProfile) return;
-                const next = profiles.map((p) =>
-                  p.id === defaultProfile.id
-                    ? {
-                        ...p,
-                        // Store explicitly. (Null means "inherit" in profile scope,
-                        // and we don't want smart behavior here.)
-                        context_grab_method: method,
-                      }
-                    : p
-                );
-                updateRewriteProgramPromptProfiles.mutate(next);
-                return;
-              }
-
-              // Per-profile: store explicitly. Use the reset button to inherit.
-              updateProfile({ context_grab_method: method });
-            }}
+            data={CONTEXT_GRAB_METHOD_OPTIONS}
+            value={contextGrabMethodUiValue}
+            onChange={handleContextGrabMethodChange}
             disabled={isLoading}
             withCheckIcon={false}
+            allowDeselect={false}
             styles={{
               input: {
                 backgroundColor: "var(--bg-elevated)",
                 borderColor: "var(--border-default)",
                 color: "var(--text-primary)",
-                minWidth: 240,
+                minWidth: 220,
               },
             }}
           />

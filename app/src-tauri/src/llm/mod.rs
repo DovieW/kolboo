@@ -298,6 +298,11 @@ pub struct ProgramPromptProfile {
     /// Controls what shortcut Kolboo uses to copy the current selection when probing.
     pub context_grab_method: Option<String>,
 
+    // Clipboard context toggles (per-profile)
+    pub rewrite_include_clipboard_context: Option<bool>,
+    pub quick_replace_include_clipboard_context: Option<bool>,
+    pub quick_ask_include_clipboard_context: Option<bool>,
+
     // Quick Replace (per-profile overrides)
     pub quick_replace_enabled: Option<bool>,
     pub quick_replace_provider: Option<String>,

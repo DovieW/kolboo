@@ -205,15 +205,82 @@ impl LlmProvider for CerebrasLlmProvider {
             });
         }
 
-        response_json
+        // Some providers (or edge cases) may return a JSON error payload with a 2xx status.
+        // Prefer surfacing that message over a generic "no choices" parse failure.
+        if let Some(message) = response_json
+            .get("error")
+            .and_then(|e| e.get("message").or_else(|| e.get("error")))
+            .and_then(|m| m.as_str())
+        {
+            return Err(LlmError::Api(format!("Cerebras API error: {}", message)));
+        }
+
+        fn extract_content_from_choice(choice: &serde_json::Value) -> Option<String> {
+            // OpenAI Chat Completions: choices[0].message.content is typically a string.
+            if let Some(s) = choice
+                .get("message")
+                .and_then(|msg| msg.get("content"))
+                .and_then(|c| c.as_str())
+            {
+                return Some(s.to_string());
+            }
+
+            // Some OpenAI-compatible implementations may return content as an array of parts,
+            // e.g. [{"type":"text","text":"..."}, ...]. Join text parts.
+            if let Some(parts) = choice
+                .get("message")
+                .and_then(|msg| msg.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                let mut out = String::new();
+                for part in parts {
+                    if let Some(text) = part
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .or_else(|| part.get("content").and_then(|t| t.as_str()))
+                    {
+                        if !out.is_empty() {
+                            out.push_str("\n");
+                        }
+                        out.push_str(text);
+                    }
+                }
+                if !out.trim().is_empty() {
+                    return Some(out);
+                }
+            }
+
+            // Legacy completions-style: choices[0].text
+            if let Some(s) = choice.get("text").and_then(|t| t.as_str()) {
+                return Some(s.to_string());
+            }
+
+            None
+        }
+
+        let choices = response_json
             .get("choices")
             .and_then(|v| v.as_array())
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
-            .and_then(|msg| msg.get("content"))
-            .and_then(|c| c.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| LlmError::InvalidResponse("No response choices returned".to_string()))
+            .ok_or_else(|| {
+                LlmError::InvalidResponse(
+                    "Cerebras response missing `choices` (see Request Logs for llm_response_json)"
+                        .to_string(),
+                )
+            })?;
+
+        let first = choices.first().ok_or_else(|| {
+            LlmError::InvalidResponse(
+                "Cerebras response had an empty `choices` array (see Request Logs for llm_response_json)"
+                    .to_string(),
+            )
+        })?;
+
+        extract_content_from_choice(first).ok_or_else(|| {
+            LlmError::InvalidResponse(
+                "Cerebras response missing message content (see Request Logs for llm_response_json)"
+                    .to_string(),
+            )
+        })
     }
 
     fn name(&self) -> &'static str {

@@ -634,18 +634,6 @@ export function useUpdateRewriteLlmEnabled() {
   });
 }
 
-export function useUpdateQuickReplaceEnabled() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (enabled: boolean) => {
-      await tauriAPI.updateQuickReplaceEnabled(enabled);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-    },
-  });
-}
-
 export function useUpdatePlayingAudioHandling() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -210,11 +210,15 @@ export function PromptSettings({
 
         context_grab_method: null,
 
+        rewrite_include_clipboard_context: null,
+        quick_replace_include_clipboard_context: null,
+        quick_ask_include_clipboard_context: null,
+
         quick_replace_enabled: null,
         quick_replace_provider: null,
         quick_replace_model: null,
         quick_replace_system_prompt: null,
-      } as any;
+      };
     }
 
     return null;
@@ -251,12 +255,27 @@ export function PromptSettings({
 
   const [localProfileQuickReplaceEnabled, setLocalProfileQuickReplaceEnabled] =
     useState<boolean>(false);
-  const [localProfileQuickReplaceProvider, setLocalProfileQuickReplaceProvider] =
-    useState<string | null>(null);
+  const [
+    localProfileQuickReplaceProvider,
+    setLocalProfileQuickReplaceProvider,
+  ] = useState<string | null>(null);
   const [localProfileQuickReplaceModel, setLocalProfileQuickReplaceModel] =
     useState<string | null>(null);
   const [localQuickReplaceSystemPrompt, setLocalQuickReplaceSystemPrompt] =
     useState<string>("");
+
+  const [
+    localProfileRewriteIncludeClipboardContext,
+    setLocalProfileRewriteIncludeClipboardContext,
+  ] = useState<boolean>(false);
+  const [
+    localProfileQuickReplaceIncludeClipboardContext,
+    setLocalProfileQuickReplaceIncludeClipboardContext,
+  ] = useState<boolean>(false);
+  const [
+    localProfileQuickAskIncludeClipboardContext,
+    setLocalProfileQuickAskIncludeClipboardContext,
+  ] = useState<boolean>(false);
 
   // Per-profile thinking/reasoning knobs (stored on the profile object).
   // In UI, SELECT_DEFAULT means "inherit from Default/global settings".
@@ -742,6 +761,19 @@ export function PromptSettings({
   const [rewriteEnabledInheriting, setRewriteEnabledInheriting] =
     useState(false);
 
+  const [
+    rewriteIncludeClipboardContextInheriting,
+    setRewriteIncludeClipboardContextInheriting,
+  ] = useState(false);
+  const [
+    quickReplaceIncludeClipboardContextInheriting,
+    setQuickReplaceIncludeClipboardContextInheriting,
+  ] = useState(false);
+  const [
+    quickAskIncludeClipboardContextInheriting,
+    setQuickAskIncludeClipboardContextInheriting,
+  ] = useState(false);
+
   const [openAiReasoningEffortInheriting, setOpenAiReasoningEffortInheriting] =
     useState(false);
   const [geminiThinkingLevelInheriting, setGeminiThinkingLevelInheriting] =
@@ -902,12 +934,28 @@ export function PromptSettings({
           ? defaultProfile.quick_replace_enabled
           : settings?.quick_replace_enabled ?? false;
       const baseQuickReplaceProvider =
-        defaultProfile?.quick_replace_provider ?? settings?.llm_provider ?? null;
+        defaultProfile?.quick_replace_provider ??
+        settings?.llm_provider ??
+        null;
       const baseQuickReplaceModel =
         defaultProfile?.quick_replace_model ?? settings?.llm_model ?? null;
       const baseQuickReplaceSystemPrompt =
         defaultProfile?.quick_replace_system_prompt ??
         DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT;
+
+      const baseRewriteIncludeClipboardContext =
+        typeof defaultProfile?.rewrite_include_clipboard_context === "boolean"
+          ? defaultProfile.rewrite_include_clipboard_context
+          : false;
+      const baseQuickReplaceIncludeClipboardContext =
+        typeof defaultProfile?.quick_replace_include_clipboard_context ===
+        "boolean"
+          ? defaultProfile.quick_replace_include_clipboard_context
+          : false;
+      const baseQuickAskIncludeClipboardContext =
+        typeof defaultProfile?.quick_ask_include_clipboard_context === "boolean"
+          ? defaultProfile.quick_ask_include_clipboard_context
+          : false;
 
       const quickReplaceEnabledIsNull =
         activeProfile.quick_replace_enabled === null ||
@@ -921,6 +969,16 @@ export function PromptSettings({
       const quickReplaceSystemPromptIsNull =
         activeProfile.quick_replace_system_prompt === null ||
         activeProfile.quick_replace_system_prompt === undefined;
+
+      const rewriteIncludeClipboardContextIsNull =
+        activeProfile.rewrite_include_clipboard_context === null ||
+        activeProfile.rewrite_include_clipboard_context === undefined;
+      const quickReplaceIncludeClipboardContextIsNull =
+        activeProfile.quick_replace_include_clipboard_context === null ||
+        activeProfile.quick_replace_include_clipboard_context === undefined;
+      const quickAskIncludeClipboardContextIsNull =
+        activeProfile.quick_ask_include_clipboard_context === null ||
+        activeProfile.quick_ask_include_clipboard_context === undefined;
 
       const quickAskOpenAiReasoningEffortIsNull =
         activeProfile.quick_ask_openai_reasoning_effort === null ||
@@ -955,6 +1013,16 @@ export function PromptSettings({
       setQuickReplaceProviderInheriting(quickReplaceProviderIsNull);
       setQuickReplaceModelInheriting(quickReplaceModelIsNull);
       setQuickReplaceSystemPromptInheriting(quickReplaceSystemPromptIsNull);
+
+      setRewriteIncludeClipboardContextInheriting(
+        rewriteIncludeClipboardContextIsNull
+      );
+      setQuickReplaceIncludeClipboardContextInheriting(
+        quickReplaceIncludeClipboardContextIsNull
+      );
+      setQuickAskIncludeClipboardContextInheriting(
+        quickAskIncludeClipboardContextIsNull
+      );
 
       setQuickAskOpenAiReasoningEffortInheriting(
         quickAskOpenAiReasoningEffortIsNull
@@ -1010,7 +1078,9 @@ export function PromptSettings({
       );
       setLocalProfileQuickReplaceProvider(
         activeProfileId === "default"
-          ? activeProfile.quick_replace_provider ?? settings?.llm_provider ?? null
+          ? activeProfile.quick_replace_provider ??
+              settings?.llm_provider ??
+              null
           : activeProfile.quick_replace_provider ?? baseQuickReplaceProvider
       );
       setLocalProfileQuickReplaceModel(
@@ -1022,7 +1092,37 @@ export function PromptSettings({
         activeProfileId === "default"
           ? activeProfile.quick_replace_system_prompt ??
               DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
-          : activeProfile.quick_replace_system_prompt ?? baseQuickReplaceSystemPrompt
+          : activeProfile.quick_replace_system_prompt ??
+              baseQuickReplaceSystemPrompt
+      );
+
+      setLocalProfileRewriteIncludeClipboardContext(
+        activeProfileId === "default"
+          ? typeof activeProfile.rewrite_include_clipboard_context === "boolean"
+            ? activeProfile.rewrite_include_clipboard_context
+            : false
+          : activeProfile.rewrite_include_clipboard_context ??
+              baseRewriteIncludeClipboardContext
+      );
+
+      setLocalProfileQuickReplaceIncludeClipboardContext(
+        activeProfileId === "default"
+          ? typeof activeProfile.quick_replace_include_clipboard_context ===
+            "boolean"
+            ? activeProfile.quick_replace_include_clipboard_context
+            : false
+          : activeProfile.quick_replace_include_clipboard_context ??
+              baseQuickReplaceIncludeClipboardContext
+      );
+
+      setLocalProfileQuickAskIncludeClipboardContext(
+        activeProfileId === "default"
+          ? typeof activeProfile.quick_ask_include_clipboard_context ===
+            "boolean"
+            ? activeProfile.quick_ask_include_clipboard_context
+            : false
+          : activeProfile.quick_ask_include_clipboard_context ??
+              baseQuickAskIncludeClipboardContext
       );
 
       setLocalProfileOpenAiReasoningEffort(
@@ -1089,6 +1189,10 @@ export function PromptSettings({
       setQuickReplaceModelInheriting(false);
       setQuickReplaceSystemPromptInheriting(false);
 
+      setRewriteIncludeClipboardContextInheriting(false);
+      setQuickReplaceIncludeClipboardContextInheriting(false);
+      setQuickAskIncludeClipboardContextInheriting(false);
+
       setQuickAskOpenAiReasoningEffortInheriting(false);
       setQuickAskGeminiThinkingLevelInheriting(false);
       setQuickAskGeminiThinkingBudgetInheriting(false);
@@ -1102,10 +1206,16 @@ export function PromptSettings({
       setLocalProfileQuickAskModel(null);
       setLocalQuickAskSystemPrompt(settings?.quick_ask_system_prompt ?? "");
 
-      setLocalProfileQuickReplaceEnabled(settings?.quick_replace_enabled ?? false);
+      setLocalProfileQuickReplaceEnabled(
+        settings?.quick_replace_enabled ?? false
+      );
       setLocalProfileQuickReplaceProvider(settings?.llm_provider ?? null);
       setLocalProfileQuickReplaceModel(settings?.llm_model ?? null);
       setLocalQuickReplaceSystemPrompt(DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT);
+
+      setLocalProfileRewriteIncludeClipboardContext(false);
+      setLocalProfileQuickReplaceIncludeClipboardContext(false);
+      setLocalProfileQuickAskIncludeClipboardContext(false);
       setLocalProfileRewriteEnabled(defaultRewriteEnabled);
       setLocalProfileSttTimeout(
         settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT
@@ -1184,6 +1294,9 @@ export function PromptSettings({
       gemini_thinking_budget: null,
       gemini_thinking_level: null,
       anthropic_thinking_budget: null,
+
+      context_grab_method: null,
+
       sound_enabled: null,
       playing_audio_handling: null,
       overlay_mode: null,
@@ -1322,6 +1435,19 @@ export function PromptSettings({
   const defaultQuickReplaceSystemPrompt =
     defaultProfile?.quick_replace_system_prompt ??
     DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT;
+
+  const defaultRewriteIncludeClipboardContext =
+    typeof defaultProfile?.rewrite_include_clipboard_context === "boolean"
+      ? defaultProfile.rewrite_include_clipboard_context
+      : false;
+  const defaultQuickReplaceIncludeClipboardContext =
+    typeof defaultProfile?.quick_replace_include_clipboard_context === "boolean"
+      ? defaultProfile.quick_replace_include_clipboard_context
+      : false;
+  const defaultQuickAskIncludeClipboardContext =
+    typeof defaultProfile?.quick_ask_include_clipboard_context === "boolean"
+      ? defaultProfile.quick_ask_include_clipboard_context
+      : false;
 
   const rawQuickReplaceProvider =
     activeProfileId === "default"
@@ -1694,9 +1820,7 @@ export function PromptSettings({
           ...openAiThinkingEffortsForModel(effectiveLlmModel).map((v) => ({
             value: v,
             label:
-              v === "none"
-                ? "None"
-                : v.charAt(0).toUpperCase() + v.slice(1),
+              v === "none" ? "None" : v.charAt(0).toUpperCase() + v.slice(1),
           })),
         ];
 
@@ -1712,9 +1836,7 @@ export function PromptSettings({
             (v) => ({
               value: v,
               label:
-                v === "none"
-                  ? "None"
-                  : v.charAt(0).toUpperCase() + v.slice(1),
+                v === "none" ? "None" : v.charAt(0).toUpperCase() + v.slice(1),
             })
           ),
         ];
@@ -2191,6 +2313,10 @@ export function PromptSettings({
         router: null,
         active_preset_id: null,
         rewrite_llm_enabled: null,
+
+        context_grab_method: null,
+
+        context_grab_method: null,
       };
 
       const updated = [...profiles, { ...defaultProfile, ...next }];
@@ -3191,6 +3317,63 @@ export function PromptSettings({
               setRewriteEnabledInheriting(false);
               setLocalProfileRewriteEnabled(enabled);
               saveProfileMetadata({ rewrite_llm_enabled: enabled });
+            }}
+            color="gray"
+            size="md"
+          />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Include Clipboard Context</p>
+          <p className="settings-description">
+            When enabled, Kolboo reads your clipboard text and includes it as
+            optional context during the Rewrite step.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && rewriteIncludeClipboardContextInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope && !rewriteIncludeClipboardContextInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Rewrite Clipboard Context override?",
+                    onConfirm: () => {
+                      setRewriteIncludeClipboardContextInheriting(true);
+                      setLocalProfileRewriteIncludeClipboardContext(
+                        defaultRewriteIncludeClipboardContext
+                      );
+                      saveProfileMetadata({
+                        rewrite_include_clipboard_context: null,
+                      });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Switch
+            checked={localProfileRewriteIncludeClipboardContext}
+            onChange={(e) => {
+              const enabled = e.currentTarget.checked;
+              if (!isDefaultScope) {
+                setRewriteIncludeClipboardContextInheriting(false);
+              }
+              setLocalProfileRewriteIncludeClipboardContext(enabled);
+              saveProfileMetadata({
+                rewrite_include_clipboard_context: enabled,
+              });
             }}
             color="gray"
             size="md"
@@ -5365,7 +5548,8 @@ export function PromptSettings({
                                     label:
                                       v === "none"
                                         ? "None"
-                                        : v.charAt(0).toUpperCase() + v.slice(1),
+                                        : v.charAt(0).toUpperCase() +
+                                          v.slice(1),
                                   })),
                                 ];
 
@@ -6416,6 +6600,68 @@ export function PromptSettings({
 
       <div className="settings-row">
         <div>
+          <p className="settings-label">Include Clipboard Context</p>
+          <p className="settings-description">
+            When enabled, Kolboo reads your clipboard text and includes it as
+            optional context during Quick Replace.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && quickReplaceIncludeClipboardContextInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope &&
+            !quickReplaceIncludeClipboardContextInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title:
+                        "Disable Quick Replace Clipboard Context override?",
+                      onConfirm: () => {
+                        setQuickReplaceIncludeClipboardContextInheriting(true);
+                        setLocalProfileQuickReplaceIncludeClipboardContext(
+                          defaultQuickReplaceIncludeClipboardContext
+                        );
+                        saveProfileMetadata({
+                          quick_replace_include_clipboard_context: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          <Switch
+            checked={localProfileQuickReplaceIncludeClipboardContext}
+            onChange={(e) => {
+              const enabled = e.currentTarget.checked;
+              if (!isDefaultScope) {
+                setQuickReplaceIncludeClipboardContextInheriting(false);
+              }
+              setLocalProfileQuickReplaceIncludeClipboardContext(enabled);
+              saveProfileMetadata({
+                quick_replace_include_clipboard_context: enabled,
+              });
+            }}
+            color="gray"
+            size="md"
+          />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
           <p className="settings-label">Provider</p>
           <p className="settings-description">
             AI service used to rewrite the highlighted text.
@@ -6439,7 +6685,9 @@ export function PromptSettings({
                     setLocalProfileQuickReplaceProvider(
                       settings?.llm_provider ?? null
                     );
-                    setLocalProfileQuickReplaceModel(settings?.llm_model ?? null);
+                    setLocalProfileQuickReplaceModel(
+                      settings?.llm_model ?? null
+                    );
                     saveProfileMetadata({
                       quick_replace_provider: null,
                       quick_replace_model: null,
@@ -6465,7 +6713,9 @@ export function PromptSettings({
                       setLocalProfileQuickReplaceProvider(
                         defaultQuickReplaceProvider
                       );
-                      setLocalProfileQuickReplaceModel(defaultQuickReplaceModel);
+                      setLocalProfileQuickReplaceModel(
+                        defaultQuickReplaceModel
+                      );
                       saveProfileMetadata({
                         quick_replace_provider: null,
                         quick_replace_model: null,
@@ -6530,7 +6780,10 @@ export function PromptSettings({
               </Tooltip>
             )}
             {!isDefaultScope && !quickReplaceModelInheriting && (
-              <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
                 <ActionIcon
                   variant="subtle"
                   color="gray"
@@ -6679,6 +6932,63 @@ export function PromptSettings({
 
       <div className="settings-mini-header">
         <span className="settings-mini-header__text">Quick Ask</span>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Include Clipboard Context</p>
+          <p className="settings-description">
+            When enabled, Kolboo reads your clipboard text and includes it as
+            optional context during Quick Ask.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && quickAskIncludeClipboardContextInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope && !quickAskIncludeClipboardContextInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Quick Ask Clipboard Context override?",
+                    onConfirm: () => {
+                      setQuickAskIncludeClipboardContextInheriting(true);
+                      setLocalProfileQuickAskIncludeClipboardContext(
+                        defaultQuickAskIncludeClipboardContext
+                      );
+                      saveProfileMetadata({
+                        quick_ask_include_clipboard_context: null,
+                      });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Switch
+            checked={localProfileQuickAskIncludeClipboardContext}
+            onChange={(e) => {
+              const enabled = e.currentTarget.checked;
+              if (!isDefaultScope) {
+                setQuickAskIncludeClipboardContextInheriting(false);
+              }
+              setLocalProfileQuickAskIncludeClipboardContext(enabled);
+              saveProfileMetadata({
+                quick_ask_include_clipboard_context: enabled,
+              });
+            }}
+            color="gray"
+            size="md"
+          />
+        </div>
       </div>
 
       <div className="settings-row">

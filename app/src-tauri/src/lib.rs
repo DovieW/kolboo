@@ -10,6 +10,7 @@ use tauri_utils::config::BackgroundThrottlingPolicy;
 mod audio;
 mod audio_capture;
 mod audio_mute;
+mod clipboard_context;
 mod commands;
 mod cost;
 mod embeddings;
@@ -1034,20 +1035,39 @@ fn stop_recording(
             gemini_thinking_budget: Option<i64>,
             gemini_thinking_level: Option<String>,
             anthropic_thinking_budget: Option<i64>,
+            include_clipboard_context: bool,
         }
 
-        let quick_ask_profile_cfg: QuickAskProfileConfig = profile
-            .as_ref()
-            .map(|p| QuickAskProfileConfig {
-                provider: p.quick_ask_provider.clone(),
-                model: p.quick_ask_model.clone(),
-                system_prompt: p.quick_ask_system_prompt.clone(),
-                openai_reasoning_effort: p.quick_ask_openai_reasoning_effort.clone(),
-                gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
-                gemini_thinking_level: p.quick_ask_gemini_thinking_level.clone(),
-                anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
-            })
-            .unwrap_or_default();
+        let default_profile = config
+            .llm_config
+            .program_prompt_profiles
+            .iter()
+            .find(|p| p.id == "default");
+
+        let quick_ask_profile_cfg: QuickAskProfileConfig = {
+            let include_clipboard_context = profile
+                .as_ref()
+                .and_then(|p| p.quick_ask_include_clipboard_context)
+                .or_else(|| default_profile.and_then(|p| p.quick_ask_include_clipboard_context))
+                .unwrap_or(false);
+
+            profile
+                .as_ref()
+                .map(|p| QuickAskProfileConfig {
+                    provider: p.quick_ask_provider.clone(),
+                    model: p.quick_ask_model.clone(),
+                    system_prompt: p.quick_ask_system_prompt.clone(),
+                    openai_reasoning_effort: p.quick_ask_openai_reasoning_effort.clone(),
+                    gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
+                    gemini_thinking_level: p.quick_ask_gemini_thinking_level.clone(),
+                    anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
+                    include_clipboard_context,
+                })
+                .unwrap_or(QuickAskProfileConfig {
+                    include_clipboard_context,
+                    ..Default::default()
+                })
+        };
 
         const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT: &str =
             "You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
@@ -1058,13 +1078,8 @@ fn stop_recording(
             provider: Option<String>,
             model: Option<String>,
             system_prompt: String,
+            include_clipboard_context: bool,
         }
-
-        let default_profile = config
-            .llm_config
-            .program_prompt_profiles
-            .iter()
-            .find(|p| p.id == "default");
 
         // Context grabbing method (highlighted selection capture).
         // This is a per-profile setting; when unset, we default to Ctrl+C.
@@ -1123,11 +1138,18 @@ fn stop_recording(
                 .or_else(|| default_profile.and_then(|p| p.quick_replace_system_prompt.clone()))
                 .unwrap_or_else(|| DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT.to_string());
 
+            let include_clipboard_context = profile
+                .as_ref()
+                .and_then(|p| p.quick_replace_include_clipboard_context)
+                .or_else(|| default_profile.and_then(|p| p.quick_replace_include_clipboard_context))
+                .unwrap_or(false);
+
             QuickReplaceProfileConfig {
                 enabled,
                 provider,
                 model,
                 system_prompt,
+                include_clipboard_context,
             }
         };
 
@@ -1149,9 +1171,12 @@ fn stop_recording(
 
             let app_for_probe = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let selection = crate::commands::text::probe_selected_text_via_copy(context_grab_method)
-                    .ok()
-                    .flatten();
+                let selection = crate::commands::text::probe_selected_text_via_copy_with_app(
+                    &app_for_probe,
+                    context_grab_method,
+                )
+                .ok()
+                .flatten();
 
                 let state = app_for_probe.state::<AppState>();
                 let lock_result = state.quick_replace_probe.lock();
@@ -1186,9 +1211,12 @@ fn stop_recording(
 
             let app_for_probe = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let selection = crate::commands::text::probe_selected_text_via_copy(context_grab_method)
-                    .ok()
-                    .flatten();
+                let selection = crate::commands::text::probe_selected_text_via_copy_with_app(
+                    &app_for_probe,
+                    context_grab_method,
+                )
+                .ok()
+                .flatten();
 
                 let state = app_for_probe.state::<AppState>();
                 let lock_result = state.quick_ask_probe.lock();
@@ -1776,35 +1804,63 @@ fn stop_recording(
                                         .map(str::trim)
                                         .filter(|s| !s.is_empty());
 
-                                    let mut quick_ask_context_text_for_log: Option<String> = None;
-                                    let question_with_context = if let Some(ctx) = selected_context_trimmed {
-                                        // Bound context to keep Quick Ask snappy and cheap.
-                                        let cap = 8_000usize;
-                                        let ctx_capped = if ctx.len() > cap {
+                                    // Read clipboard context if enabled for this profile.
+                                    let clipboard_text: Option<String> = if quick_ask_profile_cfg.include_clipboard_context {
+                                        clipboard_context::read_clipboard_text_best_effort_async(8000).await
+                                    } else {
+                                        None
+                                    };
+                                    let clipboard_trimmed = clipboard_text
+                                        .as_deref()
+                                        .map(str::trim)
+                                        .filter(|s| !s.is_empty());
+
+                                    // Keep the two context sources distinct:
+                                    // - highlighted selection (grab shortcut)
+                                    // - clipboard text (optional)
+                                    // Both are independently optional.
+                                    let cap = 8_000usize;
+
+                                    let selected_context_capped: Option<String> = selected_context_trimmed.map(|ctx| {
+                                        if ctx.len() > cap {
                                             format!("{}\n\n… (truncated)", &ctx[..cap])
                                         } else {
                                             ctx.to_string()
-                                        };
+                                        }
+                                    });
 
-                                        // Store the exact context string we attached to the question.
-                                        quick_ask_context_text_for_log = Some(ctx_capped.clone());
+                                    let clipboard_context_capped: Option<String> = clipboard_trimmed.map(|cb| {
+                                        if cb.len() > cap {
+                                            format!("{}\n\n… (truncated)", &cb[..cap])
+                                        } else {
+                                            cb.to_string()
+                                        }
+                                    });
 
-                                        format!(
-                                            "CONTEXT (highlighted text):\n{}\n\nQUESTION:\n{}",
-                                            ctx_capped,
-                                            question
-                                        )
-                                    } else {
-                                        question.clone()
-                                    };
+                                    // This is the *exact* context text (if any) we attached to the question.
+                                    // Stored for request logs/UI.
+                                    let quick_ask_context_text_for_log: Option<String> =
+                                        selected_context_capped.clone();
+                                    let quick_ask_clipboard_context_for_log: Option<String> =
+                                        clipboard_context_capped.clone();
+
+                                    let question_with_context = crate::clipboard_context::build_quick_ask_user_message_with_context(
+                                        question.as_str(),
+                                        selected_context_capped.as_deref(),
+                                        clipboard_context_capped.as_deref(),
+                                    );
 
                                     // Update the logical request payload to indicate context was used.
                                     // We avoid logging the raw context string by default (it may contain secrets).
                                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                         let context_chars = selected_context_trimmed.map(|s| s.len());
+                                        let clipboard_chars = clipboard_trimmed.map(|s| s.len());
                                         let quick_ask_context_text_for_log = quick_ask_context_text_for_log.clone();
+                                        let quick_ask_clipboard_context_for_log =
+                                            quick_ask_clipboard_context_for_log.clone();
                                         log_store.with_current(|log| {
                                             log.quick_ask_context_text = quick_ask_context_text_for_log;
+                                            log.quick_ask_clipboard_context = quick_ask_clipboard_context_for_log;
 
                                             if let Some(req) = log.quick_ask_request_json.as_mut() {
                                                 // If it's our JSON object, add a couple extra fields.
@@ -1816,6 +1872,20 @@ fn stop_recording(
                                                     map.insert(
                                                         "context_chars".to_string(),
                                                         context_chars
+                                                            .map(|n| {
+                                                                serde_json::Value::Number(
+                                                                    serde_json::Number::from(n as u64),
+                                                                )
+                                                            })
+                                                            .unwrap_or(serde_json::Value::Null),
+                                                    );
+                                                    map.insert(
+                                                        "clipboard_context_present".to_string(),
+                                                        serde_json::Value::Bool(clipboard_chars.is_some()),
+                                                    );
+                                                    map.insert(
+                                                        "clipboard_context_chars".to_string(),
+                                                        clipboard_chars
                                                             .map(|n| {
                                                                 serde_json::Value::Number(
                                                                     serde_json::Number::from(n as u64),
@@ -2032,11 +2102,37 @@ fn stop_recording(
                                         // NOTE: Keep prompts minimal and instruct the model to output only the rewritten text.
                                         let system_prompt = quick_replace_cfg.system_prompt.clone();
                                         let instructions_text = output_value.trim().to_string();
-                                        let user_prompt = format!(
-                                            "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}\n\nReturn only the updated text.",
-                                            instructions_text,
-                                            selected
-                                        );
+
+                                        // Read clipboard context if enabled for this profile.
+                                        let clipboard_text: Option<String> = if quick_replace_cfg.include_clipboard_context {
+                                            clipboard_context::read_clipboard_text_best_effort_async(8000).await
+                                        } else {
+                                            None
+                                        };
+
+                                        let user_prompt = if let Some(ref cb) = clipboard_text {
+                                            format!(
+                                                "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}\n\nCLIPBOARD CONTEXT:\n{}\n\nReturn only the updated text.",
+                                                instructions_text,
+                                                selected,
+                                                cb.trim()
+                                            )
+                                        } else {
+                                            format!(
+                                                "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}\n\nReturn only the updated text.",
+                                                instructions_text,
+                                                selected
+                                            )
+                                        };
+
+                                        // Store clipboard context in request log if present.
+                                        if let Some(ref cb_text) = clipboard_text {
+                                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                log_store.with_current(|log| {
+                                                    log.quick_replace_clipboard_context = Some(cb_text.clone());
+                                                });
+                                            }
+                                        }
 
                                         let provider_cfg = crate::llm::LlmConfig {
                                             enabled: true,
@@ -4701,6 +4797,10 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
                 quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
                 quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,
                 quick_ask_anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
+
+                rewrite_include_clipboard_context: p.rewrite_include_clipboard_context,
+                quick_replace_include_clipboard_context: p.quick_replace_include_clipboard_context,
+                quick_ask_include_clipboard_context: p.quick_ask_include_clipboard_context,
             }
         })
         .collect();

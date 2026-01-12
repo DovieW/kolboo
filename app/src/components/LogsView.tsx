@@ -349,9 +349,15 @@ function RequestLogItem({
   const hasAnyTranscriptText = !!(rawTranscriptTrimmed || finalOutputTrimmed);
   const quickAskQuestionTrimmed = (log.quick_ask_question ?? "").trim();
   const quickAskContextTrimmed = (log.quick_ask_context_text ?? "").trim();
+  const quickAskClipboardContextTrimmed = (
+    log.quick_ask_clipboard_context ?? ""
+  ).trim();
   const quickAskAnswerTrimmed = (log.quick_ask_answer ?? "").trim();
   const hasAnyQuickAskText = !!(
-    quickAskContextTrimmed || quickAskQuestionTrimmed || quickAskAnswerTrimmed
+    quickAskContextTrimmed ||
+    quickAskClipboardContextTrimmed ||
+    quickAskQuestionTrimmed ||
+    quickAskAnswerTrimmed
   );
 
   const quickReplaceInstructionsTrimmed = (
@@ -360,10 +366,14 @@ function RequestLogItem({
   const quickReplaceSelectedTextTrimmed = (
     log.quick_replace_selected_text ?? ""
   ).trim();
+  const quickReplaceClipboardContextTrimmed = (
+    log.quick_replace_clipboard_context ?? ""
+  ).trim();
   const quickReplaceOutputTextTrimmed = (log.quick_replace_output_text ?? "").trim();
   const hasAnyQuickReplaceText = !!(
     quickReplaceInstructionsTrimmed ||
     quickReplaceSelectedTextTrimmed ||
+    quickReplaceClipboardContextTrimmed ||
     quickReplaceOutputTextTrimmed
   );
   const playDisabled = log.status === "in_progress";
@@ -515,6 +525,17 @@ function RequestLogItem({
                   </Box>
                 ) : null}
 
+                {quickAskClipboardContextTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Clipboard Context:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_ask_clipboard_context}
+                    </Text>
+                  </Box>
+                ) : null}
+
                 {quickAskQuestionTrimmed ? (
                   <Box>
                     <Text size="xs" fw={600} c="dimmed">
@@ -554,6 +575,17 @@ function RequestLogItem({
                   </Box>
                 ) : null}
 
+                {quickReplaceClipboardContextTrimmed ? (
+                  <Box>
+                    <Text size="xs" fw={600} c="dimmed">
+                      Clipboard Context:
+                    </Text>
+                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                      {log.quick_replace_clipboard_context}
+                    </Text>
+                  </Box>
+                ) : null}
+
                 {quickReplaceInstructionsTrimmed ? (
                   <Box>
                     <Text size="xs" fw={600} c="dimmed">
@@ -583,85 +615,98 @@ function RequestLogItem({
           {(log.raw_transcript || log.final_text) &&
             !isQuickAsk &&
             (!isQuickReplace || !hasAnyQuickReplaceText) && (
-            <Paper withBorder p="sm">
-              <Stack gap="xs">
-                {llmAttempted ? (
-                  <>
-                    {log.raw_transcript && (
-                      <Box>
-                        <Text size="xs" fw={600} c="dimmed">
-                          Raw Transcript:
-                        </Text>
-                        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                          {log.raw_transcript || "(empty)"}
-                        </Text>
-                      </Box>
-                    )}
-                    {log.final_text && (
-                      <Box>
-                        <Text size="xs" fw={600} c="dimmed">
-                          Rewrite Output:
-                        </Text>
-                        {typeof log.raw_transcript === "string" &&
-                        typeof log.final_text === "string" &&
-                        log.final_text === log.raw_transcript ? (
-                          <Text size="sm" c="dimmed">
-                            (no change)
+              <Paper withBorder p="sm">
+                <Stack gap="xs">
+                  {llmAttempted ? (
+                    <>
+                      {log.raw_transcript && (
+                        <Box>
+                          <Text size="xs" fw={600} c="dimmed">
+                            Raw Transcript:
                           </Text>
-                        ) : (
                           <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                            {log.final_text}
+                            {log.raw_transcript || "(empty)"}
                           </Text>
-                        )}
-                      </Box>
-                    )}
+                        </Box>
+                      )}
+                      {log.final_text && (
+                        <Box>
+                          <Text size="xs" fw={600} c="dimmed">
+                            Rewrite Output:
+                          </Text>
+                          {typeof log.raw_transcript === "string" &&
+                          typeof log.final_text === "string" &&
+                          log.final_text === log.raw_transcript ? (
+                            <Text size="sm" c="dimmed">
+                              (no change)
+                            </Text>
+                          ) : (
+                            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                              {log.final_text}
+                            </Text>
+                          )}
+                        </Box>
+                      )}
 
-                    {differenceInfo && (
-                      <Box>
-                        <Text size="xs" fw={600} c="dimmed">
-                          Difference ({differenceInfo.changeGroups} change
-                          {differenceInfo.changeGroups === 1 ? "" : "s"}):
-                        </Text>
-                        <InlineTextDiff chunks={differenceInfo.chunks} />
-                      </Box>
-                    )}
-                  </>
-                ) : (
-                  <Box>
-                    <Text size="xs" fw={600} c="dimmed">
-                      {isQuickReplace ? "Instructions (transcript):" : "Transcript:"}
-                    </Text>
-                    {isTranscription && rewriteSkipped ? (
-                      <>
-                        <Text size="xs" c="dimmed">
-                          Rewrite: skipped ({rewriteSkippedReasonLabel})
-                        </Text>
-                        {log.llm_error_message ? (
-                          <Code
-                            block
-                            mt={6}
-                            style={{
-                              fontSize: "0.75rem",
-                              maxWidth: "100%",
-                              overflowX: "auto",
-                              whiteSpace: "pre-wrap",
-                              overflowWrap: "anywhere",
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            {log.llm_error_message}
-                          </Code>
-                        ) : null}
-                      </>
-                    ) : null}
-                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                      {log.final_text ?? log.raw_transcript ?? "(empty)"}
-                    </Text>
-                  </Box>
-                )}
-              </Stack>
-            </Paper>
-          )}
+                      {log.rewrite_clipboard_context && (
+                        <Box>
+                          <Text size="xs" fw={600} c="dimmed">
+                            Clipboard Context:
+                          </Text>
+                          <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                            {log.rewrite_clipboard_context}
+                          </Text>
+                        </Box>
+                      )}
+
+                      {differenceInfo && (
+                        <Box>
+                          <Text size="xs" fw={600} c="dimmed">
+                            Difference ({differenceInfo.changeGroups} change
+                            {differenceInfo.changeGroups === 1 ? "" : "s"}):
+                          </Text>
+                          <InlineTextDiff chunks={differenceInfo.chunks} />
+                        </Box>
+                      )}
+                    </>
+                  ) : (
+                    <Box>
+                      <Text size="xs" fw={600} c="dimmed">
+                        {isQuickReplace
+                          ? "Instructions (transcript):"
+                          : "Transcript:"}
+                      </Text>
+                      {isTranscription && rewriteSkipped ? (
+                        <>
+                          <Text size="xs" c="dimmed">
+                            Rewrite: skipped ({rewriteSkippedReasonLabel})
+                          </Text>
+                          {log.llm_error_message ? (
+                            <Code
+                              block
+                              mt={6}
+                              style={{
+                                fontSize: "0.75rem",
+                                maxWidth: "100%",
+                                overflowX: "auto",
+                                whiteSpace: "pre-wrap",
+                                overflowWrap: "anywhere",
+                                wordBreak: "break-word",
+                              }}
+                            >
+                              {log.llm_error_message}
+                            </Code>
+                          ) : null}
+                        </>
+                      ) : null}
+                      <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                        {log.final_text ?? log.raw_transcript ?? "(empty)"}
+                      </Text>
+                    </Box>
+                  )}
+                </Stack>
+              </Paper>
+            )}
 
           {/* Error message */}
           {log.error_message && (

@@ -388,13 +388,15 @@ export interface RewriteProgramPromptProfile {
   quick_ask_model?: string | null;
   quick_ask_system_prompt?: string | null;
 
-  // Context grabbing method for highlighted-text capture (per-profile override).
-  // Controls what shortcut Kolboo uses to copy the current selection.
+  // Context grabbing method for highlighted-text capture.
   context_grab_method?: ContextGrabMethod | null;
 
+  // Clipboard context toggles (per-profile)
+  rewrite_include_clipboard_context?: boolean | null;
+  quick_replace_include_clipboard_context?: boolean | null;
+  quick_ask_include_clipboard_context?: boolean | null;
+
   // Quick Replace (per-profile overrides)
-  // When enabled and there is highlighted text when transcription starts, treat the transcript
-  // as an instruction to rewrite the selected text.
   quick_replace_enabled?: boolean | null;
   quick_replace_provider?: string | null;
   quick_replace_model?: string | null;
@@ -424,17 +426,19 @@ export interface RewriteProgramPromptProfile {
   output_hit_enter?: boolean | null;
 }
 
-export type ContextGrabMethod =
-  | "none"
-  | "ctrl_c"
-  | "ctrl_shift_c"
-  | "ctrl_insert";
-
 export type PlayingAudioHandling = "none" | "mute" | "pause" | "mute_and_pause";
 
 export type AudioCue = "kolboo" | "maraca" | "clave" | "legacy";
 
 export type OverlayMode = "always" | "never" | "recording_only";
+
+export type ContextGrabMethod =
+  | "none"
+  | "ctrl_c"
+  | "ctrl_shift_c"
+  | "ctrl_insert"
+  // Legacy (deprecated): previously meant "read clipboard without injecting keys".
+  | "clipboard_only";
 
 // Which monitor to place always-on-top overlay windows on.
 // - main: primary monitor
@@ -698,9 +702,6 @@ export interface AppSettings {
   accent_color: string | null;
   // Global gate for the optional LLM rewrite step
   rewrite_llm_enabled: boolean;
-  // When true, if there is highlighted text when transcription starts, treat the transcript
-  // as an instruction to rewrite the selected text.
-  quick_replace_enabled: boolean;
   cleanup_prompt_sections: CleanupPromptSections | null;
   rewrite_program_prompt_profiles: RewriteProgramPromptProfile[];
   stt_provider: string | null;
@@ -712,7 +713,7 @@ export interface AppSettings {
   // Whisper server base URL (OpenAI-compatible API; optional)
   whisper_server_base_url: string | null;
 
-  // Ollama server base URL (optional). If unset, backend defaults to http://localhost:11434.
+  // Ollama server base URL (optional)
   ollama_url: string | null;
 
   // Local Whisper model id (e.g. "base", "tinyen"). Only meaningful when the
@@ -1440,8 +1441,22 @@ export const tauriAPI = {
         context_grab_method_raw === "none" ||
         context_grab_method_raw === "ctrl_c" ||
         context_grab_method_raw === "ctrl_shift_c" ||
-        context_grab_method_raw === "ctrl_insert"
-          ? context_grab_method_raw
+        context_grab_method_raw === "ctrl_insert" ||
+        context_grab_method_raw === "clipboard_only"
+          ? (context_grab_method_raw as ContextGrabMethod)
+          : null;
+
+      const rewrite_include_clipboard_context =
+        typeof (p as any).rewrite_include_clipboard_context === "boolean"
+          ? (p as any).rewrite_include_clipboard_context
+          : null;
+      const quick_replace_include_clipboard_context =
+        typeof (p as any).quick_replace_include_clipboard_context === "boolean"
+          ? (p as any).quick_replace_include_clipboard_context
+          : null;
+      const quick_ask_include_clipboard_context =
+        typeof (p as any).quick_ask_include_clipboard_context === "boolean"
+          ? (p as any).quick_ask_include_clipboard_context
           : null;
 
       const quick_replace_enabled =
@@ -1456,9 +1471,11 @@ export const tauriAPI = {
         typeof (p as any).quick_replace_model === "string"
           ? (p as any).quick_replace_model
           : null;
-      const quick_replace_system_prompt_raw = (p as any).quick_replace_system_prompt;
+      const quick_replace_system_prompt_raw = (p as any)
+        .quick_replace_system_prompt;
       const quick_replace_system_prompt =
-        typeof quick_replace_system_prompt_raw === "string"
+        typeof quick_replace_system_prompt_raw === "string" &&
+        quick_replace_system_prompt_raw.trim().length > 0
           ? quick_replace_system_prompt_raw
           : null;
 
@@ -1579,7 +1596,9 @@ export const tauriAPI = {
         quick_ask_model,
         quick_ask_system_prompt,
         context_grab_method,
-
+        rewrite_include_clipboard_context,
+        quick_replace_include_clipboard_context,
+        quick_ask_include_clipboard_context,
         quick_replace_enabled,
         quick_replace_provider,
         quick_replace_model,
@@ -1649,7 +1668,7 @@ export const tauriAPI = {
         (await store.get<string | null>("selected_mic_id")) ?? null,
       sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
       audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: await(async () => {
+      accent_color: await (async () => {
         const raw = (await store.get<string | null>("accent_color")) ?? null;
         const normalized = normalizeHexColor(raw);
 
@@ -1665,9 +1684,7 @@ export const tauriAPI = {
       })(),
       rewrite_llm_enabled:
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
-      quick_replace_enabled:
-        (await store.get<boolean>("quick_replace_enabled")) ?? false,
-      cleanup_prompt_sections: await(async () => {
+      cleanup_prompt_sections: await (async () => {
         const raw = await store.get<any>("cleanup_prompt_sections");
         const normalized = normalizeCleanupPromptSections(raw);
 
@@ -1794,7 +1811,7 @@ export const tauriAPI = {
       mic_auto_recover_enabled:
         (await store.get<boolean>("mic_auto_recover_enabled")) ?? false,
 
-      noise_gate_threshold_dbfs: await(async () => {
+      noise_gate_threshold_dbfs: await (async () => {
         const configured = normalizeNoiseGateThresholdDbfs(
           await store.get("noise_gate_threshold_dbfs")
         );
@@ -1833,7 +1850,7 @@ export const tauriAPI = {
       ),
 
       // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("transcription_retention_unit");
         const rawValue = await store.get("transcription_retention_value");
 
@@ -1855,14 +1872,14 @@ export const tauriAPI = {
           transcription_retention_unit: unit,
           transcription_retention_value: value,
         };
-      })(),
+      })()),
       transcription_retention_delete_recordings:
         normalizeTranscriptionRetentionDeleteRecordings(
           await store.get("transcription_retention_delete_recordings")
         ),
 
       // Stats retention (persisted on disk).
-      ...await(async () => {
+      ...(await (async () => {
         const rawUnit = await store.get("stats_retention_unit");
         const rawValue = await store.get("stats_retention_value");
 
@@ -1876,7 +1893,7 @@ export const tauriAPI = {
           stats_retention_unit: unit,
           stats_retention_value: value,
         };
-      })(),
+      })()),
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
@@ -2130,12 +2147,6 @@ export const tauriAPI = {
     await store.save();
   },
 
-  async updateQuickReplaceEnabled(enabled: boolean): Promise<void> {
-    const store = await getStore();
-    await store.set("quick_replace_enabled", !!enabled);
-    await store.save();
-  },
-
   async updateCleanupPromptSections(
     sections: CleanupPromptSections | null
   ): Promise<void> {
@@ -2241,8 +2252,7 @@ export const tauriAPI = {
 
   async updateOllamaUrl(baseUrl: string | null): Promise<void> {
     const store = await getStore();
-    const trimmed = baseUrl?.trim() ? baseUrl.trim() : null;
-    const normalized = trimmed ? trimmed.replace(/\/+$/, "") : null;
+    const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
     await store.set("ollama_url", normalized);
     await store.save();
   },
@@ -2417,7 +2427,9 @@ export const tauriAPI = {
     });
   },
 
-  async updateOverlayMonitorTarget(target: OverlayMonitorTarget): Promise<void> {
+  async updateOverlayMonitorTarget(
+    target: OverlayMonitorTarget
+  ): Promise<void> {
     const store = await getStore();
     const normalized = normalizeOverlayMonitorTarget(target);
 
@@ -2897,8 +2909,8 @@ export interface LlmProviderInfo {
 }
 
 export interface ModelOption {
-	value: string;
-	label: string;
+  value: string;
+  label: string;
   disabled?: boolean;
 }
 
@@ -2923,7 +2935,7 @@ export interface TestRewriteWithPromptResponse {
 export const llmAPI = {
   getLlmProviders: () => invoke<LlmProviderInfo[]>("get_llm_providers"),
 
-	getFireworksModels: () => invoke<ModelOption[]>("fireworks_list_models"),
+  getFireworksModels: () => invoke<ModelOption[]>("fireworks_list_models"),
   getOllamaModels: () => invoke<ModelOption[]>("ollama_list_models"),
 
   testLlmRewrite: (params: { transcript: string; profileId?: string | null }) =>
@@ -3104,7 +3116,7 @@ export const configAPI = {
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type RequestStatus = "in_progress" | "success" | "error" | "cancelled";
-export type RequestKind = "transcription" | "quick_ask" | "quick_replace";
+export type RequestKind = "transcription" | "quick_ask";
 
 export interface LogEntry {
   timestamp: string;
@@ -3135,9 +3147,13 @@ export interface RequestLog {
   raw_transcript: string | null;
   final_text: string | null;
 
+  // LLM rewrite clipboard context (when enabled)
+  rewrite_clipboard_context?: string | null;
+
   // Quick Ask fields (when kind === "quick_ask")
   quick_ask_question?: string | null;
   quick_ask_context_text?: string | null;
+  quick_ask_clipboard_context?: string | null;
   quick_ask_answer?: string | null;
   quick_ask_provider?: string | null;
   quick_ask_model?: string | null;
@@ -3147,9 +3163,11 @@ export interface RequestLog {
   quick_replace_instructions?: string | null;
   quick_replace_selected_text?: string | null;
   quick_replace_output_text?: string | null;
+  quick_replace_clipboard_context?: string | null;
   quick_replace_provider?: string | null;
   quick_replace_model?: string | null;
   quick_replace_duration_ms?: number | null;
+
   // Total request processing duration (ms). Excludes recording time when available.
   total_duration_ms: number | null;
   stt_duration_ms: number | null;
@@ -3196,10 +3214,6 @@ export interface RequestLog {
   // Quick Ask payloads (optional)
   quick_ask_request_json?: unknown;
   quick_ask_response_json?: unknown;
-
-  // Quick Replace payloads (optional)
-  quick_replace_request_json?: unknown;
-  quick_replace_response_json?: unknown;
 
   // Optional router payloads for debugging.
   // For embeddings this may be an array of calls/responses.
