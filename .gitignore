@@ -54,6 +54,12 @@ RELEASE_NOTES.md
 .coverage
 htmlcov/
 
+# Vitest coverage output
+app/coverage/
+
+# Vitest cache (when enabled)
+app/.vitest/
+
 # Type checking
 .mypy_cache/
 .pytype/
