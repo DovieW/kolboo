@@ -1669,11 +1669,31 @@ function RecordingControl() {
     tauriAPI.emitConnectionState(connectionState);
   }, [pipelineState]);
 
-  // Poll pipeline state periodically to stay in sync
+  // Poll pipeline state periodically to stay in sync.
+  //
+  // We prefer event-driven updates, but keep polling as a backstop.
+  // Avoid polling constantly while idle/hidden to reduce backend churn.
   useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    let interval: number | null = null;
+
+    const overlayIsVisible =
+      settings?.overlay_mode === "always" || animState !== "exit";
+
+    const pollMs = (() => {
+      if (pipelineState !== "idle") return 500;
+      if (overlayIsVisible) return 5000;
+      return 0;
+    })();
+
     const syncState = async () => {
+      if (cancelled) return;
+      if (inFlight) return;
+      inFlight = true;
       try {
         const state = await invoke<string>("pipeline_get_state");
+        if (cancelled) return;
         if (isPipelineState(state)) {
           setPipelineState(state);
         } else {
@@ -1681,16 +1701,23 @@ function RecordingControl() {
         }
       } catch (error) {
         console.error("[Pipeline] Failed to get state:", error);
+      } finally {
+        inFlight = false;
       }
     };
 
-    // Initial sync
+    // Sync on mount and whenever polling mode changes.
     syncState();
 
-    // Poll every 500ms
-    const interval = setInterval(syncState, 500);
-    return () => clearInterval(interval);
-  }, []);
+    if (pollMs > 0) {
+      interval = window.setInterval(syncState, pollMs);
+    }
+
+    return () => {
+      cancelled = true;
+      if (interval) window.clearInterval(interval);
+    };
+  }, [animState, pipelineState, settings?.overlay_mode]);
 
   // Track mouse movement in this window so we can distinguish:
   // - pointer actually moved onto the overlay (show hover)

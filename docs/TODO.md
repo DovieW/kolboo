@@ -17,14 +17,6 @@ Legend:
 - **Todo:**
   - Review whether any directives can be tightened further (e.g. reduce `connect-src` surface) without breaking Tauri/Vite.
 
-### Improve settings import UX (preview/validation)
-
-- **Where:** backup commands in `app/src-tauri/src/commands/backup.rs` and UI in `app/src/components/settings/DataSettings.tsx`.
-- **Current state:** export/import exists and intentionally excludes secrets (API keys + GitHub token).
-- **Todo:**
-  - Add a simple import preview (show a diff or at least a list of keys that will be applied).
-  - Add more explicit schema/version validation and clearer error messages for malformed backups.
-
 ---
 
 ## P1 — Performance & responsiveness
@@ -53,12 +45,6 @@ Legend:
   - Prefer event-driven UI; keep polling as a fallback/backstop.
 
 ### Stop polling pipeline state every 500ms in the overlay
-
-- **Where:** `app/src/OverlayApp.tsx` (calls `pipeline_get_state` on a 500ms interval)
-- **Problem:** constant polling creates needless backend churn and can race with event-driven updates.
-- **Todo:**
-  - Poll only when the overlay is visible/active, and back off when idle (e.g., 5–15s) or disable entirely when events are reliable.
-  - Consider having the backend push the canonical pipeline state (see event unification item above).
 
 ### Unify overlay pipeline state sources (hotkey + events + polling)
 
