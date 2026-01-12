@@ -35,12 +35,11 @@ Legend:
   - Introduce a ring buffer + worker thread so the CPAL callback only enqueues samples.
   - Do buffer append / pre-roll maintenance / VAD feeding on the worker thread.
 
-### Replace `AudioBuffer` front-drain trimming with a ring buffer
+### Replace `AudioBuffer` front-drain trimming with a ring buffer (done)
 
 - **Where:** `app/src-tauri/src/audio_capture.rs` (`AudioBuffer::append`)
-- **Problem:** draining from the front can be O(n) and expensive for long recordings.
-- **Todo:**
-  - Use a ring buffer or chunked `VecDeque<Vec<f32>>` and drop whole chunks.
+- **Previous problem:** draining from the front could be O(n) and expensive for long recordings.
+- **Current state:** `AudioBuffer` is now a fixed-capacity ring buffer that overwrites the oldest samples in O(1).
 
 ### Unify overlay pipeline state sources (hotkey + events + polling)
 

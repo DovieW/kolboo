@@ -403,20 +403,55 @@ pub enum AudioCaptureError {
 /// Audio buffer that accumulates samples during recording
 #[derive(Debug, Clone)]
 pub struct AudioBuffer {
-    samples: Vec<f32>,
+    data: Vec<f32>,
+    write_pos: usize,
+    filled: usize,
     sample_rate: u32,
     channels: u16,
     max_duration_secs: f32,
 }
 
 impl AudioBuffer {
+    fn max_samples_for(sample_rate: u32, channels: u16, max_duration_secs: f32) -> usize {
+        let sr = sample_rate.max(1) as f32;
+        let ch = channels.max(1) as f32;
+        let secs = max_duration_secs.max(0.0);
+        (sr * secs * ch) as usize
+    }
+
+    fn capacity(&self) -> usize {
+        self.data.len()
+    }
+
+    fn snapshot(&self) -> Vec<f32> {
+        let cap = self.capacity();
+        if self.filled == 0 || cap == 0 {
+            return Vec::new();
+        }
+
+        if self.filled < cap {
+            // Not wrapped yet; oldest is at 0.
+            return self.data[..self.filled].to_vec();
+        }
+
+        // Wrapped / full: oldest is at write_pos.
+        let mut out = Vec::with_capacity(cap);
+        out.extend_from_slice(&self.data[self.write_pos..]);
+        if self.write_pos > 0 {
+            out.extend_from_slice(&self.data[..self.write_pos]);
+        }
+        out
+    }
+
     /// Create a new audio buffer with the specified parameters
     pub fn new(sample_rate: u32, channels: u16, max_duration_secs: f32) -> Self {
-        let capacity = (sample_rate as f32 * max_duration_secs * channels as f32) as usize;
+        let capacity = Self::max_samples_for(sample_rate, channels, max_duration_secs);
         Self {
-            samples: Vec::with_capacity(capacity),
+            data: vec![0.0; capacity],
+            write_pos: 0,
+            filled: 0,
             sample_rate,
-            channels,
+            channels: channels.max(1),
             max_duration_secs,
         }
     }
@@ -428,53 +463,109 @@ impl AudioBuffer {
     pub fn set_format(&mut self, sample_rate: u32, channels: u16) {
         self.sample_rate = sample_rate;
         self.channels = channels.max(1);
+
+        // Keep the most recent samples, but resize capacity to reflect the new format.
+        // This can happen on device restarts; it's not on a realtime hot path.
+        let new_cap = Self::max_samples_for(self.sample_rate, self.channels, self.max_duration_secs);
+        if new_cap == self.capacity() {
+            return;
+        }
+
+        if new_cap == 0 {
+            self.data.clear();
+            self.write_pos = 0;
+            self.filled = 0;
+            return;
+        }
+
+        let snapshot = self.snapshot();
+        let keep = if snapshot.len() > new_cap {
+            snapshot[snapshot.len() - new_cap..].to_vec()
+        } else {
+            snapshot
+        };
+
+        let mut data = vec![0.0; new_cap];
+        let n = keep.len().min(new_cap);
+        data[..n].copy_from_slice(&keep[..n]);
+
+        self.data = data;
+        self.filled = n;
+        self.write_pos = if self.filled < self.capacity() {
+            self.filled
+        } else {
+            0
+        };
     }
 
     /// Reset the buffer for a new recording session.
     ///
     /// Clears samples and sets the max duration (used for trimming during capture).
     pub fn reset_for_recording(&mut self, max_duration_secs: f32) {
-        self.samples.clear();
         self.max_duration_secs = max_duration_secs.max(0.0);
-        let capacity =
-            (self.sample_rate as f32 * self.max_duration_secs * self.channels as f32) as usize;
-        self.samples.reserve(capacity.saturating_sub(self.samples.capacity()));
+
+        let cap = Self::max_samples_for(self.sample_rate, self.channels, self.max_duration_secs);
+        if cap == 0 {
+            self.data.clear();
+        } else {
+            self.data = vec![0.0; cap];
+        }
+        self.write_pos = 0;
+        self.filled = 0;
     }
 
     /// Append samples to the buffer
     pub fn append(&mut self, new_samples: &[f32]) {
-        self.samples.extend_from_slice(new_samples);
-
-        // Trim if exceeds max duration
-        let max_samples =
-            (self.sample_rate as f32 * self.max_duration_secs * self.channels as f32) as usize;
-        if self.samples.len() > max_samples {
-            let drain_count = self.samples.len() - max_samples;
-            self.samples.drain(0..drain_count);
+        let cap = self.capacity();
+        if cap == 0 || new_samples.is_empty() {
+            return;
         }
+
+        // Fast path: if input is larger than the whole buffer, keep only the tail.
+        if new_samples.len() >= cap {
+            let tail = &new_samples[new_samples.len() - cap..];
+            self.data.copy_from_slice(tail);
+            self.write_pos = 0;
+            self.filled = cap;
+            return;
+        }
+
+        // Write in up to two contiguous segments.
+        let first = (cap - self.write_pos).min(new_samples.len());
+        self.data[self.write_pos..self.write_pos + first].copy_from_slice(&new_samples[..first]);
+        self.write_pos = (self.write_pos + first) % cap;
+
+        let rest = &new_samples[first..];
+        if !rest.is_empty() {
+            self.data[..rest.len()].copy_from_slice(rest);
+            self.write_pos = rest.len();
+        }
+
+        self.filled = (self.filled + new_samples.len()).min(cap);
     }
 
     /// Clear all samples from the buffer
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn clear(&mut self) {
-        self.samples.clear();
+        self.write_pos = 0;
+        self.filled = 0;
     }
 
     /// Get the number of samples in the buffer
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn len(&self) -> usize {
-        self.samples.len()
+        self.filled
     }
 
     /// Check if the buffer is empty
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_empty(&self) -> bool {
-        self.samples.is_empty()
+        self.filled == 0
     }
 
     /// Get the duration of audio in the buffer in seconds
     pub fn duration_secs(&self) -> f32 {
-        self.samples.len() as f32 / (self.sample_rate as f32 * self.channels as f32)
+        self.len() as f32 / (self.sample_rate as f32 * self.channels as f32)
     }
 
     /// Compute simple signal level statistics over the captured samples.
@@ -485,15 +576,37 @@ impl AudioBuffer {
         let mut sum_sq: f64 = 0.0;
         let mut n: u64 = 0;
 
-        for &s in &self.samples {
-            let a = s.abs();
-            if a > peak {
-                peak = a;
+        let cap = self.capacity();
+        if self.filled > 0 && cap > 0 {
+            if self.filled < cap {
+                for &s in &self.data[..self.filled] {
+                    let a = s.abs();
+                    if a > peak {
+                        peak = a;
+                    }
+                    sum_sq += (s as f64) * (s as f64);
+                    n += 1;
+                }
+            } else {
+                for &s in &self.data[self.write_pos..] {
+                    let a = s.abs();
+                    if a > peak {
+                        peak = a;
+                    }
+                    sum_sq += (s as f64) * (s as f64);
+                    n += 1;
+                }
+                if self.write_pos > 0 {
+                    for &s in &self.data[..self.write_pos] {
+                        let a = s.abs();
+                        if a > peak {
+                            peak = a;
+                        }
+                        sum_sq += (s as f64) * (s as f64);
+                        n += 1;
+                    }
+                }
             }
-
-            // Promote to f64 for numerical stability on long recordings.
-            sum_sq += (s as f64) * (s as f64);
-            n += 1;
         }
 
         let rms = if n == 0 {
@@ -541,9 +654,12 @@ impl AudioBuffer {
         &self,
         cfg: AudioEncodeConfig,
     ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+        // Allocate once at stop-time to obtain a contiguous, chronological snapshot.
+        let raw_samples = self.snapshot();
+
         let diagnostics = if cfg.detect_speech_presence {
             Some(detect_speech_presence(
-                &self.samples,
+                &raw_samples,
                 self.sample_rate,
                 self.channels,
             ))
@@ -552,9 +668,9 @@ impl AudioBuffer {
         };
 
         let mut processed_samples = if cfg.downmix_to_mono {
-            downmix_interleaved_to_mono(&self.samples, self.channels as usize)
+            downmix_interleaved_to_mono(&raw_samples, self.channels as usize)
         } else {
-            self.samples.to_vec()
+            raw_samples
         };
 
         let mut out_sample_rate = self.sample_rate;
