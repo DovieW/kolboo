@@ -1632,6 +1632,32 @@ export function useUpdateQuickAskSystemPrompt() {
   });
 }
 
+export function useUpdateQuickAskConversationHistoryEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await tauriAPI.updateQuickAskConversationHistoryEnabled(enabled);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
+export function useUpdateQuickAskConversationHistoryCount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (count: number) => {
+      await tauriAPI.updateQuickAskConversationHistoryCount(count);
+      await configAPI.syncPipelineConfig();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+}
+
 export function useUpdateQuickAskOpenAiReasoningEffort() {
   const queryClient = useQueryClient();
   return useMutation({

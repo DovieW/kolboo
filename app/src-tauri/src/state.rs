@@ -3,6 +3,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
 
 #[cfg(desktop)]
+use std::collections::VecDeque;
+
+#[cfg(desktop)]
+use std::sync::Arc;
+
+#[cfg(desktop)]
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
@@ -62,6 +68,72 @@ pub struct AppState {
     /// Latest Quick Ask selection probe result (ephemeral; never persisted).
     #[cfg(desktop)]
     pub quick_ask_probe: Mutex<QuickAskProbe>,
+}
+
+/// A single Quick Ask conversation turn (question + answer).
+#[derive(Debug, Clone)]
+pub struct QuickAskConversationTurn {
+    pub question: String,
+    pub answer: String,
+}
+
+/// Ephemeral Quick Ask conversation history (in-memory only).
+///
+/// This is managed as its own Tauri state so we can safely access it from async
+/// contexts without borrowing issues.
+#[derive(Clone)]
+pub struct QuickAskConversationMemory {
+    #[cfg(desktop)]
+    inner: Arc<Mutex<VecDeque<QuickAskConversationTurn>>>,
+}
+
+impl Default for QuickAskConversationMemory {
+    fn default() -> Self {
+        Self {
+            #[cfg(desktop)]
+            inner: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+}
+
+impl QuickAskConversationMemory {
+    /// Maximum number of turns retained in memory.
+    ///
+    /// This is independent of the UI setting (which controls how many are *sent*).
+    pub const MAX_TURNS: usize = 50;
+
+    /// Return up to the last `n` turns (oldest -> newest).
+    pub fn snapshot_last(&self, n: usize) -> Vec<QuickAskConversationTurn> {
+        #[cfg(desktop)]
+        {
+            let n = n.max(1).min(20);
+            if let Ok(history) = self.inner.lock() {
+                let mut turns: Vec<QuickAskConversationTurn> = history
+                    .iter()
+                    .rev()
+                    .take(n)
+                    .cloned()
+                    .collect();
+                turns.reverse();
+                return turns;
+            }
+        }
+
+        Vec::new()
+    }
+
+    /// Push a successful Q/A turn into memory (best-effort).
+    pub fn push_turn(&self, question: String, answer: String) {
+        #[cfg(desktop)]
+        {
+            if let Ok(mut history) = self.inner.lock() {
+                history.push_back(QuickAskConversationTurn { question, answer });
+                while history.len() > Self::MAX_TURNS {
+                    history.pop_front();
+                }
+            }
+        }
+    }
 }
 
 /// Ephemeral selection probe state used by the Quick Replace feature.

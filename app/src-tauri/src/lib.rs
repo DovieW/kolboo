@@ -40,7 +40,7 @@ use history::{HistoryStorage, RequestModelInfo};
 use recordings::RecordingStore;
 use request_log::{RequestKind, RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
 use settings::HotkeyConfig;
-use state::{AppState, MicTestMeterState, TrayKeepAlive};
+use state::{AppState, MicTestMeterState, QuickAskConversationMemory, TrayKeepAlive};
 
 #[cfg(desktop)]
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -346,6 +346,12 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         json!("Try to answer the question in a single word, sentence or paragraph when possible. Use markdown for formatting when necessary."),
         true,
     );
+
+    // Quick Ask conversation history (ephemeral; stored in memory only).
+    // These keys only control whether/how much in-memory history to attach to prompts.
+    dirty |= set_default("quick_ask_conversation_history_enabled", json!(true), false);
+    // How many previous Q/A turns to include when enabled.
+    dirty |= set_default("quick_ask_conversation_history_count", json!(3), false);
 
     // Migration: legacy `quick_ask_hotkey` (hold-to-record) -> `quick_ask_hold_hotkey`.
     // Only migrate when the new key is truly absent (not when explicitly null).
@@ -1628,6 +1634,14 @@ fn stop_recording(
                                     Option::<String>::None,
                                 );
 
+                                // Quick Ask conversation history (in-memory only).
+                                let quick_ask_conversation_history_enabled: bool =
+                                    get_setting_from_store(&app_clone, "quick_ask_conversation_history_enabled", true);
+                                let quick_ask_conversation_history_count_raw: u64 =
+                                    get_setting_from_store(&app_clone, "quick_ask_conversation_history_count", 3u64);
+                                let quick_ask_conversation_history_count: usize =
+                                    (quick_ask_conversation_history_count_raw.max(1).min(20)) as usize;
+
                                 let global_qa_openai_reasoning_effort: Option<String> = get_setting_from_store(
                                     &app_clone,
                                     "quick_ask_openai_reasoning_effort",
@@ -1806,7 +1820,52 @@ fn stop_recording(
 
                                     // Read clipboard context if enabled for this profile.
                                     let clipboard_text: Option<String> = if quick_ask_profile_cfg.include_clipboard_context {
-                                        clipboard_context::read_clipboard_text_best_effort_async(8000).await
+                                        // The selection probe may temporarily write a sentinel token into the clipboard
+                                        // while it waits for the target app to copy the selection.
+                                        // If we read clipboard context during that window, request logs can end up with
+                                        // "__kolboo_selection_probe__..." as the clipboard context.
+                                        if quick_ask_epoch != 0 {
+                                            let deadline = Instant::now() + Duration::from_millis(350);
+                                            loop {
+                                                let ready = {
+                                                    let state = app_clone.state::<AppState>();
+                                                    let lock_result = state.quick_ask_probe.lock();
+                                                    match lock_result {
+                                                        Ok(probe) if probe.epoch == quick_ask_epoch => probe.ready,
+                                                        _ => true,
+                                                    }
+                                                };
+
+                                                if ready {
+                                                    break;
+                                                }
+                                                if Instant::now() >= deadline {
+                                                    break;
+                                                }
+                                                tokio::time::sleep(Duration::from_millis(20)).await;
+                                            }
+                                        }
+
+                                        let is_probe_sentinel = |s: &str| {
+                                            s.trim_start().starts_with("__kolboo_selection_probe__")
+                                        };
+
+                                        let v_first =
+                                            clipboard_context::read_clipboard_text_best_effort_async(8000).await;
+
+                                        // If we still see the sentinel, wait a beat and retry once.
+                                        let v = if v_first.as_deref().is_some_and(is_probe_sentinel) {
+                                            tokio::time::sleep(Duration::from_millis(120)).await;
+                                            clipboard_context::read_clipboard_text_best_effort_async(8000).await
+                                        } else {
+                                            v_first
+                                        };
+
+                                        if v.as_deref().is_some_and(is_probe_sentinel) {
+                                            None
+                                        } else {
+                                            v
+                                        }
                                     } else {
                                         None
                                     };
@@ -1849,6 +1908,55 @@ fn stop_recording(
                                         selected_context_capped.as_deref(),
                                         clipboard_context_capped.as_deref(),
                                     );
+
+                                    // Best-effort: include last N Quick Ask turns from in-memory history.
+                                    // We intentionally do NOT persist or log this conversation content.
+                                    let question_with_context = if quick_ask_conversation_history_enabled {
+                                        let turns: Vec<crate::state::QuickAskConversationTurn> = app_clone
+                                            .try_state::<QuickAskConversationMemory>()
+                                            .map(|m| m.snapshot_last(quick_ask_conversation_history_count))
+                                            .unwrap_or_default();
+
+                                        if turns.is_empty() {
+                                            question_with_context
+                                        } else {
+                                            let mut s = String::new();
+                                            s.push_str("Previous Quick Ask conversation (most recent last):\n\n");
+
+                                            for t in turns.iter() {
+                                                let q = t.question.trim();
+                                                let a = t.answer.trim();
+                                                if q.is_empty() && a.is_empty() {
+                                                    continue;
+                                                }
+
+                                                // Keep each turn reasonably bounded.
+                                                let cap = 1_500usize;
+                                                let q_capped = if q.len() > cap {
+                                                    format!("{}…", &q[..cap])
+                                                } else {
+                                                    q.to_string()
+                                                };
+                                                let a_capped = if a.len() > cap {
+                                                    format!("{}…", &a[..cap])
+                                                } else {
+                                                    a.to_string()
+                                                };
+
+                                                s.push_str("User: ");
+                                                s.push_str(&q_capped);
+                                                s.push_str("\nAssistant: ");
+                                                s.push_str(&a_capped);
+                                                s.push_str("\n\n");
+                                            }
+
+                                            s.push_str("---\n\n");
+                                            s.push_str(&question_with_context);
+                                            s
+                                        }
+                                    } else {
+                                        question_with_context
+                                    };
 
                                     // Update the logical request payload to indicate context was used.
                                     // We avoid logging the raw context string by default (it may contain secrets).
@@ -1906,6 +2014,11 @@ fn stop_recording(
                                         Ok(answer) => {
                                             let answer = answer.trim().to_string();
                                             let duration_ms = t0.elapsed().as_millis() as u64;
+
+                                            // Record the successful Q/A turn into in-memory Quick Ask history.
+                                            if let Some(mem) = app_clone.try_state::<QuickAskConversationMemory>() {
+                                                mem.push_turn(question.clone(), answer.clone());
+                                            }
 
                                             if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                                 log_store.with_current(|log| {
@@ -3254,6 +3367,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(AppState::default())
+        .manage(QuickAskConversationMemory::default())
         .manage(TrayKeepAlive::default())
         .manage(MicTestMeterState::default())
         .manage(commands::whisper::WhisperDownloadManager::default())

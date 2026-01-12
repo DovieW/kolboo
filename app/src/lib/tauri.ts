@@ -733,6 +733,11 @@ export interface AppSettings {
   quick_ask_model: string | null;
   quick_ask_system_prompt: string | null;
 
+  // Quick Ask conversation history (ephemeral; in-memory only)
+  quick_ask_conversation_history_enabled: boolean;
+  // How many previous Q/A turns to include when enabled.
+  quick_ask_conversation_history_count: number;
+
   quick_ask_openai_reasoning_effort: OpenAiReasoningEffort | null;
   quick_ask_anthropic_thinking_budget: number | null;
   quick_ask_gemini_thinking_budget: number | null;
@@ -827,6 +832,14 @@ export interface AppSettings {
   request_logs_retention_amount: number;
   // Only used when mode === "time" (0 = forever)
   request_logs_retention_days: number;
+}
+
+function normalizeQuickAskConversationHistoryCount(raw: unknown): number {
+  // Default to 3; keep it small to avoid runaway token usage.
+  const n = typeof raw === "number" && Number.isFinite(raw) ? raw : 3;
+  // Allow fractional store values but normalize to an integer.
+  const rounded = Math.round(n);
+  return Math.min(20, Math.max(1, rounded));
 }
 
 function normalizeProxyMode(value: unknown): ProxyMode {
@@ -1735,6 +1748,13 @@ export const tauriAPI = {
       quick_ask_system_prompt:
         (await store.get<string | null>("quick_ask_system_prompt")) ?? null,
 
+      quick_ask_conversation_history_enabled:
+        (await store.get<boolean>("quick_ask_conversation_history_enabled")) ??
+        true,
+      quick_ask_conversation_history_count: normalizeQuickAskConversationHistoryCount(
+        await store.get("quick_ask_conversation_history_count")
+      ),
+
       quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(
         await store.get("quick_ask_openai_reasoning_effort")
       ),
@@ -2038,6 +2058,19 @@ export const tauriAPI = {
       "quick_ask_system_prompt",
       normalized.length > 0 ? normalized : null
     );
+    await store.save();
+  },
+
+  async updateQuickAskConversationHistoryEnabled(enabled: boolean): Promise<void> {
+    const store = await getStore();
+    await store.set("quick_ask_conversation_history_enabled", Boolean(enabled));
+    await store.save();
+  },
+
+  async updateQuickAskConversationHistoryCount(count: number): Promise<void> {
+    const store = await getStore();
+    const normalized = normalizeQuickAskConversationHistoryCount(count);
+    await store.set("quick_ask_conversation_history_count", normalized);
     await store.save();
   },
 

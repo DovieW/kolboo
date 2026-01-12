@@ -43,6 +43,8 @@ import {
   useUpdateQuickAskProvider,
   useUpdateQuickAskModel,
   useUpdateQuickAskSystemPrompt,
+  useUpdateQuickAskConversationHistoryEnabled,
+  useUpdateQuickAskConversationHistoryCount,
   useUpdateQuickAskOpenAiReasoningEffort,
   useUpdateQuickAskAnthropicThinkingBudget,
   useUpdateQuickAskGeminiThinkingBudget,
@@ -176,6 +178,10 @@ export function PromptSettings({
   const updateQuickAskProvider = useUpdateQuickAskProvider();
   const updateQuickAskModel = useUpdateQuickAskModel();
   const updateQuickAskSystemPrompt = useUpdateQuickAskSystemPrompt();
+  const updateQuickAskConversationHistoryEnabled =
+    useUpdateQuickAskConversationHistoryEnabled();
+  const updateQuickAskConversationHistoryCount =
+    useUpdateQuickAskConversationHistoryCount();
   const updateQuickAskOpenAiReasoningEffort =
     useUpdateQuickAskOpenAiReasoningEffort();
   const updateQuickAskAnthropicThinkingBudget =
@@ -1448,6 +1454,11 @@ export function PromptSettings({
     typeof defaultProfile?.quick_ask_include_clipboard_context === "boolean"
       ? defaultProfile.quick_ask_include_clipboard_context
       : false;
+
+  const quickAskConversationHistoryEnabled =
+    settings?.quick_ask_conversation_history_enabled ?? false;
+  const quickAskConversationHistoryCount =
+    settings?.quick_ask_conversation_history_count ?? 3;
 
   const rawQuickReplaceProvider =
     activeProfileId === "default"
@@ -6987,6 +6998,82 @@ export function PromptSettings({
             }}
             color="gray"
             size="md"
+          />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Conversation History</p>
+          <p className="settings-description">
+            When enabled, Quick Ask will include the last few Quick Ask questions
+            and answers as additional context. This is kept in memory only (not
+            saved to disk).
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {!isDefaultScope && (
+            <Tooltip
+              label="Global setting (edit in Default profile)"
+              withArrow
+            >
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+
+          {quickAskConversationHistoryEnabled && (
+            <NumberInput
+              value={quickAskConversationHistoryCount}
+              onChange={(v) => {
+                if (!isDefaultScope) return;
+                const n = typeof v === "number" && Number.isFinite(v) ? v : 3;
+                updateQuickAskConversationHistoryCount.mutate(n, {
+                  onSuccess: () => {
+                    tauriAPI.emitSettingsChanged();
+                  },
+                });
+              }}
+              min={1}
+              max={20}
+              step={1}
+              w={96}
+              disabled={!isDefaultScope}
+              styles={{
+                input: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                  color: "var(--text-primary)",
+                  textAlign: "center",
+                },
+              }}
+            />
+          )}
+
+          <Switch
+            checked={quickAskConversationHistoryEnabled}
+            onChange={(e) => {
+              if (!isDefaultScope) return;
+              const enabled = e.currentTarget.checked;
+              updateQuickAskConversationHistoryEnabled.mutate(enabled, {
+                onSuccess: () => {
+                  tauriAPI.emitSettingsChanged();
+                  // If enabling and count is missing/invalid, nudge it to default 3.
+                  if (enabled) {
+                    updateQuickAskConversationHistoryCount.mutate(
+                      quickAskConversationHistoryCount,
+                      {
+                        onSuccess: () => {
+                          tauriAPI.emitSettingsChanged();
+                        },
+                      }
+                    );
+                  }
+                },
+              });
+            }}
+            color="gray"
+            size="md"
+            disabled={!isDefaultScope}
           />
         </div>
       </div>
