@@ -55,6 +55,36 @@ pub struct VadConfig {
     pub sample_rate: u32,
 }
 
+impl VadConfig {
+    /// Normalize settings to match what the current implementation actually supports.
+    ///
+    /// Today we always run webrtc-vad at 16kHz, and we only support 10/20/30ms frames.
+    pub fn normalized(mut self) -> Self {
+        self.frame_duration_ms = match self.frame_duration_ms {
+            10 | 20 | 30 => self.frame_duration_ms,
+            // Defensive default: 10ms provides lower-latency speech boundaries.
+            other => {
+                log::warn!(
+                    "VadConfig.frame_duration_ms={} is unsupported; falling back to 10ms",
+                    other
+                );
+                10
+            }
+        };
+
+        // The current pipeline always resamples to 16kHz before calling webrtc-vad.
+        if self.sample_rate != 16000 {
+            log::warn!(
+                "VadConfig.sample_rate={} is not supported by current implementation; forcing 16000",
+                self.sample_rate
+            );
+            self.sample_rate = 16000;
+        }
+
+        self
+    }
+}
+
 impl Default for VadConfig {
     fn default() -> Self {
         Self {
@@ -102,6 +132,8 @@ pub struct VoiceActivityDetector {
 impl VoiceActivityDetector {
     /// Create a new VAD with the given configuration
     pub fn new(config: VadConfig) -> Self {
+        let config = config.normalized();
+
         let mut vad = Vad::new();
         vad.set_mode(config.aggressiveness.to_vad_mode());
         vad.set_sample_rate(webrtc_vad::SampleRate::Rate16kHz);

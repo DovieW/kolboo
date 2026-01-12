@@ -305,8 +305,8 @@ impl VadSettings {
                 speech_frames_threshold: self.speech_frames_threshold,
                 hangover_frames: self.hangover_frames,
                 pre_roll_ms: self.pre_roll_ms,
-                frame_duration_ms: 30, // Fixed at 30ms for webrtc-vad
-                sample_rate: 16000,    // Fixed at 16kHz for webrtc-vad
+                frame_duration_ms: 10, // webrtc-vad supports 10/20/30ms; 10ms matches our defaults
+                sample_rate: 16000,    // Current implementation runs webrtc-vad at 16kHz
             },
         }
     }
