@@ -119,6 +119,11 @@ function normalizeRewritePreset(value: unknown): RewritePreset | null {
   const id = typeof p.id === "string" ? p.id : "";
   const name = typeof p.name === "string" ? p.name : "";
   if (!id) return null;
+
+  const description =
+    typeof p.description === "string" && p.description.trim().length > 0
+      ? p.description
+      : null;
   const routing_hints = Array.isArray(p.routing_hints)
     ? p.routing_hints
         .map((x: any) => (typeof x === "string" ? x.trim() : ""))
@@ -192,6 +197,7 @@ function normalizeRewritePreset(value: unknown): RewritePreset | null {
   return {
     id,
     name,
+    description,
     routing_hints,
     cleanup_prompt_sections,
     rewrite_llm_enabled,
@@ -316,6 +322,9 @@ export interface IntentRouterSettings {
 export interface RewritePreset {
   id: string;
   name: string;
+
+  // Optional display hint (used for preset hover/tooltips).
+  description?: string | null;
 
   // Routing hints used by the intent router
   routing_hints?: string[] | null;
@@ -702,6 +711,10 @@ export interface AppSettings {
   accent_color: string | null;
   // Global gate for the optional LLM rewrite step
   rewrite_llm_enabled: boolean;
+
+  // Quick Replace (global defaults)
+  // NOTE: This is used by the backend; profiles may inherit from it.
+  quick_replace_enabled: boolean;
   cleanup_prompt_sections: CleanupPromptSections | null;
   rewrite_program_prompt_profiles: RewriteProgramPromptProfile[];
   stt_provider: string | null;
@@ -1708,6 +1721,8 @@ export const tauriAPI = {
       })(),
       rewrite_llm_enabled:
         (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
+      quick_replace_enabled:
+        (await store.get<boolean>("quick_replace_enabled")) ?? false,
       cleanup_prompt_sections: await (async () => {
         const raw = await store.get<any>("cleanup_prompt_sections");
         const normalized = normalizeCleanupPromptSections(raw);
@@ -3187,7 +3202,7 @@ export const configAPI = {
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type RequestStatus = "in_progress" | "success" | "error" | "cancelled";
-export type RequestKind = "transcription" | "quick_ask";
+export type RequestKind = "transcription" | "quick_ask" | "quick_replace";
 
 export interface LogEntry {
   timestamp: string;
@@ -3285,6 +3300,10 @@ export interface RequestLog {
   // Quick Ask payloads (optional)
   quick_ask_request_json?: unknown;
   quick_ask_response_json?: unknown;
+
+  // Quick Replace payloads (optional)
+  quick_replace_request_json?: unknown;
+  quick_replace_response_json?: unknown;
 
   // Optional router payloads for debugging.
   // For embeddings this may be an array of calls/responses.

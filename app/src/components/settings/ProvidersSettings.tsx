@@ -13,7 +13,7 @@ import {
   useUpdateSTTTimeout,
 } from "../../lib/queries";
 import { LLM_MODELS, STT_MODELS } from "../../lib/modelOptions";
-import { tauriAPI } from "../../lib/tauri";
+import { tauriAPI, type OpenAiReasoningEffort } from "../../lib/tauri";
 import { HintSelect } from "../HintSelect";
 
 // NOTE: This timeout is used by the Rust pipeline as a transcription request timeout.
@@ -143,7 +143,7 @@ export function ProvidersSettings() {
 
   const effectiveLlmProvider = settings?.llm_provider ?? null;
   const effectiveLlmModel =
-    settings?.llm_model ?? llmModelOptions[0]?.value ?? null ?? null;
+    settings?.llm_model ?? llmModelOptions[0]?.value ?? null;
 
   const supportsOpenAiReasoningEffort =
     effectiveLlmProvider === "openai" &&
@@ -165,7 +165,9 @@ export function ProvidersSettings() {
   // Mantine Select requires option values to be strings.
   const SELECT_DEFAULT = "default";
 
-  const openAiThinkingEffortsForModel = (model: string): string[] => {
+  const openAiThinkingEffortsForModel = (
+    model: string
+  ): OpenAiReasoningEffort[] => {
     // OpenAI docs (2025-12):
     // - gpt-5.1 supports: none, low, medium, high
     // - models before gpt-5.1 do not support `none`
@@ -185,7 +187,9 @@ export function ProvidersSettings() {
     return [];
   };
 
-  const openAiDefaultReasoningEffortForModel = (model: string): string => {
+  const openAiDefaultReasoningEffortForModel = (
+    model: string
+  ): OpenAiReasoningEffort => {
     // OpenAI docs (2025-12):
     // - gpt-5.1 defaults to `none`
     // - models before gpt-5.1 default to `medium`
@@ -203,7 +207,7 @@ export function ProvidersSettings() {
           { value: SELECT_DEFAULT, label: "Default" },
           ...openAiThinkingEffortsForModel(effectiveLlmModel).map((v) => ({
             value: v,
-            label: v === "none" ? "None" : v[0].toUpperCase() + v.slice(1),
+            label: v === "none" ? "None" : v.charAt(0).toUpperCase() + v.slice(1),
           })),
         ];
 
@@ -271,7 +275,19 @@ export function ProvidersSettings() {
       return;
     }
 
-    updateOpenAiReasoningEffort.mutate(value, {
+    // Select values are strings; narrow to the allowed union before mutating.
+    const v: OpenAiReasoningEffort | null =
+      value === "none" ||
+      value === "minimal" ||
+      value === "low" ||
+      value === "medium" ||
+      value === "high" ||
+      value === "xhigh"
+        ? (value as OpenAiReasoningEffort)
+        : null;
+    if (!v) return;
+
+    updateOpenAiReasoningEffort.mutate(v, {
       onSuccess: () => {
         tauriAPI.emitSettingsChanged();
       },

@@ -462,7 +462,24 @@ export function AudioSettings({
         <Group gap={8} align="center">
           <NumberInput
             value={noiseGateThresholdDbfs}
-            onChange={setNoiseGateThresholdDraft}
+            onChange={(value) => {
+              // Mantine NumberInput can emit string/number. Our draft state
+              // allows only number, empty string (""), or null.
+              if (value === "") {
+                setNoiseGateThresholdDraft("");
+                return;
+              }
+              if (value == null) {
+                setNoiseGateThresholdDraft(null);
+                return;
+              }
+              if (typeof value === "number") {
+                setNoiseGateThresholdDraft(value);
+                return;
+              }
+              // Any other string => treat as "blank" until commit.
+              setNoiseGateThresholdDraft("");
+            }}
             onBlur={commitNoiseGateThresholdDbfs}
             onKeyDown={(e) => {
               if (e.key === "Enter") commitNoiseGateThresholdDbfs();

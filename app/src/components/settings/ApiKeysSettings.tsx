@@ -29,7 +29,7 @@ import type {
   WhisperModelInfo,
 } from "../../lib/tauri";
 import { configAPI, tauriAPI } from "../../lib/tauri";
-import { API_KEYS } from "../../lib/apiKeys";
+import { API_KEYS, type ApiKeyConfig } from "../../lib/apiKeys";
 import {
   EMBEDDING_MODELS,
   LLM_MODELS,

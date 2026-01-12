@@ -328,6 +328,8 @@ function PanicGate({ children }: { children: ReactNode }) {
       }, 250);
       return () => window.clearTimeout(t);
     }
+
+    return undefined;
   }, [panic]);
 
   return (
