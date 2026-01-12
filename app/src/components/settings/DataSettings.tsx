@@ -5,20 +5,27 @@ import {
   Group,
   Modal,
   NumberInput,
+  PasswordInput,
   SegmentedControl,
+  Stack,
   Text,
+  TextInput,
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   BarChart2,
   FileText,
   FolderOpen,
+  Github,
   Key,
   MessageSquare,
   RotateCcw,
   Skull,
   Trash2,
+  Upload,
+  Download,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,6 +39,7 @@ import {
 } from "../../lib/queries";
 import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
 import {
+  backupAPI,
   configAPI,
   dataAPI,
   logsAPI,
@@ -104,6 +112,200 @@ export function DataSettings({
     staleTime: 0,
     refetchOnWindowFocus: true,
     refetchInterval: 10000,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Settings backup (export/import) + GitHub Gist backup
+  // ---------------------------------------------------------------------------
+
+  const githubBackupHasToken = useQuery({
+    queryKey: ["githubBackupHasToken"],
+    queryFn: () => backupAPI.githubBackupHasToken(),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+  const [githubTokenModalOpen, setGithubTokenModalOpen] = useState(false);
+  const [githubTokenDraft, setGithubTokenDraft] = useState("");
+
+  const gistIdFromSettings = settings?.github_backup_gist_id ?? "";
+  const [gistIdDraft, setGistIdDraft] = useState(gistIdFromSettings);
+  useEffect(() => {
+    setGistIdDraft(gistIdFromSettings);
+  }, [gistIdFromSettings]);
+
+  const saveGistId = useMutation({
+    mutationFn: async (gistId: string | null) => {
+      await tauriAPI.updateGithubBackupGistId(gistId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+
+  const exportSettingsBackup = useMutation({
+    mutationFn: async (): Promise<boolean> => {
+      const path = await save({
+        defaultPath: "kolboo-settings-backup.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+
+      if (!path) return false;
+
+      await backupAPI.exportSettingsBackupToFile({ path });
+      return true;
+    },
+    onSuccess: (didExport) => {
+      if (!didExport) return;
+      notifications.show({
+        title: "Exported",
+        message: "Settings backup saved (secrets excluded).",
+        color: "green",
+      });
+    },
+    onError: (e) => {
+      notifications.show({
+        title: "Export failed",
+        message: formatErrorMessage(e),
+        color: "red",
+      });
+    },
+  });
+
+  const importSettingsBackup = useMutation({
+    mutationFn: async (): Promise<boolean> => {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+
+      const path = typeof selected === "string" ? selected : null;
+      if (!path) return false;
+
+      await backupAPI.importSettingsBackupFromFile({ path });
+      await tauriAPI.unregisterShortcuts();
+      await tauriAPI.registerShortcuts();
+
+      return true;
+    },
+    onSuccess: (didImport) => {
+      if (!didImport) return;
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
+      queryClient.invalidateQueries({ queryKey: ["dataStorageSummary"] });
+      notifications.show({
+        title: "Imported",
+        message: "Settings backup imported (secrets excluded).",
+        color: "green",
+      });
+    },
+    onError: (e) => {
+      notifications.show({
+        title: "Import failed",
+        message: formatErrorMessage(e),
+        color: "red",
+      });
+    },
+  });
+
+  const setGithubToken = useMutation({
+    mutationFn: async (token: string) => {
+      await backupAPI.githubBackupSetToken({ token });
+    },
+    onSuccess: () => {
+      setGithubTokenDraft("");
+      setGithubTokenModalOpen(false);
+      githubBackupHasToken.refetch();
+      notifications.show({
+        title: "GitHub token saved",
+        message: "Stored securely in your OS credential manager.",
+        color: "green",
+      });
+    },
+    onError: (e) => {
+      notifications.show({
+        title: "Failed to save token",
+        message: formatErrorMessage(e),
+        color: "red",
+      });
+    },
+  });
+
+  const clearGithubToken = useMutation({
+    mutationFn: async () => {
+      await backupAPI.githubBackupClearToken();
+    },
+    onSuccess: () => {
+      githubBackupHasToken.refetch();
+      notifications.show({
+        title: "GitHub token removed",
+        message: "The stored token was deleted from secure storage.",
+        color: "green",
+      });
+    },
+    onError: (e) => {
+      notifications.show({
+        title: "Failed to remove token",
+        message: formatErrorMessage(e),
+        color: "red",
+      });
+    },
+  });
+
+  const pushToGist = useMutation({
+    mutationFn: async () => {
+      const gistId = (gistIdDraft ?? "").trim();
+      const nextId = await backupAPI.githubBackupPushToGist({
+        gistId: gistId || null,
+      });
+      await tauriAPI.updateGithubBackupGistId(nextId);
+      return nextId;
+    },
+    onSuccess: (id) => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      notifications.show({
+        title: "Backed up",
+        message: `Settings pushed to GitHub Gist (${id}).`,
+        color: "green",
+      });
+    },
+    onError: (e) => {
+      notifications.show({
+        title: "Backup failed",
+        message: formatErrorMessage(e),
+        color: "red",
+      });
+    },
+  });
+
+  const pullFromGist = useMutation({
+    mutationFn: async () => {
+      const id = (gistIdDraft ?? "").trim();
+      if (!id) throw new Error("Missing gist id");
+
+      const json = await backupAPI.githubBackupPullFromGist({ gistId: id });
+      await backupAPI.importSettingsBackupJson({ json });
+      await tauriAPI.unregisterShortcuts();
+      await tauriAPI.registerShortcuts();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
+      queryClient.invalidateQueries({ queryKey: ["dataStorageSummary"] });
+      notifications.show({
+        title: "Restored",
+        message: "Settings pulled from GitHub Gist and imported.",
+        color: "green",
+      });
+    },
+    onError: (e) => {
+      notifications.show({
+        title: "Restore failed",
+        message: formatErrorMessage(e),
+        color: "red",
+      });
+    },
   });
 
   const profiles = settings?.rewrite_program_prompt_profiles ?? [];
@@ -975,6 +1177,132 @@ export function DataSettings({
         </Group>
       </div>
 
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Settings backup</p>
+          <p className="settings-description">
+            Export/import settings as JSON. API keys and other secrets are not
+            included.
+          </p>
+        </div>
+        <Group gap={10} align="center" wrap="wrap">
+          <Button
+            variant="outline"
+            size="xs"
+            leftSection={<Upload size={14} />}
+            loading={exportSettingsBackup.isPending}
+            onClick={() => exportSettingsBackup.mutate()}
+          >
+            Export
+          </Button>
+          <Button
+            variant="outline"
+            size="xs"
+            leftSection={<Download size={14} />}
+            loading={importSettingsBackup.isPending}
+            onClick={() => importSettingsBackup.mutate()}
+          >
+            Import
+          </Button>
+        </Group>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">GitHub Gist backup</p>
+          <p className="settings-description">
+            Optional: push/pull your settings to a private GitHub Gist. Requires
+            a GitHub token with the <code>gist</code> scope (stored securely).
+          </p>
+        </div>
+
+        <Stack gap={8} style={{ width: "min(640px, 100%)" }}>
+          <Group gap={8} align="center" wrap="wrap">
+            <Text size="xs" c="dimmed">
+              Token:{" "}
+              {githubBackupHasToken.isLoading
+                ? "checking"
+                : githubBackupHasToken.data
+                ? "configured"
+                : "not configured"}
+            </Text>
+
+            <Button
+              variant="outline"
+              size="xs"
+              leftSection={<Github size={14} />}
+              onClick={() => setGithubTokenModalOpen(true)}
+            >
+              Set token
+            </Button>
+
+            <Button
+              variant="outline"
+              size="xs"
+              color="red"
+              loading={clearGithubToken.isPending}
+              disabled={!githubBackupHasToken.data}
+              onClick={() => clearGithubToken.mutate()}
+            >
+              Clear token
+            </Button>
+          </Group>
+
+          <Group gap={8} align="center" wrap="wrap">
+            <TextInput
+              value={gistIdDraft}
+              onChange={(e) => setGistIdDraft(e.currentTarget.value)}
+              placeholder="Gist id (optional for first push)"
+              size="xs"
+              styles={{
+                input: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                  color: "var(--text-primary)",
+                  width: 280,
+                },
+              }}
+            />
+
+            <Button
+              variant="outline"
+              size="xs"
+              loading={saveGistId.isPending}
+              onClick={() => {
+                const trimmed = (gistIdDraft ?? "").trim();
+                saveGistId.mutate(trimmed || null);
+              }}
+            >
+              Save gist id
+            </Button>
+          </Group>
+
+          <Group gap={8} align="center" wrap="wrap">
+            <Button
+              variant="outline"
+              size="xs"
+              leftSection={<Upload size={14} />}
+              loading={pushToGist.isPending}
+              disabled={!githubBackupHasToken.data}
+              onClick={() => pushToGist.mutate()}
+            >
+              Push to gist
+            </Button>
+
+            <Button
+              variant="outline"
+              size="xs"
+              leftSection={<Download size={14} />}
+              loading={pullFromGist.isPending}
+              disabled={!githubBackupHasToken.data}
+              onClick={() => pullFromGist.mutate()}
+            >
+              Pull from gist
+            </Button>
+          </Group>
+        </Stack>
+      </div>
+
       <div
         style={{
           marginTop: 16,
@@ -1229,6 +1557,47 @@ export function DataSettings({
           </div>
         </div>
       </div>
+
+      <Modal
+        opened={githubTokenModalOpen}
+        onClose={() => {
+          if (setGithubToken.isPending) return;
+          setGithubTokenModalOpen(false);
+        }}
+        title="GitHub token"
+        centered
+        size="sm"
+      >
+        <Text size="sm" mb="md">
+          Create a GitHub personal access token with the <code>gist</code> scope.
+          It will be stored securely in your OS credential manager.
+        </Text>
+
+        <PasswordInput
+          label="Token"
+          value={githubTokenDraft}
+          onChange={(e) => setGithubTokenDraft(e.currentTarget.value)}
+        />
+
+        <Group justify="flex-end" gap="sm" mt="md">
+          <Button
+            variant="default"
+            disabled={setGithubToken.isPending}
+            onClick={() => setGithubTokenModalOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            loading={setGithubToken.isPending}
+            onClick={() => {
+              const token = githubTokenDraft.trim();
+              setGithubToken.mutate(token);
+            }}
+          >
+            Save token
+          </Button>
+        </Group>
+      </Modal>
 
       <Modal
         opened={dangerDialog !== null}

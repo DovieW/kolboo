@@ -839,6 +839,10 @@ export interface AppSettings {
   request_logs_retention_amount: number;
   // Only used when mode === "time" (0 = forever)
   request_logs_retention_days: number;
+
+  // Backups
+  // Optional: GitHub Gist id used for "push/pull" backups.
+  github_backup_gist_id: string | null;
 }
 
 function normalizeQuickAskConversationHistoryCount(raw: unknown): number {
@@ -1929,6 +1933,10 @@ export const tauriAPI = {
       stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
         await store.get("stats_retention_max_bytes")
       ),
+
+      // Backups
+      github_backup_gist_id:
+        (await store.get<string | null>("github_backup_gist_id")) ?? null,
     };
 
     // Mirror the accent so index.html can apply it synchronously at next launch.
@@ -2001,6 +2009,22 @@ export const tauriAPI = {
 
     // Notify other windows (overlay) to refresh cached settings.
     await emit("settings-changed", { main_window_close_behavior: normalized });
+  },
+
+  async updateGithubBackupGistId(gistId: string | null): Promise<void> {
+    const store = await getStore();
+    const trimmed = (gistId ?? "").trim();
+
+    if (!trimmed) {
+      await store.delete("github_backup_gist_id");
+    } else {
+      await store.set("github_backup_gist_id", trimmed);
+    }
+
+    await store.save();
+
+    // Notify other windows (overlay) to refresh cached settings.
+    await emit("settings-changed", { github_backup_gist_id: trimmed || null });
   },
 
   async updateToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
@@ -3309,6 +3333,38 @@ export const dataAPI = {
   deleteAllStats: () => invoke<void>("delete_all_stats"),
 
   deleteAllData: () => invoke<void>("delete_all_data"),
+};
+
+// ============================================================================
+// Backup / Export / Import
+// ============================================================================
+
+export const backupAPI = {
+  exportSettingsBackupJson: () => invoke<string>("export_settings_backup_json"),
+
+  exportSettingsBackupToFile: (params: { path: string }) =>
+    invoke<void>("export_settings_backup_to_file", { path: params.path }),
+
+  importSettingsBackupJson: (params: { json: string }) =>
+    invoke<void>("import_settings_backup_json", { json: params.json }),
+
+  importSettingsBackupFromFile: (params: { path: string }) =>
+    invoke<void>("import_settings_backup_from_file", { path: params.path }),
+
+  githubBackupHasToken: () => invoke<boolean>("github_backup_has_token"),
+
+  githubBackupSetToken: (params: { token: string }) =>
+    invoke<void>("github_backup_set_token", { token: params.token }),
+
+  githubBackupClearToken: () => invoke<void>("github_backup_clear_token"),
+
+  githubBackupPushToGist: (params: { gistId?: string | null }) =>
+    invoke<string>("github_backup_push_to_gist", {
+      gistId: params.gistId ?? null,
+    }),
+
+  githubBackupPullFromGist: (params: { gistId: string }) =>
+    invoke<string>("github_backup_pull_from_gist", { gistId: params.gistId }),
 };
 
 // ============================================================================

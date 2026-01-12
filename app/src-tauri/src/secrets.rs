@@ -47,8 +47,12 @@ pub const API_KEY_SETTING_KEYS: &[&str] = &[
 const SERVICE_NAME: &str = "kolboo";
 
 #[cfg(desktop)]
-fn validate_api_key_store_key(store_key: &str) -> Result<(), String> {
-	if !store_key.ends_with("_api_key") {
+const EXTRA_SECRET_KEYS: &[&str] = &["github_gist_token"];
+
+#[cfg(desktop)]
+fn validate_secret_store_key(store_key: &str) -> Result<(), String> {
+	let is_extra = EXTRA_SECRET_KEYS.iter().any(|k| *k == store_key);
+	if !store_key.ends_with("_api_key") && !is_extra {
 		return Err("Invalid key name".to_string());
 	}
 
@@ -66,8 +70,64 @@ fn validate_api_key_store_key(store_key: &str) -> Result<(), String> {
 
 #[cfg(desktop)]
 fn entry_for_key(store_key: &str) -> Result<Entry, String> {
-	validate_api_key_store_key(store_key)?;
+	validate_secret_store_key(store_key)?;
 	Entry::new(SERVICE_NAME, store_key).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Generic secret helpers (OS keyring)
+// ---------------------------------------------------------------------------
+
+/// Get a non-API-key secret from secure storage.
+///
+/// Unlike API keys, these do not have a legacy `settings.json` fallback.
+#[cfg(desktop)]
+pub fn get_secret(app: &AppHandle, store_key: &str) -> Option<String> {
+	let _ = app;
+	let entry = entry_for_key(store_key).ok()?;
+	match entry.get_password() {
+		Ok(s) => {
+			let trimmed = s.trim();
+			if trimmed.is_empty() {
+				None
+			} else {
+				Some(trimmed.to_string())
+			}
+		}
+		Err(keyring::Error::NoEntry) => None,
+		Err(e) => {
+			log::warn!("Failed to read secret from secure storage ({}): {}", store_key, e);
+			None
+		}
+	}
+}
+
+#[cfg(desktop)]
+pub fn has_secret(app: &AppHandle, store_key: &str) -> bool {
+	get_secret(app, store_key).is_some()
+}
+
+#[cfg(desktop)]
+pub fn set_secret(app: &AppHandle, store_key: &str, value: &str) -> Result<(), String> {
+	let _ = app;
+	let trimmed = value.trim();
+	if trimmed.is_empty() {
+		return Err("Secret cannot be empty".to_string());
+	}
+	let entry = entry_for_key(store_key)?;
+	entry.set_password(trimmed).map_err(|e| e.to_string())?;
+	Ok(())
+}
+
+#[cfg(desktop)]
+pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
+	let _ = app;
+	let entry = entry_for_key(store_key)?;
+	match entry.delete_credential() {
+		Ok(()) => Ok(()),
+		Err(keyring::Error::NoEntry) => Ok(()),
+		Err(e) => Err(e.to_string()),
+	}
 }
 
 /// Best-effort read of a legacy API key from `settings.json`.

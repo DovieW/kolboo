@@ -242,6 +242,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("stats_retention_value", json!(30.0), false);
     // Defensive cap (bytes). The pruning logic enforces this regardless of time settings.
     dirty |= set_default("stats_retention_max_bytes", json!(50_000_000u64), false);
+
+    // Backups
+    // Optional GitHub Gist id for push/pull backups. Null/absent means "not configured".
+    dirty |= set_default("github_backup_gist_id", json!(null), true);
     dirty |= set_default("overlay_mode", json!("recording_only"), false);
     // Whether the overlay shows detailed phase text while processing
     // (e.g. "transcribing…", "routing…", "rewriting…"). When false, the overlay
@@ -3472,6 +3476,17 @@ pub fn run() {
             commands::data::delete_all_stats,
             commands::data::get_data_storage_summary,
             commands::data::delete_all_data,
+            // Backups (export/import settings; exclude secrets)
+            commands::backup::export_settings_backup_json,
+            commands::backup::export_settings_backup_to_file,
+            commands::backup::import_settings_backup_json,
+            commands::backup::import_settings_backup_from_file,
+            // Optional GitHub Gist backup
+            commands::backup::github_backup_has_token,
+            commands::backup::github_backup_set_token,
+            commands::backup::github_backup_clear_token,
+            commands::backup::github_backup_push_to_gist,
+            commands::backup::github_backup_pull_from_gist,
             // Secure secrets (API keys)
             commands::secrets::secrets_has_api_key,
             commands::secrets::secrets_get_api_key,

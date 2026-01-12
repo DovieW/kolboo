@@ -17,14 +17,13 @@ Legend:
 - **Todo:**
   - Review whether any directives can be tightened further (e.g. reduce `connect-src` surface) without breaking Tauri/Vite.
 
-### Add export/import settings (exclude secrets by default)
+### Improve settings import UX (preview/validation)
 
-- **Where:** settings are stored in `settings.json` via the Tauri store plugin; API keys are now stored separately in OS secure storage (`app/src-tauri/src/secrets.rs`).
-- **Problem:** there’s no first-class backup/restore flow; when added, it must not accidentally include secrets.
+- **Where:** backup commands in `app/src-tauri/src/commands/backup.rs` and UI in `app/src/components/settings/DataSettings.tsx`.
+- **Current state:** export/import exists and intentionally excludes secrets (API keys + GitHub token).
 - **Todo:**
-  - Add “Export settings” that writes a sanitized JSON file.
-  - Add “Import settings” with basic schema validation and a preview.
-  - Keep secrets out of export by default; if you ever support exporting secrets, require explicit opt-in.
+  - Add a simple import preview (show a diff or at least a list of keys that will be applied).
+  - Add more explicit schema/version validation and clearer error messages for malformed backups.
 
 ---
 

@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod backup;
 pub mod config;
 pub mod data;
 pub mod history;
