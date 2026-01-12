@@ -82,22 +82,11 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      - name: TypeScript check
-        working-directory: app
-        run: pnpm typecheck
-
-      - name: Unit tests (Vitest)
-        working-directory: app
-        run: pnpm test
-
-      - name: Lint check
-        working-directory: app
-        run: pnpm biome lint --max-diagnostics=1000 .
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          components: clippy, rustfmt
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -116,8 +105,7 @@ jobs:
           workspaces: |
             app/src-tauri -> target
 
-      - name: Run Rust tests
-        working-directory: app/src-tauri
+      - name: Run checks (check:ci)
         shell: bash
         run: |
           set -euo pipefail
@@ -133,7 +121,9 @@ jobs:
             echo "sccache not available; running tests without compiler cache"
           fi
 
-          cargo test --lib
+          pushd app >/dev/null
+          pnpm check:ci
+          popd >/dev/null
 
           sccache --show-stats || true
 

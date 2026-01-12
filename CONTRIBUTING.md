@@ -12,7 +12,7 @@ Thanks for your interest in contributing!
 
 ### Prerequisites
 
-- **Node.js 20+** (Corepack available)
+- **Node.js 24+** (Corepack available)
 - **pnpm** (this repo pins a pnpm version in `app/package.json`)
 - **Rust toolchain (stable)**
 - **Tauri prerequisites** for your OS (see Tauri docs)
@@ -69,12 +69,49 @@ You can also pass features directly through Tauri:
 From `app/`:
 
 - `pnpm typecheck`
-- `pnpm biome check`
+- `pnpm lint:ci`
 - `pnpm test`
+
+### Running all tests (frontend + Rust)
+
+If you just want “run everything that can fail in CI”, from the repo root:
+
+- `pnpm -C app test:all`
+
+What it does (in plain English):
+
+- TypeScript checks your types (no output files)
+- Vitest runs the UI/unit tests
+- Cargo runs the Rust tests for the Tauri backend
+
+If you only want Rust tests:
+
+- `pnpm -C app cargo:test`
+
+If you only want frontend tests:
+
+- `pnpm -C app test`
 
 For a fuller local sweep (slower):
 
 - `pnpm check`
+
+## Pre-commit tests (recommended)
+
+This repo uses **Husky** to run tests automatically on every commit.
+
+After you install dependencies once, Husky will set up the git hooks for you:
+
+- `cd app`
+- `pnpm install`
+
+From then on, `git commit` will run:
+
+- `pnpm -C app test:all`
+
+If you ever need to temporarily skip hooks (use sparingly):
+
+- `git commit --no-verify`
 
 ## Submitting a PR
 

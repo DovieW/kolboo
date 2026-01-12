@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -e
+
+# Run the full test suite before allowing a commit.
+# Note: this may take a bit (it includes Rust tests).
+pnpm -C app check:ci

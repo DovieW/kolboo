@@ -33,5 +33,23 @@ fn main() {
         }
     }
 
+
+    // Windows-specific fix for local/CI Rust tests:
+    // Our crate (via Tauri and dialogs) imports comctl32 APIs like `TaskDialogIndirect`.
+    // If the test harness exe doesn't have a manifest requesting Common Controls v6,
+    // Windows may load the legacy comctl32 v5, which *doesn't* export those symbols,
+    // causing an immediate process-start crash: 0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND).
+    //
+    // /MANIFESTDEPENDENCY merges into the generated manifest (doesn't replace it), so it
+    // is safe to apply to all Windows link steps, including tests.
+    #[cfg(target_os = "windows")]
+    {
+        let common_controls_dep = "type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'";
+        println!(
+            "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:{}",
+            common_controls_dep
+        );
+    }
+
     tauri_build::build()
 }

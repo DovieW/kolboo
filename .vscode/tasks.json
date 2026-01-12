@@ -1,0 +1,69 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "app: lint (fix)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "lint"],
+      "problemMatcher": []
+    },
+    {
+      "label": "app: lint (check)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "lint:ci"],
+      "problemMatcher": []
+    },
+    {
+      "label": "app: typecheck",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "typecheck"],
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "app: test",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "test"],
+      "problemMatcher": []
+    },
+    {
+      "label": "app: coverage",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "coverage"],
+      "problemMatcher": []
+    },
+    {
+      "label": "app: test (watch)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "test:watch"],
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "tauri: cargo test",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "cargo:test"],
+      "problemMatcher": []
+    },
+    {
+      "label": "all: test (typecheck + vitest + cargo)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "test:all"],
+      "problemMatcher": []
+    },
+    {
+      "label": "all: check:ci (no file changes)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["-C", "app", "check:ci"],
+      "problemMatcher": []
+    }
+  ]
+}

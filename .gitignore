@@ -43,6 +43,9 @@ Desktop.ini
 *.log
 logs/
 
+# Local debugging artifacts
+cdb-*.txt
+
 # Generated release notes (local)
 RELEASE_NOTES.md
 
