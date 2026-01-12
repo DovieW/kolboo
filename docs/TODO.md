@@ -44,17 +44,29 @@ Legend:
   - Add a “privacy mode” option: never read prior clipboard (don’t restore), avoiding sensitive clipboard reads.
   - Improve UI error messaging and remediation tips per OS.
 
+### “Delete all API keys” should actually delete *all* provider keys
+
+- **Where:** `app/src-tauri/src/commands/data.rs`
+- **Problem:** `delete_all_api_keys()` and `get_data_storage_summary()` enumerate a hard-coded subset of `*_api_key` keys. Several supported providers appear to be missing from one or both lists (e.g. `fireworks_api_key`, `cohere_api_key`, `assemblyai_api_key`, `speechmatics_api_key`, etc.).
+- **Impact:** user can believe they cleared secrets, but some API keys remain in `settings.json`.
+- **Todo:**
+  - Centralize “known providers that use API keys” into one shared list used by:
+    - `delete_all_api_keys`
+    - `get_data_storage_summary` (api_keys_set_count)
+    - any UI “keys present” indicators
+  - Add a regression test (or at least a debug assertion) that provider registries and this list stay in sync.
+
 ---
 
 ## P1 — Security & privacy hardening
 
-### Stop shipping with CSP disabled
+### Keep CSP restrictive (and prevent accidental regression)
 
 - **Where:** `app/src-tauri/tauri.conf.json`
-- **Problem:** `app.security.csp` is `null`.
+- **Current state:** CSP is enabled, and a looser `devCsp` is configured for development.
 - **Todo:**
-  - Enable a restrictive CSP suitable for a bundled Tauri/Vite app.
-  - Add a “CSP debug” escape hatch for development only (not release).
+  - Add a simple guardrail so release builds can’t accidentally ship with `security.csp: null`.
+  - Review whether any directives can be tightened further (e.g. reduce `connect-src` surface) without breaking Tauri/Vite.
 
 ### Store API keys in OS secure storage
 
@@ -201,13 +213,6 @@ Legend:
 - **Todo:**
   - Introduce a single helper for settings reads that supports “fresh read” semantics.
   - Audit commands that depend on immediately-updated values (retention settings, API key presence).
-
-### Fix stale Dependabot config entry
-
-- **Where:** `.github/dependabot.yml`
-- **Problem:** references a `/server` directory (uv ecosystem) that doesn’t appear in the current workspace.
-- **Todo:**
-  - Remove/disable the `/server` entry or restore the server folder if intended.
 
 ---
 
