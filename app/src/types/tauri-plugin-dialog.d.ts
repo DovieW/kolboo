@@ -13,7 +13,9 @@ declare module "@tauri-apps/plugin-dialog" {
 		defaultPath?: string;
 	}
 
-	export function open(options?: OpenDialogOptions): Promise<string | string[] | null>;
+	export function open(
+		options?: OpenDialogOptions,
+	): Promise<string | string[] | null>;
 
 	export interface SaveDialogOptions {
 		title?: string;

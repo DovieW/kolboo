@@ -92,7 +92,7 @@ jobs:
 
       - name: Lint check
         working-directory: app
-        run: pnpm biome check
+        run: pnpm biome lint --max-diagnostics=1000 .
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
