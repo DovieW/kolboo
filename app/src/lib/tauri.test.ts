@@ -5,7 +5,7 @@ import {
 	HotkeyConfigSchema,
 	hotkeyIsSameAs,
 	validateHotkeyNotDuplicate,
-} from "./tauri";
+} from "./hotkeys";
 
 describe("HotkeyConfigSchema", () => {
 	it("validates a valid hotkey config", () => {

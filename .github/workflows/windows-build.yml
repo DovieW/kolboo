@@ -86,6 +86,10 @@ jobs:
         working-directory: app
         run: pnpm typecheck
 
+      - name: Unit tests (Vitest)
+        working-directory: app
+        run: pnpm test
+
       - name: Lint check
         working-directory: app
         run: pnpm biome check

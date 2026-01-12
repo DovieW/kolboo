@@ -4,6 +4,22 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Store } from "@tauri-apps/plugin-store";
 import { z } from "zod";
 import { DEFAULT_ACCENT_HEX, normalizeHexColor } from "./accentColor";
+import {
+  createHotkeyDuplicateSchema,
+  hotkeyIsSameAs,
+  HotkeyConfigSchema,
+  normalizeHotkeyConfig,
+  validateHotkeyNotDuplicate,
+  type HotkeyConfig,
+} from "./hotkeys";
+
+export {
+  createHotkeyDuplicateSchema,
+  hotkeyIsSameAs,
+  HotkeyConfigSchema,
+  validateHotkeyNotDuplicate,
+  type HotkeyConfig,
+} from "./hotkeys";
 
 /**
  * Connection state for UI display (maps from pipeline state)
@@ -20,28 +36,6 @@ interface TypeTextResult {
   error?: string;
 }
 
-export interface HotkeyConfig {
-  modifiers: string[];
-  key: string;
-}
-
-// Zod schema for HotkeyConfig validation
-export const HotkeyConfigSchema = z.object({
-  modifiers: z.array(z.string()),
-  key: z.string().min(1, "Key is required"),
-});
-
-function normalizeHotkeyConfig(
-  value: unknown,
-  fallback: HotkeyConfig | null
-): HotkeyConfig | null {
-  // Explicit null means "disabled".
-  if (value === null) return null;
-
-  // Missing/invalid means fallback to default.
-  const result = HotkeyConfigSchema.safeParse(value);
-  return result.success ? result.data : fallback;
-}
 
 function normalizeIntentRouterStrategy(value: unknown): IntentRouterStrategy {
   if (value === "off" || value === "embeddings" || value === "llm")
@@ -1175,80 +1169,7 @@ async function getStore(): Promise<Store> {
 /**
  * Check if two hotkey configs are equivalent (case-insensitive comparison)
  */
-export function hotkeyIsSameAs(a: HotkeyConfig, b: HotkeyConfig): boolean {
-  if (a.key.toLowerCase() !== b.key.toLowerCase()) return false;
-  if (a.modifiers.length !== b.modifiers.length) return false;
-  return a.modifiers.every((mod) =>
-    b.modifiers.some((other) => mod.toLowerCase() === other.toLowerCase())
-  );
-}
-
-type HotkeyType =
-  | "toggle"
-  | "hold"
-  | "paste_last"
-  | "retry"
-  | "quick_ask_hold"
-  | "quick_ask_toggle";
-
-const HOTKEY_LABELS: Record<HotkeyType, string> = {
-  toggle: "toggle",
-  hold: "hold",
-  paste_last: "paste last",
-  retry: "retry",
-  quick_ask_hold: "Quick Ask hold",
-  quick_ask_toggle: "Quick Ask toggle",
-};
-
-/**
- * Create a Zod schema for validating a hotkey doesn't conflict with existing hotkeys
- */
-export function createHotkeyDuplicateSchema(
-  allHotkeys: Record<HotkeyType, HotkeyConfig | null>,
-  excludeType: HotkeyType
-) {
-  return HotkeyConfigSchema.superRefine((hotkey, ctx) => {
-    for (const [type, existing] of Object.entries(allHotkeys)) {
-      if (type === excludeType) continue;
-      if (!existing) continue;
-
-      if (hotkeyIsSameAs(hotkey, existing)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `This shortcut is already used for the ${
-            HOTKEY_LABELS[type as HotkeyType]
-          } hotkey`,
-        });
-        return;
-      }
-    }
-  });
-}
-
-/**
- * Validate that a hotkey doesn't conflict with other hotkeys
- * Returns error message if invalid, null if valid
- */
-export function validateHotkeyNotDuplicate(
-  newHotkey: HotkeyConfig | null,
-  allHotkeys: {
-    toggle: HotkeyConfig | null;
-    hold: HotkeyConfig | null;
-    paste_last: HotkeyConfig | null;
-    retry: HotkeyConfig | null;
-    quick_ask_hold: HotkeyConfig | null;
-    quick_ask_toggle: HotkeyConfig | null;
-  },
-  excludeType: HotkeyType
-): string | null {
-  if (!newHotkey) return null;
-  const schema = createHotkeyDuplicateSchema(allHotkeys, excludeType);
-  const result = schema.safeParse(newHotkey);
-  if (!result.success) {
-    return result.error.issues[0]?.message ?? "Invalid hotkey";
-  }
-  return null;
-}
+// Hotkey helpers live in ./hotkeys and are re-exported above.
 
 // ============================================================================
 // Tauri API
