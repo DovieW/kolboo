@@ -30,7 +30,7 @@ import {
   Plus,
   Settings,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
@@ -223,7 +223,7 @@ function HotkeyDisplay({ config }: { config: HotkeyConfig | null }) {
   );
 }
 
-function InstructionsCard() {
+function _InstructionsCard() {
   const { data: settings } = useSettings();
 
   const toggleHotkey = settings
@@ -658,7 +658,7 @@ function UsageStatsView() {
   );
 }
 
-function SettingsView() {
+function _SettingsView() {
   const { data: settings } = useSettings();
   const profiles = settings?.rewrite_program_prompt_profiles ?? [];
   const [editingProfileId, setEditingProfileId] = useState<string>("default");
@@ -1181,7 +1181,7 @@ export default function App() {
   const guideQuery = useSettingsGuideState();
   const guideState = guideQuery.data;
   const setGuideState = useSetSettingsGuideState();
-  const { data: settings } = useSettings();
+
 
   // Keep the cost summary cache in sync even when the Stats view isn't mounted.
   useEffect(() => {

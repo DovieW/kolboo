@@ -131,7 +131,7 @@ function formatProviderModelsTooltip(providerId: string): ReactNode | null {
 function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
-  const [isPrefilling, setIsPrefilling] = useState(false);
+  const [isPrefilling, _setIsPrefilling] = useState(false);
   const hasHydratedRef = useRef(false);
 
   const { data: settings } = useSettings();

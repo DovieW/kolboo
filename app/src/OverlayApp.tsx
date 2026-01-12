@@ -12,7 +12,6 @@ import {
   useRef,
   useReducer,
   useState,
-  type KeyboardEvent,
 } from "react";
 import { applyAccentColor } from "./lib/accentColor";
 import { useSettings, useTypeText } from "./lib/queries";
@@ -1522,7 +1521,7 @@ function RecordingControl() {
     pipelineState,
     animState,
     lastError,
-    lastErrorDetail,
+    lastErrorDetail: _lastErrorDetail,
     lastFailedRequestId,
   } = ui;
 
@@ -1633,7 +1632,7 @@ function RecordingControl() {
 
   const hoverHasPresets = activeProfilePresets.length > 0;
 
-  const sessionPresetLabel = useMemo(() => {
+  const _sessionPresetLabel = useMemo(() => {
     if (!sessionPresetId) return "Auto";
     const preset = activeProfilePresets.find((p) => p.id === sessionPresetId);
     return preset?.name ?? "Auto";
@@ -1674,7 +1673,7 @@ function RecordingControl() {
     hoverHasPresets &&
     rewriteIsEnabled;
 
-  const toggleRouterEnabled = useCallback(async () => {
+  const _toggleRouterEnabled = useCallback(async () => {
     if (!settings) return;
     if (!activeProfileId) return;
 
@@ -1746,7 +1745,7 @@ function RecordingControl() {
     }
   }, [activeProfileId, routerIsEffectivelyOn, settings]);
 
-  const setSessionPresetLock = useCallback(
+  const _setSessionPresetLock = useCallback(
     async (nextPresetId: string | null) => {
       setSessionPresetId(nextPresetId);
 
@@ -1837,10 +1836,6 @@ function RecordingControl() {
   // - pointer actually moved onto the overlay (show hover)
   // - overlay appeared underneath a stationary pointer (do NOT show hover)
   useEffect(() => {
-    const onMove = () => {
-      lastMouseMoveTsRef.current = Date.now();
-    };
-
     const onMoveWithPos = (e: MouseEvent) => {
       const now = Date.now();
       lastMouseMoveTsRef.current = now;

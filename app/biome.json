@@ -24,6 +24,10 @@
 			},
 			"a11y": {
 				"noStaticElementInteractions": "warn",
+				"noNoninteractiveTabindex": "warn",
+				"useAriaPropsSupportedByRole": "warn",
+				"useMediaCaption": "warn",
+				"useSemanticElements": "warn",
 				"useKeyWithClickEvents": "warn"
 			},
 			"complexity": {
@@ -32,7 +36,11 @@
 				"useIndexOf": "warn",
 				"useOptionalChain": "warn"
 			},
+			"security": {
+				"noDangerouslySetInnerHtml": "warn"
+			},
 			"style": {
+				"noNonNullAssertion": "warn",
 				"useExponentiationOperator": "warn",
 				"useImportType": "warn",
 				"useTemplate": "warn"

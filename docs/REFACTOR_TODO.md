@@ -38,7 +38,13 @@ This file is a parking lot for larger refactors that came up while working on sm
 
 - **Re-enable stricter Biome rules gradually (ratchet).**
 
-  - To get CI stable, we temporarily downgraded several high-churn rules to warnings in `app/biome.json` (notably hook dependency checks, some a11y rules, and a couple style/complexity rules).
+  - To get CI stable, we temporarily downgraded several high-churn rules to warnings in `app/biome.json`.
+    - Hook dependency checks: `lint/correctness/useExhaustiveDependencies`
+    - “Unknown data” typing noise: `lint/suspicious/noExplicitAny`
+    - A11y rules that require larger UI refactors: `lint/a11y/*` (semantic buttons, ARIA checks, media captions)
+    - Security/XSS rule that needs a more deliberate audit: `lint/security/noDangerouslySetInnerHtml`
+    - Non-null assertions: `lint/style/noNonNullAssertion`
+    - Some style/complexity preferences: `lint/style/useTemplate`, `lint/style/useExponentiationOperator`, `lint/complexity/useOptionalChain`
   - Follow-up approach:
     - Pick one rule at a time (e.g. `lint/correctness/useExhaustiveDependencies`) and fix the existing findings.
     - Flip it back to `error` once the repo is clean.

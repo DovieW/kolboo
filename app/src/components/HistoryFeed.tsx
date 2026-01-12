@@ -564,7 +564,7 @@ export function HistoryFeed({
   const [analysisSystemPrompt, setAnalysisSystemPrompt] = useState<string>("");
   const [analysisUserPrompt, setAnalysisUserPrompt] = useState<string>("");
   const [analysisIncludedCount, setAnalysisIncludedCount] = useState(0);
-  const [analysisTotalCount, setAnalysisTotalCount] = useState(0);
+  const [_analysisTotalCount, setAnalysisTotalCount] = useState(0);
   const [
     analysisAvailableTranscriptsCount,
     setAnalysisAvailableTranscriptsCount,
