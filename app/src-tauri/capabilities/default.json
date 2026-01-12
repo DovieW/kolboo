@@ -2,10 +2,7 @@
 	"$schema": "../gen/schemas/desktop-schema.json",
 	"identifier": "default",
 	"description": "Default capabilities for Kolboo",
-	"windows": [
-		"main",
-		"quick_ask"
-	],
+	"windows": ["main", "quick_ask"],
 	"permissions": [
 		"core:default",
 		"core:window:default",

@@ -2,10 +2,7 @@
 	"$schema": "../gen/schemas/desktop-schema.json",
 	"identifier": "overlay",
 	"description": "Minimal capabilities for overlay windows",
-	"windows": [
-		"overlay",
-		"overlay_hover"
-	],
+	"windows": ["overlay", "overlay_hover"],
 	"permissions": [
 		"core:default",
 		"core:window:default",
