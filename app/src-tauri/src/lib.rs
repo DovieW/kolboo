@@ -827,6 +827,7 @@ fn start_recording(
                 "request_id": null,
             });
             let _ = app.emit("pipeline-error", payload);
+            let _ = app.emit("pipeline-state-changed", "error");
             return;
         }
 
@@ -858,6 +859,7 @@ fn start_recording(
 
     // Pipeline started successfully - now update state and do side effects
     state.is_recording.store(true, Ordering::SeqCst);
+    let _ = app.emit("pipeline-state-changed", "recording");
 
     // Start the recording chime ASAP.
     // Showing/snapping the overlay window can be a bit slow on some systems (monitor queries,
@@ -1316,6 +1318,7 @@ fn stop_recording(
                             pipeline::PipelineState::Transcribing
                             | pipeline::PipelineState::Rewriting => {
                                 let _ = app_for_evt.emit("pipeline-transcription-started", ());
+                                let _ = app_for_evt.emit("pipeline-state-changed", "transcribing");
 
                                 if should_play_stop_sound {
                                     crate::audio::play_sound(
@@ -1351,6 +1354,7 @@ fn stop_recording(
                         match pipeline_for_evt.state() {
                             pipeline::PipelineState::Routing => {
                                 let _ = app_for_evt.emit("pipeline-routing-started", ());
+                                let _ = app_for_evt.emit("pipeline-state-changed", "routing");
                                 break;
                             }
                             pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
@@ -1382,6 +1386,7 @@ fn stop_recording(
                         match pipeline_for_evt.state() {
                             pipeline::PipelineState::Rewriting => {
                                 let _ = app_for_evt.emit("pipeline-rewriting-started", ());
+                                let _ = app_for_evt.emit("pipeline-state-changed", "rewriting");
                                 break;
                             }
                             pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
@@ -1583,6 +1588,7 @@ fn stop_recording(
 
                     if let Some(ref text) = filtered_transcript {
                         let _ = app_clone.emit("pipeline-transcript-ready", text);
+                        let _ = app_clone.emit("pipeline-state-changed", "idle");
 
                         // Default output is the (possibly rewritten) pipeline transcript.
                         // Quick Replace may overwrite this when a selection is present.
@@ -2433,6 +2439,7 @@ fn stop_recording(
                                     "request_id": request_id.clone(),
                                 });
                                 let _ = app_clone.emit("pipeline-error", payload);
+                                let _ = app_clone.emit("pipeline-state-changed", "error");
                             } else {
                                 // Output using the selected output mode.
                                 let output_clipboard_privacy_mode: bool = get_setting_from_store(
@@ -2485,6 +2492,7 @@ fn stop_recording(
                     } else {
                         // Emit empty transcript event so UI can update appropriately
                         let _ = app_clone.emit("pipeline-transcript-ready", "");
+                        let _ = app_clone.emit("pipeline-state-changed", "idle");
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
                         if is_quick_ask_session {
@@ -2614,6 +2622,7 @@ fn stop_recording(
 
                         // Notify frontend and hide overlay if needed.
                         let _ = app_clone.emit("pipeline-cancelled", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "idle");
 
                         // Best-effort: remove any in-progress history entry for this request
                         // so it doesn't remain stuck in "in_progress".
@@ -2642,6 +2651,7 @@ fn stop_recording(
                         "request_id": request_id.clone(),
                     });
                     let _ = app_clone.emit("pipeline-error", payload);
+                    let _ = app_clone.emit("pipeline-state-changed", "error");
 
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                         log_store.with_current(|log| {
@@ -2900,6 +2910,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
 
     // Notify frontend
     let _ = app.emit("pipeline-cancelled", ());
+    let _ = app.emit("pipeline-state-changed", "idle");
 
     // Disable Escape shortcut now that we're idle.
     set_escape_cancel_shortcut_enabled(app, false);

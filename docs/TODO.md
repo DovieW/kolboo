@@ -36,16 +36,6 @@ Legend:
 - **Todo:**
   - Use a ring buffer or chunked `VecDeque<Vec<f32>>` and drop whole chunks.
 
-### Reduce overlay polling and unify with events
-
-- **Where:** overlay UI (observed polling pattern in `app/src/OverlayApp.tsx`), backend emits multiple pipeline/overlay events.
-- **Problem:** state polling + events can cause redundant work and race-y UX.
-- **Todo:**
-  - Emit a single backend `pipeline-state-changed` event on every transition.
-  - Prefer event-driven UI; keep polling as a fallback/backstop.
-
-### Stop polling pipeline state every 500ms in the overlay
-
 ### Unify overlay pipeline state sources (hotkey + events + polling)
 
 - **Where:** `app/src/OverlayApp.tsx`
@@ -55,7 +45,6 @@ Legend:
   - pipeline events (`pipeline-*`)
 - **Todo:**
   - Introduce a reducer/state-machine for UI state so transitions are consistent.
-  - Reduce event surface area by consuming one canonical `pipeline-state-changed` event.
 
 ### Improve stats aggregation performance
 

@@ -2268,27 +2268,13 @@ function RecordingControl() {
     const unlisteners: (() => void)[] = [];
 
     const setup = async () => {
+      // Canonical state update event (preferred): reduces event surface area.
       unlisteners.push(
-        await listen("pipeline-recording-started", () => {
-          setPipelineState("recording");
-        })
-      );
-
-      unlisteners.push(
-        await listen("pipeline-transcription-started", () => {
-          setPipelineState("transcribing");
-        })
-      );
-
-      unlisteners.push(
-        await listen("pipeline-rewriting-started", () => {
-          setPipelineState("rewriting");
-        })
-      );
-
-      unlisteners.push(
-        await listen("pipeline-routing-started", () => {
-          setPipelineState("routing");
+        await listen<string>("pipeline-state-changed", (event) => {
+          const next = (event.payload ?? "").toString();
+          if (isPipelineState(next)) {
+            setPipelineState(next);
+          }
         })
       );
 

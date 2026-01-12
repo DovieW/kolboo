@@ -487,6 +487,7 @@ pub fn pipeline_start_recording(
 
     // Emit event to frontend
     let _ = app.emit("pipeline-recording-started", ());
+    let _ = app.emit("pipeline-state-changed", "recording");
 
     Ok(())
 }
@@ -613,6 +614,7 @@ pub async fn pipeline_stop_and_transcribe(
                         }
 
                         let _ = app_clone.emit("pipeline-transcription-started", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "transcribing");
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -644,6 +646,7 @@ pub async fn pipeline_stop_and_transcribe(
                 match pipeline_clone.state() {
                     PipelineState::Routing => {
                         let _ = app_clone.emit("pipeline-routing-started", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "routing");
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -677,6 +680,7 @@ pub async fn pipeline_stop_and_transcribe(
                 match pipeline_clone.state() {
                     PipelineState::Rewriting => {
                         let _ = app_clone.emit("pipeline-rewriting-started", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "rewriting");
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -737,6 +741,7 @@ pub async fn pipeline_stop_and_transcribe(
             }
 
             let _ = app.emit("pipeline-cancelled", ());
+            let _ = app.emit("pipeline-state-changed", "idle");
             return Ok(String::new());
         }
         Err(e) => {
@@ -793,6 +798,7 @@ pub async fn pipeline_stop_and_transcribe(
                 "request_id": active_request_id.clone(),
             });
             let _ = app.emit("pipeline-error", payload);
+            let _ = app.emit("pipeline-state-changed", "error");
 
             return Err(CommandError::from(e));
         }
@@ -969,6 +975,7 @@ pub async fn pipeline_stop_and_transcribe(
 
     // Emit transcript ready event
     let _ = app.emit("pipeline-transcript-ready", &final_text);
+    let _ = app.emit("pipeline-state-changed", "idle");
 
     // Done transcribing - stop stealing Escape.
     #[cfg(desktop)]
@@ -1089,6 +1096,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     }
 
     let _ = app.emit("pipeline-transcription-started", ());
+    let _ = app.emit("pipeline-state-changed", "transcribing");
 
     // If we know the original preset, set a one-shot session lock so the retry uses the
     // same preset as the entry being rerun (instead of whatever the profile/router would
@@ -1125,6 +1133,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 match pipeline_clone.state() {
                     PipelineState::Rewriting => {
                         let _ = app_clone.emit("pipeline-rewriting-started", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "rewriting");
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1152,6 +1161,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 match pipeline_clone.state() {
                     PipelineState::Routing => {
                         let _ = app_clone.emit("pipeline-routing-started", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "routing");
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1179,6 +1189,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
             let _ = app.emit("pipeline-cancelled", ());
+            let _ = app.emit("pipeline-state-changed", "idle");
             return Ok(String::new());
         }
         Err(e) => {
@@ -1217,6 +1228,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 "request_id": new_request_id,
             });
             let _ = app.emit("pipeline-error", payload);
+            let _ = app.emit("pipeline-state-changed", "error");
 
             return Err(CommandError::from(e));
         }
@@ -1299,6 +1311,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
 
     // Emit transcript ready event
     let _ = app.emit("pipeline-transcript-ready", &final_text);
+    let _ = app.emit("pipeline-state-changed", "idle");
 
     #[cfg(desktop)]
     crate::set_escape_cancel_shortcut_enabled(&app, false);
@@ -1338,6 +1351,7 @@ pub fn pipeline_cancel(
 
         // Emit cancelled event
         let _ = app.emit("pipeline-cancelled", ());
+        let _ = app.emit("pipeline-state-changed", "idle");
 
         Ok(())
     }
@@ -1517,6 +1531,7 @@ pub async fn pipeline_dictate(
                 match pipeline_clone.state() {
                     PipelineState::Transcribing | PipelineState::Routing | PipelineState::Rewriting => {
                         let _ = app_clone.emit("pipeline-transcription-started", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "transcribing");
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1543,6 +1558,7 @@ pub async fn pipeline_dictate(
                 match pipeline_clone.state() {
                     PipelineState::Routing => {
                         let _ = app_clone.emit("pipeline-routing-started", ());
+                        let _ = app_clone.emit("pipeline-state-changed", "routing");
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1565,6 +1581,7 @@ pub async fn pipeline_dictate(
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
             let _ = app.emit("pipeline-cancelled", ());
+            let _ = app.emit("pipeline-state-changed", "idle");
 
             // Best-effort: mark request as cancelled in logs + history.
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
@@ -1637,6 +1654,7 @@ pub async fn pipeline_dictate(
                 "request_id": active_request_id.clone(),
             });
             let _ = app.emit("pipeline-error", payload);
+            let _ = app.emit("pipeline-state-changed", "error");
 
             return Err(CommandError::from(e));
         }
@@ -1649,6 +1667,7 @@ pub async fn pipeline_dictate(
 
     // Emit transcript ready event
     let _ = app.emit("pipeline-transcript-ready", &final_text);
+    let _ = app.emit("pipeline-state-changed", "idle");
 
     // Type the transcript
     if !final_text.is_empty() {
@@ -2007,6 +2026,7 @@ pub async fn pipeline_toggle(
         }
 
         let _ = app.emit("pipeline-recording-started", ());
+        let _ = app.emit("pipeline-state-changed", "recording");
         Ok(String::new())
     }
 }
@@ -2034,6 +2054,7 @@ pub fn pipeline_force_reset(
 
     // Emit reset event
     let _ = app.emit("pipeline-reset", ());
+    let _ = app.emit("pipeline-state-changed", "idle");
 
     Ok(())
 }
