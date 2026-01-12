@@ -44,18 +44,6 @@ Legend:
   - Add a “privacy mode” option: never read prior clipboard (don’t restore), avoiding sensitive clipboard reads.
   - Improve UI error messaging and remediation tips per OS.
 
-### “Delete all API keys” should actually delete *all* provider keys
-
-- **Where:** `app/src-tauri/src/commands/data.rs`
-- **Problem:** `delete_all_api_keys()` and `get_data_storage_summary()` enumerate a hard-coded subset of `*_api_key` keys. Several supported providers appear to be missing from one or both lists (e.g. `fireworks_api_key`, `cohere_api_key`, `assemblyai_api_key`, `speechmatics_api_key`, etc.).
-- **Impact:** user can believe they cleared secrets, but some API keys remain in `settings.json`.
-- **Todo:**
-  - Centralize “known providers that use API keys” into one shared list used by:
-    - `delete_all_api_keys`
-    - `get_data_storage_summary` (api_keys_set_count)
-    - any UI “keys present” indicators
-  - Add a regression test (or at least a debug assertion) that provider registries and this list stay in sync.
-
 ---
 
 ## P1 — Security & privacy hardening

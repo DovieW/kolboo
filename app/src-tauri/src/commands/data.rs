@@ -14,6 +14,31 @@ use crate::stats::StatsStore;
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
+/// Known API key setting keys stored in `settings.json`.
+///
+/// Keep this in sync with the provider lists in `app/src-tauri/src/commands/config.rs`.
+#[cfg(desktop)]
+const API_KEY_SETTING_KEYS: &[&str] = &[
+    // STT providers
+    "groq_api_key",
+    "elevenlabs_api_key",
+    "openai_api_key",
+    "fireworks_api_key",
+    "aquavoice_api_key",
+    "assemblyai_api_key",
+    "speechmatics_api_key",
+    "deepgram_api_key",
+
+    // LLM providers
+    "cerebras_api_key",
+    "openai_api_key",
+    "fireworks_api_key",
+    "gemini_api_key",
+    "anthropic_api_key",
+    "cohere_api_key",
+    "groq_api_key",
+];
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DataStorageSummary {
     pub recordings_count: u64,
@@ -103,14 +128,7 @@ pub fn get_data_storage_summary(app: AppHandle) -> Result<DataStorageSummary, St
 
     let store = app.store("settings.json").map_err(|e| e.to_string())?;
     let mut api_keys_set_count: u64 = 0;
-    for key in [
-        "openai_api_key",
-        "aquavoice_api_key",
-        "groq_api_key",
-        "deepgram_api_key",
-        "gemini_api_key",
-        "anthropic_api_key",
-    ] {
+    for key in API_KEY_SETTING_KEYS {
         let Some(v) = store.get(key) else { continue };
         if let Ok(s) = serde_json::from_value::<String>(v) {
             if !s.trim().is_empty() {
@@ -157,16 +175,7 @@ pub fn delete_all_api_keys(app: AppHandle) -> Result<(), String> {
     let store = app.store("settings.json").map_err(|e| e.to_string())?;
 
     // Known provider keys. (Local providers generally don't use API keys.)
-    for key in [
-        "openai_api_key",
-        "cerebras_api_key",
-        "aquavoice_api_key",
-        "groq_api_key",
-        "deepgram_api_key",
-        "gemini_api_key",
-        "anthropic_api_key",
-           "elevenlabs_api_key",
-    ] {
+    for key in API_KEY_SETTING_KEYS {
         store.delete(key);
     }
 
