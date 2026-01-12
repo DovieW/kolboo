@@ -64,29 +64,6 @@ const OVERLAY_MONITOR_TARGET_OPTIONS: Array<{
   { value: "active_window", label: "Monitor with active window" },
 ];
 
-function outputModeToFlags(mode: OutputMode): {
-  paste: boolean;
-  clipboard: boolean;
-} {
-  switch (mode) {
-    case "paste":
-      return { paste: true, clipboard: false };
-    case "paste_and_clipboard":
-      return { paste: true, clipboard: true };
-    case "clipboard":
-      return { paste: false, clipboard: true };
-    default:
-      return { paste: true, clipboard: false };
-  }
-}
-
-function flagsToOutputMode(paste: boolean, clipboard: boolean): OutputMode {
-  if (paste && clipboard) return "paste_and_clipboard";
-  if (paste) return "paste";
-  if (clipboard) return "clipboard";
-  // Should be unreachable because we enforce at least one.
-  return "paste";
-}
 
 const PLAYING_AUDIO_HANDLING_OPTIONS: Array<{
   value: PlayingAudioHandling;
@@ -269,8 +246,6 @@ export function UiSettings({
 
   const mainWindowCloseBehavior: MainWindowCloseBehavior =
     settings?.main_window_close_behavior ?? "minimize_to_tray";
-
-  const outputFlags = outputModeToFlags(outputMode);
 
   // Accent color (global only)
   const ACCENT_COLOR_OPTIONS: Array<{ value: string; label: string }> = [

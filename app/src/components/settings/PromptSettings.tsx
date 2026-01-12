@@ -2,7 +2,6 @@ import {
   Accordion,
   ActionIcon,
   Button,
-  Divider,
   Group,
   Loader,
   Modal,
@@ -2140,7 +2139,7 @@ export function PromptSettings({
     });
   };
 
-  const handleQuickAskOpenAiThinkingChange = (value: string | null) => {
+  const _handleQuickAskOpenAiThinkingChange = (value: string | null) => {
     if (value == null || value === SELECT_DEFAULT) {
       updateQuickAskOpenAiReasoningEffort.mutate(null, {
         onSuccess: () => {
@@ -2157,7 +2156,7 @@ export function PromptSettings({
     });
   };
 
-  const handleQuickAskGeminiThinkingLevelChange = (value: string | null) => {
+  const _handleQuickAskGeminiThinkingLevelChange = (value: string | null) => {
     const v =
       value === "minimal" ||
       value === "low" ||
@@ -2172,7 +2171,7 @@ export function PromptSettings({
     });
   };
 
-  const handleQuickAskGeminiThinkingBudgetChange = (value: string | null) => {
+  const _handleQuickAskGeminiThinkingBudgetChange = (value: string | null) => {
     if (value == null || value === SELECT_DEFAULT) {
       updateQuickAskGeminiThinkingBudget.mutate(null, {
         onSuccess: () => {
@@ -2191,7 +2190,7 @@ export function PromptSettings({
     });
   };
 
-  const handleQuickAskAnthropicThinkingBudgetChange = (
+  const _handleQuickAskAnthropicThinkingBudgetChange = (
     value: string | null
   ) => {
     if (value == null || value === SELECT_DEFAULT) {

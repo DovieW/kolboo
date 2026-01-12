@@ -2,16 +2,8 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Store } from "@tauri-apps/plugin-store";
-import { z } from "zod";
 import { DEFAULT_ACCENT_HEX, normalizeHexColor } from "./accentColor";
-import {
-  createHotkeyDuplicateSchema,
-  hotkeyIsSameAs,
-  HotkeyConfigSchema,
-  normalizeHotkeyConfig,
-  validateHotkeyNotDuplicate,
-  type HotkeyConfig,
-} from "./hotkeys";
+import { normalizeHotkeyConfig, type HotkeyConfig } from "./hotkeys";
 
 export {
   createHotkeyDuplicateSchema,

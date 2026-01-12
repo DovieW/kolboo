@@ -17,11 +17,28 @@
 		"rules": {
 			"recommended": true,
 			"correctness": {
+				"useExhaustiveDependencies": "warn",
 				"noUnusedVariables": "error",
 				"noUnusedImports": "error",
 				"noUnusedFunctionParameters": "error"
 			},
+			"a11y": {
+				"noStaticElementInteractions": "warn",
+				"useKeyWithClickEvents": "warn"
+			},
+			"complexity": {
+				"noImportantStyles": "warn",
+				"noUselessFragments": "warn",
+				"useIndexOf": "warn",
+				"useOptionalChain": "warn"
+			},
+			"style": {
+				"useExponentiationOperator": "warn",
+				"useImportType": "warn",
+				"useTemplate": "warn"
+			},
 			"suspicious": {
+				"noArrayIndexKey": "warn",
 				"noExplicitAny": "warn"
 			}
 		}

@@ -33,3 +33,13 @@ This file is a parking lot for larger refactors that came up while working on sm
     - Generate TypeScript types from the Rust structs (or from the JSON schemas in `app/src-tauri/gen/schemas/`) and import those into `app/src/lib/tauri.ts`.
     - Or add a small check that compares the settings keys expected by `tauriAPI.getSettings()` vs the keys seeded/migrated by `ensure_default_settings(...)` in Rust.
   - Goal: avoid shipping changes where Rust and TS disagree on the shape of settings/logs.
+
+## Lint rule ratchet (Biome)
+
+- **Re-enable stricter Biome rules gradually (ratchet).**
+
+  - To get CI stable, we temporarily downgraded several high-churn rules to warnings in `app/biome.json` (notably hook dependency checks, some a11y rules, and a couple style/complexity rules).
+  - Follow-up approach:
+    - Pick one rule at a time (e.g. `lint/correctness/useExhaustiveDependencies`) and fix the existing findings.
+    - Flip it back to `error` once the repo is clean.
+  - Goal: keep CI green while steadily improving quality instead of “big bang” lint migrations.
