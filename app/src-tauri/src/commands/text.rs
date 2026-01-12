@@ -270,6 +270,7 @@ pub async fn type_text(app: AppHandle, text: String) -> Result<(), String> {
 }
 
 /// Output text based on the specified mode
+#[allow(dead_code)]
 pub fn output_text_with_mode(text: &str, mode: OutputMode, hit_enter: bool) -> Result<(), String> {
     output_text_with_mode_options(text, mode, hit_enter, true)
 }

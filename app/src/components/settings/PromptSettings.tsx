@@ -2331,8 +2331,6 @@ export function PromptSettings({
         rewrite_llm_enabled: null,
 
         context_grab_method: null,
-
-        context_grab_method: null,
       };
 
       const updated = [...profiles, { ...defaultProfile, ...next }];

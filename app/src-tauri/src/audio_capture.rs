@@ -17,7 +17,6 @@ use std::sync::mpsc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
 const MIC_DEVICE_ID_PREFIX: &str = "mic:v1:";
 
