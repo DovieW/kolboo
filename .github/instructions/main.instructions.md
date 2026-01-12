@@ -2,5 +2,4 @@
 applyTo: '**'
 ---
 
-- **NEVER** run linting or tests unless explicitly told to do so.
-- **NEVER** run builds or cargo checks unless explicitly told to do so.
+- I have `pnpm dev` running an external terminal so I can see build errors already. Use VS Code Problems to make sure you didn't introduce real issues and fix all errors and warnings while you work.

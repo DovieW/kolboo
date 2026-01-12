@@ -1,8 +1,6 @@
 # Kolboo Copilot instructions
 
-- Dovie’s rule: **don’t run builds, lint, tests, or cargo checks unless explicitly asked**.
-
-- Common commands (don’t run unless asked):
+- Common commands:
 
   - `pnpm -C app dev` (Tauri dev)
   - `pnpm -C app build` (Tauri build)
