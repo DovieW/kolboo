@@ -32,6 +32,11 @@ fn should_exclude_setting_key_from_backup(key: &str) -> bool {
 		return true;
 	}
 
+	// Never back up router embeddings cache (large, non-valuable, regeneratable).
+	if key == crate::router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_KEY {
+		return true;
+	}
+
 	false
 }
 

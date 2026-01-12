@@ -15,6 +15,55 @@ pub const ROUTER_EMBEDDINGS_STORE_KEY: &str = "router_embeddings_cache_v1";
 #[cfg(desktop)]
 pub const ROUTER_EMBEDDINGS_STORE_FILE: &str = "router_embeddings_cache.json";
 
+/// Migration: older installs stored the embeddings cache in `settings.json`.
+///
+/// This cache can be very large, is not user-facing configuration, and can be
+/// recreated. We move it into the dedicated cache store file and delete the
+/// legacy key from `settings.json`.
+#[cfg(desktop)]
+pub fn migrate_router_embeddings_out_of_settings(app: &AppHandle) -> Result<usize, String> {
+    use tauri_plugin_store::StoreExt;
+
+    let settings_store = app
+        .store("settings.json")
+        .map_err(|e| format!("Failed to open settings store: {e}"))?;
+
+    let Some(raw) = settings_store.get(ROUTER_EMBEDDINGS_STORE_KEY) else {
+        return Ok(0);
+    };
+
+    let JsonValue::Object(map) = raw else {
+        // Malformed: just delete it.
+        settings_store.delete(ROUTER_EMBEDDINGS_STORE_KEY);
+        let _ = settings_store.save();
+        return Ok(0);
+    };
+
+    let mut decoded: HashMap<String, Vec<f32>> = HashMap::new();
+    for (k, v) in map {
+        let Some(b64) = v.as_str() else { continue };
+        let Some(embedding) = decode_embedding_b64(b64) else { continue };
+        decoded.insert(k, embedding);
+    }
+
+    let migrated = decoded.len();
+    if migrated > 0 {
+        // Best-effort: persist to dedicated cache store.
+        let _ = merge_router_embeddings_into_store(app, &decoded);
+    }
+
+    // Remove the legacy key regardless (don't keep giant blobs in settings).
+    settings_store.delete(ROUTER_EMBEDDINGS_STORE_KEY);
+    let _ = settings_store.save();
+
+    Ok(migrated)
+}
+
+#[cfg(not(desktop))]
+pub fn migrate_router_embeddings_out_of_settings(_app: &AppHandle) -> Result<usize, String> {
+    Ok(0)
+}
+
 pub fn encode_embedding_b64(v: &[f32]) -> String {
     let mut bytes: Vec<u8> = Vec::with_capacity(v.len() * 4);
     for f in v {

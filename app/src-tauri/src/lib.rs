@@ -3784,6 +3784,7 @@ pub fn run() {
 
                 // Preload persisted router embeddings cache once at startup.
                 // Routing uses the in-memory cache and does not read the store per request.
+                let _ = router_embeddings_cache::migrate_router_embeddings_out_of_settings(app.handle());
                 let persisted = router_embeddings_cache::load_router_embeddings_from_store(app.handle());
                 if !persisted.is_empty() {
                     pipeline.preload_embedding_cache(persisted);
@@ -5129,7 +5130,9 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         config.vad_config.enabled
     );
 
-    pipeline::SharedPipeline::new(config)
+    let pipeline = pipeline::SharedPipeline::new(config);
+    pipeline.set_app_handle(app.clone());
+    pipeline
 }
 
 /// Register shortcuts from store settings (called from setup() after store plugin is available)

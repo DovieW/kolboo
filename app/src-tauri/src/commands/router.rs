@@ -153,7 +153,7 @@ pub async fn cache_router_embeddings(
         (HashSet::new(), serde_json::Map::new())
     } else {
         let store = app
-            .store("settings.json")
+            .store(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_FILE)
             .map_err(|e| format!("Failed to get store: {e}"))?;
         match store.get(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_KEY) {
             Some(JsonValue::Object(map)) => {

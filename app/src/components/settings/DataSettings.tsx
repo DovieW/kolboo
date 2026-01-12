@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   BarChart2,
   FileText,
@@ -1583,6 +1584,48 @@ export function DataSettings({
           Create a GitHub personal access token with the <code>gist</code> scope.
           It will be stored securely in your OS credential manager.
         </Text>
+
+        <Group gap="xs" mb="md" wrap="wrap">
+          <Button
+            variant="subtle"
+            size="xs"
+            onClick={async () => {
+              try {
+                await openUrl("https://github.com/settings/personal-access-tokens/new");
+              } catch {
+                notifications.show({
+                  title: "Couldn't open link",
+                  message:
+                    "Failed to open your browser. You can open the token page manually from GitHub settings.",
+                  color: "red",
+                });
+              }
+            }}
+          >
+            Open token creation page
+          </Button>
+
+          <Button
+            variant="subtle"
+            size="xs"
+            onClick={async () => {
+              try {
+                await openUrl(
+                  "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"
+                );
+              } catch {
+                notifications.show({
+                  title: "Couldn't open link",
+                  message:
+                    "Failed to open your browser. You can find GitHub token docs on docs.github.com.",
+                  color: "red",
+                });
+              }
+            }}
+          >
+            Docs
+          </Button>
+        </Group>
 
         <PasswordInput
           label="Token"

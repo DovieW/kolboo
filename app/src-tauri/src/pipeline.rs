@@ -29,6 +29,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 fn normalize_program_path(path: &str) -> String {
@@ -194,6 +195,7 @@ async fn route_preset_id_with_embeddings(
     proxy_settings: &ProxySettings,
     llm_api_keys: &HashMap<String, String>,
     embedding_cache: &Arc<Mutex<HashMap<String, Vec<f32>>>>,
+    persist_app: Option<AppHandle>,
 ) -> Option<(Option<String>, Vec<(String, f32)>, f32, f32, JsonValue, JsonValue)> {
     const DEFAULT_CANDIDATE_ID: &str = "__default__";
 
@@ -537,6 +539,7 @@ async fn route_preset_id_with_embeddings(
                             req,
                             resp,
                         );
+                        let cache_key_for_store = cache_key.clone();
                         if let Ok(mut cache) = embedding_cache.lock() {
                             // Keep cache bounded, but avoid aggressively clearing.
                             // The cache may be preloaded from persisted store and can be larger
@@ -545,6 +548,19 @@ async fn route_preset_id_with_embeddings(
                                 cache.clear();
                             }
                             cache.insert(cache_key, v.clone());
+                        }
+
+                        // Best-effort persistence: embeddings routing performance should improve
+                        // automatically after first use without requiring a manual "Store" step.
+                        if let Some(app) = persist_app.as_ref() {
+                            let mut one: HashMap<String, Vec<f32>> = HashMap::new();
+                            one.insert(cache_key_for_store, v.clone());
+                            if let Err(e) = crate::router_embeddings_cache::merge_router_embeddings_into_store(app, &one) {
+                                log::debug!(
+                                    "Intent router: failed to persist router embeddings cache: {}",
+                                    e
+                                );
+                            }
                         }
                         v
                     }
@@ -1809,6 +1825,7 @@ pub struct SharedPipeline {
     level_meter: crate::audio_capture::SharedAudioLevelMeter,
     waveform_meter: crate::audio_capture::SharedAudioWaveformMeter,
     embedding_cache: Arc<Mutex<HashMap<String, Vec<f32>>>>,
+    app_handle: Arc<Mutex<Option<AppHandle>>>,
     session_preset_lock: Arc<Mutex<Option<SessionPresetLock>>>,
     session_profile_override: Arc<Mutex<Option<String>>>,
 }
@@ -1824,8 +1841,16 @@ impl SharedPipeline {
             level_meter,
             waveform_meter,
             embedding_cache: Arc::new(Mutex::new(HashMap::new())),
+            app_handle: Arc::new(Mutex::new(None)),
             session_preset_lock: Arc::new(Mutex::new(None)),
             session_profile_override: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Provide an app handle for best-effort persistence of recreatable caches.
+    pub fn set_app_handle(&self, app: AppHandle) {
+        if let Ok(mut guard) = self.app_handle.lock() {
+            *guard = Some(app);
         }
     }
 
@@ -2819,12 +2844,14 @@ impl SharedPipeline {
                     }
 
                     let router_start = std::time::Instant::now();
+                    let persist_app = self.app_handle.lock().ok().and_then(|g| g.clone());
                     let embeddings_out = route_preset_id_with_embeddings(
                         profile,
                         &stt_text,
                         &proxy_settings,
                         &llm_api_keys,
                         &self.embedding_cache,
+                        persist_app,
                     )
                     .await;
 
@@ -3702,12 +3729,14 @@ impl SharedPipeline {
                     }
 
                     let router_start = std::time::Instant::now();
+                    let persist_app = self.app_handle.lock().ok().and_then(|g| g.clone());
                     let embeddings_out = route_preset_id_with_embeddings(
                         profile,
                         &stt_text,
                         &proxy_settings,
                         &llm_api_keys,
                         &self.embedding_cache,
+                        persist_app,
                     )
                     .await;
 
