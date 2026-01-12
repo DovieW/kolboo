@@ -9,7 +9,7 @@ import {
   Switch,
   Tooltip,
 } from "@mantine/core";
-import { Info, Play, RefreshCcw, RotateCcw } from "lucide-react";
+import { Info, Play, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -26,7 +26,6 @@ import {
   useUpdatePlayingAudioHandling,
   useUpdateRewriteProgramPromptProfiles,
   useUpdateSoundEnabled,
-  useUpdateWidgetPosition,
 } from "../../lib/queries";
 import { DEFAULT_ACCENT_HEX, applyAccentColor } from "../../lib/accentColor";
 import type {
@@ -38,7 +37,6 @@ import type {
   OverlayMonitorTarget,
   PlayingAudioHandling,
   RewriteProgramPromptProfile,
-  WidgetPosition,
 } from "../../lib/tauri";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
@@ -55,16 +53,6 @@ const OVERLAY_MODE_OPTIONS = [
   { value: "always", label: "Always visible" },
   { value: "recording_only", label: "Only when recording" },
   { value: "never", label: "Hidden" },
-];
-
-const WIDGET_POSITION_OPTIONS = [
-  { value: "top-left", label: "Top Left" },
-  { value: "top-center", label: "Top Center" },
-  { value: "top-right", label: "Top Right" },
-  { value: "center", label: "Center" },
-  { value: "bottom-left", label: "Bottom Left" },
-  { value: "bottom-center", label: "Bottom Center" },
-  { value: "bottom-right", label: "Bottom Right" },
 ];
 
 const OVERLAY_MONITOR_TARGET_OPTIONS: Array<{
@@ -153,7 +141,6 @@ export function UiSettings({
   const updateOverlayShowDetailedLoading =
     useUpdateOverlayShowDetailedLoading();
   const updateOverlayMonitorTarget = useUpdateOverlayMonitorTarget();
-  const updateWidgetPosition = useUpdateWidgetPosition();
   const updateOutputMode = useUpdateOutputMode();
   const updateOutputHitEnter = useUpdateOutputHitEnter();
   const updateRewriteProgramPromptProfiles =
@@ -251,14 +238,6 @@ export function UiSettings({
 
   const overlayMonitorTarget: OverlayMonitorTarget =
     settings?.overlay_monitor_target ?? "main";
-
-  const globalWidgetPosition: WidgetPosition =
-    settings?.widget_position ?? "bottom-center";
-  const widgetPosition = isProfileScope
-    ? getProfileValue(profile?.widget_position, globalWidgetPosition)
-    : globalWidgetPosition;
-  const widgetPositionInheriting =
-    isProfileScope && isInheriting(profile?.widget_position);
 
   const globalOutputMode: OutputMode = settings?.output_mode ?? "paste";
   const outputMode = isProfileScope
@@ -388,21 +367,6 @@ export function UiSettings({
     if (!value) return;
     if (isProfileScope) return;
     updateOverlayMonitorTarget.mutate(value as OverlayMonitorTarget);
-  };
-
-  const handleWidgetPositionChange = (value: string | null) => {
-    if (!value) return;
-    if (isProfileScope) {
-      updateProfile({ widget_position: value as WidgetPosition });
-      return;
-    }
-    updateWidgetPosition.mutate(value as WidgetPosition);
-  };
-
-  const handleSnapWidgetPosition = async () => {
-    // Reposition the overlay window back to the selected preset.
-    // This is useful if the user has dragged the overlay away.
-    await invoke("set_widget_position", { position: widgetPosition });
   };
 
   const handleOutputHitEnterToggle = (checked: boolean) => {
@@ -729,82 +693,7 @@ export function UiSettings({
         </div>
       </div>
 
-      <div className="settings-row">
-        <div>
-          <p className="settings-label">Widget position</p>
-          <p className="settings-description">
-            Default position of the overlay widget on screen
-          </p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isProfileScope && !widgetPositionInheriting && (
-            <Tooltip label="Disable override (inherit from Default)" withArrow>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="sm"
-                disabled={isLoading}
-                onClick={() =>
-                  openDisableOverrideDialog({
-                    title: "Disable Widget position override?",
-                    onConfirm: () => updateProfile({ widget_position: null }),
-                  })
-                }
-              >
-                <RotateCcw size={14} style={{ opacity: 0.65 }} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-          {widgetPositionInheriting && (
-            <Tooltip label={INHERIT_TOOLTIP} withArrow>
-              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-            </Tooltip>
-          )}
-          <Tooltip
-            label="Snap overlay back to this position"
-            withArrow
-            position="top"
-          >
-            <span>
-              <ActionIcon
-                variant="default"
-                size={36}
-                disabled={isLoading || overlayMode === "never"}
-                onClick={() => {
-                  handleSnapWidgetPosition().catch(console.error);
-                }}
-                aria-label="Snap overlay position"
-                styles={{
-                  root: {
-                    backgroundColor: "var(--bg-elevated)",
-                    borderColor: "var(--border-default)",
-                    color: "var(--text-primary)",
-                    height: 36,
-                    width: 36,
-                  },
-                }}
-              >
-                <RefreshCcw size={14} style={{ opacity: 0.75 }} />
-              </ActionIcon>
-            </span>
-          </Tooltip>
-          <Select
-            data={WIDGET_POSITION_OPTIONS}
-            value={widgetPosition}
-            onChange={handleWidgetPositionChange}
-            disabled={isLoading || overlayMode === "never"}
-            withCheckIcon={false}
-            styles={{
-              input: {
-                backgroundColor: "var(--bg-elevated)",
-                borderColor: "var(--border-default)",
-                color: "var(--text-primary)",
-                minWidth: 180,
-              },
-            }}
-          />
-        </div>
-      </div>
+      {/* Widget position setting intentionally hidden for now (we may bring it back later). */}
 
       <div className="settings-row">
         <div>
