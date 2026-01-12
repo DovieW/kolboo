@@ -10,6 +10,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useReducer,
   useState,
   type KeyboardEvent,
 } from "react";
@@ -71,6 +72,90 @@ type PipelineErrorPayload = {
 interface ErrorInfo {
   message: string;
   recoverable: boolean;
+}
+
+type PipelineStateSource = "event" | "hotkey" | "poll" | "sync" | "ui";
+
+type OverlayAnimState = "enter" | "visible" | "exit";
+
+type OverlayUiState = {
+  pipelineState: PipelineState;
+  animState: OverlayAnimState;
+
+  lastError: ErrorInfo | null;
+  lastErrorDetail: string | null;
+  lastFailedRequestId: string | null;
+
+  // When we get a non-poll state update (hotkey/event/ui), suppress poll updates
+  // for a short time to avoid flicker/races.
+  ignorePollUntilTs: number;
+};
+
+type OverlayUiAction =
+  | {
+      type: "PIPELINE_SET";
+      source: PipelineStateSource;
+      next: PipelineState;
+      at: number;
+    }
+  | {
+      type: "ANIM_SET";
+      next: OverlayAnimState;
+    }
+  | {
+      type: "ERROR_CLEAR";
+    }
+  | {
+      type: "ERROR_SET";
+      info: ErrorInfo;
+      detail: string | null;
+      requestId: string | null;
+    };
+
+const PIPELINE_POLL_SUPPRESS_MS = 1500;
+
+function overlayUiReducer(state: OverlayUiState, action: OverlayUiAction) {
+  switch (action.type) {
+    case "PIPELINE_SET": {
+      // Poll is a backstop; ignore if we recently received a more authoritative signal.
+      if (
+        action.source === "poll" &&
+        action.at < state.ignorePollUntilTs &&
+        action.next !== state.pipelineState
+      ) {
+        return state;
+      }
+
+      return {
+        ...state,
+        pipelineState: action.next,
+        ignorePollUntilTs:
+          action.source === "poll"
+            ? state.ignorePollUntilTs
+            : action.at + PIPELINE_POLL_SUPPRESS_MS,
+      };
+    }
+    case "ANIM_SET":
+      return { ...state, animState: action.next };
+    case "ERROR_CLEAR":
+      return {
+        ...state,
+        lastError: null,
+        lastErrorDetail: null,
+        lastFailedRequestId: null,
+      };
+    case "ERROR_SET":
+      return {
+        ...state,
+        lastError: action.info,
+        lastErrorDetail: action.detail,
+        lastFailedRequestId: action.requestId,
+      };
+    default: {
+      const _exhaustive: never = action;
+      return _exhaustive;
+    }
+  }
 }
 
 /**
@@ -1425,11 +1510,42 @@ function AudioWave({
 
 function RecordingControl() {
   const queryClient = useQueryClient();
-  const [pipelineState, setPipelineState] = useState<PipelineState>("idle");
-  const [lastError, setLastError] = useState<ErrorInfo | null>(null);
-  const [lastErrorDetail, setLastErrorDetail] = useState<string | null>(null);
-  const [lastFailedRequestId, setLastFailedRequestId] = useState<string | null>(
-    null
+  const [ui, dispatchUi] = useReducer(overlayUiReducer, {
+    pipelineState: "idle",
+    animState: "visible",
+    lastError: null,
+    lastErrorDetail: null,
+    lastFailedRequestId: null,
+    ignorePollUntilTs: 0,
+  } as OverlayUiState);
+  const {
+    pipelineState,
+    animState,
+    lastError,
+    lastErrorDetail,
+    lastFailedRequestId,
+  } = ui;
+
+  const setPipelineState = useCallback(
+    (source: PipelineStateSource, next: PipelineState) => {
+      dispatchUi({ type: "PIPELINE_SET", source, next, at: Date.now() });
+    },
+    []
+  );
+
+  const setAnimState = useCallback((next: OverlayAnimState) => {
+    dispatchUi({ type: "ANIM_SET", next });
+  }, []);
+
+  const clearError = useCallback(() => {
+    dispatchUi({ type: "ERROR_CLEAR" });
+  }, []);
+
+  const setError = useCallback(
+    (info: ErrorInfo, detail: string | null, requestId: string | null) => {
+      dispatchUi({ type: "ERROR_SET", info, detail, requestId });
+    },
+    []
   );
   const [sessionPresetId, setSessionPresetId] = useState<string | null>(null);
   const hoverCloseTimerRef = useRef<number | null>(null);
@@ -1453,9 +1569,6 @@ function RecordingControl() {
     [containerRef]
   );
   const hasDragStartedRef = useRef(false);
-  const [animState, setAnimState] = useState<"enter" | "visible" | "exit">(
-    "visible"
-  );
   const exitTimerRef = useRef<number | null>(null);
 
   // During the exit animation, the backend may have already flipped the pipeline
@@ -1508,8 +1621,9 @@ function RecordingControl() {
     if (!settings) return null;
     if (!activeProfileId) return null;
     return (
-      settings.rewrite_program_prompt_profiles.find((p) => p.id === activeProfileId) ??
-      null
+      settings.rewrite_program_prompt_profiles.find(
+        (p) => p.id === activeProfileId
+      ) ?? null
     );
   }, [settings, activeProfileId]);
 
@@ -1695,9 +1809,9 @@ function RecordingControl() {
         const state = await invoke<string>("pipeline_get_state");
         if (cancelled) return;
         if (isPipelineState(state)) {
-          setPipelineState(state);
+          setPipelineState("poll", state);
         } else {
-          setPipelineState("idle");
+          setPipelineState("poll", "idle");
         }
       } catch (error) {
         console.error("[Pipeline] Failed to get state:", error);
@@ -1717,7 +1831,7 @@ function RecordingControl() {
       cancelled = true;
       if (interval) window.clearInterval(interval);
     };
-  }, [animState, pipelineState, settings?.overlay_mode]);
+  }, [animState, pipelineState, setPipelineState, settings?.overlay_mode]);
 
   // Track mouse movement in this window so we can distinguish:
   // - pointer actually moved onto the overlay (show hover)
@@ -1836,8 +1950,8 @@ function RecordingControl() {
         holdPhaseTimerRef.current = null;
       }
       if (!hoverPanelEnabled || !shouldShowHoverPresets) {
-              setHoldPhaseText(pipelineState);
-            }
+        setHoldPhaseText(pipelineState);
+      }
       return;
     }
 
@@ -2013,15 +2127,13 @@ function RecordingControl() {
   const dismissError = useCallback(() => {
     // Reset pipeline state in backend so polling reflects reality.
     invoke("pipeline_force_reset").catch(console.error);
-    setLastError(null);
-    setLastErrorDetail(null);
-    setLastFailedRequestId(null);
+    clearError();
 
     // If we force-showed the window for an error (recording_only/never), allow the user to hide it.
     if (settings?.overlay_mode !== "always") {
       requestAnimatedHide();
     }
-  }, [requestAnimatedHide, settings?.overlay_mode]);
+  }, [clearError, requestAnimatedHide, settings?.overlay_mode]);
 
   const requestAnimatedShow = useCallback(() => {
     if (exitTimerRef.current) {
@@ -2094,13 +2206,11 @@ function RecordingControl() {
     if (pipelineState !== "idle") return;
 
     // Clear any previous error when starting
-    setLastError(null);
-    setLastErrorDetail(null);
-    setLastFailedRequestId(null);
+    clearError();
 
     // Optimistic UX: the backend begins capturing before the UI can receive events.
     // Show "REC" immediately so the overlay matches when the user can start talking.
-    setPipelineState("recording");
+    setPipelineState("ui", "recording");
 
     try {
       await invoke("pipeline_start_recording");
@@ -2110,7 +2220,7 @@ function RecordingControl() {
       try {
         const state = await invoke<string>("pipeline_get_state");
         if (isPipelineState(state)) {
-          setPipelineState(state);
+          setPipelineState("sync", state);
         }
       } catch {
         // If polling fails, we'll still rely on event listeners / interval polling.
@@ -2118,12 +2228,10 @@ function RecordingControl() {
     } catch (error) {
       console.error("[Pipeline] Failed to start recording:", error);
       const errorInfo = parseError(error);
-      setLastError(errorInfo);
-      setLastErrorDetail(String(error));
-
-      setPipelineState("error");
+      setError(errorInfo, String(error), null);
+      setPipelineState("ui", "error");
     }
-  }, [pipelineState]);
+  }, [clearError, pipelineState, setError, setPipelineState]);
 
   // Stop recording and transcribe
   const onStopRecording = useCallback(async () => {
@@ -2147,7 +2255,7 @@ function RecordingControl() {
 
       // UX: once the user stops, always show "transcribing" (even if the backend
       // ends up short-circuiting due to quiet-audio gating).
-      setPipelineState("transcribing");
+      setPipelineState("ui", "transcribing");
 
       const transcript = await invoke<string>("pipeline_stop_and_transcribe");
 
@@ -2158,33 +2266,36 @@ function RecordingControl() {
         } catch (error) {
           console.error("[Pipeline] Failed to type text:", error);
           const errorInfo = parseError(error);
-          setLastError(errorInfo);
-          setLastErrorDetail(String(error));
+          setError(errorInfo, String(error), null);
         }
       }
 
-      setPipelineState("idle");
-      setLastError(null);
-      setLastErrorDetail(null);
-      setLastFailedRequestId(null);
+      setPipelineState("ui", "idle");
+      clearError();
       setSessionPresetId(null);
     } catch (error) {
       console.error("[Pipeline] Failed to stop and transcribe:", error);
-      setPipelineState("error");
+      setPipelineState("ui", "error");
 
       // Show error to user
       const errorInfo = parseError(error);
-      setLastError(errorInfo);
-      setLastErrorDetail(String(error));
+      setError(errorInfo, String(error), null);
     }
-  }, [activeProfileId, pipelineState, sessionPresetId, typeTextMutation]);
+  }, [
+    activeProfileId,
+    clearError,
+    pipelineState,
+    sessionPresetId,
+    setError,
+    setPipelineState,
+    typeTextMutation,
+  ]);
 
   const onRetry = useCallback(async () => {
     if (!lastFailedRequestId) return;
     try {
-      setPipelineState("transcribing");
-      setLastError(null);
-      setLastErrorDetail(null);
+      setPipelineState("ui", "transcribing");
+      clearError();
 
       // Best-effort: apply session lock to retry too.
       try {
@@ -2208,21 +2319,27 @@ function RecordingControl() {
           await typeTextMutation.mutateAsync(transcript);
         } catch (error) {
           console.error("[Pipeline] Failed to type retry transcript:", error);
-          setLastError(parseError(error));
-          setLastErrorDetail(String(error));
+          setError(parseError(error), String(error), null);
         }
       }
 
-      setPipelineState("idle");
-      setLastFailedRequestId(null);
+      setPipelineState("ui", "idle");
+      clearError();
       setSessionPresetId(null);
     } catch (error) {
       console.error("[Pipeline] Retry failed:", error);
-      setPipelineState("error");
-      setLastError(parseError(error));
-      setLastErrorDetail(String(error));
+      setPipelineState("ui", "error");
+      setError(parseError(error), String(error), null);
     }
-  }, [activeProfileId, lastFailedRequestId, sessionPresetId, typeTextMutation]);
+  }, [
+    activeProfileId,
+    clearError,
+    lastFailedRequestId,
+    sessionPresetId,
+    setError,
+    setPipelineState,
+    typeTextMutation,
+  ]);
 
   // Hotkey event listeners
   // Listen for recording state changes from shortcuts (Rust handles the actual recording)
@@ -2235,10 +2352,8 @@ function RecordingControl() {
       unlistenStart = await tauriAPI.onStartRecording(() => {
         // Hotkey events can arrive slightly before the overlay receives any other
         // pipeline events; still show "REC" immediately to match actual capture.
-        setLastError(null);
-        setLastErrorDetail(null);
-        setLastFailedRequestId(null);
-        setPipelineState("recording");
+        clearError();
+        setPipelineState("hotkey", "recording");
 
         // In recording_only mode the backend may have just shown the window while the
         // overlay UI is still in the pre-show "enter" animation state (opacity 0)
@@ -2251,7 +2366,7 @@ function RecordingControl() {
       });
       unlistenStop = await tauriAPI.onStopRecording(() => {
         // UX: once the user stops, always show "transcribing".
-        setPipelineState("transcribing");
+        setPipelineState("hotkey", "transcribing");
       });
     };
 
@@ -2261,7 +2376,12 @@ function RecordingControl() {
       unlistenStart?.();
       unlistenStop?.();
     };
-  }, []);
+  }, [
+    clearError,
+    markOverlayShownForHoverGating,
+    setAnimState,
+    setPipelineState,
+  ]);
 
   // Listen for pipeline events from Rust
   useEffect(() => {
@@ -2273,26 +2393,22 @@ function RecordingControl() {
         await listen<string>("pipeline-state-changed", (event) => {
           const next = (event.payload ?? "").toString();
           if (isPipelineState(next)) {
-            setPipelineState(next);
+            setPipelineState("event", next);
           }
         })
       );
 
       unlisteners.push(
         await listen("pipeline-cancelled", () => {
-          setPipelineState("idle");
-          setLastError(null);
-          setLastErrorDetail(null);
-          setLastFailedRequestId(null);
+          setPipelineState("event", "idle");
+          clearError();
         })
       );
 
       unlisteners.push(
         await listen("pipeline-reset", () => {
-          setPipelineState("idle");
-          setLastError(null);
-          setLastErrorDetail(null);
-          setLastFailedRequestId(null);
+          setPipelineState("event", "idle");
+          clearError();
         })
       );
 
@@ -2300,22 +2416,22 @@ function RecordingControl() {
       unlisteners.push(
         await listen<PipelineErrorPayload>("pipeline-error", (event) => {
           console.error("[Pipeline] Error from Rust:", event.payload);
-          setPipelineState("error");
+          setPipelineState("event", "error");
 
           const errorInfo = parseError(event.payload?.message);
-          setLastError(errorInfo);
-          setLastErrorDetail(event.payload?.message ?? null);
-          setLastFailedRequestId(event.payload?.request_id ?? null);
+          setError(
+            errorInfo,
+            event.payload?.message ?? null,
+            event.payload?.request_id ?? null
+          );
         })
       );
 
       // Listen for successful transcription (from hotkey-triggered recordings)
       unlisteners.push(
         await listen<string>("pipeline-transcript-ready", () => {
-          setPipelineState("idle");
-          setLastError(null);
-          setLastErrorDetail(null);
-          setLastFailedRequestId(null);
+          setPipelineState("event", "idle");
+          clearError();
         })
       );
     };
@@ -2327,7 +2443,7 @@ function RecordingControl() {
         unlisten();
       }
     };
-  }, []);
+  }, [clearError, setError, setPipelineState]);
 
   // Listen for settings changes from main window
   useEffect(() => {

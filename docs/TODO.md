@@ -21,12 +21,6 @@ Legend:
 
 ## P1 — Performance & responsiveness
 
-### Avoid per-callback heap allocations in audio callbacks (done)
-
-- **Where:** `app/src-tauri/src/audio_capture.rs`
-- **Previous problem:** CPAL callback paths for i16/u16 allocated `Vec<f32>` per callback, and VAD handoff allocated `Vec<f32>` chunks.
-- **Current state:** callbacks reuse preallocated conversion scratch buffers, and VAD handoff uses a small `Vec<f32>` pool so steady-state capture avoids heap allocation.
-
 ### Move audio processing off the realtime callback
 
 - **Where:** `app/src-tauri/src/audio_capture.rs`
@@ -35,12 +29,6 @@ Legend:
   - Introduce a ring buffer + worker thread so the CPAL callback only enqueues samples.
   - Do buffer append / pre-roll maintenance / VAD feeding on the worker thread.
 
-### Replace `AudioBuffer` front-drain trimming with a ring buffer (done)
-
-- **Where:** `app/src-tauri/src/audio_capture.rs` (`AudioBuffer::append`)
-- **Previous problem:** draining from the front could be O(n) and expensive for long recordings.
-- **Current state:** `AudioBuffer` is now a fixed-capacity ring buffer that overwrites the oldest samples in O(1).
-
 ### Unify overlay pipeline state sources (hotkey + events + polling)
 
 - **Where:** `app/src/OverlayApp.tsx`
@@ -48,8 +36,9 @@ Legend:
   - interval polling (`pipeline_get_state`)
   - hotkey events (`recording-start` / `recording-stop`)
   - pipeline events (`pipeline-*`)
-- **Todo:**
-  - Introduce a reducer/state-machine for UI state so transitions are consistent.
+- **Current state:** overlay now routes pipeline state + animation state through a small reducer, and treats polling as a backstop with a short suppression window after event/hotkey/UI updates (reduces flicker/races).
+- **Todo (optional follow-up):**
+  - Extract the reducer into a dedicated hook (`useOverlayUiReducer`) and add a transition table comment/tests for tricky cases.
 
 ### Improve stats aggregation performance
 
@@ -58,12 +47,6 @@ Legend:
 - **Current state:** stats queries are now cached in-memory and invalidated whenever a new cost event is appended.
 - **Todo (optional follow-up):**
   - Add an on-disk incremental index (for instant stats even after restart) and a “rebuild index” path if shards are corrupted.
-
-### Reduce fsync/flush overhead for stats writes (done)
-
-- **Where:** `app/src-tauri/src/stats.rs`
-- **Previous problem:** `StatsStore::append_cost_event` opened a file + created a writer + flushed on every event.
-- **Current state:** the stats shard file is kept open with a buffered writer and is flushed once per request (after all cost events are appended), reducing overhead while keeping the UI reads fresh.
 
 ---
 
