@@ -16,30 +16,6 @@ Legend:
 
 (fixed)
 
-### Make VAD sample rate + frame duration handling consistent
-
-- **Where:** `app/src-tauri/src/vad.rs`, `app/src-tauri/src/settings.rs`
-- **Problem:** `VadConfig` contains `sample_rate`, but `VoiceActivityDetector::new()` always sets WebRTC VAD to 16kHz and `frame_size()` assumes 16kHz. Also `frame_duration_ms` isn’t validated (WebRTC VAD only supports 10/20/30ms).
-- **Todo:**
-  - Either remove `sample_rate` from `VadConfig` (if 16kHz is always the design), or correctly support the full WebRTC VAD sample rate set.
-  - Validate/normalize `frame_duration_ms` to 10/20/30.
-
-### Prevent audio-capture stop from potentially hanging
-
-- **Where:** `app/src-tauri/src/audio_capture.rs`
-- **Problem:** `AudioCapture::stop()` comments “with timeout” but does an unconditional `join()`; if a driver callback deadlocks, shutdown could hang the app.
-- **Todo:**
-  - Implement a real timeout strategy (e.g., cooperative shutdown + join with a max wait; log + detach if exceeded).
-
-### Clipboard/paste injection: make clipboard restoration fail-safe
-
-- **Where:** `app/src-tauri/src/commands/text.rs`
-- **Problem:** paste modes do best-effort clipboard restore. If clipboard access fails mid-flight, user clipboard may be left overwritten.
-- **Todo:**
-  - Use a guard pattern (RAII) to attempt restore in all paths.
-  - Add a “privacy mode” option: never read prior clipboard (don’t restore), avoiding sensitive clipboard reads.
-  - Improve UI error messaging and remediation tips per OS.
-
 ---
 
 ## P1 — Security & privacy hardening

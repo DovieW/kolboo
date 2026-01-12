@@ -261,6 +261,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("main_window_close_behavior", json!("minimize_to_tray"), false);
     dirty |= set_default("output_mode", json!("paste"), false);
     dirty |= set_default("output_hit_enter", json!(false), false);
+    // When true, output injection will not read the clipboard and will not attempt to restore it.
+    // This reduces accidental exposure of clipboard contents at the cost of leaving output text
+    // on the clipboard after paste.
+    dirty |= set_default("output_clipboard_privacy_mode", json!(false), false);
     dirty |= set_default("playing_audio_handling", json!("none"), false);
     dirty |= set_default("sound_enabled", json!(true), false);
     dirty |= set_default("rewrite_llm_enabled", json!(false), false);
@@ -578,9 +582,15 @@ fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &str) {
         let output_mode_str: String = get_setting_from_store(&app, "output_mode", "paste".to_string());
         let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
         let output_hit_enter: bool = get_setting_from_store(&app, "output_hit_enter", false);
+        let output_clipboard_privacy_mode: bool =
+            get_setting_from_store(&app, "output_clipboard_privacy_mode", false);
 
-        if let Err(e) = commands::text::output_text_with_mode(&text, output_mode, output_hit_enter)
-        {
+        if let Err(e) = commands::text::output_text_with_mode_options(
+            &text,
+            output_mode,
+            output_hit_enter,
+            !output_clipboard_privacy_mode,
+        ) {
             log::error!("{source}: failed to output retry transcript: {}", e);
         }
     });
@@ -2415,10 +2425,17 @@ fn stop_recording(
                                 let _ = app_clone.emit("pipeline-error", payload);
                             } else {
                                 // Output using the selected output mode.
-                                if let Err(e) = commands::text::output_text_with_mode(
+                                let output_clipboard_privacy_mode: bool = get_setting_from_store(
+                                    &app_clone,
+                                    "output_clipboard_privacy_mode",
+                                    false,
+                                );
+
+                                if let Err(e) = commands::text::output_text_with_mode_options(
                                     &output_value,
                                     output_mode,
                                     output_hit_enter,
+                                    !output_clipboard_privacy_mode,
                                 ) {
                                     log::error!("Failed to output transcript: {}", e);
 
@@ -3144,12 +3161,19 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                     let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
 
                     let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
+                    let output_clipboard_privacy_mode: bool =
+                        get_setting_from_store(app, "output_clipboard_privacy_mode", false);
 
                     let history_storage = app.state::<HistoryStorage>();
 
                     if let Ok(entries) = history_storage.get_all(Some(1)) {
                         if let Some(entry) = entries.first() {
-                            if let Err(e) = commands::text::output_text_with_mode(&entry.text, output_mode, output_hit_enter) {
+                            if let Err(e) = commands::text::output_text_with_mode_options(
+                                &entry.text,
+                                output_mode,
+                                output_hit_enter,
+                                !output_clipboard_privacy_mode,
+                            ) {
                                 log::error!("Failed to output last transcription: {}", e);
                             }
                         } else {
@@ -4259,15 +4283,18 @@ pub(crate) fn handle_modifier_key_event(
             get_setting_from_store(app, "output_mode", "paste".to_string());
         let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
         let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
+        let output_clipboard_privacy_mode: bool =
+            get_setting_from_store(app, "output_clipboard_privacy_mode", false);
 
         let history_storage = app.state::<HistoryStorage>();
 
         if let Ok(entries) = history_storage.get_all(Some(1)) {
             if let Some(entry) = entries.first() {
-                if let Err(e) = commands::text::output_text_with_mode(
+                if let Err(e) = commands::text::output_text_with_mode_options(
                     &entry.text,
                     output_mode,
                     output_hit_enter,
+                    !output_clipboard_privacy_mode,
                 ) {
                     log::error!("Failed to output last transcription: {}", e);
                 }

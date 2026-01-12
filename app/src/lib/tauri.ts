@@ -784,6 +784,8 @@ export interface AppSettings {
   widget_position: WidgetPosition;
   output_mode: OutputMode;
   output_hit_enter: boolean;
+  // When true, output injection will not read/restore the clipboard.
+  output_clipboard_privacy_mode: boolean;
 
   /** What the window close button does for the main/settings window. */
   main_window_close_behavior: MainWindowCloseBehavior;
@@ -1817,6 +1819,8 @@ export const tauriAPI = {
         (await store.get<WidgetPosition>("widget_position")) ?? "bottom-center",
       output_mode: normalizeOutputMode(await store.get("output_mode")),
       output_hit_enter: (await store.get<boolean>("output_hit_enter")) ?? false,
+      output_clipboard_privacy_mode:
+        (await store.get<boolean>("output_clipboard_privacy_mode")) ?? false,
 
       main_window_close_behavior: normalizeMainWindowCloseBehavior(
         await store.get("main_window_close_behavior")

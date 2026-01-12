@@ -271,14 +271,85 @@ pub async fn type_text(app: AppHandle, text: String) -> Result<(), String> {
 
 /// Output text based on the specified mode
 pub fn output_text_with_mode(text: &str, mode: OutputMode, hit_enter: bool) -> Result<(), String> {
+    output_text_with_mode_options(text, mode, hit_enter, true)
+}
+
+/// Output text with explicit control over whether we read/restore the previous clipboard.
+///
+/// - When `preserve_clipboard` is true, Paste mode will save+restore the previous *text* clipboard
+///   value when safe.
+/// - When false, Paste mode will never read the clipboard and will not attempt any restore.
+pub fn output_text_with_mode_options(
+    text: &str,
+    mode: OutputMode,
+    hit_enter: bool,
+    preserve_clipboard: bool,
+) -> Result<(), String> {
     let _guard = output_injection_lock()
         .lock()
         .map_err(|_| "Output lock poisoned".to_string())?;
 
     match mode {
-        OutputMode::Paste => type_text_blocking(text, hit_enter),
+        OutputMode::Paste => type_text_blocking_with_options(text, hit_enter, preserve_clipboard),
         OutputMode::PasteAndClipboard => paste_and_keep_clipboard(text, hit_enter),
         OutputMode::Clipboard => copy_to_clipboard(text),
+    }
+}
+
+struct ClipboardRestoreGuard {
+    enabled: bool,
+    previous: Option<String>,
+    injected: String,
+    paste_sent: bool,
+}
+
+impl ClipboardRestoreGuard {
+    fn new(previous: Option<String>, injected: &str, enabled: bool) -> Self {
+        Self {
+            enabled,
+            previous,
+            injected: injected.to_string(),
+            paste_sent: false,
+        }
+    }
+
+    fn mark_paste_sent(&mut self) {
+        self.paste_sent = true;
+    }
+}
+
+impl Drop for ClipboardRestoreGuard {
+    fn drop(&mut self) {
+        if !self.enabled {
+            return;
+        }
+
+        let Some(previous) = self.previous.as_ref() else {
+            // If we didn't capture previous text, do not overwrite a non-text clipboard.
+            return;
+        };
+
+        // If we actually attempted to paste, give the target app time to fetch clipboard
+        // contents (lazy paste). Then apply the normal restore delay.
+        if self.paste_sent {
+            thread::sleep(Duration::from_millis(CLIPBOARD_POST_PASTE_DELAY_MS));
+        }
+        thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS));
+
+        let Ok(mut clipboard) = Clipboard::new() else {
+            return;
+        };
+
+        // Only restore if the clipboard still contains our injected text.
+        let should_restore = clipboard
+            .get_text()
+            .ok()
+            .is_some_and(|current| current == self.injected);
+
+        if should_restore {
+            // Avoid creating a duplicate clipboard-history entry for the restored content.
+            let _ = set_clipboard_text_platform(&mut clipboard, previous, true);
+        }
     }
 }
 
@@ -354,11 +425,26 @@ pub fn type_as_keystrokes(_text: &str) -> Result<(), String> {
 
 /// Type text using clipboard and paste. Used internally by shortcut handlers.
 pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
+    type_text_blocking_with_options(text, hit_enter, true)
+}
+
+pub fn type_text_blocking_with_options(
+    text: &str,
+    hit_enter: bool,
+    preserve_clipboard: bool,
+) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
     // Save previous clipboard content (text only). If the previous clipboard isn't text,
     // don't try to "restore" it as an empty string.
-    let previous: Option<String> = clipboard.get_text().ok();
+    let previous: Option<String> = if preserve_clipboard {
+        clipboard.get_text().ok()
+    } else {
+        None
+    };
+
+    // RAII restore guard so errors/early-returns still attempt to restore when safe.
+    let mut restore_guard = ClipboardRestoreGuard::new(previous, text, preserve_clipboard);
 
     // Set new text and wait for it to become visible to readers (best-effort).
     // In the default "Paste" mode, we restore the clipboard afterwards, so on Windows we also
@@ -404,33 +490,9 @@ pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
     release_common_modifiers_best_effort(&mut enigo);
     result?;
 
+    restore_guard.mark_paste_sent();
+
     maybe_hit_enter(&mut enigo, hit_enter)?;
-
-    // Give the target app time to fetch clipboard contents after the paste shortcut.
-    // (Some apps fetch lazily, and restoring too soon causes the *previous* clipboard to paste.)
-    thread::sleep(Duration::from_millis(CLIPBOARD_POST_PASTE_DELAY_MS));
-
-    // Restore previous clipboard after a delay
-    thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS));
-
-    // Only restore if:
-    // 1) we actually captured a previous text value, and
-    // 2) the clipboard still contains our injected text (avoid clobbering user changes).
-    if let Some(previous) = previous {
-        let should_restore = clipboard
-            .get_text()
-            .ok()
-            .is_some_and(|current| current == text);
-
-        if should_restore {
-            // Avoid creating a duplicate clipboard-history entry for the restored content.
-            let _ = set_clipboard_text_platform(&mut clipboard, &previous, true);
-        } else {
-            log::debug!("Clipboard restore skipped (clipboard changed after paste)");
-        }
-    } else {
-        log::debug!("Clipboard restore skipped (previous clipboard was not text)");
-    }
 
     Ok(())
 }
