@@ -9,6 +9,7 @@ use crate::vad::{VadConfig, VadEvent, VadFrameProcessor};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
+use crossbeam_queue::ArrayQueue;
 use hound::{WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -134,9 +135,40 @@ fn downmix_interleaved_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
     mono
 }
 
-fn downmix_interleaved_chunk_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
-    // Same as full downmix, but kept separate for clarity.
-    downmix_interleaved_to_mono(samples, channels)
+fn downmix_interleaved_chunk_to_mono_into(samples: &[f32], channels: usize, out: &mut Vec<f32>) {
+    let channels = channels.max(1);
+    out.clear();
+    if samples.is_empty() {
+        return;
+    }
+
+    if channels == 1 {
+        out.extend_from_slice(samples);
+        return;
+    }
+
+    let frames = samples.len() / channels;
+    // Note: we rely on callers to provision sufficient capacity to avoid allocations.
+    // This reserve is a no-op in the common case; it only allocates if capacity is too small.
+    out.reserve(frames);
+    for frame_idx in 0..frames {
+        let base = frame_idx * channels;
+        let mut sum = 0.0_f32;
+        for c in 0..channels {
+            sum += samples[base + c];
+        }
+        out.push(sum / channels as f32);
+    }
+}
+
+fn estimate_callback_interleaved_capacity(config: &cpal::StreamConfig, channels: usize) -> usize {
+    // CPAL often uses a stable callback size, but it can vary.
+    // We preallocate a reasonable default to avoid per-callback growth.
+    let frames = match config.buffer_size {
+        cpal::BufferSize::Fixed(n) => n as usize,
+        cpal::BufferSize::Default => 2048,
+    };
+    frames.saturating_mul(channels.max(1))
 }
 
 fn apply_highpass_dc_block(samples: &mut [f32], sample_rate: u32) {
@@ -1502,21 +1534,38 @@ fn run_capture_thread(
         log::error!("Audio stream error: {}", err);
     };
 
-    // Create a channel for passing samples to the VAD processing thread
-    let (vad_samples_tx, vad_samples_rx): (mpsc::Sender<Vec<f32>>, mpsc::Receiver<Vec<f32>>) =
-        mpsc::channel();
+    // Channel + pool for passing samples to the VAD processing thread.
+    // The pool avoids per-callback allocations; the callback takes a Vec from the pool,
+    // fills it with mono f32, and the VAD thread returns it to the pool after processing.
+    let (vad_samples_tx, vad_samples_rx): (mpsc::Sender<Vec<f32>>, mpsc::Receiver<Vec<f32>>) = mpsc::channel();
+    let vad_pool: Option<Arc<ArrayQueue<Vec<f32>>>> = if vad_config.enabled {
+        const VAD_POOL_SIZE: usize = 8;
+
+        // VAD input is mono, but we provision capacity based on the interleaved callback size
+        // to conservatively avoid resizing when channels > 1.
+        let cap = estimate_callback_interleaved_capacity(&config, config.channels as usize);
+        let pool = Arc::new(ArrayQueue::new(VAD_POOL_SIZE));
+        for _ in 0..VAD_POOL_SIZE {
+            // Preallocate buffers; actual length is set in the callback.
+            let _ = pool.push(Vec::with_capacity(cap));
+        }
+        Some(pool)
+    } else {
+        None
+    };
 
     // Spawn a separate thread for VAD processing (since webrtc-vad is not Send)
     let vad_handle = if vad_config.enabled {
         let event_tx_clone = event_tx.clone();
         let vad_cfg = vad_config.vad_config.clone();
+        let pool = vad_pool.clone();
         Some(thread::spawn(move || {
             let mut processor = VadFrameProcessor::new(vad_cfg, sample_rate);
             log::info!("VAD processor initialized for {} Hz audio in dedicated thread", sample_rate);
 
             loop {
                 match vad_samples_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                    Ok(samples) => {
+                    Ok(mut samples) => {
                         for event in processor.process(&samples) {
                             let capture_event = match event {
                                 VadEvent::SpeechStart { .. } => AudioCaptureEvent::SpeechStart,
@@ -1524,6 +1573,12 @@ fn run_capture_thread(
                                 VadEvent::None => continue,
                             };
                             let _ = event_tx_clone.send(capture_event);
+                        }
+
+                        // Return the buffer to the pool for reuse.
+                        samples.clear();
+                        if let Some(ref pool) = pool {
+                            let _ = pool.push(samples);
                         }
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -1536,6 +1591,8 @@ fn run_capture_thread(
     };
 
     let build_stream = |device: &cpal::Device| -> Result<cpal::Stream, AudioCaptureError> {
+        use std::cell::RefCell;
+
         let buffer = buffer.clone();
         let pre_roll = pre_roll.clone();
         let recording_active = recording_active.clone();
@@ -1548,8 +1605,11 @@ fn run_capture_thread(
         } else {
             None
         };
+        let vad_pool = vad_pool.clone();
         let channels = config.channels as usize;
         let start_cb = start;
+
+        let scratch_capacity = estimate_callback_interleaved_capacity(&config, channels);
 
         match sample_format {
             SampleFormat::F32 => device
@@ -1586,12 +1646,15 @@ fn run_capture_thread(
                             }
 
                             if let Some(ref tx) = vad_tx {
-                                let mono = if channels > 1 {
-                                    downmix_interleaved_chunk_to_mono(data, channels)
-                                } else {
-                                    data.to_vec()
-                                };
-                                let _ = tx.send(mono);
+                                if let Some(ref pool) = vad_pool {
+                                    if let Some(mut mono) = pool.pop() {
+                                        downmix_interleaved_chunk_to_mono_into(data, channels, &mut mono);
+                                        if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
+                                            mono.clear();
+                                            let _ = pool.push(mono);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -1602,47 +1665,52 @@ fn run_capture_thread(
                     err_fn,
                     None,
                 ),
-            SampleFormat::I16 => device
-                .build_input_stream(
+            SampleFormat::I16 => {
+                let scratch = RefCell::new(Vec::<f32>::with_capacity(scratch_capacity));
+                device.build_input_stream(
                     &config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
 
                         let mut peak: f32 = 0.0;
                         let mut sum_sq: f64 = 0.0;
-                        let samples: Vec<f32> = data
-                            .iter()
-                            .map(|&s| {
-                                let f = s.to_float_sample();
-                                let a = f.abs();
-                                if a > peak {
-                                    peak = a;
-                                }
-                                sum_sq += (f as f64) * (f as f64);
-                                f
-                            })
-                            .collect();
+
+                        let mut samples = scratch.borrow_mut();
+                        samples.clear();
+                        for &s in data {
+                            let f = s.to_float_sample();
+                            let a = f.abs();
+                            if a > peak {
+                                peak = a;
+                            }
+                            sum_sq += (f as f64) * (f as f64);
+                            samples.push(f);
+                        }
+
                         let n = samples.len() as u64;
                         let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
                         meter.update(rms, peak);
-                        waveform_meter.update_from_f32_interleaved(&samples, channels);
+                        waveform_meter.update_from_f32_interleaved(samples.as_slice(), channels);
 
                         if let Ok(mut pr) = pre_roll.lock() {
-                            pr.push(&samples);
+                            pr.push(samples.as_slice());
                         }
 
                         if recording_active.load(Ordering::Relaxed) {
                             if let Ok(mut buf) = buffer.lock() {
-                                buf.append(&samples);
+                                buf.append(samples.as_slice());
                             }
 
                             if let Some(ref tx) = vad_tx {
-                                let mono = if channels > 1 {
-                                    downmix_interleaved_chunk_to_mono(&samples, channels)
-                                } else {
-                                    samples
-                                };
-                                let _ = tx.send(mono);
+                                if let Some(ref pool) = vad_pool {
+                                    if let Some(mut mono) = pool.pop() {
+                                        downmix_interleaved_chunk_to_mono_into(samples.as_slice(), channels, &mut mono);
+                                        if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
+                                            mono.clear();
+                                            let _ = pool.push(mono);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -1650,48 +1718,54 @@ fn run_capture_thread(
                     },
                     err_fn,
                     None,
-                ),
-            SampleFormat::U16 => device
-                .build_input_stream(
+                )
+            }
+            SampleFormat::U16 => {
+                let scratch = RefCell::new(Vec::<f32>::with_capacity(scratch_capacity));
+                device.build_input_stream(
                     &config,
                     move |data: &[u16], _: &cpal::InputCallbackInfo| {
                         last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
 
                         let mut peak: f32 = 0.0;
                         let mut sum_sq: f64 = 0.0;
-                        let samples: Vec<f32> = data
-                            .iter()
-                            .map(|&s| {
-                                let f = s.to_float_sample();
-                                let a = f.abs();
-                                if a > peak {
-                                    peak = a;
-                                }
-                                sum_sq += (f as f64) * (f as f64);
-                                f
-                            })
-                            .collect();
+
+                        let mut samples = scratch.borrow_mut();
+                        samples.clear();
+                        for &s in data {
+                            let f = s.to_float_sample();
+                            let a = f.abs();
+                            if a > peak {
+                                peak = a;
+                            }
+                            sum_sq += (f as f64) * (f as f64);
+                            samples.push(f);
+                        }
+
                         let n = samples.len() as u64;
                         let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
                         meter.update(rms, peak);
-                        waveform_meter.update_from_f32_interleaved(&samples, channels);
+                        waveform_meter.update_from_f32_interleaved(samples.as_slice(), channels);
 
                         if let Ok(mut pr) = pre_roll.lock() {
-                            pr.push(&samples);
+                            pr.push(samples.as_slice());
                         }
 
                         if recording_active.load(Ordering::Relaxed) {
                             if let Ok(mut buf) = buffer.lock() {
-                                buf.append(&samples);
+                                buf.append(samples.as_slice());
                             }
 
                             if let Some(ref tx) = vad_tx {
-                                let mono = if channels > 1 {
-                                    downmix_interleaved_chunk_to_mono(&samples, channels)
-                                } else {
-                                    samples
-                                };
-                                let _ = tx.send(mono);
+                                if let Some(ref pool) = vad_pool {
+                                    if let Some(mut mono) = pool.pop() {
+                                        downmix_interleaved_chunk_to_mono_into(samples.as_slice(), channels, &mut mono);
+                                        if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
+                                            mono.clear();
+                                            let _ = pool.push(mono);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -1699,7 +1773,8 @@ fn run_capture_thread(
                     },
                     err_fn,
                     None,
-                ),
+                )
+            }
             _ => {
                 return Err(AudioCaptureError::DeviceConfig(format!(
                     "Unsupported sample format: {:?}",

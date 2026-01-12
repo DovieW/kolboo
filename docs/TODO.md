@@ -21,13 +21,19 @@ Legend:
 
 ## P1 — Performance & responsiveness
 
-### Avoid allocations in real-time audio callbacks
+### Avoid per-callback heap allocations in audio callbacks (done)
 
 - **Where:** `app/src-tauri/src/audio_capture.rs`
-- **Problem:** CPAL callback paths for i16/u16 allocate `Vec<f32>` per callback, and VAD sends freshly allocated `Vec<f32>` chunks via channel.
+- **Previous problem:** CPAL callback paths for i16/u16 allocated `Vec<f32>` per callback, and VAD handoff allocated `Vec<f32>` chunks.
+- **Current state:** callbacks reuse preallocated conversion scratch buffers, and VAD handoff uses a small `Vec<f32>` pool so steady-state capture avoids heap allocation.
+
+### Move audio processing off the realtime callback
+
+- **Where:** `app/src-tauri/src/audio_capture.rs`
+- **Problem:** callback still does non-trivial work (format conversion/downmix) and takes mutex locks (`buffer`, `pre_roll`).
 - **Todo:**
-  - Move format conversion and VAD chunking off the realtime callback (ring buffer + worker thread).
-  - Avoid per-callback heap allocations; preallocate buffers or use chunk pools.
+  - Introduce a ring buffer + worker thread so the CPAL callback only enqueues samples.
+  - Do buffer append / pre-roll maintenance / VAD feeding on the worker thread.
 
 ### Replace `AudioBuffer` front-drain trimming with a ring buffer
 

@@ -91,6 +91,9 @@ base64 = "0.22"
 # Async utilities
 async-trait = "0.1"
 
+# Lock-free queues (used to avoid allocations in realtime audio callbacks)
+crossbeam-queue = "0.3"
+
 # Error handling
 thiserror = "2.0"
 
