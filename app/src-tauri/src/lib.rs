@@ -20,6 +20,7 @@ mod network;
 mod pipeline;
 mod recordings;
 mod request_log;
+mod secrets;
 mod router_embeddings_cache;
 mod settings;
 mod shortcuts_lock;
@@ -453,6 +454,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
             log::warn!("Failed to save seeded default settings: {}", e);
         }
     }
+
+    // Best-effort: migrate legacy plaintext API keys out of `settings.json`.
+    // This runs on startup (after the store exists), and deletes the store copy
+    // only after the key was written to secure storage.
+    let _ = crate::secrets::migrate_api_keys_from_store(app);
 
     Ok(())
 }
@@ -3466,6 +3472,11 @@ pub fn run() {
             commands::data::delete_all_stats,
             commands::data::get_data_storage_summary,
             commands::data::delete_all_data,
+            // Secure secrets (API keys)
+            commands::secrets::secrets_has_api_key,
+            commands::secrets::secrets_get_api_key,
+            commands::secrets::secrets_set_api_key,
+            commands::secrets::secrets_clear_api_key,
             // Config commands (replacing Python server)
             commands::config::get_default_sections,
             commands::config::get_available_providers,
@@ -4658,7 +4669,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         "deepgram",
     ] {
         let key_name = format!("{}_api_key", provider);
-        let key: String = get_setting_from_store(app, &key_name, String::new());
+        let key: String = crate::secrets::get_api_key(app, &key_name).unwrap_or_default();
         if !key.is_empty() {
             stt_api_keys.insert(provider.to_string(), key);
         }
@@ -4666,14 +4677,14 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     // Get the appropriate API key based on provider
     let stt_api_key: String = match stt_provider.as_str() {
-        "openai" => get_setting_from_store(app, "openai_api_key", String::new()),
-        "fireworks" => get_setting_from_store(app, "fireworks_api_key", String::new()),
-        "aquavoice" => get_setting_from_store(app, "aquavoice_api_key", String::new()),
-        "groq" => get_setting_from_store(app, "groq_api_key", String::new()),
-        "elevenlabs" => get_setting_from_store(app, "elevenlabs_api_key", String::new()),
-        "assemblyai" => get_setting_from_store(app, "assemblyai_api_key", String::new()),
-        "speechmatics" => get_setting_from_store(app, "speechmatics_api_key", String::new()),
-        "deepgram" => get_setting_from_store(app, "deepgram_api_key", String::new()),
+        "openai" => crate::secrets::get_api_key(app, "openai_api_key").unwrap_or_default(),
+        "fireworks" => crate::secrets::get_api_key(app, "fireworks_api_key").unwrap_or_default(),
+        "aquavoice" => crate::secrets::get_api_key(app, "aquavoice_api_key").unwrap_or_default(),
+        "groq" => crate::secrets::get_api_key(app, "groq_api_key").unwrap_or_default(),
+        "elevenlabs" => crate::secrets::get_api_key(app, "elevenlabs_api_key").unwrap_or_default(),
+        "assemblyai" => crate::secrets::get_api_key(app, "assemblyai_api_key").unwrap_or_default(),
+        "speechmatics" => crate::secrets::get_api_key(app, "speechmatics_api_key").unwrap_or_default(),
+        "deepgram" => crate::secrets::get_api_key(app, "deepgram_api_key").unwrap_or_default(),
         _ => String::new(),
     };
 
@@ -4832,7 +4843,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         .as_deref()
         .map(|provider| {
             let key_name = format!("{}_api_key", provider);
-            get_setting_from_store(app, &key_name, String::new())
+            crate::secrets::get_api_key(app, &key_name).unwrap_or_default()
         })
         .unwrap_or_default();
 
@@ -4852,7 +4863,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         "cerebras",
     ] {
         let key_name = format!("{}_api_key", provider);
-        let key: String = get_setting_from_store(app, &key_name, String::new());
+        let key: String = crate::secrets::get_api_key(app, &key_name).unwrap_or_default();
         if !key.is_empty() {
             llm_api_keys.insert(provider.to_string(), key);
         }

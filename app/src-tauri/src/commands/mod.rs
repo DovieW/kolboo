@@ -9,6 +9,7 @@ pub mod overlay;
 pub mod pricing;
 pub mod recording;
 pub mod router;
+pub mod secrets;
 pub mod settings;
 pub mod fireworks;
 pub mod ollama;

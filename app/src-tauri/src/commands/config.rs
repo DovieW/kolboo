@@ -157,11 +157,13 @@ fn has_nonempty_setting(app: &AppHandle, key: &str) -> bool {
 /// Helper to check if an API key is configured in the store
 #[cfg(desktop)]
 fn has_api_key(app: &AppHandle, key: &str) -> bool {
-    app.store("settings.json")
-        .ok()
-        .and_then(|store| store.get(key))
-        .and_then(|v| v.as_str().map(|s| !s.is_empty()))
-        .unwrap_or(false)
+    crate::secrets::has_api_key(app, key)
+}
+
+/// Helper to read an API key (secure storage first, legacy store fallback).
+#[cfg(desktop)]
+fn get_api_key(app: &AppHandle, key: &str) -> String {
+    crate::secrets::get_api_key(app, key).unwrap_or_default()
 }
 
 /// Get list of available STT and LLM providers (those with API keys configured)
@@ -323,11 +325,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
     // Get the appropriate API key based on provider
     let stt_api_key: String = {
         let key_name = format!("{}_api_key", stt_provider);
-        app.store("settings.json")
-            .ok()
-            .and_then(|store| store.get(&key_name))
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
+        get_api_key(&app, &key_name)
     };
 
     // Read all available STT API keys (for per-profile provider overrides at runtime)
@@ -344,12 +342,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         "deepgram",
     ] {
         let key_name = format!("{}_api_key", provider);
-        let key: String = app
-            .store("settings.json")
-            .ok()
-            .and_then(|store| store.get(&key_name))
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let key: String = get_api_key(&app, &key_name);
         if !key.is_empty() {
             stt_api_keys.insert(provider.to_string(), key);
         }
@@ -437,11 +430,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .as_deref()
         .map(|provider| {
             let key_name = format!("{}_api_key", provider);
-            app.store("settings.json")
-                .ok()
-                .and_then(|store| store.get(&key_name))
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default()
+            get_api_key(&app, &key_name)
         })
         .unwrap_or_default();
 
@@ -462,12 +451,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         "cerebras",
     ] {
         let key_name = format!("{}_api_key", provider);
-        let key: String = app
-            .store("settings.json")
-            .ok()
-            .and_then(|store| store.get(&key_name))
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let key: String = get_api_key(&app, &key_name);
         if !key.is_empty() {
             llm_api_keys.insert(provider.to_string(), key);
         }

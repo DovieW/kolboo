@@ -2735,27 +2735,20 @@ export const tauriAPI = {
 
   // API Key management
   async hasApiKey(storeKey: string): Promise<boolean> {
-    const store = await getStore();
-    const value = await store.get<string>(storeKey);
-    return value !== null && value !== undefined && value.length > 0;
+    return invoke("secrets_has_api_key", { storeKey });
   },
 
   async getApiKey(storeKey: string): Promise<string | null> {
-    const store = await getStore();
-    const value = await store.get<string>(storeKey);
+    const value = await invoke<string | null>("secrets_get_api_key", { storeKey });
     return value ?? null;
   },
 
   async setApiKey(storeKey: string, apiKey: string): Promise<void> {
-    const store = await getStore();
-    await store.set(storeKey, apiKey);
-    await store.save();
+    await invoke("secrets_set_api_key", { storeKey, apiKey });
   },
 
   async clearApiKey(storeKey: string): Promise<void> {
-    const store = await getStore();
-    await store.delete(storeKey);
-    await store.save();
+    await invoke("secrets_clear_api_key", { storeKey });
   },
 
   // Onboarding / guide state

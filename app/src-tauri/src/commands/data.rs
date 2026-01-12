@@ -14,30 +14,8 @@ use crate::stats::StatsStore;
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
-/// Known API key setting keys stored in `settings.json`.
-///
-/// Keep this in sync with the provider lists in `app/src-tauri/src/commands/config.rs`.
 #[cfg(desktop)]
-const API_KEY_SETTING_KEYS: &[&str] = &[
-    // STT providers
-    "groq_api_key",
-    "elevenlabs_api_key",
-    "openai_api_key",
-    "fireworks_api_key",
-    "aquavoice_api_key",
-    "assemblyai_api_key",
-    "speechmatics_api_key",
-    "deepgram_api_key",
-
-    // LLM providers
-    "cerebras_api_key",
-    "openai_api_key",
-    "fireworks_api_key",
-    "gemini_api_key",
-    "anthropic_api_key",
-    "cohere_api_key",
-    "groq_api_key",
-];
+use crate::secrets::API_KEY_SETTING_KEYS;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DataStorageSummary {
@@ -128,7 +106,21 @@ pub fn get_data_storage_summary(app: AppHandle) -> Result<DataStorageSummary, St
 
     let store = app.store("settings.json").map_err(|e| e.to_string())?;
     let mut api_keys_set_count: u64 = 0;
+    let mut unique_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for key in API_KEY_SETTING_KEYS {
+        if !unique_keys.insert(key) {
+            continue;
+        }
+
+        // Prefer secure storage, but allow legacy store fallback for users who
+        // haven't successfully migrated yet.
+        if crate::secrets::has_api_key(&app, key) {
+            api_keys_set_count = api_keys_set_count.saturating_add(1);
+            continue;
+        }
+
+        // If secure storage isn't available (or migration failed), fall back to
+        // checking the raw store to keep the UI summary accurate.
         let Some(v) = store.get(key) else { continue };
         if let Ok(s) = serde_json::from_value::<String>(v) {
             if !s.trim().is_empty() {
@@ -172,14 +164,14 @@ pub fn get_data_storage_summary(_app: AppHandle) -> Result<DataStorageSummary, S
 #[cfg(desktop)]
 #[tauri::command]
 pub fn delete_all_api_keys(app: AppHandle) -> Result<(), String> {
-    let store = app.store("settings.json").map_err(|e| e.to_string())?;
-
-    // Known provider keys. (Local providers generally don't use API keys.)
+    // Delete from secure storage (and any legacy store copies).
+    let mut unique_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for key in API_KEY_SETTING_KEYS {
-        store.delete(key);
+        if !unique_keys.insert(key) {
+            continue;
+        }
+        let _ = crate::secrets::clear_api_key(&app, key);
     }
-
-    store.save().map_err(|e| e.to_string())?;
 
     // Best-effort: sync pipeline so provider availability updates immediately.
     let _ = crate::commands::config::sync_pipeline_config(app);

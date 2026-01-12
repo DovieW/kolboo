@@ -181,7 +181,7 @@ fn is_probably_llm_model_id(name: &str) -> bool {
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn fireworks_list_models(app: AppHandle) -> Result<Vec<ModelOption>, String> {
-	let api_key: String = crate::get_setting_from_store(&app, "fireworks_api_key", String::new());
+	let api_key: String = crate::secrets::get_api_key(&app, "fireworks_api_key").unwrap_or_default();
 	let api_key_trimmed = api_key.trim();
 	if api_key_trimmed.is_empty() {
 		return Err("No Fireworks API key configured".to_string());

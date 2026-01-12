@@ -17,14 +17,14 @@ Legend:
 - **Todo:**
   - Review whether any directives can be tightened further (e.g. reduce `connect-src` surface) without breaking Tauri/Vite.
 
-### Store API keys in OS secure storage
+### Add export/import settings (exclude secrets by default)
 
-- **Where:** keys currently live in `settings.json` via store usage (e.g., `app/src-tauri/src/commands/data.rs`, `commands/config.rs`).
-- **Problem:** implies plaintext-at-rest in the app data dir.
+- **Where:** settings are stored in `settings.json` via the Tauri store plugin; API keys are now stored separately in OS secure storage (`app/src-tauri/src/secrets.rs`).
+- **Problem:** there’s no first-class backup/restore flow; when added, it must not accidentally include secrets.
 - **Todo:**
-  - Migrate secrets to secure storage (e.g., Tauri Stronghold / OS credential vault).
-  - Add migration: read old keys once, write to secure store, delete from settings.
-  - Add “export/import settings” that defaults to _excluding_ secrets.
+  - Add “Export settings” that writes a sanitized JSON file.
+  - Add “Import settings” with basic schema validation and a preview.
+  - Keep secrets out of export by default; if you ever support exporting secrets, require explicit opt-in.
 
 ---
 
