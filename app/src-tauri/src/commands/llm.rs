@@ -1307,14 +1307,11 @@ pub struct LlmConfigResponse {
     pub prompts: PromptConfigPayload,
 }
 
-/// Helper to get current pipeline config (placeholder - needs proper implementation)
+/// Helper to get the current pipeline config.
 fn get_current_pipeline_config(
-    _pipeline: &State<'_, SharedPipeline>,
+    pipeline: &State<'_, SharedPipeline>,
 ) -> Result<crate::pipeline::PipelineConfig, LlmCommandError> {
-    // Note: The current SharedPipeline doesn't expose config reading
-    // For now, return default config. In a full implementation, we'd
-    // add a get_config() method to SharedPipeline.
-    Ok(crate::pipeline::PipelineConfig::default())
+    Ok(pipeline.config())
 }
 
 #[cfg(test)]

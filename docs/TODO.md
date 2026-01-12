@@ -14,11 +14,7 @@ Legend:
 
 ### Fix the LLM command config path (currently a stub)
 
-- **Where:** `app/src-tauri/src/commands/llm.rs`
-- **Problem:** `get_current_pipeline_config()` returns `PipelineConfig::default()` (explicitly a placeholder). Commands that rely on it (`update_llm_config`, `update_llm_prompts`, `get_llm_config`) can silently read/overwrite the _wrong_ config.
-- **Todo:**
-  - Expose a real read-only getter on `SharedPipeline` (e.g., `config_cloned()`), then replace the placeholder.
-  - Add a regression test ensuring `update_llm_config` does not reset unrelated pipeline config.
+(fixed)
 
 ### Make VAD sample rate + frame duration handling consistent
 
