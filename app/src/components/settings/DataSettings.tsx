@@ -1185,122 +1185,133 @@ export function DataSettings({
             included.
           </p>
         </div>
-        <Group gap={10} align="center" wrap="wrap">
-          <Button
-            variant="outline"
-            size="xs"
-            leftSection={<Upload size={14} />}
-            loading={exportSettingsBackup.isPending}
-            onClick={() => exportSettingsBackup.mutate()}
-          >
-            Export
-          </Button>
-          <Button
-            variant="outline"
-            size="xs"
-            leftSection={<Download size={14} />}
-            loading={importSettingsBackup.isPending}
-            onClick={() => importSettingsBackup.mutate()}
-          >
-            Import
-          </Button>
-        </Group>
+
+        <div
+          className="settings-row-actions"
+          style={{ minWidth: 280, justifyContent: "flex-end" }}
+        >
+          <Group gap="xs" wrap="nowrap" justify="flex-end">
+            <Button
+              variant="default"
+              size="xs"
+              leftSection={<Download size={14} />}
+              loading={exportSettingsBackup.isPending}
+              onClick={() => exportSettingsBackup.mutate()}
+            >
+              Export
+            </Button>
+            <Button
+              variant="default"
+              size="xs"
+              leftSection={<Upload size={14} />}
+              loading={importSettingsBackup.isPending}
+              onClick={() => importSettingsBackup.mutate()}
+            >
+              Import
+            </Button>
+          </Group>
+        </div>
       </div>
 
       <div className="settings-row">
         <div>
           <p className="settings-label">GitHub Gist backup</p>
           <p className="settings-description">
-            Optional: push/pull your settings to a private GitHub Gist. Requires
-            a GitHub token with the <code>gist</code> scope (stored securely).
+            Push/pull your settings to a private GitHub Gist. Requires a GitHub
+            token with the <code>gist</code> scope (stored securely).
           </p>
         </div>
 
-        <Stack gap={8} style={{ width: "min(640px, 100%)" }}>
-          <Group gap={8} align="center" wrap="wrap">
-            <Text size="xs" c="dimmed">
-              Token:{" "}
-              {githubBackupHasToken.isLoading
-                ? "checking"
-                : githubBackupHasToken.data
-                ? "configured"
-                : "not configured"}
-            </Text>
+        <div
+          className="settings-row-actions"
+          style={{ minWidth: 520, justifyContent: "flex-end" }}
+        >
+          <Stack gap={8} style={{ width: "min(640px, 100%)" }}>
+            <Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
+              <Text size="xs" c="dimmed">
+                Token:{" "}
+                {githubBackupHasToken.isLoading
+                  ? "checking"
+                  : githubBackupHasToken.data
+                  ? "configured"
+                  : "not configured"}
+              </Text>
 
-            <Button
-              variant="outline"
-              size="xs"
-              leftSection={<Github size={14} />}
-              onClick={() => setGithubTokenModalOpen(true)}
-            >
-              Set token
-            </Button>
+              <Button
+                variant="default"
+                size="xs"
+                leftSection={<Github size={14} />}
+                onClick={() => setGithubTokenModalOpen(true)}
+              >
+                Set token
+              </Button>
 
-            <Button
-              variant="outline"
-              size="xs"
-              color="red"
-              loading={clearGithubToken.isPending}
-              disabled={!githubBackupHasToken.data}
-              onClick={() => clearGithubToken.mutate()}
-            >
-              Clear token
-            </Button>
-          </Group>
+              <Button
+                variant="default"
+                size="xs"
+                color="red"
+                loading={clearGithubToken.isPending}
+                disabled={!githubBackupHasToken.data}
+                onClick={() => clearGithubToken.mutate()}
+              >
+                Clear
+              </Button>
+            </Group>
 
-          <Group gap={8} align="center" wrap="wrap">
-            <TextInput
-              value={gistIdDraft}
-              onChange={(e) => setGistIdDraft(e.currentTarget.value)}
-              placeholder="Gist id (optional for first push)"
-              size="xs"
-              styles={{
-                input: {
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  width: 280,
-                },
-              }}
-            />
+            <Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
+              <TextInput
+                value={gistIdDraft}
+                onChange={(e) => setGistIdDraft(e.currentTarget.value)}
+                placeholder="Gist id (optional for first push)"
+                size="xs"
+                styles={{
+                  input: {
+                    backgroundColor: "var(--bg-elevated)",
+                    borderColor: "var(--border-default)",
+                    color: "var(--text-primary)",
+                    width: 280,
+                  },
+                }}
+              />
 
-            <Button
-              variant="outline"
-              size="xs"
-              loading={saveGistId.isPending}
-              onClick={() => {
-                const trimmed = (gistIdDraft ?? "").trim();
-                saveGistId.mutate(trimmed || null);
-              }}
-            >
-              Save gist id
-            </Button>
-          </Group>
+              <Button
+                variant="default"
+                size="xs"
+                loading={saveGistId.isPending}
+                onClick={() => {
+                  const trimmed = (gistIdDraft ?? "").trim();
+                  saveGistId.mutate(trimmed || null);
+                }}
+              >
+                Save
+              </Button>
+            </Group>
 
-          <Group gap={8} align="center" wrap="wrap">
-            <Button
-              variant="outline"
-              size="xs"
-              leftSection={<Upload size={14} />}
-              loading={pushToGist.isPending}
-              disabled={!githubBackupHasToken.data}
-              onClick={() => pushToGist.mutate()}
-            >
-              Push to gist
-            </Button>
+            <Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
+              <Button
+                variant="default"
+                size="xs"
+                leftSection={<Upload size={14} />}
+                loading={pushToGist.isPending}
+                disabled={!githubBackupHasToken.data}
+                onClick={() => pushToGist.mutate()}
+              >
+                Push
+              </Button>
 
-            <Button
-              variant="outline"
-              size="xs"
-              leftSection={<Download size={14} />}
-              loading={pullFromGist.isPending}
-              disabled={!githubBackupHasToken.data}
-              onClick={() => pullFromGist.mutate()}
-            >
-              Pull from gist
-            </Button>
-          </Group>
-        </Stack>
+              <Button
+                variant="default"
+                size="xs"
+                leftSection={<Download size={14} />}
+                loading={pullFromGist.isPending}
+                disabled={!githubBackupHasToken.data}
+                onClick={() => pullFromGist.mutate()}
+              >
+                Pull
+              </Button>
+            </Group>
+          </Stack>
+        </div>
       </div>
 
       <div
