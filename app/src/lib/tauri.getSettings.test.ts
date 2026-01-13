@@ -138,4 +138,150 @@ describe("tauriAPI.getSettings() normalization", () => {
 			"C:\\Program Files\\Foo\\foo.exe",
 		]);
 	});
+
+	it("uses legacy quick_ask_hotkey as fallback when quick_ask_hold_hotkey is missing", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			quick_ask_hotkey: { modifiers: ["Control"], key: "K" },
+			// quick_ask_hold_hotkey intentionally missing
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+
+		expect(settings.quick_ask_hold_hotkey).toEqual({
+			modifiers: ["Control"],
+			key: "K",
+		});
+	});
+
+	it("does NOT fall back to legacy quick_ask_hotkey when quick_ask_hold_hotkey is explicitly null", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			quick_ask_hold_hotkey: null,
+			quick_ask_hotkey: { modifiers: ["Control"], key: "K" },
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+
+		expect(settings.quick_ask_hold_hotkey).toBeNull();
+	});
+
+	it("normalizes quick_ask_conversation_history_count (invalid/missing -> default, clamps range)", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			quick_ask_conversation_history_count: "banana",
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+		expect(settings.quick_ask_conversation_history_count).toBe(3);
+
+		vi.resetModules();
+		currentStore = new FakeStore({
+			quick_ask_conversation_history_count: 0,
+		});
+		const { tauriAPI: tauriAPI2 } = await import("./tauri");
+		const settings2 = await tauriAPI2.getSettings();
+		expect(settings2.quick_ask_conversation_history_count).toBe(1);
+
+		vi.resetModules();
+		currentStore = new FakeStore({
+			quick_ask_conversation_history_count: 999,
+		});
+		const { tauriAPI: tauriAPI3 } = await import("./tauri");
+		const settings3 = await tauriAPI3.getSettings();
+		expect(settings3.quick_ask_conversation_history_count).toBe(20);
+	});
+
+	it("normalizes malformed cleanup_prompt_sections.system and writes back", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			cleanup_prompt_sections: {
+				system: { content: 123, extra: "ignored" },
+				other: "ignored",
+			},
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+
+		expect(settings.cleanup_prompt_sections).toEqual({
+			system: { content: null },
+		});
+		expect(
+			currentStore.setCalls.some(
+				(c) =>
+					c.key === "cleanup_prompt_sections" &&
+					JSON.stringify(c.value) ===
+						JSON.stringify({ system: { content: null } })
+			)
+		).toBe(true);
+		expect(currentStore.saveCalls).toBeGreaterThan(0);
+	});
+
+	it("migrates legacy auto_mute_audio boolean into playing_audio_handling", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			auto_mute_audio: true,
+			// playing_audio_handling intentionally missing
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+		expect(settings.playing_audio_handling).toBe("mute");
+
+		vi.resetModules();
+		currentStore = new FakeStore({
+			auto_mute_audio: false,
+		});
+		const { tauriAPI: tauriAPI2 } = await import("./tauri");
+		const settings2 = await tauriAPI2.getSettings();
+		expect(settings2.playing_audio_handling).toBe("none");
+	});
+
+	it("uses legacy noise_gate_strength when noise_gate_threshold_dbfs is missing", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			noise_gate_strength: 50,
+			// noise_gate_threshold_dbfs intentionally missing
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+
+		// strength 50 => -75 + (0.5 * 45) = -52.5
+		expect(settings.noise_gate_threshold_dbfs).not.toBeNull();
+		expect(settings.noise_gate_threshold_dbfs).toBeCloseTo(-52.5, 5);
+	});
+
+	it("uses legacy transcription_retention_days when unit+value are missing", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			transcription_retention_days: 2.2,
+			// transcription_retention_unit/value intentionally missing
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+		expect(settings.transcription_retention_unit).toBe("days");
+		expect(settings.transcription_retention_value).toBe(2);
+	});
+
+	it("normalizes legacy/typo enum values (overlay_monitor_target, main_window_close_behavior, output_mode)", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			overlay_monitor_target: "activeWindow",
+			main_window_close_behavior: "close_window",
+			output_mode: "keystrokes",
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+
+		expect(settings.overlay_monitor_target).toBe("active_window");
+		expect(settings.main_window_close_behavior).toBe("minimize_to_tray");
+		expect(settings.output_mode).toBe("paste");
+	});
 });

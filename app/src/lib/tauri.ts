@@ -1648,9 +1648,12 @@ export const tauriAPI = {
           ? Object.hasOwn(raw, "main")
           : false;
 
+        const rawJson = rawIsObject ? JSON.stringify(raw) : null;
+        const normalizedJson = normalized ? JSON.stringify(normalized) : null;
+
         if (
-          (rawHasLegacyMain || (rawIsObject && !rawHasSystem)) &&
-          normalized
+          normalized &&
+          (rawHasLegacyMain || (rawIsObject && !rawHasSystem) || rawJson !== normalizedJson)
         ) {
           await store.set("cleanup_prompt_sections", normalized);
           await store.save();
