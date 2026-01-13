@@ -6,8 +6,12 @@
 
 use crate::stt::{
     AudioEncoding, AudioFormat, DeepgramSttProvider, GroqSttProvider, OpenAiSttProvider,
-    SpeechmaticsSttProvider, SttProvider,
+    SpeechmaticsSttProvider, SttError, SttProvider, WhisperServerSttProvider,
 };
+
+use serde_json::json;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
 fn test_groq_provider_implements_trait() {
@@ -174,4 +178,126 @@ fn create_test_wav_silence(duration_secs: f32) -> Vec<u8> {
     buffer.resize(44 + data_size as usize, 0);
 
     buffer
+}
+
+#[tokio::test]
+async fn test_whisper_server_transcribe_sends_expected_multipart_and_prompt_is_clamped() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "text": "hello from mock"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let prompt_raw = format!("   {}   ", "a".repeat(300));
+    let expected_prompt = "a".repeat(224);
+
+    let provider =
+        WhisperServerSttProvider::new(format!("{}/v1", mock_server.uri()), None, Some(prompt_raw))
+            .expect("provider should be constructible");
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello from mock");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let req = &received[0];
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("multipart/form-data"),
+        "expected multipart/form-data, got: {content_type}"
+    );
+
+    let body = String::from_utf8_lossy(&req.body);
+    assert!(body.contains("name=\"model\""));
+    assert!(body.contains("whisper-1"));
+    assert!(body.contains("name=\"prompt\""));
+    assert!(body.contains(&expected_prompt));
+    assert!(body.contains("filename=\"audio.wav\""));
+}
+
+#[tokio::test]
+async fn test_whisper_server_transcribe_omits_prompt_when_empty_or_whitespace() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "text": "ok" })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider = WhisperServerSttProvider::new(
+        format!("{}/v1", mock_server.uri()),
+        None,
+        Some("   ".to_string()),
+    )
+    .expect("provider should be constructible");
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "ok");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let body = String::from_utf8_lossy(&received[0].body);
+    assert!(!body.contains("name=\"prompt\""));
+}
+
+#[tokio::test]
+async fn test_whisper_server_non_success_is_surface_as_api_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = WhisperServerSttProvider::new(format!("{}/v1", mock_server.uri()), None, None)
+        .expect("provider should be constructible");
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let err = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect_err("expected error");
+
+    match err {
+        SttError::Api(msg) => {
+            assert!(msg.contains("401"), "expected status in message: {msg}");
+            assert!(msg.contains("nope"), "expected body in message: {msg}");
+        }
+        other => panic!("expected SttError::Api, got: {other:?}"),
+    }
 }
