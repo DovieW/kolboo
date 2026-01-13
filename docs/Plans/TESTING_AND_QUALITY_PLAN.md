@@ -10,6 +10,15 @@ It is written for real day-to-day development: fast local feedback, reliable CI,
 
 ---
 
+## Scope (what we will and won’t do)
+
+This plan explicitly targets **unit + integration + contract testing**, plus CI reliability.
+
+**Out of scope for this plan:** end-to-end (E2E) UI automation.
+
+- Rationale: Tauri E2E tends to be higher-effort and higher-flake than the value we need right now.
+- If we ever add E2E later, it should be a separate doc/workstream so it doesn’t block shipping.
+
 ## Progress log (what we’ve already done)
 
 ### 2026-01-12 — Testing foundation + CI alignment
@@ -75,7 +84,7 @@ This is the end goal. It’s okay if it takes multiple phases.
 3. **Tiered test strategy**
    - Fast unit tests always run.
    - Slower integration tests run in CI (or nightly).
-   - E2E tests exist for the highest value user flows.
+   - UI automation/E2E tests are intentionally excluded from this plan.
 4. **Meaningful coverage**
    - Coverage is measured and used as a guardrail, not a vanity metric.
    - We at least cover the high-risk logic (settings normalization, pipeline transitions, provider request shaping).
@@ -107,17 +116,6 @@ This is the end goal. It’s okay if it takes multiple phases.
 - Pipeline edge cases with mocked components
 
 **Goal:** these should run in CI reliably.
-
-### Layer 3: E2E tests (highest value user flows)
-
-For a Tauri app, E2E can be tricky, so we should focus on flows that genuinely prevent regressions:
-
-- “Start recording → stop → transcription appears”
-- “Cancel transcription”
-- “Hotkey registration doesn’t break”
-- “Overlay shows correct state transitions”
-
-**Goal:** run these less frequently (nightly or on demand) until stable.
 
 ---
 
@@ -198,15 +196,6 @@ Plan:
 
 **Done when:** provider bugs are caught before shipping.
 
-### Step 6 — Add a small E2E smoke test suite (later)
-
-This is optional until unit/integration testing is solid.
-
-- Start with 1–2 high value smoke flows.
-- Run them nightly or manually.
-
-**Done when:** we catch “app boots but core flow broke” type regressions.
-
 ---
 
 ## CI recommendations (how we keep it reliable)
@@ -234,7 +223,7 @@ This is optional until unit/integration testing is solid.
 
 - **Coverage isn’t free**: it adds overhead; don’t run it on every commit by default.
 - **Coverage % can be misleading**: 80% coverage can still miss the important bugs.
-- **Tauri E2E is harder than web E2E**: keep the scope small.
+- **Tauri E2E is harder than web E2E**: this plan intentionally avoids it.
 
 ---
 
@@ -244,4 +233,7 @@ This is optional until unit/integration testing is solid.
 - [ ] Frontend has a growing set of unit tests in the highest-risk modules
 - [ ] Rust tests are stable across platforms
 - [ ] Coverage reports exist and are acted on
-- [ ] At least 1–2 E2E smoke flows exist (optional, later)
+
+### Explicit non-goal
+
+- We are **not** requiring E2E smoke flows as part of reaching “ideal tests” for this plan.
