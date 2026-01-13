@@ -17,11 +17,13 @@ pub struct OpenAiSttProvider {
     api_key: String,
     model: String,
     default_prompt: Option<String>,
+    api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
 
 impl OpenAiSttProvider {
     const WHISPER_PROMPT_MAX_CHARS: usize = 224;
+    const DEFAULT_OPENAI_API_BASE_URL: &'static str = "https://api.openai.com";
 
     /// Create a new OpenAI STT provider
     ///
@@ -47,6 +49,7 @@ impl OpenAiSttProvider {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
+            api_base_url: Self::DEFAULT_OPENAI_API_BASE_URL.to_string(),
             request_log_store: None,
         }
     }
@@ -68,8 +71,30 @@ impl OpenAiSttProvider {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
+            api_base_url: Self::DEFAULT_OPENAI_API_BASE_URL.to_string(),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.openai.com).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
+    }
+
+    fn api_base_url_trimmed(&self) -> &str {
+        self.api_base_url.trim_end_matches('/')
+    }
+
+    fn transcriptions_url(&self) -> String {
+        format!("{}/v1/audio/transcriptions", self.api_base_url_trimmed())
+    }
+
+    fn responses_url(&self) -> String {
+        format!("{}/v1/responses", self.api_base_url_trimmed())
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -123,7 +148,7 @@ impl OpenAiSttProvider {
             let prompt = self.clamp_prompt_for_model(prompt);
             let request_json = json!({
                 "provider": "openai",
-                "endpoint": "https://api.openai.com/v1/audio/transcriptions",
+                "endpoint": self.transcriptions_url(),
                 "content_type": "multipart/form-data",
                 "fields": {
                     "model": self.model,
@@ -157,7 +182,7 @@ impl OpenAiSttProvider {
 
         let response = self
             .client
-            .post("https://api.openai.com/v1/audio/transcriptions")
+            .post(self.transcriptions_url())
             .bearer_auth(&self.api_key)
             .multipart(form)
             .send()
@@ -283,7 +308,7 @@ impl OpenAiSttProvider {
         if let Some(store) = &self.request_log_store {
             let request_json = json!({
                 "provider": "openai",
-                "endpoint": "https://api.openai.com/v1/responses",
+                "endpoint": self.responses_url(),
                 "body": {
                     "model": self.model,
                     "input": [
@@ -319,7 +344,7 @@ impl OpenAiSttProvider {
 
         let response = self
             .client
-            .post("https://api.openai.com/v1/responses")
+            .post(self.responses_url())
             .bearer_auth(&self.api_key)
             .json(&request_body)
             .send()

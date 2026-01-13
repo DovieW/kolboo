@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 
-const OPENAI_API_URL: &str = "https://api.openai.com/v1/responses";
+const DEFAULT_OPENAI_API_BASE_URL: &str = "https://api.openai.com";
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
 
 /// OpenAI LLM provider using the Chat Completions API
@@ -16,6 +16,7 @@ pub struct OpenAiLlmProvider {
     client: Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     timeout: Option<Duration>,
     reasoning_effort: Option<String>,
     structured_outputs: bool,
@@ -29,6 +30,7 @@ impl OpenAiLlmProvider {
             client: Client::new(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
+            api_base_url: DEFAULT_OPENAI_API_BASE_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             reasoning_effort: None,
             structured_outputs: true,
@@ -42,6 +44,7 @@ impl OpenAiLlmProvider {
             client: Client::new(),
             api_key,
             model,
+            api_base_url: DEFAULT_OPENAI_API_BASE_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             reasoning_effort: None,
             structured_outputs: true,
@@ -56,11 +59,29 @@ impl OpenAiLlmProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            api_base_url: DEFAULT_OPENAI_API_BASE_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             reasoning_effort: None,
             structured_outputs: true,
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.openai.com).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
+    }
+
+    fn api_base_url_trimmed(&self) -> &str {
+        self.api_base_url.trim_end_matches('/')
+    }
+
+    fn responses_url(&self) -> String {
+        format!("{}/v1/responses", self.api_base_url_trimmed())
     }
 
     /// Enable/disable Structured Outputs (JSON schema mode).
@@ -145,7 +166,7 @@ impl OpenAiLlmProvider {
         }
 
         let allowed = Self::allowed_reasoning_efforts(&self.model);
-        if allowed.iter().any(|a| *a == lower.as_str()) {
+        if allowed.contains(&lower.as_str()) {
             return Some(lower);
         }
 
@@ -399,7 +420,7 @@ impl LlmProvider for OpenAiLlmProvider {
 
         let mut req = self
             .client
-            .post(OPENAI_API_URL)
+            .post(self.responses_url())
             .bearer_auth(&self.api_key)
             .json(&request);
         if let Some(timeout) = self.timeout {
@@ -528,7 +549,7 @@ impl LlmProvider for OpenAiLlmProvider {
 
         let mut req = self
             .client
-            .post(OPENAI_API_URL)
+            .post(self.responses_url())
             .bearer_auth(&self.api_key)
             .json(&request);
         if let Some(timeout) = self.timeout {

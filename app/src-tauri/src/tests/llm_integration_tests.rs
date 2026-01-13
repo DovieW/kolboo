@@ -10,7 +10,7 @@ use crate::llm::{
 };
 
 use serde_json::json;
-use wiremock::matchers::{body_json, method, path};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
@@ -271,4 +271,72 @@ async fn test_ollama_list_models_parses_tags_response() {
     let provider = OllamaLlmProvider::with_url(mock_server.uri(), None);
     let models = provider.list_models().await.unwrap();
     assert_eq!(models, vec!["m1".to_string(), "m2".to_string()]);
+}
+
+#[tokio::test]
+async fn test_openai_complete_sends_expected_request_body_when_structured_outputs_disabled() {
+    let mock_server = MockServer::start().await;
+
+    // When Structured Outputs are disabled, OpenAI uses the simple Responses API request.
+    let expected_request = json!({
+        "model": "gpt-4o-mini",
+        "input": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user"}
+        ],
+        "max_output_tokens": 4096,
+        "temperature": 0.0
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .and(header("authorization", "Bearer test_key"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "output_text": "hello from openai mock"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = OpenAiLlmProvider::new("test_key".to_string())
+        .with_structured_outputs(false)
+        .with_api_base_url(mock_server.uri());
+
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello from openai mock");
+}
+
+#[tokio::test]
+async fn test_openai_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": { "message": "bad request" }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = OpenAiLlmProvider::new("test_key".to_string())
+        .with_structured_outputs(false)
+        .with_api_base_url(mock_server.uri());
+
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("400"), "expected status in message: {msg}");
+            assert!(
+                msg.contains("bad request"),
+                "expected error in message: {msg}"
+            );
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
 }

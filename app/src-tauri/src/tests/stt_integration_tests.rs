@@ -268,6 +268,63 @@ async fn test_whisper_server_transcribe_omits_prompt_when_empty_or_whitespace() 
 }
 
 #[tokio::test]
+async fn test_openai_whisper_transcribe_sends_expected_multipart_and_prompt_is_clamped() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "text": "hello from openai mock"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let prompt_raw = format!("   {}   ", "a".repeat(300));
+    let expected_prompt = "a".repeat(224);
+
+    let client = reqwest::Client::new();
+    let provider = OpenAiSttProvider::with_client(
+        client,
+        "test_key".to_string(),
+        Some("whisper-1".to_string()),
+        Some(prompt_raw),
+    )
+    .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello from openai mock");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let req = &received[0];
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("multipart/form-data"),
+        "expected multipart/form-data, got: {content_type}"
+    );
+
+    let body = String::from_utf8_lossy(&req.body);
+    assert!(body.contains("name=\"model\""));
+    assert!(body.contains("whisper-1"));
+    assert!(body.contains("name=\"prompt\""));
+    assert!(body.contains(&expected_prompt));
+    assert!(body.contains("filename=\"audio.wav\""));
+}
+
+#[tokio::test]
 async fn test_whisper_server_non_success_is_surface_as_api_error() {
     let mock_server = MockServer::start().await;
 
