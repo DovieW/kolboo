@@ -28,7 +28,6 @@ import {
   type IterateRewritePromptResponse,
   type TestRewriteWithPromptResponse,
   validateHotkeyNotDuplicate,
-  type WidgetPosition,
   type CostTimeframe,
   type ModelPricingKind,
   type ProxySettings,
@@ -678,17 +677,6 @@ export function useUpdateOverlayMonitorTarget() {
   });
 }
 
-export function useUpdateWidgetPosition() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (position: WidgetPosition) =>
-      tauriAPI.updateWidgetPosition(position),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-    },
-  });
-}
-
 export function useUpdateOutputMode() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -753,19 +741,6 @@ export function useUpdateQuietAudioPeakDbfsThreshold() {
   return useMutation({
     mutationFn: async (dbfs: number) => {
       await tauriAPI.updateQuietAudioPeakDbfsThreshold(dbfs);
-      await configAPI.syncPipelineConfig();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-    },
-  });
-}
-
-export function useUpdateNoiseGateStrength() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (strength: number) => {
-      await tauriAPI.updateNoiseGateStrength(strength);
       await configAPI.syncPipelineConfig();
     },
     onSuccess: () => {
@@ -937,32 +912,6 @@ export function useUpdateMaxSavedRecordings() {
   });
 }
 
-export function useUpdateRequestLogsRetention() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (params: {
-      mode: "amount" | "time";
-      amount: number;
-      days: number;
-    }) => tauriAPI.updateRequestLogsRetention(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-      queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
-    },
-  });
-}
-
-export function useUpdateTranscriptionRetentionDays() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (days: number) =>
-      tauriAPI.updateTranscriptionRetentionDays(days),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-    },
-  });
-}
-
 export function useUpdateTranscriptionRetention() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -1119,13 +1068,6 @@ export function useResetHotkeysToDefaults() {
 }
 
 // History queries and mutations
-export function useHistory(limit?: number) {
-  return useQuery({
-    queryKey: ["history", limit],
-    queryFn: () => tauriAPI.getHistory(limit),
-  });
-}
-
 // Fetch all history entries (unbounded). Intended for optional features like
 // analysis where full history is required, but shouldn't load by default.
 export function useHistoryAll(options?: { enabled?: boolean }) {
@@ -1176,48 +1118,6 @@ export function useHistoryPage(params: HistoryPageQuery) {
     placeholderData: keepPreviousData,
     // Keep things feeling responsive while typing filters.
     refetchOnWindowFocus: true,
-  });
-}
-
-export function useAddHistoryEntry() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (text: string) => tauriAPI.addHistoryEntry(text),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["history"] });
-      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
-      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
-      // Notify other windows about history change
-      tauriAPI.emitHistoryChanged();
-    },
-  });
-}
-
-export function useDeleteHistoryEntry() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => tauriAPI.deleteHistoryEntry(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["history"] });
-      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
-      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
-      // Notify other windows about history change
-      tauriAPI.emitHistoryChanged();
-    },
-  });
-}
-
-export function useClearHistory() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => tauriAPI.clearHistory(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["history"] });
-      queryClient.invalidateQueries({ queryKey: ["historyAll"] });
-      queryClient.invalidateQueries({ queryKey: ["historyPage"] });
-      // Notify other windows about history change
-      tauriAPI.emitHistoryChanged();
-    },
   });
 }
 

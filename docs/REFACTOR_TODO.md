@@ -50,6 +50,23 @@ This file is a parking lot for larger refactors that came up while working on sm
     - Flip it back to `error` once the repo is clean.
   - Goal: keep CI green while steadily improving quality instead of “big bang” lint migrations.
 
+## Hotkey normalization UX
+
+- **Decide whether `normalize_shortcut_string(...)` should output “modifiers first”.**
+
+  - Current behavior sorts tokens alphabetically, which produces canonical strings like `"a+control"`.
+  - That’s consistent and easy to test, but it’s a little “inside-out” for humans (people expect `"control+a"`).
+  - Follow-up options:
+    - Keep current behavior and ensure the UI always formats shortcuts for display (separate from canonical serialization), or
+    - Change normalization to sort modifiers before non-modifiers (and update any persisted settings/tests accordingly).
+
+## Rust clippy warning backlog
+
+- **Chip away at the clippy warnings so `cargo clippy` is more signal than noise.**
+
+  - `pnpm -C app check:ci` currently passes, but clippy emits a lot of warnings, which makes it harder to spot new issues.
+  - Suggestion: add a gradual cleanup list (start with low-risk mechanical fixes like `unwrap_or_default`, `manual_clamp`, `needless_return`, and the duplicated Windows cfg attribute).
+
 ## A11y lint follow-ups
 
 - **Audit and reduce inline Biome a11y ignores added during the “0 warnings now” push.**

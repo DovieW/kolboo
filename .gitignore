@@ -19,6 +19,7 @@ node_modules/
 artifacts/
 target/
 app/src-tauri/target/
+app/src-tauri/target-ci/
 release/
 dist/
 out/

@@ -39,11 +39,3 @@ export const DEFAULT_QUICK_ASK_HOLD_HOTKEY: HotkeyConfig | null = null;
 
 /** Default Quick Ask toggle hotkey config (unset) */
 export const DEFAULT_QUICK_ASK_TOGGLE_HOTKEY: HotkeyConfig | null = null;
-
-/**
- * Legacy alias (pre split): Quick Ask hotkey.
- *
- * Historically Quick Ask only supported hold-to-record.
- */
-export const DEFAULT_QUICK_ASK_HOTKEY: HotkeyConfig | null =
-	DEFAULT_QUICK_ASK_HOLD_HOTKEY;

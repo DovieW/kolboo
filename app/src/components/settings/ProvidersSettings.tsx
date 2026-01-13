@@ -20,6 +20,7 @@ import { HintSelect } from "../HintSelect";
 // Keep this default aligned with backend fallbacks so "unset" settings don't lie.
 const DEFAULT_STT_TIMEOUT = 10;
 
+/** @lintignore */
 export function ProvidersSettings() {
   const { data: settings, isLoading: isLoadingSettings } = useSettings();
   const { data: availableProviders, isLoading: isLoadingProviders } =

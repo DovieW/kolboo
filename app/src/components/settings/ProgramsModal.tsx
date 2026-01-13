@@ -610,6 +610,3 @@ export function ProfileConfigModal({
     </>
   );
 }
-
-// Backward compatible alias (some code still imports ProgramsModal)
-export const ProgramsModal = ProfileConfigModal;

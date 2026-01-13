@@ -10,11 +10,24 @@ It is written for real day-to-day development: fast local feedback, reliable CI,
 
 ---
 
+## Progress log (what we’ve already done)
+
+### 2026-01-12 — Testing foundation + CI alignment
+
+- Added a single canonical, non-mutating “CI style” command: `pnpm -C app check:ci` (includes: Biome check (no write), TypeScript typecheck, Knip, Vitest, Rust clippy, Rust fmt check, Rust tests)
+- Hooked pre-commit to run `check:ci` (prevents committing broken code without rewriting files).
+- Aligned Windows CI to run `pnpm check:ci` (instead of separate ad-hoc steps).
+- Added Vitest coverage command (`pnpm -C app coverage`) and coverage provider dependency.
+- Ignored generated coverage artifacts in `.gitignore` (e.g. `app/coverage/`).
+- Adjusted `check:ci` to avoid `cargo clippy --all-features` by default (prevents slow/fragile builds of optional native deps like `whisper-rs-sys`).
+
+---
+
 ## What exists today (current state)
 
 ### Tooling in place
 
-**Frontend (TypeScript/React)**
+#### Frontend (TypeScript/React)
 
 - Type checking: `tsc --noEmit` (`pnpm -C app typecheck`)
 - Unit tests: Vitest v4 (`pnpm -C app test`)
@@ -22,7 +35,7 @@ It is written for real day-to-day development: fast local feedback, reliable CI,
 - Lint/format: Biome (`pnpm -C app lint` / `pnpm -C app lint:ci`)
 - Code smell / dead-code detection: Knip (`pnpm -C app knip`)
 
-**Backend (Rust/Tauri)**
+#### Backend (Rust/Tauri)
 
 - Unit/integration tests: `cargo test` via `pnpm -C app cargo:test`
 - Lints: `cargo clippy` via `pnpm -C app cargo:clippy`
@@ -76,12 +89,12 @@ This is the end goal. It’s okay if it takes multiple phases.
 
 ### Layer 1: Pure unit tests (fast, no IO)
 
-**Frontend**
+#### Frontend
 
 - Pure function tests (e.g. diffing, formatting helpers, settings normalization)
 - UI component tests only when there’s meaningful behavior (not snapshot spam)
 
-**Rust**
+#### Rust
 
 - Pure logic tests (parsers, request shaping, state machine transitions)
 
@@ -118,6 +131,10 @@ For a Tauri app, E2E can be tricky, so we should focus on flows that genuinely p
 
 **Done when:** contributors can run one command and get the same answer locally and in CI.
 
+**Status:** Done (foundation is in place).
+
+**Note:** keep `check:ci` fast and deterministic. Run optional heavy checks (like clippy with `local-whisper`) separately.
+
 ### Step 2 — Make coverage usable (not annoying)
 
 Coverage exists now, but we need to make it useful.
@@ -135,6 +152,8 @@ Coverage exists now, but we need to make it useful.
 
 **Done when:** anyone can run `pnpm -C app coverage` and understand what to improve.
 
+**Status:** In progress (coverage exists; coverage include/exclude + report output are configured; no thresholds yet).
+
 ### Step 3 — Increase the number of meaningful frontend tests
 
 Today the frontend test surface is small. The fastest improvement is to add tests around code that:
@@ -150,6 +169,8 @@ Suggested targets:
 - `app/src/lib/tauri.ts` (settings normalization / migrations)
 
 **Rule of thumb:** test code that can break silently.
+
+**Status:** In progress (utility-module unit tests added; keep expanding into settings normalization / migrations).
 
 ### Step 4 — Make Rust tests more “isolated”
 
@@ -219,7 +240,7 @@ This is optional until unit/integration testing is solid.
 
 ## Success checklist (how we know we’re winning)
 
-- [ ] `check:ci` is the canonical local + CI command
+- [x] `check:ci` is the canonical local + CI command
 - [ ] Frontend has a growing set of unit tests in the highest-risk modules
 - [ ] Rust tests are stable across platforms
 - [ ] Coverage reports exist and are acted on

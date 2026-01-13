@@ -1,7 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
 import svgr from "vite-plugin-svgr";
+import { defineConfig } from "vitest/config";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -12,6 +12,16 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
+      reportsDirectory: "coverage",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.d.ts",
+        "src/vite-env.d.ts",
+        "src/main.tsx",
+        "src/overlay-main.tsx",
+        "src/overlay-hover-main.tsx",
+        "src/quick-ask-main.tsx",
+      ],
     },
   },
   server: {
@@ -35,8 +45,8 @@ export default defineConfig({
       process.env.TAURI_PLATFORM === "windows"
         ? "chrome105"
         : process.env.TAURI_PLATFORM === "macos"
-        ? "safari13"
-        : "chrome105",
+          ? "safari13"
+          : "chrome105",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
     rollupOptions: {

@@ -6,6 +6,6 @@ export { NetworkSettings } from "./NetworkSettings";
 export type { PromptSectionEditorProps } from "./PromptSectionEditor";
 export { PromptSectionEditor } from "./PromptSectionEditor";
 export { PromptSettings } from "./PromptSettings";
-export { ProfileConfigModal, ProgramsModal } from "./ProgramsModal";
+export { ProfileConfigModal } from "./ProgramsModal";
 export { ProvidersSettings } from "./ProvidersSettings";
 export { UiSettings } from "./UiSettings";
