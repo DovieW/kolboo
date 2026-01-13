@@ -23,24 +23,23 @@ use keyring::Entry;
 /// - `app/src/lib/apiKeys.ts`
 #[cfg(desktop)]
 pub const API_KEY_SETTING_KEYS: &[&str] = &[
-	// STT providers
-	"groq_api_key",
-	"elevenlabs_api_key",
-	"openai_api_key",
-	"fireworks_api_key",
-	"aquavoice_api_key",
-	"assemblyai_api_key",
-	"speechmatics_api_key",
-	"deepgram_api_key",
-
-	// LLM providers
-	"cerebras_api_key",
-	"openai_api_key",
-	"fireworks_api_key",
-	"gemini_api_key",
-	"anthropic_api_key",
-	"cohere_api_key",
-	"groq_api_key",
+    // STT providers
+    "groq_api_key",
+    "elevenlabs_api_key",
+    "openai_api_key",
+    "fireworks_api_key",
+    "aquavoice_api_key",
+    "assemblyai_api_key",
+    "speechmatics_api_key",
+    "deepgram_api_key",
+    // LLM providers
+    "cerebras_api_key",
+    "openai_api_key",
+    "fireworks_api_key",
+    "gemini_api_key",
+    "anthropic_api_key",
+    "cohere_api_key",
+    "groq_api_key",
 ];
 
 #[cfg(desktop)]
@@ -51,27 +50,27 @@ const EXTRA_SECRET_KEYS: &[&str] = &["github_gist_token"];
 
 #[cfg(desktop)]
 fn validate_secret_store_key(store_key: &str) -> Result<(), String> {
-	let is_extra = EXTRA_SECRET_KEYS.iter().any(|k| *k == store_key);
-	if !store_key.ends_with("_api_key") && !is_extra {
-		return Err("Invalid key name".to_string());
-	}
+    let is_extra = EXTRA_SECRET_KEYS.iter().any(|k| *k == store_key);
+    if !store_key.ends_with("_api_key") && !is_extra {
+        return Err("Invalid key name".to_string());
+    }
 
-	// Keep the surface area tight: only allow lowercase letters, digits, and underscores.
-	// (Keys are expected to look like `${provider}_api_key`.)
-	for ch in store_key.chars() {
-		let ok = matches!(ch, 'a'..='z' | '0'..='9' | '_');
-		if !ok {
-			return Err("Invalid key name".to_string());
-		}
-	}
+    // Keep the surface area tight: only allow lowercase letters, digits, and underscores.
+    // (Keys are expected to look like `${provider}_api_key`.)
+    for ch in store_key.chars() {
+        let ok = matches!(ch, 'a'..='z' | '0'..='9' | '_');
+        if !ok {
+            return Err("Invalid key name".to_string());
+        }
+    }
 
-	Ok(())
+    Ok(())
 }
 
 #[cfg(desktop)]
 fn entry_for_key(store_key: &str) -> Result<Entry, String> {
-	validate_secret_store_key(store_key)?;
-	Entry::new(SERVICE_NAME, store_key).map_err(|e| e.to_string())
+    validate_secret_store_key(store_key)?;
+    Entry::new(SERVICE_NAME, store_key).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -83,51 +82,55 @@ fn entry_for_key(store_key: &str) -> Result<Entry, String> {
 /// Unlike API keys, these do not have a legacy `settings.json` fallback.
 #[cfg(desktop)]
 pub fn get_secret(app: &AppHandle, store_key: &str) -> Option<String> {
-	let _ = app;
-	let entry = entry_for_key(store_key).ok()?;
-	match entry.get_password() {
-		Ok(s) => {
-			let trimmed = s.trim();
-			if trimmed.is_empty() {
-				None
-			} else {
-				Some(trimmed.to_string())
-			}
-		}
-		Err(keyring::Error::NoEntry) => None,
-		Err(e) => {
-			log::warn!("Failed to read secret from secure storage ({}): {}", store_key, e);
-			None
-		}
-	}
+    let _ = app;
+    let entry = entry_for_key(store_key).ok()?;
+    match entry.get_password() {
+        Ok(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Err(keyring::Error::NoEntry) => None,
+        Err(e) => {
+            log::warn!(
+                "Failed to read secret from secure storage ({}): {}",
+                store_key,
+                e
+            );
+            None
+        }
+    }
 }
 
 #[cfg(desktop)]
 pub fn has_secret(app: &AppHandle, store_key: &str) -> bool {
-	get_secret(app, store_key).is_some()
+    get_secret(app, store_key).is_some()
 }
 
 #[cfg(desktop)]
 pub fn set_secret(app: &AppHandle, store_key: &str, value: &str) -> Result<(), String> {
-	let _ = app;
-	let trimmed = value.trim();
-	if trimmed.is_empty() {
-		return Err("Secret cannot be empty".to_string());
-	}
-	let entry = entry_for_key(store_key)?;
-	entry.set_password(trimmed).map_err(|e| e.to_string())?;
-	Ok(())
+    let _ = app;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("Secret cannot be empty".to_string());
+    }
+    let entry = entry_for_key(store_key)?;
+    entry.set_password(trimmed).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(desktop)]
 pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
-	let _ = app;
-	let entry = entry_for_key(store_key)?;
-	match entry.delete_credential() {
-		Ok(()) => Ok(()),
-		Err(keyring::Error::NoEntry) => Ok(()),
-		Err(e) => Err(e.to_string()),
-	}
+    let _ = app;
+    let entry = entry_for_key(store_key)?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Best-effort read of a legacy API key from `settings.json`.
@@ -135,27 +138,27 @@ pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
 /// This is only for backward compatibility during migration.
 #[cfg(desktop)]
 fn get_legacy_api_key_from_store(app: &AppHandle, store_key: &str) -> Option<String> {
-	let raw = app.store("settings.json").ok()?.get(store_key)?;
+    let raw = app.store("settings.json").ok()?.get(store_key)?;
 
-	// Store values are JSON; accept either string values or stringified JSON.
-	if let Some(s) = raw.as_str() {
-		let trimmed = s.trim();
-		if trimmed.is_empty() {
-			None
-		} else {
-			Some(trimmed.to_string())
-		}
-	} else {
-		serde_json::from_value::<String>(raw)
-			.ok()
-			.map(|s| s.trim().to_string())
-			.filter(|s| !s.is_empty())
-	}
+    // Store values are JSON; accept either string values or stringified JSON.
+    if let Some(s) = raw.as_str() {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    } else {
+        serde_json::from_value::<String>(raw)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
 }
 
 #[cfg(desktop)]
 pub fn has_api_key(app: &AppHandle, store_key: &str) -> bool {
-	get_api_key(app, store_key).is_some()
+    get_api_key(app, store_key).is_some()
 }
 
 /// Get an API key.
@@ -165,61 +168,65 @@ pub fn has_api_key(app: &AppHandle, store_key: &str) -> bool {
 /// 2) Legacy `settings.json` (during migration)
 #[cfg(desktop)]
 pub fn get_api_key(app: &AppHandle, store_key: &str) -> Option<String> {
-	let entry = entry_for_key(store_key).ok()?;
-	match entry.get_password() {
-		Ok(s) => {
-			let trimmed = s.trim();
-			if trimmed.is_empty() {
-				None
-			} else {
-				Some(trimmed.to_string())
-			}
-		}
-		Err(keyring::Error::NoEntry) => get_legacy_api_key_from_store(app, store_key),
-		Err(e) => {
-			log::warn!("Failed to read API key from secure storage ({}): {}", store_key, e);
-			get_legacy_api_key_from_store(app, store_key)
-		}
-	}
+    let entry = entry_for_key(store_key).ok()?;
+    match entry.get_password() {
+        Ok(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Err(keyring::Error::NoEntry) => get_legacy_api_key_from_store(app, store_key),
+        Err(e) => {
+            log::warn!(
+                "Failed to read API key from secure storage ({}): {}",
+                store_key,
+                e
+            );
+            get_legacy_api_key_from_store(app, store_key)
+        }
+    }
 }
 
 #[cfg(desktop)]
 pub fn set_api_key(app: &AppHandle, store_key: &str, api_key: &str) -> Result<(), String> {
-	let trimmed = api_key.trim();
-	if trimmed.is_empty() {
-		return Err("API key cannot be empty".to_string());
-	}
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        return Err("API key cannot be empty".to_string());
+    }
 
-	let entry = entry_for_key(store_key)?;
-	entry.set_password(trimmed).map_err(|e| e.to_string())?;
+    let entry = entry_for_key(store_key)?;
+    entry.set_password(trimmed).map_err(|e| e.to_string())?;
 
-	// Ensure plaintext keys are removed from the settings store.
-	if let Ok(store) = app.store("settings.json") {
-		store.delete(store_key);
-		let _ = store.save();
-	}
+    // Ensure plaintext keys are removed from the settings store.
+    if let Ok(store) = app.store("settings.json") {
+        store.delete(store_key);
+        let _ = store.save();
+    }
 
-	Ok(())
+    Ok(())
 }
 
 #[cfg(desktop)]
 pub fn clear_api_key(app: &AppHandle, store_key: &str) -> Result<(), String> {
-	let entry = entry_for_key(store_key)?;
-	match entry.delete_credential() {
-		Ok(()) => {}
-		Err(keyring::Error::NoEntry) => {}
-		Err(e) => {
-			return Err(e.to_string());
-		}
-	}
+    let entry = entry_for_key(store_key)?;
+    match entry.delete_credential() {
+        Ok(()) => {}
+        Err(keyring::Error::NoEntry) => {}
+        Err(e) => {
+            return Err(e.to_string());
+        }
+    }
 
-	// Also clear any legacy value that may remain.
-	if let Ok(store) = app.store("settings.json") {
-		store.delete(store_key);
-		let _ = store.save();
-	}
+    // Also clear any legacy value that may remain.
+    if let Ok(store) = app.store("settings.json") {
+        store.delete(store_key);
+        let _ = store.save();
+    }
 
-	Ok(())
+    Ok(())
 }
 
 /// One-time (best-effort) migration from `settings.json` to OS keyring.
@@ -230,55 +237,63 @@ pub fn clear_api_key(app: &AppHandle, store_key: &str) -> Result<(), String> {
 /// - If secure storage write fails, keep the store key (to avoid breaking existing users).
 #[cfg(desktop)]
 pub fn migrate_api_keys_from_store(app: &AppHandle) -> Result<(), Box<dyn Error>> {
-	let store = app.store("settings.json")?;
-	let mut dirty = false;
+    let store = app.store("settings.json")?;
+    let mut dirty = false;
 
-	for key in API_KEY_SETTING_KEYS {
-		let Some(value) = store.get(key) else { continue };
-		let Ok(s) = serde_json::from_value::<String>(value) else { continue };
-		let trimmed = s.trim();
-		if trimmed.is_empty() {
-			continue;
-		}
+    for key in API_KEY_SETTING_KEYS {
+        let Some(value) = store.get(key) else {
+            continue;
+        };
+        let Ok(s) = serde_json::from_value::<String>(value) else {
+            continue;
+        };
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
 
-		let entry = match entry_for_key(key) {
-			Ok(e) => e,
-			Err(_) => continue,
-		};
+        let entry = match entry_for_key(key) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
 
-		match entry.get_password() {
-			Ok(existing) => {
-				if !existing.trim().is_empty() {
-					// Secure storage already has it; remove the legacy plaintext copy.
-					store.delete(key);
-					dirty = true;
-					continue;
-				}
-			}
-			Err(keyring::Error::NoEntry) => {}
-			Err(e) => {
-				log::warn!("Failed checking secure storage for {}: {}", key, e);
-				// Don't delete the store key if we can't safely confirm.
-				continue;
-			}
-		}
+        match entry.get_password() {
+            Ok(existing) => {
+                if !existing.trim().is_empty() {
+                    // Secure storage already has it; remove the legacy plaintext copy.
+                    store.delete(key);
+                    dirty = true;
+                    continue;
+                }
+            }
+            Err(keyring::Error::NoEntry) => {}
+            Err(e) => {
+                log::warn!("Failed checking secure storage for {}: {}", key, e);
+                // Don't delete the store key if we can't safely confirm.
+                continue;
+            }
+        }
 
-		match entry.set_password(trimmed) {
-			Ok(()) => {
-				store.delete(key);
-				dirty = true;
-			}
-			Err(e) => {
-				log::warn!("Failed migrating API key to secure storage ({}): {}", key, e);
-			}
-		}
-	}
+        match entry.set_password(trimmed) {
+            Ok(()) => {
+                store.delete(key);
+                dirty = true;
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed migrating API key to secure storage ({}): {}",
+                    key,
+                    e
+                );
+            }
+        }
+    }
 
-	if dirty {
-		let _ = store.save();
-	}
+    if dirty {
+        let _ = store.save();
+    }
 
-	Ok(())
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -287,31 +302,31 @@ pub fn migrate_api_keys_from_store(app: &AppHandle) -> Result<(), Box<dyn Error>
 
 #[cfg(not(desktop))]
 pub fn has_api_key(_app: &tauri::AppHandle, _store_key: &str) -> bool {
-	false
+    false
 }
 
 #[cfg(not(desktop))]
 pub fn get_api_key(_app: &tauri::AppHandle, _store_key: &str) -> Option<String> {
-	None
+    None
 }
 
 #[cfg(not(desktop))]
 pub fn set_api_key(
-	_app: &tauri::AppHandle,
-	_store_key: &str,
-	_api_key: &str,
+    _app: &tauri::AppHandle,
+    _store_key: &str,
+    _api_key: &str,
 ) -> Result<(), String> {
-	Ok(())
+    Ok(())
 }
 
 #[cfg(not(desktop))]
 pub fn clear_api_key(_app: &tauri::AppHandle, _store_key: &str) -> Result<(), String> {
-	Ok(())
+    Ok(())
 }
 
 #[cfg(not(desktop))]
 pub fn migrate_api_keys_from_store(
-	_app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-	Ok(())
+    Ok(())
 }

@@ -117,7 +117,8 @@ pub fn estimate_llm_cost_from_usage(model: &str, usage: OpenAiUsage) -> Option<U
     let rates = text_token_rates_for_prompt_tokens(model, usage.input_tokens)?;
 
     let input_micros = cost_from_tokens_micros(rates.input_usd_micros_per_1m, usage.input_tokens);
-    let output_micros = cost_from_tokens_micros(rates.output_usd_micros_per_1m, usage.output_tokens);
+    let output_micros =
+        cost_from_tokens_micros(rates.output_usd_micros_per_1m, usage.output_tokens);
 
     Some(input_micros.saturating_add(output_micros))
 }

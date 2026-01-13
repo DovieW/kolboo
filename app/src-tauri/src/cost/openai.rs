@@ -178,7 +178,10 @@ pub fn text_token_rates(model: &str) -> Option<TokenRates> {
             cached_input_usd_micros_per_1m: None,
             output_usd_micros_per_1m: usd_micros(15_000_000),
         },
-        "gpt-4-turbo-2024-04-09" | "gpt-4-0125-preview" | "gpt-4-1106-preview" | "gpt-4-1106-vision-preview" => TokenRates {
+        "gpt-4-turbo-2024-04-09"
+        | "gpt-4-0125-preview"
+        | "gpt-4-1106-preview"
+        | "gpt-4-1106-vision-preview" => TokenRates {
             input_usd_micros_per_1m: usd_micros(10_000_000),
             cached_input_usd_micros_per_1m: None,
             output_usd_micros_per_1m: usd_micros(30_000_000),
@@ -342,8 +345,10 @@ pub fn estimate_cost_from_usage(model: &str, usage: OpenAiUsage) -> Option<OpenA
         .saturating_sub(input_audio);
     let output_text = usage.output_tokens.saturating_sub(output_audio);
 
-    let text_input_usd_micros = cost_from_tokens_micros(text_rates.input_usd_micros_per_1m, input_text);
-    let text_output_usd_micros = cost_from_tokens_micros(text_rates.output_usd_micros_per_1m, output_text);
+    let text_input_usd_micros =
+        cost_from_tokens_micros(text_rates.input_usd_micros_per_1m, input_text);
+    let text_output_usd_micros =
+        cost_from_tokens_micros(text_rates.output_usd_micros_per_1m, output_text);
 
     let text_cached_input_usd_micros = match text_rates.cached_input_usd_micros_per_1m {
         Some(rate) => cost_from_tokens_micros(rate, cached),

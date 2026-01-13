@@ -1,7 +1,7 @@
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-use std::sync::{Mutex, OnceLock};
 use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -98,10 +98,7 @@ fn clipboard_only_last_text_lock() -> &'static Mutex<Option<String>> {
 
 fn basename_for_log(path: &str) -> &str {
     let trimmed = path.trim().trim_matches('"');
-    trimmed
-        .rsplit(['\\', '/'])
-        .next()
-        .unwrap_or(trimmed)
+    trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
 }
 
 fn with_pressed_key<T>(
@@ -187,8 +184,10 @@ fn set_clipboard_text_platform(
 
 #[cfg(target_os = "windows")]
 fn set_clipboard_text_windows_excluding_history(text: &str) -> Result<(), String> {
-    use windows::ApplicationModel::DataTransfer::{Clipboard, ClipboardContentOptions, DataPackage};
     use windows::core::HSTRING;
+    use windows::ApplicationModel::DataTransfer::{
+        Clipboard, ClipboardContentOptions, DataPackage,
+    };
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 
     // WinRT clipboard APIs require COM initialization on the current thread.
@@ -206,9 +205,7 @@ fn set_clipboard_text_windows_excluding_history(text: &str) -> Result<(), String
     options
         .SetIsAllowedInHistory(false)
         .map_err(|e| e.to_string())?;
-    options
-        .SetIsRoamable(false)
-        .map_err(|e| e.to_string())?;
+    options.SetIsRoamable(false).map_err(|e| e.to_string())?;
 
     Clipboard::SetContentWithOptions(&package, &options).map_err(|e| e.to_string())?;
 
@@ -566,10 +563,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
         .lock()
         .map_err(|_| "Output lock poisoned".to_string())?;
 
-    log::info!(
-        "Selection probe: attempting copy (method={:?})",
-        method
-    );
+    log::info!("Selection probe: attempting copy (method={:?})", method);
 
     #[cfg(target_os = "windows")]
     {
@@ -624,13 +618,14 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
 
         // Important: ensure we always release modifiers, even if something errors mid-injection.
         // Otherwise keys can appear "stuck" at the OS level.
-        let injection_result: Result<(), String> = with_pressed_key(&mut enigo, modifier, |enigo| {
-            enigo
-                .key(Key::Unicode('c'), Direction::Click)
-                .map_err(|e| e.to_string())?;
-            thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
-            Ok(())
-        });
+        let injection_result: Result<(), String> =
+            with_pressed_key(&mut enigo, modifier, |enigo| {
+                enigo
+                    .key(Key::Unicode('c'), Direction::Click)
+                    .map_err(|e| e.to_string())?;
+                thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                Ok(())
+            });
 
         if let Err(e) = injection_result {
             log::warn!("Selection probe: key injection failed: {}", e);
@@ -661,32 +656,40 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
             const SCANCODE_C: u16 = 0x2E;
 
             match method {
-                ContextGrabMethod::CtrlShiftC => with_pressed_key(&mut enigo, Key::Shift, |enigo| {
-                    // Hold Shift first, then press Ctrl+<key>.
-                    // NOTE: Some console hosts still treat this as a Ctrl+C cancel event; users
-                    // can opt into Ctrl+Insert or None if this is unsafe in their shell.
-                    with_pressed_key(enigo, Key::Control, |enigo| {
-                        enigo.raw(SCANCODE_C, Direction::Press).map_err(|e| e.to_string())?;
-                        thread::sleep(Duration::from_millis(50));
+                ContextGrabMethod::CtrlShiftC => {
+                    with_pressed_key(&mut enigo, Key::Shift, |enigo| {
+                        // Hold Shift first, then press Ctrl+<key>.
+                        // NOTE: Some console hosts still treat this as a Ctrl+C cancel event; users
+                        // can opt into Ctrl+Insert or None if this is unsafe in their shell.
+                        with_pressed_key(enigo, Key::Control, |enigo| {
+                            enigo
+                                .raw(SCANCODE_C, Direction::Press)
+                                .map_err(|e| e.to_string())?;
+                            thread::sleep(Duration::from_millis(50));
+                            enigo
+                                .raw(SCANCODE_C, Direction::Release)
+                                .map_err(|e| e.to_string())?;
+                            thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                            Ok(())
+                        })
+                    })
+                }
+                ContextGrabMethod::CtrlInsert => {
+                    with_pressed_key(&mut enigo, Key::Control, |enigo| {
+                        // Use the semantic Insert key rather than a raw scancode here.
+                        // Insert is an extended key on Windows; sending the wrong form can end up
+                        // as a VT escape sequence in some terminals (e.g. showing up as `5~`).
                         enigo
-                            .raw(SCANCODE_C, Direction::Release)
+                            .key(Key::Insert, Direction::Click)
                             .map_err(|e| e.to_string())?;
                         thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
                         Ok(())
                     })
-                }),
-                ContextGrabMethod::CtrlInsert => with_pressed_key(&mut enigo, Key::Control, |enigo| {
-                    // Use the semantic Insert key rather than a raw scancode here.
-                    // Insert is an extended key on Windows; sending the wrong form can end up
-                    // as a VT escape sequence in some terminals (e.g. showing up as `5~`).
-                    enigo
-                        .key(Key::Insert, Direction::Click)
-                        .map_err(|e| e.to_string())?;
-                    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
-                    Ok(())
-                }),
+                }
                 _ => with_pressed_key(&mut enigo, Key::Control, |enigo| {
-                    enigo.raw(SCANCODE_C, Direction::Press).map_err(|e| e.to_string())?;
+                    enigo
+                        .raw(SCANCODE_C, Direction::Press)
+                        .map_err(|e| e.to_string())?;
                     thread::sleep(Duration::from_millis(50));
                     enigo
                         .raw(SCANCODE_C, Direction::Release)
@@ -765,13 +768,14 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
             "Selection probe: Ctrl+C produced no clipboard change; retrying with Ctrl+Insert"
         );
 
-        let injection_result: Result<(), String> = with_pressed_key(&mut enigo, Key::Control, |enigo| {
-            enigo
-                .key(Key::Insert, Direction::Click)
-                .map_err(|e| e.to_string())?;
-            thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
-            Ok(())
-        });
+        let injection_result: Result<(), String> =
+            with_pressed_key(&mut enigo, Key::Control, |enigo| {
+                enigo
+                    .key(Key::Insert, Direction::Click)
+                    .map_err(|e| e.to_string())?;
+                thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                Ok(())
+            });
 
         if let Err(e) = injection_result {
             log::warn!("Selection probe: key injection failed: {}", e);
@@ -821,9 +825,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
     // - If we set a sentinel, we MUST attempt to restore (otherwise we leave the sentinel behind).
     // - Even when restoring, avoid clobbering if the user/app changed clipboard after our copy.
     if let Some(prev) = previous {
-        let expected_current = captured
-            .as_deref()
-            .or(sentinel.as_deref());
+        let expected_current = captured.as_deref().or(sentinel.as_deref());
 
         let should_restore = match expected_current {
             Some(expected) => clipboard

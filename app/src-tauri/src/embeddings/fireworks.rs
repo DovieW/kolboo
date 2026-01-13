@@ -151,7 +151,9 @@ pub async fn embed_text_with_debug(
 
     let mut embedding: Vec<f32> = Vec::with_capacity(embedding_arr.len());
     for v in embedding_arr {
-        let n = v.as_f64().ok_or(FireworksEmbeddingsError::MissingEmbedding)?;
+        let n = v
+            .as_f64()
+            .ok_or(FireworksEmbeddingsError::MissingEmbedding)?;
         embedding.push(n as f32);
     }
     if embedding.is_empty() {

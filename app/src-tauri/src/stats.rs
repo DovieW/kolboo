@@ -5,29 +5,29 @@
 //! - stats are persisted (for usage analytics / cost reporting).
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use serde::de::DeserializeOwned;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 use uuid::Uuid;
 
-use crate::cost::openai as openai_cost;
-use crate::cost::groq as groq_cost;
-use crate::cost::aquavoice as aquavoice_cost;
-use crate::cost::gemini as gemini_cost;
 use crate::cost::anthropic as anthropic_cost;
-use crate::cost::deepgram as deepgram_cost;
+use crate::cost::aquavoice as aquavoice_cost;
 use crate::cost::assemblyai as assemblyai_cost;
-use crate::cost::speechmatics as speechmatics_cost;
+use crate::cost::deepgram as deepgram_cost;
 use crate::cost::fireworks as fireworks_cost;
-use tauri::AppHandle;
-use tauri::{Manager, Emitter};
+use crate::cost::gemini as gemini_cost;
+use crate::cost::groq as groq_cost;
+use crate::cost::openai as openai_cost;
+use crate::cost::speechmatics as speechmatics_cost;
 use crate::request_log::RequestLogStore;
+use tauri::AppHandle;
+use tauri::{Emitter, Manager};
 
 #[derive(Debug, Clone)]
 struct StatsQueryCacheEntry {
@@ -419,17 +419,26 @@ impl StatsStore {
 pub fn read_stats_retention_config(app: &tauri::AppHandle) -> StatsRetentionConfig {
     let unit: String = crate::get_setting_from_store(app, "stats_retention_unit", "days".into());
     let value: f64 = crate::get_setting_from_store(app, "stats_retention_value", 30.0f64);
-    let max_bytes: u64 = crate::get_setting_from_store(app, "stats_retention_max_bytes", 50_000_000u64);
+    let max_bytes: u64 =
+        crate::get_setting_from_store(app, "stats_retention_max_bytes", 50_000_000u64);
 
-    let value = if value.is_finite() { value.max(0.0) } else { 0.0 };
+    let value = if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    };
 
     let time_retention = if value == 0.0 {
         None
     } else if unit == "hours" {
-        Some(ChronoDuration::milliseconds((value * 3600.0 * 1000.0) as i64))
+        Some(ChronoDuration::milliseconds(
+            (value * 3600.0 * 1000.0) as i64,
+        ))
     } else {
         // Default: days
-        Some(ChronoDuration::milliseconds((value * 24.0 * 3600.0 * 1000.0) as i64))
+        Some(ChronoDuration::milliseconds(
+            (value * 24.0 * 3600.0 * 1000.0) as i64,
+        ))
     };
 
     StatsRetentionConfig {
@@ -473,7 +482,10 @@ pub fn parse_openai_usage_from_response_json(v: &JsonValue) -> Option<openai_cos
 
     // Chat Completions shape
     if usage.get("prompt_tokens").is_some() || usage.get("completion_tokens").is_some() {
-        let prompt = usage.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+        let prompt = usage
+            .get("prompt_tokens")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
         let completion = usage
             .get("completion_tokens")
             .and_then(|x| x.as_u64())
@@ -488,7 +500,10 @@ pub fn parse_openai_usage_from_response_json(v: &JsonValue) -> Option<openai_cos
     }
 
     // Responses shape
-    let input_tokens = usage.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
     let output_tokens = usage
         .get("output_tokens")
         .and_then(|x| x.as_u64())
@@ -530,9 +545,7 @@ pub fn parse_openai_usage_from_response_json(v: &JsonValue) -> Option<openai_cos
 ///
 /// We map those into an OpenAI-style usage struct for downstream cost estimators.
 pub fn parse_gemini_usage_from_response_json(v: &JsonValue) -> Option<openai_cost::OpenAiUsage> {
-    let usage = v
-        .get("usageMetadata")
-        .or_else(|| v.get("usage_metadata"))?;
+    let usage = v.get("usageMetadata").or_else(|| v.get("usage_metadata"))?;
 
     let prompt = usage
         .get("promptTokenCount")
@@ -573,11 +586,19 @@ pub fn parse_gemini_usage_from_response_json(v: &JsonValue) -> Option<openai_cos
 ///   }
 /// }
 /// ```
-pub fn parse_anthropic_usage_from_response_json(v: &JsonValue) -> Option<anthropic_cost::AnthropicUsage> {
+pub fn parse_anthropic_usage_from_response_json(
+    v: &JsonValue,
+) -> Option<anthropic_cost::AnthropicUsage> {
     let usage = v.get("usage")?;
 
-    let input_tokens = usage.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
-    let output_tokens = usage.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
 
     let cache_read_input_tokens = usage
         .get("cache_read_input_tokens")
@@ -606,7 +627,8 @@ pub fn parse_anthropic_usage_from_response_json(v: &JsonValue) -> Option<anthrop
         cache_creation_5m_input_tokens = cache_creation_total;
     } else {
         // If the totals don't match (API evolution), assign any remainder to 5m.
-        let split_sum = cache_creation_5m_input_tokens.saturating_add(cache_creation_1h_input_tokens);
+        let split_sum =
+            cache_creation_5m_input_tokens.saturating_add(cache_creation_1h_input_tokens);
         if cache_creation_total > split_sum {
             cache_creation_5m_input_tokens = cache_creation_5m_input_tokens
                 .saturating_add(cache_creation_total.saturating_sub(split_sum));
@@ -665,7 +687,10 @@ pub fn emit_cost_events_for_current_request(
     status: EventStatus,
     wav_bytes: Option<&[u8]>,
 ) {
-    log::info!("emit_cost_events_for_current_request called with status {:?}", status);
+    log::info!(
+        "emit_cost_events_for_current_request called with status {:?}",
+        status
+    );
 
     let Some(stats_store) = app.try_state::<StatsStore>() else {
         log::warn!("StatsStore not available");
@@ -680,15 +705,23 @@ pub fn emit_cost_events_for_current_request(
     let inputs = log_store.with_current(|log| {
         let (llm_provider, llm_model, llm_response_json) = match log.kind {
             crate::request_log::RequestKind::QuickAsk => (
-                log.quick_ask_provider.clone().or_else(|| log.llm_provider.clone()),
-                log.quick_ask_model.clone().or_else(|| log.llm_model.clone()),
+                log.quick_ask_provider
+                    .clone()
+                    .or_else(|| log.llm_provider.clone()),
+                log.quick_ask_model
+                    .clone()
+                    .or_else(|| log.llm_model.clone()),
                 log.quick_ask_response_json
                     .clone()
                     .or_else(|| log.llm_response_json.clone()),
             ),
             crate::request_log::RequestKind::QuickReplace => (
-                log.quick_replace_provider.clone().or_else(|| log.llm_provider.clone()),
-                log.quick_replace_model.clone().or_else(|| log.llm_model.clone()),
+                log.quick_replace_provider
+                    .clone()
+                    .or_else(|| log.llm_provider.clone()),
+                log.quick_replace_model
+                    .clone()
+                    .or_else(|| log.llm_model.clone()),
                 log.quick_replace_response_json
                     .clone()
                     .or_else(|| log.llm_response_json.clone()),
@@ -754,7 +787,9 @@ pub fn emit_cost_events_for_current_request(
         ev.audio_duration_secs = audio_secs;
 
         if inputs.stt_provider == "openai" {
-            if let (Some(model), Some(resp)) = (ev.model.as_deref(), inputs.stt_response_json.as_ref()) {
+            if let (Some(model), Some(resp)) =
+                (ev.model.as_deref(), inputs.stt_response_json.as_ref())
+            {
                 if let Some(u) = parse_openai_usage_from_response_json(resp) {
                     ev.tokens = Some(TokenUsage {
                         input_tokens: u.input_tokens,
@@ -775,7 +810,9 @@ pub fn emit_cost_events_for_current_request(
             // fall back to transcription-per-minute pricing if available.
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) = openai_cost::estimate_transcription_cost_from_audio_secs(model, secs) {
+                    if let Some(micros) =
+                        openai_cost::estimate_transcription_cost_from_audio_secs(model, secs)
+                    {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }
@@ -787,7 +824,8 @@ pub fn emit_cost_events_for_current_request(
             // optionally include free-tier calls in Stats.
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) = groq_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                    if let Some(micros) = groq_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                    {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }
@@ -797,7 +835,9 @@ pub fn emit_cost_events_for_current_request(
         if inputs.stt_provider == "deepgram" {
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) = deepgram_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                    if let Some(micros) =
+                        deepgram_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                    {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }
@@ -807,7 +847,9 @@ pub fn emit_cost_events_for_current_request(
         if inputs.stt_provider == "aquavoice" {
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) = aquavoice_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                    if let Some(micros) =
+                        aquavoice_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                    {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }
@@ -817,7 +859,9 @@ pub fn emit_cost_events_for_current_request(
         if inputs.stt_provider == "assemblyai" {
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) = assemblyai_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                    if let Some(micros) =
+                        assemblyai_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                    {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }
@@ -829,7 +873,9 @@ pub fn emit_cost_events_for_current_request(
             // optionally include free-tier calls in Stats.
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) = speechmatics_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                    if let Some(micros) =
+                        speechmatics_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                    {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }
@@ -839,7 +885,9 @@ pub fn emit_cost_events_for_current_request(
         if inputs.stt_provider == "fireworks" {
             if ev.estimated_cost_usd_micros.is_none() {
                 if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) = fireworks_cost::estimate_stt_cost_from_audio_secs(model, secs) {
+                    if let Some(micros) =
+                        fireworks_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                    {
                         ev.estimated_cost_usd_micros = Some(micros);
                     }
                 }
@@ -856,12 +904,18 @@ pub fn emit_cost_events_for_current_request(
             log::warn!("Failed to append STT cost event: {}", e);
         } else {
             any_stats_written = true;
-            log::info!("Successfully wrote STT cost event for request {}, cost: {:?} micros", inputs.request_id, ev.estimated_cost_usd_micros);
+            log::info!(
+                "Successfully wrote STT cost event for request {}, cost: {:?} micros",
+                inputs.request_id,
+                ev.estimated_cost_usd_micros
+            );
         }
     }
 
     // LLM cost event (only if an LLM provider/model is set)
-    if let (Some(llm_provider), Some(llm_model)) = (inputs.llm_provider.as_deref(), inputs.llm_model.as_deref()) {
+    if let (Some(llm_provider), Some(llm_model)) =
+        (inputs.llm_provider.as_deref(), inputs.llm_model.as_deref())
+    {
         let mut ev = CostEvent::new(
             inputs.request_id.clone(),
             CostKind::Llm,
@@ -873,7 +927,9 @@ pub fn emit_cost_events_for_current_request(
         ev.is_free_tier = is_free_tier_call(app, ev.provider.as_str());
 
         if llm_provider == "openai" {
-            if let (Some(model), Some(resp)) = (ev.model.as_deref(), inputs.llm_response_json.as_ref()) {
+            if let (Some(model), Some(resp)) =
+                (ev.model.as_deref(), inputs.llm_response_json.as_ref())
+            {
                 if let Some(u) = parse_openai_usage_from_response_json(resp) {
                     ev.tokens = Some(TokenUsage {
                         input_tokens: u.input_tokens,
@@ -893,7 +949,9 @@ pub fn emit_cost_events_for_current_request(
         if llm_provider == "groq" {
             // Even when marked free-tier, still estimate the list-price cost so users can
             // optionally include free-tier calls in Stats.
-            if let (Some(model), Some(resp)) = (ev.model.as_deref(), inputs.llm_response_json.as_ref()) {
+            if let (Some(model), Some(resp)) =
+                (ev.model.as_deref(), inputs.llm_response_json.as_ref())
+            {
                 if let Some(u) = parse_openai_usage_from_response_json(resp) {
                     ev.tokens = Some(TokenUsage {
                         input_tokens: u.input_tokens,
@@ -911,7 +969,9 @@ pub fn emit_cost_events_for_current_request(
         }
 
         if llm_provider == "gemini" {
-            if let (Some(model), Some(resp)) = (ev.model.as_deref(), inputs.llm_response_json.as_ref()) {
+            if let (Some(model), Some(resp)) =
+                (ev.model.as_deref(), inputs.llm_response_json.as_ref())
+            {
                 if let Some(u) = parse_gemini_usage_from_response_json(resp) {
                     ev.tokens = Some(TokenUsage {
                         input_tokens: u.input_tokens,
@@ -929,7 +989,9 @@ pub fn emit_cost_events_for_current_request(
         }
 
         if llm_provider == "anthropic" {
-            if let (Some(model), Some(resp)) = (ev.model.as_deref(), inputs.llm_response_json.as_ref()) {
+            if let (Some(model), Some(resp)) =
+                (ev.model.as_deref(), inputs.llm_response_json.as_ref())
+            {
                 if let Some(u) = parse_anthropic_usage_from_response_json(resp) {
                     let total_input = u.total_input_tokens_for_tier();
                     ev.tokens = Some(TokenUsage {
@@ -948,7 +1010,9 @@ pub fn emit_cost_events_for_current_request(
         }
 
         if llm_provider == "fireworks" {
-            if let (Some(model), Some(resp)) = (ev.model.as_deref(), inputs.llm_response_json.as_ref()) {
+            if let (Some(model), Some(resp)) =
+                (ev.model.as_deref(), inputs.llm_response_json.as_ref())
+            {
                 if let Some(u) = parse_openai_usage_from_response_json(resp) {
                     ev.tokens = Some(TokenUsage {
                         input_tokens: u.input_tokens,

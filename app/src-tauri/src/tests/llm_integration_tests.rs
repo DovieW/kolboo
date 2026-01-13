@@ -83,7 +83,9 @@ async fn test_openai_llm_complete_integration() {
     };
 
     let provider = OpenAiLlmProvider::new(api_key);
-    let result = provider.complete("You are a helpful assistant.", "Say hello").await;
+    let result = provider
+        .complete("You are a helpful assistant.", "Say hello")
+        .await;
 
     assert!(result.is_ok(), "OpenAI complete failed: {:?}", result);
     let response = result.unwrap();
@@ -104,7 +106,9 @@ async fn test_anthropic_llm_complete_integration() {
     };
 
     let provider = AnthropicLlmProvider::new(api_key);
-    let result = provider.complete("You are a helpful assistant.", "Say hello").await;
+    let result = provider
+        .complete("You are a helpful assistant.", "Say hello")
+        .await;
 
     assert!(result.is_ok(), "Anthropic complete failed: {:?}", result);
     let response = result.unwrap();
@@ -118,10 +122,7 @@ async fn test_anthropic_llm_complete_integration() {
 async fn test_ollama_llm_complete_integration() {
     // Try to connect to Ollama
     let client = reqwest::Client::new();
-    let check = client
-        .get("http://localhost:11434/api/tags")
-        .send()
-        .await;
+    let check = client.get("http://localhost:11434/api/tags").send().await;
 
     if check.is_err() {
         eprintln!("Skipping Ollama LLM integration test: Ollama not running");
@@ -129,7 +130,9 @@ async fn test_ollama_llm_complete_integration() {
     }
 
     let provider = OllamaLlmProvider::new();
-    let result = provider.complete("You are a helpful assistant.", "Say hello").await;
+    let result = provider
+        .complete("You are a helpful assistant.", "Say hello")
+        .await;
 
     assert!(result.is_ok(), "Ollama complete failed: {:?}", result);
     let response = result.unwrap();

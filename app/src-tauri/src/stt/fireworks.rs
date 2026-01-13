@@ -5,8 +5,8 @@
 //! - whisper-v3-turbo: https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions
 
 use super::{AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::multipart;
 use serde_json::json;
 
@@ -124,7 +124,13 @@ impl SttProvider for FireworksSttProvider {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -174,7 +180,8 @@ mod tests {
 
     #[test]
     fn test_transcriptions_url_switches_on_turbo() {
-        let p1 = FireworksSttProvider::new("test".to_string(), Some("whisper-v3".to_string()), None);
+        let p1 =
+            FireworksSttProvider::new("test".to_string(), Some("whisper-v3".to_string()), None);
         assert!(p1.transcriptions_url().contains("audio-prod"));
 
         let p2 = FireworksSttProvider::new(

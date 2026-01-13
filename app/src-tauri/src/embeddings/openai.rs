@@ -58,15 +58,10 @@ pub async fn embed_text(
         if let Ok(parsed) = serde_json::from_str::<OpenAiErrorResponse>(&body) {
             return Err(OpenAiEmbeddingsError::Api(format!(
                 "{}: {}",
-                status,
-                parsed.error.message
+                status, parsed.error.message
             )));
         }
-        return Err(OpenAiEmbeddingsError::Api(format!(
-            "{}: {}",
-            status,
-            body
-        )));
+        return Err(OpenAiEmbeddingsError::Api(format!("{}: {}", status, body)));
     }
 
     let parsed: EmbeddingsResponse = resp.json().await?;

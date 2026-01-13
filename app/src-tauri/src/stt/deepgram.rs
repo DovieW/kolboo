@@ -1,8 +1,8 @@
 //! Deepgram STT provider implementation.
 
 use super::{AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Url;
 use serde_json::json;
@@ -100,10 +100,7 @@ impl SttProvider for DeepgramSttProvider {
             HeaderValue::from_str(&format!("Token {}", self.api_key))
                 .map_err(|e| SttError::Config(format!("Invalid API key format: {}", e)))?,
         );
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("audio/wav"),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("audio/wav"));
 
         let url = self.listen_url()?;
 
@@ -114,7 +111,13 @@ impl SttProvider for DeepgramSttProvider {
             .body(audio.to_vec())
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -167,7 +170,8 @@ mod tests {
 
     #[test]
     fn test_provider_with_custom_model() {
-        let provider = DeepgramSttProvider::new("test-key".to_string(), Some("nova-2-general".to_string()));
+        let provider =
+            DeepgramSttProvider::new("test-key".to_string(), Some("nova-2-general".to_string()));
         assert_eq!(provider.model, "nova-2-general");
     }
 }

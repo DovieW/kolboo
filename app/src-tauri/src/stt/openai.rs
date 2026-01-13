@@ -5,8 +5,8 @@
 //! - Audio chat models (e.g., gpt-4o-audio-preview) - uses /v1/responses with audio input
 
 use super::{AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::multipart;
 use serde_json::json;
 use std::time::Duration;
@@ -102,7 +102,12 @@ impl OpenAiSttProvider {
         // OpenAI docs say Whisper only considers 224 tokens. Tokenization differs by language.
         // For a simple, predictable UX (and to match our UI), we clamp to 224 characters.
         if self.model == "whisper-1" && prompt.len() > Self::WHISPER_PROMPT_MAX_CHARS {
-            return Some(prompt.chars().take(Self::WHISPER_PROMPT_MAX_CHARS).collect());
+            return Some(
+                prompt
+                    .chars()
+                    .take(Self::WHISPER_PROMPT_MAX_CHARS)
+                    .collect(),
+            );
         }
 
         Some(prompt.to_string())
@@ -157,7 +162,13 @@ impl OpenAiSttProvider {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -208,10 +219,7 @@ impl OpenAiSttProvider {
             for part in content {
                 match part.get("type").and_then(|t| t.as_str()) {
                     Some("refusal") => {
-                        let refusal = part
-                            .get("refusal")
-                            .and_then(|r| r.as_str())
-                            .unwrap_or("");
+                        let refusal = part.get("refusal").and_then(|r| r.as_str()).unwrap_or("");
                         return Err(SttError::Api(format!("OpenAI refusal: {}", refusal)));
                     }
                     Some("output_text") => {
@@ -240,7 +248,8 @@ impl OpenAiSttProvider {
         // Encode audio as base64
         let audio_base64 = STANDARD.encode(audio);
 
-        let mut instruction = "Transcribe this audio. Output only the transcribed text, nothing else.".to_string();
+        let mut instruction =
+            "Transcribe this audio. Output only the transcribed text, nothing else.".to_string();
         if let Some(prompt) = self.clamp_prompt_for_model(prompt) {
             instruction.push_str("\n\nContext/prompt: ");
             instruction.push_str(&prompt);
@@ -315,7 +324,13 @@ impl OpenAiSttProvider {
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -400,11 +415,8 @@ mod tests {
         );
         assert!(!provider.uses_transcriptions_endpoint());
 
-        let provider = OpenAiSttProvider::new(
-            "test-key".to_string(),
-            Some("gpt-audio".to_string()),
-            None,
-        );
+        let provider =
+            OpenAiSttProvider::new("test-key".to_string(), Some("gpt-audio".to_string()), None);
         assert!(!provider.uses_transcriptions_endpoint());
 
         let provider = OpenAiSttProvider::new(

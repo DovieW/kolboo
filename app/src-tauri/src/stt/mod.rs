@@ -24,17 +24,19 @@ pub use elevenlabs::ElevenLabsSttProvider;
 pub use fireworks::FireworksSttProvider;
 pub use groq::GroqSttProvider;
 pub use openai::OpenAiSttProvider;
+#[allow(unused_imports)]
+pub use retry::is_retryable_error;
 pub use retry::{with_retry, RetryConfig};
 pub use speechmatics::SpeechmaticsSttProvider;
 pub use whisper_server::WhisperServerSttProvider;
-#[allow(unused_imports)]
-pub use retry::is_retryable_error;
 
 #[cfg(feature = "local-whisper")]
 pub use whisper::{LocalWhisperConfig, LocalWhisperProvider, WhisperModel};
 
 #[cfg(feature = "local-whisper")]
-pub use whisper::{get_local_whisper_backend_status, LocalWhisperBackendStatus, LocalWhisperComputeBackend};
+pub use whisper::{
+    get_local_whisper_backend_status, LocalWhisperBackendStatus, LocalWhisperComputeBackend,
+};
 
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -189,7 +191,11 @@ mod tests {
 
     #[async_trait]
     impl SttProvider for MockProvider {
-        async fn transcribe(&self, _audio: &[u8], _format: &AudioFormat) -> Result<String, SttError> {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+            _format: &AudioFormat,
+        ) -> Result<String, SttError> {
             Ok("test transcript".to_string())
         }
 

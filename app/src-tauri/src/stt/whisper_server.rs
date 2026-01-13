@@ -14,8 +14,8 @@
 //!   that supports API keys, or extend this provider accordingly.
 
 use super::{AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::multipart;
 use serde_json::json;
 
@@ -114,10 +114,7 @@ impl SttProvider for WhisperServerSttProvider {
         let endpoint = self.endpoint();
 
         if let Some(store) = &self.request_log_store {
-            let prompt = self
-                .default_prompt
-                .as_deref()
-                .and_then(Self::clamp_prompt);
+            let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
 
             let request_json = json!({
                 "provider": "whisper-server",
@@ -149,15 +146,17 @@ impl SttProvider for WhisperServerSttProvider {
             .part("file", part)
             .text("model", self.model.clone());
 
-        if let Some(prompt) = self
-            .default_prompt
-            .as_deref()
-            .and_then(Self::clamp_prompt)
-        {
+        if let Some(prompt) = self.default_prompt.as_deref().and_then(Self::clamp_prompt) {
             form = form.text("prompt", prompt);
         }
 
-        let response = match self.client.post(endpoint.clone()).multipart(form).send().await {
+        let response = match self
+            .client
+            .post(endpoint.clone())
+            .multipart(form)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 if e.is_timeout() {

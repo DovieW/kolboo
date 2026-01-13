@@ -1,8 +1,8 @@
 //! OpenAI LLM provider for text formatting.
 
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -207,7 +207,11 @@ impl OpenAiLlmProvider {
         }
     }
 
-    fn json_schema_response_format(name: &str, description: &str, schema: serde_json::Value) -> TextFormat {
+    fn json_schema_response_format(
+        name: &str,
+        description: &str,
+        schema: serde_json::Value,
+    ) -> TextFormat {
         TextFormat {
             format_type: "json_schema".to_string(),
             name: Some(name.to_string()),
@@ -243,14 +247,8 @@ impl OpenAiLlmProvider {
             for part in content {
                 match part.get("type").and_then(|t| t.as_str()) {
                     Some("refusal") => {
-                        let refusal = part
-                            .get("refusal")
-                            .and_then(|r| r.as_str())
-                            .unwrap_or("");
-                        return Err(LlmError::Api(format!(
-                            "OpenAI refusal: {}",
-                            refusal
-                        )));
+                        let refusal = part.get("refusal").and_then(|r| r.as_str()).unwrap_or("");
+                        return Err(LlmError::Api(format!("OpenAI refusal: {}", refusal)));
                     }
                     Some("output_text") => {
                         if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
@@ -437,9 +435,10 @@ impl LlmProvider for OpenAiLlmProvider {
             )));
         }
 
-        let response_json: serde_json::Value = response.json().await.map_err(|e| {
-            LlmError::InvalidResponse(format!("Failed to parse response: {}", e))
-        })?;
+        let response_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();
@@ -563,9 +562,10 @@ impl LlmProvider for OpenAiLlmProvider {
             )));
         }
 
-        let response_json: serde_json::Value = response.json().await.map_err(|e| {
-            LlmError::InvalidResponse(format!("Failed to parse response: {}", e))
-        })?;
+        let response_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();

@@ -62,7 +62,7 @@ fn is_retryable_error_with_config(error: &SttError, config: &RetryConfig) -> boo
                         || msg.to_lowercase().contains("rate limit")
                         || msg.to_lowercase().contains("too many requests")))
         }
-        SttError::Audio(_) => false, // Don't retry audio errors
+        SttError::Audio(_) => false,  // Don't retry audio errors
         SttError::Config(_) => false, // Don't retry config errors
     }
 }
@@ -77,10 +77,7 @@ pub fn is_retryable_error(error: &SttError) -> bool {
 }
 
 /// Execute an async function with retry logic
-pub async fn with_retry<F, Fut, T>(
-    config: &RetryConfig,
-    operation: F,
-) -> Result<T, SttError>
+pub async fn with_retry<F, Fut, T>(config: &RetryConfig, operation: F) -> Result<T, SttError>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<T, SttError>>,
@@ -145,9 +142,17 @@ mod tests {
     #[test]
     fn test_is_retryable_error() {
         assert!(is_retryable_error(&SttError::Timeout));
-        assert!(is_retryable_error(&SttError::Api("500 Internal Server Error".to_string())));
-        assert!(is_retryable_error(&SttError::Api("429 Rate limit exceeded".to_string())));
-        assert!(!is_retryable_error(&SttError::Config("Invalid API key".to_string())));
-        assert!(!is_retryable_error(&SttError::Audio("Invalid audio format".to_string())));
+        assert!(is_retryable_error(&SttError::Api(
+            "500 Internal Server Error".to_string()
+        )));
+        assert!(is_retryable_error(&SttError::Api(
+            "429 Rate limit exceeded".to_string()
+        )));
+        assert!(!is_retryable_error(&SttError::Config(
+            "Invalid API key".to_string()
+        )));
+        assert!(!is_retryable_error(&SttError::Audio(
+            "Invalid audio format".to_string()
+        )));
     }
 }

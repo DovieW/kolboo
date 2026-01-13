@@ -1,8 +1,8 @@
 //! Ollama LLM provider for local text formatting.
 
 use super::{LlmError, LlmProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -244,9 +244,10 @@ impl LlmProvider for OllamaLlmProvider {
             )));
         }
 
-        let response_json: serde_json::Value = response.json().await.map_err(|e| {
-            LlmError::InvalidResponse(format!("Failed to parse response: {}", e))
-        })?;
+        let response_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();

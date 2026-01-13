@@ -4,8 +4,8 @@
 //! https://api.fireworks.ai/inference/v1/chat/completions
 
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -229,7 +229,10 @@ mod tests {
             "test-key".to_string(),
             "accounts/fireworks/models/llama-v3p1-70b-instruct".to_string(),
         );
-        assert_eq!(provider.model(), "accounts/fireworks/models/llama-v3p1-70b-instruct");
+        assert_eq!(
+            provider.model(),
+            "accounts/fireworks/models/llama-v3p1-70b-instruct"
+        );
     }
 
     #[test]

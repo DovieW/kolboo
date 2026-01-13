@@ -20,12 +20,12 @@ mod network;
 mod pipeline;
 mod recordings;
 mod request_log;
-mod secrets;
 mod router_embeddings_cache;
+mod secrets;
 mod settings;
 mod shortcuts_lock;
-mod stats;
 mod state;
+mod stats;
 mod stt;
 mod vad;
 mod windows_apps;
@@ -39,7 +39,9 @@ mod tests;
 use audio_mute::AudioMuteManager;
 use history::{HistoryStorage, RequestModelInfo};
 use recordings::RecordingStore;
-use request_log::{RequestKind, RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
+use request_log::{
+    RequestKind, RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode,
+};
 use settings::HotkeyConfig;
 use state::{AppState, MicTestMeterState, QuickAskConversationMemory, TrayKeepAlive};
 
@@ -150,9 +152,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // settings that the pipeline will use at runtime (and what the UI shows).
     let default_pipeline_config = crate::pipeline::PipelineConfig::default();
 
-    let is_missing = |v: Option<Value>| -> bool {
-        matches!(v, None | Some(Value::Null))
-    };
+    let is_missing = |v: Option<Value>| -> bool { matches!(v, None | Some(Value::Null)) };
 
     let mut dirty = false;
     // Some settings intentionally use explicit null as a meaningful value.
@@ -229,7 +229,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("transcription_retention_unit", json!("days"), false);
     dirty |= set_default("transcription_retention_value", json!(0.0), false);
     // When deleting old transcriptions, optionally also delete their .wav recordings.
-    dirty |= set_default("transcription_retention_delete_recordings", json!(false), false);
+    dirty |= set_default(
+        "transcription_retention_delete_recordings",
+        json!(false),
+        false,
+    );
 
     // Optional diagnostics: when true, emit additional hotkey debug events to the
     // in-app "System Events" panel (useful in release builds).
@@ -263,7 +267,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     //   (the tray can recreate the main window on demand)
     // Legacy (migrated by the frontend normalizer):
     // - "close_window": previously meant "destroy the main window (tray can recreate it)".
-    dirty |= set_default("main_window_close_behavior", json!("minimize_to_tray"), false);
+    dirty |= set_default(
+        "main_window_close_behavior",
+        json!("minimize_to_tray"),
+        false,
+    );
     dirty |= set_default("output_mode", json!("paste"), false);
     dirty |= set_default("output_hit_enter", json!(false), false);
     // When true, output injection will not read the clipboard and will not attempt to restore it.
@@ -315,7 +323,10 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
 
             if !has_default {
                 arr.insert(0, default_rewrite_profile);
-                store.set("rewrite_program_prompt_profiles".to_string(), Value::Array(arr));
+                store.set(
+                    "rewrite_program_prompt_profiles".to_string(),
+                    Value::Array(arr),
+                );
                 dirty = true;
             }
         }
@@ -553,9 +564,14 @@ fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &str) {
         let pipeline = (*pipeline).clone();
 
         let pipeline_state = pipeline.state();
-        if !matches!(pipeline_state, pipeline::PipelineState::Idle | pipeline::PipelineState::Error)
-        {
-            log::info!("{source}: retry ignored (pipeline busy: {:?})", pipeline_state);
+        if !matches!(
+            pipeline_state,
+            pipeline::PipelineState::Idle | pipeline::PipelineState::Error
+        ) {
+            log::info!(
+                "{source}: retry ignored (pipeline busy: {:?})",
+                pipeline_state
+            );
             return;
         }
 
@@ -589,7 +605,8 @@ fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &str) {
             return;
         };
 
-        let output_mode_str: String = get_setting_from_store(&app, "output_mode", "paste".to_string());
+        let output_mode_str: String =
+            get_setting_from_store(&app, "output_mode", "paste".to_string());
         let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
         let output_hit_enter: bool = get_setting_from_store(&app, "output_hit_enter", false);
         let output_clipboard_privacy_mode: bool =
@@ -774,8 +791,17 @@ fn start_recording(
     let current_state = app
         .try_state::<pipeline::SharedPipeline>()
         .map(|p| p.state());
-    log::info!("{}: starting recording (current pipeline state: {:?})", source, current_state);
-    emit_system_event(app, "shortcut", &format!("{}: starting recording", source), Some(&format!("Pipeline state: {:?}", current_state)));
+    log::info!(
+        "{}: starting recording (current pipeline state: {:?})",
+        source,
+        current_state
+    );
+    emit_system_event(
+        app,
+        "shortcut",
+        &format!("{}: starting recording", source),
+        Some(&format!("Pipeline state: {:?}", current_state)),
+    );
 
     // Start pipeline recording FIRST - if it fails, don't do anything else
     if let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() {
@@ -784,7 +810,8 @@ fn start_recording(
         // which would otherwise cause per-program profile detection to degrade to Default.
         let config = pipeline.config();
         let foreground = crate::windows_apps::get_foreground_process_path();
-        let matched_profile = crate::pipeline::select_profile_for_foreground_app(&config.llm_config);
+        let matched_profile =
+            crate::pipeline::select_profile_for_foreground_app(&config.llm_config);
 
         if let Some(p) = matched_profile.as_ref() {
             let _ = pipeline.set_session_profile_override(Some(p.id.clone()));
@@ -818,10 +845,20 @@ fn start_recording(
         }
 
         if let Err(e) = pipeline.start_recording() {
-            log::error!("{}: Failed to start pipeline recording: {} (state was: {:?})", source, e, current_state);
+            log::error!(
+                "{}: Failed to start pipeline recording: {} (state was: {:?})",
+                source,
+                e,
+                current_state
+            );
             let _ = pipeline.set_session_profile_override(None);
             let error_msg = format!("{} (pipeline state: {:?})", e, current_state);
-            emit_system_event(app, "error", &format!("{}: Failed to start recording", source), Some(&error_msg));
+            emit_system_event(
+                app,
+                "error",
+                &format!("{}: Failed to start recording", source),
+                Some(&error_msg),
+            );
             let payload = serde_json::json!({
                 "message": error_msg,
                 "request_id": null,
@@ -940,14 +977,16 @@ fn start_recording(
             }
             Err(e) => {
                 // Detection failed: be conservative and avoid toggling.
-                log::warn!("Failed to detect active audio session; skipping pause: {}", e);
+                log::warn!(
+                    "Failed to detect active audio session; skipping pause: {}",
+                    e
+                );
                 state.play_pause_toggled.store(false, Ordering::SeqCst);
             }
         }
     } else {
         state.play_pause_toggled.store(false, Ordering::SeqCst);
     }
-
 }
 
 /// Stop recording with sound and audio unmute handling
@@ -963,13 +1002,16 @@ fn stop_recording(
 ) {
     state.is_recording.store(false, Ordering::SeqCst);
     log::info!("{}: stopping recording", source);
-    emit_system_event(app, "shortcut", &format!("{}: stopping recording", source), None);
+    emit_system_event(
+        app,
+        "shortcut",
+        &format!("{}: stopping recording", source),
+        None,
+    );
 
     // If this recording was started via the Quick Ask hotkey, branch the post-transcription
     // flow into an LLM answer overlay (instead of output/paste).
-    let is_quick_ask_session = state
-        .quick_ask_session_active
-        .swap(false, Ordering::SeqCst);
+    let is_quick_ask_session = state.quick_ask_session_active.swap(false, Ordering::SeqCst);
 
     // If hallucination protection (quiet-audio gate) is enabled and the recording is considered
     // effectively quiet, the pipeline will skip STT and immediately return to Idle.
@@ -1148,9 +1190,7 @@ fn stop_recording(
                 .or_else(|| default_profile.and_then(|p| p.llm_provider.clone()))
                 .or(Some(config.llm_config.provider.clone()));
 
-            let provider_for_default_model = provider
-                .as_deref()
-                .unwrap_or("openai");
+            let provider_for_default_model = provider.as_deref().unwrap_or("openai");
 
             let model = profile
                 .as_ref()
@@ -1282,7 +1322,8 @@ fn stop_recording(
 
         if request_id.is_none() {
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
-                let id = log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+                let id =
+                    log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
                 log_store.with_current(|log| {
                     log.profile_id = model_info.profile_id.clone();
                     log.profile_name = model_info.profile_name.clone();
@@ -1332,7 +1373,8 @@ fn stop_recording(
                                 // Idle can happen immediately due to quiet-audio skip.
                                 break;
                             }
-                            pipeline::PipelineState::Recording | pipeline::PipelineState::Routing => {}
+                            pipeline::PipelineState::Recording
+                            | pipeline::PipelineState::Routing => {}
                         }
 
                         if start.elapsed() > std::time::Duration::from_secs(2) {
@@ -1546,7 +1588,8 @@ fn stop_recording(
                             });
                             if let Some((preset_id, preset_name)) = preset_meta {
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
+                                    let _ =
+                                        history.set_request_preset(req_id, preset_id, preset_name);
                                     let _ = app_clone.emit("history-changed", ());
                                 }
                             }
@@ -1568,10 +1611,9 @@ fn stop_recording(
                     }
 
                     // Persist audio for retry (best-effort)
-                    if let (Some(ref req_id), Some(store)) = (
-                        request_id.as_ref(),
-                        app_clone.try_state::<RecordingStore>(),
-                    ) {
+                    if let (Some(ref req_id), Some(store)) =
+                        (request_id.as_ref(), app_clone.try_state::<RecordingStore>())
+                    {
                         if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
                             if store.save_wav(req_id, &wav).is_ok() {
                                 let max_saved_recordings: usize = (get_setting_from_store(
@@ -1579,7 +1621,8 @@ fn stop_recording(
                                     "max_saved_recordings",
                                     1000u64,
                                 ))
-                                .clamp(1, 100_000) as usize;
+                                .clamp(1, 100_000)
+                                    as usize;
 
                                 let _ = store.prune_to_max_files(max_saved_recordings);
                             }
@@ -1609,16 +1652,18 @@ fn stop_recording(
                                 .trim()
                                 .to_string();
 
-                            let emit_to_quick_ask = |app: &AppHandle, event: &str, payload: serde_json::Value| {
-                                if let Some(win) = app.get_webview_window("quick_ask") {
-                                    let _ = win.emit(event, payload);
-                                } else {
-                                    let _ = app.emit(event, payload);
-                                }
-                            };
+                            let emit_to_quick_ask =
+                                |app: &AppHandle, event: &str, payload: serde_json::Value| {
+                                    if let Some(win) = app.get_webview_window("quick_ask") {
+                                        let _ = win.emit(event, payload);
+                                    } else {
+                                        let _ = app.emit(event, payload);
+                                    }
+                                };
 
                             // Ensure the answer window is visible before we start the LLM call.
-                            let _ = commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
+                            let _ =
+                                commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
                             if let Some(win) = app_clone.get_webview_window("quick_ask") {
                                 let _ = win.set_always_on_top(true);
                                 let _ = win.show();
@@ -1633,7 +1678,9 @@ fn stop_recording(
                                         log.kind = RequestKind::QuickAsk;
                                         log.quick_ask_question = Some(String::new());
                                         log.quick_ask_answer = None;
-                                        log.error("Quick Ask failed: no transcript to answer (empty)");
+                                        log.error(
+                                            "Quick Ask failed: no transcript to answer (empty)",
+                                        );
                                         log.complete_error("No transcript to answer (empty)");
                                     });
 
@@ -1660,46 +1707,70 @@ fn stop_recording(
                                 // Resolve effective Quick Ask configuration:
                                 // per-profile override -> global Quick Ask defaults -> global rewrite provider -> fallback.
                                 let global_quick_ask_provider: Option<String> =
-                                    get_setting_from_store(&app_clone, "quick_ask_provider", Option::<String>::None);
-                                let global_quick_ask_model: Option<String> =
-                                    get_setting_from_store(&app_clone, "quick_ask_model", Option::<String>::None);
-                                let global_quick_ask_system_prompt: Option<String> = get_setting_from_store(
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_provider",
+                                        Option::<String>::None,
+                                    );
+                                let global_quick_ask_model: Option<String> = get_setting_from_store(
                                     &app_clone,
-                                    "quick_ask_system_prompt",
+                                    "quick_ask_model",
                                     Option::<String>::None,
                                 );
+                                let global_quick_ask_system_prompt: Option<String> =
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_system_prompt",
+                                        Option::<String>::None,
+                                    );
 
                                 // Quick Ask conversation history (in-memory only).
                                 let quick_ask_conversation_history_enabled: bool =
-                                    get_setting_from_store(&app_clone, "quick_ask_conversation_history_enabled", true);
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_conversation_history_enabled",
+                                        true,
+                                    );
                                 let quick_ask_conversation_history_count_raw: u64 =
-                                    get_setting_from_store(&app_clone, "quick_ask_conversation_history_count", 3u64);
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_conversation_history_count",
+                                        3u64,
+                                    );
                                 let quick_ask_conversation_history_count: usize =
-                                    (quick_ask_conversation_history_count_raw.max(1).min(20)) as usize;
+                                    (quick_ask_conversation_history_count_raw.max(1).min(20))
+                                        as usize;
 
-                                let global_qa_openai_reasoning_effort: Option<String> = get_setting_from_store(
+                                let global_qa_openai_reasoning_effort: Option<String> =
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_openai_reasoning_effort",
+                                        Option::<String>::None,
+                                    );
+                                let global_qa_gemini_thinking_budget: Option<i64> =
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_gemini_thinking_budget",
+                                        Option::<i64>::None,
+                                    );
+                                let global_qa_gemini_thinking_level: Option<String> =
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_gemini_thinking_level",
+                                        Option::<String>::None,
+                                    );
+                                let global_qa_anthropic_thinking_budget: Option<i64> =
+                                    get_setting_from_store(
+                                        &app_clone,
+                                        "quick_ask_anthropic_thinking_budget",
+                                        Option::<i64>::None,
+                                    );
+
+                                let fallback_provider: Option<String> = get_setting_from_store(
                                     &app_clone,
-                                    "quick_ask_openai_reasoning_effort",
+                                    "llm_provider",
                                     Option::<String>::None,
                                 );
-                                let global_qa_gemini_thinking_budget: Option<i64> = get_setting_from_store(
-                                    &app_clone,
-                                    "quick_ask_gemini_thinking_budget",
-                                    Option::<i64>::None,
-                                );
-                                let global_qa_gemini_thinking_level: Option<String> = get_setting_from_store(
-                                    &app_clone,
-                                    "quick_ask_gemini_thinking_level",
-                                    Option::<String>::None,
-                                );
-                                let global_qa_anthropic_thinking_budget: Option<i64> = get_setting_from_store(
-                                    &app_clone,
-                                    "quick_ask_anthropic_thinking_budget",
-                                    Option::<i64>::None,
-                                );
-
-                                let fallback_provider: Option<String> =
-                                    get_setting_from_store(&app_clone, "llm_provider", Option::<String>::None);
 
                                 let provider = quick_ask_profile_cfg
                                     .provider
@@ -1744,11 +1815,11 @@ fn stop_recording(
                                         log.quick_ask_provider = Some(provider.clone());
                                         log.quick_ask_model = model.clone();
                                         log.quick_ask_request_json = Some(serde_json::json!({
-                                            "system_prompt": system_prompt.clone(),
-                                            "question": question.clone(),
-                                            "provider": provider.clone(),
-                                            "model": model.clone(),
-                                    }));
+                                                "system_prompt": system_prompt.clone(),
+                                                "question": question.clone(),
+                                                "provider": provider.clone(),
+                                                "model": model.clone(),
+                                        }));
                                         log.info("Quick Ask: starting answer generation");
                                     });
                                 }
@@ -1774,8 +1845,11 @@ fn stop_recording(
                                 };
 
                                 if provider != "ollama" && api_key.trim().is_empty() {
-                                    let err = format!("No API key configured for provider: {}", provider);
-                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                    let err =
+                                        format!("No API key configured for provider: {}", provider);
+                                    if let Some(log_store) =
+                                        app_clone.try_state::<RequestLogStore>()
+                                    {
                                         log_store.with_current(|log| {
                                             log.kind = RequestKind::QuickAsk;
                                             log.error(format!("Quick Ask failed: {}", err));
@@ -1818,7 +1892,9 @@ fn stop_recording(
                                     };
 
                                     let provider_impl =
-                                        crate::commands::llm::create_llm_provider_unstructured(&provider_cfg);
+                                        crate::commands::llm::create_llm_provider_unstructured(
+                                            &provider_cfg,
+                                        );
 
                                     // Best-effort: attach any highlighted text captured at recording stop.
                                     // We keep this bounded so we don't blow up token usage.
@@ -1854,19 +1930,26 @@ fn stop_recording(
                                         .filter(|s| !s.is_empty());
 
                                     // Read clipboard context if enabled for this profile.
-                                    let clipboard_text: Option<String> = if quick_ask_profile_cfg.include_clipboard_context {
+                                    let clipboard_text: Option<String> = if quick_ask_profile_cfg
+                                        .include_clipboard_context
+                                    {
                                         // The selection probe may temporarily write a sentinel token into the clipboard
                                         // while it waits for the target app to copy the selection.
                                         // If we read clipboard context during that window, request logs can end up with
                                         // "__kolboo_selection_probe__..." as the clipboard context.
                                         if quick_ask_epoch != 0 {
-                                            let deadline = Instant::now() + Duration::from_millis(350);
+                                            let deadline =
+                                                Instant::now() + Duration::from_millis(350);
                                             loop {
                                                 let ready = {
                                                     let state = app_clone.state::<AppState>();
                                                     let lock_result = state.quick_ask_probe.lock();
                                                     match lock_result {
-                                                        Ok(probe) if probe.epoch == quick_ask_epoch => probe.ready,
+                                                        Ok(probe)
+                                                            if probe.epoch == quick_ask_epoch =>
+                                                        {
+                                                            probe.ready
+                                                        }
                                                         _ => true,
                                                     }
                                                 };
@@ -1889,7 +1972,8 @@ fn stop_recording(
                                             clipboard_context::read_clipboard_text_best_effort_async(8000).await;
 
                                         // If we still see the sentinel, wait a beat and retry once.
-                                        let v = if v_first.as_deref().is_some_and(is_probe_sentinel) {
+                                        let v = if v_first.as_deref().is_some_and(is_probe_sentinel)
+                                        {
                                             tokio::time::sleep(Duration::from_millis(120)).await;
                                             clipboard_context::read_clipboard_text_best_effort_async(8000).await
                                         } else {
@@ -1915,21 +1999,23 @@ fn stop_recording(
                                     // Both are independently optional.
                                     let cap = 8_000usize;
 
-                                    let selected_context_capped: Option<String> = selected_context_trimmed.map(|ctx| {
-                                        if ctx.len() > cap {
-                                            format!("{}\n\n… (truncated)", &ctx[..cap])
-                                        } else {
-                                            ctx.to_string()
-                                        }
-                                    });
+                                    let selected_context_capped: Option<String> =
+                                        selected_context_trimmed.map(|ctx| {
+                                            if ctx.len() > cap {
+                                                format!("{}\n\n… (truncated)", &ctx[..cap])
+                                            } else {
+                                                ctx.to_string()
+                                            }
+                                        });
 
-                                    let clipboard_context_capped: Option<String> = clipboard_trimmed.map(|cb| {
-                                        if cb.len() > cap {
-                                            format!("{}\n\n… (truncated)", &cb[..cap])
-                                        } else {
-                                            cb.to_string()
-                                        }
-                                    });
+                                    let clipboard_context_capped: Option<String> =
+                                        clipboard_trimmed.map(|cb| {
+                                            if cb.len() > cap {
+                                                format!("{}\n\n… (truncated)", &cb[..cap])
+                                            } else {
+                                                cb.to_string()
+                                            }
+                                        });
 
                                     // This is the *exact* context text (if any) we attached to the question.
                                     // Stored for request logs/UI.
@@ -1946,92 +2032,112 @@ fn stop_recording(
 
                                     // Best-effort: include last N Quick Ask turns from in-memory history.
                                     // We intentionally do NOT persist or log this conversation content.
-                                    let question_with_context = if quick_ask_conversation_history_enabled {
-                                        let turns: Vec<crate::state::QuickAskConversationTurn> = app_clone
-                                            .try_state::<QuickAskConversationMemory>()
-                                            .map(|m| m.snapshot_last(quick_ask_conversation_history_count))
-                                            .unwrap_or_default();
+                                    let question_with_context =
+                                        if quick_ask_conversation_history_enabled {
+                                            let turns: Vec<crate::state::QuickAskConversationTurn> =
+                                                app_clone
+                                                    .try_state::<QuickAskConversationMemory>()
+                                                    .map(|m| {
+                                                        m.snapshot_last(
+                                                            quick_ask_conversation_history_count,
+                                                        )
+                                                    })
+                                                    .unwrap_or_default();
 
-                                        if turns.is_empty() {
-                                            question_with_context
-                                        } else {
-                                            let mut s = String::new();
-                                            s.push_str("Previous Quick Ask conversation (most recent last):\n\n");
+                                            if turns.is_empty() {
+                                                question_with_context
+                                            } else {
+                                                let mut s = String::new();
+                                                s.push_str("Previous Quick Ask conversation (most recent last):\n\n");
 
-                                            for t in turns.iter() {
-                                                let q = t.question.trim();
-                                                let a = t.answer.trim();
-                                                if q.is_empty() && a.is_empty() {
-                                                    continue;
+                                                for t in turns.iter() {
+                                                    let q = t.question.trim();
+                                                    let a = t.answer.trim();
+                                                    if q.is_empty() && a.is_empty() {
+                                                        continue;
+                                                    }
+
+                                                    // Keep each turn reasonably bounded.
+                                                    let cap = 1_500usize;
+                                                    let q_capped = if q.len() > cap {
+                                                        format!("{}…", &q[..cap])
+                                                    } else {
+                                                        q.to_string()
+                                                    };
+                                                    let a_capped = if a.len() > cap {
+                                                        format!("{}…", &a[..cap])
+                                                    } else {
+                                                        a.to_string()
+                                                    };
+
+                                                    s.push_str("User: ");
+                                                    s.push_str(&q_capped);
+                                                    s.push_str("\nAssistant: ");
+                                                    s.push_str(&a_capped);
+                                                    s.push_str("\n\n");
                                                 }
 
-                                                // Keep each turn reasonably bounded.
-                                                let cap = 1_500usize;
-                                                let q_capped = if q.len() > cap {
-                                                    format!("{}…", &q[..cap])
-                                                } else {
-                                                    q.to_string()
-                                                };
-                                                let a_capped = if a.len() > cap {
-                                                    format!("{}…", &a[..cap])
-                                                } else {
-                                                    a.to_string()
-                                                };
-
-                                                s.push_str("User: ");
-                                                s.push_str(&q_capped);
-                                                s.push_str("\nAssistant: ");
-                                                s.push_str(&a_capped);
-                                                s.push_str("\n\n");
+                                                s.push_str("---\n\n");
+                                                s.push_str(&question_with_context);
+                                                s
                                             }
-
-                                            s.push_str("---\n\n");
-                                            s.push_str(&question_with_context);
-                                            s
-                                        }
-                                    } else {
-                                        question_with_context
-                                    };
+                                        } else {
+                                            question_with_context
+                                        };
 
                                     // Update the logical request payload to indicate context was used.
                                     // We avoid logging the raw context string by default (it may contain secrets).
-                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                        let context_chars = selected_context_trimmed.map(|s| s.len());
+                                    if let Some(log_store) =
+                                        app_clone.try_state::<RequestLogStore>()
+                                    {
+                                        let context_chars =
+                                            selected_context_trimmed.map(|s| s.len());
                                         let clipboard_chars = clipboard_trimmed.map(|s| s.len());
-                                        let quick_ask_context_text_for_log = quick_ask_context_text_for_log.clone();
+                                        let quick_ask_context_text_for_log =
+                                            quick_ask_context_text_for_log.clone();
                                         let quick_ask_clipboard_context_for_log =
                                             quick_ask_clipboard_context_for_log.clone();
                                         log_store.with_current(|log| {
-                                            log.quick_ask_context_text = quick_ask_context_text_for_log;
-                                            log.quick_ask_clipboard_context = quick_ask_clipboard_context_for_log;
+                                            log.quick_ask_context_text =
+                                                quick_ask_context_text_for_log;
+                                            log.quick_ask_clipboard_context =
+                                                quick_ask_clipboard_context_for_log;
 
                                             if let Some(req) = log.quick_ask_request_json.as_mut() {
                                                 // If it's our JSON object, add a couple extra fields.
                                                 if let serde_json::Value::Object(map) = req {
                                                     map.insert(
                                                         "context_present".to_string(),
-                                                        serde_json::Value::Bool(context_chars.is_some()),
+                                                        serde_json::Value::Bool(
+                                                            context_chars.is_some(),
+                                                        ),
                                                     );
                                                     map.insert(
                                                         "context_chars".to_string(),
                                                         context_chars
                                                             .map(|n| {
                                                                 serde_json::Value::Number(
-                                                                    serde_json::Number::from(n as u64),
+                                                                    serde_json::Number::from(
+                                                                        n as u64,
+                                                                    ),
                                                                 )
                                                             })
                                                             .unwrap_or(serde_json::Value::Null),
                                                     );
                                                     map.insert(
                                                         "clipboard_context_present".to_string(),
-                                                        serde_json::Value::Bool(clipboard_chars.is_some()),
+                                                        serde_json::Value::Bool(
+                                                            clipboard_chars.is_some(),
+                                                        ),
                                                     );
                                                     map.insert(
                                                         "clipboard_context_chars".to_string(),
                                                         clipboard_chars
                                                             .map(|n| {
                                                                 serde_json::Value::Number(
-                                                                    serde_json::Number::from(n as u64),
+                                                                    serde_json::Number::from(
+                                                                        n as u64,
+                                                                    ),
                                                                 )
                                                             })
                                                             .unwrap_or(serde_json::Value::Null),
@@ -2043,7 +2149,10 @@ fn stop_recording(
 
                                     let t0 = std::time::Instant::now();
                                     match provider_impl
-                                        .complete(system_prompt.as_str(), question_with_context.as_str())
+                                        .complete(
+                                            system_prompt.as_str(),
+                                            question_with_context.as_str(),
+                                        )
                                         .await
                                     {
                                         Ok(answer) => {
@@ -2051,28 +2160,37 @@ fn stop_recording(
                                             let duration_ms = t0.elapsed().as_millis() as u64;
 
                                             // Record the successful Q/A turn into in-memory Quick Ask history.
-                                            if let Some(mem) = app_clone.try_state::<QuickAskConversationMemory>() {
+                                            if let Some(mem) =
+                                                app_clone.try_state::<QuickAskConversationMemory>()
+                                            {
                                                 mem.push_turn(question.clone(), answer.clone());
                                             }
 
-                                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                            if let Some(log_store) =
+                                                app_clone.try_state::<RequestLogStore>()
+                                            {
                                                 log_store.with_current(|log| {
                                                     log.kind = RequestKind::QuickAsk;
                                                     log.quick_ask_answer = Some(answer.clone());
-                                                    log.quick_ask_provider = Some(provider_impl.name().to_string());
-                                                    log.quick_ask_model = Some(provider_impl.model().to_string());
+                                                    log.quick_ask_provider =
+                                                        Some(provider_impl.name().to_string());
+                                                    log.quick_ask_model =
+                                                        Some(provider_impl.model().to_string());
                                                     log.quick_ask_duration_ms = Some(duration_ms);
-                                                    log.quick_ask_response_json = Some(serde_json::json!({
-                                                        "ok": true,
-                                                        "answer": answer.clone(),
-                                                        "provider_used": provider_impl.name(),
-                                                        "model_used": provider_impl.model(),
-                                                        "duration_ms": duration_ms,
-                                                    }));
+                                                    log.quick_ask_response_json =
+                                                        Some(serde_json::json!({
+                                                            "ok": true,
+                                                            "answer": answer.clone(),
+                                                            "provider_used": provider_impl.name(),
+                                                            "model_used": provider_impl.model(),
+                                                            "duration_ms": duration_ms,
+                                                        }));
                                                     log.complete_success();
                                                 });
 
-                                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                                if let Some(wav) =
+                                                    pipeline_clone.clone_last_wav_bytes()
+                                                {
                                                     stats::emit_cost_events_for_current_request(
                                                         &app_clone,
                                                         stats::EventStatus::Success,
@@ -2097,19 +2215,27 @@ fn stop_recording(
                                         }
                                         Err(e) => {
                                             let err = e.to_string();
-                                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                            if let Some(log_store) =
+                                                app_clone.try_state::<RequestLogStore>()
+                                            {
                                                 log_store.with_current(|log| {
                                                     log.kind = RequestKind::QuickAsk;
                                                     log.quick_ask_answer = None;
-                                                    log.quick_ask_response_json = Some(serde_json::json!({
-                                                        "ok": false,
-                                                        "error": err.clone(),
-                                                    }));
-                                                    log.error(format!("Quick Ask failed: {}", err.clone()));
+                                                    log.quick_ask_response_json =
+                                                        Some(serde_json::json!({
+                                                            "ok": false,
+                                                            "error": err.clone(),
+                                                        }));
+                                                    log.error(format!(
+                                                        "Quick Ask failed: {}",
+                                                        err.clone()
+                                                    ));
                                                     log.complete_error(err.clone());
                                                 });
 
-                                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                                if let Some(wav) =
+                                                    pipeline_clone.clone_last_wav_bytes()
+                                                {
                                                     stats::emit_cost_events_for_current_request(
                                                         &app_clone,
                                                         stats::EventStatus::Error,
@@ -2139,8 +2265,7 @@ fn stop_recording(
                             if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
                                 // Wait briefly for the selection probe to finish (best-effort).
                                 let selected_text: Option<String> = {
-                                    let deadline = Instant::now()
-                                        + Duration::from_millis(700);
+                                    let deadline = Instant::now() + Duration::from_millis(700);
                                     loop {
                                         let (ready, selection) = {
                                             let state = app_clone.state::<AppState>();
@@ -2172,7 +2297,9 @@ fn stop_recording(
                                     .map(|s| s.trim())
                                     .filter(|s| !s.is_empty())
                                 {
-                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                    if let Some(log_store) =
+                                        app_clone.try_state::<RequestLogStore>()
+                                    {
                                         log_store.with_current(|log| {
                                             log.kind = RequestKind::QuickReplace;
                                             log.info(format!(
@@ -2196,7 +2323,8 @@ fn stop_recording(
                                             };
 
                                             log.quick_replace_selected_text = Some(selected_capped);
-                                            log.quick_replace_instructions = Some(instructions_capped);
+                                            log.quick_replace_instructions =
+                                                Some(instructions_capped);
                                         });
                                     }
 
@@ -2228,7 +2356,9 @@ fn stop_recording(
                                             "Quick Replace failed: no API key configured for provider: {}",
                                             provider
                                         );
-                                        if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                        if let Some(log_store) =
+                                            app_clone.try_state::<RequestLogStore>()
+                                        {
                                             log_store.with_current(|log| {
                                                 log.warn(format!(
                                                     "Quick replace: skipped (no API key configured for provider: {})",
@@ -2252,7 +2382,9 @@ fn stop_recording(
                                         let instructions_text = output_value.trim().to_string();
 
                                         // Read clipboard context if enabled for this profile.
-                                        let clipboard_text: Option<String> = if quick_replace_cfg.include_clipboard_context {
+                                        let clipboard_text: Option<String> = if quick_replace_cfg
+                                            .include_clipboard_context
+                                        {
                                             clipboard_context::read_clipboard_text_best_effort_async(8000).await
                                         } else {
                                             None
@@ -2275,9 +2407,12 @@ fn stop_recording(
 
                                         // Store clipboard context in request log if present.
                                         if let Some(ref cb_text) = clipboard_text {
-                                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                            if let Some(log_store) =
+                                                app_clone.try_state::<RequestLogStore>()
+                                            {
                                                 log_store.with_current(|log| {
-                                                    log.quick_replace_clipboard_context = Some(cb_text.clone());
+                                                    log.quick_replace_clipboard_context =
+                                                        Some(cb_text.clone());
                                                 });
                                             }
                                         }
@@ -2288,16 +2423,29 @@ fn stop_recording(
                                             api_key,
                                             model,
                                             ollama_url: cfg.llm_config.ollama_url.clone(),
-                                            openai_reasoning_effort: cfg.llm_config.openai_reasoning_effort.clone(),
-                                            gemini_thinking_budget: cfg.llm_config.gemini_thinking_budget,
-                                            gemini_thinking_level: cfg.llm_config.gemini_thinking_level.clone(),
-                                            anthropic_thinking_budget: cfg.llm_config.anthropic_thinking_budget,
+                                            openai_reasoning_effort: cfg
+                                                .llm_config
+                                                .openai_reasoning_effort
+                                                .clone(),
+                                            gemini_thinking_budget: cfg
+                                                .llm_config
+                                                .gemini_thinking_budget,
+                                            gemini_thinking_level: cfg
+                                                .llm_config
+                                                .gemini_thinking_level
+                                                .clone(),
+                                            anthropic_thinking_budget: cfg
+                                                .llm_config
+                                                .anthropic_thinking_budget,
                                             prompts: crate::llm::PromptSections::default(),
                                             program_prompt_profiles: Vec::new(),
                                             timeout: cfg.llm_config.timeout,
                                         };
 
-                                        let provider_impl = crate::commands::llm::create_llm_provider_unstructured(&provider_cfg);
+                                        let provider_impl =
+                                            crate::commands::llm::create_llm_provider_unstructured(
+                                                &provider_cfg,
+                                            );
                                         let t0 = Instant::now();
                                         match provider_impl
                                             .complete(&system_prompt, &user_prompt)
@@ -2307,17 +2455,22 @@ fn stop_recording(
                                                 let rewritten = rewritten.trim().to_string();
                                                 if rewritten.is_empty() {
                                                     let err = "Quick Replace failed: model returned empty output".to_string();
-                                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                    if let Some(log_store) =
+                                                        app_clone.try_state::<RequestLogStore>()
+                                                    {
                                                         log_store.with_current(|log| {
                                                             log.kind = RequestKind::QuickReplace;
-                                                            log.quick_replace_provider =
-                                                                Some(provider_impl.name().to_string());
-                                                            log.quick_replace_model =
-                                                                Some(provider_impl.model().to_string());
-                                                            log.quick_replace_response_json = Some(serde_json::json!({
-                                                                "ok": false,
-                                                                "error": err.clone(),
-                                                            }));
+                                                            log.quick_replace_provider = Some(
+                                                                provider_impl.name().to_string(),
+                                                            );
+                                                            log.quick_replace_model = Some(
+                                                                provider_impl.model().to_string(),
+                                                            );
+                                                            log.quick_replace_response_json =
+                                                                Some(serde_json::json!({
+                                                                    "ok": false,
+                                                                    "error": err.clone(),
+                                                                }));
                                                             log.error(err.clone());
                                                             log.complete_error(err.clone());
                                                         });
@@ -2325,7 +2478,9 @@ fn stop_recording(
                                                     quick_replace_failure = Some(err);
                                                 } else {
                                                     output_value = rewritten;
-                                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                    if let Some(log_store) =
+                                                        app_clone.try_state::<RequestLogStore>()
+                                                    {
                                                         let ms = t0.elapsed().as_millis() as u64;
                                                         log_store.with_current(|log| {
                                                             log.kind = RequestKind::QuickReplace;
@@ -2364,7 +2519,9 @@ fn stop_recording(
                                             }
                                             Err(e) => {
                                                 let err = e.to_string();
-                                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                                if let Some(log_store) =
+                                                    app_clone.try_state::<RequestLogStore>()
+                                                {
                                                     log_store.with_current(|log| {
                                                         log.kind = RequestKind::QuickReplace;
                                                         log.quick_replace_provider = Some(provider.clone());
@@ -2401,7 +2558,9 @@ fn stop_recording(
                             if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
                                 if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                     log_store.with_current(|log| {
-                                        if log.status == crate::request_log::RequestStatus::InProgress {
+                                        if log.status
+                                            == crate::request_log::RequestStatus::InProgress
+                                        {
                                             if quick_replace_failure.is_some() {
                                                 // Preserve error status set earlier.
                                             } else {
@@ -2456,7 +2615,9 @@ fn stop_recording(
                                 ) {
                                     log::error!("Failed to output transcript: {}", e);
 
-                                    if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                    if let Some(log_store) =
+                                        app_clone.try_state::<RequestLogStore>()
+                                    {
                                         log_store.with_current(|log| {
                                             log.warn(format!("Output failed: {}", e));
                                         });
@@ -2471,13 +2632,19 @@ fn stop_recording(
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                     // Store the actual output (Quick Replace may have changed it).
                                     if let Some(err) = quick_replace_failure.as_deref() {
-                                        let _ = history.complete_request_error(req_id, err.to_string());
-                                    } else if let Err(e) = history.complete_request_success(req_id, output_value.clone()) {
+                                        let _ =
+                                            history.complete_request_error(req_id, err.to_string());
+                                    } else if let Err(e) = history
+                                        .complete_request_success(req_id, output_value.clone())
+                                    {
                                         log::warn!("Failed to update history: {}", e);
                                     }
 
                                     let (provider, model) = if result.llm_attempted() {
-                                        (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                                        (
+                                            result.llm_provider_used.clone(),
+                                            result.llm_model_used.clone(),
+                                        )
                                     } else {
                                         (None, None)
                                     };
@@ -2496,18 +2663,18 @@ fn stop_recording(
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
                         if is_quick_ask_session {
-                            let emit_to_quick_ask = |app: &AppHandle,
-                                                     event: &str,
-                                                     payload: serde_json::Value| {
-                                if let Some(win) = app.get_webview_window("quick_ask") {
-                                    let _ = win.emit(event, payload);
-                                } else {
-                                    let _ = app.emit(event, payload);
-                                }
-                            };
+                            let emit_to_quick_ask =
+                                |app: &AppHandle, event: &str, payload: serde_json::Value| {
+                                    if let Some(win) = app.get_webview_window("quick_ask") {
+                                        let _ = win.emit(event, payload);
+                                    } else {
+                                        let _ = app.emit(event, payload);
+                                    }
+                                };
 
                             // Ensure the answer window is visible so the error is actually seen.
-                            let _ = commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
+                            let _ =
+                                commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
                             if let Some(win) = app_clone.get_webview_window("quick_ask") {
                                 let _ = win.set_always_on_top(true);
                                 let _ = win.show();
@@ -2551,7 +2718,10 @@ fn stop_recording(
                                     let _ = history.complete_request_success(req_id, String::new());
 
                                     let (provider, model) = if result.llm_attempted() {
-                                        (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                                        (
+                                            result.llm_provider_used.clone(),
+                                            result.llm_model_used.clone(),
+                                        )
                                     } else {
                                         (None, None)
                                     };
@@ -2590,7 +2760,9 @@ fn stop_recording(
                                     .state::<AppState>()
                                     .overlay_visibility_epoch
                                     .load(Ordering::SeqCst);
-                                if current_mode == "recording_only" && current_epoch == expected_epoch {
+                                if current_mode == "recording_only"
+                                    && current_epoch == expected_epoch
+                                {
                                     let _ = window_clone.hide();
                                 }
                             });
@@ -2675,10 +2847,9 @@ fn stop_recording(
                     }
 
                     // Persist audio for retry (best-effort)
-                    if let (Some(ref req_id), Some(store)) = (
-                        request_id.as_ref(),
-                        app_clone.try_state::<RecordingStore>(),
-                    ) {
+                    if let (Some(ref req_id), Some(store)) =
+                        (request_id.as_ref(), app_clone.try_state::<RecordingStore>())
+                    {
                         if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
                             if store.save_wav(req_id, &wav).is_ok() {
                                 let max_saved_recordings: usize = (get_setting_from_store(
@@ -2686,7 +2857,8 @@ fn stop_recording(
                                     "max_saved_recordings",
                                     1000u64,
                                 ))
-                                .clamp(1, 100_000) as usize;
+                                .clamp(1, 100_000)
+                                    as usize;
 
                                 let _ = store.prune_to_max_files(max_saved_recordings);
                             }
@@ -2706,10 +2878,11 @@ fn stop_recording(
 
                     // Force-show overlay for retry UI regardless of overlay_mode.
                     // If the user is not in always-visible mode, also snap back to the saved preset.
-                    if let Err(e) = commands::overlay::show_overlay_with_reset_if_not_always(&app_clone) {
+                    if let Err(e) =
+                        commands::overlay::show_overlay_with_reset_if_not_always(&app_clone)
+                    {
                         log::warn!("Failed to force-show overlay after error: {}", e);
                     }
-
                 }
             }
 
@@ -2760,11 +2933,13 @@ async fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool
             return;
         }
 
-        if let Err(e) = shortcut_manager.on_shortcut(ESCAPE_CANCEL_SHORTCUT, |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                cancel_pipeline_session(app, "Escape");
-            }
-        }) {
+        if let Err(e) =
+            shortcut_manager.on_shortcut(ESCAPE_CANCEL_SHORTCUT, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    cancel_pipeline_session(app, "Escape");
+                }
+            })
+        {
             log::warn!(
                 "Failed to register Escape cancel shortcut ({}): {}",
                 ESCAPE_CANCEL_SHORTCUT,
@@ -2817,8 +2992,12 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     state.paste_key_held.store(false, Ordering::SeqCst);
     state.retry_key_held.store(false, Ordering::SeqCst);
     state.quick_ask_key_held.store(false, Ordering::SeqCst);
-    state.quick_ask_toggle_key_held.store(false, Ordering::SeqCst);
-    state.quick_ask_session_active.store(false, Ordering::SeqCst);
+    state
+        .quick_ask_toggle_key_held
+        .store(false, Ordering::SeqCst);
+    state
+        .quick_ask_session_active
+        .store(false, Ordering::SeqCst);
 
     // Restore audio side effects (unmute + resume playback if we paused).
     let sound_enabled: bool = get_setting_from_store(app, "sound_enabled", true);
@@ -2849,8 +3028,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
         && !playing_audio_handling.wants_mute()
         && matches!(pipeline_state, Some(pipeline::PipelineState::Recording));
     if sound_enabled && should_play_stop_cue {
-        let audio_cue_raw: String =
-            get_setting_from_store(app, "audio_cue", "kolboo".to_string());
+        let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "kolboo".to_string());
         let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
         audio::play_sound(audio::SoundType::RecordingStop, audio_cue);
     }
@@ -3062,18 +3240,23 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                         .map(|p| p.state());
 
                     log::info!("Toggle released: pipeline state = {:?}", pipeline_state);
-                    emit_system_event(app, "shortcut", "Toggle key released", Some(&format!("Pipeline state: {:?}", pipeline_state)));
+                    emit_system_event(
+                        app,
+                        "shortcut",
+                        "Toggle key released",
+                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
+                    );
 
                     // Do not allow starting a new capture while we are processing a previous one.
                     // This avoids a brief error UI flash if the user taps the toggle again.
                     if matches!(
                         pipeline_state,
-                        Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                        Some(
+                            pipeline::PipelineState::Transcribing
+                                | pipeline::PipelineState::Rewriting
+                        )
                     ) {
-                        log::info!(
-                            "Toggle ignored (pipeline busy: {:?})",
-                            pipeline_state
-                        );
+                        log::info!("Toggle ignored (pipeline busy: {:?})", pipeline_state);
                         return;
                     }
 
@@ -3105,10 +3288,7 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                             "Toggle",
                         );
                     } else {
-                        log::info!(
-                            "Toggle ignored (pipeline state: {:?})",
-                            pipeline_state
-                        );
+                        log::info!("Toggle ignored (pipeline state: {:?})", pipeline_state);
                     }
                 }
             }
@@ -3124,7 +3304,12 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                         .map(|p| p.state());
 
                     log::info!("Hold pressed: pipeline state = {:?}", pipeline_state);
-                    emit_system_event(app, "shortcut", "Hold key pressed", Some(&format!("Pipeline state: {:?}", pipeline_state)));
+                    emit_system_event(
+                        app,
+                        "shortcut",
+                        "Hold key pressed",
+                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
+                    );
 
                     let can_start = pipeline_state
                         .map(|s| s.can_start_recording())
@@ -3178,10 +3363,12 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                     log::info!("OutputLast: outputting last transcription");
 
                     // Get output mode from settings
-                    let output_mode_str: String = get_setting_from_store(app, "output_mode", "paste".to_string());
+                    let output_mode_str: String =
+                        get_setting_from_store(app, "output_mode", "paste".to_string());
                     let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
 
-                    let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
+                    let output_hit_enter: bool =
+                        get_setting_from_store(app, "output_hit_enter", false);
                     let output_clipboard_privacy_mode: bool =
                         get_setting_from_store(app, "output_clipboard_privacy_mode", false);
 
@@ -3228,7 +3415,10 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                         .try_state::<pipeline::SharedPipeline>()
                         .map(|p| p.state());
 
-                    log::info!("QuickAskHold pressed: pipeline state = {:?}", pipeline_state);
+                    log::info!(
+                        "QuickAskHold pressed: pipeline state = {:?}",
+                        pipeline_state
+                    );
                     emit_system_event(
                         app,
                         "shortcut",
@@ -3239,7 +3429,10 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                     // Do not allow starting while we are processing a previous capture.
                     if matches!(
                         pipeline_state,
-                        Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                        Some(
+                            pipeline::PipelineState::Transcribing
+                                | pipeline::PipelineState::Rewriting
+                        )
                     ) {
                         log::info!("QuickAskHold ignored (pipeline busy: {:?})", pipeline_state);
                         return;
@@ -3267,7 +3460,9 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                             .map(|p| p.state() == pipeline::PipelineState::Recording)
                             .unwrap_or(false);
                         if !is_recording {
-                            state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                            state
+                                .quick_ask_session_active
+                                .store(false, Ordering::SeqCst);
                         }
                     }
                 }
@@ -3292,7 +3487,9 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                         );
                     } else {
                         // If we never actually started capture, clear the intent.
-                        state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                        state
+                            .quick_ask_session_active
+                            .store(false, Ordering::SeqCst);
                     }
                 }
             }
@@ -3305,7 +3502,10 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                 state.quick_ask_toggle_key_held.swap(true, Ordering::SeqCst);
             }
             ShortcutState::Released => {
-                if state.quick_ask_toggle_key_held.swap(false, Ordering::SeqCst) {
+                if state
+                    .quick_ask_toggle_key_held
+                    .swap(false, Ordering::SeqCst)
+                {
                     let pipeline_state = app
                         .try_state::<pipeline::SharedPipeline>()
                         .map(|p| p.state());
@@ -3324,7 +3524,10 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                     // Do not allow starting while we are processing a previous capture.
                     if matches!(
                         pipeline_state,
-                        Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                        Some(
+                            pipeline::PipelineState::Transcribing
+                                | pipeline::PipelineState::Rewriting
+                        )
                     ) {
                         log::info!(
                             "QuickAskToggle ignored (pipeline busy: {:?})",
@@ -3377,7 +3580,9 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                             .map(|p| p.state() == pipeline::PipelineState::Recording)
                             .unwrap_or(false);
                         if !is_recording {
-                            state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                            state
+                                .quick_ask_session_active
+                                .store(false, Ordering::SeqCst);
                         }
                     } else {
                         log::info!(
@@ -4064,9 +4269,11 @@ pub(crate) fn handle_modifier_key_event(
     let hotkey_debug = crate::windows_modifier_hotkeys::hotkey_debug_runtime_enabled();
 
     // Determine which (if any) configured hotkey uses this modifier-only key.
-    let toggle_hotkey = get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
+    let toggle_hotkey =
+        get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
     let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
-    let paste_last_hotkey = get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
+    let paste_last_hotkey =
+        get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
     let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
     let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
         use serde_json::Value;
@@ -4094,12 +4301,24 @@ pub(crate) fn handle_modifier_key_event(
     let matches_modifier_only = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == key;
     let is_toggle = toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
     let is_hold = hold_hotkey.as_ref().is_some_and(matches_modifier_only);
-    let is_paste_last = paste_last_hotkey.as_ref().is_some_and(matches_modifier_only);
+    let is_paste_last = paste_last_hotkey
+        .as_ref()
+        .is_some_and(matches_modifier_only);
     let is_retry = retry_hotkey.as_ref().is_some_and(matches_modifier_only);
-    let is_quick_ask_hold = quick_ask_hold_hotkey.as_ref().is_some_and(matches_modifier_only);
-    let is_quick_ask_toggle = quick_ask_toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
+    let is_quick_ask_hold = quick_ask_hold_hotkey
+        .as_ref()
+        .is_some_and(matches_modifier_only);
+    let is_quick_ask_toggle = quick_ask_toggle_hotkey
+        .as_ref()
+        .is_some_and(matches_modifier_only);
 
-    if !(is_toggle || is_hold || is_paste_last || is_retry || is_quick_ask_hold || is_quick_ask_toggle) {
+    if !(is_toggle
+        || is_hold
+        || is_paste_last
+        || is_retry
+        || is_quick_ask_hold
+        || is_quick_ask_toggle)
+    {
         if hotkey_debug {
             let details = format!(
                 "key={key} is_down={is_down} suppress_release_actions={suppress_release_actions} toggle_hotkey={} hold_hotkey={} paste_last_hotkey={} retry_hotkey={} quick_ask_hold_hotkey={} quick_ask_toggle_hotkey={} (no match)",
@@ -4128,7 +4347,12 @@ pub(crate) fn handle_modifier_key_event(
                     .map(|h| h.to_shortcut_string())
                     .unwrap_or_else(|| "<disabled>".to_string()),
             );
-            emit_system_event(app, "debug", "Modifier-only hotkey event (ignored)", Some(&details));
+            emit_system_event(
+                app,
+                "debug",
+                "Modifier-only hotkey event (ignored)",
+                Some(&details),
+            );
         }
         return;
     }
@@ -4137,7 +4361,12 @@ pub(crate) fn handle_modifier_key_event(
         let details = format!(
             "key={key} is_down={is_down} suppress_release_actions={suppress_release_actions} match: toggle={is_toggle} hold={is_hold} paste_last={is_paste_last} retry={is_retry} quick_ask_hold={is_quick_ask_hold} quick_ask_toggle={is_quick_ask_toggle}",
         );
-        emit_system_event(app, "debug", "Modifier-only hotkey event (matched)", Some(&details));
+        emit_system_event(
+            app,
+            "debug",
+            "Modifier-only hotkey event (matched)",
+            Some(&details),
+        );
     }
 
     // Get current settings from store (mirrors handle_shortcut_event behavior)
@@ -4182,7 +4411,9 @@ pub(crate) fn handle_modifier_key_event(
                 // Do not allow starting a new capture while we are processing a previous one.
                 if matches!(
                     pipeline_state,
-                    Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                    Some(
+                        pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting
+                    )
                 ) {
                     log::info!(
                         "{} ignored (pipeline busy: {:?})",
@@ -4229,7 +4460,11 @@ pub(crate) fn handle_modifier_key_event(
                         &toggle_label,
                     );
                 } else {
-                    log::info!("{} ignored (pipeline state: {:?})", toggle_label, pipeline_state);
+                    log::info!(
+                        "{} ignored (pipeline state: {:?})",
+                        toggle_label,
+                        pipeline_state
+                    );
 
                     if hotkey_debug {
                         emit_system_event(
@@ -4379,7 +4614,9 @@ pub(crate) fn handle_modifier_key_event(
                 // Do not allow starting while we are processing a previous capture.
                 if matches!(
                     pipeline_state,
-                    Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
+                    Some(
+                        pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting
+                    )
                 ) {
                     log::info!(
                         "{} ignored (pipeline busy: {:?})",
@@ -4409,7 +4646,9 @@ pub(crate) fn handle_modifier_key_event(
                         .map(|p| p.state() == pipeline::PipelineState::Recording)
                         .unwrap_or(false);
                     if !is_recording {
-                        state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                        state
+                            .quick_ask_session_active
+                            .store(false, Ordering::SeqCst);
                     }
                 }
             }
@@ -4430,7 +4669,9 @@ pub(crate) fn handle_modifier_key_event(
                         &quick_ask_hold_label,
                     );
                 } else {
-                    state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                    state
+                        .quick_ask_session_active
+                        .store(false, Ordering::SeqCst);
                 }
             }
         }
@@ -4445,7 +4686,9 @@ pub(crate) fn handle_modifier_key_event(
             return;
         }
 
-        let was_held = state.quick_ask_toggle_key_held.swap(false, Ordering::SeqCst);
+        let was_held = state
+            .quick_ask_toggle_key_held
+            .swap(false, Ordering::SeqCst);
         if !was_held {
             return;
         }
@@ -4513,7 +4756,9 @@ pub(crate) fn handle_modifier_key_event(
                 .map(|p| p.state() == pipeline::PipelineState::Recording)
                 .unwrap_or(false);
             if !is_recording {
-                state.quick_ask_session_active.store(false, Ordering::SeqCst);
+                state
+                    .quick_ask_session_active
+                    .store(false, Ordering::SeqCst);
             }
         }
 
@@ -4658,8 +4903,8 @@ fn build_global_shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 /// Initialize the recording pipeline from settings in the store
 #[cfg(desktop)]
 fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipeline {
-    use std::time::Duration;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     // Read STT settings from store
     let stt_provider: String = get_setting_from_store(app, "stt_provider", "groq".to_string());
@@ -4673,15 +4918,16 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
 
     // Read STT timeout from store (seconds)
     let stt_timeout_seconds_raw: f64 = get_setting_from_store(app, "stt_timeout_seconds", 10.0);
-    let stt_timeout_seconds: f64 = if stt_timeout_seconds_raw.is_finite() && stt_timeout_seconds_raw > 0.0 {
-        stt_timeout_seconds_raw
-    } else {
-        log::warn!(
-            "Invalid stt_timeout_seconds value in store ({}); falling back to 10s",
+    let stt_timeout_seconds: f64 =
+        if stt_timeout_seconds_raw.is_finite() && stt_timeout_seconds_raw > 0.0 {
             stt_timeout_seconds_raw
-        );
-        10.0
-    };
+        } else {
+            log::warn!(
+                "Invalid stt_timeout_seconds value in store ({}); falling back to 10s",
+                stt_timeout_seconds_raw
+            );
+            10.0
+        };
 
     // Read all available STT API keys (for per-profile provider overrides at runtime)
     let mut stt_api_keys: HashMap<String, String> = HashMap::new();
@@ -4710,7 +4956,9 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         "groq" => crate::secrets::get_api_key(app, "groq_api_key").unwrap_or_default(),
         "elevenlabs" => crate::secrets::get_api_key(app, "elevenlabs_api_key").unwrap_or_default(),
         "assemblyai" => crate::secrets::get_api_key(app, "assemblyai_api_key").unwrap_or_default(),
-        "speechmatics" => crate::secrets::get_api_key(app, "speechmatics_api_key").unwrap_or_default(),
+        "speechmatics" => {
+            crate::secrets::get_api_key(app, "speechmatics_api_key").unwrap_or_default()
+        }
         "deepgram" => crate::secrets::get_api_key(app, "deepgram_api_key").unwrap_or_default(),
         _ => String::new(),
     };
@@ -4765,8 +5013,10 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         default_pipeline_config.quiet_audio_peak_dbfs_threshold,
     );
 
-    let quiet_audio_min_duration_secs =
-        sanitize_quiet_duration_secs(quiet_audio_min_duration_secs, default_pipeline_config.quiet_audio_min_duration_secs);
+    let quiet_audio_min_duration_secs = sanitize_quiet_duration_secs(
+        quiet_audio_min_duration_secs,
+        default_pipeline_config.quiet_audio_min_duration_secs,
+    );
     let quiet_audio_rms_dbfs_threshold = sanitize_quiet_dbfs_threshold(
         quiet_audio_rms_dbfs_threshold,
         default_pipeline_config.quiet_audio_rms_dbfs_threshold,
@@ -5017,7 +5267,8 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
     let hot_mic_enabled: bool = get_setting_from_store(app, "hot_mic_enabled", false);
     let hot_mic_pre_roll_ms: u32 =
         get_setting_from_store(app, "hot_mic_pre_roll_ms", 1500u32).min(5000);
-    let mic_auto_recover_enabled: bool = get_setting_from_store(app, "mic_auto_recover_enabled", false);
+    let mic_auto_recover_enabled: bool =
+        get_setting_from_store(app, "mic_auto_recover_enabled", false);
 
     let proxy_settings: settings::ProxySettings =
         get_setting_from_store(app, "proxy_settings", settings::ProxySettings::default());
@@ -5026,7 +5277,11 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         let raw: Option<String> = get_setting_from_store(app, "whisper_server_base_url", None);
         raw.and_then(|s| {
             let t = s.trim().to_string();
-            if t.is_empty() { None } else { Some(t) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
         })
     };
 
@@ -5034,7 +5289,11 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         let raw: Option<String> = get_setting_from_store(app, "ollama_url", None);
         raw.and_then(|s| {
             let t = s.trim().trim_end_matches('/').to_string();
-            if t.is_empty() { None } else { Some(t) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
         })
     };
 
@@ -5042,7 +5301,8 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
     let whisper_model_path: Option<std::path::PathBuf> = {
         use crate::stt::WhisperModel;
 
-        let model_id: String = get_setting_from_store(app, "local_whisper_model_id", "base".to_string());
+        let model_id: String =
+            get_setting_from_store(app, "local_whisper_model_id", "base".to_string());
         let model = match model_id.trim().to_lowercase().as_str() {
             "tiny" => WhisperModel::Tiny,
             "tinyen" | "tiny_en" | "tiny-en" => WhisperModel::TinyEn,
@@ -5068,11 +5328,8 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         })
     };
 
-    let local_whisper_load_mode: String = get_setting_from_store(
-        app,
-        "local_whisper_load_mode",
-        "manual".to_string(),
-    );
+    let local_whisper_load_mode: String =
+        get_setting_from_store(app, "local_whisper_load_mode", "manual".to_string());
 
     let config = pipeline::PipelineConfig {
         input_device_name,
@@ -5127,7 +5384,9 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
         llm_api_keys,
 
         // Allow providers to enrich the active RequestLog with request/response payloads.
-        request_log_store: app.try_state::<RequestLogStore>().map(|s| s.inner().clone()),
+        request_log_store: app
+            .try_state::<RequestLogStore>()
+            .map(|s| s.inner().clone()),
 
         #[cfg(feature = "local-whisper")]
         whisper_model_path,
@@ -5199,14 +5458,20 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
             || paste_last_hotkey.as_ref().is_some_and(matches_copilot)
             || retry_hotkey.as_ref().is_some_and(matches_copilot)
             || quick_ask_hold_hotkey.as_ref().is_some_and(matches_copilot)
-            || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_copilot);
+            || quick_ask_toggle_hotkey
+                .as_ref()
+                .is_some_and(matches_copilot);
 
         let alt_right_enabled = toggle_hotkey.as_ref().is_some_and(matches_alt_right)
             || hold_hotkey.as_ref().is_some_and(matches_alt_right)
             || paste_last_hotkey.as_ref().is_some_and(matches_alt_right)
             || retry_hotkey.as_ref().is_some_and(matches_alt_right)
-            || quick_ask_hold_hotkey.as_ref().is_some_and(matches_alt_right)
-            || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_alt_right);
+            || quick_ask_hold_hotkey
+                .as_ref()
+                .is_some_and(matches_alt_right)
+            || quick_ask_toggle_hotkey
+                .as_ref()
+                .is_some_and(matches_alt_right);
 
         crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
         crate::windows_modifier_hotkeys::set_alt_right_hotkey_enabled(alt_right_enabled);
@@ -5340,19 +5605,17 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
     let mut failures: Vec<String> = Vec::new();
 
     if let Some(toggle_shortcut_str) = &toggle_shortcut_str {
-        let toggle_shortcut =
-            <Shortcut as std::str::FromStr>::from_str(toggle_shortcut_str).map_err(|e| {
+        let toggle_shortcut = <Shortcut as std::str::FromStr>::from_str(toggle_shortcut_str)
+            .map_err(|e| {
                 failures.push(format!(
                     "Toggle ({}) => failed to parse shortcut: {:?}",
                     toggle_shortcut_str, e
                 ));
             });
         if let Ok(toggle_shortcut) = toggle_shortcut {
-            if let Err(e) =
-                shortcut_manager.on_shortcut(toggle_shortcut, |app, shortcut, event| {
-                    handle_shortcut_event(app, shortcut, &event);
-                })
-            {
+            if let Err(e) = shortcut_manager.on_shortcut(toggle_shortcut, |app, shortcut, event| {
+                handle_shortcut_event(app, shortcut, &event);
+            }) {
                 failures.push(format!("Toggle ({}) => {}", toggle_shortcut_str, e));
             }
         }
@@ -5384,12 +5647,11 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 ));
             });
         if let Ok(paste_last_shortcut) = paste_last_shortcut {
-            if let Err(e) = shortcut_manager.on_shortcut(
-                paste_last_shortcut,
-                |app, shortcut, event| {
+            if let Err(e) =
+                shortcut_manager.on_shortcut(paste_last_shortcut, |app, shortcut, event| {
                     handle_shortcut_event(app, shortcut, &event);
-                },
-            ) {
+                })
+            {
                 failures.push(format!("PasteLast ({}) => {}", paste_last_shortcut_str, e));
             }
         }
@@ -5421,10 +5683,15 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 ));
             });
         if let Ok(quick_ask_hold_shortcut) = quick_ask_hold_shortcut {
-            if let Err(e) = shortcut_manager.on_shortcut(quick_ask_hold_shortcut, |app, shortcut, event| {
-                handle_shortcut_event(app, shortcut, &event);
-            }) {
-                failures.push(format!("QuickAskHold ({}) => {}", quick_ask_hold_shortcut_str, e));
+            if let Err(e) =
+                shortcut_manager.on_shortcut(quick_ask_hold_shortcut, |app, shortcut, event| {
+                    handle_shortcut_event(app, shortcut, &event);
+                })
+            {
+                failures.push(format!(
+                    "QuickAskHold ({}) => {}",
+                    quick_ask_hold_shortcut_str, e
+                ));
             }
         }
     }
@@ -5438,10 +5705,15 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
                 ));
             });
         if let Ok(quick_ask_toggle_shortcut) = quick_ask_toggle_shortcut {
-            if let Err(e) = shortcut_manager.on_shortcut(quick_ask_toggle_shortcut, |app, shortcut, event| {
-                handle_shortcut_event(app, shortcut, &event);
-            }) {
-                failures.push(format!("QuickAskToggle ({}) => {}", quick_ask_toggle_shortcut_str, e));
+            if let Err(e) =
+                shortcut_manager.on_shortcut(quick_ask_toggle_shortcut, |app, shortcut, event| {
+                    handle_shortcut_event(app, shortcut, &event);
+                })
+            {
+                failures.push(format!(
+                    "QuickAskToggle ({}) => {}",
+                    quick_ask_toggle_shortcut_str, e
+                ));
             }
         }
     }

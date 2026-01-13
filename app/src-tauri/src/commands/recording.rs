@@ -4,15 +4,15 @@
 //! enabling voice dictation directly from the Tauri app.
 
 use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
+use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
 use crate::history::{HistoryStorage, RequestModelInfo};
 use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, SharedPipeline};
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
 use crate::stats::{self, EventStatus};
-use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
-use tauri::{AppHandle, Manager, State, Emitter};
 use chrono::{Duration as ChronoDuration, Utc};
 use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -50,7 +50,10 @@ fn resolve_profile_for_foreground_app(cfg: &PipelineConfig) -> (Option<String>, 
     (Some("default".to_string()), Some("Default".to_string()))
 }
 
-fn resolve_profile_by_id(cfg: &PipelineConfig, profile_id: Option<&str>) -> (Option<String>, Option<String>) {
+fn resolve_profile_by_id(
+    cfg: &PipelineConfig,
+    profile_id: Option<&str>,
+) -> (Option<String>, Option<String>) {
     let Some(profile_id) = profile_id else {
         return (Some("default".to_string()), Some("Default".to_string()));
     };
@@ -265,7 +268,9 @@ pub fn recording_get_wav_path(
         .try_state::<RecordingStore>()
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
 
-    let path = store.wav_path_if_exists(&request_id).map_err(CommandError::from)?;
+    let path = store
+        .wav_path_if_exists(&request_id)
+        .map_err(CommandError::from)?;
     Ok(path.map(|p| p.to_string_lossy().to_string()))
 }
 
@@ -287,7 +292,9 @@ pub fn recording_get_wav_base64(
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
 
     // Reuse the same validation / existence semantics.
-    let path = store.wav_path_if_exists(&request_id).map_err(CommandError::from)?;
+    let path = store
+        .wav_path_if_exists(&request_id)
+        .map_err(CommandError::from)?;
     let Some(_) = path else {
         return Ok(None);
     };
@@ -562,11 +569,7 @@ pub async fn pipeline_stop_and_transcribe(
     // Create an in-progress history entry so the History view shows a running request.
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.add_request_entry(
-                req_id.to_string(),
-                model_info,
-                max_history_entries,
-            );
+            let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
             let _ = app.emit("history-changed", ());
         }
     }
@@ -584,7 +587,9 @@ pub async fn pipeline_stop_and_transcribe(
             let start = Instant::now();
             loop {
                 match pipeline_clone.state() {
-                    PipelineState::Transcribing | PipelineState::Routing | PipelineState::Rewriting => {
+                    PipelineState::Transcribing
+                    | PipelineState::Routing
+                    | PipelineState::Rewriting => {
                         // Now that transcription has begun, copy the *actual* profile metadata
                         // from the request log into History.
                         //
@@ -594,9 +599,8 @@ pub async fn pipeline_stop_and_transcribe(
                         // the profile as Default. The pipeline writes the chosen profile into the
                         // request log as part of starting transcription.
                         if let Some(req_id) = request_id_for_history.as_deref() {
-                            let profile_meta = app_clone
-                                .try_state::<RequestLogStore>()
-                                .and_then(|store| {
+                            let profile_meta =
+                                app_clone.try_state::<RequestLogStore>().and_then(|store| {
                                     store.with_current(|log| {
                                         (log.profile_id.clone(), log.profile_name.clone())
                                     })
@@ -652,7 +656,9 @@ pub async fn pipeline_stop_and_transcribe(
                     PipelineState::Idle | PipelineState::Error => {
                         break;
                     }
-                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Rewriting => {}
+                    PipelineState::Recording
+                    | PipelineState::Transcribing
+                    | PipelineState::Rewriting => {}
                 }
 
                 // Hard stop to avoid a runaway task in pathological cases.
@@ -687,7 +693,9 @@ pub async fn pipeline_stop_and_transcribe(
                         // No rewrite (disabled/failed early) or pipeline exited.
                         break;
                     }
-                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Routing => {
+                    PipelineState::Recording
+                    | PipelineState::Transcribing
+                    | PipelineState::Routing => {
                         // Not yet.
                     }
                 }
@@ -858,7 +866,9 @@ pub async fn pipeline_stop_and_transcribe(
             match &result.llm_outcome {
                 LlmOutcome::NotAttempted(reason) => {
                     log.llm_not_attempted_reason = Some(reason.code().to_string());
-                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } = reason {
+                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } =
+                        reason
+                    {
                         log.llm_error_message = Some(reason.to_log_details());
                     }
                     log.info_with_details("LLM formatting not attempted", reason.to_log_details());
@@ -906,16 +916,11 @@ pub async fn pipeline_stop_and_transcribe(
 
         // Persist preset metadata into History (best-effort).
         if let Some(req_id) = active_request_id.as_deref() {
-            let preset_meta = log_store.with_current(|log| {
-                (log.preset_id.clone(), log.preset_name.clone())
-            });
+            let preset_meta =
+                log_store.with_current(|log| (log.preset_id.clone(), log.preset_name.clone()));
             if let Some((preset_id, preset_name)) = preset_meta {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.set_request_preset(
-                        req_id,
-                        preset_id,
-                        preset_name,
-                    );
+                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
                     let _ = app.emit("history-changed", ());
                 }
             }
@@ -925,7 +930,10 @@ pub async fn pipeline_stop_and_transcribe(
         if let Some(req_id) = active_request_id.as_deref() {
             if let Some(history) = app.try_state::<HistoryStorage>() {
                 let (provider, model) = if result.llm_attempted() {
-                    (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                    (
+                        result.llm_provider_used.clone(),
+                        result.llm_model_used.clone(),
+                    )
                 } else {
                     (None, None)
                 };
@@ -961,7 +969,10 @@ pub async fn pipeline_stop_and_transcribe(
             let _ = history.complete_request_success(req_id, final_text.clone());
 
             let (provider, model) = if result.llm_attempted() {
-                (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                (
+                    result.llm_provider_used.clone(),
+                    result.llm_model_used.clone(),
+                )
             } else {
                 (None, None)
             };
@@ -1029,10 +1040,10 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     // Preserve the preset used by the original request (if we can find it).
     // This was added after presets existed, but retry transcription historically did not
     // carry preset selection forward.
-    let original_preset_id: Option<String> = original_entry.as_ref().and_then(|e| e.preset_id.clone());
-    let original_preset_name: Option<String> = original_entry
-        .as_ref()
-        .and_then(|e| e.preset_name.clone());
+    let original_preset_id: Option<String> =
+        original_entry.as_ref().and_then(|e| e.preset_id.clone());
+    let original_preset_name: Option<String> =
+        original_entry.as_ref().and_then(|e| e.preset_name.clone());
 
     let wav = recording_store
         .load_wav(&recording_source_id)
@@ -1042,7 +1053,8 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     let config = pipeline.config();
     // Use the same profile as the original request (if we can find it).
     // This avoids retry accidentally using Default just because the foreground app changed.
-    let original_profile_id: Option<String> = original_entry.as_ref().and_then(|e| e.profile_id.clone());
+    let original_profile_id: Option<String> =
+        original_entry.as_ref().and_then(|e| e.profile_id.clone());
 
     // Preserve "unknown" as None so the UI doesn't show a Default chip unless it was
     // explicitly recorded as default on the original entry.
@@ -1139,7 +1151,9 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                     PipelineState::Idle | PipelineState::Error => {
                         break;
                     }
-                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Routing => {}
+                    PipelineState::Recording
+                    | PipelineState::Transcribing
+                    | PipelineState::Routing => {}
                 }
 
                 if start.elapsed() > Duration::from_secs(15 * 60) {
@@ -1167,7 +1181,9 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                     PipelineState::Idle | PipelineState::Error => {
                         break;
                     }
-                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Rewriting => {}
+                    PipelineState::Recording
+                    | PipelineState::Transcribing
+                    | PipelineState::Rewriting => {}
                 }
 
                 if start.elapsed() > Duration::from_secs(15 * 60) {
@@ -1300,7 +1316,10 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             let _ = history.complete_request_success(req_id, final_text.clone());
 
             let (provider, model) = if result.llm_attempted() {
-                (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                (
+                    result.llm_provider_used.clone(),
+                    result.llm_model_used.clone(),
+                )
             } else {
                 (None, None)
             };
@@ -1359,9 +1378,7 @@ pub fn pipeline_cancel(
 
 /// Get the current pipeline state
 #[tauri::command]
-pub fn pipeline_get_state(
-    pipeline: State<'_, SharedPipeline>,
-) -> Result<String, CommandError> {
+pub fn pipeline_get_state(pipeline: State<'_, SharedPipeline>) -> Result<String, CommandError> {
     let state = pipeline.state();
     let state_str = match state {
         PipelineState::Idle => "idle",
@@ -1376,9 +1393,7 @@ pub fn pipeline_get_state(
 
 /// Check if the pipeline is currently recording
 #[tauri::command]
-pub fn pipeline_is_recording(
-    pipeline: State<'_, SharedPipeline>,
-) -> Result<bool, CommandError> {
+pub fn pipeline_is_recording(pipeline: State<'_, SharedPipeline>) -> Result<bool, CommandError> {
     Ok(pipeline.is_recording())
 }
 
@@ -1434,7 +1449,9 @@ pub fn pipeline_update_config(
     new_config.llm_config = crate::llm::LlmConfig::default();
     new_config.llm_api_keys = HashMap::new();
 
-    pipeline.update_config(new_config).map_err(CommandError::from)?;
+    pipeline
+        .update_config(new_config)
+        .map_err(CommandError::from)?;
     log::info!("Pipeline configuration updated");
 
     Ok(())
@@ -1529,7 +1546,9 @@ pub async fn pipeline_dictate(
             let start = Instant::now();
             loop {
                 match pipeline_clone.state() {
-                    PipelineState::Transcribing | PipelineState::Routing | PipelineState::Rewriting => {
+                    PipelineState::Transcribing
+                    | PipelineState::Routing
+                    | PipelineState::Rewriting => {
                         let _ = app_clone.emit("pipeline-transcription-started", ());
                         let _ = app_clone.emit("pipeline-state-changed", "transcribing");
                         break;
@@ -1564,7 +1583,9 @@ pub async fn pipeline_dictate(
                     PipelineState::Idle | PipelineState::Error => {
                         break;
                     }
-                    PipelineState::Recording | PipelineState::Transcribing | PipelineState::Rewriting => {}
+                    PipelineState::Recording
+                    | PipelineState::Transcribing
+                    | PipelineState::Rewriting => {}
                 }
 
                 if start.elapsed() > Duration::from_secs(15 * 60) {
@@ -1608,7 +1629,11 @@ pub async fn pipeline_dictate(
             // Best-effort: persist cost/usage stats even when dictate fails.
             // (This flow is commonly used by the global hotkey / toggle path.)
             let wav_bytes = pipeline.clone_last_wav_bytes();
-            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, wav_bytes.as_deref());
+            crate::stats::emit_cost_events_for_current_request(
+                &app,
+                EventStatus::Error,
+                wav_bytes.as_deref(),
+            );
 
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
@@ -1715,7 +1740,9 @@ pub async fn pipeline_dictate(
             match &result.llm_outcome {
                 LlmOutcome::NotAttempted(reason) => {
                     log.llm_not_attempted_reason = Some(reason.code().to_string());
-                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } = reason {
+                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } =
+                        reason
+                    {
                         log.llm_error_message = Some(reason.to_log_details());
                     }
                     log.info_with_details("LLM formatting not attempted", reason.to_log_details());
@@ -1757,13 +1784,16 @@ pub async fn pipeline_dictate(
         // Persist cost/usage stats (best-effort).
         // NOTE: `pipeline_stop_and_transcribe` and `pipeline_retry_transcription` already do this,
         // but `pipeline_dictate` is a separate flow used by hotkeys and should also be tracked.
-        crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, wav_bytes.as_deref());
+        crate::stats::emit_cost_events_for_current_request(
+            &app,
+            EventStatus::Success,
+            wav_bytes.as_deref(),
+        );
 
         // Persist preset metadata into History (best-effort).
         if let Some(req_id) = active_request_id.as_deref() {
-            let preset_meta = log_store.with_current(|log| {
-                (log.preset_id.clone(), log.preset_name.clone())
-            });
+            let preset_meta =
+                log_store.with_current(|log| (log.preset_id.clone(), log.preset_name.clone()));
             if let Some((preset_id, preset_name)) = preset_meta {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.set_request_preset(req_id, preset_id, preset_name);
@@ -1793,7 +1823,10 @@ pub async fn pipeline_dictate(
             let _ = history.complete_request_success(req_id, final_text.clone());
 
             let (provider, model) = if result.llm_attempted() {
-                (result.llm_provider_used.clone(), result.llm_model_used.clone())
+                (
+                    result.llm_provider_used.clone(),
+                    result.llm_model_used.clone(),
+                )
             } else {
                 (None, None)
             };
@@ -2010,10 +2043,7 @@ pub async fn pipeline_toggle(
         // Pipeline started successfully - now create the request log
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
             let config = pipeline.config();
-            log_store.start_request(
-                config.stt_provider.clone(),
-                config.stt_model.clone(),
-            );
+            log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
             log_store.with_current(|log| {
                 log.llm_provider = if config.llm_config.enabled {
                     Some(config.llm_config.provider.clone())
@@ -2033,9 +2063,7 @@ pub async fn pipeline_toggle(
 
 /// Check if the pipeline is in an error state
 #[tauri::command]
-pub fn pipeline_is_error(
-    pipeline: State<'_, SharedPipeline>,
-) -> Result<bool, CommandError> {
+pub fn pipeline_is_error(pipeline: State<'_, SharedPipeline>) -> Result<bool, CommandError> {
     Ok(pipeline.is_error())
 }
 

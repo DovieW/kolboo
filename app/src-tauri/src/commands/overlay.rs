@@ -11,7 +11,11 @@ use crate::state::AppState;
 use tauri_plugin_store::StoreExt;
 
 #[cfg(desktop)]
-fn get_setting_from_store<T: serde::de::DeserializeOwned>(app: &AppHandle, key: &str, default: T) -> T {
+fn get_setting_from_store<T: serde::de::DeserializeOwned>(
+    app: &AppHandle,
+    key: &str,
+    default: T,
+) -> T {
     app.store("settings.json")
         .ok()
         .and_then(|store| store.get(key))
@@ -59,19 +63,12 @@ fn monitor_contains_point(monitor: &Monitor, x: i32, y: i32) -> bool {
 }
 
 #[cfg(desktop)]
-fn find_monitor_by_point(
-    window: &tauri::WebviewWindow,
-    x: i32,
-    y: i32,
-) -> Option<Monitor> {
-    window
-        .available_monitors()
-        .ok()
-        .and_then(|monitors| {
-            monitors
-                .into_iter()
-                .find(|m| monitor_contains_point(m, x, y))
-        })
+fn find_monitor_by_point(window: &tauri::WebviewWindow, x: i32, y: i32) -> Option<Monitor> {
+    window.available_monitors().ok().and_then(|monitors| {
+        monitors
+            .into_iter()
+            .find(|m| monitor_contains_point(m, x, y))
+    })
 }
 
 #[cfg(all(desktop, target_os = "windows"))]
@@ -283,7 +280,11 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> Result<(), Stri
             .fetch_add(1, Ordering::SeqCst);
 
         let visible_before = window.is_visible().ok();
-        log::info!("[overlay] show requested (mode={}, visible_before={:?})", overlay_mode, visible_before);
+        log::info!(
+            "[overlay] show requested (mode={}, visible_before={:?})",
+            overlay_mode,
+            visible_before
+        );
 
         window.show().map_err(|e| e.to_string())?;
 
@@ -343,7 +344,10 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> Result<(), Stri
         }
 
         let visible_after = window.is_visible().ok();
-        log::info!("[overlay] show complete (visible_after={:?})", visible_after);
+        log::info!(
+            "[overlay] show complete (visible_after={:?})",
+            visible_after
+        );
     }
 
     Ok(())
@@ -360,9 +364,11 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(
         // We position using *outer* geometry (position + size) in PHYSICAL pixels.
         // Using logical floats here can accumulate rounding error across repeated
         // size transitions (notably hover open/close), causing the overlay to drift.
-        let prev = if let (Ok(pos), Ok(outer_size), Ok(inner_size)) =
-            (window.outer_position(), window.outer_size(), window.inner_size())
-        {
+        let prev = if let (Ok(pos), Ok(outer_size), Ok(inner_size)) = (
+            window.outer_position(),
+            window.outer_size(),
+            window.inner_size(),
+        ) {
             let scale = window.scale_factor().unwrap_or(1.0);
             let inner_w = inner_size.width as f64 / scale;
             let inner_h = inner_size.height as f64 / scale;
@@ -410,7 +416,8 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(
             // it doesn't jump away from the cursor (which would instantly cancel hover).
             let was_compact = (prev_inner_h - 56.0).abs() < 1.2;
             let is_compact = (height - 56.0).abs() < 0.8;
-            let is_hover_panel_transition = (was_compact && !is_compact) || (!was_compact && is_compact);
+            let is_hover_panel_transition =
+                (was_compact && !is_compact) || (!was_compact && is_compact);
 
             if is_fixed_toggle_size {
                 let cx_px = prev_pos_px.x + (prev_outer_px.width as i32 / 2);

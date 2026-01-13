@@ -12,8 +12,8 @@
 //! - Collects `AddTranscript` final messages until `EndOfTranscript`.
 
 use super::{AudioEncoding, AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value as JsonValue};
 use std::io::Cursor;
@@ -51,7 +51,11 @@ impl SpeechmaticsSttProvider {
 
     fn operating_point_for_api(&self) -> &str {
         let m = self.operating_point.trim().to_lowercase();
-        if m == "standard" { "standard" } else { "enhanced" }
+        if m == "standard" {
+            "standard"
+        } else {
+            "enhanced"
+        }
     }
 
     fn decode_to_pcm_s16le(
@@ -77,21 +81,27 @@ impl SpeechmaticsSttProvider {
                 match (spec.sample_format, spec.bits_per_sample) {
                     (hound::SampleFormat::Int, 16) => {
                         for s in reader.samples::<i16>() {
-                            let s = s.map_err(|e| SttError::Audio(format!("WAV sample read failed: {}", e)))?;
+                            let s = s.map_err(|e| {
+                                SttError::Audio(format!("WAV sample read failed: {}", e))
+                            })?;
                             pcm.extend_from_slice(&s.to_le_bytes());
                         }
                     }
                     (hound::SampleFormat::Int, 32) => {
                         // Scale i32 samples down to i16.
                         for s in reader.samples::<i32>() {
-                            let s = s.map_err(|e| SttError::Audio(format!("WAV sample read failed: {}", e)))?;
+                            let s = s.map_err(|e| {
+                                SttError::Audio(format!("WAV sample read failed: {}", e))
+                            })?;
                             let s16 = (s >> 16) as i16;
                             pcm.extend_from_slice(&s16.to_le_bytes());
                         }
                     }
                     (hound::SampleFormat::Float, 32) => {
                         for s in reader.samples::<f32>() {
-                            let s = s.map_err(|e| SttError::Audio(format!("WAV sample read failed: {}", e)))?;
+                            let s = s.map_err(|e| {
+                                SttError::Audio(format!("WAV sample read failed: {}", e))
+                            })?;
                             let clipped = s.clamp(-1.0, 1.0);
                             let s16 = (clipped * i16::MAX as f32).round() as i16;
                             pcm.extend_from_slice(&s16.to_le_bytes());
@@ -150,7 +160,12 @@ impl SpeechmaticsSttProvider {
         bytes_per_100ms.clamp(2_048, 32_768)
     }
 
-    async fn transcribe_ws(&self, pcm: &[u8], sample_rate: u32, channels: u8) -> Result<(String, JsonValue), SttError> {
+    async fn transcribe_ws(
+        &self,
+        pcm: &[u8],
+        sample_rate: u32,
+        channels: u8,
+    ) -> Result<(String, JsonValue), SttError> {
         let mut req = Self::DEFAULT_WS_URL
             .into_client_request()
             .map_err(|e| SttError::NetworkMessage(format!("Invalid websocket URL: {}", e)))?;
@@ -256,8 +271,13 @@ impl SpeechmaticsSttProvider {
                                     break;
                                 }
                                 "AddTranscript" => {
-                                    if let Some(results) = v.get("results").and_then(|r| r.as_array()) {
-                                        Self::append_transcript_from_results(&mut transcript, results);
+                                    if let Some(results) =
+                                        v.get("results").and_then(|r| r.as_array())
+                                    {
+                                        Self::append_transcript_from_results(
+                                            &mut transcript,
+                                            results,
+                                        );
                                     }
                                     received_for_log.push(v);
                                 }
@@ -357,7 +377,9 @@ impl SpeechmaticsSttProvider {
 impl SttProvider for SpeechmaticsSttProvider {
     async fn transcribe(&self, audio: &[u8], format: &AudioFormat) -> Result<String, SttError> {
         if self.api_key.trim().is_empty() {
-            return Err(SttError::Config("Speechmatics API key is missing".to_string()));
+            return Err(SttError::Config(
+                "Speechmatics API key is missing".to_string(),
+            ));
         }
 
         let (pcm, sample_rate, channels) = Self::decode_to_pcm_s16le(audio, format)?;
@@ -423,7 +445,8 @@ mod tests {
 
     #[test]
     fn test_provider_with_custom_model() {
-        let provider = SpeechmaticsSttProvider::new("test-key".to_string(), Some("standard".to_string()));
+        let provider =
+            SpeechmaticsSttProvider::new("test-key".to_string(), Some("standard".to_string()));
         assert_eq!(provider.operating_point, "standard");
     }
 }

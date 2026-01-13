@@ -87,7 +87,10 @@ pub fn text_token_rates(model: &str) -> Option<TokenRates> {
 
 /// Returns Claude LLM **text** token rates for the given model, selecting the tier based
 /// on total input tokens (including prompt caching read/write tokens).
-pub fn text_token_rates_for_total_input_tokens(model: &str, total_input_tokens: u64) -> Option<TokenRates> {
+pub fn text_token_rates_for_total_input_tokens(
+    model: &str,
+    total_input_tokens: u64,
+) -> Option<TokenRates> {
     const fn usd_micros(dollars_times_1_000_000: u64) -> UsdMicros {
         dollars_times_1_000_000
     }
@@ -106,8 +109,16 @@ pub fn text_token_rates_for_total_input_tokens(model: &str, total_input_tokens: 
         "claude-sonnet-4-5" => {
             // Long-context tiering applies to Sonnet 4/4.5 when using the 1M context.
             // We apply the premium tier whenever total input tokens exceed 200k.
-            let base_input = if long_input { usd_micros(6_000_000) } else { usd_micros(3_000_000) };
-            let base_output = if long_input { usd_micros(22_500_000) } else { usd_micros(15_000_000) };
+            let base_input = if long_input {
+                usd_micros(6_000_000)
+            } else {
+                usd_micros(3_000_000)
+            };
+            let base_output = if long_input {
+                usd_micros(22_500_000)
+            } else {
+                usd_micros(15_000_000)
+            };
             TokenRates {
                 input_usd_micros_per_1m: base_input,
                 cached_input_usd_micros_per_1m: Some(cache_hit_rate(base_input)),
@@ -150,8 +161,16 @@ pub fn text_token_rates_for_total_input_tokens(model: &str, total_input_tokens: 
 
         // Some API callers may send Sonnet 4 without the "-latest" alias.
         "claude-sonnet-4" => {
-            let base_input = if long_input { usd_micros(6_000_000) } else { usd_micros(3_000_000) };
-            let base_output = if long_input { usd_micros(22_500_000) } else { usd_micros(15_000_000) };
+            let base_input = if long_input {
+                usd_micros(6_000_000)
+            } else {
+                usd_micros(3_000_000)
+            };
+            let base_output = if long_input {
+                usd_micros(22_500_000)
+            } else {
+                usd_micros(15_000_000)
+            };
             TokenRates {
                 input_usd_micros_per_1m: base_input,
                 cached_input_usd_micros_per_1m: Some(cache_hit_rate(base_input)),

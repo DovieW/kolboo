@@ -137,8 +137,9 @@ pub async fn cache_router_embeddings(
 
     let proxy_settings: ProxySettings = config.proxy_settings.clone();
 
-    let client = crate::network::build_http_client_with_timeout(&proxy_settings, Duration::from_secs(30))
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+    let client =
+        crate::network::build_http_client_with_timeout(&proxy_settings, Duration::from_secs(30))
+            .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     let mut cached_now: usize = 0;
     let mut skipped_existing: usize = 0;
@@ -149,20 +150,21 @@ pub async fn cache_router_embeddings(
     // (useful if the app started before the store was populated, or if the runtime cache was cleared).
     let mut preload_from_store: HashMap<String, Vec<f32>> = HashMap::new();
 
-    let (persisted_keys, persisted_map): (HashSet<String>, serde_json::Map<String, JsonValue>) = if force_refresh {
-        (HashSet::new(), serde_json::Map::new())
-    } else {
-        let store = app
-            .store(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_FILE)
-            .map_err(|e| format!("Failed to get store: {e}"))?;
-        match store.get(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_KEY) {
-            Some(JsonValue::Object(map)) => {
-                let keys = map.keys().cloned().collect();
-                (keys, map)
+    let (persisted_keys, persisted_map): (HashSet<String>, serde_json::Map<String, JsonValue>) =
+        if force_refresh {
+            (HashSet::new(), serde_json::Map::new())
+        } else {
+            let store = app
+                .store(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_FILE)
+                .map_err(|e| format!("Failed to get store: {e}"))?;
+            match store.get(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_KEY) {
+                Some(JsonValue::Object(map)) => {
+                    let keys = map.keys().cloned().collect();
+                    (keys, map)
+                }
+                _ => (HashSet::new(), serde_json::Map::new()),
             }
-            _ => (HashSet::new(), serde_json::Map::new()),
-        }
-    };
+        };
 
     let hints = collect_candidate_hints(&profile);
 

@@ -154,7 +154,9 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
         let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
 
         let hold = match raw_hold {
-            None => get_hotkey_from_store(&app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
+            None => {
+                get_hotkey_from_store(&app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask)
+            }
             Some(Value::Null) => None,
             Some(v) => serde_json::from_value::<HotkeyConfig>(v)
                 .ok()
@@ -181,14 +183,20 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             || paste_last_hotkey.as_ref().is_some_and(matches_copilot)
             || retry_hotkey.as_ref().is_some_and(matches_copilot)
             || quick_ask_hold_hotkey.as_ref().is_some_and(matches_copilot)
-            || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_copilot);
+            || quick_ask_toggle_hotkey
+                .as_ref()
+                .is_some_and(matches_copilot);
 
         let alt_right_enabled = toggle_hotkey.as_ref().is_some_and(matches_alt_right)
             || hold_hotkey.as_ref().is_some_and(matches_alt_right)
             || paste_last_hotkey.as_ref().is_some_and(matches_alt_right)
             || retry_hotkey.as_ref().is_some_and(matches_alt_right)
-            || quick_ask_hold_hotkey.as_ref().is_some_and(matches_alt_right)
-            || quick_ask_toggle_hotkey.as_ref().is_some_and(matches_alt_right);
+            || quick_ask_hold_hotkey
+                .as_ref()
+                .is_some_and(matches_alt_right)
+            || quick_ask_toggle_hotkey
+                .as_ref()
+                .is_some_and(matches_alt_right);
 
         crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
         crate::windows_modifier_hotkeys::set_alt_right_hotkey_enabled(alt_right_enabled);

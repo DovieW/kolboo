@@ -1,8 +1,8 @@
 //! Groq Whisper API STT provider implementation.
 
 use super::{AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::multipart;
 use serde_json::json;
 use std::time::Duration;
@@ -78,10 +78,7 @@ impl GroqSttProvider {
 impl SttProvider for GroqSttProvider {
     async fn transcribe(&self, audio: &[u8], _format: &AudioFormat) -> Result<String, SttError> {
         if let Some(store) = &self.request_log_store {
-            let prompt = self
-                .default_prompt
-                .as_deref()
-                .and_then(Self::clamp_prompt);
+            let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
             let request_json = json!({
                 "provider": "groq",
                 "endpoint": "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -112,11 +109,7 @@ impl SttProvider for GroqSttProvider {
             .part("file", part)
             .text("model", self.model.clone());
 
-        if let Some(prompt) = self
-            .default_prompt
-            .as_deref()
-            .and_then(Self::clamp_prompt)
-        {
+        if let Some(prompt) = self.default_prompt.as_deref().and_then(Self::clamp_prompt) {
             form = form.text("prompt", prompt);
         }
 
@@ -127,7 +120,13 @@ impl SttProvider for GroqSttProvider {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -149,10 +148,7 @@ impl SttProvider for GroqSttProvider {
                 log.stt_response_json = Some(result_for_log);
             });
         }
-        let text = result["text"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let text = result["text"].as_str().unwrap_or("").to_string();
 
         Ok(text)
     }

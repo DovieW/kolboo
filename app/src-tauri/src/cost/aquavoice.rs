@@ -59,6 +59,9 @@ mod tests {
 
     #[test]
     fn estimate_zero_is_zero() {
-        assert_eq!(estimate_stt_cost_from_audio_secs("avalon-v1-en", 0.0), Some(0));
+        assert_eq!(
+            estimate_stt_cost_from_audio_secs("avalon-v1-en", 0.0),
+            Some(0)
+        );
     }
 }

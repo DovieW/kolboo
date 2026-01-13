@@ -46,7 +46,8 @@ fn file_size_bytes(path: &std::path::Path) -> u64 {
 #[tauri::command]
 pub fn get_data_storage_summary(app: AppHandle) -> Result<DataStorageSummary, String> {
     // Recordings
-    let (recordings_count, recordings_bytes) = if let Some(recs) = app.try_state::<RecordingStore>() {
+    let (recordings_count, recordings_bytes) = if let Some(recs) = app.try_state::<RecordingStore>()
+    {
         match recs.stats() {
             Ok(s) => (s.count as u64, s.bytes as u64),
             Err(_) => (0, 0),
@@ -198,8 +199,13 @@ pub fn delete_all_settings(app: AppHandle) -> Result<(), String> {
 
     let settings_path = app_data_dir.join("settings.json");
     if settings_path.exists() {
-        fs::remove_file(&settings_path)
-            .map_err(|e| format!("Failed to delete settings file {}: {}", settings_path.display(), e))?;
+        fs::remove_file(&settings_path).map_err(|e| {
+            format!(
+                "Failed to delete settings file {}: {}",
+                settings_path.display(),
+                e
+            )
+        })?;
     }
 
     // Recreate the store + seed defaults so UI/backend agree.

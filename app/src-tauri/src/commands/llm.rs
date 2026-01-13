@@ -1,17 +1,18 @@
 //! Tauri commands for LLM formatting configuration.
 
-use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::llm::{
-    format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider, GeminiLlmProvider,
-    GroqLlmProvider, FireworksLlmProvider, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
+    format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider,
+    FireworksLlmProvider, GeminiLlmProvider, GroqLlmProvider, LlmProvider, OllamaLlmProvider,
+    OpenAiLlmProvider,
 };
+use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
-use std::sync::Arc;
-use std::time::Instant;
-use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
 use crate::stats::EventStatus;
+use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
+use tauri::{AppHandle, Manager, State};
 
 /// Error type for LLM commands
 #[derive(Debug, serde::Serialize)]
@@ -522,21 +523,25 @@ pub async fn test_llm_rewrite(
     // IMPORTANT: This is a *test* endpoint. It intentionally ignores the
     // "Rewrite Transcription" enable toggle so users can validate prompts/
     // provider/model without changing runtime behavior.
-    let (desired_provider, desired_model, prompts) = if let Some(profile) = resolved_profile.as_ref() {
-        let provider = profile
-            .llm_provider
-            .clone()
-            .unwrap_or_else(|| config.llm_config.provider.clone());
-        let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
+    let (desired_provider, desired_model, prompts) =
+        if let Some(profile) = resolved_profile.as_ref() {
+            let provider = profile
+                .llm_provider
+                .clone()
+                .unwrap_or_else(|| config.llm_config.provider.clone());
+            let model = profile
+                .llm_model
+                .clone()
+                .or_else(|| config.llm_config.model.clone());
 
-        (provider, model, profile.prompts.clone())
-    } else {
-        (
-            config.llm_config.provider.clone(),
-            config.llm_config.model.clone(),
-            config.llm_config.prompts.clone(),
-        )
-    };
+            (provider, model, profile.prompts.clone())
+        } else {
+            (
+                config.llm_config.provider.clone(),
+                config.llm_config.model.clone(),
+                config.llm_config.prompts.clone(),
+            )
+        };
 
     let api_key = if desired_provider == "ollama" {
         String::new()
@@ -641,11 +646,7 @@ pub async fn test_llm_rewrite(
                     log.complete_error(e.to_string());
                 });
 
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Error,
-                    None,
-                );
+                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
 
                 store.complete_current();
             } else {
@@ -691,10 +692,7 @@ pub async fn iterate_rewrite_prompt(
         store.start_request("prompt-iter".to_string(), None);
         store.with_current(|log| {
             log.raw_transcript = Some(transcript.clone());
-            let mode_label = mode
-                .as_deref()
-                .unwrap_or("fixed")
-                .to_string();
+            let mode_label = mode.as_deref().unwrap_or("fixed").to_string();
             log.info(format!("Prompt iteration started (mode: {})", mode_label));
         });
     }
@@ -733,10 +731,16 @@ pub async fn iterate_rewrite_prompt(
             .llm_provider
             .clone()
             .unwrap_or_else(|| config.llm_config.provider.clone());
-        let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
+        let model = profile
+            .llm_model
+            .clone()
+            .or_else(|| config.llm_config.model.clone());
         (provider, model)
     } else {
-        (config.llm_config.provider.clone(), config.llm_config.model.clone())
+        (
+            config.llm_config.provider.clone(),
+            config.llm_config.model.clone(),
+        )
     };
 
     let desired_provider = llm_provider
@@ -778,7 +782,11 @@ pub async fn iterate_rewrite_prompt(
         .or_else(|| config.llm_config.openai_reasoning_effort.clone());
 
     let effective_gemini_thinking_budget = gemini_thinking_budget
-        .or_else(|| resolved_profile.as_ref().and_then(|p| p.gemini_thinking_budget))
+        .or_else(|| {
+            resolved_profile
+                .as_ref()
+                .and_then(|p| p.gemini_thinking_budget)
+        })
         .or(config.llm_config.gemini_thinking_budget);
 
     let effective_gemini_thinking_level = gemini_thinking_level
@@ -794,7 +802,11 @@ pub async fn iterate_rewrite_prompt(
         .or_else(|| config.llm_config.gemini_thinking_level.clone());
 
     let effective_anthropic_thinking_budget = anthropic_thinking_budget
-        .or_else(|| resolved_profile.as_ref().and_then(|p| p.anthropic_thinking_budget))
+        .or_else(|| {
+            resolved_profile
+                .as_ref()
+                .and_then(|p| p.anthropic_thinking_budget)
+        })
         .or(config.llm_config.anthropic_thinking_budget);
 
     let provider_cfg = LlmConfig {
@@ -941,11 +953,7 @@ pub async fn iterate_rewrite_prompt(
                     log.complete_error(e.to_string());
                 });
 
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Error,
-                    None,
-                );
+                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
                 store.complete_current();
             } else {
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
@@ -1016,10 +1024,16 @@ pub async fn test_rewrite_with_prompt(
             .llm_provider
             .clone()
             .unwrap_or_else(|| config.llm_config.provider.clone());
-        let model = profile.llm_model.clone().or_else(|| config.llm_config.model.clone());
+        let model = profile
+            .llm_model
+            .clone()
+            .or_else(|| config.llm_config.model.clone());
         (provider, model)
     } else {
-        (config.llm_config.provider.clone(), config.llm_config.model.clone())
+        (
+            config.llm_config.provider.clone(),
+            config.llm_config.model.clone(),
+        )
     };
 
     let api_key = if desired_provider == "ollama" {
@@ -1066,7 +1080,9 @@ pub async fn test_rewrite_with_prompt(
 
     let provider = create_llm_provider_without_timeout(&provider_cfg, request_log_store.clone());
 
-    let output_res = provider.complete(prompt.as_str(), transcript.as_str()).await;
+    let output_res = provider
+        .complete(prompt.as_str(), transcript.as_str())
+        .await;
 
     match output_res {
         Ok(output_raw) => {
@@ -1122,11 +1138,7 @@ pub async fn test_rewrite_with_prompt(
                     log.complete_error(e.to_string());
                 });
 
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Error,
-                    None,
-                );
+                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
                 store.complete_current();
             } else {
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
@@ -1284,7 +1296,9 @@ pub fn update_llm_prompts(
 
 /// Get current LLM configuration
 #[tauri::command]
-pub fn get_llm_config(pipeline: State<'_, SharedPipeline>) -> Result<LlmConfigResponse, LlmCommandError> {
+pub fn get_llm_config(
+    pipeline: State<'_, SharedPipeline>,
+) -> Result<LlmConfigResponse, LlmCommandError> {
     let config = get_current_pipeline_config(&pipeline)?;
     Ok(LlmConfigResponse {
         enabled: config.llm_config.enabled,
@@ -1321,7 +1335,8 @@ mod tests {
     #[test]
     fn test_get_llm_providers() {
         let providers = get_llm_providers();
-        assert_eq!(providers.len(), 7);
+        assert_eq!(providers.len(), 8);
+        assert!(providers.iter().any(|p| p.id == "cerebras"));
         assert!(providers.iter().any(|p| p.id == "openai"));
         assert!(providers.iter().any(|p| p.id == "gemini"));
         assert!(providers.iter().any(|p| p.id == "anthropic"));

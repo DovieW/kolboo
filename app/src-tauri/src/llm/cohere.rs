@@ -6,8 +6,8 @@
 //! - Structured outputs: uses `response_format: { type: "json_object", schema: ... }`
 
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
@@ -216,9 +216,10 @@ impl LlmProvider for CohereLlmProvider {
             )));
         }
 
-        let response_json: JsonValue = response.json().await.map_err(|e| {
-            LlmError::InvalidResponse(format!("Failed to parse response: {}", e))
-        })?;
+        let response_json: JsonValue = response
+            .json()
+            .await
+            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();
@@ -325,9 +326,10 @@ impl LlmProvider for CohereLlmProvider {
             )));
         }
 
-        let response_json: JsonValue = response.json().await.map_err(|e| {
-            LlmError::InvalidResponse(format!("Failed to parse response: {}", e))
-        })?;
+        let response_json: JsonValue = response
+            .json()
+            .await
+            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();

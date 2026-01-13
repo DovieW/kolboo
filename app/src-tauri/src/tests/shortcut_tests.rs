@@ -7,7 +7,8 @@ fn test_normalize_ctrl_to_control() {
 
 #[test]
 fn test_normalize_uppercase_ctrl() {
-    assert_eq!(normalize_shortcut_string("CTRL+A"), "control+a");
+    // Canonical form sorts tokens.
+    assert_eq!(normalize_shortcut_string("CTRL+A"), "a+control");
 }
 
 #[test]
@@ -18,12 +19,14 @@ fn test_normalize_cmd_to_super() {
 
 #[test]
 fn test_normalize_win_to_super() {
-    assert_eq!(normalize_shortcut_string("WIN+a"), "super+a");
+    // Canonical form sorts tokens.
+    assert_eq!(normalize_shortcut_string("WIN+a"), "a+super");
 }
 
 #[test]
 fn test_normalize_meta_to_super() {
-    assert_eq!(normalize_shortcut_string("Meta+b"), "super+b");
+    // Canonical form sorts tokens.
+    assert_eq!(normalize_shortcut_string("Meta+b"), "b+super");
 }
 
 #[test]
@@ -52,7 +55,8 @@ fn test_normalize_is_order_insensitive() {
 fn test_normalize_preserves_non_modifier_parts() {
     assert_eq!(
         normalize_shortcut_string("ctrl+Backquote"),
-        "control+backquote"
+        // Canonical form sorts tokens.
+        "backquote+control"
     );
 }
 

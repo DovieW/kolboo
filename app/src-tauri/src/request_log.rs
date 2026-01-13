@@ -62,9 +62,7 @@ pub fn redact_json(value: JsonValue) -> JsonValue {
             }
             JsonValue::Object(map)
         }
-        JsonValue::Array(arr) => {
-            JsonValue::Array(arr.into_iter().map(redact_json).collect())
-        }
+        JsonValue::Array(arr) => JsonValue::Array(arr.into_iter().map(redact_json).collect()),
         JsonValue::String(s) => {
             if let Some(replacement) = redact_string_value(&s) {
                 JsonValue::String(replacement.to_string())

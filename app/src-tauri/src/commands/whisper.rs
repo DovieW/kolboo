@@ -4,9 +4,9 @@
 
 #[cfg(feature = "local-whisper")]
 use crate::stt::WhisperModel;
+use serde_json::json;
 #[cfg(feature = "local-whisper")]
 use sha2::{Digest, Sha256};
-use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -232,7 +232,9 @@ pub fn get_local_whisper_backend_status() -> serde_json::Value {
     }
 }
 
-fn get_pipeline(app: &tauri::AppHandle) -> Result<crate::pipeline::SharedPipeline, WhisperCommandError> {
+fn get_pipeline(
+    app: &tauri::AppHandle,
+) -> Result<crate::pipeline::SharedPipeline, WhisperCommandError> {
     app.try_state::<crate::pipeline::SharedPipeline>()
         .map(|s| s.inner().clone())
         .ok_or_else(|| WhisperCommandError::from("Pipeline not initialized".to_string()))
@@ -293,7 +295,9 @@ pub fn unload_local_whisper_model(app: tauri::AppHandle) -> Result<(), WhisperCo
 
 /// Get list of available Whisper models with download status
 #[tauri::command]
-pub fn get_whisper_models(app: tauri::AppHandle) -> Result<Vec<WhisperModelInfo>, WhisperCommandError> {
+pub fn get_whisper_models(
+    app: tauri::AppHandle,
+) -> Result<Vec<WhisperModelInfo>, WhisperCommandError> {
     #[cfg(feature = "local-whisper")]
     {
         let models_dir = get_models_dir(&app)?;
@@ -391,9 +395,8 @@ pub fn delete_whisper_model(
         let model_path = models_dir.join(model.filename());
 
         if model_path.exists() {
-            std::fs::remove_file(&model_path).map_err(|e| {
-                WhisperCommandError::from(format!("Failed to delete model: {}", e))
-            })?;
+            std::fs::remove_file(&model_path)
+                .map_err(|e| WhisperCommandError::from(format!("Failed to delete model: {}", e)))?;
             log::info!("Deleted Whisper model: {}", model.filename());
         }
 
@@ -448,9 +451,8 @@ pub fn validate_whisper_model(
         let expected = model.expected_sha256();
         let mut hasher = Sha256::new();
 
-        let mut file = std::fs::File::open(&model_path).map_err(|e| {
-            WhisperCommandError::from(format!("Failed to open model file: {}", e))
-        })?;
+        let mut file = std::fs::File::open(&model_path)
+            .map_err(|e| WhisperCommandError::from(format!("Failed to open model file: {}", e)))?;
 
         use std::io::Read;
         let mut buf = vec![0u8; 8 * 1024 * 1024];
@@ -719,12 +721,7 @@ pub async fn download_whisper_model(
                 }
                 Err(e) => {
                     let _ = tokio::fs::remove_file(&tmp_path).await;
-                    send_progress(
-                        WhisperModelDownloadStatus::Error,
-                        0,
-                        None,
-                        Some(e),
-                    );
+                    send_progress(WhisperModelDownloadStatus::Error, 0, None, Some(e));
                 }
             }
 

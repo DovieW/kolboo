@@ -13,8 +13,8 @@ fn main() {
     if profile == "release" {
         let conf = std::fs::read_to_string("tauri.conf.json")
             .expect("Failed to read tauri.conf.json for CSP validation");
-        let json: serde_json::Value = serde_json::from_str(&conf)
-            .expect("tauri.conf.json must be valid JSON");
+        let json: serde_json::Value =
+            serde_json::from_str(&conf).expect("tauri.conf.json must be valid JSON");
 
         let csp = json
             .get("app")
@@ -32,7 +32,6 @@ fn main() {
             );
         }
     }
-
 
     // Windows-specific fix for local/CI Rust tests:
     // Our crate (via Tauri and dialogs) imports comctl32 APIs like `TaskDialogIndirect`.

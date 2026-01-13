@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::settings::{TrustedCaCertFormat, TrustedCaCertificate};
+use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemProxyInfo {
@@ -41,9 +41,13 @@ fn to_wide(s: &str) -> Vec<u16> {
 }
 
 #[cfg(target_os = "windows")]
-fn reg_get_string(hkey: windows::Win32::System::Registry::HKEY, subkey: &str, value: &str) -> Option<String> {
-    use windows::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
+fn reg_get_string(
+    hkey: windows::Win32::System::Registry::HKEY,
+    subkey: &str,
+    value: &str,
+) -> Option<String> {
     use windows::core::PCWSTR;
+    use windows::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
 
     let subkey_w = to_wide(subkey);
     let value_w = to_wide(value);
@@ -85,13 +89,21 @@ fn reg_get_string(hkey: windows::Win32::System::Registry::HKEY, subkey: &str, va
     let len_u16 = (data_len as usize) / 2;
     let s = String::from_utf16_lossy(&buf[..len_u16]);
     let s = s.trim_end_matches('\0').trim();
-    if s.is_empty() { None } else { Some(s.to_string()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 #[cfg(target_os = "windows")]
-fn reg_get_dword(hkey: windows::Win32::System::Registry::HKEY, subkey: &str, value: &str) -> Option<u32> {
-    use windows::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_DWORD};
+fn reg_get_dword(
+    hkey: windows::Win32::System::Registry::HKEY,
+    subkey: &str,
+    value: &str,
+) -> Option<u32> {
     use windows::core::PCWSTR;
+    use windows::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_DWORD};
 
     let subkey_w = to_wide(subkey);
     let value_w = to_wide(value);
@@ -124,8 +136,7 @@ fn get_windows_internet_proxy_settings() -> Option<WindowsInternetProxySettings>
 
     const SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
-    let proxy_enable = reg_get_dword(HKEY_CURRENT_USER, SUBKEY, "ProxyEnable")
-        .map(|v| v != 0);
+    let proxy_enable = reg_get_dword(HKEY_CURRENT_USER, SUBKEY, "ProxyEnable").map(|v| v != 0);
     let proxy_server = reg_get_string(HKEY_CURRENT_USER, SUBKEY, "ProxyServer");
     let proxy_override = reg_get_string(HKEY_CURRENT_USER, SUBKEY, "ProxyOverride");
     let auto_config_url = reg_get_string(HKEY_CURRENT_USER, SUBKEY, "AutoConfigURL");
@@ -179,8 +190,7 @@ pub fn load_trusted_ca_certificate_from_file(path: String) -> Result<TrustedCaCe
         .unwrap_or("")
         .to_string();
 
-    let data = std::fs::read(p)
-        .map_err(|e| format!("Failed to read certificate file: {e}"))?;
+    let data = std::fs::read(p).map_err(|e| format!("Failed to read certificate file: {e}"))?;
 
     if data.is_empty() {
         return Err("Certificate file is empty".to_string());

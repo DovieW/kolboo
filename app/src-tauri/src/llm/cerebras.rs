@@ -8,8 +8,8 @@
 //! - OpenAI compatibility: https://inference-docs.cerebras.ai/resources/openai
 
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -310,7 +310,8 @@ mod tests {
 
     #[test]
     fn test_custom_model() {
-        let provider = CerebrasLlmProvider::with_model("test-key".to_string(), "llama3.1-8b".to_string());
+        let provider =
+            CerebrasLlmProvider::with_model("test-key".to_string(), "llama3.1-8b".to_string());
         assert_eq!(provider.model(), "llama3.1-8b");
     }
 

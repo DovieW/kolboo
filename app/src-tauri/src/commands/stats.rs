@@ -67,7 +67,10 @@ fn make_cache_key_for_summary(
     llm.sort();
 
     let key = StatsCacheKey {
-        kind: kind.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        kind: kind
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
         timeframe: timeframe.trim().to_string(),
         stt_model_keys: stt,
         llm_model_keys: llm,
@@ -292,7 +295,9 @@ pub fn get_cost_by_provider_v2(
     params: GetCostSummaryParams,
 ) -> Result<CostByProviderResponse, String> {
     let cache_key = make_cache_key_for_by_provider(&params);
-    if let Some(cached) = stats_store.cache_get_cost_by_provider::<CostByProviderResponse>(&cache_key) {
+    if let Some(cached) =
+        stats_store.cache_get_cost_by_provider::<CostByProviderResponse>(&cache_key)
+    {
         return Ok(cached);
     }
 
@@ -398,12 +403,14 @@ pub fn get_cost_by_provider_v2(
 
     let mut providers: Vec<ProviderCostTotal> = by_provider
         .into_iter()
-        .map(|(provider, (total, events_total, events_with_cost))| ProviderCostTotal {
-            provider,
-            total_usd_micros: (total.min(u128::from(u64::MAX))) as u64,
-            events_total,
-            events_with_cost,
-        })
+        .map(
+            |(provider, (total, events_total, events_with_cost))| ProviderCostTotal {
+                provider,
+                total_usd_micros: (total.min(u128::from(u64::MAX))) as u64,
+                events_total,
+                events_with_cost,
+            },
+        )
         .collect();
 
     // Sort by spend desc, then provider name asc.
@@ -413,7 +420,10 @@ pub fn get_cost_by_provider_v2(
             .then_with(|| a.provider.cmp(&b.provider))
     });
 
-    let out = CostByProviderResponse { timeframe, providers };
+    let out = CostByProviderResponse {
+        timeframe,
+        providers,
+    };
     stats_store.cache_put_cost_by_provider(cache_key, &out);
     Ok(out)
 }

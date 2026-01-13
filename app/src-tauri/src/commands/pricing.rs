@@ -1,14 +1,14 @@
 use serde::Serialize;
 
+use crate::cost::anthropic as anthropic_cost;
+use crate::cost::aquavoice as aquavoice_cost;
+use crate::cost::assemblyai as assemblyai_cost;
+use crate::cost::deepgram as deepgram_cost;
+use crate::cost::fireworks as fireworks_cost;
+use crate::cost::gemini as gemini_cost;
 use crate::cost::groq as groq_cost;
 use crate::cost::openai as openai_cost;
-use crate::cost::aquavoice as aquavoice_cost;
-use crate::cost::gemini as gemini_cost;
-use crate::cost::anthropic as anthropic_cost;
-use crate::cost::deepgram as deepgram_cost;
-use crate::cost::assemblyai as assemblyai_cost;
 use crate::cost::speechmatics as speechmatics_cost;
-use crate::cost::fireworks as fireworks_cost;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SttModelPricing {
@@ -40,7 +40,11 @@ pub struct ModelPricingResponse {
 }
 
 #[tauri::command]
-pub fn get_model_pricing(provider: String, kind: String, model: String) -> Option<ModelPricingResponse> {
+pub fn get_model_pricing(
+    provider: String,
+    kind: String,
+    model: String,
+) -> Option<ModelPricingResponse> {
     let provider_norm = provider.trim().to_lowercase();
     let kind_norm = kind.trim().to_lowercase();
     let model_norm = model.trim().to_string();

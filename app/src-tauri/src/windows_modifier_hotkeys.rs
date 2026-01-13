@@ -12,9 +12,9 @@
 
 #![cfg(target_os = "windows")]
 
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 
 use tauri::AppHandle;
 use tauri::Emitter;

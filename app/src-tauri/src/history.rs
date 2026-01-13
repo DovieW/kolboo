@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::RwLock;
 use uuid::Uuid;
 
@@ -194,7 +194,11 @@ impl HistoryStorage {
     }
 
     /// Add a new entry to the history
-    pub fn add_entry(&self, text: String, max_entries: Option<usize>) -> Result<HistoryEntry, String> {
+    pub fn add_entry(
+        &self,
+        text: String,
+        max_entries: Option<usize>,
+    ) -> Result<HistoryEntry, String> {
         let entry = HistoryEntry::new(text);
         {
             let mut data = self
@@ -345,7 +349,13 @@ impl HistoryStorage {
                 entry.error_message = None;
             } else {
                 // If we somehow missed creating an in-progress entry, fall back to inserting.
-                data.entries.insert(0, HistoryEntry::new_request_in_progress(request_id.to_string(), RequestModelInfo::default()));
+                data.entries.insert(
+                    0,
+                    HistoryEntry::new_request_in_progress(
+                        request_id.to_string(),
+                        RequestModelInfo::default(),
+                    ),
+                );
                 if let Some(entry) = data.entries.iter_mut().find(|e| e.id == request_id) {
                     entry.text = text;
                     entry.status = HistoryStatus::Success;
@@ -357,7 +367,11 @@ impl HistoryStorage {
     }
 
     /// Mark an existing request entry as failed with an error message.
-    pub fn complete_request_error(&self, request_id: &str, error_message: String) -> Result<(), String> {
+    pub fn complete_request_error(
+        &self,
+        request_id: &str,
+        error_message: String,
+    ) -> Result<(), String> {
         {
             let mut data = self
                 .data
@@ -369,7 +383,10 @@ impl HistoryStorage {
                 entry.error_message = Some(error_message);
                 // Keep text as-is (likely empty). We intentionally do not delete the entry.
             } else {
-                let mut entry = HistoryEntry::new_request_in_progress(request_id.to_string(), RequestModelInfo::default());
+                let mut entry = HistoryEntry::new_request_in_progress(
+                    request_id.to_string(),
+                    RequestModelInfo::default(),
+                );
                 entry.status = HistoryStatus::Error;
                 entry.error_message = Some(error_message);
                 data.entries.insert(0, entry);
@@ -400,11 +417,7 @@ impl HistoryStorage {
             .read()
             .map_err(|e| format!("Failed to read history: {}", e))?;
 
-        Ok(data
-            .entries
-            .iter()
-            .find(|e| e.id == request_id)
-            .cloned())
+        Ok(data.entries.iter().find(|e| e.id == request_id).cloned())
     }
 
     /// Update the stored profile metadata for an existing history entry.
@@ -517,11 +530,7 @@ impl HistoryStorage {
         let total_all = entries.len();
 
         // Defaults match the current UI behavior.
-        let filter_text = params
-            .filter_text
-            .unwrap_or_default()
-            .trim()
-            .to_lowercase();
+        let filter_text = params.filter_text.unwrap_or_default().trim().to_lowercase();
         let show_failed = params.show_failed.unwrap_or(true);
         let show_empty_transcript = params.show_empty_transcript.unwrap_or(false);
         let selected_stt_model_keys = params.selected_stt_model_keys.unwrap_or_default();
@@ -538,12 +547,14 @@ impl HistoryStorage {
             let mut llm_counts: HashMap<String, usize> = HashMap::new();
 
             for entry in entries.iter() {
-                if let (Some(p), Some(m)) = (entry.stt_provider.as_ref(), entry.stt_model.as_ref()) {
+                if let (Some(p), Some(m)) = (entry.stt_provider.as_ref(), entry.stt_model.as_ref())
+                {
                     let key = format!("{}::{}", p, m);
                     *stt_counts.entry(key).or_insert(0) += 1;
                 }
 
-                if let (Some(p), Some(m)) = (entry.llm_provider.as_ref(), entry.llm_model.as_ref()) {
+                if let (Some(p), Some(m)) = (entry.llm_provider.as_ref(), entry.llm_model.as_ref())
+                {
                     let key = format!("{}::{}", p, m);
                     *llm_counts.entry(key).or_insert(0) += 1;
                 }
@@ -576,11 +587,7 @@ impl HistoryStorage {
                     HistoryStatus::Success => "success",
                     HistoryStatus::Error => "error",
                 };
-                let err = entry
-                    .error_message
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_lowercase();
+                let err = entry.error_message.as_deref().unwrap_or("").to_lowercase();
 
                 let matches = text.contains(&filter_text)
                     || status.contains(&filter_text)
@@ -660,10 +667,7 @@ impl HistoryStorage {
         let items: Vec<HistoryEntry> = if start >= total_filtered {
             Vec::new()
         } else {
-            filtered[start..end]
-                .iter()
-                .map(|e| (*e).clone())
-                .collect()
+            filtered[start..end].iter().map(|e| (*e).clone()).collect()
         };
 
         Ok(HistoryPageResult {
@@ -893,6 +897,9 @@ mod tests {
             .expect("get_by_id failed")
             .expect("missing entry");
         assert_eq!(after.status, HistoryStatus::Error);
-        assert_eq!(after.error_message.as_deref(), Some("Interrupted (app restarted)"));
+        assert_eq!(
+            after.error_message.as_deref(),
+            Some("Interrupted (app restarted)")
+        );
     }
 }

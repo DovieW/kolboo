@@ -1,6 +1,6 @@
-pub mod openai;
 pub mod cohere;
 pub mod fireworks;
+pub mod openai;
 
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> Option<f32> {
     if a.len() != b.len() || a.is_empty() {

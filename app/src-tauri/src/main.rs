@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-                kolboo_lib::run();
+    kolboo_lib::run();
 }

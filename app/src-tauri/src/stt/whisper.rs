@@ -184,7 +184,8 @@ pub fn get_local_whisper_backend_status() -> LocalWhisperBackendStatus {
             build_has_cuda,
             compute: LocalWhisperComputeBackend::Cpu,
             reason: Some(
-                "This build does not include CUDA support; Local Whisper will run on CPU.".to_string(),
+                "This build does not include CUDA support; Local Whisper will run on CPU."
+                    .to_string(),
             ),
             missing_dlls: Vec::new(),
         };
@@ -278,9 +279,10 @@ pub fn get_local_whisper_backend_status() -> LocalWhisperBackendStatus {
             None
         };
 
-        if let (Some(runtime_major), Some(driver_cuda)) =
-            (runtime_major, get_nvidia_smi_reported_cuda_version_windows())
-        {
+        if let (Some(runtime_major), Some(driver_cuda)) = (
+            runtime_major,
+            get_nvidia_smi_reported_cuda_version_windows(),
+        ) {
             let driver_major = driver_cuda.floor() as u32;
             if driver_major < runtime_major {
                 return LocalWhisperBackendStatus {
@@ -369,7 +371,9 @@ impl WhisperModel {
             Self::LargeV1 => "7d99f41a10525d0206bddadd86760181fa920438b6b33237e3118ff6c83bb53d",
             Self::LargeV2 => "9a423fe4d40c82774b6af34115b8b935f34152246eb19e80e376071d3f999487",
             Self::LargeV3 => "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
-            Self::LargeV3Turbo => "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+            Self::LargeV3Turbo => {
+                "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
+            }
         }
     }
 
@@ -498,15 +502,15 @@ impl LocalWhisperProvider {
         // aren't installed/bundled (common on Windows).
         #[cfg(feature = "local-whisper-cuda")]
         {
-
             let status = get_local_whisper_backend_status();
             ctx_params.use_gpu(matches!(status.compute, LocalWhisperComputeBackend::Cuda));
         }
 
         let ctx = WhisperContext::new_with_params(
-            config.model_path.to_str().ok_or_else(|| {
-                SttError::Audio("Invalid model path encoding".to_string())
-            })?,
+            config
+                .model_path
+                .to_str()
+                .ok_or_else(|| SttError::Audio("Invalid model path encoding".to_string()))?,
             ctx_params,
         )
         .map_err(|e| SttError::Audio(format!("Failed to load Whisper model: {}", e)))?;
@@ -524,9 +528,7 @@ impl LocalWhisperProvider {
 
     /// Get the default models directory
     pub fn default_models_dir() -> Option<PathBuf> {
-        dirs::data_local_dir().map(|d| {
-            d.join("kolboo").join("models")
-        })
+        dirs::data_local_dir().map(|d| d.join("kolboo").join("models"))
     }
 }
 
@@ -545,14 +547,14 @@ impl SttProvider for LocalWhisperProvider {
         let language = self.config.language.clone();
         let translate = self.config.translate;
         let n_threads = self.config.n_threads;
-        let transcription_prompt = self
-            .config
-            .transcription_prompt
-            .clone()
-            .and_then(|p| {
-                let trimmed = p.trim().to_string();
-                if trimmed.is_empty() { None } else { Some(trimmed) }
-            });
+        let transcription_prompt = self.config.transcription_prompt.clone().and_then(|p| {
+            let trimmed = p.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        });
 
         // whisper-rs is synchronous, so we use spawn_blocking
         let result = tokio::task::spawn_blocking(move || {
@@ -641,10 +643,7 @@ fn decode_wav_to_f32_mono_16khz(wav_bytes: &[u8]) -> Result<Vec<f32>, SttError> 
 
     // Read samples based on format
     let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .map(|s| s.unwrap_or(0.0))
-            .collect(),
+        hound::SampleFormat::Float => reader.samples::<f32>().map(|s| s.unwrap_or(0.0)).collect(),
         hound::SampleFormat::Int => {
             let bits = spec.bits_per_sample;
             let max_val = (1 << (bits - 1)) as f32;

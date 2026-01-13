@@ -113,7 +113,9 @@ pub async fn embed_texts(
         // Cohere v2 embed returns either:
         // - embeddings: { float: [[...], ...] }
         // - embeddings: [[...], ...] (older)
-        let embeddings_root = parsed.get("embeddings").ok_or(CohereEmbeddingsError::MissingEmbedding)?;
+        let embeddings_root = parsed
+            .get("embeddings")
+            .ok_or(CohereEmbeddingsError::MissingEmbedding)?;
         let embeddings_arr = if embeddings_root.is_object() {
             embeddings_root
                 .get("float")
@@ -135,7 +137,9 @@ pub async fn embed_texts(
 
         let mut out: Vec<Vec<f32>> = Vec::with_capacity(embeddings_arr.len());
         for row in embeddings_arr {
-            let row_arr = row.as_array().ok_or(CohereEmbeddingsError::MissingEmbedding)?;
+            let row_arr = row
+                .as_array()
+                .ok_or(CohereEmbeddingsError::MissingEmbedding)?;
             let mut embedding: Vec<f32> = Vec::with_capacity(row_arr.len());
             for v in row_arr {
                 let n = v.as_f64().ok_or(CohereEmbeddingsError::MissingEmbedding)?;

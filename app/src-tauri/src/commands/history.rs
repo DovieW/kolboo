@@ -1,9 +1,9 @@
 use crate::history::{HistoryEntry, HistoryPageQuery, HistoryPageResult, HistoryStorage};
 use crate::recordings::RecordingStore;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
-use tauri::Manager;
 use std::collections::HashSet;
+use tauri::Manager;
+use tauri::{AppHandle, State};
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -293,9 +293,17 @@ pub async fn delete_history_entry_ex(
             for e in entries.iter() {
                 let source = if let Some(x) = e.recording_request_id.as_ref() {
                     let t = x.trim();
-                    if t.is_empty() { None } else { Some(t.to_string()) }
+                    if t.is_empty() {
+                        None
+                    } else {
+                        Some(t.to_string())
+                    }
                 } else if let Some(store) = app.try_state::<RecordingStore>() {
-                    if store.has(&e.id) { Some(e.id.clone()) } else { None }
+                    if store.has(&e.id) {
+                        Some(e.id.clone())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 };

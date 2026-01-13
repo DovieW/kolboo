@@ -42,7 +42,9 @@ pub fn migrate_router_embeddings_out_of_settings(app: &AppHandle) -> Result<usiz
     let mut decoded: HashMap<String, Vec<f32>> = HashMap::new();
     for (k, v) in map {
         let Some(b64) = v.as_str() else { continue };
-        let Some(embedding) = decode_embedding_b64(b64) else { continue };
+        let Some(embedding) = decode_embedding_b64(b64) else {
+            continue;
+        };
         decoded.insert(k, embedding);
     }
 
@@ -116,7 +118,9 @@ pub fn load_router_embeddings_from_store(app: &AppHandle) -> HashMap<String, Vec
 
     for (k, v) in map {
         let Some(b64) = v.as_str() else { continue };
-        let Some(embedding) = decode_embedding_b64(b64) else { continue };
+        let Some(embedding) = decode_embedding_b64(b64) else {
+            continue;
+        };
         out.insert(k, embedding);
     }
 
@@ -159,7 +163,9 @@ pub fn merge_router_embeddings_into_store(
     }
 
     store.set(ROUTER_EMBEDDINGS_STORE_KEY, JsonValue::Object(existing));
-    store.save().map_err(|e| format!("Failed to save store: {e}"))?;
+    store
+        .save()
+        .map_err(|e| format!("Failed to save store: {e}"))?;
 
     Ok((inserted, updated))
 }

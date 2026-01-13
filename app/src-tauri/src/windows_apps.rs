@@ -10,8 +10,8 @@ mod imp {
     use windows::core::{BOOL, PWSTR};
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
     use windows::Win32::System::Threading::{
-        GetCurrentProcessId,
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
@@ -20,10 +20,7 @@ mod imp {
 
     fn basename_for_log(path: &str) -> &str {
         let trimmed = path.trim().trim_matches('"');
-        trimmed
-            .rsplit(['\\', '/'])
-            .next()
-            .unwrap_or(trimmed)
+        trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
     }
 
     #[derive(Debug, Clone, serde::Serialize)]
@@ -208,8 +205,9 @@ mod imp {
                         return BOOL(1);
                     }
 
-                    let title =
-                        String::from_utf16_lossy(&title_buf[..copied as usize]).trim().to_string();
+                    let title = String::from_utf16_lossy(&title_buf[..copied as usize])
+                        .trim()
+                        .to_string();
                     if title.is_empty() {
                         return BOOL(1);
                     }
@@ -228,7 +226,10 @@ mod imp {
                     return BOOL(1);
                 };
 
-                windows.push(OpenWindowInfo { title, process_path });
+                windows.push(OpenWindowInfo {
+                    title,
+                    process_path,
+                });
                 BOOL(1)
             }
         }

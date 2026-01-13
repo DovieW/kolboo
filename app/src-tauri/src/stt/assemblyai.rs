@@ -11,8 +11,8 @@
 //! - https://www.assemblyai.com/docs/api-reference/transcripts/get
 
 use super::{AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
@@ -102,7 +102,13 @@ impl AssemblyAiSttProvider {
             .body(audio.to_vec())
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -139,7 +145,13 @@ impl AssemblyAiSttProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -166,7 +178,13 @@ impl AssemblyAiSttProvider {
             .header("Authorization", &self.api_key)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { SttError::Timeout } else { SttError::Network(e) })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    SttError::Timeout
+                } else {
+                    SttError::Network(e)
+                }
+            })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -284,7 +302,8 @@ mod tests {
 
     #[test]
     fn test_provider_with_custom_model() {
-        let provider = AssemblyAiSttProvider::new("test-key".to_string(), Some("slam-1".to_string()));
+        let provider =
+            AssemblyAiSttProvider::new("test-key".to_string(), Some("slam-1".to_string()));
         assert_eq!(provider.model, "slam-1");
     }
 }

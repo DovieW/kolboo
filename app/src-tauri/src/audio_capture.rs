@@ -14,8 +14,8 @@ use hound::{WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
-use std::sync::mpsc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
 
@@ -66,8 +66,7 @@ fn select_input_device_from_host(
     host: &cpal::Host,
     selection: Option<&str>,
 ) -> Option<cpal::Device> {
-    let (desired_name, desired_ordinal, is_encoded) =
-        normalize_input_device_selection(selection)?;
+    let (desired_name, desired_ordinal, is_encoded) = normalize_input_device_selection(selection)?;
 
     // Prefer exact-name matching with ordinal disambiguation.
     let mut ordinal_for_name: usize = 0;
@@ -317,7 +316,11 @@ fn apply_noise_gate_interleaved(
         }
 
         let target = if gate_open { 1.0_f32 } else { 0.0_f32 };
-        let alpha = if target > gain { attack_alpha } else { release_alpha };
+        let alpha = if target > gain {
+            attack_alpha
+        } else {
+            release_alpha
+        };
         gain = target + alpha * (gain - target);
 
         for c in 0..channels_usize {
@@ -466,7 +469,8 @@ impl AudioBuffer {
 
         // Keep the most recent samples, but resize capacity to reflect the new format.
         // This can happen on device restarts; it's not on a realtime hot path.
-        let new_cap = Self::max_samples_for(self.sample_rate, self.channels, self.max_duration_secs);
+        let new_cap =
+            Self::max_samples_for(self.sample_rate, self.channels, self.max_duration_secs);
         if new_cap == self.capacity() {
             return;
         }
@@ -674,7 +678,11 @@ impl AudioBuffer {
         };
 
         let mut out_sample_rate = self.sample_rate;
-        let out_channels: u16 = if cfg.downmix_to_mono { 1 } else { self.channels.max(1) };
+        let out_channels: u16 = if cfg.downmix_to_mono {
+            1
+        } else {
+            self.channels.max(1)
+        };
 
         // If we didn't downmix, most processing is skipped (keeps code simple and predictable).
         if cfg.downmix_to_mono {
@@ -690,7 +698,8 @@ impl AudioBuffer {
 
             // Optional resample after filtering/gain.
             if cfg.resample_to_16khz && out_sample_rate != 16000 {
-                processed_samples = crate::vad::resample_to_16khz(&processed_samples, out_sample_rate);
+                processed_samples =
+                    crate::vad::resample_to_16khz(&processed_samples, out_sample_rate);
                 out_sample_rate = 16000;
             }
 
@@ -812,7 +821,11 @@ impl RollingBuffer {
 
         self.data = data;
         self.filled = n;
-        self.write_pos = if self.filled < self.capacity() { self.filled } else { 0 };
+        self.write_pos = if self.filled < self.capacity() {
+            self.filled
+        } else {
+            0
+        };
     }
 
     fn push(&mut self, samples: &[f32]) {
@@ -1033,8 +1046,16 @@ impl AudioLevelMeter {
 
     fn update(&self, rms: f32, peak: f32) {
         // Clamp to sane range and avoid NaNs propagating into the UI.
-        let rms = if rms.is_finite() { rms.clamp(0.0, 1.0) } else { 0.0 };
-        let peak = if peak.is_finite() { peak.clamp(0.0, 1.0) } else { 0.0 };
+        let rms = if rms.is_finite() {
+            rms.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let peak = if peak.is_finite() {
+            peak.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
 
         self.rms_bits.store(rms.to_bits(), Ordering::Relaxed);
         self.peak_bits.store(peak.to_bits(), Ordering::Relaxed);
@@ -1277,7 +1298,8 @@ impl AudioCapture {
                 .lock()
                 .map(|b| (b.sample_rate(), b.channels()))
                 .unwrap_or((self.sample_rate, self.channels));
-            let cap_samples = ((sr as f32 * (pre_ms / 1000.0) * ch as f32) as usize).min(10_000_000);
+            let cap_samples =
+                ((sr as f32 * (pre_ms / 1000.0) * ch as f32) as usize).min(10_000_000);
             if let Ok(mut pr) = self.pre_roll.lock() {
                 pr.set_capacity(cap_samples);
             }
@@ -1290,7 +1312,10 @@ impl AudioCapture {
         self.start_stream_only(input_device_name)
     }
 
-    fn start_stream_only(&mut self, input_device_name: Option<&str>) -> Result<(), AudioCaptureError> {
+    fn start_stream_only(
+        &mut self,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
         // Stop any existing stream (defensive)
         self.stop();
 
@@ -1309,9 +1334,9 @@ impl AudioCapture {
 
         // Update pre-roll buffer capacity based on current stream format.
         let pre_ms = self.pre_roll_ms.load(Ordering::Relaxed) as f32;
-        let cap_samples =
-            ((self.sample_rate as f32 * (pre_ms / 1000.0) * self.channels as f32) as usize)
-                .min(10_000_000);
+        let cap_samples = ((self.sample_rate as f32 * (pre_ms / 1000.0) * self.channels as f32)
+            as usize)
+            .min(10_000_000);
         if let Ok(mut pr) = self.pre_roll.lock() {
             pr.set_capacity(cap_samples);
             pr.clear();
@@ -1419,7 +1444,8 @@ impl AudioCapture {
         &mut self,
         noise_gate_strength: u8,
     ) -> Result<Vec<u8>, AudioCaptureError> {
-        let (wav_bytes, _diag) = self.stop_and_get_wav_with_stats_with_noise_gate(noise_gate_strength)?;
+        let (wav_bytes, _diag) =
+            self.stop_and_get_wav_with_stats_with_noise_gate(noise_gate_strength)?;
         Ok(wav_bytes)
     }
 
@@ -1586,10 +1612,7 @@ impl AudioCapture {
     /// Get the duration of recorded audio in seconds
     #[allow(dead_code)]
     pub fn duration_secs(&self) -> f32 {
-        self.buffer
-            .lock()
-            .map(|b| b.duration_secs())
-            .unwrap_or(0.0)
+        self.buffer.lock().map(|b| b.duration_secs()).unwrap_or(0.0)
     }
 
     /// Get the sample rate
@@ -1653,7 +1676,8 @@ fn run_capture_thread(
     // Channel + pool for passing samples to the VAD processing thread.
     // The pool avoids per-callback allocations; the callback takes a Vec from the pool,
     // fills it with mono f32, and the VAD thread returns it to the pool after processing.
-    let (vad_samples_tx, vad_samples_rx): (mpsc::Sender<Vec<f32>>, mpsc::Receiver<Vec<f32>>) = mpsc::channel();
+    let (vad_samples_tx, vad_samples_rx): (mpsc::Sender<Vec<f32>>, mpsc::Receiver<Vec<f32>>) =
+        mpsc::channel();
     let vad_pool: Option<Arc<ArrayQueue<Vec<f32>>>> = if vad_config.enabled {
         const VAD_POOL_SIZE: usize = 8;
 
@@ -1677,7 +1701,10 @@ fn run_capture_thread(
         let pool = vad_pool.clone();
         Some(thread::spawn(move || {
             let mut processor = VadFrameProcessor::new(vad_cfg, sample_rate);
-            log::info!("VAD processor initialized for {} Hz audio in dedicated thread", sample_rate);
+            log::info!(
+                "VAD processor initialized for {} Hz audio in dedicated thread",
+                sample_rate
+            );
 
             loop {
                 match vad_samples_rx.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -1728,65 +1755,72 @@ fn run_capture_thread(
         let scratch_capacity = estimate_callback_interleaved_capacity(&config, channels);
 
         match sample_format {
-            SampleFormat::F32 => device
-                .build_input_stream(
-                    &config,
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+            SampleFormat::F32 => device.build_input_stream(
+                &config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    last_callback_ms
+                        .store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                        // Realtime meter (cheap math, no allocations).
-                        let mut peak: f32 = 0.0;
-                        let mut sum_sq: f64 = 0.0;
-                        let mut n: u64 = 0;
-                        for &s in data {
-                            let a = s.abs();
-                            if a > peak {
-                                peak = a;
-                            }
-                            sum_sq += (s as f64) * (s as f64);
-                            n += 1;
+                    // Realtime meter (cheap math, no allocations).
+                    let mut peak: f32 = 0.0;
+                    let mut sum_sq: f64 = 0.0;
+                    let mut n: u64 = 0;
+                    for &s in data {
+                        let a = s.abs();
+                        if a > peak {
+                            peak = a;
                         }
-                        let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
-                        meter.update(rms, peak);
-                        waveform_meter.update_from_f32_interleaved(data, channels);
+                        sum_sq += (s as f64) * (s as f64);
+                        n += 1;
+                    }
+                    let rms = if n == 0 {
+                        0.0
+                    } else {
+                        (sum_sq / n as f64).sqrt() as f32
+                    };
+                    meter.update(rms, peak);
+                    waveform_meter.update_from_f32_interleaved(data, channels);
 
-                        // Always maintain the rolling pre-roll buffer.
-                        if let Ok(mut pr) = pre_roll.lock() {
-                            pr.push(data);
+                    // Always maintain the rolling pre-roll buffer.
+                    if let Ok(mut pr) = pre_roll.lock() {
+                        pr.push(data);
+                    }
+
+                    // Record only when active.
+                    if recording_active.load(Ordering::Relaxed) {
+                        if let Ok(mut buf) = buffer.lock() {
+                            buf.append(data);
                         }
 
-                        // Record only when active.
-                        if recording_active.load(Ordering::Relaxed) {
-                            if let Ok(mut buf) = buffer.lock() {
-                                buf.append(data);
-                            }
-
-                            if let Some(ref tx) = vad_tx {
-                                if let Some(ref pool) = vad_pool {
-                                    if let Some(mut mono) = pool.pop() {
-                                        downmix_interleaved_chunk_to_mono_into(data, channels, &mut mono);
-                                        if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
-                                            mono.clear();
-                                            let _ = pool.push(mono);
-                                        }
+                        if let Some(ref tx) = vad_tx {
+                            if let Some(ref pool) = vad_pool {
+                                if let Some(mut mono) = pool.pop() {
+                                    downmix_interleaved_chunk_to_mono_into(
+                                        data, channels, &mut mono,
+                                    );
+                                    if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
+                                        mono.clear();
+                                        let _ = pool.push(mono);
                                     }
                                 }
                             }
                         }
+                    }
 
-                        // Keep capacity in sync if pre-roll ms changes drastically.
-                        // (Avoids waiting for a config sync while stream is running.)
-                        let _ = pre_roll_ms.load(Ordering::Relaxed);
-                    },
-                    err_fn,
-                    None,
-                ),
+                    // Keep capacity in sync if pre-roll ms changes drastically.
+                    // (Avoids waiting for a config sync while stream is running.)
+                    let _ = pre_roll_ms.load(Ordering::Relaxed);
+                },
+                err_fn,
+                None,
+            ),
             SampleFormat::I16 => {
                 let scratch = RefCell::new(Vec::<f32>::with_capacity(scratch_capacity));
                 device.build_input_stream(
                     &config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+                        last_callback_ms
+                            .store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
 
                         let mut peak: f32 = 0.0;
                         let mut sum_sq: f64 = 0.0;
@@ -1804,7 +1838,11 @@ fn run_capture_thread(
                         }
 
                         let n = samples.len() as u64;
-                        let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
+                        let rms = if n == 0 {
+                            0.0
+                        } else {
+                            (sum_sq / n as f64).sqrt() as f32
+                        };
                         meter.update(rms, peak);
                         waveform_meter.update_from_f32_interleaved(samples.as_slice(), channels);
 
@@ -1820,7 +1858,11 @@ fn run_capture_thread(
                             if let Some(ref tx) = vad_tx {
                                 if let Some(ref pool) = vad_pool {
                                     if let Some(mut mono) = pool.pop() {
-                                        downmix_interleaved_chunk_to_mono_into(samples.as_slice(), channels, &mut mono);
+                                        downmix_interleaved_chunk_to_mono_into(
+                                            samples.as_slice(),
+                                            channels,
+                                            &mut mono,
+                                        );
                                         if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
                                             mono.clear();
                                             let _ = pool.push(mono);
@@ -1841,7 +1883,8 @@ fn run_capture_thread(
                 device.build_input_stream(
                     &config,
                     move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                        last_callback_ms.store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+                        last_callback_ms
+                            .store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
 
                         let mut peak: f32 = 0.0;
                         let mut sum_sq: f64 = 0.0;
@@ -1859,7 +1902,11 @@ fn run_capture_thread(
                         }
 
                         let n = samples.len() as u64;
-                        let rms = if n == 0 { 0.0 } else { (sum_sq / n as f64).sqrt() as f32 };
+                        let rms = if n == 0 {
+                            0.0
+                        } else {
+                            (sum_sq / n as f64).sqrt() as f32
+                        };
                         meter.update(rms, peak);
                         waveform_meter.update_from_f32_interleaved(samples.as_slice(), channels);
 
@@ -1875,7 +1922,11 @@ fn run_capture_thread(
                             if let Some(ref tx) = vad_tx {
                                 if let Some(ref pool) = vad_pool {
                                     if let Some(mut mono) = pool.pop() {
-                                        downmix_interleaved_chunk_to_mono_into(samples.as_slice(), channels, &mut mono);
+                                        downmix_interleaved_chunk_to_mono_into(
+                                            samples.as_slice(),
+                                            channels,
+                                            &mut mono,
+                                        );
                                         if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
                                             mono.clear();
                                             let _ = pool.push(mono);
@@ -1959,7 +2010,8 @@ fn run_capture_thread(
                         continue;
                     }
                     Err(e) => {
-                        consecutive_restart_failures = consecutive_restart_failures.saturating_add(1);
+                        consecutive_restart_failures =
+                            consecutive_restart_failures.saturating_add(1);
                         log::warn!("Audio capture watchdog: restart failed: {}", e);
                     }
                 }
@@ -1976,9 +2028,10 @@ fn run_capture_thread(
                     }
                     // Resize pre-roll based on current config and configured ms.
                     let pre_ms = pre_roll_ms.load(Ordering::Relaxed).min(5000) as f32;
-                    let cap_samples =
-                        ((config.sample_rate as f32 * (pre_ms / 1000.0) * config.channels as f32) as usize)
-                            .min(10_000_000);
+                    let cap_samples = ((config.sample_rate as f32
+                        * (pre_ms / 1000.0)
+                        * config.channels as f32) as usize)
+                        .min(10_000_000);
                     if let Ok(mut pr) = pre_roll.lock() {
                         pr.set_capacity(cap_samples);
                     }
@@ -1995,7 +2048,8 @@ fn run_capture_thread(
                             continue;
                         }
                         Err(e) => {
-                            consecutive_restart_failures = consecutive_restart_failures.saturating_add(1);
+                            consecutive_restart_failures =
+                                consecutive_restart_failures.saturating_add(1);
                             log::warn!("Audio capture watchdog: rebind restart failed: {}", e);
                         }
                     }
@@ -2141,7 +2195,7 @@ mod tests {
     #[test]
     fn test_audio_buffer_max_duration() {
         let mut buffer = AudioBuffer::new(1000, 1, 1.0); // 1 second max
-        // Add 2 seconds worth of samples
+                                                         // Add 2 seconds worth of samples
         buffer.append(&[0.0; 2000]);
         // Should be trimmed to 1 second
         assert_eq!(buffer.len(), 1000);

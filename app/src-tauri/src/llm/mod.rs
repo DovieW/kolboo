@@ -8,9 +8,9 @@ mod anthropic;
 mod cerebras;
 mod cohere;
 mod defaults;
+mod fireworks;
 mod gemini;
 mod groq;
-mod fireworks;
 mod ollama;
 mod openai;
 mod prompts;
@@ -18,18 +18,18 @@ mod prompts;
 pub use anthropic::AnthropicLlmProvider;
 pub use cerebras::CerebrasLlmProvider;
 pub use cohere::CohereLlmProvider;
+pub use defaults::default_llm_model_for_provider;
+pub use fireworks::FireworksLlmProvider;
 pub use gemini::GeminiLlmProvider;
 pub use groq::GroqLlmProvider;
-pub use fireworks::FireworksLlmProvider;
 pub use ollama::OllamaLlmProvider;
 pub use openai::OpenAiLlmProvider;
-pub use defaults::default_llm_model_for_provider;
 pub use prompts::{combine_prompt_sections, PromptSections, SYSTEM_PROMPT_DEFAULT};
 
 use async_trait::async_trait;
+use serde_json::Value as JsonValue;
 use std::sync::Arc;
 use std::time::Duration;
-use serde_json::Value as JsonValue;
 
 /// Default timeout for LLM API requests
 pub const DEFAULT_LLM_TIMEOUT: Duration = Duration::from_secs(30);
@@ -87,8 +87,7 @@ pub trait LlmProvider: Send + Sync {
         serde_json::from_str::<JsonValue>(out.trim()).map_err(|e| {
             LlmError::InvalidResponse(format!(
                 "Structured output was not valid JSON: {} (content: {})",
-                e,
-                out
+                e, out
             ))
         })
     }
@@ -151,7 +150,10 @@ impl LlmRegistry {
 
     /// List all registered provider names
     pub fn list_providers(&self) -> Vec<String> {
-        self.providers.iter().map(|p| p.name().to_string()).collect()
+        self.providers
+            .iter()
+            .map(|p| p.name().to_string())
+            .collect()
     }
 
     /// Get the current provider name

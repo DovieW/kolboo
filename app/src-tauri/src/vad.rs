@@ -139,8 +139,7 @@ impl VoiceActivityDetector {
         vad.set_sample_rate(webrtc_vad::SampleRate::Rate16kHz);
 
         // Calculate pre-roll buffer size in frames
-        let pre_roll_max_frames =
-            (config.pre_roll_ms / config.frame_duration_ms) as usize;
+        let pre_roll_max_frames = (config.pre_roll_ms / config.frame_duration_ms) as usize;
 
         Self {
             vad,
@@ -172,10 +171,7 @@ impl VoiceActivityDetector {
         }
 
         // Run VAD on the frame
-        let is_speech = self
-            .vad
-            .is_voice_segment(samples)
-            .unwrap_or(false);
+        let is_speech = self.vad.is_voice_segment(samples).unwrap_or(false);
 
         if is_speech {
             self.speech_frames += 1;
@@ -186,12 +182,7 @@ impl VoiceActivityDetector {
                 self.is_speaking = true;
 
                 // Collect pre-roll audio
-                let pre_roll: Vec<i16> = self
-                    .pre_roll_buffer
-                    .iter()
-                    .flatten()
-                    .cloned()
-                    .collect();
+                let pre_roll: Vec<i16> = self.pre_roll_buffer.iter().flatten().cloned().collect();
 
                 log::debug!(
                     "VAD: Speech started (pre-roll: {} samples, {} frames)",
@@ -326,7 +317,12 @@ pub fn resample_to_16khz(samples: &[f32], source_sample_rate: u32) -> Vec<f32> {
         }
     };
 
-    match resampler.process_all_into_buffer(&input_adapter, &mut output_adapter, input_len_frames, None) {
+    match resampler.process_all_into_buffer(
+        &input_adapter,
+        &mut output_adapter,
+        input_len_frames,
+        None,
+    ) {
         Ok((_frames_read, frames_written)) => {
             out.truncate(frames_written);
             out

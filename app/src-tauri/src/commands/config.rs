@@ -278,7 +278,11 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .and_then(|s| s)
         .and_then(|s| {
             let t = s.trim().trim_end_matches('/').to_string();
-            if t.is_empty() { None } else { Some(t) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
         });
 
     #[cfg(feature = "local-whisper")]
@@ -357,15 +361,16 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .unwrap_or(10.0);
 
     // Guard against invalid values (NaN/inf/<=0) to avoid Duration::from_secs_f64 panics.
-    let stt_timeout_seconds: f64 = if stt_timeout_seconds_raw.is_finite() && stt_timeout_seconds_raw > 0.0 {
-        stt_timeout_seconds_raw
-    } else {
-        log::warn!(
-            "Invalid stt_timeout_seconds value in store ({}); falling back to 10s",
+    let stt_timeout_seconds: f64 =
+        if stt_timeout_seconds_raw.is_finite() && stt_timeout_seconds_raw > 0.0 {
             stt_timeout_seconds_raw
-        );
-        10.0
-    };
+        } else {
+            log::warn!(
+                "Invalid stt_timeout_seconds value in store ({}); falling back to 10s",
+                stt_timeout_seconds_raw
+            );
+            10.0
+        };
 
     // Read LLM settings from store
     // NOTE: If the user has not selected an LLM provider yet, keep LLM disabled.
@@ -476,88 +481,90 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
-    let program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile> = rewrite_program_prompt_profiles
-        .into_iter()
-        .map(|p| {
-            let profile_prompts = p
-                .cleanup_prompt_sections
-                .as_ref()
-                .map(|o| o.apply_to(&base_prompts))
-                .unwrap_or_else(|| base_prompts.clone());
+    let program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile> =
+        rewrite_program_prompt_profiles
+            .into_iter()
+            .map(|p| {
+                let profile_prompts = p
+                    .cleanup_prompt_sections
+                    .as_ref()
+                    .map(|o| o.apply_to(&base_prompts))
+                    .unwrap_or_else(|| base_prompts.clone());
 
-            let presets = p
-                .presets
-                .into_iter()
-                .map(|preset| {
-                    let preset_prompts = preset
-                        .cleanup_prompt_sections
-                        .as_ref()
-                        .map(|o| o.apply_to(&profile_prompts))
-                        .unwrap_or_else(|| profile_prompts.clone());
+                let presets = p
+                    .presets
+                    .into_iter()
+                    .map(|preset| {
+                        let preset_prompts = preset
+                            .cleanup_prompt_sections
+                            .as_ref()
+                            .map(|o| o.apply_to(&profile_prompts))
+                            .unwrap_or_else(|| profile_prompts.clone());
 
-                    crate::llm::ProgramPreset {
-                        id: preset.id,
-                        name: preset.name,
-                        routing_hints: preset.routing_hints,
-                        prompts: preset_prompts,
-                        rewrite_llm_enabled: preset.rewrite_llm_enabled,
-                        stt_provider: preset.stt_provider,
-                        stt_model: preset.stt_model,
-                        stt_timeout_seconds: preset.stt_timeout_seconds,
-                        llm_provider: preset.llm_provider,
-                        llm_model: preset.llm_model,
-                        openai_reasoning_effort: preset.openai_reasoning_effort,
-                        gemini_thinking_budget: preset.gemini_thinking_budget,
-                        gemini_thinking_level: preset.gemini_thinking_level,
-                        anthropic_thinking_budget: preset.anthropic_thinking_budget,
-                    }
-                })
-                .collect();
+                        crate::llm::ProgramPreset {
+                            id: preset.id,
+                            name: preset.name,
+                            routing_hints: preset.routing_hints,
+                            prompts: preset_prompts,
+                            rewrite_llm_enabled: preset.rewrite_llm_enabled,
+                            stt_provider: preset.stt_provider,
+                            stt_model: preset.stt_model,
+                            stt_timeout_seconds: preset.stt_timeout_seconds,
+                            llm_provider: preset.llm_provider,
+                            llm_model: preset.llm_model,
+                            openai_reasoning_effort: preset.openai_reasoning_effort,
+                            gemini_thinking_budget: preset.gemini_thinking_budget,
+                            gemini_thinking_level: preset.gemini_thinking_level,
+                            anthropic_thinking_budget: preset.anthropic_thinking_budget,
+                        }
+                    })
+                    .collect();
 
-            crate::llm::ProgramPromptProfile {
-                id: p.id,
-                name: p.name,
-                program_paths: p.program_paths,
-                prompts: profile_prompts,
+                crate::llm::ProgramPromptProfile {
+                    id: p.id,
+                    name: p.name,
+                    program_paths: p.program_paths,
+                    prompts: profile_prompts,
 
-                presets,
-                default_preset_id: p.default_preset_id,
-                default_preset_description: p.default_preset_description,
-                default_target_rewrite_llm_enabled: p.default_target_rewrite_llm_enabled,
-                active_preset_id: p.active_preset_id,
-                router: p.router,
+                    presets,
+                    default_preset_id: p.default_preset_id,
+                    default_preset_description: p.default_preset_description,
+                    default_target_rewrite_llm_enabled: p.default_target_rewrite_llm_enabled,
+                    active_preset_id: p.active_preset_id,
+                    router: p.router,
 
-                rewrite_llm_enabled: p.rewrite_llm_enabled,
-                stt_provider: p.stt_provider,
-                stt_model: p.stt_model,
-                stt_timeout_seconds: p.stt_timeout_seconds,
-                llm_provider: p.llm_provider,
-                llm_model: p.llm_model,
-                openai_reasoning_effort: p.openai_reasoning_effort,
-                gemini_thinking_budget: p.gemini_thinking_budget,
-                gemini_thinking_level: p.gemini_thinking_level,
-                anthropic_thinking_budget: p.anthropic_thinking_budget,
+                    rewrite_llm_enabled: p.rewrite_llm_enabled,
+                    stt_provider: p.stt_provider,
+                    stt_model: p.stt_model,
+                    stt_timeout_seconds: p.stt_timeout_seconds,
+                    llm_provider: p.llm_provider,
+                    llm_model: p.llm_model,
+                    openai_reasoning_effort: p.openai_reasoning_effort,
+                    gemini_thinking_budget: p.gemini_thinking_budget,
+                    gemini_thinking_level: p.gemini_thinking_level,
+                    anthropic_thinking_budget: p.anthropic_thinking_budget,
 
-                quick_ask_provider: p.quick_ask_provider,
-                quick_ask_model: p.quick_ask_model,
-                quick_ask_system_prompt: p.quick_ask_system_prompt,
-                context_grab_method: p.context_grab_method,
+                    quick_ask_provider: p.quick_ask_provider,
+                    quick_ask_model: p.quick_ask_model,
+                    quick_ask_system_prompt: p.quick_ask_system_prompt,
+                    context_grab_method: p.context_grab_method,
 
-                rewrite_include_clipboard_context: p.rewrite_include_clipboard_context,
-                quick_replace_include_clipboard_context: p.quick_replace_include_clipboard_context,
-                quick_ask_include_clipboard_context: p.quick_ask_include_clipboard_context,
+                    rewrite_include_clipboard_context: p.rewrite_include_clipboard_context,
+                    quick_replace_include_clipboard_context: p
+                        .quick_replace_include_clipboard_context,
+                    quick_ask_include_clipboard_context: p.quick_ask_include_clipboard_context,
 
-                quick_replace_enabled: p.quick_replace_enabled,
-                quick_replace_provider: p.quick_replace_provider,
-                quick_replace_model: p.quick_replace_model,
-                quick_replace_system_prompt: p.quick_replace_system_prompt,
-                quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
-                quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
-                quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,
-                quick_ask_anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
-            }
-        })
-        .collect();
+                    quick_replace_enabled: p.quick_replace_enabled,
+                    quick_replace_provider: p.quick_replace_provider,
+                    quick_replace_model: p.quick_replace_model,
+                    quick_replace_system_prompt: p.quick_replace_system_prompt,
+                    quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
+                    quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
+                    quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,
+                    quick_ask_anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
+                }
+            })
+            .collect();
 
     // Read VAD settings from store
     let vad_settings: VadSettings = app
@@ -579,7 +586,11 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .and_then(|v| serde_json::from_value(v).ok())
         .and_then(|s: String| {
             let t = s.trim().to_string();
-            if t.is_empty() || t == "default" { None } else { Some(t) }
+            if t.is_empty() || t == "default" {
+                None
+            } else {
+                Some(t)
+            }
         });
 
     // Capture behavior (Hot Mic + recovery)
@@ -643,7 +654,13 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         .ok()
         .and_then(|store| store.get("noise_gate_threshold_dbfs"))
         .and_then(|v| serde_json::from_value(v).ok())
-        .and_then(|v: f32| if v.is_finite() { Some(v.clamp(-75.0, -30.0)) } else { None })
+        .and_then(|v: f32| {
+            if v.is_finite() {
+                Some(v.clamp(-75.0, -30.0))
+            } else {
+                None
+            }
+        })
         .or_else(|| {
             let strength_raw: u64 = app
                 .store("settings.json")
@@ -760,7 +777,9 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
         llm_api_keys,
 
         // Preserve provider payload logging across config sync.
-        request_log_store: app.try_state::<RequestLogStore>().map(|s| s.inner().clone()),
+        request_log_store: app
+            .try_state::<RequestLogStore>()
+            .map(|s| s.inner().clone()),
 
         #[cfg(feature = "local-whisper")]
         whisper_model_path,
@@ -778,7 +797,9 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
             "Pipeline config synced - STT: {} ({}), LLM: {} ({}), VAD: {}, program_profiles: {}",
             stt_provider,
             stt_model.as_deref().unwrap_or("default"),
-            llm_provider_setting.clone().unwrap_or_else(|| "disabled".to_string()),
+            llm_provider_setting
+                .clone()
+                .unwrap_or_else(|| "disabled".to_string()),
             llm_model_effective.as_deref().unwrap_or("default"),
             vad_settings.enabled,
             pipeline.config().llm_config.program_prompt_profiles.len()
@@ -827,17 +848,20 @@ pub fn set_vad_settings(app: AppHandle, settings: VadSettings) -> Result<(), Str
         .store("settings.json")
         .map_err(|e| format!("Failed to get store: {}", e))?;
 
-    store
-        .set(
-            "vad_settings",
-            serde_json::to_value(&settings).map_err(|e| format!("Failed to serialize: {}", e))?,
-        );
+    store.set(
+        "vad_settings",
+        serde_json::to_value(&settings).map_err(|e| format!("Failed to serialize: {}", e))?,
+    );
 
     store
         .save()
         .map_err(|e| format!("Failed to save store: {}", e))?;
 
-    log::info!("VAD settings updated: enabled={}, auto_stop={}", settings.enabled, settings.auto_stop);
+    log::info!(
+        "VAD settings updated: enabled={}, auto_stop={}",
+        settings.enabled,
+        settings.auto_stop
+    );
     Ok(())
 }
 

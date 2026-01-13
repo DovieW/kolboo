@@ -5,8 +5,8 @@
 //! Groq's base URL.
 
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;

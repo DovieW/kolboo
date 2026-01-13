@@ -49,7 +49,10 @@ const STOP_SOUND: &[u8] = include_bytes!("assets/stop.mp3");
 /// Keeping a single stream alive and feeding the mixer tends to be much more stable.
 static CUE_STREAM: OnceLock<Mutex<Option<rodio::OutputStream>>> = OnceLock::new();
 
-fn cue_stream() -> Result<std::sync::MutexGuard<'static, Option<rodio::OutputStream>>, Box<dyn std::error::Error + Send + Sync>> {
+fn cue_stream() -> Result<
+    std::sync::MutexGuard<'static, Option<rodio::OutputStream>>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let cell = CUE_STREAM.get_or_init(|| Mutex::new(None));
     let mut guard = cell.lock().map_err(|_| "Cue stream mutex poisoned")?;
     if guard.is_none() {
@@ -385,7 +388,13 @@ fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffe
                     let gap = Duration::from_millis(35);
                     push_woodblock(&mut samples, 1750.0, tap, 0.38, &mut seed);
                     push_silence(&mut samples, gap);
-                    push_woodblock(&mut samples, 2100.0, Duration::from_millis(45), 0.32, &mut seed);
+                    push_woodblock(
+                        &mut samples,
+                        2100.0,
+                        Duration::from_millis(45),
+                        0.32,
+                        &mut seed,
+                    );
                     duration = tap + gap + Duration::from_millis(45);
                 }
                 SoundType::RecordingStop => {

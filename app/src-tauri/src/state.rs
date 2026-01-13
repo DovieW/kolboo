@@ -108,12 +108,8 @@ impl QuickAskConversationMemory {
         {
             let n = n.max(1).min(20);
             if let Ok(history) = self.inner.lock() {
-                let mut turns: Vec<QuickAskConversationTurn> = history
-                    .iter()
-                    .rev()
-                    .take(n)
-                    .cloned()
-                    .collect();
+                let mut turns: Vec<QuickAskConversationTurn> =
+                    history.iter().rev().take(n).cloned().collect();
                 turns.reverse();
                 return turns;
             }

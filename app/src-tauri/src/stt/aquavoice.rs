@@ -9,8 +9,8 @@
 //! - Model defaults to `avalon-v1-en`.
 
 use super::{AudioFormat, SttError, SttProvider};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::multipart;
 use serde_json::json;
 use std::time::Duration;
@@ -40,11 +40,7 @@ impl AquavoiceSttProvider {
     /// * `model` - Model to use (default: `avalon-v1-en`)
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(
-        api_key: String,
-        model: Option<String>,
-        default_prompt: Option<String>,
-    ) -> Self {
+    pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
@@ -53,8 +49,7 @@ impl AquavoiceSttProvider {
         Self {
             client,
             api_key,
-            model: Self::normalize_model(model)
-                .unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
+            model: Self::normalize_model(model).unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
             request_log_store: None,
         }
@@ -71,8 +66,7 @@ impl AquavoiceSttProvider {
         Self {
             client,
             api_key,
-            model: Self::normalize_model(model)
-                .unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
+            model: Self::normalize_model(model).unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
             request_log_store: None,
         }
@@ -146,10 +140,7 @@ impl SttProvider for AquavoiceSttProvider {
         let endpoint = self.endpoint();
 
         if let Some(store) = &self.request_log_store {
-            let prompt = self
-                .default_prompt
-                .as_deref()
-                .and_then(Self::clamp_prompt);
+            let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
 
             let request_json = json!({
                 "provider": "aquavoice",
@@ -182,11 +173,7 @@ impl SttProvider for AquavoiceSttProvider {
                 .part("file", part)
                 .text("model", self.model.clone());
 
-            if let Some(prompt) = self
-                .default_prompt
-                .as_deref()
-                .and_then(Self::clamp_prompt)
-            {
+            if let Some(prompt) = self.default_prompt.as_deref().and_then(Self::clamp_prompt) {
                 form = form.text("prompt", prompt);
             }
 
@@ -208,8 +195,7 @@ impl SttProvider for AquavoiceSttProvider {
                 }
 
                 return Err(SttError::NetworkMessage(Self::network_error_message(
-                    &endpoint,
-                    &e,
+                    &endpoint, &e,
                 )));
             }
         };

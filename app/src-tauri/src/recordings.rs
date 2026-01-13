@@ -89,10 +89,12 @@ impl RecordingStore {
 
         let path = self.path_for_id(id);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create recordings dir: {}", e))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create recordings dir: {}", e))?;
         }
 
-        fs::write(&path, wav_bytes).map_err(|e| format!("Failed to write recording {}: {}", path.display(), e))?;
+        fs::write(&path, wav_bytes)
+            .map_err(|e| format!("Failed to write recording {}: {}", path.display(), e))?;
 
         if let Ok(mut known) = self.known_existing.write() {
             known.insert(id.to_string());
@@ -138,8 +140,13 @@ impl RecordingStore {
     /// Best-effort: skips individual files it cannot stat.
     pub fn total_size_bytes(&self) -> Result<u64, String> {
         let mut total: u64 = 0;
-        let entries = fs::read_dir(&self.dir)
-            .map_err(|e| format!("Failed to read recordings dir {}: {}", self.dir.display(), e))?;
+        let entries = fs::read_dir(&self.dir).map_err(|e| {
+            format!(
+                "Failed to read recordings dir {}: {}",
+                self.dir.display(),
+                e
+            )
+        })?;
 
         for entry in entries {
             let Ok(entry) = entry else {
@@ -168,8 +175,13 @@ impl RecordingStore {
         let mut count: u64 = 0;
         let mut bytes: u64 = 0;
 
-        let entries = fs::read_dir(&self.dir)
-            .map_err(|e| format!("Failed to read recordings dir {}: {}", self.dir.display(), e))?;
+        let entries = fs::read_dir(&self.dir).map_err(|e| {
+            format!(
+                "Failed to read recordings dir {}: {}",
+                self.dir.display(),
+                e
+            )
+        })?;
 
         for entry in entries {
             let Ok(entry) = entry else {
@@ -210,8 +222,13 @@ impl RecordingStore {
         }
 
         let mut files: Vec<(PathBuf, SystemTime)> = Vec::new();
-        let entries = fs::read_dir(&self.dir)
-            .map_err(|e| format!("Failed to read recordings dir {}: {}", self.dir.display(), e))?;
+        let entries = fs::read_dir(&self.dir).map_err(|e| {
+            format!(
+                "Failed to read recordings dir {}: {}",
+                self.dir.display(),
+                e
+            )
+        })?;
 
         for entry in entries {
             let Ok(entry) = entry else {
@@ -222,7 +239,13 @@ impl RecordingStore {
                 continue;
             }
             // Only manage .wav files (be conservative).
-            if path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase() != "wav" {
+            if path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                != "wav"
+            {
                 continue;
             }
 
@@ -265,8 +288,13 @@ impl RecordingStore {
     pub fn delete_all_wavs(&self) -> Result<u64, String> {
         let mut deleted: u64 = 0;
 
-        let entries = fs::read_dir(&self.dir)
-            .map_err(|e| format!("Failed to read recordings dir {}: {}", self.dir.display(), e))?;
+        let entries = fs::read_dir(&self.dir).map_err(|e| {
+            format!(
+                "Failed to read recordings dir {}: {}",
+                self.dir.display(),
+                e
+            )
+        })?;
 
         for entry in entries {
             let Ok(entry) = entry else {

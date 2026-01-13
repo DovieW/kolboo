@@ -1,8 +1,8 @@
 //! Google Gemini (AI Studio / Gemini Developer API) LLM provider for text formatting.
 
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -175,9 +175,7 @@ impl GeminiLlmProvider {
             if let Some(budget) = self.thinking_budget {
                 // Docs: flash-lite does not think; don't send a budget knob.
                 if self.model.contains("gemini-2.5-flash-lite") {
-                    log::warn!(
-                        "gemini-2.5-flash-lite does not support thinkingBudget; ignoring"
-                    );
+                    log::warn!("gemini-2.5-flash-lite does not support thinkingBudget; ignoring");
                     return None;
                 }
 
@@ -470,7 +468,9 @@ impl LlmProvider for GeminiLlmProvider {
         }
 
         let response_json: GenerateContentResponse = serde_json::from_value(response_value)
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse Gemini response: {}", e)))?;
+            .map_err(|e| {
+                LlmError::InvalidResponse(format!("Failed to parse Gemini response: {}", e))
+            })?;
 
         let output_text = Self::extract_text(&response_json)?;
 
@@ -586,7 +586,9 @@ impl LlmProvider for GeminiLlmProvider {
         }
 
         let response_json: GenerateContentResponse = serde_json::from_value(response_value)
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse Gemini response: {}", e)))?;
+            .map_err(|e| {
+                LlmError::InvalidResponse(format!("Failed to parse Gemini response: {}", e))
+            })?;
 
         let output_text = Self::extract_text(&response_json)?;
         serde_json::from_str::<serde_json::Value>(output_text.trim()).map_err(|e| {

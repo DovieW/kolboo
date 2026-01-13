@@ -1,8 +1,8 @@
 //! Anthropic (Claude) LLM provider for text formatting.
 
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
-use async_trait::async_trait;
 use crate::request_log::RequestLogStore;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -263,9 +263,10 @@ impl LlmProvider for AnthropicLlmProvider {
             )));
         }
 
-        let response_json: serde_json::Value = response.json().await.map_err(|e| {
-            LlmError::InvalidResponse(format!("Failed to parse response: {}", e))
-        })?;
+        let response_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();
@@ -284,7 +285,10 @@ impl LlmProvider for AnthropicLlmProvider {
                     if ty != Some("text") {
                         return None;
                     }
-                    block.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    block
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
                 })
             })
             .ok_or_else(|| LlmError::InvalidResponse("No text content in response".to_string()))

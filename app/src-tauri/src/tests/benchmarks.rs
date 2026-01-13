@@ -169,9 +169,7 @@ mod audio_benchmarks {
         });
 
         // Informational only - rubato has per-call overhead
-        println!(
-            "Note: Short chunk resampling has rubato initialization overhead."
-        );
+        println!("Note: Short chunk resampling has rubato initialization overhead.");
         println!(
             "In production, we resample the full recording at once ({:?} per 10ms chunk).",
             per_iter
@@ -345,8 +343,7 @@ mod memory_benchmarks {
 
         // Max recording size (50MB limit)
         let max_recording = 50 * 1024 * 1024;
-        let max_duration_48k =
-            max_recording as f64 / (std::mem::size_of::<f32>() as f64 * 48000.0);
+        let max_duration_48k = max_recording as f64 / (std::mem::size_of::<f32>() as f64 * 48000.0);
         println!(
             "  Max recording (50MB) @ 48kHz mono f32: {:.1} seconds",
             max_duration_48k
@@ -362,8 +359,14 @@ mod memory_benchmarks {
 
         println!("\n[MEMORY] Struct sizes:");
         println!("  VadConfig: {} bytes", std::mem::size_of::<VadConfig>());
-        println!("  AudioFormat: {} bytes", std::mem::size_of::<AudioFormat>());
-        println!("  RetryConfig: {} bytes", std::mem::size_of::<RetryConfig>());
+        println!(
+            "  AudioFormat: {} bytes",
+            std::mem::size_of::<AudioFormat>()
+        );
+        println!(
+            "  RetryConfig: {} bytes",
+            std::mem::size_of::<RetryConfig>()
+        );
         println!(
             "  PipelineConfig: {} bytes",
             std::mem::size_of::<PipelineConfig>()
