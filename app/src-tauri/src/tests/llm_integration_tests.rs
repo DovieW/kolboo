@@ -5,9 +5,13 @@
 //! when you have `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or a running Ollama instance.
 
 use crate::llm::{
-    format_text, AnthropicLlmProvider, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
+    format_text, AnthropicLlmProvider, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
     PromptSections,
 };
+
+use serde_json::json;
+use wiremock::matchers::{body_json, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
 fn test_openai_llm_provider_implements_trait() {
@@ -183,4 +187,88 @@ async fn test_format_text_whitespace_input() {
     let result = format_text(&provider, "   \n\t   ", &prompts).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "");
+}
+
+#[tokio::test]
+async fn test_ollama_complete_sends_expected_request_body() {
+    let mock_server = MockServer::start().await;
+
+    let expected_request = json!({
+        "model": "test-model",
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user"}
+        ],
+        "stream": false,
+        "options": {
+            "temperature": 0.3,
+            "num_predict": 4096
+        }
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "message": { "content": "hello" }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = OllamaLlmProvider::with_url(mock_server.uri(), Some("test-model".to_string()));
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello");
+}
+
+#[tokio::test]
+async fn test_ollama_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": "model not found"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = OllamaLlmProvider::with_url(mock_server.uri(), Some("test-model".to_string()));
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("400"), "expected status in message: {msg}");
+            assert!(
+                msg.contains("model not found"),
+                "expected error in message: {msg}"
+            );
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_ollama_list_models_parses_tags_response() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/tags"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "models": [
+                {"name": "m1"},
+                {"name": "m2"}
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = OllamaLlmProvider::with_url(mock_server.uri(), None);
+    let models = provider.list_models().await.unwrap();
+    assert_eq!(models, vec!["m1".to_string(), "m2".to_string()]);
 }
