@@ -10,8 +10,6 @@
 // - Forward events to the app's handler (crate::handle_modifier_key_event).
 // - Allow temporarily disabling while the UI is recording a new hotkey.
 
-#![cfg(target_os = "windows")]
-
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;

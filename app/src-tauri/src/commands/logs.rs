@@ -40,7 +40,7 @@ fn read_request_logs_retention(app: &AppHandle) -> RequestLogsRetentionConfig {
 
     RequestLogsRetentionConfig {
         mode,
-        amount: amount.max(1).min(200) as usize,
+        amount: amount.clamp(1, 200) as usize,
         time_retention,
     }
 }

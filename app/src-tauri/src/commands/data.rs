@@ -49,7 +49,7 @@ pub fn get_data_storage_summary(app: AppHandle) -> Result<DataStorageSummary, St
     let (recordings_count, recordings_bytes) = if let Some(recs) = app.try_state::<RecordingStore>()
     {
         match recs.stats() {
-            Ok(s) => (s.count as u64, s.bytes as u64),
+            Ok(s) => (s.count, s.bytes),
             Err(_) => (0, 0),
         }
     } else {

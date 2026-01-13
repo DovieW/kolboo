@@ -50,7 +50,7 @@ const EXTRA_SECRET_KEYS: &[&str] = &["github_gist_token"];
 
 #[cfg(desktop)]
 fn validate_secret_store_key(store_key: &str) -> Result<(), String> {
-    let is_extra = EXTRA_SECRET_KEYS.iter().any(|k| *k == store_key);
+    let is_extra = EXTRA_SECRET_KEYS.contains(&store_key);
     if !store_key.ends_with("_api_key") && !is_extra {
         return Err("Invalid key name".to_string());
     }
