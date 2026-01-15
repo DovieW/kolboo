@@ -1,0 +1,73 @@
+name: Ralph (Copilot CLI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: "Ticket filename under .ralph/projects/add_tests/tickets"
+        required: true
+        default: "001-textDiff-edge-cases.md"
+
+jobs:
+  run-ralph:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node (Kolboo backpressure)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup pnpm (Kolboo backpressure)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust (Kolboo backpressure)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Copilot CLI if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v copilot >/dev/null 2>&1; then
+            echo "copilot already installed: $(copilot --version)"
+            exit 0
+          fi
+          echo "copilot not found; installing via https://gh.io/copilot-install"
+          curl -fsSL https://gh.io/copilot-install | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          copilot --version
+
+      - name: Configure trusted folders (headless)
+        shell: pwsh
+        run: |
+          $cfgDir = Join-Path $HOME ".copilot"
+          New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+          $cfgPath = Join-Path $cfgDir "config.json"
+          @{ trusted_folders = @($env:GITHUB_WORKSPACE) } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+          Write-Host "Wrote $cfgPath"
+
+      - name: Run Ralph (one ticket)
+        uses: DovieW/ralph-copilot-action@master
+        with:
+          repo_path: .
+          project: add_tests
+          ticket: ${{ inputs.ticket }}
+          profile_path: .ralph/projects/add_tests/profile.json
+          state_dir: .ralph/projects/add_tests/state
+          gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
+
+      - name: Upload Ralph state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ralph-state
+          path: .ralph/projects/add_tests/state

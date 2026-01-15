@@ -50,6 +50,11 @@ logs/
 # Local debugging artifacts
 cdb-*.txt
 
+# Ralph (Copilot CLI harness) runtime state
+.ralph/**/state/
+.ralph/**/state/**
+.ralph/**/done-tickets.txt
+
 # Generated release notes (local)
 RELEASE_NOTES.md
 
