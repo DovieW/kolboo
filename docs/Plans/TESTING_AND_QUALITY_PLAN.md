@@ -61,6 +61,12 @@ This plan explicitly targets **unit + integration + contract testing**, plus CI 
 
 - Coverage remains **report-only** for now (no thresholds), to avoid slowing the default dev loop or blocking contributors on a number.
 
+### 2026-01-15 — Coverage thresholds implemented (high-risk scope only)
+
+- Added coverage thresholds for `app/src/lib/tauri.ts` (settings normalization logic)
+- Thresholds: 50% statements/functions/lines, 40% branches
+- Enforcement: thresholds only apply when running `pnpm -C app coverage` (not in default `check:ci`)
+
 ---
 
 ## What exists today (current state)
@@ -101,6 +107,58 @@ This plan explicitly targets **unit + integration + contract testing**, plus CI 
 
 - Windows-only Rust test startup crash (status `0xc0000139`) due to a Common Controls v6 manifest dependency.
   - This is an example of a bug that “unit tests exist” won’t catch unless CI actually runs them on Windows.
+
+---
+
+## Coverage policy
+
+### Current approach
+
+Coverage is configured with **targeted thresholds** for high-risk code only.
+
+**Scope:** `app/src/lib/tauri.ts` (settings normalization and migration logic)
+
+**Thresholds:**
+- Statements: 50%
+- Branches: 40%
+- Functions: 50%
+- Lines: 50%
+
+**Rationale:**
+- Settings normalization is high-risk (silent bugs persist across upgrades)
+- Thresholds are realistic for current baseline (not punitive)
+- Limited scope keeps the dev loop fast
+
+### How to run coverage
+
+**Local development:**
+```bash
+pnpm -C app coverage
+```
+
+This generates:
+- Terminal summary (shows threshold pass/fail)
+- HTML report in `app/coverage/` (for investigation)
+
+**Important:**
+- Coverage thresholds are **not** enforced in `pnpm -C app check:ci` (to keep commits fast)
+- Thresholds only apply when explicitly running the `coverage` command
+- Use coverage as a guardrail when touching settings logic, not as a gate for all changes
+
+### Excluded files
+
+The following are excluded from coverage (low signal):
+- Type declaration files (`*.d.ts`)
+- Vite entrypoints (`main.tsx`, `overlay-main.tsx`, etc.)
+- Generated files
+
+### Expanding coverage
+
+When adding thresholds for new files:
+1. Pick high-risk code (provider contracts, state machines, critical business logic)
+2. Check current baseline with `pnpm -C app coverage`
+3. Set thresholds at or slightly below current coverage
+4. Document the decision here
 
 ---
 
@@ -364,9 +422,13 @@ Implementation todo:
 
 **Done when:** coverage is measured consistently and nudges improvements without being annoying.
 
-**Decision:** report-only for now (no thresholds).
+**Decision:** High-risk scope only - `app/src/lib/tauri.ts` (settings normalization).
 
-**Status:** Done (report-only; revisit thresholds once the suite is larger and stable).
+**Thresholds:** 50% statements/functions/lines, 40% branches (realistic for current baseline).
+
+**Enforcement:** Thresholds apply only when running `pnpm -C app coverage` (not in `check:ci`).
+
+**Status:** Done (thresholds implemented in `vite.config.ts` for settings normalization logic).
 
 ---
 
@@ -389,9 +451,10 @@ If we stop work and come back later, this section should contain *everything tha
 
 ### Coverage policy
 
-- [x] Decide report-only vs thresholds (report-only for now)
-- [ ] If thresholds: define scope (only high-risk folders)
-- [ ] If thresholds: wire into CI command(s) without slowing the default loop too much
+- [x] Decide report-only vs thresholds (high-risk scope: tauri.ts)
+- [x] Define scope (app/src/lib/tauri.ts - settings normalization)
+- [x] Wire into vite.config.ts (thresholds: 50/40/50/50)
+- [x] Document policy in TESTING_AND_QUALITY_PLAN.md
 
 ### Frontend unit tests (next batch)
 

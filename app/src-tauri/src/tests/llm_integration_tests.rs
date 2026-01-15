@@ -340,3 +340,35 @@ async fn test_openai_complete_parses_json_error_body() {
         other => panic!("expected LlmError::Api, got: {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn test_anthropic_complete_sends_expected_headers() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .and(header("x-api-key", "test_anthropic_key"))
+        .and(header("anthropic-version", "2023-06-01"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [{"type": "text", "text": "hello from anthropic"}],
+            "model": "claude-3-haiku-20240307",
+            "role": "assistant"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let client = reqwest::Client::new();
+    let provider = AnthropicLlmProvider::with_client(
+        client,
+        "test_anthropic_key".to_string(),
+        None,
+    )
+    .with_api_base_url(format!("{}/v1/messages", mock_server.uri()));
+
+    let result = provider.complete("system prompt", "user message").await;
+    assert!(result.is_ok(), "Anthropic complete failed: {:?}", result);
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+}
