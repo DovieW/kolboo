@@ -11,11 +11,14 @@ jobs:
   run-ralph:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node (Kolboo backpressure)
         uses: actions/setup-node@v4
@@ -32,11 +35,69 @@ jobs:
       - name: Setup Rust (Kolboo backpressure)
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Create Ralph branch
+        id: branch
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $project = "${{ inputs.ralph_project }}"
+          $branch = "ralph/{0}/{1}" -f $project, "${{ github.run_id }}"
+
+          git config user.name "ralph-bot"
+          git config user.email "ralph-bot@users.noreply.github.com"
+
+          git switch -c $branch
+          "branch=$branch" >> $env:GITHUB_OUTPUT
+
       - name: Run Ralph (project tickets)
         uses: DovieW/ralph-copilot-action@master
         with:
           ralph_project: ${{ inputs.ralph_project }}
           gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
+
+      - name: Push branch
+        id: push
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $ahead = 0
+          try {
+            $ahead = [int](git rev-list --count origin/master..HEAD)
+          } catch {
+            $ahead = 0
+          }
+
+          if ($ahead -le 0) {
+            Write-Host "No commits were created; skipping push/PR." -ForegroundColor DarkGray
+            "pushed=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $branch = "${{ steps.branch.outputs.branch }}"
+          git push --set-upstream origin $branch
+          "pushed=true" >> $env:GITHUB_OUTPUT
+
+      - name: Create PR
+        if: steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $project = "${{ inputs.ralph_project }}"
+          $branch = "${{ steps.branch.outputs.branch }}"
+
+          gh pr create \
+            --base master \
+            --head $branch \
+            --title "Ralph: $project" \
+            --body "Automated Ralph run for project '$project'."
 
       - name: Upload Ralph state
         if: always()
