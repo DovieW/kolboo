@@ -93,11 +93,7 @@ jobs:
           $project = "${{ inputs.ralph_project }}"
           $branch = "${{ steps.branch.outputs.branch }}"
 
-          gh pr create \
-            --base master \
-            --head $branch \
-            --title "Ralph: $project" \
-            --body "Automated Ralph run for project '$project'."
+          gh pr create --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
 
       - name: Upload Ralph state
         if: always()
