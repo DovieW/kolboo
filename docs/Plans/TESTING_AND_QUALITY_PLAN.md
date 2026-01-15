@@ -395,8 +395,8 @@ If we stop work and come back later, this section should contain *everything tha
 
 ### Frontend unit tests (next batch)
 
-- [ ] Add `formatErrorMessage(...)` tests (`app/src/lib/formatError.test.ts`)
-- [ ] Expand `textDiff` tests for Unicode + whitespace edge cases (`app/src/lib/textDiff.test.ts`)
+- [x] Add `formatErrorMessage(...)` tests (`app/src/lib/formatError.test.ts`)
+- [x] Expand `textDiff` tests for Unicode + whitespace edge cases (`app/src/lib/textDiff.test.ts`)
 
 ### Rust isolation / deterministic tests (next batch)
 

@@ -1289,8 +1289,13 @@ export const tauriAPI = {
 			// Legacy shape: { main, advanced, dictionary }
 			// We keep only the old "main" section as the new System Prompt.
 			if (Object.hasOwn(v, "main")) {
-				const main = normalizePromptSection(v.main);
-				const legacyContent = main?.content ?? null;
+				const rawMain = v.main;
+				const legacyContent =
+					typeof rawMain === "string"
+						? rawMain.trim().length > 0
+							? rawMain
+							: null
+						: normalizePromptSection(rawMain)?.content ?? null;
 				return { system: { content: legacyContent } };
 			}
 

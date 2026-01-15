@@ -24,13 +24,15 @@ export function formatErrorMessage(error: unknown): string {
 
 	if (typeof error === "object") {
 		const maybeMessage = (error as { message?: unknown }).message;
-		if (typeof maybeMessage === "string" && maybeMessage.trim().length > 0) {
-			return maybeMessage;
+		if (typeof maybeMessage === "string") {
+			const trimmed = maybeMessage.trim();
+			if (trimmed.length > 0) return trimmed;
 		}
 
 		const maybeError = (error as { error?: unknown }).error;
-		if (typeof maybeError === "string" && maybeError.trim().length > 0) {
-			return maybeError;
+		if (typeof maybeError === "string") {
+			const trimmed = maybeError.trim();
+			if (trimmed.length > 0) return trimmed;
 		}
 
 		if (hasSensitiveKeys(error)) {

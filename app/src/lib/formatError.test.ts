@@ -30,11 +30,18 @@ describe("formatErrorMessage", () => {
 	});
 
 	it("reads string message field from plain objects", () => {
-		expect(formatErrorMessage({ message: " hi " })).toBe(" hi ");
+		expect(formatErrorMessage({ message: " hi " })).toBe("hi");
 	});
 
 	it("reads string error field from plain objects", () => {
-		expect(formatErrorMessage({ error: "bad" })).toBe("bad");
+		expect(formatErrorMessage({ error: " bad " })).toBe("bad");
+	});
+
+	it("ignores blank message/error fields and falls back", () => {
+		expect(formatErrorMessage({ message: "   " })).toBe(
+			'{"message":"   "}',
+		);
+		expect(formatErrorMessage({ error: "\n\t" })).toBe('{"error":"\\n\\t"}');
 	});
 
 	it("stringifies objects, including circular references", () => {
