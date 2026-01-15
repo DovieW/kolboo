@@ -17,6 +17,7 @@ pub struct AnthropicLlmProvider {
     client: Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     timeout: Option<Duration>,
     thinking_budget_tokens: Option<i64>,
     request_log_store: Option<RequestLogStore>,
@@ -29,6 +30,7 @@ impl AnthropicLlmProvider {
             client: Client::new(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
+            api_base_url: ANTHROPIC_API_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             thinking_budget_tokens: None,
             request_log_store: None,
@@ -41,6 +43,7 @@ impl AnthropicLlmProvider {
             client: Client::new(),
             api_key,
             model,
+            api_base_url: ANTHROPIC_API_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             thinking_budget_tokens: None,
             request_log_store: None,
@@ -54,10 +57,20 @@ impl AnthropicLlmProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            api_base_url: ANTHROPIC_API_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             thinking_budget_tokens: None,
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.anthropic.com/v1/messages).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -225,7 +238,7 @@ impl LlmProvider for AnthropicLlmProvider {
 
         let mut req = self
             .client
-            .post(ANTHROPIC_API_URL)
+            .post(&self.api_base_url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", API_VERSION)
             .header("content-type", "application/json")
