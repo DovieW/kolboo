@@ -3,9 +3,9 @@ name: Ralph (Copilot CLI)
 on:
   workflow_dispatch:
     inputs:
-      tickets:
-        description: "Optional comma-separated ticket filenames (under .ralph/projects/add_tests/tickets). Leave blank to run all tickets in that folder."
-        required: false
+      ralph_project:
+        description: "Ralph project name under .ralph/projects/<project> (example: add_tests)"
+        required: true
 
 jobs:
   run-ralph:
@@ -32,14 +32,10 @@ jobs:
       - name: Setup Rust (Kolboo backpressure)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run Ralph (one ticket)
+      - name: Run Ralph (project tickets)
         uses: DovieW/ralph-copilot-action@master
         with:
-          project: add_tests
-          target: .ralph/projects/add_tests/tickets
-          tickets: ${{ inputs.tickets }}
-          profile_path: .ralph/projects/add_tests/profile.json
-          state_dir: .ralph/projects/add_tests/state
+          ralph_project: ${{ inputs.ralph_project }}
           gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
 
       - name: Upload Ralph state
@@ -47,4 +43,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ralph-state
-          path: .ralph/projects/add_tests/state
+          path: .ralph/projects/${{ inputs.ralph_project }}/state
