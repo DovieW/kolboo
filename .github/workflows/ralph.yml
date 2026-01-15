@@ -3,9 +3,9 @@ name: Ralph (Copilot CLI)
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: "Ticket file or folder. Preferred forms: .ralph/projects/<project>/tickets OR .ralph/projects/<project>/tickets/<ticket>.md. Shorthand also works: <project>/tickets OR <project>/<ticket>.md"
-        required: true
+      tickets:
+        description: "Optional comma-separated ticket filenames (under .ralph/projects/add_tests/tickets). Leave blank to run all tickets in that folder."
+        required: false
 
 jobs:
   run-ralph:
@@ -36,7 +36,8 @@ jobs:
         uses: DovieW/ralph-copilot-action@master
         with:
           project: add_tests
-          target: ${{ inputs.target }}
+          target: .ralph/projects/add_tests/tickets
+          tickets: ${{ inputs.tickets }}
           profile_path: .ralph/projects/add_tests/profile.json
           state_dir: .ralph/projects/add_tests/state
           gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
