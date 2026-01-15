@@ -22,6 +22,14 @@ export default defineConfig({
 				"src/overlay-hover-main.tsx",
 				"src/quick-ask-main.tsx",
 			],
+			thresholds: {
+				"src/lib/tauri.ts": {
+					statements: 50,
+					branches: 40,
+					functions: 50,
+					lines: 50,
+				},
+			},
 		},
 	},
 	server: {
