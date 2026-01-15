@@ -3,10 +3,9 @@ name: Ralph (Copilot CLI)
 on:
   workflow_dispatch:
     inputs:
-      ticket:
-        description: "Ticket filename under .ralph/projects/add_tests/tickets"
+      target:
+        description: "Ticket filename (resolved under .ralph/projects/add_tests/tickets) OR a tickets folder path"
         required: true
-        default: "001-textDiff-edge-cases.md"
 
 jobs:
   run-ralph:
@@ -36,9 +35,8 @@ jobs:
       - name: Run Ralph (one ticket)
         uses: DovieW/ralph-copilot-action@master
         with:
-          repo_path: .
           project: add_tests
-          ticket: ${{ inputs.ticket }}
+          target: ${{ inputs.target }}
           profile_path: .ralph/projects/add_tests/profile.json
           state_dir: .ralph/projects/add_tests/state
           gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
