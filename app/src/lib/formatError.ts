@@ -33,12 +33,36 @@ export function formatErrorMessage(error: unknown): string {
       return maybeError;
     }
 
+    if (hasSensitiveKeys(error)) {
+      return "[object Object]";
+    }
+
     const json = safeJsonStringify(error);
     if (json && json !== "{}") return json;
   }
 
   // Last resort.
   return String(error);
+}
+
+const SENSITIVE_KEY_PATTERN =
+  /(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|authorization|bearer)/i;
+
+function hasSensitiveKeys(value: unknown, seen = new WeakSet<object>()): boolean {
+  if (value == null || typeof value !== "object") return false;
+  if (seen.has(value as object)) return false;
+  seen.add(value as object);
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasSensitiveKeys(entry, seen));
+  }
+
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_KEY_PATTERN.test(key)) return true;
+    if (hasSensitiveKeys(entry, seen)) return true;
+  }
+
+  return false;
 }
 
 function safeJsonStringify(value: unknown): string | null {
