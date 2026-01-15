@@ -2,260 +2,260 @@ import { Alert, Button, Tooltip } from "@mantine/core";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
-  DEFAULT_HOLD_HOTKEY,
-  DEFAULT_PASTE_LAST_HOTKEY,
-  DEFAULT_QUICK_ASK_HOLD_HOTKEY,
-  DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
-  DEFAULT_RETRY_HOTKEY,
-  DEFAULT_TOGGLE_HOTKEY,
+	DEFAULT_HOLD_HOTKEY,
+	DEFAULT_PASTE_LAST_HOTKEY,
+	DEFAULT_QUICK_ASK_HOLD_HOTKEY,
+	DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
+	DEFAULT_RETRY_HOTKEY,
+	DEFAULT_TOGGLE_HOTKEY,
 } from "../../lib/hotkeyDefaults";
 import {
-  useResetHotkeysToDefaults,
-  useSettings,
-  useUpdateHoldHotkey,
-  useUpdatePasteLastHotkey,
-  useUpdateQuickAskHoldHotkey,
-  useUpdateQuickAskToggleHotkey,
-  useUpdateRetryHotkey,
-  useUpdateToggleHotkey,
+	useResetHotkeysToDefaults,
+	useSettings,
+	useUpdateHoldHotkey,
+	useUpdatePasteLastHotkey,
+	useUpdateQuickAskHoldHotkey,
+	useUpdateQuickAskToggleHotkey,
+	useUpdateRetryHotkey,
+	useUpdateToggleHotkey,
 } from "../../lib/queries";
 import type { HotkeyConfig } from "../../lib/tauri";
 import { HotkeyInput } from "../HotkeyInput";
 
 const GLOBAL_ONLY_TOOLTIP =
-  "This setting can only be changed in the Default profile";
+	"This setting can only be changed in the Default profile";
 
 type RecordingInput =
-  | "toggle"
-  | "hold"
-  | "paste_last"
-  | "retry"
-  | "quick_ask_hold"
-  | "quick_ask_toggle"
-  | null;
+	| "toggle"
+	| "hold"
+	| "paste_last"
+	| "retry"
+	| "quick_ask_hold"
+	| "quick_ask_toggle"
+	| null;
 
 export function HotkeySettings({
-  editingProfileId,
+	editingProfileId,
 }: {
-  editingProfileId?: string;
+	editingProfileId?: string;
 }) {
-  const isProfileScope = editingProfileId && editingProfileId !== "default";
-  const { data: settings, isLoading } = useSettings();
-  const updateToggleHotkey = useUpdateToggleHotkey();
-  const updateHoldHotkey = useUpdateHoldHotkey();
-  const updatePasteLastHotkey = useUpdatePasteLastHotkey();
-  const updateRetryHotkey = useUpdateRetryHotkey();
-  const updateQuickAskHoldHotkey = useUpdateQuickAskHoldHotkey();
-  const updateQuickAskToggleHotkey = useUpdateQuickAskToggleHotkey();
-  const resetHotkeys = useResetHotkeysToDefaults();
+	const isProfileScope = editingProfileId && editingProfileId !== "default";
+	const { data: settings, isLoading } = useSettings();
+	const updateToggleHotkey = useUpdateToggleHotkey();
+	const updateHoldHotkey = useUpdateHoldHotkey();
+	const updatePasteLastHotkey = useUpdatePasteLastHotkey();
+	const updateRetryHotkey = useUpdateRetryHotkey();
+	const updateQuickAskHoldHotkey = useUpdateQuickAskHoldHotkey();
+	const updateQuickAskToggleHotkey = useUpdateQuickAskToggleHotkey();
+	const resetHotkeys = useResetHotkeysToDefaults();
 
-  // Track which input is currently recording (only one at a time)
-  const [recordingInput, setRecordingInput] = useState<RecordingInput>(null);
+	// Track which input is currently recording (only one at a time)
+	const [recordingInput, setRecordingInput] = useState<RecordingInput>(null);
 
-  // Track dismissed error to allow auto-dismiss
-  const [dismissedError, setDismissedError] = useState<string | null>(null);
+	// Track dismissed error to allow auto-dismiss
+	const [dismissedError, setDismissedError] = useState<string | null>(null);
 
-  // Collect any errors from mutations
-  const rawError =
-    updateToggleHotkey.error ||
-    updateHoldHotkey.error ||
-    updatePasteLastHotkey.error ||
-    updateRetryHotkey.error ||
-    updateQuickAskHoldHotkey.error ||
-    updateQuickAskToggleHotkey.error ||
-    resetHotkeys.error;
+	// Collect any errors from mutations
+	const rawError =
+		updateToggleHotkey.error ||
+		updateHoldHotkey.error ||
+		updatePasteLastHotkey.error ||
+		updateRetryHotkey.error ||
+		updateQuickAskHoldHotkey.error ||
+		updateQuickAskToggleHotkey.error ||
+		resetHotkeys.error;
 
-  const errorMessage =
-    rawError instanceof Error
-      ? rawError.message
-      : rawError
-      ? String(rawError)
-      : null;
+	const errorMessage =
+		rawError instanceof Error
+			? rawError.message
+			: rawError
+				? String(rawError)
+				: null;
 
-  // Only show error if not dismissed
-  const showError = errorMessage && errorMessage !== dismissedError;
+	// Only show error if not dismissed
+	const showError = errorMessage && errorMessage !== dismissedError;
 
-  // Auto-dismiss error after 5 seconds
-  useEffect(() => {
-    if (!errorMessage || errorMessage === dismissedError) return;
+	// Auto-dismiss error after 5 seconds
+	useEffect(() => {
+		if (!errorMessage || errorMessage === dismissedError) return;
 
-    const timer = setTimeout(() => {
-      setDismissedError(errorMessage);
-    }, 5000);
+		const timer = setTimeout(() => {
+			setDismissedError(errorMessage);
+		}, 5000);
 
-    return () => clearTimeout(timer);
-  }, [errorMessage, dismissedError]);
+		return () => clearTimeout(timer);
+	}, [errorMessage, dismissedError]);
 
-  // Reset dismissed error when a new error appears
-  useEffect(() => {
-    if (errorMessage && errorMessage !== dismissedError) {
-      // New error appeared, clear previous dismissed state
-      setDismissedError(null);
-    }
-  }, [errorMessage, dismissedError]);
+	// Reset dismissed error when a new error appears
+	useEffect(() => {
+		if (errorMessage && errorMessage !== dismissedError) {
+			// New error appeared, clear previous dismissed state
+			setDismissedError(null);
+		}
+	}, [errorMessage, dismissedError]);
 
-  const handleToggleHotkeyChange = (config: HotkeyConfig | null) => {
-    updateToggleHotkey.mutate(config);
-  };
+	const handleToggleHotkeyChange = (config: HotkeyConfig | null) => {
+		updateToggleHotkey.mutate(config);
+	};
 
-  const handleHoldHotkeyChange = (config: HotkeyConfig | null) => {
-    updateHoldHotkey.mutate(config);
-  };
+	const handleHoldHotkeyChange = (config: HotkeyConfig | null) => {
+		updateHoldHotkey.mutate(config);
+	};
 
-  const handlePasteLastHotkeyChange = (config: HotkeyConfig | null) => {
-    updatePasteLastHotkey.mutate(config);
-  };
+	const handlePasteLastHotkeyChange = (config: HotkeyConfig | null) => {
+		updatePasteLastHotkey.mutate(config);
+	};
 
-  const handleRetryHotkeyChange = (config: HotkeyConfig | null) => {
-    updateRetryHotkey.mutate(config);
-  };
+	const handleRetryHotkeyChange = (config: HotkeyConfig | null) => {
+		updateRetryHotkey.mutate(config);
+	};
 
-  const handleQuickAskHoldHotkeyChange = (config: HotkeyConfig | null) => {
-    updateQuickAskHoldHotkey.mutate(config);
-  };
+	const handleQuickAskHoldHotkeyChange = (config: HotkeyConfig | null) => {
+		updateQuickAskHoldHotkey.mutate(config);
+	};
 
-  const handleQuickAskToggleHotkeyChange = (config: HotkeyConfig | null) => {
-    updateQuickAskToggleHotkey.mutate(config);
-  };
+	const handleQuickAskToggleHotkeyChange = (config: HotkeyConfig | null) => {
+		updateQuickAskToggleHotkey.mutate(config);
+	};
 
-  const content = (
-    <>
-      {showError && (
-        <Alert
-          icon={<AlertCircle size={16} />}
-          color="red"
-          mb="md"
-          title="Error"
-          withCloseButton
-          onClose={() => setDismissedError(errorMessage)}
-        >
-          {errorMessage}
-        </Alert>
-      )}
-      <HotkeyInput
-        label="Toggle Recording"
-        description="Press once to start recording, press again to stop"
-        value={settings ? settings.toggle_hotkey : DEFAULT_TOGGLE_HOTKEY}
-        onChange={handleToggleHotkeyChange}
-        disabled={isLoading || updateToggleHotkey.isPending}
-        isSaving={updateToggleHotkey.isPending}
-        isRecording={recordingInput === "toggle"}
-        onStartRecording={() => setRecordingInput("toggle")}
-        onStopRecording={() => setRecordingInput(null)}
-      />
+	const content = (
+		<>
+			{showError && (
+				<Alert
+					icon={<AlertCircle size={16} />}
+					color="red"
+					mb="md"
+					title="Error"
+					withCloseButton
+					onClose={() => setDismissedError(errorMessage)}
+				>
+					{errorMessage}
+				</Alert>
+			)}
+			<HotkeyInput
+				label="Toggle Recording"
+				description="Press once to start recording, press again to stop"
+				value={settings ? settings.toggle_hotkey : DEFAULT_TOGGLE_HOTKEY}
+				onChange={handleToggleHotkeyChange}
+				disabled={isLoading || updateToggleHotkey.isPending}
+				isSaving={updateToggleHotkey.isPending}
+				isRecording={recordingInput === "toggle"}
+				onStartRecording={() => setRecordingInput("toggle")}
+				onStopRecording={() => setRecordingInput(null)}
+			/>
 
-      <div style={{ marginTop: 20 }}>
-        <HotkeyInput
-          label="Hold to Record"
-          description="Hold to record, release to stop"
-          value={settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY}
-          onChange={handleHoldHotkeyChange}
-          disabled={isLoading || updateHoldHotkey.isPending}
-          isSaving={updateHoldHotkey.isPending}
-          isRecording={recordingInput === "hold"}
-          onStartRecording={() => setRecordingInput("hold")}
-          onStopRecording={() => setRecordingInput(null)}
-        />
-      </div>
+			<div style={{ marginTop: 20 }}>
+				<HotkeyInput
+					label="Hold to Record"
+					description="Hold to record, release to stop"
+					value={settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY}
+					onChange={handleHoldHotkeyChange}
+					disabled={isLoading || updateHoldHotkey.isPending}
+					isSaving={updateHoldHotkey.isPending}
+					isRecording={recordingInput === "hold"}
+					onStartRecording={() => setRecordingInput("hold")}
+					onStopRecording={() => setRecordingInput(null)}
+				/>
+			</div>
 
-      <div style={{ marginTop: 20 }}>
-        <HotkeyInput
-          label="Paste Last Transcription"
-          description="Paste your last result"
-          value={
-            settings ? settings.paste_last_hotkey : DEFAULT_PASTE_LAST_HOTKEY
-          }
-          onChange={handlePasteLastHotkeyChange}
-          disabled={isLoading || updatePasteLastHotkey.isPending}
-          isSaving={updatePasteLastHotkey.isPending}
-          isRecording={recordingInput === "paste_last"}
-          onStartRecording={() => setRecordingInput("paste_last")}
-          onStopRecording={() => setRecordingInput(null)}
-        />
-      </div>
+			<div style={{ marginTop: 20 }}>
+				<HotkeyInput
+					label="Paste Last Transcription"
+					description="Paste your last result"
+					value={
+						settings ? settings.paste_last_hotkey : DEFAULT_PASTE_LAST_HOTKEY
+					}
+					onChange={handlePasteLastHotkeyChange}
+					disabled={isLoading || updatePasteLastHotkey.isPending}
+					isSaving={updatePasteLastHotkey.isPending}
+					isRecording={recordingInput === "paste_last"}
+					onStartRecording={() => setRecordingInput("paste_last")}
+					onStopRecording={() => setRecordingInput(null)}
+				/>
+			</div>
 
-      <div style={{ marginTop: 20 }}>
-        <HotkeyInput
-          label="Retry Last Recording"
-          description="Re-run the most recent recording and paste the result"
-          value={settings ? settings.retry_hotkey : DEFAULT_RETRY_HOTKEY}
-          onChange={handleRetryHotkeyChange}
-          disabled={isLoading || updateRetryHotkey.isPending}
-          isSaving={updateRetryHotkey.isPending}
-          isRecording={recordingInput === "retry"}
-          onStartRecording={() => setRecordingInput("retry")}
-          onStopRecording={() => setRecordingInput(null)}
-        />
-      </div>
+			<div style={{ marginTop: 20 }}>
+				<HotkeyInput
+					label="Retry Last Recording"
+					description="Re-run the most recent recording and paste the result"
+					value={settings ? settings.retry_hotkey : DEFAULT_RETRY_HOTKEY}
+					onChange={handleRetryHotkeyChange}
+					disabled={isLoading || updateRetryHotkey.isPending}
+					isSaving={updateRetryHotkey.isPending}
+					isRecording={recordingInput === "retry"}
+					onStartRecording={() => setRecordingInput("retry")}
+					onStopRecording={() => setRecordingInput(null)}
+				/>
+			</div>
 
-      <div style={{ marginTop: 20 }}>
-        <HotkeyInput
-          label="Quick Ask Hold"
-          description="Record a question and show an answer overlay (no auto-paste)"
-          value={
-            settings
-              ? settings.quick_ask_hold_hotkey
-              : DEFAULT_QUICK_ASK_HOLD_HOTKEY
-          }
-          onChange={handleQuickAskHoldHotkeyChange}
-          disabled={isLoading || updateQuickAskHoldHotkey.isPending}
-          isSaving={updateQuickAskHoldHotkey.isPending}
-          isRecording={recordingInput === "quick_ask_hold"}
-          onStartRecording={() => setRecordingInput("quick_ask_hold")}
-          onStopRecording={() => setRecordingInput(null)}
-        />
-      </div>
+			<div style={{ marginTop: 20 }}>
+				<HotkeyInput
+					label="Quick Ask Hold"
+					description="Record a question and show an answer overlay (no auto-paste)"
+					value={
+						settings
+							? settings.quick_ask_hold_hotkey
+							: DEFAULT_QUICK_ASK_HOLD_HOTKEY
+					}
+					onChange={handleQuickAskHoldHotkeyChange}
+					disabled={isLoading || updateQuickAskHoldHotkey.isPending}
+					isSaving={updateQuickAskHoldHotkey.isPending}
+					isRecording={recordingInput === "quick_ask_hold"}
+					onStartRecording={() => setRecordingInput("quick_ask_hold")}
+					onStopRecording={() => setRecordingInput(null)}
+				/>
+			</div>
 
-      <div style={{ marginTop: 20 }}>
-        <HotkeyInput
-          label="Quick Ask Toggle"
-          description="Press once to start recording a question, press again to stop (shows answer overlay)"
-          value={
-            settings
-              ? settings.quick_ask_toggle_hotkey
-              : DEFAULT_QUICK_ASK_TOGGLE_HOTKEY
-          }
-          onChange={handleQuickAskToggleHotkeyChange}
-          disabled={isLoading || updateQuickAskToggleHotkey.isPending}
-          isSaving={updateQuickAskToggleHotkey.isPending}
-          isRecording={recordingInput === "quick_ask_toggle"}
-          onStartRecording={() => setRecordingInput("quick_ask_toggle")}
-          onStopRecording={() => setRecordingInput(null)}
-        />
-      </div>
+			<div style={{ marginTop: 20 }}>
+				<HotkeyInput
+					label="Quick Ask Toggle"
+					description="Press once to start recording a question, press again to stop (shows answer overlay)"
+					value={
+						settings
+							? settings.quick_ask_toggle_hotkey
+							: DEFAULT_QUICK_ASK_TOGGLE_HOTKEY
+					}
+					onChange={handleQuickAskToggleHotkeyChange}
+					disabled={isLoading || updateQuickAskToggleHotkey.isPending}
+					isSaving={updateQuickAskToggleHotkey.isPending}
+					isRecording={recordingInput === "quick_ask_toggle"}
+					onStartRecording={() => setRecordingInput("quick_ask_toggle")}
+					onStopRecording={() => setRecordingInput(null)}
+				/>
+			</div>
 
-      <div
-        style={{
-          marginTop: 24,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-        }}
-      >
-        <Button
-          variant="light"
-          color="gray"
-          size="xs"
-          leftSection={<RotateCcw size={14} />}
-          onClick={() => resetHotkeys.mutate()}
-          loading={resetHotkeys.isPending}
-          disabled={isLoading}
-        >
-          Reset to Defaults
-        </Button>
-      </div>
-    </>
-  );
+			<div
+				style={{
+					marginTop: 24,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "flex-end",
+				}}
+			>
+				<Button
+					variant="light"
+					color="gray"
+					size="xs"
+					leftSection={<RotateCcw size={14} />}
+					onClick={() => resetHotkeys.mutate()}
+					loading={resetHotkeys.isPending}
+					disabled={isLoading}
+				>
+					Reset to Defaults
+				</Button>
+			</div>
+		</>
+	);
 
-  if (isProfileScope) {
-    return (
-      <Tooltip label={GLOBAL_ONLY_TOOLTIP} withArrow position="top-start">
-        <div style={{ opacity: 0.5, cursor: "not-allowed" }}>
-          <div style={{ pointerEvents: "none" }}>{content}</div>
-        </div>
-      </Tooltip>
-    );
-  }
+	if (isProfileScope) {
+		return (
+			<Tooltip label={GLOBAL_ONLY_TOOLTIP} withArrow position="top-start">
+				<div style={{ opacity: 0.5, cursor: "not-allowed" }}>
+					<div style={{ pointerEvents: "none" }}>{content}</div>
+				</div>
+			</Tooltip>
+		);
+	}
 
-  return content;
+	return content;
 }

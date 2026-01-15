@@ -1,8 +1,8 @@
 import { Loader, ScrollArea, Text } from "@mantine/core";
-import hljs from "highlight.js/lib/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import hljs from "highlight.js/lib/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,127 +10,127 @@ import { applyAccentColor } from "./lib/accentColor";
 import "./app.css";
 
 function sanitizeExternalHref(href: string | undefined | null): string | null {
-  if (typeof href !== "string") return null;
-  const trimmed = href.trim();
-  if (!trimmed) return null;
+	if (typeof href !== "string") return null;
+	const trimmed = href.trim();
+	if (!trimmed) return null;
 
-  // Disallow obviously dangerous schemes.
-  const lower = trimmed.toLowerCase();
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("data:") ||
-    lower.startsWith("vbscript:")
-  ) {
-    return null;
-  }
+	// Disallow obviously dangerous schemes.
+	const lower = trimmed.toLowerCase();
+	if (
+		lower.startsWith("javascript:") ||
+		lower.startsWith("data:") ||
+		lower.startsWith("vbscript:")
+	) {
+		return null;
+	}
 
-  // Allow mailto: directly.
-  if (lower.startsWith("mailto:")) return trimmed;
+	// Allow mailto: directly.
+	if (lower.startsWith("mailto:")) return trimmed;
 
-  // Only allow absolute http(s) URLs.
-  try {
-    const u = new URL(trimmed);
-    if (u.protocol === "http:" || u.protocol === "https:") return u.toString();
-    return null;
-  } catch {
-    return null;
-  }
+	// Only allow absolute http(s) URLs.
+	try {
+		const u = new URL(trimmed);
+		if (u.protocol === "http:" || u.protocol === "https:") return u.toString();
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 function highlightCodeHtml(code: string, language: string): string {
-  try {
-    if (language !== "plaintext" && hljs.getLanguage(language)) {
-      return hljs.highlight(code, { language, ignoreIllegals: true }).value;
-    }
-    return hljs.highlightAuto(code).value;
-  } catch {
-    try {
-      return hljs.highlightAuto(code).value;
-    } catch {
-      // Last resort: escape by treating it as plaintext.
-      return hljs.highlight(code, {
-        language: "plaintext",
-        ignoreIllegals: true,
-      }).value;
-    }
-  }
+	try {
+		if (language !== "plaintext" && hljs.getLanguage(language)) {
+			return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+		}
+		return hljs.highlightAuto(code).value;
+	} catch {
+		try {
+			return hljs.highlightAuto(code).value;
+		} catch {
+			// Last resort: escape by treating it as plaintext.
+			return hljs.highlight(code, {
+				language: "plaintext",
+				ignoreIllegals: true,
+			}).value;
+		}
+	}
 }
 
 function copyToClipboard(text: string): Promise<void> {
-  // Best effort: use async clipboard API, fallback to execCommand.
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
+	// Best effort: use async clipboard API, fallback to execCommand.
+	if (navigator.clipboard?.writeText) {
+		return navigator.clipboard.writeText(text);
+	}
 
-  return new Promise((resolve, reject) => {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "");
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      ta.style.left = "-9999px";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      if (!ok) {
-        reject(new Error("Copy failed"));
-        return;
-      }
-      resolve();
-    } catch (err) {
-      reject(err);
-    }
-  });
+	return new Promise((resolve, reject) => {
+		try {
+			const ta = document.createElement("textarea");
+			ta.value = text;
+			ta.setAttribute("readonly", "");
+			ta.style.position = "fixed";
+			ta.style.opacity = "0";
+			ta.style.left = "-9999px";
+			document.body.appendChild(ta);
+			ta.select();
+			const ok = document.execCommand("copy");
+			document.body.removeChild(ta);
+			if (!ok) {
+				reject(new Error("Copy failed"));
+				return;
+			}
+			resolve();
+		} catch (err) {
+			reject(err);
+		}
+	});
 }
 
 function QuickAskCodeBlock({
-  code,
-  language,
+	code,
+	language,
 }: {
-  code: string;
-  language: string;
+	code: string;
+	language: string;
 }) {
-  const [copied, setCopied] = useState(false);
-  const highlighted = useMemo(
-    () => highlightCodeHtml(code, language),
-    [code, language]
-  );
+	const [copied, setCopied] = useState(false);
+	const highlighted = useMemo(
+		() => highlightCodeHtml(code, language),
+		[code, language],
+	);
 
-  return (
-    <div className="quick-ask-codeblock-wrap">
-      <div className="quick-ask-codeblock-toolbar">
-        <span className="quick-ask-codeblock-lang">{language}</span>
-        <button
-          type="button"
-          className="quick-ask-codeblock-copy"
-          onClick={() => {
-            copyToClipboard(code)
-              .then(() => {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 900);
-              })
-              .catch(() => {
-                // ignore
-              });
-          }}
-          aria-label="Copy code"
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <pre className="quick-ask-codeblock">
-        <code
-          className={`hljs language-${language}`}
-          // highlight.js returns escaped HTML with span wrappers.
-          // We do NOT allow arbitrary raw HTML from markdown.
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js output is escaped; we only add span wrappers.
-          dangerouslySetInnerHTML={{ __html: highlighted }}
-        />
-      </pre>
-    </div>
-  );
+	return (
+		<div className="quick-ask-codeblock-wrap">
+			<div className="quick-ask-codeblock-toolbar">
+				<span className="quick-ask-codeblock-lang">{language}</span>
+				<button
+					type="button"
+					className="quick-ask-codeblock-copy"
+					onClick={() => {
+						copyToClipboard(code)
+							.then(() => {
+								setCopied(true);
+								window.setTimeout(() => setCopied(false), 900);
+							})
+							.catch(() => {
+								// ignore
+							});
+					}}
+					aria-label="Copy code"
+				>
+					{copied ? "Copied" : "Copy"}
+				</button>
+			</div>
+			<pre className="quick-ask-codeblock">
+				<code
+					className={`hljs language-${language}`}
+					// highlight.js returns escaped HTML with span wrappers.
+					// We do NOT allow arbitrary raw HTML from markdown.
+					// biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js output is escaped; we only add span wrappers.
+					dangerouslySetInnerHTML={{ __html: highlighted }}
+				/>
+			</pre>
+		</div>
+	);
 }
 
 function readBootAccentColor(): string | null {
@@ -167,7 +167,7 @@ type QuickAskAnswerPayload =
 export default function QuickAskApp() {
 	const win = useMemo(() => getCurrentWindow(), []);
 	const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
-		"idle"
+		"idle",
 	);
 	const awaitingAnswerRef = useRef(false);
 	const [closing, setClosing] = useState(false);
@@ -245,7 +245,9 @@ export default function QuickAskApp() {
 			if (p && typeof p === "object" && (p as any).ok === true) {
 				setClosing(false);
 				setPhase("ready");
-				setAnswer(typeof (p as any).answer === "string" ? (p as any).answer : "");
+				setAnswer(
+					typeof (p as any).answer === "string" ? (p as any).answer : "",
+				);
 				setError("");
 				return;
 			}
@@ -253,7 +255,11 @@ export default function QuickAskApp() {
 			setClosing(false);
 			setPhase("error");
 			setAnswer("");
-			setError(typeof (p as any).error === "string" ? (p as any).error : "Unknown error");
+			setError(
+				typeof (p as any).error === "string"
+					? (p as any).error
+					: "Unknown error",
+			);
 		})
 			.then((fn) => {
 				unlistenAnswer = fn;
@@ -323,116 +329,116 @@ export default function QuickAskApp() {
 	}, [dismiss]);
 
 	return (
-    <div
-      className={`quick-ask-backdrop${closing ? " closing" : ""}`}
-      role="dialog"
-      aria-label="Quick Ask answer"
-      onMouseDown={(e) => {
-        // Click outside the panel dismisses.
-        if (e.target === e.currentTarget) {
-          dismiss();
-        }
-      }}
-    >
-      <div
-        className={`quick-ask-panel${closing ? " closing" : ""}`}
-        key={panelKey}
-      >
-        {question ? (
-          <Text
-            size="xs"
-            c="dimmed"
-            className="quick-ask-question"
-            title={question}
-          >
-            {question}
-          </Text>
-        ) : null}
+		<div
+			className={`quick-ask-backdrop${closing ? " closing" : ""}`}
+			role="dialog"
+			aria-label="Quick Ask answer"
+			onMouseDown={(e) => {
+				// Click outside the panel dismisses.
+				if (e.target === e.currentTarget) {
+					dismiss();
+				}
+			}}
+		>
+			<div
+				className={`quick-ask-panel${closing ? " closing" : ""}`}
+				key={panelKey}
+			>
+				{question ? (
+					<Text
+						size="xs"
+						c="dimmed"
+						className="quick-ask-question"
+						title={question}
+					>
+						{question}
+					</Text>
+				) : null}
 
-        {phase === "loading" ? (
-          <div className="quick-ask-loading">
-            <Loader size="sm" color="orange" />
-            <Text size="sm" c="dimmed">
-              Thinking…
-            </Text>
-          </div>
-        ) : null}
+				{phase === "loading" ? (
+					<div className="quick-ask-loading">
+						<Loader size="sm" color="orange" />
+						<Text size="sm" c="dimmed">
+							Thinking…
+						</Text>
+					</div>
+				) : null}
 
-        {phase === "error" ? (
-          <Text size="sm" c="red" className="quick-ask-error">
-            {error}
-          </Text>
-        ) : null}
+				{phase === "error" ? (
+					<Text size="sm" c="red" className="quick-ask-error">
+						{error}
+					</Text>
+				) : null}
 
-        {phase === "ready" ? (
-          <ScrollArea
-            className="quick-ask-answer"
-            type="auto"
-            scrollbars="y"
-            mah={320}
-          >
-            <div className="quick-ask-answer-md">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  a: ({ href, children, ...props }) => {
-                    const safeHref = sanitizeExternalHref(href);
+				{phase === "ready" ? (
+					<ScrollArea
+						className="quick-ask-answer"
+						type="auto"
+						scrollbars="y"
+						mah={320}
+					>
+						<div className="quick-ask-answer-md">
+							<ReactMarkdown
+								remarkPlugins={[remarkGfm]}
+								components={{
+									a: ({ href, children, ...props }) => {
+										const safeHref = sanitizeExternalHref(href);
 
-                    return (
-                      <a
-                        {...props}
-                        href={safeHref ?? undefined}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        onClick={(e) => {
-                          // Never navigate inside the webview.
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (!safeHref) return;
-                          openUrl(safeHref).catch(() => {
-                            // ignore
-                          });
-                        }}
-                      >
-                        {children}
-                      </a>
-                    );
-                  },
-                  code: ({ className, children, ...props }) => {
-                    const raw = String(children ?? "");
-                    const code = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
-                    const m = /language-([a-zA-Z0-9_-]+)/.exec(className ?? "");
-                    const language = m?.[1] ?? "plaintext";
+										return (
+											<a
+												{...props}
+												href={safeHref ?? undefined}
+												target="_blank"
+												rel="noreferrer noopener"
+												onClick={(e) => {
+													// Never navigate inside the webview.
+													e.preventDefault();
+													e.stopPropagation();
+													if (!safeHref) return;
+													openUrl(safeHref).catch(() => {
+														// ignore
+													});
+												}}
+											>
+												{children}
+											</a>
+										);
+									},
+									code: ({ className, children, ...props }) => {
+										const raw = String(children ?? "");
+										const code = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
+										const m = /language-([a-zA-Z0-9_-]+)/.exec(className ?? "");
+										const language = m?.[1] ?? "plaintext";
 
-                    // Inline code: leave it to CSS (we style it in app.css).
-                    // Block code: use CodeHighlight for syntax highlighting + copy.
-                    const isBlock = (className ?? "").includes("language-");
-                    if (!isBlock) {
-                      return (
-                        <code className={className} {...props}>
-                          {children}
-                        </code>
-                      );
-                    }
+										// Inline code: leave it to CSS (we style it in app.css).
+										// Block code: use CodeHighlight for syntax highlighting + copy.
+										const isBlock = (className ?? "").includes("language-");
+										if (!isBlock) {
+											return (
+												<code className={className} {...props}>
+													{children}
+												</code>
+											);
+										}
 
-                    return (
-                      <QuickAskCodeBlock code={code} language={language} />
-                    );
-                  },
-                }}
-              >
-                {answer}
-              </ReactMarkdown>
-            </div>
-          </ScrollArea>
-        ) : null}
+										return (
+											<QuickAskCodeBlock code={code} language={language} />
+										);
+									},
+								}}
+							>
+								{answer}
+							</ReactMarkdown>
+						</div>
+					</ScrollArea>
+				) : null}
 
-        {phase === "idle" ? (
-          <Text size="sm" c="dimmed" className="quick-ask-hint">
-            Waiting for Quick Ask…
-          </Text>
-        ) : null}
-      </div>
-    </div>
-  );
+				{phase === "idle" ? (
+					<Text size="sm" c="dimmed" className="quick-ask-hint">
+						Waiting for Quick Ask…
+					</Text>
+				) : null}
+			</div>
+		</div>
+	);
 }

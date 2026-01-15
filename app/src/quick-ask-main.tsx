@@ -2,8 +2,8 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "@mantine/code-highlight/styles.css";
 import {
-  CodeHighlightAdapterProvider,
-  createHighlightJsAdapter,
+	CodeHighlightAdapterProvider,
+	createHighlightJsAdapter,
 } from "@mantine/code-highlight";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -34,11 +34,11 @@ if (!rootElement) {
 }
 
 createRoot(rootElement).render(
-  <StrictMode>
-    <CodeHighlightAdapterProvider adapter={highlightAdapter}>
-      <MantineProvider theme={darkTheme} defaultColorScheme="dark">
-        <QuickAskApp />
-      </MantineProvider>
-    </CodeHighlightAdapterProvider>
-  </StrictMode>
+	<StrictMode>
+		<CodeHighlightAdapterProvider adapter={highlightAdapter}>
+			<MantineProvider theme={darkTheme} defaultColorScheme="dark">
+				<QuickAskApp />
+			</MantineProvider>
+		</CodeHighlightAdapterProvider>
+	</StrictMode>,
 );

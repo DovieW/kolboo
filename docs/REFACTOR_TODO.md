@@ -60,6 +60,12 @@ This file is a parking lot for larger refactors that came up while working on sm
     - Keep current behavior and ensure the UI always formats shortcuts for display (separate from canonical serialization), or
     - Change normalization to sort modifiers before non-modifiers (and update any persisted settings/tests accordingly).
 
+## Prompt settings UI complexity
+
+- **Split `app/src/components/settings/PromptSettings.tsx` into smaller components + hooks.**
+  - Suggested splits: presets editor, intent router panel, Quick Ask panel, Quick Replace panel, and shared “provider/model” sections.
+  - Goal: reduce file size, simplify hook dependencies, and make it easier to test isolated sections.
+
 ## Rust clippy warning backlog
 
 - **Chip away at the clippy warnings so `cargo clippy` is more signal than noise.**
@@ -76,3 +82,11 @@ This file is a parking lot for larger refactors that came up while working on sm
     - refactor nested interactive regions to avoid button-in-button structure,
     - replace `role="button"` containers with real buttons where valid,
     - and re-evaluate `lint/a11y/useMediaCaption` for the audio-test UI (captions likely not applicable, but confirm intent).
+
+## Ralph harness (Copilot CLI) ergonomics
+
+- **Remove hard-coded profile `ValidateSet` and discover profiles dynamically.**
+
+  - Today the harness scripts list `kolboo` in a `ValidateSet`, which means adding a new profile requires editing scripts.
+  - Follow-up idea: accept any `-Profile` string, then validate by checking for `ralph/<profile>/profile.json` (or legacy `ralph/profiles/<profile>.json`) and show a friendly error listing available profiles.
+  - Bonus: add a `List-Profiles` helper command/script.

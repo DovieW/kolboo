@@ -1,19 +1,19 @@
 import { Loader, Select, Slider, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
-import {
-  useAvailableProviders,
-  useSettings,
-  useUpdateGeminiThinkingBudget,
-  useUpdateGeminiThinkingLevel,
-  useUpdateLLMModel,
-  useUpdateLLMProvider,
-  useUpdateOpenAiReasoningEffort,
-  useUpdateSTTModel,
-  useUpdateSTTProvider,
-  useUpdateSTTTimeout,
-} from "../../lib/queries";
 import { LLM_MODELS, STT_MODELS } from "../../lib/modelOptions";
-import { tauriAPI, type OpenAiReasoningEffort } from "../../lib/tauri";
+import {
+	useAvailableProviders,
+	useSettings,
+	useUpdateGeminiThinkingBudget,
+	useUpdateGeminiThinkingLevel,
+	useUpdateLLMModel,
+	useUpdateLLMProvider,
+	useUpdateOpenAiReasoningEffort,
+	useUpdateSTTModel,
+	useUpdateSTTProvider,
+	useUpdateSTTTimeout,
+} from "../../lib/queries";
+import { type OpenAiReasoningEffort, tauriAPI } from "../../lib/tauri";
 import { HintSelect } from "../HintSelect";
 
 // NOTE: This timeout is used by the Rust pipeline as a transcription request timeout.
@@ -22,721 +22,722 @@ const DEFAULT_STT_TIMEOUT = 10;
 
 /** @lintignore */
 export function ProvidersSettings() {
-  const { data: settings, isLoading: isLoadingSettings } = useSettings();
-  const { data: availableProviders, isLoading: isLoadingProviders } =
-    useAvailableProviders();
+	const { data: settings, isLoading: isLoadingSettings } = useSettings();
+	const { data: availableProviders, isLoading: isLoadingProviders } =
+		useAvailableProviders();
 
-  // Wait for settings (source of truth) and provider list (for options)
-  const isLoadingProviderData = isLoadingSettings || isLoadingProviders;
-  const updateSTTProvider = useUpdateSTTProvider();
-  const updateSTTModel = useUpdateSTTModel();
-  const updateLLMProvider = useUpdateLLMProvider();
-  const updateLLMModel = useUpdateLLMModel();
-  const updateOpenAiReasoningEffort = useUpdateOpenAiReasoningEffort();
-  const updateGeminiThinkingBudget = useUpdateGeminiThinkingBudget();
-  const updateGeminiThinkingLevel = useUpdateGeminiThinkingLevel();
-  const updateSTTTimeout = useUpdateSTTTimeout();
+	// Wait for settings (source of truth) and provider list (for options)
+	const isLoadingProviderData = isLoadingSettings || isLoadingProviders;
+	const updateSTTProvider = useUpdateSTTProvider();
+	const updateSTTModel = useUpdateSTTModel();
+	const updateLLMProvider = useUpdateLLMProvider();
+	const updateLLMModel = useUpdateLLMModel();
+	const updateOpenAiReasoningEffort = useUpdateOpenAiReasoningEffort();
+	const updateGeminiThinkingBudget = useUpdateGeminiThinkingBudget();
+	const updateGeminiThinkingLevel = useUpdateGeminiThinkingLevel();
+	const updateSTTTimeout = useUpdateSTTTimeout();
 
-  const handleSTTProviderChange = (value: string | null) => {
-    if (!value) return;
-    // Save to local settings (Tauri) then notify overlay window to sync to server
-    updateSTTProvider.mutate(value, {
-      onSuccess: () => {
-        // Reset model to first available when provider changes
-        const models = STT_MODELS[value];
-        const firstModel = models?.[0];
-        if (firstModel) {
-          updateSTTModel.mutate(firstModel.value);
-        }
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+	const handleSTTProviderChange = (value: string | null) => {
+		if (!value) return;
+		// Save to local settings (Tauri) then notify overlay window to sync to server
+		updateSTTProvider.mutate(value, {
+			onSuccess: () => {
+				// Reset model to first available when provider changes
+				const models = STT_MODELS[value];
+				const firstModel = models?.[0];
+				if (firstModel) {
+					updateSTTModel.mutate(firstModel.value);
+				}
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  const handleSTTModelChange = (value: string | null) => {
-    if (!value) return;
-    updateSTTModel.mutate(value, {
-      onSuccess: () => {
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+	const handleSTTModelChange = (value: string | null) => {
+		if (!value) return;
+		updateSTTModel.mutate(value, {
+			onSuccess: () => {
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  const handleLLMProviderChange = (value: string | null) => {
-    if (!value) return;
-    // Save to local settings (Tauri) then notify overlay window to sync to server
-    updateLLMProvider.mutate(value, {
-      onSuccess: () => {
-        // Reset model to first available when provider changes
-        const models = LLM_MODELS[value];
-        const firstModel = models?.[0];
-        if (firstModel) {
-          updateLLMModel.mutate(firstModel.value);
-        }
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+	const handleLLMProviderChange = (value: string | null) => {
+		if (!value) return;
+		// Save to local settings (Tauri) then notify overlay window to sync to server
+		updateLLMProvider.mutate(value, {
+			onSuccess: () => {
+				// Reset model to first available when provider changes
+				const models = LLM_MODELS[value];
+				const firstModel = models?.[0];
+				if (firstModel) {
+					updateLLMModel.mutate(firstModel.value);
+				}
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  const handleLLMModelChange = (value: string | null) => {
-    if (!value) return;
-    updateLLMModel.mutate(value, {
-      onSuccess: () => {
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+	const handleLLMModelChange = (value: string | null) => {
+		if (!value) return;
+		updateLLMModel.mutate(value, {
+			onSuccess: () => {
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  const handleSTTTimeoutChange = (value: number) => {
-    // Save to local settings (Tauri) then notify overlay window to sync to server
-    updateSTTTimeout.mutate(value, {
-      onSuccess: () => {
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+	const handleSTTTimeoutChange = (value: number) => {
+		// Save to local settings (Tauri) then notify overlay window to sync to server
+		updateSTTTimeout.mutate(value, {
+			onSuccess: () => {
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  // Get the current timeout value from settings, falling back to default
-  const currentTimeout = settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT;
+	// Get the current timeout value from settings, falling back to default
+	const currentTimeout = settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT;
 
-  // Local state for smooth slider dragging
-  const [sliderValue, setSliderValue] = useState(currentTimeout);
+	// Local state for smooth slider dragging
+	const [sliderValue, setSliderValue] = useState(currentTimeout);
 
-  // Sync local state when server value changes
-  useEffect(() => {
-    setSliderValue(currentTimeout);
-  }, [currentTimeout]);
+	// Sync local state when server value changes
+	useEffect(() => {
+		setSliderValue(currentTimeout);
+	}, [currentTimeout]);
 
-  // Group providers by cloud/local for dropdown display
-  const sttCloudProviders =
-    availableProviders?.stt
-      .filter((p) => !p.is_local)
-      .map((p) => ({ value: p.value, label: p.label })) ?? [];
-  const sttLocalProviders =
-    availableProviders?.stt
-      .filter((p) => p.is_local)
-      .map((p) => ({ value: p.value, label: p.label })) ?? [];
-  const sttProviderOptions = [
-    { group: "Cloud", items: sttCloudProviders },
-    { group: "Local", items: sttLocalProviders },
-  ];
+	// Group providers by cloud/local for dropdown display
+	const sttCloudProviders =
+		availableProviders?.stt
+			.filter((p) => !p.is_local)
+			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const sttLocalProviders =
+		availableProviders?.stt
+			.filter((p) => p.is_local)
+			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const sttProviderOptions = [
+		{ group: "Cloud", items: sttCloudProviders },
+		{ group: "Local", items: sttLocalProviders },
+	];
 
-  const llmCloudProviders =
-    availableProviders?.llm
-      .filter((p) => !p.is_local)
-      .map((p) => ({ value: p.value, label: p.label })) ?? [];
-  const llmLocalProviders =
-    availableProviders?.llm
-      .filter((p) => p.is_local)
-      .map((p) => ({ value: p.value, label: p.label })) ?? [];
-  const llmProviderOptions = [
-    { group: "Cloud", items: llmCloudProviders },
-    { group: "Local", items: llmLocalProviders },
-  ];
+	const llmCloudProviders =
+		availableProviders?.llm
+			.filter((p) => !p.is_local)
+			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const llmLocalProviders =
+		availableProviders?.llm
+			.filter((p) => p.is_local)
+			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const llmProviderOptions = [
+		{ group: "Cloud", items: llmCloudProviders },
+		{ group: "Local", items: llmLocalProviders },
+	];
 
-  // Get available models for the selected providers
-  const sttModelOptions = settings?.stt_provider
-    ? STT_MODELS[settings.stt_provider] ?? []
-    : [];
-  const llmModelOptions = settings?.llm_provider
-    ? LLM_MODELS[settings.llm_provider] ?? []
-    : [];
+	// Get available models for the selected providers
+	const sttModelOptions = settings?.stt_provider
+		? (STT_MODELS[settings.stt_provider] ?? [])
+		: [];
+	const llmModelOptions = settings?.llm_provider
+		? (LLM_MODELS[settings.llm_provider] ?? [])
+		: [];
 
-  const effectiveLlmProvider = settings?.llm_provider ?? null;
-  const effectiveLlmModel =
-    settings?.llm_model ?? llmModelOptions[0]?.value ?? null;
+	const effectiveLlmProvider = settings?.llm_provider ?? null;
+	const effectiveLlmModel =
+		settings?.llm_model ?? llmModelOptions[0]?.value ?? null;
 
-  const supportsOpenAiReasoningEffort =
-    effectiveLlmProvider === "openai" &&
-    !!effectiveLlmModel &&
-    (effectiveLlmModel.startsWith("gpt-5") ||
-      effectiveLlmModel.startsWith("o"));
+	const supportsOpenAiReasoningEffort =
+		effectiveLlmProvider === "openai" &&
+		!!effectiveLlmModel &&
+		(effectiveLlmModel.startsWith("gpt-5") ||
+			effectiveLlmModel.startsWith("o"));
 
-  const supportsGeminiThinkingLevel =
-    effectiveLlmProvider === "gemini" &&
-    !!effectiveLlmModel &&
-    effectiveLlmModel.includes("gemini-3");
+	const supportsGeminiThinkingLevel =
+		effectiveLlmProvider === "gemini" &&
+		!!effectiveLlmModel &&
+		effectiveLlmModel.includes("gemini-3");
 
-  const supportsGeminiThinkingBudget =
-    effectiveLlmProvider === "gemini" &&
-    !!effectiveLlmModel &&
-    effectiveLlmModel.includes("gemini-2.5") &&
-    !effectiveLlmModel.includes("flash-lite");
+	const supportsGeminiThinkingBudget =
+		effectiveLlmProvider === "gemini" &&
+		!!effectiveLlmModel &&
+		effectiveLlmModel.includes("gemini-2.5") &&
+		!effectiveLlmModel.includes("flash-lite");
 
-  // Mantine Select requires option values to be strings.
-  const SELECT_DEFAULT = "default";
+	// Mantine Select requires option values to be strings.
+	const SELECT_DEFAULT = "default";
 
-  const openAiThinkingEffortsForModel = (
-    model: string
-  ): OpenAiReasoningEffort[] => {
-    // OpenAI docs (2025-12):
-    // - gpt-5.1 supports: none, low, medium, high
-    // - models before gpt-5.1 do not support `none`
-    // - gpt-5-pro defaults to and only supports `high`
-    if (model.startsWith("gpt-5-pro")) {
-      return ["high"];
-    }
-    if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1")) {
-      return ["none", "low", "medium", "high"];
-    }
-    if (model.startsWith("gpt-5")) {
-      return ["low", "medium", "high"];
-    }
-    if (model.startsWith("o")) {
-      return ["low", "medium", "high"];
-    }
-    return [];
-  };
+	const openAiThinkingEffortsForModel = (
+		model: string,
+	): OpenAiReasoningEffort[] => {
+		// OpenAI docs (2025-12):
+		// - gpt-5.1 supports: none, low, medium, high
+		// - models before gpt-5.1 do not support `none`
+		// - gpt-5-pro defaults to and only supports `high`
+		if (model.startsWith("gpt-5-pro")) {
+			return ["high"];
+		}
+		if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1")) {
+			return ["none", "low", "medium", "high"];
+		}
+		if (model.startsWith("gpt-5")) {
+			return ["low", "medium", "high"];
+		}
+		if (model.startsWith("o")) {
+			return ["low", "medium", "high"];
+		}
+		return [];
+	};
 
-  const openAiDefaultReasoningEffortForModel = (
-    model: string
-  ): OpenAiReasoningEffort => {
-    // OpenAI docs (2025-12):
-    // - gpt-5.1 defaults to `none`
-    // - models before gpt-5.1 default to `medium`
-    // - gpt-5-pro defaults to `high`
-    if (model.startsWith("gpt-5-pro")) return "high";
-    if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1"))
-      return "none";
-    return "medium";
-  };
+	const openAiDefaultReasoningEffortForModel = (
+		model: string,
+	): OpenAiReasoningEffort => {
+		// OpenAI docs (2025-12):
+		// - gpt-5.1 defaults to `none`
+		// - models before gpt-5.1 default to `medium`
+		// - gpt-5-pro defaults to `high`
+		if (model.startsWith("gpt-5-pro")) return "high";
+		if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1"))
+			return "none";
+		return "medium";
+	};
 
-  const openAiThinkingOptions =
-    !supportsOpenAiReasoningEffort || !effectiveLlmModel
-      ? []
-      : [
-          { value: SELECT_DEFAULT, label: "Default" },
-          ...openAiThinkingEffortsForModel(effectiveLlmModel).map((v) => ({
-            value: v,
-            label: v === "none" ? "None" : v.charAt(0).toUpperCase() + v.slice(1),
-          })),
-        ];
+	const openAiThinkingOptions =
+		!supportsOpenAiReasoningEffort || !effectiveLlmModel
+			? []
+			: [
+					{ value: SELECT_DEFAULT, label: "Default" },
+					...openAiThinkingEffortsForModel(effectiveLlmModel).map((v) => ({
+						value: v,
+						label:
+							v === "none" ? "None" : v.charAt(0).toUpperCase() + v.slice(1),
+					})),
+				];
 
-  const isGemini3Flash =
-    supportsGeminiThinkingLevel &&
-    effectiveLlmModel?.includes("gemini-3-flash");
-  const isGemini3Pro =
-    supportsGeminiThinkingLevel && effectiveLlmModel?.includes("gemini-3-pro");
+	const isGemini3Flash =
+		supportsGeminiThinkingLevel &&
+		effectiveLlmModel?.includes("gemini-3-flash");
+	const isGemini3Pro =
+		supportsGeminiThinkingLevel && effectiveLlmModel?.includes("gemini-3-pro");
 
-  const geminiThinkingLevelOptions = isGemini3Flash
-    ? [
-        { value: SELECT_DEFAULT, label: "Default" },
-        { value: "minimal", label: "Minimal" },
-        { value: "low", label: "Low" },
-        { value: "medium", label: "Medium" },
-        { value: "high", label: "High" },
-      ]
-    : [
-        { value: SELECT_DEFAULT, label: "Default" },
-        { value: "low", label: "Low" },
-        { value: "high", label: "High" },
-      ];
+	const geminiThinkingLevelOptions = isGemini3Flash
+		? [
+				{ value: SELECT_DEFAULT, label: "Default" },
+				{ value: "minimal", label: "Minimal" },
+				{ value: "low", label: "Low" },
+				{ value: "medium", label: "Medium" },
+				{ value: "high", label: "High" },
+			]
+		: [
+				{ value: SELECT_DEFAULT, label: "Default" },
+				{ value: "low", label: "Low" },
+				{ value: "high", label: "High" },
+			];
 
-  const canDisableGemini25Thinking =
-    supportsGeminiThinkingBudget &&
-    !!effectiveLlmModel &&
-    effectiveLlmModel.includes("gemini-2.5-flash") &&
-    !effectiveLlmModel.includes("gemini-2.5-pro");
+	const canDisableGemini25Thinking =
+		supportsGeminiThinkingBudget &&
+		!!effectiveLlmModel &&
+		effectiveLlmModel.includes("gemini-2.5-flash") &&
+		!effectiveLlmModel.includes("gemini-2.5-pro");
 
-  const isGemini25Pro =
-    supportsGeminiThinkingBudget &&
-    !!effectiveLlmModel &&
-    effectiveLlmModel.includes("gemini-2.5-pro");
+	const isGemini25Pro =
+		supportsGeminiThinkingBudget &&
+		!!effectiveLlmModel &&
+		effectiveLlmModel.includes("gemini-2.5-pro");
 
-  const gemini25MaxBudget = isGemini25Pro ? 32768 : 24576;
-  const gemini25MinBudget = isGemini25Pro ? 128 : 0;
+	const gemini25MaxBudget = isGemini25Pro ? 32768 : 24576;
+	const gemini25MinBudget = isGemini25Pro ? 128 : 0;
 
-  const geminiThinkingBudgetOptions: Array<{ value: string; label: string }> = [
-    { value: SELECT_DEFAULT, label: "Default" },
-    { value: "-1", label: "Dynamic (-1)" },
-    ...(canDisableGemini25Thinking ? [{ value: "0", label: "Off (0)" }] : []),
-    ...(isGemini25Pro
-      ? [{ value: String(gemini25MinBudget), label: "Minimal (128)" }]
-      : []),
-    { value: "1024", label: "Light (1024)" },
-    { value: "4096", label: "Medium (4096)" },
-    { value: "16384", label: "High (16384)" },
-    ...(gemini25MaxBudget > 16384
-      ? [
-          {
-            value: String(gemini25MaxBudget),
-            label: `Max (${gemini25MaxBudget})`,
-          },
-        ]
-      : []),
-  ];
+	const geminiThinkingBudgetOptions: Array<{ value: string; label: string }> = [
+		{ value: SELECT_DEFAULT, label: "Default" },
+		{ value: "-1", label: "Dynamic (-1)" },
+		...(canDisableGemini25Thinking ? [{ value: "0", label: "Off (0)" }] : []),
+		...(isGemini25Pro
+			? [{ value: String(gemini25MinBudget), label: "Minimal (128)" }]
+			: []),
+		{ value: "1024", label: "Light (1024)" },
+		{ value: "4096", label: "Medium (4096)" },
+		{ value: "16384", label: "High (16384)" },
+		...(gemini25MaxBudget > 16384
+			? [
+					{
+						value: String(gemini25MaxBudget),
+						label: `Max (${gemini25MaxBudget})`,
+					},
+				]
+			: []),
+	];
 
-  const handleOpenAiReasoningEffortChange = (value: string | null) => {
-    if (value == null || value === SELECT_DEFAULT) {
-      updateOpenAiReasoningEffort.mutate(null, {
-        onSuccess: () => {
-          tauriAPI.emitSettingsChanged();
-        },
-      });
-      return;
-    }
+	const handleOpenAiReasoningEffortChange = (value: string | null) => {
+		if (value == null || value === SELECT_DEFAULT) {
+			updateOpenAiReasoningEffort.mutate(null, {
+				onSuccess: () => {
+					tauriAPI.emitSettingsChanged();
+				},
+			});
+			return;
+		}
 
-    // Select values are strings; narrow to the allowed union before mutating.
-    const v: OpenAiReasoningEffort | null =
-      value === "none" ||
-      value === "minimal" ||
-      value === "low" ||
-      value === "medium" ||
-      value === "high" ||
-      value === "xhigh"
-        ? (value as OpenAiReasoningEffort)
-        : null;
-    if (!v) return;
+		// Select values are strings; narrow to the allowed union before mutating.
+		const v: OpenAiReasoningEffort | null =
+			value === "none" ||
+			value === "minimal" ||
+			value === "low" ||
+			value === "medium" ||
+			value === "high" ||
+			value === "xhigh"
+				? (value as OpenAiReasoningEffort)
+				: null;
+		if (!v) return;
 
-    updateOpenAiReasoningEffort.mutate(v, {
-      onSuccess: () => {
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+		updateOpenAiReasoningEffort.mutate(v, {
+			onSuccess: () => {
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  const handleGeminiThinkingLevelChange = (value: string | null) => {
-    const v =
-      value === "minimal" ||
-      value === "low" ||
-      value === "medium" ||
-      value === "high"
-        ? value
-        : null;
-    updateGeminiThinkingLevel.mutate(v, {
-      onSuccess: () => {
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+	const handleGeminiThinkingLevelChange = (value: string | null) => {
+		const v =
+			value === "minimal" ||
+			value === "low" ||
+			value === "medium" ||
+			value === "high"
+				? value
+				: null;
+		updateGeminiThinkingLevel.mutate(v, {
+			onSuccess: () => {
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  const handleGeminiThinkingBudgetChange = (value: string | null) => {
-    if (value == null || value === SELECT_DEFAULT) {
-      updateGeminiThinkingBudget.mutate(null, {
-        onSuccess: () => {
-          tauriAPI.emitSettingsChanged();
-        },
-      });
-      return;
-    }
+	const handleGeminiThinkingBudgetChange = (value: string | null) => {
+		if (value == null || value === SELECT_DEFAULT) {
+			updateGeminiThinkingBudget.mutate(null, {
+				onSuccess: () => {
+					tauriAPI.emitSettingsChanged();
+				},
+			});
+			return;
+		}
 
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return;
-    updateGeminiThinkingBudget.mutate(parsed, {
-      onSuccess: () => {
-        tauriAPI.emitSettingsChanged();
-      },
-    });
-  };
+		const parsed = Number(value);
+		if (!Number.isFinite(parsed)) return;
+		updateGeminiThinkingBudget.mutate(parsed, {
+			onSuccess: () => {
+				tauriAPI.emitSettingsChanged();
+			},
+		});
+	};
 
-  return (
-    <>
-      {/* STT Provider */}
-      <div className="settings-row">
-        <div>
-          <p className="settings-label">Speech-to-Text Provider</p>
-          <p className="settings-description">Service for transcribing audio</p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isLoadingProviderData ? (
-            <Loader size="sm" color="orange" />
-          ) : (
-            <Select
-              data={sttProviderOptions}
-              value={settings?.stt_provider ?? null}
-              onChange={handleSTTProviderChange}
-              placeholder="Select provider"
-              withCheckIcon={false}
-              disabled={
-                sttCloudProviders.length === 0 && sttLocalProviders.length === 0
-              }
-              styles={{
-                input: {
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 200,
-                },
-              }}
-            />
-          )}
-        </div>
-      </div>
+	return (
+		<>
+			{/* STT Provider */}
+			<div className="settings-row">
+				<div>
+					<p className="settings-label">Speech-to-Text Provider</p>
+					<p className="settings-description">Service for transcribing audio</p>
+				</div>
+				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+					{isLoadingProviderData ? (
+						<Loader size="sm" color="orange" />
+					) : (
+						<Select
+							data={sttProviderOptions}
+							value={settings?.stt_provider ?? null}
+							onChange={handleSTTProviderChange}
+							placeholder="Select provider"
+							withCheckIcon={false}
+							disabled={
+								sttCloudProviders.length === 0 && sttLocalProviders.length === 0
+							}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								},
+							}}
+						/>
+					)}
+				</div>
+			</div>
 
-      {/* STT Model - only show if provider has models */}
-      {sttModelOptions.length > 0 && (
-        <div className="settings-row">
-          <div>
-            <p className="settings-label">STT Model</p>
-            <p className="settings-description">
-              Model to use for transcription
-            </p>
-          </div>
-          <Select
-            data={sttModelOptions}
-            value={settings?.stt_model ?? sttModelOptions[0]?.value ?? null}
-            onChange={handleSTTModelChange}
-            placeholder="Select model"
-            withCheckIcon={false}
-            styles={{
-              input: {
-                backgroundColor: "var(--bg-elevated)",
-                borderColor: "var(--border-default)",
-                color: "var(--text-primary)",
-                minWidth: 200,
-              },
-            }}
-          />
-        </div>
-      )}
+			{/* STT Model - only show if provider has models */}
+			{sttModelOptions.length > 0 && (
+				<div className="settings-row">
+					<div>
+						<p className="settings-label">STT Model</p>
+						<p className="settings-description">
+							Model to use for transcription
+						</p>
+					</div>
+					<Select
+						data={sttModelOptions}
+						value={settings?.stt_model ?? sttModelOptions[0]?.value ?? null}
+						onChange={handleSTTModelChange}
+						placeholder="Select model"
+						withCheckIcon={false}
+						styles={{
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 200,
+							},
+						}}
+					/>
+				</div>
+			)}
 
-      {/* LLM Provider */}
-      <div className="settings-row">
-        <div>
-          <p className="settings-label">Language Model Provider</p>
-          <p className="settings-description">AI service for text formatting</p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isLoadingProviderData ? (
-            <Loader size="sm" color="orange" />
-          ) : (
-            <Select
-              data={llmProviderOptions}
-              value={settings?.llm_provider ?? null}
-              onChange={handleLLMProviderChange}
-              placeholder="Select provider"
-              withCheckIcon={false}
-              disabled={
-                llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-              }
-              styles={{
-                input: {
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 200,
-                },
-              }}
-            />
-          )}
-        </div>
-      </div>
+			{/* LLM Provider */}
+			<div className="settings-row">
+				<div>
+					<p className="settings-label">Language Model Provider</p>
+					<p className="settings-description">AI service for text formatting</p>
+				</div>
+				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+					{isLoadingProviderData ? (
+						<Loader size="sm" color="orange" />
+					) : (
+						<Select
+							data={llmProviderOptions}
+							value={settings?.llm_provider ?? null}
+							onChange={handleLLMProviderChange}
+							placeholder="Select provider"
+							withCheckIcon={false}
+							disabled={
+								llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+							}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								},
+							}}
+						/>
+					)}
+				</div>
+			</div>
 
-      {/* LLM Model - only show if provider has models */}
-      {llmModelOptions.length > 0 && (
-        <div className="settings-row">
-          <div>
-            <p className="settings-label">Rewrite LLM Model</p>
-            <p className="settings-description">
-              LLM Model used to rewrite the transcription.
-            </p>
-          </div>
-          <Select
-            data={llmModelOptions}
-            value={settings?.llm_model ?? llmModelOptions[0]?.value ?? null}
-            onChange={handleLLMModelChange}
-            placeholder="Select model"
-            withCheckIcon={false}
-            styles={{
-              input: {
-                backgroundColor: "var(--bg-elevated)",
-                borderColor: "var(--border-default)",
-                color: "var(--text-primary)",
-                minWidth: 200,
-              },
-            }}
-          />
-        </div>
-      )}
+			{/* LLM Model - only show if provider has models */}
+			{llmModelOptions.length > 0 && (
+				<div className="settings-row">
+					<div>
+						<p className="settings-label">Rewrite LLM Model</p>
+						<p className="settings-description">
+							LLM Model used to rewrite the transcription.
+						</p>
+					</div>
+					<Select
+						data={llmModelOptions}
+						value={settings?.llm_model ?? llmModelOptions[0]?.value ?? null}
+						onChange={handleLLMModelChange}
+						placeholder="Select model"
+						withCheckIcon={false}
+						styles={{
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 200,
+							},
+						}}
+					/>
+				</div>
+			)}
 
-      {/* OpenAI thinking (gpt-5 / o-series) */}
-      {supportsOpenAiReasoningEffort && (
-        <div className="settings-row">
-          <div>
-            <p className="settings-label">Thinking</p>
-            <p className="settings-description">
-              Set the reasoning effort for this model.
-            </p>
-          </div>
-          <HintSelect
-            data={openAiThinkingOptions}
-            value={settings?.openai_reasoning_effort ?? SELECT_DEFAULT}
-            onChange={handleOpenAiReasoningEffortChange}
-            placeholder="Default"
-            inputStyle={{
-              backgroundColor: "var(--bg-elevated)",
-              borderColor: "var(--border-default)",
-              color: "var(--text-primary)",
-              minWidth: 200,
-            }}
-            renderSelected={({ option, placeholder }) => {
-              if (!option) {
-                return (
-                  <Text size="sm" c="dimmed">
-                    {placeholder}
-                  </Text>
-                );
-              }
+			{/* OpenAI thinking (gpt-5 / o-series) */}
+			{supportsOpenAiReasoningEffort && (
+				<div className="settings-row">
+					<div>
+						<p className="settings-label">Thinking</p>
+						<p className="settings-description">
+							Set the reasoning effort for this model.
+						</p>
+					</div>
+					<HintSelect
+						data={openAiThinkingOptions}
+						value={settings?.openai_reasoning_effort ?? SELECT_DEFAULT}
+						onChange={handleOpenAiReasoningEffortChange}
+						placeholder="Default"
+						inputStyle={{
+							backgroundColor: "var(--bg-elevated)",
+							borderColor: "var(--border-default)",
+							color: "var(--text-primary)",
+							minWidth: 200,
+						}}
+						renderSelected={({ option, placeholder }) => {
+							if (!option) {
+								return (
+									<Text size="sm" c="dimmed">
+										{placeholder}
+									</Text>
+								);
+							}
 
-              if (option.value !== SELECT_DEFAULT) {
-                return <Text size="sm">{option.label}</Text>;
-              }
+							if (option.value !== SELECT_DEFAULT) {
+								return <Text size="sm">{option.label}</Text>;
+							}
 
-              const hint = effectiveLlmModel
-                ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-                : "medium";
+							const hint = effectiveLlmModel
+								? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+								: "medium";
 
-              return (
-                <div
-                  style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-                >
-                  <span style={{ fontSize: 14 }}>{option.label}</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      opacity: 0.9,
-                      lineHeight: 1,
-                    }}
-                  >
-                    · {hint}
-                  </span>
-                </div>
-              );
-            }}
-            renderOption={({ option }) => {
-              if (option.value !== SELECT_DEFAULT) {
-                return <Text size="sm">{option.label}</Text>;
-              }
+							return (
+								<div
+									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
+								>
+									<span style={{ fontSize: 14 }}>{option.label}</span>
+									<span
+										style={{
+											fontSize: 11,
+											color: "var(--text-muted)",
+											opacity: 0.9,
+											lineHeight: 1,
+										}}
+									>
+										· {hint}
+									</span>
+								</div>
+							);
+						}}
+						renderOption={({ option }) => {
+							if (option.value !== SELECT_DEFAULT) {
+								return <Text size="sm">{option.label}</Text>;
+							}
 
-              const hint = effectiveLlmModel
-                ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-                : "medium";
+							const hint = effectiveLlmModel
+								? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+								: "medium";
 
-              return (
-                <div
-                  style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-                >
-                  <span style={{ fontSize: 14 }}>{option.label}</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      opacity: 0.9,
-                      lineHeight: 1,
-                    }}
-                  >
-                    · {hint}
-                  </span>
-                </div>
-              );
-            }}
-          />
-        </div>
-      )}
+							return (
+								<div
+									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
+								>
+									<span style={{ fontSize: 14 }}>{option.label}</span>
+									<span
+										style={{
+											fontSize: 11,
+											color: "var(--text-muted)",
+											opacity: 0.9,
+											lineHeight: 1,
+										}}
+									>
+										· {hint}
+									</span>
+								</div>
+							);
+						}}
+					/>
+				</div>
+			)}
 
-      {/* Gemini thinking level (Gemini 3) */}
-      {supportsGeminiThinkingLevel && (
-        <div className="settings-row">
-          <div>
-            <p className="settings-label">Thinking Level</p>
-            <p className="settings-description">
-              {isGemini3Pro
-                ? "Gemini 3 Pro supports low/high (default high)."
-                : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
-            </p>
-          </div>
-          <HintSelect
-            data={geminiThinkingLevelOptions}
-            value={settings?.gemini_thinking_level ?? SELECT_DEFAULT}
-            onChange={handleGeminiThinkingLevelChange}
-            placeholder="Default"
-            inputStyle={{
-              backgroundColor: "var(--bg-elevated)",
-              borderColor: "var(--border-default)",
-              color: "var(--text-primary)",
-              minWidth: 200,
-            }}
-            renderSelected={({ option, placeholder }) => {
-              if (!option) {
-                return (
-                  <Text size="sm" c="dimmed">
-                    {placeholder}
-                  </Text>
-                );
-              }
-              if (option.value !== SELECT_DEFAULT) {
-                return <Text size="sm">{option.label}</Text>;
-              }
+			{/* Gemini thinking level (Gemini 3) */}
+			{supportsGeminiThinkingLevel && (
+				<div className="settings-row">
+					<div>
+						<p className="settings-label">Thinking Level</p>
+						<p className="settings-description">
+							{isGemini3Pro
+								? "Gemini 3 Pro supports low/high (default high)."
+								: "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
+						</p>
+					</div>
+					<HintSelect
+						data={geminiThinkingLevelOptions}
+						value={settings?.gemini_thinking_level ?? SELECT_DEFAULT}
+						onChange={handleGeminiThinkingLevelChange}
+						placeholder="Default"
+						inputStyle={{
+							backgroundColor: "var(--bg-elevated)",
+							borderColor: "var(--border-default)",
+							color: "var(--text-primary)",
+							minWidth: 200,
+						}}
+						renderSelected={({ option, placeholder }) => {
+							if (!option) {
+								return (
+									<Text size="sm" c="dimmed">
+										{placeholder}
+									</Text>
+								);
+							}
+							if (option.value !== SELECT_DEFAULT) {
+								return <Text size="sm">{option.label}</Text>;
+							}
 
-              return (
-                <div
-                  style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-                >
-                  <span style={{ fontSize: 14 }}>{option.label}</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      opacity: 0.9,
-                      lineHeight: 1,
-                    }}
-                  >
-                    · high
-                  </span>
-                </div>
-              );
-            }}
-            renderOption={({ option }) => {
-              if (option.value !== SELECT_DEFAULT) {
-                return <Text size="sm">{option.label}</Text>;
-              }
+							return (
+								<div
+									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
+								>
+									<span style={{ fontSize: 14 }}>{option.label}</span>
+									<span
+										style={{
+											fontSize: 11,
+											color: "var(--text-muted)",
+											opacity: 0.9,
+											lineHeight: 1,
+										}}
+									>
+										· high
+									</span>
+								</div>
+							);
+						}}
+						renderOption={({ option }) => {
+							if (option.value !== SELECT_DEFAULT) {
+								return <Text size="sm">{option.label}</Text>;
+							}
 
-              return (
-                <div
-                  style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-                >
-                  <span style={{ fontSize: 14 }}>{option.label}</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      opacity: 0.9,
-                      lineHeight: 1,
-                    }}
-                  >
-                    · high
-                  </span>
-                </div>
-              );
-            }}
-          />
-        </div>
-      )}
+							return (
+								<div
+									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
+								>
+									<span style={{ fontSize: 14 }}>{option.label}</span>
+									<span
+										style={{
+											fontSize: 11,
+											color: "var(--text-muted)",
+											opacity: 0.9,
+											lineHeight: 1,
+										}}
+									>
+										· high
+									</span>
+								</div>
+							);
+						}}
+					/>
+				</div>
+			)}
 
-      {/* Gemini thinking budget (Gemini 2.5) */}
-      {supportsGeminiThinkingBudget && (
-        <div className="settings-row">
-          <div>
-            <p className="settings-label">Thinking Budget</p>
-            <p className="settings-description">
-              Token budget for Gemini 2.5 thinking.
-            </p>
-          </div>
-          <HintSelect
-            data={geminiThinkingBudgetOptions}
-            value={
-              settings?.gemini_thinking_budget == null
-                ? SELECT_DEFAULT
-                : String(settings.gemini_thinking_budget)
-            }
-            onChange={handleGeminiThinkingBudgetChange}
-            placeholder="Default"
-            inputStyle={{
-              backgroundColor: "var(--bg-elevated)",
-              borderColor: "var(--border-default)",
-              color: "var(--text-primary)",
-              minWidth: 200,
-            }}
-            renderSelected={({ option, placeholder }) => {
-              if (!option) {
-                return (
-                  <Text size="sm" c="dimmed">
-                    {placeholder}
-                  </Text>
-                );
-              }
-              if (option.value !== SELECT_DEFAULT) {
-                return <Text size="sm">{option.label}</Text>;
-              }
+			{/* Gemini thinking budget (Gemini 2.5) */}
+			{supportsGeminiThinkingBudget && (
+				<div className="settings-row">
+					<div>
+						<p className="settings-label">Thinking Budget</p>
+						<p className="settings-description">
+							Token budget for Gemini 2.5 thinking.
+						</p>
+					</div>
+					<HintSelect
+						data={geminiThinkingBudgetOptions}
+						value={
+							settings?.gemini_thinking_budget == null
+								? SELECT_DEFAULT
+								: String(settings.gemini_thinking_budget)
+						}
+						onChange={handleGeminiThinkingBudgetChange}
+						placeholder="Default"
+						inputStyle={{
+							backgroundColor: "var(--bg-elevated)",
+							borderColor: "var(--border-default)",
+							color: "var(--text-primary)",
+							minWidth: 200,
+						}}
+						renderSelected={({ option, placeholder }) => {
+							if (!option) {
+								return (
+									<Text size="sm" c="dimmed">
+										{placeholder}
+									</Text>
+								);
+							}
+							if (option.value !== SELECT_DEFAULT) {
+								return <Text size="sm">{option.label}</Text>;
+							}
 
-              return (
-                <div
-                  style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-                >
-                  <span style={{ fontSize: 14 }}>{option.label}</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      opacity: 0.9,
-                      lineHeight: 1,
-                    }}
-                  >
-                    · dynamic
-                  </span>
-                </div>
-              );
-            }}
-            renderOption={({ option }) => {
-              if (option.value !== SELECT_DEFAULT) {
-                return <Text size="sm">{option.label}</Text>;
-              }
+							return (
+								<div
+									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
+								>
+									<span style={{ fontSize: 14 }}>{option.label}</span>
+									<span
+										style={{
+											fontSize: 11,
+											color: "var(--text-muted)",
+											opacity: 0.9,
+											lineHeight: 1,
+										}}
+									>
+										· dynamic
+									</span>
+								</div>
+							);
+						}}
+						renderOption={({ option }) => {
+							if (option.value !== SELECT_DEFAULT) {
+								return <Text size="sm">{option.label}</Text>;
+							}
 
-              return (
-                <div
-                  style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-                >
-                  <span style={{ fontSize: 14 }}>{option.label}</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      opacity: 0.9,
-                      lineHeight: 1,
-                    }}
-                  >
-                    · dynamic
-                  </span>
-                </div>
-              );
-            }}
-          />
-        </div>
-      )}
+							return (
+								<div
+									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
+								>
+									<span style={{ fontSize: 14 }}>{option.label}</span>
+									<span
+										style={{
+											fontSize: 11,
+											color: "var(--text-muted)",
+											opacity: 0.9,
+											lineHeight: 1,
+										}}
+									>
+										· dynamic
+									</span>
+								</div>
+							);
+						}}
+					/>
+				</div>
+			)}
 
-      {/* STT Timeout */}
-      <div className="settings-row">
-        <div style={{ flex: 1 }}>
-          <p className="settings-label">STT Timeout</p>
-          <p className="settings-description">
-            Increase if nothing is getting transcribed
-          </p>
-          <div
-            style={{
-              marginTop: 12,
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <Slider
-              value={sliderValue}
-              onChange={setSliderValue}
-              onChangeEnd={handleSTTTimeoutChange}
-              min={5}
-              max={120}
-              step={5}
-              marks={[
-                { value: 5, label: "5s" },
-                { value: 30, label: "30s" },
-                { value: 60, label: "60s" },
-                { value: 120, label: "120s" },
-              ]}
-              styles={{
-                root: { flex: 1 },
-                track: { backgroundColor: "var(--bg-elevated)" },
-                bar: { backgroundColor: "var(--accent-primary)" },
-                thumb: { borderColor: "var(--accent-primary)" },
-                markLabel: { color: "var(--text-secondary)", fontSize: 10 },
-              }}
-            />
-            <Text size="xs" c="dimmed" style={{ minWidth: 32 }}>
-              {Math.round(sliderValue)}s
-            </Text>
-          </div>
-        </div>
-      </div>
-    </>
-  );
+			{/* STT Timeout */}
+			<div className="settings-row">
+				<div style={{ flex: 1 }}>
+					<p className="settings-label">STT Timeout</p>
+					<p className="settings-description">
+						Increase if nothing is getting transcribed
+					</p>
+					<div
+						style={{
+							marginTop: 12,
+							display: "flex",
+							alignItems: "center",
+							gap: 12,
+						}}
+					>
+						<Slider
+							value={sliderValue}
+							onChange={setSliderValue}
+							onChangeEnd={handleSTTTimeoutChange}
+							min={5}
+							max={120}
+							step={5}
+							marks={[
+								{ value: 5, label: "5s" },
+								{ value: 30, label: "30s" },
+								{ value: 60, label: "60s" },
+								{ value: 120, label: "120s" },
+							]}
+							styles={{
+								root: { flex: 1 },
+								track: { backgroundColor: "var(--bg-elevated)" },
+								bar: { backgroundColor: "var(--accent-primary)" },
+								thumb: { borderColor: "var(--accent-primary)" },
+								markLabel: { color: "var(--text-secondary)", fontSize: 10 },
+							}}
+						/>
+						<Text size="xs" c="dimmed" style={{ minWidth: 32 }}>
+							{Math.round(sliderValue)}s
+						</Text>
+					</div>
+				</div>
+			</div>
+		</>
+	);
 }

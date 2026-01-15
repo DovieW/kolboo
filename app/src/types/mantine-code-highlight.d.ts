@@ -6,6 +6,8 @@ declare module "@mantine/code-highlight" {
 	export const CodeHighlightProvider: ComponentType<Record<string, unknown>>;
 
 	// Used in app bootstrap to wire highlight.js.
-	export const CodeHighlightAdapterProvider: ComponentType<Record<string, unknown>>;
+	export const CodeHighlightAdapterProvider: ComponentType<
+		Record<string, unknown>
+	>;
 	export function createHighlightJsAdapter(hljs: unknown): unknown;
 }

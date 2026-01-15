@@ -1,19 +1,19 @@
 import {
-  Anchor,
-  Button,
-  Group,
-  Kbd,
-  PasswordInput,
-  Text,
-  Textarea,
-  Title,
+	Anchor,
+	Button,
+	Group,
+	Kbd,
+	PasswordInput,
+	Text,
+	Textarea,
+	Title,
 } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Logo } from "../Logo";
-import { configAPI, type HotkeyConfig, tauriAPI } from "../../lib/tauri";
 import { useSettings } from "../../lib/queries";
+import { configAPI, type HotkeyConfig, tauriAPI } from "../../lib/tauri";
+import { Logo } from "../Logo";
 
 type Phase = "welcome" | "guide";
 
@@ -25,500 +25,500 @@ const GUIDE_STEPS: Step[] = ["groq", "dictation", "wrapup"];
 const NAV_STEPS: NavStep[] = ["welcome", ...GUIDE_STEPS];
 
 function HotkeyCombo({ config }: { config: HotkeyConfig | null }) {
-  const parts = useMemo(() => {
-    if (!config) return null;
-    const mods = config.modifiers.map(
-      (m) => m.charAt(0).toUpperCase() + m.slice(1)
-    );
-    return [...mods, config.key];
-  }, [config]);
+	const parts = useMemo(() => {
+		if (!config) return null;
+		const mods = config.modifiers.map(
+			(m) => m.charAt(0).toUpperCase() + m.slice(1),
+		);
+		return [...mods, config.key];
+	}, [config]);
 
-  const comboKey = useMemo(() => (parts ? parts.join("+") : ""), [parts]);
+	const comboKey = useMemo(() => (parts ? parts.join("+") : ""), [parts]);
 
-  if (!parts) {
-    return <Kbd className="hotkey-placeholder">Unassigned</Kbd>;
-  }
+	if (!parts) {
+		return <Kbd className="hotkey-placeholder">Unassigned</Kbd>;
+	}
 
-  return (
-    <span className="tang-guide-kbd-combo">
-      {parts.map((part, idx) => (
-        <span key={`${comboKey}-${part}`}>
-          <Kbd>{part}</Kbd>
-          {idx < parts.length - 1 && <span className="kbd-plus">+</span>}
-        </span>
-      ))}
-    </span>
-  );
+	return (
+		<span className="tang-guide-kbd-combo">
+			{parts.map((part, idx) => (
+				<span key={`${comboKey}-${part}`}>
+					<Kbd>{part}</Kbd>
+					{idx < parts.length - 1 && <span className="kbd-plus">+</span>}
+				</span>
+			))}
+		</span>
+	);
 }
 
 export function SettingsGuideOverlay({
-  opened,
-  onSkip,
-  onFinished,
-  onGoHome,
+	opened,
+	onSkip,
+	onFinished,
+	onGoHome,
 }: {
-  opened: boolean;
-  onSkip: () => void;
-  onFinished: () => void;
-  onGoHome: () => void;
+	opened: boolean;
+	onSkip: () => void;
+	onFinished: () => void;
+	onGoHome: () => void;
 }) {
-  const queryClient = useQueryClient();
+	const queryClient = useQueryClient();
 
-  const { data: settings } = useSettings();
-  const toggleHotkey = settings?.toggle_hotkey ?? null;
+	const { data: settings } = useSettings();
+	const toggleHotkey = settings?.toggle_hotkey ?? null;
 
-  const recommendedToggleKeyLabel =
-    typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
-      ? "Right Alt"
-      : "F3";
+	const recommendedToggleKeyLabel =
+		typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
+			? "Right Alt"
+			: "F3";
 
-  const welcomeTimersRef = useRef<number[]>([]);
+	const welcomeTimersRef = useRef<number[]>([]);
 
-  const [phase, setPhase] = useState<Phase>("welcome");
-  const [step, setStep] = useState<Step>("groq");
+	const [phase, setPhase] = useState<Phase>("welcome");
+	const [step, setStep] = useState<Step>("groq");
 
-  const [welcomeIconVisible, setWelcomeIconVisible] = useState(false);
-  const [welcomeTextVisible, setWelcomeTextVisible] = useState(false);
-  const [welcomeFadingOut, setWelcomeFadingOut] = useState(false);
-  const [welcomeContinueVisible, setWelcomeContinueVisible] = useState(false);
-  const [welcomeContinueSeen, setWelcomeContinueSeen] = useState(false);
+	const [welcomeIconVisible, setWelcomeIconVisible] = useState(false);
+	const [welcomeTextVisible, setWelcomeTextVisible] = useState(false);
+	const [welcomeFadingOut, setWelcomeFadingOut] = useState(false);
+	const [welcomeContinueVisible, setWelcomeContinueVisible] = useState(false);
+	const [welcomeContinueSeen, setWelcomeContinueSeen] = useState(false);
 
-  const [skipVisible, setSkipVisible] = useState(false);
+	const [skipVisible, setSkipVisible] = useState(false);
 
-  const { data: groqApiKeyValue } = useQuery({
-    queryKey: ["apiKeyValue", "groq_api_key"],
-    enabled: opened,
-    queryFn: () => tauriAPI.getApiKey("groq_api_key"),
-    staleTime: 0,
-  });
+	const { data: groqApiKeyValue } = useQuery({
+		queryKey: ["apiKeyValue", "groq_api_key"],
+		enabled: opened,
+		queryFn: () => tauriAPI.getApiKey("groq_api_key"),
+		staleTime: 0,
+	});
 
-  const [groqKeyValue, setGroqKeyValue] = useState("");
-  const [isSavingGroqKey, setIsSavingGroqKey] = useState(false);
+	const [groqKeyValue, setGroqKeyValue] = useState("");
+	const [isSavingGroqKey, setIsSavingGroqKey] = useState(false);
 
-  const trimmedGroqKeyValue = groqKeyValue.trim();
-  const savedGroqKeyValue = (groqApiKeyValue ?? "").trim();
-  const isGroqKeyUnchanged =
-    savedGroqKeyValue.length > 0 && trimmedGroqKeyValue === savedGroqKeyValue;
+	const trimmedGroqKeyValue = groqKeyValue.trim();
+	const savedGroqKeyValue = (groqApiKeyValue ?? "").trim();
+	const isGroqKeyUnchanged =
+		savedGroqKeyValue.length > 0 && trimmedGroqKeyValue === savedGroqKeyValue;
 
-  const hasHydratedGroqKeyRef = useRef(false);
+	const hasHydratedGroqKeyRef = useRef(false);
 
-  const [finishVisible, setFinishVisible] = useState(false);
-  const [finishSeen, setFinishSeen] = useState(false);
+	const [finishVisible, setFinishVisible] = useState(false);
+	const [finishSeen, setFinishSeen] = useState(false);
 
-  const [dictationText, setDictationText] = useState("");
-  const dictationInputRef = useRef<HTMLTextAreaElement | null>(null);
+	const [dictationText, setDictationText] = useState("");
+	const dictationInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const sampleText =
-    "I can dictate with my voice anywhere, and tune settings per app and website.";
+	const sampleText =
+		"I can dictate with my voice anywhere, and tune settings per app and website.";
 
-  const clearWelcomeTimers = () => {
-    for (const t of welcomeTimersRef.current) window.clearTimeout(t);
-    welcomeTimersRef.current = [];
-  };
+	const clearWelcomeTimers = () => {
+		for (const t of welcomeTimersRef.current) window.clearTimeout(t);
+		welcomeTimersRef.current = [];
+	};
 
-  const enterGuideAt = (nextStep: Step) => {
-    clearWelcomeTimers();
-    setPhase("guide");
-    setStep(nextStep);
-    setSkipVisible(true);
-  };
+	const enterGuideAt = (nextStep: Step) => {
+		clearWelcomeTimers();
+		setPhase("guide");
+		setStep(nextStep);
+		setSkipVisible(true);
+	};
 
-  const restartWelcomeSequence = () => {
-    clearWelcomeTimers();
+	const restartWelcomeSequence = () => {
+		clearWelcomeTimers();
 
-    // Always restart the intro from scratch.
-    setPhase("welcome");
-    setStep("groq");
-    setSkipVisible(false);
+		// Always restart the intro from scratch.
+		setPhase("welcome");
+		setStep("groq");
+		setSkipVisible(false);
 
-    setWelcomeIconVisible(false);
-    setWelcomeTextVisible(false);
-    setWelcomeFadingOut(false);
-    setWelcomeContinueVisible(welcomeContinueSeen);
+		setWelcomeIconVisible(false);
+		setWelcomeTextVisible(false);
+		setWelcomeFadingOut(false);
+		setWelcomeContinueVisible(welcomeContinueSeen);
 
-    const timers: Array<number> = [];
-    timers.push(window.setTimeout(() => setWelcomeIconVisible(true), 150));
-    timers.push(window.setTimeout(() => setWelcomeTextVisible(true), 650));
-    // Reveal the Continue button after the title/subtext have faded in,
-    // then held on-screen briefly.
-    if (!welcomeContinueSeen) {
-      timers.push(
-        window.setTimeout(() => {
-          setWelcomeContinueSeen(true);
-          setWelcomeContinueVisible(true);
-        }, 1465)
-      );
-    }
+		const timers: Array<number> = [];
+		timers.push(window.setTimeout(() => setWelcomeIconVisible(true), 150));
+		timers.push(window.setTimeout(() => setWelcomeTextVisible(true), 650));
+		// Reveal the Continue button after the title/subtext have faded in,
+		// then held on-screen briefly.
+		if (!welcomeContinueSeen) {
+			timers.push(
+				window.setTimeout(() => {
+					setWelcomeContinueSeen(true);
+					setWelcomeContinueVisible(true);
+				}, 1465),
+			);
+		}
 
-    welcomeTimersRef.current = timers;
-  };
+		welcomeTimersRef.current = timers;
+	};
 
-  useEffect(() => {
-    if (!opened) return;
+	useEffect(() => {
+		if (!opened) return;
 
-    // Ensure we show the latest shortcut when the guide opens, even though
-    // the settings query is cached with an infinite stale time.
-    queryClient.invalidateQueries({ queryKey: ["settings"] });
+		// Ensure we show the latest shortcut when the guide opens, even though
+		// the settings query is cached with an infinite stale time.
+		queryClient.invalidateQueries({ queryKey: ["settings"] });
 
-    // Reset guide state on open.
-    restartWelcomeSequence();
+		// Reset guide state on open.
+		restartWelcomeSequence();
 
-    setGroqKeyValue("");
-    hasHydratedGroqKeyRef.current = false;
+		setGroqKeyValue("");
+		hasHydratedGroqKeyRef.current = false;
 
-    setFinishVisible(false);
-    setFinishSeen(false);
-    setWelcomeContinueSeen(false);
-    setDictationText("");
-    return () => {
-      clearWelcomeTimers();
-    };
-  }, [opened]);
+		setFinishVisible(false);
+		setFinishSeen(false);
+		setWelcomeContinueSeen(false);
+		setDictationText("");
+		return () => {
+			clearWelcomeTimers();
+		};
+	}, [opened]);
 
-  useEffect(() => {
-    if (!opened) return;
-    if (hasHydratedGroqKeyRef.current) return;
-    if (!groqApiKeyValue) return;
+	useEffect(() => {
+		if (!opened) return;
+		if (hasHydratedGroqKeyRef.current) return;
+		if (!groqApiKeyValue) return;
 
-    // If a key already exists, show it in the PasswordInput (hidden by default).
-    setGroqKeyValue(groqApiKeyValue);
-    hasHydratedGroqKeyRef.current = true;
-  }, [opened, groqApiKeyValue]);
+		// If a key already exists, show it in the PasswordInput (hidden by default).
+		setGroqKeyValue(groqApiKeyValue);
+		hasHydratedGroqKeyRef.current = true;
+	}, [opened, groqApiKeyValue]);
 
-  useEffect(() => {
-    if (!opened) return;
+	useEffect(() => {
+		if (!opened) return;
 
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      // Escape exits the setup guide entirely.
-      onSkip();
-    };
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key !== "Escape") return;
+			e.preventDefault();
+			e.stopPropagation();
+			// Escape exits the setup guide entirely.
+			onSkip();
+		};
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [opened, onSkip]);
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [opened, onSkip]);
 
-  useEffect(() => {
-    if (!opened) return;
-    if (phase !== "guide") return;
-    if (step !== "dictation") return;
+	useEffect(() => {
+		if (!opened) return;
+		if (phase !== "guide") return;
+		if (step !== "dictation") return;
 
-    // Give the user a target to dictate into.
-    dictationInputRef.current?.focus();
-  }, [opened, phase, step]);
+		// Give the user a target to dictate into.
+		dictationInputRef.current?.focus();
+	}, [opened, phase, step]);
 
-  useEffect(() => {
-    if (!opened) return;
-    if (step !== "wrapup") {
-      setFinishVisible(false);
-      return;
-    }
+	useEffect(() => {
+		if (!opened) return;
+		if (step !== "wrapup") {
+			setFinishVisible(false);
+			return;
+		}
 
-    if (finishSeen) {
-      setFinishVisible(true);
-      return;
-    }
+		if (finishSeen) {
+			setFinishVisible(true);
+			return;
+		}
 
-    // Match the welcome slide timing: wait for content to be fully faded in (~280ms),
-    // then hold briefly before revealing the action.
-    const t = window.setTimeout(() => {
-      setFinishSeen(true);
-      setFinishVisible(true);
-    }, 1140);
-    return () => window.clearTimeout(t);
-  }, [opened, step, finishSeen]);
+		// Match the welcome slide timing: wait for content to be fully faded in (~280ms),
+		// then hold briefly before revealing the action.
+		const t = window.setTimeout(() => {
+			setFinishSeen(true);
+			setFinishVisible(true);
+		}, 1140);
+		return () => window.clearTimeout(t);
+	}, [opened, step, finishSeen]);
 
-  const nextStep = () => {
-    // Bottom-right action advances to the next page.
-    goForward();
-  };
+	const nextStep = () => {
+		// Bottom-right action advances to the next page.
+		goForward();
+	};
 
-  const navStep: NavStep = phase === "welcome" ? "welcome" : step;
-  const navIndex = NAV_STEPS.indexOf(navStep);
+	const navStep: NavStep = phase === "welcome" ? "welcome" : step;
+	const navIndex = NAV_STEPS.indexOf(navStep);
 
-  const canGoBack = navIndex > 0;
-  const canGoForward = (() => {
-    if (navIndex < 0) return false;
-    if (navIndex >= NAV_STEPS.length - 1) return false;
+	const canGoBack = navIndex > 0;
+	const canGoForward = (() => {
+		if (navIndex < 0) return false;
+		if (navIndex >= NAV_STEPS.length - 1) return false;
 
-    // From the welcome slide, always allow moving forward.
-    if (navStep === "welcome") return true;
+		// From the welcome slide, always allow moving forward.
+		if (navStep === "welcome") return true;
 
-    return true;
-  })();
+		return true;
+	})();
 
-  const goBack = () => {
-    if (!canGoBack) return;
+	const goBack = () => {
+		if (!canGoBack) return;
 
-    const next = NAV_STEPS[navIndex - 1];
-    if (!next) return;
+		const next = NAV_STEPS[navIndex - 1];
+		if (!next) return;
 
-    if (next === "welcome") {
-      restartWelcomeSequence();
-      return;
-    }
+		if (next === "welcome") {
+			restartWelcomeSequence();
+			return;
+		}
 
-    enterGuideAt(next);
-  };
+		enterGuideAt(next);
+	};
 
-  const goForward = () => {
-    if (!canGoForward) return;
+	const goForward = () => {
+		if (!canGoForward) return;
 
-    const next = NAV_STEPS[navIndex + 1];
-    if (!next) return;
+		const next = NAV_STEPS[navIndex + 1];
+		if (!next) return;
 
-    if (next === "welcome") {
-      restartWelcomeSequence();
-      return;
-    }
+		if (next === "welcome") {
+			restartWelcomeSequence();
+			return;
+		}
 
-    enterGuideAt(next);
-  };
+		enterGuideAt(next);
+	};
 
-  const handleSaveGroqKey = async () => {
-    const trimmed = groqKeyValue.trim();
-    if (!trimmed) return;
+	const handleSaveGroqKey = async () => {
+		const trimmed = groqKeyValue.trim();
+		if (!trimmed) return;
 
-    setIsSavingGroqKey(true);
-    try {
-      await tauriAPI.setApiKey("groq_api_key", trimmed);
-      await configAPI.syncPipelineConfig();
-      await queryClient.invalidateQueries({
-        queryKey: ["apiKey", "groq_api_key"],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["apiKeyValue", "groq_api_key"],
-      });
-      await queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
+		setIsSavingGroqKey(true);
+		try {
+			await tauriAPI.setApiKey("groq_api_key", trimmed);
+			await configAPI.syncPipelineConfig();
+			await queryClient.invalidateQueries({
+				queryKey: ["apiKey", "groq_api_key"],
+			});
+			await queryClient.invalidateQueries({
+				queryKey: ["apiKeyValue", "groq_api_key"],
+			});
+			await queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
 
-      // Keep the value in-state so if the user navigates back in this same
-      // guide session, the field stays prefilled.
-      setGroqKeyValue(trimmed);
-      hasHydratedGroqKeyRef.current = true;
-      setStep("dictation");
-    } catch (err) {
-      console.error("Failed to save Groq key", err);
-    } finally {
-      setIsSavingGroqKey(false);
-    }
-  };
+			// Keep the value in-state so if the user navigates back in this same
+			// guide session, the field stays prefilled.
+			setGroqKeyValue(trimmed);
+			hasHydratedGroqKeyRef.current = true;
+			setStep("dictation");
+		} catch (err) {
+			console.error("Failed to save Groq key", err);
+		} finally {
+			setIsSavingGroqKey(false);
+		}
+	};
 
-  if (!opened) return null;
+	if (!opened) return null;
 
-  return (
-    <div className="tang-guide-overlay" role="dialog" aria-modal="true">
-      {phase === "welcome" && (
-        <div
-          className={
-            "tang-guide-welcome" +
-            (welcomeFadingOut ? " tang-guide-welcome--fade-out" : "")
-          }
-        >
-          <div className="tang-guide-welcome-center">
-            <div
-              className={
-                "tang-guide-welcome-logo" +
-                (welcomeIconVisible
-                  ? " tang-guide-fade-in tang-guide-fade-in-slow"
-                  : "")
-              }
-            >
-              <Logo size={140} />
-            </div>
-            <div
-              className={
-                "tang-guide-welcome-text" +
-                (welcomeTextVisible
-                  ? " tang-guide-fade-in tang-guide-fade-in-slow"
-                  : "")
-              }
-            >
-              <Title order={2} style={{ marginTop: 18 }}>
-                Welcome to Kolboo
-              </Title>
-              <Text c="dimmed" size="sm" style={{ marginTop: 6 }}>
-                Let’s get your voice dictation set up.
-              </Text>
-            </div>
-          </div>
+	return (
+		<div className="tang-guide-overlay" role="dialog" aria-modal="true">
+			{phase === "welcome" && (
+				<div
+					className={
+						"tang-guide-welcome" +
+						(welcomeFadingOut ? " tang-guide-welcome--fade-out" : "")
+					}
+				>
+					<div className="tang-guide-welcome-center">
+						<div
+							className={
+								"tang-guide-welcome-logo" +
+								(welcomeIconVisible
+									? " tang-guide-fade-in tang-guide-fade-in-slow"
+									: "")
+							}
+						>
+							<Logo size={140} />
+						</div>
+						<div
+							className={
+								"tang-guide-welcome-text" +
+								(welcomeTextVisible
+									? " tang-guide-fade-in tang-guide-fade-in-slow"
+									: "")
+							}
+						>
+							<Title order={2} style={{ marginTop: 18 }}>
+								Welcome to Kolboo
+							</Title>
+							<Text c="dimmed" size="sm" style={{ marginTop: 6 }}>
+								Let’s get your voice dictation set up.
+							</Text>
+						</div>
+					</div>
 
-          <button
-            type="button"
-            className={
-              "tang-guide-continue" +
-              (welcomeContinueVisible || welcomeContinueSeen
-                ? " tang-guide-fade-in"
-                : "")
-            }
-            onClick={() => enterGuideAt("groq")}
-          >
-            <span>Start</span>
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      )}
+					<button
+						type="button"
+						className={
+							"tang-guide-continue" +
+							(welcomeContinueVisible || welcomeContinueSeen
+								? " tang-guide-fade-in"
+								: "")
+						}
+						onClick={() => enterGuideAt("groq")}
+					>
+						<span>Start</span>
+						<ChevronRight size={16} />
+					</button>
+				</div>
+			)}
 
-      {phase === "guide" && (
-        <>
-          {skipVisible && navIndex < NAV_STEPS.length - 1 && (
-            <button
-              type="button"
-              className="tang-guide-skip tang-guide-fade-in"
-              onClick={nextStep}
-            >
-              <span>Next</span>
-              <ChevronRight size={16} />
-            </button>
-          )}
+			{phase === "guide" && (
+				<>
+					{skipVisible && navIndex < NAV_STEPS.length - 1 && (
+						<button
+							type="button"
+							className="tang-guide-skip tang-guide-fade-in"
+							onClick={nextStep}
+						>
+							<span>Next</span>
+							<ChevronRight size={16} />
+						</button>
+					)}
 
-          {canGoBack && (
-            <button
-              type="button"
-              className="tang-guide-back tang-guide-fade-in"
-              onClick={goBack}
-            >
-              <ChevronLeft size={16} />
-              <span>Back</span>
-            </button>
-          )}
+					{canGoBack && (
+						<button
+							type="button"
+							className="tang-guide-back tang-guide-fade-in"
+							onClick={goBack}
+						>
+							<ChevronLeft size={16} />
+							<span>Back</span>
+						</button>
+					)}
 
-          <div className="tang-guide-content tang-guide-fade-in">
-            {step === "groq" && (
-              <div className="tang-guide-step">
-                <Title order={3}>Create a Groq API key</Title>
-                <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
-                  Groq provides free voice dictation (Whisper) and fast LLM
-                  rewriting. Create an API key here:{" "}
-                  <Anchor
-                    href="https://console.groq.com/keys"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    https://console.groq.com/keys
-                  </Anchor>
-                </Text>
+					<div className="tang-guide-content tang-guide-fade-in">
+						{step === "groq" && (
+							<div className="tang-guide-step">
+								<Title order={3}>Create a Groq API key</Title>
+								<Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
+									Groq provides free voice dictation (Whisper) and fast LLM
+									rewriting. Create an API key here:{" "}
+									<Anchor
+										href="https://console.groq.com/keys"
+										target="_blank"
+										rel="noreferrer"
+									>
+										https://console.groq.com/keys
+									</Anchor>
+								</Text>
 
-                <div style={{ marginTop: 18 }}>
-                  <div style={{ marginTop: 12 }}>
-                    <PasswordInput
-                      value={groqKeyValue}
-                      onChange={(e) => setGroqKeyValue(e.currentTarget.value)}
-                      placeholder="Paste your Groq API key"
-                      autoFocus
-                      styles={{
-                        input: {
-                          backgroundColor: "var(--bg-elevated)",
-                          borderColor: "var(--border-default)",
-                          color: "var(--text-primary)",
-                        },
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleSaveGroqKey();
-                      }}
-                    />
-                    <Group justify="flex-end" mt="sm">
-                      <Button
-                        color="orange"
-                        onClick={handleSaveGroqKey}
-                        loading={isSavingGroqKey}
-                        disabled={
-                          !trimmedGroqKeyValue ||
-                          isSavingGroqKey ||
-                          isGroqKeyUnchanged
-                        }
-                      >
-                        Set key
-                      </Button>
-                    </Group>
-                  </div>
-                </div>
-              </div>
-            )}
+								<div style={{ marginTop: 18 }}>
+									<div style={{ marginTop: 12 }}>
+										<PasswordInput
+											value={groqKeyValue}
+											onChange={(e) => setGroqKeyValue(e.currentTarget.value)}
+											placeholder="Paste your Groq API key"
+											autoFocus
+											styles={{
+												input: {
+													backgroundColor: "var(--bg-elevated)",
+													borderColor: "var(--border-default)",
+													color: "var(--text-primary)",
+												},
+											}}
+											onKeyDown={(e) => {
+												if (e.key === "Enter") handleSaveGroqKey();
+											}}
+										/>
+										<Group justify="flex-end" mt="sm">
+											<Button
+												color="orange"
+												onClick={handleSaveGroqKey}
+												loading={isSavingGroqKey}
+												disabled={
+													!trimmedGroqKeyValue ||
+													isSavingGroqKey ||
+													isGroqKeyUnchanged
+												}
+											>
+												Set key
+											</Button>
+										</Group>
+									</div>
+								</div>
+							</div>
+						)}
 
-            {step === "dictation" && (
-              <div className="tang-guide-step">
-                <Title order={3}>Voice dictation test</Title>
-                <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
-                  {!settings ? (
-                    <>Loading your shortcut…</>
-                  ) : toggleHotkey ? (
-                    <>
-                      Use your toggle recording shortcut{" "}
-                      <HotkeyCombo config={toggleHotkey} />. Press once to start
-                      recording, then press again to stop.
-                    </>
-                  ) : (
-                    <>
-                      Your toggle recording shortcut is{" "}
-                      <HotkeyCombo config={null} />. Set one in Settings →
-                      Hotkeys (recommended: <Kbd>{recommendedToggleKeyLabel}</Kbd>),
-                      then press it once
-                      to start recording and again to stop.
-                    </>
-                  )}
-                </Text>
+						{step === "dictation" && (
+							<div className="tang-guide-step">
+								<Title order={3}>Voice dictation test</Title>
+								<Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
+									{!settings ? (
+										<>Loading your shortcut…</>
+									) : toggleHotkey ? (
+										<>
+											Use your toggle recording shortcut{" "}
+											<HotkeyCombo config={toggleHotkey} />. Press once to start
+											recording, then press again to stop.
+										</>
+									) : (
+										<>
+											Your toggle recording shortcut is{" "}
+											<HotkeyCombo config={null} />. Set one in Settings →
+											Hotkeys (recommended:{" "}
+											<Kbd>{recommendedToggleKeyLabel}</Kbd>), then press it
+											once to start recording and again to stop.
+										</>
+									)}
+								</Text>
 
-                <div className="tang-guide-copy" style={{ marginTop: 14 }}>
-                  <Text size="sm" style={{ marginBottom: 6, opacity: 0.9 }}>
-                    Say something like:
-                  </Text>
-                  <div className="tang-guide-copy-box">
-                    <Text size="sm">{sampleText}</Text>
-                  </div>
-                </div>
+								<div className="tang-guide-copy" style={{ marginTop: 14 }}>
+									<Text size="sm" style={{ marginBottom: 6, opacity: 0.9 }}>
+										Say something like:
+									</Text>
+									<div className="tang-guide-copy-box">
+										<Text size="sm">{sampleText}</Text>
+									</div>
+								</div>
 
-                <div style={{ marginTop: 14 }}>
-                  <Textarea
-                    ref={dictationInputRef}
-                    value={dictationText}
-                    onChange={(e) => setDictationText(e.currentTarget.value)}
-                    placeholder="Dictate here…"
-                    minRows={4}
-                    autosize
-                    styles={{
-                      input: {
-                        backgroundColor: "var(--bg-elevated)",
-                        borderColor: "var(--border-default)",
-                        color: "var(--text-primary)",
-                      },
-                    }}
-                  />
-                </div>
-              </div>
-            )}
+								<div style={{ marginTop: 14 }}>
+									<Textarea
+										ref={dictationInputRef}
+										value={dictationText}
+										onChange={(e) => setDictationText(e.currentTarget.value)}
+										placeholder="Dictate here…"
+										minRows={4}
+										autosize
+										styles={{
+											input: {
+												backgroundColor: "var(--bg-elevated)",
+												borderColor: "var(--border-default)",
+												color: "var(--text-primary)",
+											},
+										}}
+									/>
+								</div>
+							</div>
+						)}
 
-            {step === "wrapup" && (
-              <div className="tang-guide-step">
-                <Title order={3}>You’re good to go</Title>
-                <Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
-                  Next, explore Settings to add AI providers, add an LLM rewrite
-                  step with custom prompts, change settings per program, adjust
-                  the accent color, and more.
-                </Text>
-              </div>
-            )}
-          </div>
+						{step === "wrapup" && (
+							<div className="tang-guide-step">
+								<Title order={3}>You’re good to go</Title>
+								<Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
+									Next, explore Settings to add AI providers, add an LLM rewrite
+									step with custom prompts, change settings per program, adjust
+									the accent color, and more.
+								</Text>
+							</div>
+						)}
+					</div>
 
-          {step === "wrapup" && (
-            <button
-              type="button"
-              className={
-                "tang-guide-finish" +
-                (finishSeen || finishVisible ? " tang-guide-fade-in" : "")
-              }
-              onClick={() => {
-                onFinished();
-                onGoHome();
-              }}
-              disabled={!finishSeen && !finishVisible}
-            >
-              Finish
-            </button>
-          )}
-        </>
-      )}
-    </div>
-  );
+					{step === "wrapup" && (
+						<button
+							type="button"
+							className={
+								"tang-guide-finish" +
+								(finishSeen || finishVisible ? " tang-guide-fade-in" : "")
+							}
+							onClick={() => {
+								onFinished();
+								onGoHome();
+							}}
+							disabled={!finishSeen && !finishVisible}
+						>
+							Finish
+						</button>
+					)}
+				</>
+			)}
+		</div>
+	);
 }

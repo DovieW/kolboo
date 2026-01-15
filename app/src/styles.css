@@ -3,7 +3,7 @@
 		Heading font (easy to tweak).
 		Try: 'Space Grotesk' | 'Manrope' | 'IBM Plex Sans' | 'Inter'
 	*/
-	--tv-font-heading: 'Outfit';
+	--tv-font-heading: "Outfit";
 
 	--bg-primary: #000000;
 	--bg-sidebar: #0a0a0a;
@@ -42,16 +42,16 @@
 	We attach stable classNames in theme.ts (tv-switch-*) and override the
 	variables here with higher specificity than Mantine's built-in dark-scheme rules.
 */
-[data-mantine-color-scheme='dark'] .tv-switch-track {
+[data-mantine-color-scheme="dark"] .tv-switch-track {
 	--switch-bg: var(--toggle-track-off-bg);
 	--switch-color: var(--toggle-track-on-bg);
-	--switch-disabled-color: rgba(255, 255, 255, 0.10);
+	--switch-disabled-color: rgba(255, 255, 255, 0.1);
 
 	/* Optional: add a tiny border feel to improve readability */
 	box-shadow: inset 0 0 0 1px var(--toggle-track-off-border);
 }
 
-[data-mantine-color-scheme='dark'] .tv-switch-input:checked + .tv-switch-track {
+[data-mantine-color-scheme="dark"] .tv-switch-input:checked + .tv-switch-track {
 	box-shadow: inset 0 0 0 1px var(--toggle-track-on-border);
 }
 
@@ -86,7 +86,7 @@ body {
 	Title text gets a tiny crisp shadow in dark mode for readability.
 	(Headings font is configured in theme.ts.)
 */
-[data-mantine-color-scheme='dark'] .mantine-Title-root {
+[data-mantine-color-scheme="dark"] .mantine-Title-root {
 	font-synthesis: none;
 	text-shadow:
 		0.35px 0 0 rgba(255, 255, 255, 0.28),
@@ -112,15 +112,16 @@ a:focus-visible {
 }
 
 /* Global focus-visible: keep it consistent and keyboard-friendly */
-[data-mantine-color-scheme='dark'] :where(
-	.mantine-Button-root,
-	.mantine-ActionIcon-root,
-	.mantine-TextInput-input,
-	.mantine-Textarea-input,
-	.mantine-Select-input,
-	.mantine-NumberInput-input,
-	.mantine-PasswordInput-input
-):focus-visible {
+[data-mantine-color-scheme="dark"]
+	:where(
+		.mantine-Button-root,
+		.mantine-ActionIcon-root,
+		.mantine-TextInput-input,
+		.mantine-Textarea-input,
+		.mantine-Select-input,
+		.mantine-NumberInput-input,
+		.mantine-PasswordInput-input
+	):focus-visible {
 	outline: 2px solid var(--accent-glow);
 	outline-offset: 2px;
 }
@@ -198,7 +199,7 @@ a:focus-visible {
 }
 
 .sidebar-nav-link[data-active] {
-	background-color: rgba(var(--accent-rgb) / 0.10);
+	background-color: rgba(var(--accent-rgb) / 0.1);
 	color: var(--accent-primary);
 	box-shadow: 0 0 0 2px var(--accent-glow);
 }
@@ -287,7 +288,10 @@ a:focus-visible {
 	backdrop-filter: blur(10px);
 }
 
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+@supports not (
+		(backdrop-filter: blur(1px)) or
+		(-webkit-backdrop-filter: blur(1px))
+	) {
 	.main-content .tv-page-header {
 		background: var(--bg-primary);
 	}
@@ -338,7 +342,8 @@ a:focus-visible {
 .instructions-card-title {
 	/* DM Serif Display looks great for big headlines, but gets finicky at ~18px.
 	   Use the UI font here for a cleaner, more "designed" look. */
-	font-family: var(--tv-font-heading), "Sora", -apple-system, BlinkMacSystemFont,
+	font-family:
+		var(--tv-font-heading), "Sora", -apple-system, BlinkMacSystemFont,
 		"Segoe UI", sans-serif;
 	font-size: 17px;
 	font-weight: 600;
@@ -492,7 +497,6 @@ a:focus-visible {
 	transition: all 0.2s ease;
 	cursor: pointer;
 
-
 	border: 1px solid transparent;
 }
 
@@ -508,7 +512,6 @@ a:focus-visible {
 .history-copy-icon--checked {
 	transform: scale(1.08);
 }
-
 
 .history-item:hover {
 	background: var(--bg-card-hover);
@@ -652,12 +655,14 @@ a:focus-visible {
 }
 
 /* Combobox/Select option hover: faint accent tint */
-[data-mantine-color-scheme='dark'] .mantine-Combobox-option[data-hovered] {
+[data-mantine-color-scheme="dark"] .mantine-Combobox-option[data-hovered] {
 	background-color: rgba(var(--accent-rgb) / 0.08);
 }
 
 /* ActionIcon hover cue (kept subtle; only in main content area) */
-[data-mantine-color-scheme='dark'] .main-content :where(button.mantine-ActionIcon-root):hover:not(:disabled) {
+[data-mantine-color-scheme="dark"]
+	.main-content
+	:where(button.mantine-ActionIcon-root):hover:not(:disabled) {
 	box-shadow: 0 0 0 2px rgba(var(--accent-rgb) / 0.12);
 }
 
@@ -670,21 +675,22 @@ a:focus-visible {
 
 .hotkey-display.capturing .mantine-Kbd-root {
 	border-color: rgba(var(--accent-rgb) / 0.35);
-	box-shadow: 0 0 0 2px rgba(var(--accent-rgb) / 0.10);
+	box-shadow: 0 0 0 2px rgba(var(--accent-rgb) / 0.1);
 }
 
 /* Logs: subtle in-progress stripe */
-[data-mantine-color-scheme='dark'] .mantine-Accordion-item[data-status='in_progress'] {
+[data-mantine-color-scheme="dark"]
+	.mantine-Accordion-item[data-status="in_progress"] {
 	box-shadow: inset 3px 0 0 rgba(var(--accent-rgb) / 0.75);
 }
-
 
 .settings-section {
 	margin-bottom: 32px;
 }
 
 .settings-section-title {
-	font-family: var(--tv-font-heading), "Sora", -apple-system, BlinkMacSystemFont,
+	font-family:
+		var(--tv-font-heading), "Sora", -apple-system, BlinkMacSystemFont,
 		"Segoe UI", sans-serif;
 	font-size: 14px;
 	font-weight: 600;
@@ -980,7 +986,7 @@ a:focus-visible {
 	inset: 0;
 	background: linear-gradient(
 		to bottom,
-		rgba(255, 255, 255, 0.10),
+		rgba(255, 255, 255, 0.1),
 		rgba(255, 255, 255, 0.02) 40%,
 		rgba(0, 0, 0, 0.18)
 	);
@@ -1028,11 +1034,11 @@ a:focus-visible {
 }
 
 /* Sliders: orange bar + thumb accents */
-[data-mantine-color-scheme='dark'] .mantine-Slider-bar {
+[data-mantine-color-scheme="dark"] .mantine-Slider-bar {
 	background: var(--accent-primary);
 }
 
-[data-mantine-color-scheme='dark'] .mantine-Slider-thumb {
+[data-mantine-color-scheme="dark"] .mantine-Slider-thumb {
 	border-color: rgba(var(--accent-rgb) / 0.65);
 	background: var(--bg-elevated);
 	box-shadow:
@@ -1041,27 +1047,29 @@ a:focus-visible {
 }
 
 /* Checkboxes + Radios: orange when checked */
-[data-mantine-color-scheme='dark'] .mantine-Checkbox-input:checked {
+[data-mantine-color-scheme="dark"] .mantine-Checkbox-input:checked {
 	background-color: var(--accent-primary);
 	border-color: var(--accent-primary);
 }
 
-[data-mantine-color-scheme='dark'] .mantine-Checkbox-input:checked + .mantine-Checkbox-icon {
+[data-mantine-color-scheme="dark"]
+	.mantine-Checkbox-input:checked
+	+ .mantine-Checkbox-icon {
 	color: #000;
 }
 
-[data-mantine-color-scheme='dark'] .mantine-Radio-radio:checked {
+[data-mantine-color-scheme="dark"] .mantine-Radio-radio:checked {
 	background-color: var(--accent-primary);
 	border-color: var(--accent-primary);
 }
 
 /* Toasts / Notifications: left accent bar (keeps severity colors intact) */
-[data-mantine-color-scheme='dark'] .mantine-Notification-root {
+[data-mantine-color-scheme="dark"] .mantine-Notification-root {
 	position: relative;
 	overflow: hidden;
 }
 
-[data-mantine-color-scheme='dark'] .mantine-Notification-root::before {
+[data-mantine-color-scheme="dark"] .mantine-Notification-root::before {
 	content: "";
 	position: absolute;
 	left: 0;
@@ -1073,15 +1081,18 @@ a:focus-visible {
 }
 
 /* Respect explicit notification colors when present */
-[data-mantine-color-scheme='dark'] .mantine-Notification-root[data-color='red']::before {
+[data-mantine-color-scheme="dark"]
+	.mantine-Notification-root[data-color="red"]::before {
 	background: rgba(239, 68, 68, 1);
 }
 
-[data-mantine-color-scheme='dark'] .mantine-Notification-root[data-color='yellow']::before {
+[data-mantine-color-scheme="dark"]
+	.mantine-Notification-root[data-color="yellow"]::before {
 	background: rgba(234, 179, 8, 1);
 }
 
-[data-mantine-color-scheme='dark'] .mantine-Notification-root[data-color='green']::before {
+[data-mantine-color-scheme="dark"]
+	.mantine-Notification-root[data-color="green"]::before {
 	background: rgba(34, 197, 94, 1);
 }
 
@@ -1243,7 +1254,6 @@ a:focus-visible {
 	transform: translateY(-1px);
 }
 
-
 .tang-guide-content {
 	width: min(820px, 100%);
 	display: flex;
@@ -1309,7 +1319,6 @@ a:focus-visible {
 	opacity: 0.35;
 	cursor: not-allowed;
 }
-
 
 .tang-guide-copy-box {
 	background: rgba(255, 255, 255, 0.03);

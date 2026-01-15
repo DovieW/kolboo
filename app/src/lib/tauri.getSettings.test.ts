@@ -92,8 +92,8 @@ describe("tauriAPI.getSettings() normalization", () => {
 				(c) =>
 					c.key === "cleanup_prompt_sections" &&
 					JSON.stringify(c.value) ===
-						JSON.stringify({ system: { content: "Hello legacy prompt" } })
-			)
+						JSON.stringify({ system: { content: "Hello legacy prompt" } }),
+			),
 		).toBe(true);
 		expect(currentStore.saveCalls).toBeGreaterThan(0);
 	});
@@ -112,8 +112,8 @@ describe("tauriAPI.getSettings() normalization", () => {
 		expect(settings.accent_color).toBe(DEFAULT_ACCENT_HEX);
 		expect(
 			currentStore.setCalls.some(
-				(c) => c.key === "accent_color" && c.value === DEFAULT_ACCENT_HEX
-			)
+				(c) => c.key === "accent_color" && c.value === DEFAULT_ACCENT_HEX,
+			),
 		).toBe(true);
 		expect(currentStore.saveCalls).toBeGreaterThan(0);
 	});
@@ -215,8 +215,8 @@ describe("tauriAPI.getSettings() normalization", () => {
 				(c) =>
 					c.key === "cleanup_prompt_sections" &&
 					JSON.stringify(c.value) ===
-						JSON.stringify({ system: { content: null } })
-			)
+						JSON.stringify({ system: { content: null } }),
+			),
 		).toBe(true);
 		expect(currentStore.saveCalls).toBeGreaterThan(0);
 	});

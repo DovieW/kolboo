@@ -11,7 +11,7 @@ describe("formatErrorMessage", () => {
 		["number", 123, "123"],
 		["boolean", true, "true"],
 		["bigint", 123n, "123"],
-		["plain object", { status: 500 }, "{\"status\":500}"],
+		["plain object", { status: 500 }, '{"status":500}'],
 	])("formats %s", (_label, input, expected) => {
 		expect(formatErrorMessage(input)).toBe(expected);
 	});
@@ -40,7 +40,7 @@ describe("formatErrorMessage", () => {
 	it("stringifies objects, including circular references", () => {
 		const obj: { self?: unknown } = {};
 		obj.self = obj;
-		expect(formatErrorMessage(obj)).toBe("{\"self\":\"[Circular]\"}");
+		expect(formatErrorMessage(obj)).toBe('{"self":"[Circular]"}');
 	});
 
 	it("avoids stringifying objects with sensitive keys", () => {
