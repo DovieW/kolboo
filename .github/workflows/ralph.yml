@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Ticket filename (resolved under .ralph/projects/add_tests/tickets) OR a tickets folder path"
+        description: "Ticket file or folder. Preferred forms: .ralph/projects/<project>/tickets OR .ralph/projects/<project>/tickets/<ticket>.md. Shorthand also works: <project>/tickets OR <project>/<ticket>.md"
         required: true
 
 jobs:
