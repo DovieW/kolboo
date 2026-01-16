@@ -5,9 +5,9 @@
 //! when you have `GROQ_API_KEY`, `OPENAI_API_KEY`, or `DEEPGRAM_API_KEY` set.
 
 use crate::stt::{
-    AquavoiceSttProvider, AudioEncoding, AudioFormat, DeepgramSttProvider, ElevenLabsSttProvider,
-    FireworksSttProvider, GroqSttProvider, OpenAiSttProvider, SpeechmaticsSttProvider, SttError,
-    SttProvider, WhisperServerSttProvider,
+    AquavoiceSttProvider, AssemblyAiSttProvider, AudioEncoding, AudioFormat, DeepgramSttProvider,
+    ElevenLabsSttProvider, FireworksSttProvider, GroqSttProvider, OpenAiSttProvider,
+    SpeechmaticsSttProvider, SttError, SttProvider, WhisperServerSttProvider,
 };
 
 use serde_json::json;
@@ -260,6 +260,126 @@ async fn test_deepgram_non_success_is_surface_as_api_error() {
     match err {
         SttError::Api(msg) => {
             assert!(msg.contains("503"), "expected status in message: {msg}");
+            assert!(msg.contains("nope"), "expected body in message: {msg}");
+        }
+        other => panic!("expected SttError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_assemblyai_transcribe_sends_expected_requests() {
+    let mock_server = MockServer::start().await;
+    let upload_url = format!("{}/upload/abc", mock_server.uri());
+
+    let upload_guard = Mock::given(method("POST"))
+        .and(path("/v2/upload"))
+        .and(header("authorization", "test_key"))
+        .and(header("content-type", "application/octet-stream"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "upload_url": upload_url
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let submit_guard = Mock::given(method("POST"))
+        .and(path("/v2/transcript"))
+        .and(header("authorization", "test_key"))
+        .and(header("content-type", "application/json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "transcript_123"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let get_guard = Mock::given(method("GET"))
+        .and(path("/v2/transcript/transcript_123"))
+        .and(header("authorization", "test_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed",
+            "text": "hello assemblyai"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider =
+        AssemblyAiSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello assemblyai");
+
+    let upload_received = upload_guard.received_requests().await;
+    assert_eq!(upload_received.len(), 1);
+
+    let upload_req = &upload_received[0];
+    let content_type = upload_req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(content_type, "application/octet-stream");
+    assert_eq!(upload_req.body.len(), wav_data.len());
+
+    let submit_received = submit_guard.received_requests().await;
+    assert_eq!(submit_received.len(), 1);
+
+    let submit_body: serde_json::Value =
+        serde_json::from_slice(&submit_received[0].body).expect("valid JSON body");
+    assert_eq!(
+        submit_body["audio_url"].as_str(),
+        Some(format!("{}/upload/abc", mock_server.uri()).as_str())
+    );
+    assert_eq!(
+        submit_body["speech_models"].get(0).and_then(|v| v.as_str()),
+        Some("universal")
+    );
+    assert_eq!(submit_body["punctuate"].as_bool(), Some(true));
+    assert_eq!(submit_body["format_text"].as_bool(), Some(true));
+
+    let get_received = get_guard.received_requests().await;
+    assert_eq!(get_received.len(), 1);
+}
+
+#[tokio::test]
+async fn test_assemblyai_upload_non_success_is_surface_as_api_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/upload"))
+        .respond_with(ResponseTemplate::new(502).set_body_string("nope"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider =
+        AssemblyAiSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let err = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect_err("expected error");
+
+    match err {
+        SttError::Api(msg) => {
+            assert!(msg.contains("502"), "expected status in message: {msg}");
             assert!(msg.contains("nope"), "expected body in message: {msg}");
         }
         other => panic!("expected SttError::Api, got: {other:?}"),
