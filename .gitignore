@@ -55,12 +55,6 @@ cdb-*.txt
 .ralph/**/state/**
 .ralph/**/done-tickets.txt
 
-# Ralph tickets:
-# - Keep committed history under tickets/done/
-# - Treat in-flight tickets in tickets/ as local working artifacts by default
-.ralph/**/tickets/*.md
-!.ralph/**/tickets/done/*.md
-
 # Generated release notes (local)
 RELEASE_NOTES.md
 
