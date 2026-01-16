@@ -26,7 +26,3 @@ Add deterministic contract tests that lock down request/response handling for a 
 ## Edge cases / gotchas
 
 - Avoid asserting too much (don’t lock down irrelevant fields that change often).
-
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`

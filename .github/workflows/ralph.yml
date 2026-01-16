@@ -121,8 +121,10 @@ jobs:
             Write-Host "Created PR: $url" -ForegroundColor Green
           }
 
+          # Robustly resolve PR number from the head branch.
+          # (In some cases `gh pr view` can fail to resolve from the working dir/branch.)
           try {
-            $number = (gh pr view -R $repo --json number --jq ".number" 2>$null)
+            $number = (gh pr list -R $repo --head $branch --json number --jq ".[0].number" 2>$null)
             if ($LASTEXITCODE -ne 0) {
               $number = ""
               $global:LASTEXITCODE = 0
@@ -135,7 +137,8 @@ jobs:
             "number=$number" >> $env:GITHUB_OUTPUT
             "created=true" >> $env:GITHUB_OUTPUT
           } else {
-            "created=false" >> $env:GITHUB_OUTPUT
+            Write-Warning "PR was created but PR number could not be resolved for head '$branch'."
+            "created=true" >> $env:GITHUB_OUTPUT
           }
 
       - name: Run Ralph (project tickets)
@@ -180,7 +183,7 @@ jobs:
           path: .ralph/projects/${{ inputs.ralph_project }}/state
 
       - name: Comment PR with artifact download link
-        if: always() && steps.pr.outputs.number != ''
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
         shell: pwsh
@@ -189,9 +192,27 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           $repo = "${{ github.repository }}"
+          $branch = "${{ steps.branch.outputs.branch }}"
           $prNumber = "${{ steps.pr.outputs.number }}"
           $artifactUrl = "${{ steps.upload_state.outputs.artifact-url }}"
           $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if (-not $prNumber) {
+            try {
+              $prNumber = (gh pr list -R $repo --head $branch --json number --jq ".[0].number" 2>$null)
+              if ($LASTEXITCODE -ne 0) {
+                $prNumber = ""
+                $global:LASTEXITCODE = 0
+              }
+            } catch {
+              $prNumber = ""
+            }
+          }
+
+          if (-not $prNumber) {
+            Write-Host "No PR found for head '$branch'; skipping PR comment." -ForegroundColor DarkGray
+            exit 0
+          }
 
           if (-not $artifactUrl) {
             $artifactUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts"

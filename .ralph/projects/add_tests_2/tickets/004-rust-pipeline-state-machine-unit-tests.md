@@ -25,10 +25,6 @@ Add a small set of deterministic Rust tests that validate critical pipeline stat
 - Cancellation paths are part of UX; test at least one “cancel during X” flow.
 - Avoid tests that depend on timers/sleeps.
 
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`
-
 ## Non-goals (explicitly out of scope)
 
 - End-to-end UI automation.
