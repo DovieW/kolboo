@@ -143,6 +143,7 @@ jobs:
         with:
           ralph_project: ${{ inputs.ralph_project }}
           gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
+          auto_push: "true"
 
       - name: Push branch (post-Ralph)
         id: push
