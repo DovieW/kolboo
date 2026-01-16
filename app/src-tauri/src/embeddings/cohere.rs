@@ -52,6 +52,25 @@ pub async fn embed_texts(
     input_type: &str,
     inputs: &[String],
 ) -> Result<Vec<Vec<f32>>, CohereEmbeddingsError> {
+    embed_texts_with_url(
+        client,
+        api_key,
+        model,
+        input_type,
+        inputs,
+        COHERE_EMBEDDINGS_URL,
+    )
+    .await
+}
+
+pub(crate) async fn embed_texts_with_url(
+    client: &Client,
+    api_key: &str,
+    model: &str,
+    input_type: &str,
+    inputs: &[String],
+    url: &str,
+) -> Result<Vec<Vec<f32>>, CohereEmbeddingsError> {
     if inputs.is_empty() {
         return Ok(vec![]);
     }
@@ -60,7 +79,7 @@ pub async fn embed_texts(
 
     for attempt in 0..=COHERE_MAX_RETRIES {
         let resp = client
-            .post(COHERE_EMBEDDINGS_URL)
+            .post(url)
             .bearer_auth(api_key)
             .json(&serde_json::json!({
                 "model": model,

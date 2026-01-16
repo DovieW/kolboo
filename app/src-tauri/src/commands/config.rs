@@ -472,7 +472,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
     let base_prompts: crate::llm::PromptSections = cleanup_prompt_sections
         .as_ref()
         .map(|o| o.apply_to(&crate::llm::PromptSections::default()))
-        .unwrap_or_else(crate::llm::PromptSections::default);
+        .unwrap_or_default();
 
     let rewrite_program_prompt_profiles: Vec<crate::settings::RewriteProgramPromptProfile> = app
         .store("settings.json")

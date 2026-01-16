@@ -56,10 +56,9 @@ pub fn read_clipboard_text_best_effort(_max_chars: usize) -> Option<String> {
 /// Async wrapper for `read_clipboard_text_best_effort` that avoids blocking the async runtime.
 #[cfg(desktop)]
 pub async fn read_clipboard_text_best_effort_async(max_chars: usize) -> Option<String> {
-    match tokio::task::spawn_blocking(move || read_clipboard_text_best_effort(max_chars)).await {
-        Ok(v) => v,
-        Err(_) => None,
-    }
+    tokio::task::spawn_blocking(move || read_clipboard_text_best_effort(max_chars))
+        .await
+        .unwrap_or_default()
 }
 
 #[cfg(not(desktop))]

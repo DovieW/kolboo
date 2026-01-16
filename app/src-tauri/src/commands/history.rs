@@ -20,7 +20,7 @@ pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
             .unwrap_or(default);
 
         // Be defensive: avoid runaway values if settings.json was edited.
-        return (raw.clamp(1, 100_000)) as usize;
+        (raw.clamp(1, 100_000)) as usize
     }
 
     #[cfg(not(desktop))]

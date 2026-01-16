@@ -21,6 +21,7 @@ pub struct AquavoiceSttProvider {
     api_key: String,
     model: String,
     default_prompt: Option<String>,
+    api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
 
@@ -51,6 +52,7 @@ impl AquavoiceSttProvider {
             api_key,
             model: Self::normalize_model(model).unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
+            api_base_url: Self::DEFAULT_BASE_URL.to_string(),
             request_log_store: None,
         }
     }
@@ -68,8 +70,18 @@ impl AquavoiceSttProvider {
             api_key,
             model: Self::normalize_model(model).unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
+            api_base_url: Self::DEFAULT_BASE_URL.to_string(),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.aquavoice.com/api/v1).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -82,7 +94,7 @@ impl AquavoiceSttProvider {
     }
 
     fn endpoint(&self) -> String {
-        Self::endpoint_for_base_url(Self::DEFAULT_BASE_URL)
+        Self::endpoint_for_base_url(&self.api_base_url)
     }
 
     fn normalize_model(model: Option<String>) -> Option<String> {

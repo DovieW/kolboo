@@ -221,7 +221,7 @@ pub async fn mic_test_stop_meter(
     {
         let _ = app;
         let _ = state;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(desktop)]

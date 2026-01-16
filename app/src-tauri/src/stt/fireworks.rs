@@ -16,6 +16,7 @@ pub struct FireworksSttProvider {
     api_key: String,
     model: String,
     default_prompt: Option<String>,
+    api_base_url: Option<String>,
     request_log_store: Option<RequestLogStore>,
 }
 
@@ -43,8 +44,18 @@ impl FireworksSttProvider {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
+            api_base_url: None,
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to Fireworks audio hosts).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = Some(base_url);
+        self
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -52,11 +63,13 @@ impl FireworksSttProvider {
         self
     }
 
-    fn transcriptions_url(&self) -> &'static str {
-        if self.model.contains("turbo") {
-            "https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions"
+    fn transcriptions_url(&self) -> String {
+        if let Some(base_url) = &self.api_base_url {
+            format!("{}/v1/audio/transcriptions", base_url.trim_end_matches('/'))
+        } else if self.model.contains("turbo") {
+            "https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions".to_string()
         } else {
-            "https://audio-prod.api.fireworks.ai/v1/audio/transcriptions"
+            "https://audio-prod.api.fireworks.ai/v1/audio/transcriptions".to_string()
         }
     }
 
@@ -83,7 +96,7 @@ impl SttProvider for FireworksSttProvider {
         if let Some(store) = &self.request_log_store {
             let request_json = json!({
                 "provider": "fireworks",
-                "endpoint": url,
+                "endpoint": url.clone(),
                 "content_type": "multipart/form-data",
                 "fields": {
                     "model": self.model,

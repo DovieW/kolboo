@@ -5,12 +5,13 @@
 //! when you have `GROQ_API_KEY`, `OPENAI_API_KEY`, or `DEEPGRAM_API_KEY` set.
 
 use crate::stt::{
-    AudioEncoding, AudioFormat, DeepgramSttProvider, GroqSttProvider, OpenAiSttProvider,
-    SpeechmaticsSttProvider, SttError, SttProvider, WhisperServerSttProvider,
+    AquavoiceSttProvider, AudioEncoding, AudioFormat, DeepgramSttProvider, ElevenLabsSttProvider,
+    FireworksSttProvider, GroqSttProvider, OpenAiSttProvider, SpeechmaticsSttProvider, SttError,
+    SttProvider, WhisperServerSttProvider,
 };
 
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
@@ -178,6 +179,455 @@ fn create_test_wav_silence(duration_secs: f32) -> Vec<u8> {
     buffer.resize(44 + data_size as usize, 0);
 
     buffer
+}
+
+#[tokio::test]
+async fn test_deepgram_transcribe_sends_expected_request() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/listen"))
+        .and(query_param("model", "nova-2"))
+        .and(query_param("smart_format", "true"))
+        .and(query_param("punctuate", "true"))
+        .and(header("authorization", "Token test_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "results": {
+                "channels": [{
+                    "alternatives": [{
+                        "transcript": "hello deepgram"
+                    }]
+                }]
+            }
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider =
+        DeepgramSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello deepgram");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let req = &received[0];
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(content_type, "audio/wav");
+}
+
+#[tokio::test]
+async fn test_deepgram_non_success_is_surface_as_api_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/listen"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("nope"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider =
+        DeepgramSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let err = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect_err("expected error");
+
+    match err {
+        SttError::Api(msg) => {
+            assert!(msg.contains("503"), "expected status in message: {msg}");
+            assert!(msg.contains("nope"), "expected body in message: {msg}");
+        }
+        other => panic!("expected SttError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_groq_transcribe_sends_expected_request() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/openai/v1/audio/transcriptions"))
+        .and(header("authorization", "Bearer test_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "text": "hello groq"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider = GroqSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        Some("whisper-large-v3-turbo".to_string()),
+        Some("hello prompt".to_string()),
+    )
+    .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello groq");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let req = &received[0];
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("multipart/form-data"),
+        "expected multipart/form-data, got: {content_type}"
+    );
+
+    let body = String::from_utf8_lossy(&req.body);
+    assert!(body.contains("name=\"model\""));
+    assert!(body.contains("whisper-large-v3-turbo"));
+    assert!(body.contains("name=\"prompt\""));
+    assert!(body.contains("hello prompt"));
+    assert!(body.contains("filename=\"audio.wav\""));
+}
+
+#[tokio::test]
+async fn test_groq_non_success_is_surface_as_api_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/openai/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(429).set_body_string("nope"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider =
+        GroqSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None, None)
+            .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let err = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect_err("expected error");
+
+    match err {
+        SttError::Api(msg) => {
+            assert!(msg.contains("429"), "expected status in message: {msg}");
+            assert!(msg.contains("nope"), "expected body in message: {msg}");
+        }
+        other => panic!("expected SttError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fireworks_transcribe_sends_expected_request() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .and(header("authorization", "test_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "text": "hello fireworks"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider = FireworksSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        Some("whisper-v3-turbo".to_string()),
+        Some("hello prompt".to_string()),
+    )
+    .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello fireworks");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let req = &received[0];
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("multipart/form-data"),
+        "expected multipart/form-data, got: {content_type}"
+    );
+
+    let body = String::from_utf8_lossy(&req.body);
+    assert!(body.contains("name=\"model\""));
+    assert!(body.contains("whisper-v3-turbo"));
+    assert!(body.contains("name=\"prompt\""));
+    assert!(body.contains("hello prompt"));
+    assert!(body.contains("filename=\"audio.wav\""));
+}
+
+#[tokio::test]
+async fn test_fireworks_non_success_is_surface_as_api_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("nope"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = FireworksSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let err = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect_err("expected error");
+
+    match err {
+        SttError::Api(msg) => {
+            assert!(msg.contains("500"), "expected status in message: {msg}");
+            assert!(msg.contains("nope"), "expected body in message: {msg}");
+        }
+        other => panic!("expected SttError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_aquavoice_transcribe_sends_expected_request() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/api/v1/audio/transcriptions"))
+        .and(header("authorization", "Bearer test_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "text": "hello aquavoice"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider = AquavoiceSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        Some("hello prompt".to_string()),
+    )
+    .with_api_base_url(format!("{}/api/v1", mock_server.uri()));
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello aquavoice");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let req = &received[0];
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("multipart/form-data"),
+        "expected multipart/form-data, got: {content_type}"
+    );
+
+    let body = String::from_utf8_lossy(&req.body);
+    assert!(body.contains("name=\"model\""));
+    assert!(body.contains("avalon-v1-en"));
+    assert!(body.contains("name=\"prompt\""));
+    assert!(body.contains("hello prompt"));
+    assert!(body.contains("filename=\"audio.wav\""));
+}
+
+#[tokio::test]
+async fn test_aquavoice_non_success_is_surface_as_api_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("nope"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = AquavoiceSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(format!("{}/api/v1", mock_server.uri()));
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let err = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect_err("expected error");
+
+    match err {
+        SttError::Api(msg) => {
+            assert!(msg.contains("403"), "expected status in message: {msg}");
+            assert!(msg.contains("nope"), "expected body in message: {msg}");
+        }
+        other => panic!("expected SttError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_elevenlabs_transcribe_sends_expected_multipart() {
+    let mock_server = MockServer::start().await;
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/speech-to-text"))
+        .and(header("xi-api-key", "test_key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "text": "hello elevenlabs"
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider =
+        ElevenLabsSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider.transcribe(&wav_data, &format).await;
+    assert_eq!(result.unwrap(), "hello elevenlabs");
+
+    let received = guard.received_requests().await;
+    assert_eq!(received.len(), 1);
+
+    let req = &received[0];
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("multipart/form-data"),
+        "expected multipart/form-data, got: {content_type}"
+    );
+
+    let body = String::from_utf8_lossy(&req.body);
+    assert!(body.contains("name=\"model_id\""));
+    assert!(body.contains("scribe_v1"));
+    assert!(body.contains("name=\"file\""));
+    assert!(body.contains("filename=\"audio.wav\""));
+    assert!(body.contains("Content-Type: audio/wav"));
+}
+
+#[tokio::test]
+async fn test_elevenlabs_non_success_is_surface_as_api_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/speech-to-text"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider =
+        ElevenLabsSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
+
+    let wav_data = create_test_wav_silence(0.1);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let err = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect_err("expected error");
+
+    match err {
+        SttError::Api(msg) => {
+            assert!(msg.contains("401"), "expected status in message: {msg}");
+            assert!(msg.contains("nope"), "expected body in message: {msg}");
+        }
+        other => panic!("expected SttError::Api, got: {other:?}"),
+    }
 }
 
 #[tokio::test]
