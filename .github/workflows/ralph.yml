@@ -91,6 +91,10 @@ jobs:
           $existingNumber = ""
           try {
             $existingNumber = (gh pr list -R $repo --head $branch --json number --jq ".[0].number" 2>$null)
+            if ($LASTEXITCODE -ne 0) {
+              $existingNumber = ""
+              $global:LASTEXITCODE = 0
+            }
           } catch {
             $existingNumber = ""
           }
@@ -102,16 +106,31 @@ jobs:
             exit 0
           }
 
+          $number = ""
+          $url = ""
           try {
             $url = gh pr create -R $repo --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
-            Write-Host "Created PR: $url" -ForegroundColor Green
           } catch {
             Write-Host "PR create failed: $($_.Exception.Message)" -ForegroundColor Yellow
           }
 
-          $number = ""
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "PR create failed; skipping PR lookup." -ForegroundColor Yellow
+            $global:LASTEXITCODE = 0
+            "created=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          if ($url) {
+            Write-Host "Created PR: $url" -ForegroundColor Green
+          }
+
           try {
-            $number = (gh pr view -R $repo --json number --jq ".number")
+            $number = (gh pr view -R $repo --json number --jq ".number" 2>$null)
+            if ($LASTEXITCODE -ne 0) {
+              $number = ""
+              $global:LASTEXITCODE = 0
+            }
           } catch {
             $number = ""
           }
@@ -185,6 +204,10 @@ jobs:
           if (-not $prNumber) {
             try {
               $prNumber = (gh pr list -R $repo --head $branch --json number --jq ".[0].number" 2>$null)
+              if ($LASTEXITCODE -ne 0) {
+                $prNumber = ""
+                $global:LASTEXITCODE = 0
+              }
             } catch {
               $prNumber = ""
             }
@@ -193,10 +216,17 @@ jobs:
           if ($prNumber) {
             Write-Host "No commits created; closing PR #$prNumber and deleting branch '$branch'." -ForegroundColor Yellow
             gh pr close -R $repo $prNumber --delete-branch
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "PR close failed; continuing cleanup." -ForegroundColor Yellow
+              $global:LASTEXITCODE = 0
+            }
           } else {
             Write-Host "No commits created and no PR found; deleting branch '$branch' if it exists." -ForegroundColor Yellow
             try {
               gh api -R $repo -X DELETE "repos/$repo/git/refs/heads/$branch" 2>$null
+              if ($LASTEXITCODE -ne 0) {
+                $global:LASTEXITCODE = 0
+              }
             } catch {
               # ignore
             }
