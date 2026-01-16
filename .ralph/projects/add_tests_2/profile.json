@@ -1,4 +1,4 @@
 {
-	"backpressureCommand": "pnpm -C app test",
+	"backpressureCommand": "pnpm -C app lint:ci && pnpm -C app test",
   "copilotArgs": ["--yolo", "--model", "gpt-5.2-codex"]
 }
