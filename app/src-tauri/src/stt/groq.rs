@@ -13,11 +13,13 @@ pub struct GroqSttProvider {
     api_key: String,
     model: String,
     default_prompt: Option<String>,
+    api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
 
 impl GroqSttProvider {
     const PROMPT_MAX_CHARS: usize = 224;
+    const DEFAULT_API_BASE_URL: &'static str = "https://api.groq.com";
 
     /// Create a new Groq STT provider
     ///
@@ -37,6 +39,7 @@ impl GroqSttProvider {
             api_key,
             model: model.unwrap_or_else(|| "whisper-large-v3-turbo".to_string()),
             default_prompt,
+            api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
         }
     }
@@ -54,13 +57,31 @@ impl GroqSttProvider {
             api_key,
             model: model.unwrap_or_else(|| "whisper-large-v3-turbo".to_string()),
             default_prompt,
+            api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.groq.com).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
         self
+    }
+
+    fn api_base_url_trimmed(&self) -> &str {
+        self.api_base_url.trim_end_matches('/')
+    }
+
+    fn transcriptions_url(&self) -> String {
+        format!("{}/openai/v1/audio/transcriptions", self.api_base_url_trimmed())
     }
 
     fn clamp_prompt(prompt: &str) -> Option<String> {
@@ -77,11 +98,13 @@ impl GroqSttProvider {
 #[async_trait]
 impl SttProvider for GroqSttProvider {
     async fn transcribe(&self, audio: &[u8], _format: &AudioFormat) -> Result<String, SttError> {
+        let endpoint = self.transcriptions_url();
+
         if let Some(store) = &self.request_log_store {
             let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
             let request_json = json!({
                 "provider": "groq",
-                "endpoint": "https://api.groq.com/openai/v1/audio/transcriptions",
+                "endpoint": endpoint.clone(),
                 "content_type": "multipart/form-data",
                 "fields": {
                     "model": self.model,
@@ -115,7 +138,7 @@ impl SttProvider for GroqSttProvider {
 
         let response = self
             .client
-            .post("https://api.groq.com/openai/v1/audio/transcriptions")
+            .post(endpoint)
             .bearer_auth(&self.api_key)
             .multipart(form)
             .send()
