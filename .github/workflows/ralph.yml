@@ -170,6 +170,43 @@ jobs:
           git push
           "pushed=true" >> $env:GITHUB_OUTPUT
 
+      - name: Upload Ralph state
+        if: always()
+        id: upload_state
+        uses: actions/upload-artifact@v4
+        with:
+          name: ralph-state
+          path: .ralph/projects/${{ inputs.ralph_project }}/state
+
+      - name: Comment PR with artifact download link
+        if: always() && steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $repo = "${{ github.repository }}"
+          $prNumber = "${{ steps.pr.outputs.number }}"
+          $artifactUrl = "${{ steps.upload_state.outputs.artifact-url }}"
+          $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if (-not $artifactUrl) {
+            $artifactUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts"
+          }
+
+          $body = @"
+          Ralph run artifacts are ready.
+
+          - **Artifact**: $artifactUrl
+          - **Workflow run**: $runUrl
+
+          (You must be logged in with repo access to download.)
+          "@
+
+          gh pr comment -R $repo $prNumber --body $body
+
       - name: Cleanup PR (no commits)
         if: always()
         env:
@@ -228,10 +265,3 @@ jobs:
               # ignore
             }
           }
-
-      - name: Upload Ralph state
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ralph-state
-          path: .ralph/projects/${{ inputs.ralph_project }}/state
