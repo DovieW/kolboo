@@ -1,5 +1,17 @@
 {
 	"backpressureCommand": "pnpm -C app check:ci",
+	"allowTool": [
+		"write",
+		"shell(git)",
+		"shell(pnpm)",
+		"shell(cargo)"
+	],
+	"denyTool": [
+		"shell(rm)",
+		"shell(del)",
+		"shell(rmdir)",
+		"shell(git push)"
+	],
 	"copilotArgs": [
 		"--yolo",
 		"--model",
