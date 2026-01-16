@@ -20,6 +20,7 @@ pub struct CohereLlmProvider {
     client: Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     timeout: Option<Duration>,
     request_log_store: Option<RequestLogStore>,
 }
@@ -30,6 +31,7 @@ impl CohereLlmProvider {
             client: Client::new(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
+            api_base_url: COHERE_CHAT_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             request_log_store: None,
         }
@@ -48,9 +50,19 @@ impl CohereLlmProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            api_base_url: COHERE_CHAT_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.cohere.com/v2/chat).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -178,7 +190,7 @@ impl LlmProvider for CohereLlmProvider {
 
         let mut req = self
             .client
-            .post(COHERE_CHAT_URL)
+            .post(&self.api_base_url)
             .bearer_auth(&self.api_key)
             .json(&request);
         if let Some(timeout) = self.timeout {
@@ -288,7 +300,7 @@ impl LlmProvider for CohereLlmProvider {
 
         let mut req = self
             .client
-            .post(COHERE_CHAT_URL)
+            .post(&self.api_base_url)
             .bearer_auth(&self.api_key)
             .json(&request);
         if let Some(timeout) = self.timeout {
