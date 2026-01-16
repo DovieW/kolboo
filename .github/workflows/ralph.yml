@@ -13,6 +13,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Checkout repo
@@ -83,11 +85,12 @@ jobs:
 
           $project = "${{ inputs.ralph_project }}"
           $branch = "${{ steps.branch.outputs.branch }}"
+          $repo = "${{ github.repository }}"
 
           # If a PR already exists for this head branch, reuse it.
           $existingNumber = ""
           try {
-            $existingNumber = (gh pr list --head $branch --json number --jq ".[0].number" 2>$null)
+            $existingNumber = (gh pr list -R $repo --head $branch --json number --jq ".[0].number" 2>$null)
           } catch {
             $existingNumber = ""
           }
@@ -100,7 +103,7 @@ jobs:
           }
 
           try {
-            $url = gh pr create --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
+            $url = gh pr create -R $repo --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
             Write-Host "Created PR: $url" -ForegroundColor Green
           } catch {
             Write-Host "PR create failed: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -108,7 +111,7 @@ jobs:
 
           $number = ""
           try {
-            $number = (gh pr view --json number --jq ".number")
+            $number = (gh pr view -R $repo --json number --jq ".number")
           } catch {
             $number = ""
           }
@@ -163,6 +166,7 @@ jobs:
 
           $branch = "${{ steps.branch.outputs.branch }}"
           $prNumber = "${{ steps.pr.outputs.number }}"
+          $repo = "${{ github.repository }}"
 
           # If no *file changes* exist relative to base, close PR and delete branch.
           # (The branch always has an allow-empty seed commit so the PR can exist.)
@@ -180,7 +184,7 @@ jobs:
 
           if (-not $prNumber) {
             try {
-              $prNumber = (gh pr list --head $branch --json number --jq ".[0].number" 2>$null)
+              $prNumber = (gh pr list -R $repo --head $branch --json number --jq ".[0].number" 2>$null)
             } catch {
               $prNumber = ""
             }
@@ -188,11 +192,11 @@ jobs:
 
           if ($prNumber) {
             Write-Host "No commits created; closing PR #$prNumber and deleting branch '$branch'." -ForegroundColor Yellow
-            gh pr close $prNumber --delete-branch
+            gh pr close -R $repo $prNumber --delete-branch
           } else {
             Write-Host "No commits created and no PR found; deleting branch '$branch' if it exists." -ForegroundColor Yellow
             try {
-              gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$branch" 2>$null
+              gh api -R $repo -X DELETE "repos/$repo/git/refs/heads/$branch" 2>$null
             } catch {
               # ignore
             }
