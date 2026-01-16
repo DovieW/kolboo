@@ -21,8 +21,14 @@ describe("textDiff", () => {
 
 	it("handles curly apostrophes without tokenization explosions", () => {
 		const chunks = diffTextInline("I don’t know", "I don't know");
-		const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
-		const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+		const removed = chunks
+			.filter((c) => c.removed)
+			.map((c) => c.value)
+			.join("");
+		const added = chunks
+			.filter((c) => c.added)
+			.map((c) => c.value)
+			.join("");
 
 		expect(removed).toBe("don’t");
 		expect(added).toBe("don't");
@@ -44,8 +50,14 @@ describe("textDiff", () => {
 
 	it("doesn't split accented words into weird tokens", () => {
 		const chunks = diffTextInline("I like café", "I like cafe");
-		const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
-		const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+		const removed = chunks
+			.filter((c) => c.removed)
+			.map((c) => c.value)
+			.join("");
+		const added = chunks
+			.filter((c) => c.added)
+			.map((c) => c.value)
+			.join("");
 
 		expect(removed).toBe("café");
 		expect(added).toBe("cafe");
@@ -56,7 +68,10 @@ describe("textDiff", () => {
 			const before = "line1\nline3";
 			const after = "line1\nline2\nline3";
 			const chunks = diffTextInline(before, after);
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(added).toContain("line2");
 			expect(added).toContain("\n");
@@ -66,7 +81,10 @@ describe("textDiff", () => {
 			const before = "line1\nline2\nline3";
 			const after = "line1\nline3";
 			const chunks = diffTextInline(before, after);
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
 
 			expect(removed).toContain("line2");
 			expect(removed).toContain("\n");
@@ -76,8 +94,14 @@ describe("textDiff", () => {
 			const before = "first\nmiddle\nlast";
 			const after = "first\nmodified\nlast";
 			const chunks = diffTextInline(before, after);
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(removed).toBe("middle");
 			expect(added).toBe("modified");
@@ -87,7 +111,10 @@ describe("textDiff", () => {
 			const withTrailing = "hello\n";
 			const withoutTrailing = "hello";
 			const chunks = diffTextInline(withTrailing, withoutTrailing);
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
 
 			expect(removed).toBe("\n");
 		});
@@ -100,8 +127,14 @@ describe("textDiff", () => {
 			const chunks = diffTextInline(before, after);
 
 			expect(isDiffTrivial(chunks)).toBe(false);
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(removed).toBe("    ");
 			expect(added).toBe("\t");
@@ -117,7 +150,10 @@ describe("textDiff", () => {
 
 		it("treats whitespace-only strings as different from empty", () => {
 			const chunks = diffTextInline("", "   ");
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(added).toBe("   ");
 			expect(isDiffTrivial(chunks)).toBe(false);
@@ -129,7 +165,10 @@ describe("textDiff", () => {
 			const before = "Hello world";
 			const after = "Hello 🌍 world";
 			const chunks = diffTextInline(before, after);
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(added).toContain("🌍");
 		});
@@ -138,8 +177,14 @@ describe("textDiff", () => {
 			const before = "Status: ✅";
 			const after = "Status: ❌";
 			const chunks = diffTextInline(before, after);
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(removed).toContain("✅");
 			expect(added).toContain("❌");
@@ -163,7 +208,10 @@ describe("textDiff", () => {
 			const chunks = diffTextInline("", "hello");
 			expect(isDiffTrivial(chunks)).toBe(false);
 
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 			expect(added).toBe("hello");
 		});
 
@@ -171,7 +219,10 @@ describe("textDiff", () => {
 			const chunks = diffTextInline("hello", "");
 			expect(isDiffTrivial(chunks)).toBe(false);
 
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
 			expect(removed).toBe("hello");
 		});
 
@@ -194,8 +245,14 @@ describe("textDiff", () => {
 				"Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.";
 
 			const chunks = diffTextInline(lorem, modified);
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(removed).toBe("tempor");
 			expect(added).toBe("MODIFIED");
@@ -215,7 +272,10 @@ describe("textDiff", () => {
 			const chunks = diffTextInline(before, after);
 
 			expect(isDiffTrivial(chunks)).toBe(false);
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 			expect(added).toContain("MODIFIED");
 			expect(added).toContain("Fourth");
 		});
@@ -225,8 +285,14 @@ describe("textDiff", () => {
 			const after = 'function foo() {\n\treturn "new";\n}';
 
 			const chunks = diffTextInline(before, after);
-			const removed = chunks.filter((c) => c.removed).map((c) => c.value).join("");
-			const added = chunks.filter((c) => c.added).map((c) => c.value).join("");
+			const removed = chunks
+				.filter((c) => c.removed)
+				.map((c) => c.value)
+				.join("");
+			const added = chunks
+				.filter((c) => c.added)
+				.map((c) => c.value)
+				.join("");
 
 			expect(removed).toContain("old");
 			expect(added).toContain("new");

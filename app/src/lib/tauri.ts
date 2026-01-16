@@ -1295,7 +1295,7 @@ export const tauriAPI = {
 						? rawMain.trim().length > 0
 							? rawMain
 							: null
-						: normalizePromptSection(rawMain)?.content ?? null;
+						: (normalizePromptSection(rawMain)?.content ?? null);
 				return { system: { content: legacyContent } };
 			}
 

@@ -38,9 +38,7 @@ describe("formatErrorMessage", () => {
 	});
 
 	it("ignores blank message/error fields and falls back", () => {
-		expect(formatErrorMessage({ message: "   " })).toBe(
-			'{"message":"   "}',
-		);
+		expect(formatErrorMessage({ message: "   " })).toBe('{"message":"   "}');
 		expect(formatErrorMessage({ error: "\n\t" })).toBe('{"error":"\\n\\t"}');
 	});
 
