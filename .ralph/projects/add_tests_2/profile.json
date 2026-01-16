@@ -3,6 +3,6 @@
 	"copilotArgs": [
 		"--yolo",
 		"--model",
-		"claude-sonnet-4.5"
+		"gpt-5.2-codex"
 	]
 }
