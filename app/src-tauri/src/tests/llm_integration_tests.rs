@@ -359,12 +359,9 @@ async fn test_anthropic_complete_sends_expected_headers() {
         .await;
 
     let client = reqwest::Client::new();
-    let provider = AnthropicLlmProvider::with_client(
-        client,
-        "test_anthropic_key".to_string(),
-        None,
-    )
-    .with_api_base_url(format!("{}/v1/messages", mock_server.uri()));
+    let provider =
+        AnthropicLlmProvider::with_client(client, "test_anthropic_key".to_string(), None)
+            .with_api_base_url(format!("{}/v1/messages", mock_server.uri()));
 
     let result = provider.complete("system prompt", "user message").await;
     assert!(result.is_ok(), "Anthropic complete failed: {:?}", result);

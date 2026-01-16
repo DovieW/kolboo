@@ -4715,11 +4715,7 @@ mod tests {
         let token = CancellationToken::new();
 
         // Given a pipeline in Recording with an active cancel token
-        set_state_for_test(
-            &pipeline,
-            PipelineState::Recording,
-            Some(token.clone()),
-        );
+        set_state_for_test(&pipeline, PipelineState::Recording, Some(token.clone()));
 
         // When cancellation is requested
         pipeline.cancel();
@@ -4736,11 +4732,7 @@ mod tests {
         let token = CancellationToken::new();
 
         // Given a pipeline in Transcribing with an active cancel token
-        set_state_for_test(
-            &pipeline,
-            PipelineState::Transcribing,
-            Some(token.clone()),
-        );
+        set_state_for_test(&pipeline, PipelineState::Transcribing, Some(token.clone()));
 
         // When cancellation is requested
         pipeline.cancel();
@@ -4756,11 +4748,7 @@ mod tests {
         let token = CancellationToken::new();
 
         // Given a pipeline marked as Recording
-        set_state_for_test(
-            &pipeline,
-            PipelineState::Recording,
-            Some(token),
-        );
+        set_state_for_test(&pipeline, PipelineState::Recording, Some(token));
 
         // When stopping the recording
         let result = pipeline.stop_recording();
