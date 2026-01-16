@@ -1,5 +1,5 @@
 {
-  "backpressureCommand": "pnpm -C app lint:ci && pnpm -C app test",
+  "backpressureCommand": "pnpm -C app lint && pnpm -C app lint:ci && pnpm -C app test",
   "copilotArgs": [
     "--yolo",
     "--model",
