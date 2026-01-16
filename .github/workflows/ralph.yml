@@ -77,7 +77,10 @@ jobs:
       - name: Create PR (pre-Ralph)
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.COPILOT_TOKEN || github.token }}
+          # Use a repo-scoped token for repo operations (PRs/branches).
+          # Do NOT use COPILOT_TOKEN here: it's typically a fine-grained PAT for Copilot Requests,
+          # and may not have access to the repo, causing gh PR operations to fail.
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
@@ -108,17 +111,10 @@ jobs:
 
           $number = ""
           $url = ""
-          try {
-            $url = gh pr create -R $repo --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
-          } catch {
-            Write-Host "PR create failed: $($_.Exception.Message)" -ForegroundColor Yellow
-          }
+          $url = gh pr create -R $repo --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "PR create failed; skipping PR lookup." -ForegroundColor Yellow
-            $global:LASTEXITCODE = 0
-            "created=false" >> $env:GITHUB_OUTPUT
-            exit 0
+          if ($LASTEXITCODE -ne 0 -or -not $url) {
+            throw "PR create failed (gh exit=$LASTEXITCODE)."
           }
 
           if ($url) {
@@ -177,7 +173,8 @@ jobs:
       - name: Cleanup PR (no commits)
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.COPILOT_TOKEN || github.token }}
+          # Same rationale as PR creation: use a repo-scoped token.
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
