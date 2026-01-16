@@ -204,12 +204,9 @@ async fn test_deepgram_transcribe_sends_expected_request() {
         .mount_as_scoped(&mock_server)
         .await;
 
-    let provider = DeepgramSttProvider::with_client(
-        reqwest::Client::new(),
-        "test_key".to_string(),
-        None,
-    )
-    .with_api_base_url(mock_server.uri());
+    let provider =
+        DeepgramSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -244,12 +241,9 @@ async fn test_deepgram_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider = DeepgramSttProvider::with_client(
-        reqwest::Client::new(),
-        "test_key".to_string(),
-        None,
-    )
-    .with_api_base_url(mock_server.uri());
+    let provider =
+        DeepgramSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -337,13 +331,9 @@ async fn test_groq_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider = GroqSttProvider::with_client(
-        reqwest::Client::new(),
-        "test_key".to_string(),
-        None,
-        None,
-    )
-    .with_api_base_url(mock_server.uri());
+    let provider =
+        GroqSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None, None)
+            .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -431,9 +421,13 @@ async fn test_fireworks_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider =
-        FireworksSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None, None)
-            .with_api_base_url(mock_server.uri());
+    let provider = FireworksSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -521,9 +515,13 @@ async fn test_aquavoice_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider =
-        AquavoiceSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None, None)
-            .with_api_base_url(format!("{}/api/v1", mock_server.uri()));
+    let provider = AquavoiceSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(format!("{}/api/v1", mock_server.uri()));
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -560,12 +558,9 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
         .mount_as_scoped(&mock_server)
         .await;
 
-    let provider = ElevenLabsSttProvider::with_client(
-        reqwest::Client::new(),
-        "test_key".to_string(),
-        None,
-    )
-    .with_api_base_url(mock_server.uri());
+    let provider =
+        ElevenLabsSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -610,12 +605,9 @@ async fn test_elevenlabs_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider = ElevenLabsSttProvider::with_client(
-        reqwest::Client::new(),
-        "test_key".to_string(),
-        None,
-    )
-    .with_api_base_url(mock_server.uri());
+    let provider =
+        ElevenLabsSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
+            .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {

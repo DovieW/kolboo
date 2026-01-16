@@ -243,21 +243,21 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
     let mut shortcuts: Vec<Shortcut> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
-    let mut push_unique = |sc: Shortcut| {
+    fn push_unique(shortcuts: &mut Vec<Shortcut>, seen: &mut HashSet<String>, sc: Shortcut) {
         let k = sc.to_string();
         if seen.insert(k) {
             shortcuts.push(sc);
         } else {
             log::warn!("Duplicate hotkey detected; skipping duplicate registration");
         }
-    };
+    }
     if let Some(hk) = toggle_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
         if is_windows_hook_handled_hotkey(&hk) {
             // handled by Windows hook (not tauri-plugin-global-shortcut)
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => push_unique(sc),
+                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
                 Err(e) => log::warn!(
                     "Invalid toggle hotkey in settings store ({}); treating as disabled",
                     e
@@ -282,7 +282,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => push_unique(sc),
+                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
                 Err(e) => log::warn!(
                     "Invalid hold hotkey in settings store ({}); treating as disabled",
                     e
@@ -305,7 +305,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => push_unique(sc),
+                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
                 Err(e) => log::warn!(
                     "Invalid paste-last hotkey in settings store ({}); treating as disabled",
                     e
@@ -329,7 +329,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => push_unique(sc),
+                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
                 Err(e) => log::warn!(
                     "Invalid retry hotkey in settings store ({}); treating as disabled",
                     e
@@ -353,7 +353,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => push_unique(sc),
+                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
                 Err(e) => log::warn!(
                     "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
                     e
@@ -363,7 +363,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 
         #[cfg(not(all(desktop, target_os = "windows")))]
         match hk.to_shortcut() {
-            Ok(sc) => push_unique(sc),
+            Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
             Err(e) => log::warn!(
                 "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
                 e
@@ -377,7 +377,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             // handled by Windows hook
         } else {
             match hk.to_shortcut() {
-                Ok(sc) => push_unique(sc),
+                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
                 Err(e) => log::warn!(
                     "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
                     e
@@ -387,7 +387,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 
         #[cfg(not(all(desktop, target_os = "windows")))]
         match hk.to_shortcut() {
-            Ok(sc) => push_unique(sc),
+            Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
             Err(e) => log::warn!(
                 "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
                 e

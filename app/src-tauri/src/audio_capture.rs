@@ -40,9 +40,7 @@ fn encode_mic_device_id(name: &str, ordinal_for_name: usize) -> String {
 fn decode_mic_device_id(id: &str) -> Option<(String, usize)> {
     // Format: mic:v1:<base64url(name)>:<ordinal>
     let rest = id.strip_prefix(MIC_DEVICE_ID_PREFIX)?;
-    let mut parts = rest.rsplitn(2, ':');
-    let ordinal_str = parts.next()?;
-    let name_b64 = parts.next()?;
+    let (name_b64, ordinal_str) = rest.rsplit_once(':')?;
     let ordinal = ordinal_str.parse::<usize>().ok()?;
     let name_bytes = URL_SAFE_NO_PAD.decode(name_b64).ok()?;
     let name = String::from_utf8(name_bytes).ok()?;

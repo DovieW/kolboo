@@ -170,11 +170,11 @@ fn set_clipboard_text_with_barrier(
 fn set_clipboard_text_platform(
     clipboard: &mut Clipboard,
     text: &str,
-    exclude_from_clipboard_history: bool,
+    _exclude_from_clipboard_history: bool,
 ) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        if exclude_from_clipboard_history {
+        if _exclude_from_clipboard_history {
             return set_clipboard_text_windows_excluding_history(text);
         }
     }
@@ -756,8 +756,14 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
         None
     };
 
+    #[cfg(target_os = "windows")]
     let mut polls_run: u32 = 1;
+    #[cfg(not(target_os = "windows"))]
+    let polls_run: u32 = 1;
+    #[cfg(target_os = "windows")]
     let mut captured: Option<String> = poll_for_capture(&mut clipboard);
+    #[cfg(not(target_os = "windows"))]
+    let captured: Option<String> = poll_for_capture(&mut clipboard);
 
     // Windows reliability: some apps respond to Ctrl+Insert more consistently than Ctrl+C.
     // Only do this fallback when the user selected Ctrl+C, to avoid surprising behavior.

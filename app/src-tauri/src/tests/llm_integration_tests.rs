@@ -330,7 +330,10 @@ async fn test_cohere_complete_parses_json_error_body() {
     match err {
         LlmError::Api(msg) => {
             assert!(msg.contains("400"), "expected status in message: {msg}");
-            assert!(msg.contains("bad request"), "expected error in message: {msg}");
+            assert!(
+                msg.contains("bad request"),
+                "expected error in message: {msg}"
+            );
         }
         other => panic!("expected LlmError::Api, got: {other:?}"),
     }
@@ -363,8 +366,12 @@ async fn test_fireworks_complete_sends_expected_request_body() {
         .mount(&mock_server)
         .await;
 
-    let provider = FireworksLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
-        .with_api_base_url(format!("{}/inference/v1/chat/completions", mock_server.uri()));
+    let provider =
+        FireworksLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
+            .with_api_base_url(format!(
+                "{}/inference/v1/chat/completions",
+                mock_server.uri()
+            ));
 
     let out = provider.complete("sys", "user").await.unwrap();
     assert_eq!(out, "hello from fireworks mock");
@@ -383,8 +390,12 @@ async fn test_fireworks_complete_parses_json_error_body() {
         .mount(&mock_server)
         .await;
 
-    let provider = FireworksLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
-        .with_api_base_url(format!("{}/inference/v1/chat/completions", mock_server.uri()));
+    let provider =
+        FireworksLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
+            .with_api_base_url(format!(
+                "{}/inference/v1/chat/completions",
+                mock_server.uri()
+            ));
 
     let err = provider
         .complete("sys", "user")
@@ -394,7 +405,10 @@ async fn test_fireworks_complete_parses_json_error_body() {
     match err {
         LlmError::Api(msg) => {
             assert!(msg.contains("400"), "expected status in message: {msg}");
-            assert!(msg.contains("bad request"), "expected error in message: {msg}");
+            assert!(
+                msg.contains("bad request"),
+                "expected error in message: {msg}"
+            );
         }
         other => panic!("expected LlmError::Api, got: {other:?}"),
     }

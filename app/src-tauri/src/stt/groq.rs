@@ -81,7 +81,10 @@ impl GroqSttProvider {
     }
 
     fn transcriptions_url(&self) -> String {
-        format!("{}/openai/v1/audio/transcriptions", self.api_base_url_trimmed())
+        format!(
+            "{}/openai/v1/audio/transcriptions",
+            self.api_base_url_trimmed()
+        )
     }
 
     fn clamp_prompt(prompt: &str) -> Option<String> {
