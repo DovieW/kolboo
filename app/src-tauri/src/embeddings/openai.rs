@@ -42,8 +42,18 @@ pub async fn embed_text(
     model: &str,
     input: &str,
 ) -> Result<Vec<f32>, OpenAiEmbeddingsError> {
+    embed_text_with_url(client, api_key, model, input, OPENAI_EMBEDDINGS_URL).await
+}
+
+pub(crate) async fn embed_text_with_url(
+    client: &Client,
+    api_key: &str,
+    model: &str,
+    input: &str,
+    url: &str,
+) -> Result<Vec<f32>, OpenAiEmbeddingsError> {
     let resp = client
-        .post(OPENAI_EMBEDDINGS_URL)
+        .post(url)
         .bearer_auth(api_key)
         .json(&serde_json::json!({
             "model": model,
