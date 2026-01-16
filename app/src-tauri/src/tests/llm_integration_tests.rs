@@ -5,8 +5,8 @@
 //! when you have `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or a running Ollama instance.
 
 use crate::llm::{
-    format_text, AnthropicLlmProvider, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider,
-    PromptSections,
+    format_text, AnthropicLlmProvider, CohereLlmProvider, GroqLlmProvider, LlmError, LlmProvider,
+    OllamaLlmProvider, OpenAiLlmProvider, PromptSections,
 };
 
 use serde_json::json;
@@ -359,16 +359,148 @@ async fn test_anthropic_complete_sends_expected_headers() {
         .await;
 
     let client = reqwest::Client::new();
-    let provider = AnthropicLlmProvider::with_client(
-        client,
-        "test_anthropic_key".to_string(),
-        None,
-    )
-    .with_api_base_url(format!("{}/v1/messages", mock_server.uri()));
+    let provider =
+        AnthropicLlmProvider::with_client(client, "test_anthropic_key".to_string(), None)
+            .with_api_base_url(format!("{}/v1/messages", mock_server.uri()));
 
     let result = provider.complete("system prompt", "user message").await;
     assert!(result.is_ok(), "Anthropic complete failed: {:?}", result);
 
     let received = guard.received_requests().await;
     assert_eq!(received.len(), 1);
+}
+
+#[tokio::test]
+async fn test_groq_complete_sends_expected_request_body() {
+    let mock_server = MockServer::start().await;
+
+    let expected_request = json!({
+        "model": "test-model",
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user"}
+        ],
+        "max_tokens": 4096,
+        "temperature": 0.3
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/openai/v1/chat/completions"))
+        .and(header("authorization", "Bearer test_key"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [
+                {"message": {"content": "hello from groq"}}
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = GroqLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
+        .with_api_base_url(format!("{}/openai/v1/chat/completions", mock_server.uri()));
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello from groq");
+}
+
+#[tokio::test]
+async fn test_groq_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/openai/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "error": { "message": "invalid api key" }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = GroqLlmProvider::new("test_key".to_string())
+        .with_api_base_url(format!("{}/openai/v1/chat/completions", mock_server.uri()));
+
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("401"), "expected status in message: {msg}");
+            assert!(
+                msg.contains("invalid api key"),
+                "expected error in message: {msg}"
+            );
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_cohere_complete_sends_expected_request_body() {
+    let mock_server = MockServer::start().await;
+
+    let expected_request = json!({
+        "model": "test-model",
+        "stream": false,
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user"}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 1024
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/v2/chat"))
+        .and(header("authorization", "Bearer test_key"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "message": {
+                "content": [
+                    {"type": "text", "text": "hello from cohere"}
+                ]
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = CohereLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
+        .with_api_base_url(format!("{}/v2/chat", mock_server.uri()));
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello from cohere");
+}
+
+#[tokio::test]
+async fn test_cohere_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/chat"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "message": "quota exceeded"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = CohereLlmProvider::new("test_key".to_string())
+        .with_api_base_url(format!("{}/v2/chat", mock_server.uri()));
+
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("400"), "expected status in message: {msg}");
+            assert!(
+                msg.contains("quota exceeded"),
+                "expected error in message: {msg}"
+            );
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
 }

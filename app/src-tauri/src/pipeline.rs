@@ -4649,6 +4649,17 @@ unsafe impl Sync for SharedPipeline {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio_util::sync::CancellationToken;
+
+    fn set_state_for_test(
+        pipeline: &SharedPipeline,
+        state: PipelineState,
+        token: Option<CancellationToken>,
+    ) {
+        let mut inner = pipeline.inner.lock().expect("pipeline lock");
+        inner.state = state;
+        inner.cancel_token = token;
+    }
 
     #[test]
     fn test_pipeline_config_default() {
@@ -4696,5 +4707,56 @@ mod tests {
         // Force reset should always work
         pipeline.force_reset();
         assert_eq!(pipeline.state(), PipelineState::Idle);
+    }
+
+    #[test]
+    fn test_cancel_from_recording_transitions_to_idle() {
+        let pipeline = SharedPipeline::new(PipelineConfig::default());
+        let token = CancellationToken::new();
+
+        // Given a pipeline in Recording with an active cancel token
+        set_state_for_test(&pipeline, PipelineState::Recording, Some(token.clone()));
+
+        // When cancellation is requested
+        pipeline.cancel();
+
+        // Then the pipeline resets to Idle and the token is cancelled
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        assert!(token.is_cancelled());
+        assert!(pipeline.get_cancel_token().is_none());
+    }
+
+    #[test]
+    fn test_cancel_from_transcribing_transitions_to_idle() {
+        let pipeline = SharedPipeline::new(PipelineConfig::default());
+        let token = CancellationToken::new();
+
+        // Given a pipeline in Transcribing with an active cancel token
+        set_state_for_test(&pipeline, PipelineState::Transcribing, Some(token.clone()));
+
+        // When cancellation is requested
+        pipeline.cancel();
+
+        // Then the pipeline resets to Idle and the token is cancelled
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn test_stop_recording_transitions_to_idle() {
+        let pipeline = SharedPipeline::new(PipelineConfig::default());
+        let token = CancellationToken::new();
+
+        // Given a pipeline marked as Recording
+        set_state_for_test(&pipeline, PipelineState::Recording, Some(token));
+
+        // When stopping the recording
+        let result = pipeline.stop_recording();
+
+        // Then it resets to Idle and captures a WAV buffer
+        assert!(result.is_ok());
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        assert!(pipeline.clone_last_wav_bytes().is_some());
+        assert!(pipeline.get_cancel_token().is_none());
     }
 }
