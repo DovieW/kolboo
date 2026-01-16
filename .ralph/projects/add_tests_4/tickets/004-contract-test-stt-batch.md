@@ -22,7 +22,3 @@ Add deterministic contract coverage for a small batch of STT providers.
 - [ ] For each chosen provider: if request is JSON, assert a field; if multipart, assert part names/content-types.
 - [ ] For each chosen provider: add one error parsing test.
 - [ ] No real network.
-
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`

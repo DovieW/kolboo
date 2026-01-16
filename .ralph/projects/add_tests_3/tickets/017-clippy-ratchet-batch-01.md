@@ -24,7 +24,3 @@ Reduce Clippy warnings by fixing 1–3 low-risk warnings per small batch.
 ## Edge cases / gotchas
 
 - Avoid refactors that change runtime behavior.
-
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`

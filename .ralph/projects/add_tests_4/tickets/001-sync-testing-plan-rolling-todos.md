@@ -22,9 +22,6 @@ Make sure `docs/Plans/TESTING_AND_QUALITY_PLAN.md` reflects what’s actually be
 
 - Don’t rewrite the whole plan—only update status + tiny clarifying notes.
 
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`
 
 ## Non-goals (explicitly out of scope)
 

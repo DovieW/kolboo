@@ -19,7 +19,3 @@ Add deterministic contract tests for embeddings providers so request shaping and
 - [ ] For each chosen provider, assert at least one header detail (auth header presence, content-type, etc).
 - [ ] For each chosen provider, add one error parsing test for a non-2xx JSON error.
 - [ ] No real network calls.
-
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`

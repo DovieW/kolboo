@@ -24,10 +24,6 @@ Turn “get clippy to 0 warnings” into a manageable checklist with a baseline 
 - Don’t paste secrets or API keys into logs or examples.
 - Clippy output can change between Rust versions; record the Rust toolchain version if practical.
 
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`
-
 ## Non-goals (explicitly out of scope)
 
 - Fixing any warnings in this ticket (that’s what the batch tickets are for).

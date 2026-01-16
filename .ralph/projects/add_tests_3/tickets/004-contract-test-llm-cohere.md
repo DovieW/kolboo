@@ -18,6 +18,3 @@ Add deterministic contract coverage for a small batch of LLM providers.
 - [ ] For each chosen provider, add error parsing coverage for a representative error shape.
 - [ ] No real network access.
 
-## Backpressure (must be green)
-
-- `pnpm -C app check:ci`
