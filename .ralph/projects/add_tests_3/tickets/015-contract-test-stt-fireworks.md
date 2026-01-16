@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for STT provider (Fireworks)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): Fireworks STT is now covered by `020-contract-test-stt-speechmatics.md` (STT batch 02).
 

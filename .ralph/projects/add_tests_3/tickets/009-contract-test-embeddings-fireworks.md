@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for Embeddings provider (Fireworks)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): Fireworks embeddings are now covered by `014-contract-test-embeddings-openai.md`.
 

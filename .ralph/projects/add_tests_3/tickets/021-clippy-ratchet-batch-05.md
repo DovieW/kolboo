@@ -1,6 +1,5 @@
 # Ticket: Clippy ratchet batch 05 (fix 1–3 warnings)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): use `025-clippy-ratchet-batch-01.md` (rolling).
 

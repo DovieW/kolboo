@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for LLM provider (Groq)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): Groq is now covered by `008-contract-test-llm-anthropic.md` (LLM batch 01).
 

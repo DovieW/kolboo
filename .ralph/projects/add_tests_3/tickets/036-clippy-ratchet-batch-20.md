@@ -1,6 +1,5 @@
 # Ticket: Clippy ratchet batch 20 (fix 1–3 warnings)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidation): keep the clippy tracker + batches 01–06 for now.
 

@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for Embeddings provider (Cohere)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): Cohere embeddings are now covered by `014-contract-test-embeddings-openai.md`.
 

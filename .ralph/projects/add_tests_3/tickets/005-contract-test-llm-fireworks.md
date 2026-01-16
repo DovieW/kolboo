@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for LLM provider (Fireworks)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): Fireworks is now covered by `011-contract-test-llm-cohere.md` (LLM batch 02).
 

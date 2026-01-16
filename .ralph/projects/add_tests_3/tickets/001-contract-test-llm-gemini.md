@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for LLM provider (Gemini)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): Gemini is now covered by `008-contract-test-llm-anthropic.md` (LLM batch 01).
 

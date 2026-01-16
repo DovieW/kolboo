@@ -1,7 +1,5 @@
 # Ticket: Add Wiremock contract test for LLM provider (Cerebras)
 
-<!-- ralph:skip -->
-
 > Deprecated (consolidated): Cerebras is now covered by `011-contract-test-llm-cohere.md` (LLM batch 02).
 
 ## Goal (what we want)

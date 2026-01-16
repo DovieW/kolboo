@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for STT provider (AssemblyAI)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): AssemblyAI STT is now covered by `017-contract-test-stt-deepgram.md` (STT batch 01).
 

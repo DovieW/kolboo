@@ -1,7 +1,5 @@
 # Ticket: Wire coverage thresholds into tooling (without slowing dev)
 
-<!-- ralph:skip -->
-
 > Deprecated (consolidated): this work is now covered by `004-coverage-thresholds-define-scope.md`.
 
 ## Goal (what we want)

@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for STT provider (ElevenLabs)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): ElevenLabs STT is now covered by `017-contract-test-stt-deepgram.md` (STT batch 01).
 

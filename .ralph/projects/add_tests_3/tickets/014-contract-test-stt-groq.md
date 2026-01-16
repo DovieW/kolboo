@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for STT provider (Groq)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): Groq STT is now covered by `020-contract-test-stt-speechmatics.md` (STT batch 02).
 

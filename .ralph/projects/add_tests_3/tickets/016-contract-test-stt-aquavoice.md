@@ -1,6 +1,5 @@
 # Ticket: Add Wiremock contract test for STT provider (AquaVoice)
 
-<!-- ralph:skip -->
 
 > Deprecated (consolidated): AquaVoice STT is now covered by `020-contract-test-stt-speechmatics.md` (STT batch 02).
 
