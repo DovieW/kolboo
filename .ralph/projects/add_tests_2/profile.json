@@ -11,5 +11,10 @@
 		"shell(del)",
 		"shell(rmdir)",
 		"shell(git push)"
+	],
+	"copilotArgs": [
+		"--yolo",
+		"--model",
+		"gpt-5.2-codex"
 	]
 }
