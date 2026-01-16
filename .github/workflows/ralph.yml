@@ -51,6 +51,17 @@ jobs:
           git switch -c $branch
           "branch=$branch" >> $env:GITHUB_OUTPUT
 
+      - name: Seed PR commit (pre-Ralph)
+        id: seed
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          # GitHub won't create a PR if there are "no commits between" base and head.
+          # Create an allow-empty commit so the PR can exist immediately.
+          git commit --allow-empty -m "ralph: init"
+
       - name: Push branch (pre-Ralph)
         id: prepush
         shell: pwsh
@@ -64,7 +75,7 @@ jobs:
       - name: Create PR (pre-Ralph)
         id: pr
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.COPILOT_TOKEN || github.token }}
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
@@ -88,12 +99,26 @@ jobs:
             exit 0
           }
 
-          $url = gh pr create --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
-          Write-Host "Created PR: $url" -ForegroundColor Green
+          try {
+            $url = gh pr create --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
+            Write-Host "Created PR: $url" -ForegroundColor Green
+          } catch {
+            Write-Host "PR create failed: $($_.Exception.Message)" -ForegroundColor Yellow
+          }
 
-          $number = (gh pr view --json number --jq ".number")
-          "number=$number" >> $env:GITHUB_OUTPUT
-          "created=true" >> $env:GITHUB_OUTPUT
+          $number = ""
+          try {
+            $number = (gh pr view --json number --jq ".number")
+          } catch {
+            $number = ""
+          }
+
+          if ($number) {
+            "number=$number" >> $env:GITHUB_OUTPUT
+            "created=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "created=false" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Run Ralph (project tickets)
         uses: DovieW/ralph-copilot-action@master
@@ -130,7 +155,7 @@ jobs:
       - name: Cleanup PR (no commits)
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.COPILOT_TOKEN || github.token }}
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
@@ -139,16 +164,17 @@ jobs:
           $branch = "${{ steps.branch.outputs.branch }}"
           $prNumber = "${{ steps.pr.outputs.number }}"
 
-          # If nothing changed relative to base, close PR and delete branch.
-          $aheadBase = 0
+          # If no *file changes* exist relative to base, close PR and delete branch.
+          # (The branch always has an allow-empty seed commit so the PR can exist.)
+          $changedFiles = @()
           try {
-            $aheadBase = [int](git rev-list --count origin/master..HEAD)
+            $changedFiles = @(git diff --name-only origin/master...HEAD)
           } catch {
-            $aheadBase = 0
+            $changedFiles = @()
           }
 
-          if ($aheadBase -gt 0) {
-            Write-Host "Commits exist ($aheadBase) relative to origin/master; keeping PR/branch." -ForegroundColor DarkGray
+          if ($changedFiles.Count -gt 0) {
+            Write-Host "File changes exist relative to origin/master; keeping PR/branch." -ForegroundColor DarkGray
             exit 0
           }
 
