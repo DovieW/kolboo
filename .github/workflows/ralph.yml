@@ -51,38 +51,18 @@ jobs:
           git switch -c $branch
           "branch=$branch" >> $env:GITHUB_OUTPUT
 
-      - name: Run Ralph (project tickets)
-        uses: DovieW/ralph-copilot-action@master
-        with:
-          ralph_project: ${{ inputs.ralph_project }}
-          gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
-
-      - name: Push branch
-        id: push
+      - name: Push branch (pre-Ralph)
+        id: prepush
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
 
-          $ahead = 0
-          try {
-            $ahead = [int](git rev-list --count origin/master..HEAD)
-          } catch {
-            $ahead = 0
-          }
-
-          if ($ahead -le 0) {
-            Write-Host "No commits were created; skipping push/PR." -ForegroundColor DarkGray
-            "pushed=false" >> $env:GITHUB_OUTPUT
-            exit 0
-          }
-
           $branch = "${{ steps.branch.outputs.branch }}"
           git push --set-upstream origin $branch
-          "pushed=true" >> $env:GITHUB_OUTPUT
 
-      - name: Create PR
-        if: steps.push.outputs.pushed == 'true'
+      - name: Create PR (pre-Ralph)
+        id: pr
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
@@ -93,7 +73,104 @@ jobs:
           $project = "${{ inputs.ralph_project }}"
           $branch = "${{ steps.branch.outputs.branch }}"
 
-          gh pr create --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
+          # If a PR already exists for this head branch, reuse it.
+          $existingNumber = ""
+          try {
+            $existingNumber = (gh pr list --head $branch --json number --jq ".[0].number" 2>$null)
+          } catch {
+            $existingNumber = ""
+          }
+
+          if ($existingNumber) {
+            Write-Host "PR already exists for '$branch': #$existingNumber" -ForegroundColor DarkGray
+            "number=$existingNumber" >> $env:GITHUB_OUTPUT
+            "created=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $url = gh pr create --base master --head $branch --title "Ralph: $project" --body "Automated Ralph run for project '$project'."
+          Write-Host "Created PR: $url" -ForegroundColor Green
+
+          $number = (gh pr view --json number --jq ".number")
+          "number=$number" >> $env:GITHUB_OUTPUT
+          "created=true" >> $env:GITHUB_OUTPUT
+
+      - name: Run Ralph (project tickets)
+        uses: DovieW/ralph-copilot-action@master
+        with:
+          ralph_project: ${{ inputs.ralph_project }}
+          gh_token: ${{ secrets.COPILOT_TOKEN || secrets.GH_TOKEN || github.token }}
+
+      - name: Push branch (post-Ralph)
+        id: push
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $branch = "${{ steps.branch.outputs.branch }}"
+
+          # If we didn't create any new commits, avoid pushing.
+          $ahead = 0
+          try {
+            $ahead = [int](git rev-list --count origin/$branch..HEAD)
+          } catch {
+            $ahead = 0
+          }
+
+          if ($ahead -le 0) {
+            Write-Host "No new commits were created; skipping push." -ForegroundColor DarkGray
+            "pushed=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          git push
+          "pushed=true" >> $env:GITHUB_OUTPUT
+
+      - name: Cleanup PR (no commits)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $branch = "${{ steps.branch.outputs.branch }}"
+          $prNumber = "${{ steps.pr.outputs.number }}"
+
+          # If nothing changed relative to base, close PR and delete branch.
+          $aheadBase = 0
+          try {
+            $aheadBase = [int](git rev-list --count origin/master..HEAD)
+          } catch {
+            $aheadBase = 0
+          }
+
+          if ($aheadBase -gt 0) {
+            Write-Host "Commits exist ($aheadBase) relative to origin/master; keeping PR/branch." -ForegroundColor DarkGray
+            exit 0
+          }
+
+          if (-not $prNumber) {
+            try {
+              $prNumber = (gh pr list --head $branch --json number --jq ".[0].number" 2>$null)
+            } catch {
+              $prNumber = ""
+            }
+          }
+
+          if ($prNumber) {
+            Write-Host "No commits created; closing PR #$prNumber and deleting branch '$branch'." -ForegroundColor Yellow
+            gh pr close $prNumber --delete-branch
+          } else {
+            Write-Host "No commits created and no PR found; deleting branch '$branch' if it exists." -ForegroundColor Yellow
+            try {
+              gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$branch" 2>$null
+            } catch {
+              # ignore
+            }
+          }
 
       - name: Upload Ralph state
         if: always()
