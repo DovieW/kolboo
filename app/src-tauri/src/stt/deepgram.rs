@@ -13,17 +13,21 @@ pub struct DeepgramSttProvider {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
 
 impl DeepgramSttProvider {
+    const DEFAULT_DEEPGRAM_API_BASE_URL: &'static str = "https://api.deepgram.com";
+
     /// Build the Deepgram /v1/listen URL with required query parameters.
     ///
     /// We always enable `smart_format=true` for all Deepgram calls to improve
     /// readability (e.g., numerals/date formatting), and we keep `punctuate=true`
     /// enabled for clean transcripts.
     fn listen_url(&self) -> Result<Url, SttError> {
-        let mut url = Url::parse("https://api.deepgram.com/v1/listen")
+        let url = format!("{}/v1/listen", self.api_base_url_trimmed());
+        let mut url = Url::parse(&url)
             .map_err(|e| SttError::Config(format!("Invalid Deepgram base URL: {}", e)))?;
 
         url.query_pairs_mut()
@@ -50,6 +54,7 @@ impl DeepgramSttProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| "nova-2".to_string()),
+            api_base_url: Self::DEFAULT_DEEPGRAM_API_BASE_URL.to_string(),
             request_log_store: None,
         }
     }
@@ -61,8 +66,22 @@ impl DeepgramSttProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| "nova-2".to_string()),
+            api_base_url: Self::DEFAULT_DEEPGRAM_API_BASE_URL.to_string(),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.deepgram.com).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
+    }
+
+    fn api_base_url_trimmed(&self) -> &str {
+        self.api_base_url.trim_end_matches('/')
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {

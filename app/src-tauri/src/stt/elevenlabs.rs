@@ -22,10 +22,13 @@ pub struct ElevenLabsSttProvider {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
 
 impl ElevenLabsSttProvider {
+    const DEFAULT_ELEVENLABS_API_BASE_URL: &'static str = "https://api.elevenlabs.io";
+
     /// Create a new ElevenLabs STT provider.
     ///
     /// # Arguments
@@ -42,6 +45,7 @@ impl ElevenLabsSttProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| "scribe_v1".to_string()),
+            api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
         }
     }
@@ -53,8 +57,26 @@ impl ElevenLabsSttProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| "scribe_v1".to_string()),
+            api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.elevenlabs.io).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
+    }
+
+    fn api_base_url_trimmed(&self) -> &str {
+        self.api_base_url.trim_end_matches('/')
+    }
+
+    fn speech_to_text_url(&self) -> String {
+        format!("{}/v1/speech-to-text", self.api_base_url_trimmed())
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -69,7 +91,7 @@ impl SttProvider for ElevenLabsSttProvider {
         if let Some(store) = &self.request_log_store {
             let request_json = json!({
                 "provider": "elevenlabs",
-                "endpoint": "https://api.elevenlabs.io/v1/speech-to-text",
+                "endpoint": self.speech_to_text_url(),
                 "content_type": "multipart/form-data",
                 "fields": {
                     "model_id": self.model,
@@ -100,7 +122,7 @@ impl SttProvider for ElevenLabsSttProvider {
 
         let response = self
             .client
-            .post("https://api.elevenlabs.io/v1/speech-to-text")
+            .post(self.speech_to_text_url())
             .header("xi-api-key", &self.api_key)
             .multipart(form)
             .send()
