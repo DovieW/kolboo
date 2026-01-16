@@ -1,6 +1,15 @@
 #!/usr/bin/env sh
 set -e
 
-# Run the full test suite before allowing a commit.
-# Note: this may take a bit (it includes Rust tests).
-pnpm -C app check:ci
+# Keep pre-commit fast.
+#
+# Full checks (including Rust clippy + Rust tests) happen in CI via:
+#   pnpm -C app check:ci
+#
+# If you're changing Rust-heavy code and want extra confidence before pushing,
+# run clippy manually:
+#   pnpm -C app cargo:clippy:ci
+
+pnpm -C app lint:ci
+pnpm -C app typecheck
+pnpm -C app cargo:fmt:check
