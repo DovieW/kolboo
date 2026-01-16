@@ -10,7 +10,6 @@ function commandExists(command) {
 	const probe = process.platform === "win32" ? "where" : "which";
 	const res = spawnSync(probe, [command], {
 		stdio: "ignore",
-		shell: true,
 	});
 	return res.status === 0;
 }
@@ -44,13 +43,17 @@ if (!env.RUSTC_WRAPPER) {
 // - SCCACHE_DIR: cache location (put on a fast SSD)
 // - SCCACHE_CACHE_SIZE: e.g. "20G"
 
-const tauriCmd = process.platform === "win32" ? "tauri.cmd" : "tauri";
-const child = spawn(tauriCmd, ["dev"], {
-	cwd: appDir,
-	stdio: "inherit",
-	shell: true,
-	env,
-});
+const child = process.platform === "win32"
+	? spawn("cmd.exe", ["/d", "/s", "/c", "tauri", "dev"], {
+			cwd: appDir,
+			stdio: "inherit",
+			env,
+		})
+	: spawn("tauri", ["dev"], {
+			cwd: appDir,
+			stdio: "inherit",
+			env,
+		});
 
 child.on("exit", (code) => {
 	process.exit(code ?? 1);
