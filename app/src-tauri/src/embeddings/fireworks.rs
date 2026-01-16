@@ -106,7 +106,7 @@ pub async fn embed_text_with_debug(
     let mut preview: String = input.chars().take(INPUT_PREVIEW_MAX_CHARS).collect();
     let truncated = input_len > INPUT_PREVIEW_MAX_CHARS;
     if truncated {
-        preview.push_str("…");
+        preview.push('…');
     }
 
     let request_json = serde_json::json!({

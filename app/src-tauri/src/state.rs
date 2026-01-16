@@ -106,7 +106,7 @@ impl QuickAskConversationMemory {
     pub fn snapshot_last(&self, n: usize) -> Vec<QuickAskConversationTurn> {
         #[cfg(desktop)]
         {
-            let n = n.max(1).min(20);
+            let n = n.clamp(1, 20);
             if let Ok(history) = self.inner.lock() {
                 let mut turns: Vec<QuickAskConversationTurn> =
                     history.iter().rev().take(n).cloned().collect();

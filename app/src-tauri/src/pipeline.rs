@@ -149,9 +149,9 @@ fn select_default_profile(llm_config: &LlmConfig) -> Option<crate::llm::ProgramP
         .cloned()
 }
 
-fn select_effective_preset<'a>(
-    profile: &'a crate::llm::ProgramPromptProfile,
-) -> Option<&'a crate::llm::ProgramPreset> {
+fn select_effective_preset(
+    profile: &crate::llm::ProgramPromptProfile,
+) -> Option<&crate::llm::ProgramPreset> {
     let find_by_id = |id: &str| profile.presets.iter().find(|p| p.id == id);
 
     if let Some(id) = profile.active_preset_id.as_deref() {
@@ -165,7 +165,7 @@ fn select_effective_preset<'a>(
 
 fn find_preset_by_id<'a>(
     profile: &'a crate::llm::ProgramPromptProfile,
-    id: &str,
+    id: &'a str,
 ) -> Option<&'a crate::llm::ProgramPreset> {
     profile.presets.iter().find(|p| p.id == id)
 }
@@ -183,9 +183,33 @@ fn preview_for_log(s: &str, max_chars: usize) -> (String, bool, usize) {
     let mut preview: String = s.chars().take(max_chars).collect();
     let truncated = len > max_chars;
     if truncated {
-        preview.push_str("…");
+        preview.push('…');
     }
     (preview, truncated, len)
+}
+
+struct RouterContext<'a> {
+    embedding_provider: &'a str,
+    embedding_model: &'a str,
+    pick_highest_score: bool,
+    threshold: f32,
+    margin: f32,
+}
+
+struct RouterCallState {
+    call_id: u64,
+    calls_request: Vec<JsonValue>,
+    calls_response: Vec<JsonValue>,
+}
+
+impl RouterCallState {
+    fn new() -> Self {
+        Self {
+            call_id: 0,
+            calls_request: Vec::new(),
+            calls_response: Vec::new(),
+        }
+    }
 }
 
 async fn route_preset_id_with_embeddings(
@@ -280,62 +304,60 @@ async fn route_preset_id_with_embeddings(
         return None;
     }
 
-    let mut call_id: u64 = 0;
-    let mut calls_request: Vec<JsonValue> = Vec::new();
-    let mut calls_response: Vec<JsonValue> = Vec::new();
+    let router_ctx = RouterContext {
+        embedding_provider,
+        embedding_model,
+        pick_highest_score,
+        threshold,
+        margin,
+    };
+    let mut calls = RouterCallState::new();
 
     fn push_call(
-        call_id: &mut u64,
-        calls_request: &mut Vec<JsonValue>,
-        calls_response: &mut Vec<JsonValue>,
+        state: &mut RouterCallState,
         kind: &str,
         candidate_id: Option<&str>,
         from_cache: bool,
         request: JsonValue,
         response: JsonValue,
     ) {
-        calls_request.push(serde_json::json!({
-            "id": *call_id,
+        state.calls_request.push(serde_json::json!({
+            "id": state.call_id,
             "kind": kind,
             "candidate_id": candidate_id,
             "from_cache": from_cache,
             "request": request,
         }));
-        calls_response.push(serde_json::json!({
-            "id": *call_id,
+        state.calls_response.push(serde_json::json!({
+            "id": state.call_id,
             "kind": kind,
             "candidate_id": candidate_id,
             "from_cache": from_cache,
             "response": response,
         }));
-        *call_id += 1;
+        state.call_id += 1;
     }
 
     fn build_router_payloads(
-        embedding_provider: &str,
-        embedding_model: &str,
-        pick_highest_score: bool,
-        threshold: f32,
-        margin: f32,
+        ctx: &RouterContext<'_>,
         selected: &Option<String>,
-        scores: &Vec<(String, f32)>,
-        calls_request: &Vec<JsonValue>,
-        calls_response: &Vec<JsonValue>,
+        scores: &[(String, f32)],
+        calls: &RouterCallState,
     ) -> (JsonValue, JsonValue) {
         let router_request_json = serde_json::json!({
             "type": "embeddings",
-            "provider": embedding_provider,
-            "model": embedding_model,
-            "pick_highest_score": pick_highest_score,
-            "similarity_threshold": threshold,
-            "similarity_margin": margin,
-            "calls": calls_request,
+            "provider": ctx.embedding_provider,
+            "model": ctx.embedding_model,
+            "pick_highest_score": ctx.pick_highest_score,
+            "similarity_threshold": ctx.threshold,
+            "similarity_margin": ctx.margin,
+            "calls": calls.calls_request,
         });
         let router_response_json = serde_json::json!({
             "type": "embeddings",
             "selected_preset_id": selected,
             "scores": scores,
-            "calls": calls_response,
+            "calls": calls.calls_response,
         });
         (router_request_json, router_response_json)
     }
@@ -368,16 +390,7 @@ async fn route_preset_id_with_embeddings(
 
     let transcript_embedding = match transcript_embedding_result {
         Ok((v, req, resp)) => {
-            push_call(
-                &mut call_id,
-                &mut calls_request,
-                &mut calls_response,
-                "transcript",
-                None,
-                false,
-                req,
-                resp,
-            );
+            push_call(&mut calls, "transcript", None, false, req, resp);
             v
         }
         Err(e) => {
@@ -399,29 +412,11 @@ async fn route_preset_id_with_embeddings(
 
             let err_json = serde_json::from_str::<JsonValue>(&e).unwrap_or(JsonValue::String(e));
             let resp = serde_json::json!({ "error": err_json });
-            push_call(
-                &mut call_id,
-                &mut calls_request,
-                &mut calls_response,
-                "transcript",
-                None,
-                false,
-                req,
-                resp,
-            );
+            push_call(&mut calls, "transcript", None, false, req, resp);
 
             let empty_scores: Vec<(String, f32)> = Vec::new();
-            let (router_req, router_resp) = build_router_payloads(
-                embedding_provider,
-                embedding_model,
-                pick_highest_score,
-                threshold,
-                margin,
-                &None,
-                &empty_scores,
-                &calls_request,
-                &calls_response,
-            );
+            let (router_req, router_resp) =
+                build_router_payloads(&router_ctx, &None, &empty_scores, &calls);
             return Some((
                 None,
                 empty_scores,
@@ -514,9 +509,7 @@ async fn route_preset_id_with_embeddings(
                     "embedding_len": cached_hint_embedding.len(),
                 });
                 push_call(
-                    &mut call_id,
-                    &mut calls_request,
-                    &mut calls_response,
+                    &mut calls,
                     "hint",
                     Some(candidate_id.as_str()),
                     true,
@@ -559,9 +552,7 @@ async fn route_preset_id_with_embeddings(
                 match embed_result {
                     Ok((v, req, resp)) => {
                         push_call(
-                            &mut call_id,
-                            &mut calls_request,
-                            &mut calls_response,
+                            &mut calls,
                             "hint",
                             Some(candidate_id.as_str()),
                             false,
@@ -615,9 +606,7 @@ async fn route_preset_id_with_embeddings(
                             .unwrap_or_else(|_| JsonValue::String(e.clone()));
                         let resp = serde_json::json!({ "error": err_json });
                         push_call(
-                            &mut call_id,
-                            &mut calls_request,
-                            &mut calls_response,
+                            &mut calls,
                             "hint",
                             Some(candidate_id.as_str()),
                             false,
@@ -666,17 +655,7 @@ async fn route_preset_id_with_embeddings(
     }
 
     let Some((best_id, best_score)) = best else {
-        let (router_req, router_resp) = build_router_payloads(
-            embedding_provider,
-            embedding_model,
-            pick_highest_score,
-            threshold,
-            margin,
-            &None,
-            &scores,
-            &calls_request,
-            &calls_response,
-        );
+        let (router_req, router_resp) = build_router_payloads(&router_ctx, &None, &scores, &calls);
         return Some((None, scores, threshold, margin, router_req, router_resp));
     };
 
@@ -687,17 +666,8 @@ async fn route_preset_id_with_embeddings(
                 best_score,
                 threshold
             );
-            let (router_req, router_resp) = build_router_payloads(
-                embedding_provider,
-                embedding_model,
-                pick_highest_score,
-                threshold,
-                margin,
-                &None,
-                &scores,
-                &calls_request,
-                &calls_response,
-            );
+            let (router_req, router_resp) =
+                build_router_payloads(&router_ctx, &None, &scores, &calls);
             return Some((None, scores, threshold, margin, router_req, router_resp));
         }
 
@@ -709,17 +679,8 @@ async fn route_preset_id_with_embeddings(
                     second_score,
                     margin
                 );
-                let (router_req, router_resp) = build_router_payloads(
-                    embedding_provider,
-                    embedding_model,
-                    pick_highest_score,
-                    threshold,
-                    margin,
-                    &None,
-                    &scores,
-                    &calls_request,
-                    &calls_response,
-                );
+                let (router_req, router_resp) =
+                    build_router_payloads(&router_ctx, &None, &scores, &calls);
                 return Some((None, scores, threshold, margin, router_req, router_resp));
             }
         }
@@ -731,17 +692,7 @@ async fn route_preset_id_with_embeddings(
         Some(best_id)
     };
 
-    let (router_req, router_resp) = build_router_payloads(
-        embedding_provider,
-        embedding_model,
-        pick_highest_score,
-        threshold,
-        margin,
-        &selected,
-        &scores,
-        &calls_request,
-        &calls_response,
-    );
+    let (router_req, router_resp) = build_router_payloads(&router_ctx, &selected, &scores, &calls);
     Some((selected, scores, threshold, margin, router_req, router_resp))
 }
 
@@ -1195,6 +1146,7 @@ pub struct PipelineConfig {
     /// STT provider to use
     pub stt_provider: String,
     /// API key for the STT provider
+    #[allow(dead_code)]
     pub stt_api_key: String,
     /// API keys for all configured STT providers (provider id -> key)
     pub stt_api_keys: HashMap<String, String>,
@@ -1285,6 +1237,16 @@ pub struct PipelineConfig {
     /// - "on_transcribe": load when first needed
     /// - "on_launch": best-effort preload at startup
     pub local_whisper_load_mode: String,
+}
+
+struct LlmProviderParams {
+    model: Option<String>,
+    timeout: Duration,
+    ollama_url: Option<String>,
+    openai_reasoning_effort: Option<String>,
+    gemini_thinking_budget: Option<i64>,
+    gemini_thinking_level: Option<String>,
+    anthropic_thinking_budget: Option<i64>,
 }
 
 impl Default for PipelineConfig {
@@ -1614,35 +1576,37 @@ impl PipelineInner {
     fn get_or_create_llm_provider(
         &mut self,
         provider_id: &str,
-        model: Option<String>,
-        timeout: Duration,
-        ollama_url: Option<String>,
-        openai_reasoning_effort: Option<String>,
-        gemini_thinking_budget: Option<i64>,
-        gemini_thinking_level: Option<String>,
-        anthropic_thinking_budget: Option<i64>,
+        params: LlmProviderParams,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
-        let model_key = model.clone().unwrap_or_else(|| "<default>".to_string());
-        let url_key = ollama_url
+        let model_key = params
+            .model
+            .clone()
+            .unwrap_or_else(|| "<default>".to_string());
+        let url_key = params
+            .ollama_url
             .clone()
             .unwrap_or_else(|| "<default-url>".to_string());
-        let openai_effort_key = openai_reasoning_effort
+        let openai_effort_key = params
+            .openai_reasoning_effort
             .clone()
             .unwrap_or_else(|| "<default-effort>".to_string());
-        let gemini_budget_key = gemini_thinking_budget
+        let gemini_budget_key = params
+            .gemini_thinking_budget
             .map(|b| b.to_string())
             .unwrap_or_else(|| "<default-budget>".to_string());
-        let gemini_level_key = gemini_thinking_level
+        let gemini_level_key = params
+            .gemini_thinking_level
             .clone()
             .unwrap_or_else(|| "<default-level>".to_string());
-        let anthropic_budget_key = anthropic_thinking_budget
+        let anthropic_budget_key = params
+            .anthropic_thinking_budget
             .map(|b| b.to_string())
             .unwrap_or_else(|| "<default-budget>".to_string());
         let cache_key = format!(
             "{}::{}::{}::{}::{}::{}::{}::{}",
             provider_id,
             model_key,
-            timeout.as_secs_f64(),
+            params.timeout.as_secs_f64(),
             url_key,
             openai_effort_key,
             gemini_budget_key,
@@ -1677,13 +1641,13 @@ impl PipelineInner {
         cfg.enabled = true;
         cfg.provider = provider_id.to_string();
         cfg.api_key = api_key;
-        cfg.model = model;
-        cfg.ollama_url = ollama_url;
-        cfg.timeout = timeout;
-        cfg.openai_reasoning_effort = openai_reasoning_effort;
-        cfg.gemini_thinking_budget = gemini_thinking_budget;
-        cfg.gemini_thinking_level = gemini_thinking_level;
-        cfg.anthropic_thinking_budget = anthropic_thinking_budget;
+        cfg.model = params.model;
+        cfg.ollama_url = params.ollama_url;
+        cfg.timeout = params.timeout;
+        cfg.openai_reasoning_effort = params.openai_reasoning_effort;
+        cfg.gemini_thinking_budget = params.gemini_thinking_budget;
+        cfg.gemini_thinking_level = params.gemini_thinking_level;
+        cfg.anthropic_thinking_budget = params.anthropic_thinking_budget;
 
         let provider = create_llm_provider(
             &cfg,
@@ -2721,10 +2685,8 @@ impl SharedPipeline {
                         .map(|pid| pid == profile.id)
                         .unwrap_or(true);
 
-                    if profile_ok {
-                        if find_preset_by_id(profile, lock.preset_id.as_str()).is_some() {
-                            routed_preset_id = Some(lock.preset_id.clone());
-                        }
+                    if profile_ok && find_preset_by_id(profile, lock.preset_id.as_str()).is_some() {
+                        routed_preset_id = Some(lock.preset_id.clone());
                     }
                 }
 
@@ -2776,13 +2738,15 @@ impl SharedPipeline {
                             inner
                                 .get_or_create_llm_provider(
                                     desired_provider.as_str(),
-                                    desired_model,
-                                    llm_cfg.timeout,
-                                    llm_cfg.ollama_url.clone(),
-                                    desired_openai_effort,
-                                    desired_gemini_budget,
-                                    desired_gemini_level,
-                                    desired_anthropic_budget,
+                                    LlmProviderParams {
+                                        model: desired_model,
+                                        timeout: llm_cfg.timeout,
+                                        ollama_url: llm_cfg.ollama_url.clone(),
+                                        openai_reasoning_effort: desired_openai_effort,
+                                        gemini_thinking_budget: desired_gemini_budget,
+                                        gemini_thinking_level: desired_gemini_level,
+                                        anthropic_thinking_budget: desired_anthropic_budget,
+                                    },
                                 )
                                 .ok()
                         };
@@ -3210,13 +3174,15 @@ impl SharedPipeline {
                 inner
                     .get_or_create_llm_provider(
                         desired_llm_provider.as_str(),
-                        desired_llm_model.clone(),
-                        llm_timeout,
-                        llm_config.ollama_url.clone(),
-                        effective_openai_reasoning_effort,
-                        effective_gemini_thinking_budget,
-                        effective_gemini_thinking_level,
-                        effective_anthropic_thinking_budget,
+                        LlmProviderParams {
+                            model: desired_llm_model.clone(),
+                            timeout: llm_timeout,
+                            ollama_url: llm_config.ollama_url.clone(),
+                            openai_reasoning_effort: effective_openai_reasoning_effort,
+                            gemini_thinking_budget: effective_gemini_thinking_budget,
+                            gemini_thinking_level: effective_gemini_thinking_level,
+                            anthropic_thinking_budget: effective_anthropic_thinking_budget,
+                        },
                     )
                     .map(|p| (Some(p), None))
                     .unwrap_or_else(|e| {
@@ -3664,10 +3630,8 @@ impl SharedPipeline {
                         .as_deref()
                         .map(|pid| pid == profile.id)
                         .unwrap_or(true);
-                    if profile_ok {
-                        if find_preset_by_id(profile, lock.preset_id.as_str()).is_some() {
-                            routed_preset_id = Some(lock.preset_id.clone());
-                        }
+                    if profile_ok && find_preset_by_id(profile, lock.preset_id.as_str()).is_some() {
+                        routed_preset_id = Some(lock.preset_id.clone());
                     }
                 }
 
@@ -3694,13 +3658,20 @@ impl SharedPipeline {
                             inner
                                 .get_or_create_llm_provider(
                                     llm_cfg.provider.as_str(),
-                                    llm_cfg.model.clone(),
-                                    llm_cfg.timeout,
-                                    llm_cfg.ollama_url.clone(),
-                                    llm_cfg.openai_reasoning_effort.clone(),
-                                    llm_cfg.gemini_thinking_budget,
-                                    llm_cfg.gemini_thinking_level.clone(),
-                                    llm_cfg.anthropic_thinking_budget,
+                                    LlmProviderParams {
+                                        model: llm_cfg.model.clone(),
+                                        timeout: llm_cfg.timeout,
+                                        ollama_url: llm_cfg.ollama_url.clone(),
+                                        openai_reasoning_effort: llm_cfg
+                                            .openai_reasoning_effort
+                                            .clone(),
+                                        gemini_thinking_budget: llm_cfg.gemini_thinking_budget,
+                                        gemini_thinking_level: llm_cfg
+                                            .gemini_thinking_level
+                                            .clone(),
+                                        anthropic_thinking_budget: llm_cfg
+                                            .anthropic_thinking_budget,
+                                    },
                                 )
                                 .ok()
                         };
@@ -4122,13 +4093,15 @@ impl SharedPipeline {
                 inner
                     .get_or_create_llm_provider(
                         desired_llm_provider.as_str(),
-                        desired_llm_model.clone(),
-                        llm_timeout,
-                        llm_config.ollama_url.clone(),
-                        effective_openai_reasoning_effort,
-                        effective_gemini_thinking_budget,
-                        effective_gemini_thinking_level,
-                        effective_anthropic_thinking_budget,
+                        LlmProviderParams {
+                            model: desired_llm_model.clone(),
+                            timeout: llm_timeout,
+                            ollama_url: llm_config.ollama_url.clone(),
+                            openai_reasoning_effort: effective_openai_reasoning_effort,
+                            gemini_thinking_budget: effective_gemini_thinking_budget,
+                            gemini_thinking_level: effective_gemini_thinking_level,
+                            anthropic_thinking_budget: effective_anthropic_thinking_budget,
+                        },
                     )
                     .map(|p| (Some(p), None))
                     .unwrap_or_else(|e| {

@@ -8,21 +8,16 @@ use crate::llm::PromptSections;
 // ============================================================================
 
 /// Proxy mode for outgoing HTTP requests.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyMode {
     /// Force-disable any proxy usage (ignore env/system proxies).
     NoProxy,
     /// Use system defaults (env vars / OS proxy discovery).
+    #[default]
     System,
     /// Use a user-specified proxy URL.
     Manual,
-}
-
-impl Default for ProxyMode {
-    fn default() -> Self {
-        Self::System
-    }
 }
 
 /// Manual proxy configuration.
@@ -56,17 +51,12 @@ impl Default for ManualProxySettings {
 }
 
 /// Persistent proxy settings.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustedCaCertFormat {
+    #[default]
     Pem,
     Der,
-}
-
-impl Default for TrustedCaCertFormat {
-    fn default() -> Self {
-        Self::Pem
-    }
 }
 
 /// A user-provided CA certificate that should be trusted for outgoing HTTPS.
@@ -540,18 +530,13 @@ where
     Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(true))
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IntentRouterStrategy {
+    #[default]
     Off,
     Embeddings,
     Llm,
-}
-
-impl Default for IntentRouterStrategy {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

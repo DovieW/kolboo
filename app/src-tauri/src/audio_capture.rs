@@ -1076,7 +1076,7 @@ pub enum AudioCaptureEvent {
 }
 
 /// Configuration for VAD-based auto-stop
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VadAutoStopConfig {
     /// Enable VAD processing
     pub enabled: bool,
@@ -1085,16 +1085,6 @@ pub struct VadAutoStopConfig {
     pub auto_stop: bool,
     /// VAD configuration
     pub vad_config: VadConfig,
-}
-
-impl Default for VadAutoStopConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            auto_stop: false,
-            vad_config: VadConfig::default(),
-        }
-    }
 }
 
 /// Handle to a running audio capture session
@@ -1365,12 +1355,12 @@ impl AudioCapture {
 
         // Spawn capture thread
         let thread_handle = thread::spawn(move || {
-            run_capture_thread(
+            run_capture_thread(CaptureThreadArgs {
                 device,
-                stream_config,
+                config: stream_config,
                 sample_format,
-                buffer_clone,
-                pre_roll_clone,
+                buffer: buffer_clone,
+                pre_roll: pre_roll_clone,
                 recording_active,
                 pre_roll_ms,
                 meter,
@@ -1378,9 +1368,9 @@ impl AudioCapture {
                 command_rx,
                 event_tx,
                 vad_config,
-                auto_recover,
+                auto_recover_enabled: auto_recover,
                 desired_device_name,
-            )
+            })
         });
 
         self.capture_handle = Some(CaptureHandle {
@@ -1638,8 +1628,7 @@ impl Drop for AudioCapture {
     }
 }
 
-/// Run the audio capture in a dedicated thread
-fn run_capture_thread(
+struct CaptureThreadArgs {
     device: cpal::Device,
     config: cpal::StreamConfig,
     sample_format: SampleFormat,
@@ -1654,13 +1643,30 @@ fn run_capture_thread(
     vad_config: VadAutoStopConfig,
     auto_recover_enabled: Arc<AtomicBool>,
     desired_device_name: Arc<StdMutex<Option<String>>>,
-) -> Result<(), AudioCaptureError> {
+}
+
+/// Run the audio capture in a dedicated thread
+fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> {
     use cpal::Sample;
 
     use std::time::{Duration, Instant};
 
-    let mut device = device;
-    let config = config;
+    let CaptureThreadArgs {
+        mut device,
+        config,
+        sample_format,
+        buffer,
+        pre_roll,
+        recording_active,
+        pre_roll_ms,
+        meter,
+        waveform_meter,
+        command_rx,
+        event_tx,
+        vad_config,
+        auto_recover_enabled,
+        desired_device_name,
+    } = args;
     let sample_rate = config.sample_rate;
 
     // Used for watchdog timing (monotonic).

@@ -664,6 +664,7 @@ pub async fn test_llm_rewrite(
 /// It creates a dedicated request-log entry so provider/model + request/response payloads
 /// are visible in Request Logs.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn iterate_rewrite_prompt(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,

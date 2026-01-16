@@ -22,19 +22,13 @@ fn effective_history_max(max_entries: Option<usize>) -> usize {
 }
 
 /// Status of a transcription attempt in history.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryStatus {
     InProgress,
+    #[default]
     Success,
     Error,
-}
-
-impl Default for HistoryStatus {
-    fn default() -> Self {
-        // Existing history.json entries (pre-status) should be treated as success.
-        HistoryStatus::Success
-    }
 }
 
 /// A single dictation history entry
@@ -642,8 +636,7 @@ impl HistoryStorage {
         };
 
         // Filter into references to avoid cloning the entire dataset.
-        let mut filtered: Vec<&HistoryEntry> = Vec::new();
-        filtered.reserve(entries.len().min(2048));
+        let mut filtered: Vec<&HistoryEntry> = Vec::with_capacity(entries.len().min(2048));
         for entry in entries.iter() {
             if matches_filters(entry) {
                 filtered.push(entry);
@@ -651,7 +644,7 @@ impl HistoryStorage {
         }
 
         let total_filtered = filtered.len();
-        let total_pages = ((total_filtered + page_size - 1) / page_size).max(1);
+        let total_pages = total_filtered.div_ceil(page_size).max(1);
 
         let mut page = params.page.unwrap_or(1);
         if page < 1 {

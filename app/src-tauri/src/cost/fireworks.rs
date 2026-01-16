@@ -38,7 +38,7 @@ fn normalize_model_id(model: &str) -> String {
 fn parse_params_b_from_id(model_id: &str) -> Option<f64> {
     // Extract tokens like "8b", "70b", "405b" from the model id.
     // We keep this intentionally conservative.
-    for part in model_id.split(|c: char| c == '-' || c == '_' || c == '/' || c == '.') {
+    for part in model_id.split(['-', '_', '/', '.']) {
         let p = part.trim();
         if p.len() < 2 || !p.ends_with('b') {
             continue;
@@ -80,10 +80,7 @@ pub fn text_token_rates(model: &str) -> Option<TokenRates> {
     // We key off substrings because Fireworks model ids vary widely.
     let special = if m.contains("deepseek") && m.contains("v3") {
         Some((560_000u64, 1_680_000u64))
-    } else if m.contains("deepseek") && m.contains("r1") {
-        // "DeepSeek R1 0528" on the pricing page.
-        Some((1_350_000u64, 5_400_000u64))
-    } else if m.contains("deepseek") && m.contains("reason") {
+    } else if m.contains("deepseek") && (m.contains("r1") || m.contains("reason")) {
         // "DeepSeek R1 0528" on the pricing page.
         Some((1_350_000u64, 5_400_000u64))
     } else if m.contains("glm-4.5") || m.contains("glm-4.6") {
@@ -102,9 +99,7 @@ pub fn text_token_rates(model: &str) -> Option<TokenRates> {
         Some((150_000u64, 600_000u64))
     } else if m.contains("gpt-oss-20b") {
         Some((70_000u64, 300_000u64))
-    } else if m.contains("minimax") && m.contains("m2.1") {
-        Some((300_000u64, 1_200_000u64))
-    } else if m.contains("minimax") && m.contains("m2") {
+    } else if m.contains("minimax") && (m.contains("m2.1") || m.contains("m2")) {
         Some((300_000u64, 1_200_000u64))
     } else {
         None

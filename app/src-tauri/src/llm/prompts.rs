@@ -75,18 +75,10 @@ world
 bye""#;
 
 /// Configuration for prompt sections
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct PromptSections {
     /// Custom system prompt (if None, use built-in default)
     pub system_custom: Option<String>,
-}
-
-impl Default for PromptSections {
-    fn default() -> Self {
-        Self {
-            system_custom: None,
-        }
-    }
 }
 
 impl PromptSections {

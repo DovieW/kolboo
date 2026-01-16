@@ -471,7 +471,7 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(
 pub async fn show_overlay(app: AppHandle) -> Result<(), String> {
     #[cfg(desktop)]
     {
-        return show_overlay_with_reset_if_not_always(&app);
+        show_overlay_with_reset_if_not_always(&app)
     }
 
     #[cfg(not(desktop))]

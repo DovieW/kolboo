@@ -116,7 +116,7 @@ fn is_free_tier_call(app: &AppHandle, provider: &str) -> bool {
     #[cfg(desktop)]
     {
         // Default to true, matching UI expectations.
-        return match provider {
+        match provider {
             "cerebras" => crate::get_setting_from_store(app, "cerebras_free_tier", true),
             "groq" => crate::get_setting_from_store(app, "groq_free_tier", true),
             "elevenlabs" => crate::get_setting_from_store(app, "elevenlabs_free_tier", true),
@@ -124,7 +124,7 @@ fn is_free_tier_call(app: &AppHandle, provider: &str) -> bool {
             "assemblyai" => crate::get_setting_from_store(app, "assemblyai_free_tier", true),
             "speechmatics" => crate::get_setting_from_store(app, "speechmatics_free_tier", true),
             _ => false,
-        };
+        }
     }
 
     #[cfg(not(desktop))]
@@ -298,7 +298,7 @@ impl StatsStore {
         };
 
         serde_json::to_writer(&mut *writer, event).map_err(|e| e.to_string())?;
-        (&mut *writer).write_all(b"\n").map_err(|e| e.to_string())?;
+        writer.write_all(b"\n").map_err(|e| e.to_string())?;
         st.pending_appends = st.pending_appends.saturating_add(1);
 
         // Any append means stats queries are stale.
@@ -832,38 +832,30 @@ pub fn emit_cost_events_for_current_request(
             }
         }
 
-        if inputs.stt_provider == "deepgram" {
-            if ev.estimated_cost_usd_micros.is_none() {
-                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) =
-                        deepgram_cost::estimate_stt_cost_from_audio_secs(model, secs)
-                    {
-                        ev.estimated_cost_usd_micros = Some(micros);
-                    }
+        if inputs.stt_provider == "deepgram" && ev.estimated_cost_usd_micros.is_none() {
+            if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                if let Some(micros) = deepgram_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                {
+                    ev.estimated_cost_usd_micros = Some(micros);
                 }
             }
         }
 
-        if inputs.stt_provider == "aquavoice" {
-            if ev.estimated_cost_usd_micros.is_none() {
-                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) =
-                        aquavoice_cost::estimate_stt_cost_from_audio_secs(model, secs)
-                    {
-                        ev.estimated_cost_usd_micros = Some(micros);
-                    }
+        if inputs.stt_provider == "aquavoice" && ev.estimated_cost_usd_micros.is_none() {
+            if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                if let Some(micros) = aquavoice_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                {
+                    ev.estimated_cost_usd_micros = Some(micros);
                 }
             }
         }
 
-        if inputs.stt_provider == "assemblyai" {
-            if ev.estimated_cost_usd_micros.is_none() {
-                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) =
-                        assemblyai_cost::estimate_stt_cost_from_audio_secs(model, secs)
-                    {
-                        ev.estimated_cost_usd_micros = Some(micros);
-                    }
+        if inputs.stt_provider == "assemblyai" && ev.estimated_cost_usd_micros.is_none() {
+            if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                if let Some(micros) =
+                    assemblyai_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                {
+                    ev.estimated_cost_usd_micros = Some(micros);
                 }
             }
         }
@@ -882,14 +874,11 @@ pub fn emit_cost_events_for_current_request(
             }
         }
 
-        if inputs.stt_provider == "fireworks" {
-            if ev.estimated_cost_usd_micros.is_none() {
-                if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
-                    if let Some(micros) =
-                        fireworks_cost::estimate_stt_cost_from_audio_secs(model, secs)
-                    {
-                        ev.estimated_cost_usd_micros = Some(micros);
-                    }
+        if inputs.stt_provider == "fireworks" && ev.estimated_cost_usd_micros.is_none() {
+            if let (Some(model), Some(secs)) = (ev.model.as_deref(), audio_secs) {
+                if let Some(micros) = fireworks_cost::estimate_stt_cost_from_audio_secs(model, secs)
+                {
+                    ev.estimated_cost_usd_micros = Some(micros);
                 }
             }
         }

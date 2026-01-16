@@ -113,7 +113,7 @@ fn get_hotkey_from_store(
         Some(Value::Null) => None,
         Some(v) => serde_json::from_value::<HotkeyConfig>(v)
             .ok()
-            .or_else(|| default_fn()),
+            .or_else(default_fn),
     }
 }
 
@@ -160,7 +160,7 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
             Some(Value::Null) => None,
             Some(v) => serde_json::from_value::<HotkeyConfig>(v)
                 .ok()
-                .or_else(|| HotkeyConfig::default_quick_ask()),
+                .or_else(HotkeyConfig::default_quick_ask),
         };
 
         let toggle = get_hotkey_from_store(

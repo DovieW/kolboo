@@ -105,7 +105,7 @@ fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuratio
 
         if let (Some(unit), Some(value)) = (unit, value) {
             // 0 means keep forever.
-            if !(value > 0.0) {
+            if value.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 return None;
             }
 
@@ -123,7 +123,7 @@ fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuratio
                     // Allow fractional hours (e.g. 0.5)
                     // Defensive cap: ~100 years in hours
                     let hours = value.clamp(0.0, 36_500.0 * 24.0);
-                    if !(hours > 0.0) {
+                    if hours.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                         None
                     } else {
                         let millis = (hours * 3_600_000.0).round() as i64;
@@ -151,12 +151,11 @@ fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuratio
 fn get_transcription_retention_delete_recordings(app: &AppHandle) -> bool {
     #[cfg(desktop)]
     {
-        return app
-            .store("settings.json")
+        app.store("settings.json")
             .ok()
             .and_then(|store| store.get("transcription_retention_delete_recordings"))
             .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+            .unwrap_or(false)
     }
 
     #[cfg(not(desktop))]
@@ -168,12 +167,11 @@ fn get_transcription_retention_delete_recordings(app: &AppHandle) -> bool {
 fn get_transcription_retention_days(app: &AppHandle) -> u64 {
     #[cfg(desktop)]
     {
-        return app
-            .store("settings.json")
+        app.store("settings.json")
             .ok()
             .and_then(|store| store.get("transcription_retention_days"))
             .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
-            .unwrap_or(0u64);
+            .unwrap_or(0u64)
     }
 
     #[cfg(not(desktop))]
@@ -1352,7 +1350,7 @@ pub fn pipeline_cancel(
     {
         // Reuse the centralized cancel logic so audio mute/pause state is restored too.
         crate::cancel_pipeline_session(&app, "Command");
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(desktop))]
@@ -1433,21 +1431,23 @@ pub fn pipeline_update_config(
         ..VadAutoStopConfig::default()
     };
 
-    let mut new_config = PipelineConfig::default();
-    new_config.stt_provider = config.stt_provider.unwrap_or_else(|| "groq".to_string());
-    new_config.stt_api_key = config.stt_api_key.unwrap_or_default();
-    new_config.stt_api_keys = HashMap::new();
-    new_config.stt_model = config.stt_model;
-    new_config.max_duration_secs = config.max_duration_secs.unwrap_or(300.0);
-    new_config.retry_config = retry_config;
-    new_config.vad_config = vad_config;
-    new_config.transcription_timeout = config
-        .transcription_timeout_secs
-        .map(Duration::from_secs)
-        .unwrap_or(Duration::from_secs(60));
-    new_config.max_recording_bytes = config.max_recording_bytes.unwrap_or(50 * 1024 * 1024);
-    new_config.llm_config = crate::llm::LlmConfig::default();
-    new_config.llm_api_keys = HashMap::new();
+    let new_config = PipelineConfig {
+        stt_provider: config.stt_provider.unwrap_or_else(|| "groq".to_string()),
+        stt_api_key: config.stt_api_key.unwrap_or_default(),
+        stt_api_keys: HashMap::new(),
+        stt_model: config.stt_model,
+        max_duration_secs: config.max_duration_secs.unwrap_or(300.0),
+        retry_config,
+        vad_config,
+        transcription_timeout: config
+            .transcription_timeout_secs
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(60)),
+        max_recording_bytes: config.max_recording_bytes.unwrap_or(50 * 1024 * 1024),
+        llm_config: crate::llm::LlmConfig::default(),
+        llm_api_keys: HashMap::new(),
+        ..Default::default()
+    };
 
     pipeline
         .update_config(new_config)

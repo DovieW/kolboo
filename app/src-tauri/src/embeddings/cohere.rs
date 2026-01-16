@@ -36,8 +36,7 @@ pub async fn embed_text(
     input_type: &str,
     input: &str,
 ) -> Result<Vec<f32>, CohereEmbeddingsError> {
-    let mut inputs: Vec<String> = Vec::with_capacity(1);
-    inputs.push(input.to_string());
+    let inputs: Vec<String> = vec![input.to_string()];
     let mut out = embed_texts(client, api_key, model, input_type, &inputs).await?;
     if out.is_empty() {
         return Err(CohereEmbeddingsError::MissingEmbedding);
@@ -189,7 +188,7 @@ pub async fn embed_text_with_debug(
     let mut preview: String = input.chars().take(INPUT_PREVIEW_MAX_CHARS).collect();
     let truncated = input_len > INPUT_PREVIEW_MAX_CHARS;
     if truncated {
-        preview.push_str("…");
+        preview.push('…');
     }
 
     let request_json = serde_json::json!({

@@ -8,13 +8,14 @@ use std::collections::VecDeque;
 use webrtc_vad::{Vad, VadMode};
 
 /// VAD aggressiveness level (maps to webrtc-vad modes)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VadAggressiveness {
     /// Quality mode - less aggressive, fewer false negatives
     Quality,
     /// Low bitrate mode
     LowBitrate,
     /// Aggressive mode
+    #[default]
     Aggressive,
     /// Very aggressive mode - more aggressive, more false negatives
     VeryAggressive,
@@ -28,12 +29,6 @@ impl VadAggressiveness {
             VadAggressiveness::Aggressive => VadMode::Aggressive,
             VadAggressiveness::VeryAggressive => VadMode::VeryAggressive,
         }
-    }
-}
-
-impl Default for VadAggressiveness {
-    fn default() -> Self {
-        VadAggressiveness::Aggressive
     }
 }
 
@@ -245,7 +240,6 @@ impl Default for VoiceActivityDetector {
         Self::new(VadConfig::default())
     }
 }
-
 /// Resample audio from source sample rate to 16kHz for VAD processing
 ///
 /// Uses the rubato library for high-quality resampling.
@@ -279,7 +273,7 @@ pub fn resample_to_16khz(samples: &[f32], source_sample_rate: u32) -> Vec<f32> {
 
     let resample_ratio = 16000.0 / source_sample_rate as f64;
     let input_len_frames = samples.len();
-    let chunk_size_frames = input_len_frames.min(1024).max(1);
+    let chunk_size_frames = input_len_frames.clamp(1, 1024);
 
     // rubato v1 uses AudioAdapter-based input/output buffers.
     // We only use mono data here.

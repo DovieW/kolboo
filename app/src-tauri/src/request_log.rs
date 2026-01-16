@@ -163,18 +163,13 @@ pub struct RouterPresetScore {
 /// Most logs represent the main pipeline transcription+rewrite flow.
 /// Quick Ask sessions are also backed by the pipeline, but include an additional
 /// answer-generation step and should be surfaced separately in the UI.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestKind {
+    #[default]
     Transcription,
     QuickAsk,
     QuickReplace,
-}
-
-impl Default for RequestKind {
-    fn default() -> Self {
-        Self::Transcription
-    }
 }
 
 /// A complete request log containing all entries for a single transcription request
@@ -614,7 +609,7 @@ impl RequestLogStore {
     pub fn new_with_retention(retention: RequestLogsRetentionConfig) -> Self {
         // Allocate up to a modest default; VecDeque can grow, but we enforce caps on insert.
         let initial_capacity = match retention.mode {
-            RequestLogsRetentionMode::Amount => retention.amount.max(1).min(HARD_MAX_LOGS),
+            RequestLogsRetentionMode::Amount => retention.amount.clamp(1, HARD_MAX_LOGS),
             RequestLogsRetentionMode::Time => DEFAULT_MAX_LOGS,
         };
 

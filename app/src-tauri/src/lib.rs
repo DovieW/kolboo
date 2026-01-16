@@ -129,7 +129,7 @@ fn get_hotkey_from_store(
         Some(Value::Null) => None,
         Some(v) => serde_json::from_value::<HotkeyConfig>(v)
             .ok()
-            .or_else(|| default_fn()),
+            .or_else(default_fn),
     }
 }
 
@@ -517,13 +517,8 @@ fn sanitize_transcript(transcript: &str) -> Option<String> {
 /// This is used by the Retry hotkey to pick "the last recording".
 #[cfg(desktop)]
 fn resolve_last_recording_history_entry_id(app: &AppHandle) -> Option<String> {
-    let Some(history) = app.try_state::<HistoryStorage>() else {
-        return None;
-    };
-
-    let Some(store) = app.try_state::<RecordingStore>() else {
-        return None;
-    };
+    let history = app.try_state::<HistoryStorage>()?;
+    let store = app.try_state::<RecordingStore>()?;
 
     // Be conservative on work done inside shortcut-triggered paths.
     let entries = history.get_all(Some(50)).ok()?;
@@ -1452,7 +1447,7 @@ fn stop_recording(
             // Create an in-progress history entry while we transcribe.
             // Quick Ask uses a separate UI surface and should not pollute the main dictation history.
             if !is_quick_ask_session {
-                if let Some(ref req_id) = request_id {
+                if let Some(req_id) = request_id.as_ref() {
                     if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                         let _ = history.add_request_entry(
                             req_id.clone(),
@@ -1486,8 +1481,8 @@ fn stop_recording(
                         // Like Quick Ask, Quick Replace needs to keep the request log open
                         // until the extra LLM step completes, otherwise the UI won't capture
                         // the additional diagnostics.
-                        let should_complete_now = !is_quick_ask_session
-                            && !(quick_replace_cfg.enabled && quick_replace_epoch != 0);
+                        let should_complete_now = !(is_quick_ask_session
+                            || (quick_replace_cfg.enabled && quick_replace_epoch != 0));
 
                         log_store.with_current(|log| {
                             // Raw STT output (pre-LLM)
@@ -1611,9 +1606,10 @@ fn stop_recording(
                     }
 
                     // Persist audio for retry (best-effort)
-                    if let (Some(ref req_id), Some(store)) =
-                        (request_id.as_ref(), app_clone.try_state::<RecordingStore>())
-                    {
+                    if let (Some(req_id), Some(store)) = (
+                        request_id.as_deref(),
+                        app_clone.try_state::<RecordingStore>(),
+                    ) {
                         if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
                             if store.save_wav(req_id, &wav).is_ok() {
                                 let max_saved_recordings: usize = (get_setting_from_store(
@@ -1738,8 +1734,7 @@ fn stop_recording(
                                         3u64,
                                     );
                                 let quick_ask_conversation_history_count: usize =
-                                    (quick_ask_conversation_history_count_raw.max(1).min(20))
-                                        as usize;
+                                    quick_ask_conversation_history_count_raw.clamp(1, 20) as usize;
 
                                 let global_qa_openai_reasoning_effort: Option<String> =
                                     get_setting_from_store(
@@ -2103,46 +2098,41 @@ fn stop_recording(
                                             log.quick_ask_clipboard_context =
                                                 quick_ask_clipboard_context_for_log;
 
-                                            if let Some(req) = log.quick_ask_request_json.as_mut() {
-                                                // If it's our JSON object, add a couple extra fields.
-                                                if let serde_json::Value::Object(map) = req {
-                                                    map.insert(
-                                                        "context_present".to_string(),
-                                                        serde_json::Value::Bool(
-                                                            context_chars.is_some(),
-                                                        ),
-                                                    );
-                                                    map.insert(
-                                                        "context_chars".to_string(),
-                                                        context_chars
-                                                            .map(|n| {
-                                                                serde_json::Value::Number(
-                                                                    serde_json::Number::from(
-                                                                        n as u64,
-                                                                    ),
-                                                                )
-                                                            })
-                                                            .unwrap_or(serde_json::Value::Null),
-                                                    );
-                                                    map.insert(
-                                                        "clipboard_context_present".to_string(),
-                                                        serde_json::Value::Bool(
-                                                            clipboard_chars.is_some(),
-                                                        ),
-                                                    );
-                                                    map.insert(
-                                                        "clipboard_context_chars".to_string(),
-                                                        clipboard_chars
-                                                            .map(|n| {
-                                                                serde_json::Value::Number(
-                                                                    serde_json::Number::from(
-                                                                        n as u64,
-                                                                    ),
-                                                                )
-                                                            })
-                                                            .unwrap_or(serde_json::Value::Null),
-                                                    );
-                                                }
+                                            if let Some(serde_json::Value::Object(map)) =
+                                                log.quick_ask_request_json.as_mut()
+                                            {
+                                                map.insert(
+                                                    "context_present".to_string(),
+                                                    serde_json::Value::Bool(
+                                                        context_chars.is_some(),
+                                                    ),
+                                                );
+                                                map.insert(
+                                                    "context_chars".to_string(),
+                                                    context_chars
+                                                        .map(|n| {
+                                                            serde_json::Value::Number(
+                                                                serde_json::Number::from(n as u64),
+                                                            )
+                                                        })
+                                                        .unwrap_or(serde_json::Value::Null),
+                                                );
+                                                map.insert(
+                                                    "clipboard_context_present".to_string(),
+                                                    serde_json::Value::Bool(
+                                                        clipboard_chars.is_some(),
+                                                    ),
+                                                );
+                                                map.insert(
+                                                    "clipboard_context_chars".to_string(),
+                                                    clipboard_chars
+                                                        .map(|n| {
+                                                            serde_json::Value::Number(
+                                                                serde_json::Number::from(n as u64),
+                                                            )
+                                                        })
+                                                        .unwrap_or(serde_json::Value::Null),
+                                                );
                                             }
                                         });
                                     }
@@ -2270,14 +2260,12 @@ fn stop_recording(
                                         let (ready, selection) = {
                                             let state = app_clone.state::<AppState>();
                                             let lock_result = state.quick_replace_probe.lock();
-                                            let x = match lock_result {
+                                            match lock_result {
                                                 Ok(probe) if probe.epoch == quick_replace_epoch => {
                                                     (probe.ready, probe.selection_text.clone())
                                                 }
                                                 _ => (true, None),
-                                            };
-
-                                            x
+                                            }
                                         };
 
                                         if ready {
@@ -2628,7 +2616,7 @@ fn stop_recording(
 
                         // Save to history
                         if !is_quick_ask_session {
-                            if let Some(ref req_id) = request_id {
+                            if let Some(req_id) = request_id.as_ref() {
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                     // Store the actual output (Quick Replace may have changed it).
                                     if let Some(err) = quick_replace_failure.as_deref() {
@@ -2713,7 +2701,7 @@ fn stop_recording(
 
                         // Mark history entry as success with empty text (keeps timeline consistent)
                         if !is_quick_ask_session {
-                            if let Some(ref req_id) = request_id {
+                            if let Some(req_id) = request_id.as_ref() {
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                     let _ = history.complete_request_success(req_id, String::new());
 
@@ -2798,7 +2786,7 @@ fn stop_recording(
 
                         // Best-effort: remove any in-progress history entry for this request
                         // so it doesn't remain stuck in "in_progress".
-                        if let Some(ref req_id) = request_id {
+                        if let Some(req_id) = request_id.as_ref() {
                             if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                 let _ = history.delete(req_id);
                                 let _ = app_clone.emit("history-changed", ());
@@ -2847,9 +2835,10 @@ fn stop_recording(
                     }
 
                     // Persist audio for retry (best-effort)
-                    if let (Some(ref req_id), Some(store)) =
-                        (request_id.as_ref(), app_clone.try_state::<RecordingStore>())
-                    {
+                    if let (Some(req_id), Some(store)) = (
+                        request_id.as_deref(),
+                        app_clone.try_state::<RecordingStore>(),
+                    ) {
                         if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
                             if store.save_wav(req_id, &wav).is_ok() {
                                 let max_saved_recordings: usize = (get_setting_from_store(
@@ -2866,7 +2855,7 @@ fn stop_recording(
                     }
 
                     // Mark history entry as error and keep it
-                    if let Some(ref req_id) = request_id {
+                    if let Some(req_id) = request_id.as_ref() {
                         if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                             let _ = history.complete_request_error(req_id, e.to_string());
                             let _ = app_clone.emit("history-changed", ());
@@ -3135,7 +3124,7 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
             Some(Value::Null) => None,
             Some(v) => serde_json::from_value::<HotkeyConfig>(v)
                 .ok()
-                .or_else(|| HotkeyConfig::default_quick_ask()),
+                .or_else(HotkeyConfig::default_quick_ask),
         };
 
         let toggle = get_hotkey_from_store(
@@ -3928,7 +3917,7 @@ pub fn run() {
 
                 let retention = RequestLogsRetentionConfig {
                     mode,
-                    amount: amount.max(1).min(200) as usize,
+                    amount: amount.clamp(1, 200) as usize,
                     time_retention: if days == 0 {
                         None
                     } else {
@@ -4286,7 +4275,7 @@ pub(crate) fn handle_modifier_key_event(
             Some(Value::Null) => None,
             Some(v) => serde_json::from_value::<HotkeyConfig>(v)
                 .ok()
-                .or_else(|| HotkeyConfig::default_quick_ask()),
+                .or_else(HotkeyConfig::default_quick_ask),
         };
 
         let toggle = get_hotkey_from_store(
@@ -4510,23 +4499,21 @@ pub(crate) fn handle_modifier_key_event(
                     );
                 }
             }
-        } else {
-            if state.ptt_key_held.swap(false, Ordering::SeqCst) {
-                let is_recording = app
-                    .try_state::<pipeline::SharedPipeline>()
-                    .map(|p| p.state() == pipeline::PipelineState::Recording)
-                    .unwrap_or(false);
-                if is_recording {
-                    stop_recording(
-                        app,
-                        &state,
-                        sound_enabled,
-                        audio_cue,
-                        &audio_mute_manager,
-                        playing_audio_handling,
-                        &hold_label,
-                    );
-                }
+        } else if state.ptt_key_held.swap(false, Ordering::SeqCst) {
+            let is_recording = app
+                .try_state::<pipeline::SharedPipeline>()
+                .map(|p| p.state() == pipeline::PipelineState::Recording)
+                .unwrap_or(false);
+            if is_recording {
+                stop_recording(
+                    app,
+                    &state,
+                    sound_enabled,
+                    audio_cue,
+                    &audio_mute_manager,
+                    playing_audio_handling,
+                    &hold_label,
+                );
             }
         }
 
@@ -4652,27 +4639,25 @@ pub(crate) fn handle_modifier_key_event(
                     }
                 }
             }
-        } else {
-            if state.quick_ask_key_held.swap(false, Ordering::SeqCst) {
-                let is_recording = app
-                    .try_state::<pipeline::SharedPipeline>()
-                    .map(|p| p.state() == pipeline::PipelineState::Recording)
-                    .unwrap_or(false);
-                if is_recording {
-                    stop_recording(
-                        app,
-                        &state,
-                        sound_enabled,
-                        audio_cue,
-                        &audio_mute_manager,
-                        playing_audio_handling,
-                        &quick_ask_hold_label,
-                    );
-                } else {
-                    state
-                        .quick_ask_session_active
-                        .store(false, Ordering::SeqCst);
-                }
+        } else if state.quick_ask_key_held.swap(false, Ordering::SeqCst) {
+            let is_recording = app
+                .try_state::<pipeline::SharedPipeline>()
+                .map(|p| p.state() == pipeline::PipelineState::Recording)
+                .unwrap_or(false);
+            if is_recording {
+                stop_recording(
+                    app,
+                    &state,
+                    sound_enabled,
+                    audio_cue,
+                    &audio_mute_manager,
+                    playing_audio_handling,
+                    &quick_ask_hold_label,
+                );
+            } else {
+                state
+                    .quick_ask_session_active
+                    .store(false, Ordering::SeqCst);
             }
         }
 
@@ -4761,8 +4746,6 @@ pub(crate) fn handle_modifier_key_event(
                     .store(false, Ordering::SeqCst);
             }
         }
-
-        return;
     }
 }
 
@@ -5155,7 +5138,7 @@ fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::SharedPipelin
     let base_prompts: llm::PromptSections = cleanup_prompt_sections
         .as_ref()
         .map(|o| o.apply_to(&llm::PromptSections::default()))
-        .unwrap_or_else(llm::PromptSections::default);
+        .unwrap_or_default();
 
     let rewrite_program_prompt_profiles: Vec<settings::RewriteProgramPromptProfile> =
         get_setting_from_store(app, "rewrite_program_prompt_profiles", Vec::new());
@@ -5435,7 +5418,7 @@ fn register_initial_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error:
             Some(Value::Null) => None,
             Some(v) => serde_json::from_value::<HotkeyConfig>(v)
                 .ok()
-                .or_else(|| HotkeyConfig::default_quick_ask()),
+                .or_else(HotkeyConfig::default_quick_ask),
         };
 
         let toggle = get_hotkey_from_store(

@@ -434,33 +434,29 @@ unsafe extern "system" fn low_level_keyboard_proc(
         // When debugging, emit raw Alt key observations even if we don't classify them
         // as Right Alt, so we can diagnose weird keyboard layouts / drivers.
         if let Some(app) = APP_HANDLE.get() {
-            if hotkey_debug_enabled(app) {
-                if vk == VK_MENU || vk == VK_RMENU {
-                    let flags: u32 = kb.flags.0;
-                    let kind = if is_down { "down" } else { "up" };
-                    emit_hotkey_debug_event(
-                        app,
-                        "Raw Alt key event observed",
-                        Some(format!(
-                            "vk=0x{vk:02X} kind={kind} flags=0x{flags:02X} extended={} injected={} altdown={} upFlag={} scanCode=0x{:X} time={}",
-                            (flags & LLKHF_EXTENDED) != 0,
-                            (flags & LLKHF_INJECTED) != 0,
-                            (flags & LLKHF_ALTDOWN) != 0,
-                            (flags & LLKHF_UP) != 0,
-                            kb.scanCode,
-                            kb.time
-                        )),
-                    );
-                }
+            if hotkey_debug_enabled(app) && (vk == VK_MENU || vk == VK_RMENU) {
+                let flags: u32 = kb.flags.0;
+                let kind = if is_down { "down" } else { "up" };
+                emit_hotkey_debug_event(
+                    app,
+                    "Raw Alt key event observed",
+                    Some(format!(
+                        "vk=0x{vk:02X} kind={kind} flags=0x{flags:02X} extended={} injected={} altdown={} upFlag={} scanCode=0x{:X} time={}",
+                        (flags & LLKHF_EXTENDED) != 0,
+                        (flags & LLKHF_INJECTED) != 0,
+                        (flags & LLKHF_ALTDOWN) != 0,
+                        (flags & LLKHF_UP) != 0,
+                        kb.scanCode,
+                        kb.time
+                    )),
+                );
             }
         }
 
         // If Right Alt is held and we see a non-modifier key press, consider this an AltGr-style
         // key chord (typing) and suppress release-triggered actions.
-        if is_down && ALT_RIGHT_HELD.load(Ordering::Relaxed) {
-            if !is_modifier_vk(vk) {
-                ALT_RIGHT_USED_WITH_OTHER_KEY.store(true, Ordering::Relaxed);
-            }
+        if is_down && ALT_RIGHT_HELD.load(Ordering::Relaxed) && !is_modifier_vk(vk) {
+            ALT_RIGHT_USED_WITH_OTHER_KEY.store(true, Ordering::Relaxed);
         }
 
         if let Some(classification) = classify_right_alt(kb) {

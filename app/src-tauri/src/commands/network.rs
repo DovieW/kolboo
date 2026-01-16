@@ -69,7 +69,7 @@ fn reg_get_string(
         return None;
     }
 
-    let mut buf: Vec<u16> = vec![0; (data_len as usize + 1) / 2];
+    let mut buf: Vec<u16> = vec![0; (data_len as usize).div_ceil(2)];
     let status = unsafe {
         RegGetValueW(
             hkey,

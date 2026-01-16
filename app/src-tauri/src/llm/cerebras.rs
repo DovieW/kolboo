@@ -240,7 +240,7 @@ impl LlmProvider for CerebrasLlmProvider {
                         .or_else(|| part.get("content").and_then(|t| t.as_str()))
                     {
                         if !out.is_empty() {
-                            out.push_str("\n");
+                            out.push('\n');
                         }
                         out.push_str(text);
                     }
