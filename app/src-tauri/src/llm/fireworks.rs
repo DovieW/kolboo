@@ -21,6 +21,7 @@ pub struct FireworksLlmProvider {
     client: Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     timeout: Option<Duration>,
     request_log_store: Option<RequestLogStore>,
 }
@@ -32,6 +33,7 @@ impl FireworksLlmProvider {
             client: Client::new(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
+            api_base_url: FIREWORKS_API_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             request_log_store: None,
         }
@@ -43,6 +45,7 @@ impl FireworksLlmProvider {
             client: Client::new(),
             api_key,
             model,
+            api_base_url: FIREWORKS_API_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             request_log_store: None,
         }
@@ -55,9 +58,19 @@ impl FireworksLlmProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            api_base_url: FIREWORKS_API_URL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.fireworks.ai/inference/v1/chat/completions).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -141,7 +154,7 @@ impl LlmProvider for FireworksLlmProvider {
 
         let mut req = self
             .client
-            .post(FIREWORKS_API_URL)
+            .post(&self.api_base_url)
             .bearer_auth(&self.api_key)
             .json(&request);
         if let Some(timeout) = self.timeout {

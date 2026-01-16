@@ -5,8 +5,8 @@
 //! when you have `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or a running Ollama instance.
 
 use crate::llm::{
-    format_text, AnthropicLlmProvider, CohereLlmProvider, GroqLlmProvider, LlmError, LlmProvider,
-    OllamaLlmProvider, OpenAiLlmProvider, PromptSections,
+    format_text, AnthropicLlmProvider, CohereLlmProvider, FireworksLlmProvider, GroqLlmProvider,
+    LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider, PromptSections,
 };
 
 use serde_json::json;
@@ -271,6 +271,133 @@ async fn test_ollama_list_models_parses_tags_response() {
     let provider = OllamaLlmProvider::with_url(mock_server.uri(), None);
     let models = provider.list_models().await.unwrap();
     assert_eq!(models, vec!["m1".to_string(), "m2".to_string()]);
+}
+
+#[tokio::test]
+async fn test_cohere_complete_sends_expected_request_body() {
+    let mock_server = MockServer::start().await;
+
+    let expected_request = json!({
+        "model": "command-r-08-2024",
+        "stream": false,
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user"}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 1024
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/v2/chat"))
+        .and(header("authorization", "Bearer test_key"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "message": { "content": [ { "type": "text", "text": "hello from cohere mock" } ] }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = CohereLlmProvider::new("test_key".to_string())
+        .with_api_base_url(format!("{}/v2/chat", mock_server.uri()));
+
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello from cohere mock");
+}
+
+#[tokio::test]
+async fn test_cohere_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/chat"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "message": "bad request"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = CohereLlmProvider::new("test_key".to_string())
+        .with_api_base_url(format!("{}/v2/chat", mock_server.uri()));
+
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("400"), "expected status in message: {msg}");
+            assert!(msg.contains("bad request"), "expected error in message: {msg}");
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fireworks_complete_sends_expected_request_body() {
+    let mock_server = MockServer::start().await;
+
+    let expected_request = json!({
+        "model": "test-model",
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user"}
+        ],
+        "max_tokens": 4096,
+        "temperature": 0.3
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/inference/v1/chat/completions"))
+        .and(header("authorization", "Bearer test_key"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [
+                { "message": { "content": "hello from fireworks mock" } }
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = FireworksLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
+        .with_api_base_url(format!("{}/inference/v1/chat/completions", mock_server.uri()));
+
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello from fireworks mock");
+}
+
+#[tokio::test]
+async fn test_fireworks_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/inference/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": { "message": "bad request" }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = FireworksLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
+        .with_api_base_url(format!("{}/inference/v1/chat/completions", mock_server.uri()));
+
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("400"), "expected status in message: {msg}");
+            assert!(msg.contains("bad request"), "expected error in message: {msg}");
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
 }
 
 #[tokio::test]
