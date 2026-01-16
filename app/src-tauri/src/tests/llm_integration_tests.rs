@@ -5,8 +5,8 @@
 //! when you have `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or a running Ollama instance.
 
 use crate::llm::{
-    format_text, AnthropicLlmProvider, CohereLlmProvider, FireworksLlmProvider, GroqLlmProvider,
-    LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider, PromptSections,
+    format_text, AnthropicLlmProvider, CohereLlmProvider, FireworksLlmProvider, GeminiLlmProvider,
+    GroqLlmProvider, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider, PromptSections,
 };
 
 use serde_json::json;
@@ -512,6 +512,80 @@ async fn test_anthropic_complete_sends_expected_headers() {
 }
 
 #[tokio::test]
+async fn test_anthropic_complete_sends_expected_request_body() {
+    let mock_server = MockServer::start().await;
+
+    let expected_request = json!({
+        "model": "test-model",
+        "max_tokens": 4096,
+        "system": "sys",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "user"}
+                ]
+            }
+        ]
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .and(header("x-api-key", "test_anthropic_key"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [{"type": "text", "text": "hello from anthropic"}],
+            "model": "test-model",
+            "role": "assistant"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = AnthropicLlmProvider::with_model(
+        "test_anthropic_key".to_string(),
+        "test-model".to_string(),
+    )
+    .with_api_base_url(format!("{}/v1/messages", mock_server.uri()));
+
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello from anthropic");
+}
+
+#[tokio::test]
+async fn test_anthropic_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": { "message": "bad request" }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = AnthropicLlmProvider::new("test_anthropic_key".to_string())
+        .with_api_base_url(format!("{}/v1/messages", mock_server.uri()));
+
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("400"), "expected status in message: {msg}");
+            assert!(
+                msg.contains("bad request"),
+                "expected error in message: {msg}"
+            );
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn test_groq_complete_sends_expected_request_body() {
     let mock_server = MockServer::start().await;
 
@@ -568,6 +642,86 @@ async fn test_groq_complete_parses_json_error_body() {
     match err {
         LlmError::Api(msg) => {
             assert!(msg.contains("401"), "expected status in message: {msg}");
+            assert!(
+                msg.contains("invalid api key"),
+                "expected error in message: {msg}"
+            );
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_gemini_complete_sends_expected_request_body() {
+    let mock_server = MockServer::start().await;
+
+    let expected_request = json!({
+        "systemInstruction": {
+            "parts": [
+                { "text": "sys" }
+            ]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    { "text": "user" }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 4096,
+            "temperature": 0.0,
+            "responseMimeType": "text/plain"
+        }
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-2.5-flash:generateContent"))
+        .and(header("x-goog-api-key", "test_key"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "candidates": [
+                { "content": { "parts": [ { "text": "hello from gemini" } ] } }
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = GeminiLlmProvider::new("test_key".to_string())
+        .with_structured_outputs(false)
+        .with_api_base_url(format!("{}/v1beta", mock_server.uri()));
+
+    let out = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(out, "hello from gemini");
+}
+
+#[tokio::test]
+async fn test_gemini_complete_parses_json_error_body() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-2.5-flash:generateContent"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "error": { "message": "invalid api key" }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = GeminiLlmProvider::new("test_key".to_string())
+        .with_structured_outputs(false)
+        .with_api_base_url(format!("{}/v1beta", mock_server.uri()));
+
+    let err = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("expected error");
+
+    match err {
+        LlmError::Api(msg) => {
+            assert!(msg.contains("403"), "expected status in message: {msg}");
             assert!(
                 msg.contains("invalid api key"),
                 "expected error in message: {msg}"
