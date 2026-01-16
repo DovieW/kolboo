@@ -16,6 +16,7 @@ pub struct GeminiLlmProvider {
     client: Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     timeout: Option<Duration>,
     thinking_budget: Option<i64>,
     thinking_level: Option<String>,
@@ -29,6 +30,7 @@ impl GeminiLlmProvider {
             client: Client::new(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
+            api_base_url: GEMINI_API_ROOT.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             thinking_budget: None,
             thinking_level: None,
@@ -42,6 +44,7 @@ impl GeminiLlmProvider {
             client: Client::new(),
             api_key,
             model,
+            api_base_url: GEMINI_API_ROOT.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             thinking_budget: None,
             thinking_level: None,
@@ -57,12 +60,22 @@ impl GeminiLlmProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            api_base_url: GEMINI_API_ROOT.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             thinking_budget: None,
             thinking_level: None,
             structured_outputs: true,
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://generativelanguage.googleapis.com/v1beta).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
     }
 
     /// Enable/disable Structured Outputs (JSON schema mode).
@@ -340,7 +353,7 @@ impl LlmProvider for GeminiLlmProvider {
         }
 
         let model = Self::normalize_model_name(&self.model);
-        let url = format!("{}/{model}:generateContent", GEMINI_API_ROOT);
+        let url = format!("{}/{model}:generateContent", self.api_base_url);
 
         // For deterministic formatting/rewrite.
         // Gemini docs note that for Gemini 3 models it's recommended to keep temperature at the
@@ -490,7 +503,7 @@ impl LlmProvider for GeminiLlmProvider {
         }
 
         let model = Self::normalize_model_name(&self.model);
-        let url = format!("{}/{model}:generateContent", GEMINI_API_ROOT);
+        let url = format!("{}/{model}:generateContent", self.api_base_url);
 
         let temperature = if self.model.contains("gemini-3") {
             None

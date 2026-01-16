@@ -50,10 +50,13 @@ pub struct AssemblyAiSttProvider {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
 
 impl AssemblyAiSttProvider {
+    const DEFAULT_API_BASE_URL: &'static str = "https://api.assemblyai.com";
+
     /// Create a new AssemblyAI provider.
     ///
     /// Supported models (per API docs):
@@ -73,6 +76,7 @@ impl AssemblyAiSttProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| "universal".to_string()),
+            api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
         }
     }
@@ -84,8 +88,18 @@ impl AssemblyAiSttProvider {
             client,
             api_key,
             model: model.unwrap_or_else(|| "universal".to_string()),
+            api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
         }
+    }
+
+    /// Override the API base URL (defaults to https://api.assemblyai.com).
+    ///
+    /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_api_base_url(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -93,10 +107,30 @@ impl AssemblyAiSttProvider {
         self
     }
 
+    fn api_base_url_trimmed(&self) -> &str {
+        self.api_base_url.trim_end_matches('/')
+    }
+
+    fn upload_url(&self) -> String {
+        format!("{}/v2/upload", self.api_base_url_trimmed())
+    }
+
+    fn transcript_url(&self) -> String {
+        format!("{}/v2/transcript", self.api_base_url_trimmed())
+    }
+
+    fn transcript_get_url(&self, transcript_id: &str) -> String {
+        format!(
+            "{}/v2/transcript/{}",
+            self.api_base_url_trimmed(),
+            transcript_id
+        )
+    }
+
     async fn upload_audio(&self, audio: &[u8]) -> Result<String, SttError> {
         let resp = self
             .client
-            .post("https://api.assemblyai.com/v2/upload")
+            .post(self.upload_url())
             .header("Authorization", &self.api_key)
             .header("Content-Type", "application/octet-stream")
             .body(audio.to_vec())
@@ -139,7 +173,7 @@ impl AssemblyAiSttProvider {
 
         let resp = self
             .client
-            .post("https://api.assemblyai.com/v2/transcript")
+            .post(self.transcript_url())
             .header("Authorization", &self.api_key)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -170,11 +204,9 @@ impl AssemblyAiSttProvider {
     }
 
     async fn get_transcript(&self, transcript_id: &str) -> Result<TranscriptGetResponse, SttError> {
-        let url = format!("https://api.assemblyai.com/v2/transcript/{}", transcript_id);
-
         let resp = self
             .client
-            .get(url)
+            .get(self.transcript_get_url(transcript_id))
             .header("Authorization", &self.api_key)
             .send()
             .await
@@ -236,7 +268,7 @@ impl SttProvider for AssemblyAiSttProvider {
                 "provider": "assemblyai",
                 "steps": [
                     {
-                        "endpoint": "https://api.assemblyai.com/v2/upload",
+                        "endpoint": self.upload_url(),
                         "content_type": "application/octet-stream",
                         "body": {
                             "bytes": audio.len(),
@@ -244,7 +276,7 @@ impl SttProvider for AssemblyAiSttProvider {
                         }
                     },
                     {
-                        "endpoint": "https://api.assemblyai.com/v2/transcript",
+                        "endpoint": self.transcript_url(),
                         "content_type": "application/json",
                         "body": {
                             "speech_models": [self.model.clone()],
@@ -254,7 +286,7 @@ impl SttProvider for AssemblyAiSttProvider {
                         }
                     },
                     {
-                        "endpoint": "https://api.assemblyai.com/v2/transcript/{id}",
+                        "endpoint": format!("{}/v2/transcript/{{id}}", self.api_base_url_trimmed()),
                         "method": "GET",
                         "note": "Polled until status=completed",
                     }
