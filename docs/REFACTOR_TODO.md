@@ -73,6 +73,13 @@ This file is a parking lot for larger refactors that came up while working on sm
   - `pnpm -C app check:ci` currently passes, but clippy emits a lot of warnings, which makes it harder to spot new issues.
   - Suggestion: add a gradual cleanup list (start with low-risk mechanical fixes like `unwrap_or_default`, `manual_clamp`, `needless_return`, and the duplicated Windows cfg attribute).
 
+- **Deal with `clippy::too_many_arguments` via “args structs” (not a drive-by).**
+
+  - Some warnings (e.g. `run_capture_thread(...)` in `audio_capture.rs`, `iterate_rewrite_prompt(...)` in `commands/llm.rs`, and a few functions in `pipeline.rs`) likely need a small refactor.
+  - Suggested pattern: replace long parameter lists with a single `struct` argument (e.g. `RunCaptureThreadArgs { ... }`).
+  - This improves readability *and* makes call-sites less error-prone, but it’s bigger than a pure mechanical clippy fix.
+  - Tracking plan: see `docs/Plans/CLIPPY_WARNING_CLEANUP_PLAN.md` (Batch 5).
+
 ## Rust deterministic testing seams (hard IO audit)
 
 - **Audio device IO (CPAL):**
