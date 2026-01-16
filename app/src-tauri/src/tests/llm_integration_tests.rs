@@ -274,7 +274,7 @@ async fn test_ollama_list_models_parses_tags_response() {
 }
 
 #[tokio::test]
-async fn test_cohere_complete_sends_expected_request_body() {
+async fn test_cohere_complete_sends_expected_request_body_with_command_r_default_model() {
     let mock_server = MockServer::start().await;
 
     let expected_request = json!({
@@ -307,7 +307,7 @@ async fn test_cohere_complete_sends_expected_request_body() {
 }
 
 #[tokio::test]
-async fn test_cohere_complete_parses_json_error_body() {
+async fn test_cohere_complete_parses_json_error_body_bad_request_message_field() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -578,7 +578,7 @@ async fn test_groq_complete_parses_json_error_body() {
 }
 
 #[tokio::test]
-async fn test_cohere_complete_sends_expected_request_body() {
+async fn test_cohere_complete_sends_expected_request_body_with_explicit_model() {
     let mock_server = MockServer::start().await;
 
     let expected_request = json!({
@@ -614,7 +614,7 @@ async fn test_cohere_complete_sends_expected_request_body() {
 }
 
 #[tokio::test]
-async fn test_cohere_complete_parses_json_error_body() {
+async fn test_cohere_complete_parses_json_error_body_quota_exceeded_message_field() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))

@@ -103,7 +103,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            app/src-tauri -> target
+            # pnpm check:ci uses `--target-dir src-tauri/target-ci` for clippy/tests.
+            # Cache that directory so PR checks don't rebuild Rust from scratch every run.
+            app/src-tauri -> target-ci
 
       - name: Run checks (check:ci)
         shell: bash
