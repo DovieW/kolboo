@@ -1,6 +1,9 @@
 name: Check
 
 on:
+  pull_request:
+    branches:
+      - master
   schedule:
     # Nightly (06:00 UTC). Adjust if you want a different time.
     - cron: "0 6 * * *"
