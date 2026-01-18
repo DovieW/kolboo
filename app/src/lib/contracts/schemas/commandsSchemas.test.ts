@@ -37,6 +37,7 @@ import type {
 	WindowsInternetProxySettings,
 } from "../../tauri";
 import { configAPI } from "../../tauri";
+import { resolveSchemasDir, schemaPath } from "../contractTestPaths";
 
 type AvailableProvidersResponse = Awaited<
 	ReturnType<typeof configAPI.getAvailableProviders>
@@ -61,14 +62,13 @@ function readSchema(schemaFile: string): {
 	enum?: string[];
 	oneOfEnum?: Array<{ enum?: string[] }>;
 } {
-	const schemaPath = new URL(
-		`../../../../src-tauri/gen/schemas/${schemaFile}`,
-		import.meta.url,
-	);
-	if (!fs.existsSync(schemaPath)) {
+	const resolvedPath = schemaPath(schemaFile);
+	if (!fs.existsSync(resolvedPath)) {
 		throw new Error(`Schema missing: ${schemaFile}`);
 	}
-	const rawSchema = fs.readFileSync(schemaPath, "utf8").replace(/^\uFEFF/, "");
+	const rawSchema = fs
+		.readFileSync(resolvedPath, "utf8")
+		.replace(/^\uFEFF/, "");
 	return JSON.parse(rawSchema) as {
 		properties?: Record<string, unknown>;
 		definitions?: Record<string, SchemaDefinition>;
@@ -80,10 +80,7 @@ function readSchema(schemaFile: string): {
 }
 
 function hasSchemas(): boolean {
-	const schemasDir = new URL(
-		"../../../../src-tauri/gen/schemas/",
-		import.meta.url,
-	);
+	const schemasDir = resolveSchemasDir();
 	return fs.existsSync(schemasDir) && fs.readdirSync(schemasDir).length > 0;
 }
 
