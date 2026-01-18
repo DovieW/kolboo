@@ -8,19 +8,19 @@ import type {
 	RewriteProgramPromptProfile,
 	TrustedCaCertificate,
 } from "../../tauri";
+import { resolveSchemasDir, schemaPath } from "../contractTestPaths";
 
 function readSchema(schemaFile: string): {
 	properties?: Record<string, unknown>;
 	definitions?: Record<string, { properties?: Record<string, unknown> }>;
 } {
-	const schemaPath = new URL(
-		`../../../../src-tauri/gen/schemas/${schemaFile}`,
-		import.meta.url,
-	);
-	if (!fs.existsSync(schemaPath)) {
+	const resolvedPath = schemaPath(schemaFile);
+	if (!fs.existsSync(resolvedPath)) {
 		throw new Error(`Schema missing: ${schemaFile}`);
 	}
-	const rawSchema = fs.readFileSync(schemaPath, "utf8").replace(/^\uFEFF/, "");
+	const rawSchema = fs
+		.readFileSync(resolvedPath, "utf8")
+		.replace(/^\uFEFF/, "");
 	return JSON.parse(rawSchema) as {
 		properties?: Record<string, unknown>;
 		definitions?: Record<string, { properties?: Record<string, unknown> }>;
@@ -28,10 +28,7 @@ function readSchema(schemaFile: string): {
 }
 
 function hasSchemas(): boolean {
-	const schemasDir = new URL(
-		"../../../../src-tauri/gen/schemas/",
-		import.meta.url,
-	);
+	const schemasDir = resolveSchemasDir();
 	return fs.existsSync(schemasDir) && fs.readdirSync(schemasDir).length > 0;
 }
 
