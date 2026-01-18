@@ -94,7 +94,10 @@ function extractRustSeededSettingsKeys(rustSource: string): string[] {
 	return [...keys].sort();
 }
 
-function extractRustFunctionBody(source: string, fnName: string): string | null {
+function extractRustFunctionBody(
+	source: string,
+	fnName: string,
+): string | null {
 	const idx = source.indexOf(`fn ${fnName}`);
 	if (idx < 0) return null;
 	const braceStart = source.indexOf("{", idx);

@@ -55,10 +55,10 @@ import {
 	useWhisperModelsDir,
 } from "../../lib/queries";
 import type {
-  LocalWhisperLoadMode,
-  LocalWhisperModelLoadEvent,
-  WhisperModelDownloadProgress,
-  WhisperModelInfo,
+	LocalWhisperLoadMode,
+	LocalWhisperModelLoadEvent,
+	WhisperModelDownloadProgress,
+	WhisperModelInfo,
 } from "../../lib/tauri";
 import { configAPI, tauriAPI } from "../../lib/tauri";
 
@@ -752,19 +752,19 @@ function LocalWhisperModelsCard() {
 								]}
 								onChange={(value) => {
 									const nextMode: LocalWhisperLoadMode | null =
-                    value === "manual" ||
-                    value === "on_transcribe" ||
-                    value === "on_launch"
-                      ? value
-                      : null;
+										value === "manual" ||
+										value === "on_transcribe" ||
+										value === "on_launch"
+											? value
+											: null;
 
-                  if (!nextMode) return;
+									if (!nextMode) return;
 
-                  updateLocalWhisperLoadMode.mutate(nextMode, {
-                    onSuccess: () => {
-                      tauriAPI.emitSettingsChanged();
-                    },
-                  });
+									updateLocalWhisperLoadMode.mutate(nextMode, {
+										onSuccess: () => {
+											tauriAPI.emitSettingsChanged();
+										},
+									});
 								}}
 							/>
 

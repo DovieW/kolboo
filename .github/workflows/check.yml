@@ -1,6 +1,9 @@
 name: Check
 
 on:
+  pull_request:
+    branches:
+      - master
   schedule:
     # Nightly (06:00 UTC). Adjust if you want a different time.
     - cron: "0 6 * * *"
@@ -21,6 +24,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Install Linux system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev pkg-config
 
       - name: Setup Node
         uses: actions/setup-node@v6

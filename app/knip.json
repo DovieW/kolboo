@@ -8,5 +8,6 @@
 	],
 	"project": ["**/*.{js,ts,jsx,tsx}"],
 	"ignoreExportsUsedInFile": true,
+	"ignoreDependencies": ["@biomejs/biome"],
 	"tags": ["-lintignore"]
 }

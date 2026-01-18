@@ -47,7 +47,7 @@ When iterating locally during a ticket, it’s okay to run the smallest thing th
 
 ## Coverage notes (avoid surprise failures)
 
-- The repo has per-file coverage thresholds in `app/vite.config.ts` (example: `src/lib/tauri.ts`).
+- The repo has per-file coverage thresholds in `app/vite.config.ts` (example: `src/lib/tauri/commands.ts`, and other files under `src/lib/tauri/**`).
 - If a ticket adds code paths in thresholded files, add/adjust tests so the threshold stays green.
 - If you genuinely need to change a threshold, treat it as a deliberate decision and explain why in the ticket output.
 

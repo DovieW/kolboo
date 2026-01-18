@@ -1,10 +1,16 @@
 # Kolboo Copilot instructions
 
+- Keep instructions in sync:
+
+  - If your change is significant enough (or it overlaps with guidance here or in `.github/instructions/**`), update the relevant instruction file(s) in the same PR.
+  - Typical triggers: renamed/moved files, changed recommended commands, updated settings behavior, added/renamed Tauri commands/events, changed testing/CI expectations.
+
 - Common commands:
 
   - `pnpm -C app dev` (Tauri dev)
   - `pnpm -C app build` (Tauri build)
   - `pnpm -C app check` (aggregates Biome/tsc/knip/vitest + Rust helpers)
+  - `pnpm -C app check:ci` (CI gate; preferred before merging)
 
 - Repo layout:
 
@@ -15,6 +21,10 @@
 - UI↔backend contract:
 
   - UI calls Rust commands via `@tauri-apps/api/core` (`invoke`) and wrappers in `app/src/lib/tauri.ts`.
+    - The wrappers are split into modules under `app/src/lib/tauri/**`:
+      - `tauri/commands.ts` (invoke wrappers)
+      - `tauri/settings.ts` (settings read/write + normalization/migrations)
+      - `tauri/types.ts` (shared TS types)
   - UI state is mostly TanStack Query hooks in `app/src/lib/queries.ts`.
   - When changing any setting that affects runtime behavior, persist to the Tauri store **and** call `configAPI.syncPipelineConfig()` so the Rust `PipelineConfig` updates immediately.
   - After changing settings that overlays depend on (accent, widget position, overlay mode, etc.), emit `settings-changed` so secondary windows refresh cached settings (see `tauriAPI.update*` helpers).
@@ -25,11 +35,11 @@
   - `null` often means “explicitly disabled”; missing/invalid values should fall back to defaults.
   - If you add/rename a setting, update BOTH:
     - Rust default seeding/migrations (see `ensure_default_settings(...)` in `app/src-tauri/src/lib.rs`)
-    - TS normalization in `tauriAPI.getSettings()` (`app/src/lib/tauri.ts`) and any UI that reads it.
+    - TS normalization/migrations in the settings layer (`app/src/lib/tauri/settings.ts`) and any UI that reads it.
 
 - Profiles/presets/router:
 
-  - Per-program behavior is configured via `rewrite_program_prompt_profiles` (UI types in `app/src/lib/tauri.ts`, backend mapping in `app/src-tauri/src/pipeline.rs`).
+  - Per-program behavior is configured via `rewrite_program_prompt_profiles` (UI types in `app/src/lib/tauri/types.ts`, backend mapping in `app/src-tauri/src/pipeline.rs`).
   - Profiles can contain presets + an intent router (embeddings or LLM) that selects a preset; keep backward-compatibility for older `settings.json` shapes.
 
 - Overlay windows:

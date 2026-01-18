@@ -12,14 +12,6 @@ This file is a parking lot for larger refactors that came up while working on sm
     - `AudioWave` (browser analyser fallback)
     - Hover gating logic (mouse tracking + suppress-on-show)
 
-- **Extract the overlay UI reducer into a dedicated hook.**
-
-  - Move the reducer + action types into something like `app/src/lib/useOverlayUiReducer.ts`.
-  - Add a short transition table comment that explains how the UI should behave when:
-    - hotkey fires before `pipeline-state-changed`
-    - polling returns a stale state
-    - recording-only mode hides right after going idle
-
 - **Consider a single “overlay controller” state object.**
   - Right now some state lives in refs, some in `useState`, some in the reducer.
   - A follow-up could consolidate more of this into one predictable state machine, but that’s a larger change.
@@ -31,26 +23,19 @@ These are small refactors whose main purpose is making the “important stuff”
 ### Testing “ideal state” follow-ups (optional)
 
 - **Raise TS per-file coverage thresholds gradually.**
-  - Current: we’ve started ratcheting `app/src/lib/tauri.ts` upward.
+  - Current: we’ve started ratcheting the Tauri client modules upward (e.g. `app/src/lib/tauri/commands.ts`, `app/src/lib/tauri/settings.ts`).
   - Next suggested targets from the plan: **80% lines**, **70% branches** (only if the churn feels manageable).
-
-- **Add deterministic coverage for TanStack Query logic (`app/src/lib/queries.ts`).**
-  - Best approach: extract pure `queryFn` helpers and unit-test those.
-  - Optional: add a per-file coverage threshold for `queries.ts` once tests exist.
 
 - **Add at least one real “legacy settings” fixture test.**
   - Goal: validate migrations/normalization for older `settings.json` shapes.
   - Keep it deterministic (no network, no keys).
 
-### Frontend (React/TS)
+### Tooling (DX)
 
-- **Extract TanStack Query `queryFn`s into pure helpers.**
+- **Tighten `app/scripts/run-with-timing.mjs` Windows execution.**
 
-  - Target: `app/src/lib/queries.ts`.
-  - Why: it lets us unit-test the data fetching/transforms without mounting React.
-  - Suggested shape:
-    - `queries/queryFns.ts` exports functions that accept `tauriAPI` as a parameter.
-    - `queries.ts` becomes thin wrappers wiring those functions into `useQuery`.
+  - Right now it often runs child processes with `shell: true` on Windows, which triggers Node's DEP0190 warning (args concatenation can be a security footgun).
+  - Follow-up idea: resolve `node_modules/.bin/<cmd>` explicitly (or use a small cross-platform runner library) so we can keep `shell: false` and avoid the warning.
 
 ### Rust backend
 
@@ -84,28 +69,11 @@ These are the files that are *currently* the largest / most responsibility-dense
     - `pipeline/router/*` (embeddings router + LLM router + diagnostics payload building)
   - Bonus: lots of helper functions here are pure (e.g. path normalization / routing scoring) and can get fast unit tests once extracted.
 
-- **Break up `app/src-tauri/src/commands/text.rs` (~32KB) by responsibility.**
-  - Why: it’s doing 3 tricky OS-level jobs in one place: output injection, clipboard lifecycle (including WinRT “exclude from history”), and selection probing.
-  - Suggested splits:
-    - `text/clipboard.rs` (set/read/restore, platform-specific WinRT)
-    - `text/inject.rs` (enigo key injection + output modes + lock)
-    - `text/selection_probe.rs` (copy/insert/clipboard-only strategies)
-  - Acceptance hint: keep the public functions and `#[tauri::command]` signatures in `commands/text.rs` as wrappers so callers don’t change.
-
 ### Frontend (React/TS)
 
 - **Split `app/src/components/settings/PromptSettings.tsx` (~253KB).**
   - Why: it’s doing UI layout *and* business logic for presets/router/Quick Ask/Quick Replace.
   - Suggested splits: presets editor, router panel, quick ask panel, quick replace panel, plus 1–2 hooks that own the data plumbing.
-
-- **Split `app/src/lib/tauri.ts` (~100KB).**
-  - Why: it mixes “invoke wrappers”, settings normalization/migrations, and a bunch of shared types.
-  - Suggested split:
-    - `lib/tauri/types.ts`
-    - `lib/tauri/settings.ts` (get/normalize/update + emit `settings-changed`)
-    - `lib/tauri/commands.ts` (thin invoke wrappers)
-    - (optional) `lib/tauri/events.ts` (listen/emit helpers)
-  - Goal: reduce Rust/TS contract drift and make it clearer which calls must also do `configAPI.syncPipelineConfig()` / emit events.
 
 - **Continue splitting `app/src/OverlayApp.tsx` (~81KB).**
   - This is already tracked above, but size-wise it’s still one of the top hotspots.

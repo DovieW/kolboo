@@ -1,4 +1,4 @@
-import type { HotkeyConfig } from "./tauri";
+import type { HotkeyConfig } from "./hotkeys";
 
 // ============================================================================
 // DEFAULT HOTKEY CONSTANTS - Single source of truth for all default hotkeys

@@ -35,21 +35,62 @@ import {
 	validateHotkeyNotDuplicate,
 	type WhisperModelInfo,
 } from "./tauri";
+import {
+	createAudioMuteSupportedQueryFn,
+	createAvailableProvidersQueryFn,
+	createCostByProviderQueryFn,
+	createCostSummaryQueryFn,
+	createDataStorageSummaryQueryFn,
+	createDefaultSectionsQueryFn,
+	createFireworksModelsQueryFn,
+	createHasLastAudioQueryFn,
+	createHistoryAllQueryFn,
+	createHistoryPageQueryFn,
+	createIsLocalWhisperAvailableQueryFn,
+	createIsLocalWhisperModelLoadedQueryFn,
+	createLastRecordingDiagnosticsQueryFn,
+	createLocalWhisperBackendStatusQueryFn,
+	createModelPricingQueryFn,
+	createOllamaModelsQueryFn,
+	createRecordingsStatsQueryFn,
+	createRequestLogsQueryFn,
+	createSettingsGuideStateQueryFn,
+	createSettingsQueryFn,
+	createSystemProxyInfoQueryFn,
+	createWhisperModelsDirQueryFn,
+	createWhisperModelsQueryFn,
+} from "./queries/queryFns";
+
+const queryFnDeps = {
+	tauriAPI,
+	sttAPI,
+	recordingsAPI,
+	dataAPI,
+	configAPI,
+	llmAPI,
+	logsAPI,
+} as const;
 
 export function useModelPricing(
 	provider: string | null,
 	kind: ModelPricingKind,
 	model: string | null,
 ) {
+	const { normalized, queryFn } = createModelPricingQueryFn(queryFnDeps, {
+		provider,
+		kind,
+		model,
+	});
+
 	return useQuery({
-		queryKey: ["modelPricing", provider ?? "", kind, model ?? ""],
+		queryKey: [
+			"modelPricing",
+			normalized.provider,
+			normalized.kind,
+			normalized.model,
+		],
 		enabled: Boolean(provider) && Boolean(model),
-		queryFn: () =>
-			tauriAPI.getModelPricing({
-				provider: provider ?? "",
-				kind,
-				model: model ?? "",
-			}),
+		queryFn,
 		staleTime: Number.POSITIVE_INFINITY,
 	});
 }
@@ -63,28 +104,22 @@ export function useCostSummary(
 		excludeFreeTier?: boolean;
 	},
 ) {
-	const kind = filters?.kind;
-	const sttModelKeys = (filters?.sttModelKeys ?? []).slice().sort();
-	const llmModelKeys = (filters?.llmModelKeys ?? []).slice().sort();
-	const excludeFreeTier = filters?.excludeFreeTier ?? true;
+	const { normalized, queryFn } = createCostSummaryQueryFn(
+		queryFnDeps,
+		timeframe,
+		filters,
+	);
 
 	return useQuery({
 		queryKey: [
 			"costSummary",
 			timeframe,
-			kind ?? "all",
-			excludeFreeTier ? "exclude_free" : "include_free",
-			sttModelKeys,
-			llmModelKeys,
+			normalized.kind ?? "all",
+			normalized.excludeFreeTier ? "exclude_free" : "include_free",
+			normalized.sttModelKeys,
+			normalized.llmModelKeys,
 		],
-		queryFn: () =>
-			tauriAPI.getCostSummary({
-				timeframe,
-				kind,
-				sttModelKeys,
-				llmModelKeys,
-				excludeFreeTier,
-			}),
+		queryFn,
 		staleTime: 10_000,
 		refetchOnWindowFocus: true,
 	});
@@ -99,28 +134,22 @@ export function useCostByProvider(
 		excludeFreeTier?: boolean;
 	},
 ) {
-	const kind = filters?.kind;
-	const sttModelKeys = (filters?.sttModelKeys ?? []).slice().sort();
-	const llmModelKeys = (filters?.llmModelKeys ?? []).slice().sort();
-	const excludeFreeTier = filters?.excludeFreeTier ?? true;
+	const { normalized, queryFn } = createCostByProviderQueryFn(
+		queryFnDeps,
+		timeframe,
+		filters,
+	);
 
 	return useQuery({
 		queryKey: [
 			"costByProvider",
 			timeframe,
-			kind ?? "all",
-			excludeFreeTier ? "exclude_free" : "include_free",
-			sttModelKeys,
-			llmModelKeys,
+			normalized.kind ?? "all",
+			normalized.excludeFreeTier ? "exclude_free" : "include_free",
+			normalized.sttModelKeys,
+			normalized.llmModelKeys,
 		],
-		queryFn: () =>
-			tauriAPI.getCostByProvider({
-				timeframe,
-				kind,
-				sttModelKeys,
-				llmModelKeys,
-				excludeFreeTier,
-			}),
+		queryFn,
 		staleTime: 10_000,
 		refetchOnWindowFocus: true,
 	});
@@ -183,7 +212,7 @@ export function useTestSttTranscribeLastAudio() {
 export function useHasLastAudioForSttTest() {
 	return useQuery({
 		queryKey: ["sttLastAudioAvailable"],
-		queryFn: () => sttAPI.hasLastAudio(),
+		queryFn: createHasLastAudioQueryFn(queryFnDeps),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
 		// Very cheap boolean check; polling keeps the UI in sync when the user
@@ -196,7 +225,7 @@ export function useHasLastAudioForSttTest() {
 export function useSettings() {
 	return useQuery({
 		queryKey: ["settings"],
-		queryFn: () => tauriAPI.getSettings(),
+		queryFn: createSettingsQueryFn(queryFnDeps),
 		staleTime: Number.POSITIVE_INFINITY,
 	});
 }
@@ -204,7 +233,7 @@ export function useSettings() {
 export function useSystemProxyInfo() {
 	return useQuery({
 		queryKey: ["systemProxyInfo"],
-		queryFn: () => tauriAPI.getSystemProxyInfo(),
+		queryFn: createSystemProxyInfoQueryFn(queryFnDeps),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
 	});
@@ -213,7 +242,7 @@ export function useSystemProxyInfo() {
 export function useSettingsGuideState() {
 	return useQuery({
 		queryKey: ["settingsGuideState"],
-		queryFn: () => tauriAPI.getSettingsGuideState(),
+		queryFn: createSettingsGuideStateQueryFn(queryFnDeps),
 		staleTime: Number.POSITIVE_INFINITY,
 	});
 }
@@ -883,7 +912,7 @@ export function useUpdateAudioNoiseSuppressionEnabled() {
 export function useLastRecordingDiagnostics() {
 	return useQuery({
 		queryKey: ["lastRecordingDiagnostics"],
-		queryFn: () => sttAPI.getLastRecordingDiagnostics(),
+		queryFn: createLastRecordingDiagnosticsQueryFn(queryFnDeps),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
 		// Keep UI in sync if user records via hotkey while settings is open.
@@ -938,7 +967,7 @@ export function useUpdateTranscriptionRetentionDeleteRecordings() {
 export function useRecordingsStats() {
 	return useQuery({
 		queryKey: ["recordingsStats"],
-		queryFn: () => recordingsAPI.getRecordingsStats(),
+		queryFn: createRecordingsStatsQueryFn(queryFnDeps),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
 		refetchInterval: 10000,
@@ -948,7 +977,7 @@ export function useRecordingsStats() {
 export function useDataStorageSummary() {
 	return useQuery({
 		queryKey: ["dataStorageSummary"],
-		queryFn: () => dataAPI.getStorageSummary(),
+		queryFn: createDataStorageSummaryQueryFn(queryFnDeps),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
 		refetchInterval: 10000,
@@ -958,7 +987,7 @@ export function useDataStorageSummary() {
 export function useIsAudioMuteSupported() {
 	return useQuery({
 		queryKey: ["audioMuteSupported"],
-		queryFn: () => tauriAPI.isAudioMuteSupported(),
+		queryFn: createAudioMuteSupportedQueryFn(queryFnDeps),
 		staleTime: Number.POSITIVE_INFINITY,
 	});
 }
@@ -1074,48 +1103,30 @@ export function useResetHotkeysToDefaults() {
 export function useHistoryAll(options?: { enabled?: boolean }) {
 	return useQuery({
 		queryKey: ["historyAll"],
-		queryFn: () => tauriAPI.getHistory(undefined),
+		queryFn: createHistoryAllQueryFn(queryFnDeps),
 		enabled: options?.enabled ?? true,
 	});
 }
 
 export function useHistoryPage(params: HistoryPageQuery) {
-	const filterText = (params.filterText ?? "").toString();
-	const showFailed = params.showFailed ?? true;
-	const showEmptyTranscript = params.showEmptyTranscript ?? false;
-	const selectedSttModelKeys = (params.selectedSttModelKeys ?? [])
-		.slice()
-		.sort();
-	const selectedLlmModelKeys = (params.selectedLlmModelKeys ?? [])
-		.slice()
-		.sort();
-	const page = params.page ?? 1;
-	const pageSize = params.pageSize ?? 25;
-	const includeUsageCounts = params.includeUsageCounts ?? true;
+	const { normalized, queryFn } = createHistoryPageQueryFn(
+		queryFnDeps,
+		params,
+	);
 
 	return useQuery({
 		queryKey: [
 			"historyPage",
-			filterText,
-			showFailed,
-			showEmptyTranscript,
-			selectedSttModelKeys,
-			selectedLlmModelKeys,
-			page,
-			pageSize,
-			includeUsageCounts,
+			normalized.filterText,
+			normalized.showFailed,
+			normalized.showEmptyTranscript,
+			normalized.selectedSttModelKeys,
+			normalized.selectedLlmModelKeys,
+			normalized.page,
+			normalized.pageSize,
+			normalized.includeUsageCounts,
 		],
-		queryFn: () =>
-			tauriAPI.getHistoryPage({
-				filterText,
-				showFailed,
-				showEmptyTranscript,
-				selectedSttModelKeys,
-				selectedLlmModelKeys,
-				page,
-				pageSize,
-				includeUsageCounts,
-			}),
+		queryFn,
 		placeholderData: keepPreviousData,
 		// Keep things feeling responsive while typing filters.
 		refetchOnWindowFocus: true,
@@ -1126,7 +1137,7 @@ export function useHistoryPage(params: HistoryPageQuery) {
 export function useDefaultSections() {
 	return useQuery({
 		queryKey: ["defaultSections"],
-		queryFn: () => configAPI.getDefaultSections(),
+		queryFn: createDefaultSectionsQueryFn(queryFnDeps),
 		staleTime: Number.POSITIVE_INFINITY, // Default prompts never change
 	});
 }
@@ -1136,7 +1147,7 @@ export function useDefaultSections() {
 export function useAvailableProviders() {
 	return useQuery({
 		queryKey: ["availableProviders"],
-		queryFn: () => configAPI.getAvailableProviders(),
+		queryFn: createAvailableProvidersQueryFn(queryFnDeps),
 	});
 }
 
@@ -1316,7 +1327,7 @@ export function useUpdateLocalWhisperLoadMode() {
 export function useIsLocalWhisperAvailable() {
 	return useQuery({
 		queryKey: ["localWhisperAvailable"],
-		queryFn: () => tauriAPI.isLocalWhisperAvailable(),
+		queryFn: createIsLocalWhisperAvailableQueryFn(queryFnDeps),
 		staleTime: Number.POSITIVE_INFINITY,
 	});
 }
@@ -1325,7 +1336,7 @@ export function useLocalWhisperBackendStatus(enabled: boolean) {
 	return useQuery({
 		queryKey: ["localWhisperBackendStatus"],
 		enabled,
-		queryFn: () => tauriAPI.getLocalWhisperBackendStatus(),
+		queryFn: createLocalWhisperBackendStatusQueryFn(queryFnDeps),
 		staleTime: 0,
 	});
 }
@@ -1334,7 +1345,7 @@ export function useWhisperModels(enabled: boolean) {
 	return useQuery<WhisperModelInfo[]>({
 		queryKey: ["whisperModels"],
 		enabled,
-		queryFn: () => tauriAPI.getWhisperModels(),
+		queryFn: createWhisperModelsQueryFn(queryFnDeps),
 		staleTime: 0,
 	});
 }
@@ -1343,7 +1354,7 @@ export function useFireworksModels(enabled: boolean) {
 	return useQuery({
 		queryKey: ["fireworksModels"],
 		enabled,
-		queryFn: () => llmAPI.getFireworksModels(),
+		queryFn: createFireworksModelsQueryFn(queryFnDeps),
 		staleTime: 0,
 	});
 }
@@ -1352,7 +1363,7 @@ export function useOllamaModels(enabled: boolean) {
 	return useQuery({
 		queryKey: ["ollamaModels"],
 		enabled,
-		queryFn: () => llmAPI.getOllamaModels(),
+		queryFn: createOllamaModelsQueryFn(queryFnDeps),
 		staleTime: 0,
 	});
 }
@@ -1361,7 +1372,7 @@ export function useIsLocalWhisperModelLoaded(enabled: boolean) {
 	return useQuery({
 		queryKey: ["localWhisperModelLoaded"],
 		enabled,
-		queryFn: () => tauriAPI.isLocalWhisperModelLoaded(),
+		queryFn: createIsLocalWhisperModelLoadedQueryFn(queryFnDeps),
 		staleTime: 0,
 	});
 }
@@ -1393,7 +1404,7 @@ export function useUnloadLocalWhisperModel() {
 export function useWhisperModelsDir() {
 	return useQuery({
 		queryKey: ["whisperModelsDir"],
-		queryFn: () => tauriAPI.getWhisperModelsDir(),
+		queryFn: createWhisperModelsDirQueryFn(queryFnDeps),
 		staleTime: Number.POSITIVE_INFINITY,
 	});
 }
@@ -1694,7 +1705,7 @@ export function useUpdateSTTTimeout() {
 export function useRequestLogs(limit?: number) {
 	return useQuery({
 		queryKey: ["requestLogs", limit],
-		queryFn: () => logsAPI.getRequestLogs(limit),
+		queryFn: createRequestLogsQueryFn(queryFnDeps, limit),
 		refetchInterval: 2000, // Refresh every 2 seconds to show live updates
 	});
 }

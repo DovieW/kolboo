@@ -174,27 +174,27 @@ export function DeviceSelector() {
 	// unique backend ID, persist the new ID. This avoids ambiguous backend selection
 	// when multiple devices share the same friendly name.
 	useEffect(() => {
-    if (migratedLegacyMicRef.current) return;
-    if (!storedMicId) return;
-    if (storedMicId === "default") return;
-    if (storedMicId.startsWith(MIC_ID_PREFIX)) return;
-    if (settingsLoading || isLoading) return;
-    if (error) return;
+		if (migratedLegacyMicRef.current) return;
+		if (!storedMicId) return;
+		if (storedMicId === "default") return;
+		if (storedMicId.startsWith(MIC_ID_PREFIX)) return;
+		if (settingsLoading || isLoading) return;
+		if (error) return;
 
-    const legacyMatch = devices.find((d) => d.name === storedMicId);
-    if (!legacyMatch) return;
-    if (!legacyMatch.deviceId.startsWith(MIC_ID_PREFIX)) return;
+		const legacyMatch = devices.find((d) => d.name === storedMicId);
+		if (!legacyMatch) return;
+		if (!legacyMatch.deviceId.startsWith(MIC_ID_PREFIX)) return;
 
-    migratedLegacyMicRef.current = true;
-    updateSelectedMic.mutate(legacyMatch.deviceId);
-  }, [
-    storedMicId,
-    devices,
-    settingsLoading,
-    isLoading,
-    error,
-    updateSelectedMic,
-  ]);
+		migratedLegacyMicRef.current = true;
+		updateSelectedMic.mutate(legacyMatch.deviceId);
+	}, [
+		storedMicId,
+		devices,
+		settingsLoading,
+		isLoading,
+		error,
+		updateSelectedMic,
+	]);
 
 	// If the selected mic changes while the user is testing, force-stop the test.
 	// This avoids rapid start/stop loops and makes switching devices predictable.

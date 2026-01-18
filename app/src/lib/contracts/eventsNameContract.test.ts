@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { EVENT_NAMES } from "../tauri/events";
 
-const rustRoot = fileURLToPath(new URL("../../../src-tauri/src", import.meta.url));
+const rustRoot = fileURLToPath(
+	new URL("../../../src-tauri/src", import.meta.url),
+);
 
 const ignoredDirs = new Set([
 	"target",

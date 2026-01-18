@@ -29,6 +29,7 @@ mod shortcuts_lock;
 mod state;
 mod stats;
 mod stt;
+mod text;
 mod vad;
 mod windows_apps;
 
