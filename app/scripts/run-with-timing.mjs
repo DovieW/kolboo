@@ -1,5 +1,8 @@
 #!/usr/bin/env node
+// Usage: run-with-timing.mjs [--shell] <command> [...args]
+// --shell is an explicit fallback for shell-only commands (pipes, &&).
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -16,10 +19,30 @@ if (args.length === 0) {
 	process.exit(1);
 }
 
+const binPath = path.join(process.cwd(), "node_modules", ".bin");
+const resolveBin = (command) => {
+	if (path.isAbsolute(command) || command.includes(path.sep)) {
+		return command;
+	}
+
+	const candidates =
+		process.platform === "win32"
+			? [`${command}.cmd`, `${command}.exe`, `${command}.bat`, command]
+			: [command];
+
+	for (const candidate of candidates) {
+		const candidatePath = path.join(binPath, candidate);
+		if (existsSync(candidatePath)) {
+			return candidatePath;
+		}
+	}
+
+	return command;
+};
+
 const start = Date.now();
 console.log(`[time] start: ${new Date(start).toISOString()}`);
 
-const binPath = path.join(process.cwd(), "node_modules", ".bin");
 const env = {
 	...process.env,
 	PATH: [binPath, process.env.PATH ?? ""].join(path.delimiter),
@@ -31,11 +54,10 @@ if (useShell) {
 	child = spawn(command, { stdio: "inherit", shell: true, env });
 } else {
 	const [command, ...commandArgs] = args;
-	const shouldUseShell = process.platform === "win32";
-	child = spawn(command, commandArgs, {
+	const resolvedCommand = resolveBin(command);
+	child = spawn(resolvedCommand, commandArgs, {
 		stdio: "inherit",
 		env,
-		shell: shouldUseShell,
 	});
 }
 
