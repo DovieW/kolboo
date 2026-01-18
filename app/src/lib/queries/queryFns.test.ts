@@ -1,10 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	createCostSummaryQueryFn,
-	createHistoryPageQueryFn,
-	createModelPricingQueryFn,
-	type QueryFnDeps,
-} from "./queryFns";
 import type {
 	AppSettings,
 	CostByProvider,
@@ -17,6 +11,12 @@ import type {
 	SystemProxyInfo,
 	WhisperModelInfo,
 } from "../tauri";
+import {
+	createCostSummaryQueryFn,
+	createHistoryPageQueryFn,
+	createModelPricingQueryFn,
+	type QueryFnDeps,
+} from "./queryFns";
 
 const createDeps = (): QueryFnDeps => {
 	const emptySettings = {} as AppSettings;
@@ -68,47 +68,47 @@ const createDeps = (): QueryFnDeps => {
 	const emptyWhisperModels: WhisperModelInfo[] = [];
 
 	return {
-	tauriAPI: {
-		getModelPricing: vi.fn(async () => null as ModelPricing | null),
-		getCostSummary: vi.fn(async () => emptyCostSummary),
-		getCostByProvider: vi.fn(async () => emptyCostByProvider),
-		getSettings: vi.fn(async () => emptySettings),
-		getSystemProxyInfo: vi.fn(async () => emptySystemProxy),
-		getSettingsGuideState: vi.fn(async () => "pending" as SettingsGuideState),
-		isAudioMuteSupported: vi.fn(async () => true),
-		getHistory: vi.fn(async () => []),
-		getHistoryPage: vi.fn(async () => emptyHistoryPage),
-		isLocalWhisperAvailable: vi.fn(async () => false),
-		getLocalWhisperBackendStatus: vi.fn(async () => emptyWhisperBackend),
-		getWhisperModels: vi.fn(async () => emptyWhisperModels),
-		isLocalWhisperModelLoaded: vi.fn(async () => false),
-		getWhisperModelsDir: vi.fn(async () => ""),
-	},
-	sttAPI: {
-		hasLastAudio: vi.fn(async () => false),
-		getLastRecordingDiagnostics: vi.fn(async () => ({
-			stats: { duration_secs: 0, rms: 0, peak: 0 },
-			speech_detected: null,
-		})),
-	},
-	recordingsAPI: {
-		getRecordingsStats: vi.fn(async () => ({ count: 0, bytes: 0 })),
-	},
-	dataAPI: {
-		getStorageSummary: vi.fn(async () => emptyStorageSummary),
-	},
-	configAPI: {
-		getDefaultSections: vi.fn(async () => ({ system: "" })),
-		getAvailableProviders: vi.fn(async () => ({ stt: [], llm: [] })),
-	},
-	llmAPI: {
-		getFireworksModels: vi.fn(async () => []),
-		getOllamaModels: vi.fn(async () => []),
-	},
-	logsAPI: {
-		getRequestLogs: vi.fn(async () => []),
-	},
-};
+		tauriAPI: {
+			getModelPricing: vi.fn(async () => null as ModelPricing | null),
+			getCostSummary: vi.fn(async () => emptyCostSummary),
+			getCostByProvider: vi.fn(async () => emptyCostByProvider),
+			getSettings: vi.fn(async () => emptySettings),
+			getSystemProxyInfo: vi.fn(async () => emptySystemProxy),
+			getSettingsGuideState: vi.fn(async () => "pending" as SettingsGuideState),
+			isAudioMuteSupported: vi.fn(async () => true),
+			getHistory: vi.fn(async () => []),
+			getHistoryPage: vi.fn(async () => emptyHistoryPage),
+			isLocalWhisperAvailable: vi.fn(async () => false),
+			getLocalWhisperBackendStatus: vi.fn(async () => emptyWhisperBackend),
+			getWhisperModels: vi.fn(async () => emptyWhisperModels),
+			isLocalWhisperModelLoaded: vi.fn(async () => false),
+			getWhisperModelsDir: vi.fn(async () => ""),
+		},
+		sttAPI: {
+			hasLastAudio: vi.fn(async () => false),
+			getLastRecordingDiagnostics: vi.fn(async () => ({
+				stats: { duration_secs: 0, rms: 0, peak: 0 },
+				speech_detected: null,
+			})),
+		},
+		recordingsAPI: {
+			getRecordingsStats: vi.fn(async () => ({ count: 0, bytes: 0 })),
+		},
+		dataAPI: {
+			getStorageSummary: vi.fn(async () => emptyStorageSummary),
+		},
+		configAPI: {
+			getDefaultSections: vi.fn(async () => ({ system: "" })),
+			getAvailableProviders: vi.fn(async () => ({ stt: [], llm: [] })),
+		},
+		llmAPI: {
+			getFireworksModels: vi.fn(async () => []),
+			getOllamaModels: vi.fn(async () => []),
+		},
+		logsAPI: {
+			getRequestLogs: vi.fn(async () => []),
+		},
+	};
 };
 
 describe("queryFns", () => {

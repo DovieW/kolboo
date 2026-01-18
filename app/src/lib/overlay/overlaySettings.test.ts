@@ -1,5 +1,5 @@
-import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
 import { QueryClient } from "@tanstack/react-query";
+import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
 import { describe, expect, it, vi } from "vitest";
 import { createOverlaySettingsChangedHandler } from "./overlaySettings";
 
