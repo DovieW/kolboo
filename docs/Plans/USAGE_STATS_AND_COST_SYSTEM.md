@@ -122,7 +122,7 @@ These live in `settings.json` via the store plugin.
 
 Defaults are seeded in:
 
-- `app/src-tauri/src/lib.rs` (`ensure_default_settings`)
+- `app/src-tauri/src/settings/defaults.rs` (`ensure_default_settings`)
 
 ### UI
 

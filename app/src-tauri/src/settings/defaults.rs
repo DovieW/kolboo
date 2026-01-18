@@ -1,28 +1,21 @@
+#[cfg(desktop)]
+use crate::pipeline;
+#[cfg(desktop)]
+use crate::secrets;
+#[cfg(desktop)]
+use serde_json::{json, Value};
+#[cfg(desktop)]
 use tauri::AppHandle;
-
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
-use crate::pipeline::PipelineConfig;
-use crate::settings::{HotkeyConfig, ProxySettings, VadSettings};
-
-/// Ensure settings shown in the UI match what the backend will use.
-///
-/// The frontend often treats missing keys as "unset" and shows fallback defaults.
-/// If the backend uses different fallbacks, this can cause confusing mismatches.
-///
-/// To prevent that, we eagerly seed `settings.json` with defaults for missing/null keys
-/// (without overwriting any existing values).
 #[cfg(desktop)]
-pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    use serde_json::{json, Value};
-
-    let store = app.store("settings.json")?;
+use super::{HotkeyConfig, ProxySettings, VadSettings};
 
     // Keep these defaults aligned with pipeline defaults / expected backend behavior.
     // We intentionally seed these so a brand new install has the same effective
     // settings that the pipeline will use at runtime (and what the UI shows).
-    let default_pipeline_config = PipelineConfig::default();
+    let default_pipeline_config = pipeline::PipelineConfig::default();
 
     let is_missing = |v: Option<Value>| -> bool { matches!(v, None | Some(Value::Null)) };
 
@@ -286,49 +279,49 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         json!(default_pipeline_config.quiet_audio_min_duration_secs),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "quiet_audio_rms_dbfs_threshold",
         json!(default_pipeline_config.quiet_audio_rms_dbfs_threshold),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "quiet_audio_peak_dbfs_threshold",
         json!(default_pipeline_config.quiet_audio_peak_dbfs_threshold),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "quiet_audio_require_speech",
         json!(default_pipeline_config.quiet_audio_require_speech),
         false,
     );
 
     // Stop-time preprocessing defaults.
-    set_default(
+    dirty |= set_default(
         "noise_gate_threshold_dbfs",
         json!(default_pipeline_config.noise_gate_threshold_dbfs),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "audio_downmix_to_mono",
         json!(default_pipeline_config.audio_downmix_to_mono),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "audio_resample_to_16khz",
         json!(default_pipeline_config.audio_resample_to_16khz),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "audio_highpass_enabled",
         json!(default_pipeline_config.audio_highpass_enabled),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "audio_agc_enabled",
         json!(default_pipeline_config.audio_agc_enabled),
         false,
     );
-    set_default(
+    dirty |= set_default(
         "audio_noise_suppression_enabled",
         json!(default_pipeline_config.audio_noise_suppression_enabled),
         false,
@@ -345,7 +338,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Best-effort: migrate legacy plaintext API keys out of `settings.json`.
     // This runs on startup (after the store exists), and deletes the store copy
     // only after the key was written to secure storage.
-    let _ = crate::secrets::migrate_api_keys_from_store(app);
+    let _ = secrets::migrate_api_keys_from_store(app);
 
     Ok(())
 }

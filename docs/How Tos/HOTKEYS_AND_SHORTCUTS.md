@@ -129,7 +129,7 @@ That explicit unregister/register sequence is intentional; it keeps registration
 
 ### Seeding/migrations (first-run + missing keys)
 
-- `app/src-tauri/src/lib.rs` → `ensure_default_settings(...)`
+- `app/src-tauri/src/settings/defaults.rs` → `ensure_default_settings(...)`
 
 This runs on startup and seeds **missing** keys into `settings.json` so the UI and backend
 agree on what the “effective” settings are.
@@ -218,7 +218,7 @@ Example: add a new store setting `foo_hotkey`.
 
 1. Add store key seeding (if needed)
 
-   - `app/src-tauri/src/lib.rs` → `ensure_default_settings`
+   - `app/src-tauri/src/settings/defaults.rs` → `ensure_default_settings`
    - Decide whether the key should seed defaults when absent only, or also when null.
 
 2. Read it during registration
