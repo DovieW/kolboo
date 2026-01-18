@@ -52,6 +52,13 @@ These are small refactors whose main purpose is making the “important stuff”
     - `queries/queryFns.ts` exports functions that accept `tauriAPI` as a parameter.
     - `queries.ts` becomes thin wrappers wiring those functions into `useQuery`.
 
+### Tooling (DX)
+
+- **Tighten `app/scripts/run-with-timing.mjs` Windows execution.**
+
+  - Right now it often runs child processes with `shell: true` on Windows, which triggers Node's DEP0190 warning (args concatenation can be a security footgun).
+  - Follow-up idea: resolve `node_modules/.bin/<cmd>` explicitly (or use a small cross-platform runner library) so we can keep `shell: false` and avoid the warning.
+
 ### Rust backend
 
 - **Introduce an “event sink” seam for command/orchestration tests.**
