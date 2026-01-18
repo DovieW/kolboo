@@ -124,7 +124,10 @@ describe("settings contract: Rust defaults vs TS getSettings", () => {
 		const settings = await tauriAPI.getSettings();
 		const tsKeys = new Set(Object.keys(settings));
 
-		const rustPath = new URL("../../../src-tauri/src/lib.rs", import.meta.url);
+		const rustPath = new URL(
+			"../../../src-tauri/src/settings/defaults.rs",
+			import.meta.url,
+		);
 		const rustSource = fs.readFileSync(rustPath, "utf8");
 		const rustSeededKeys = extractRustSeededSettingsKeys(rustSource);
 		const rustSeededKeySet = new Set(rustSeededKeys);

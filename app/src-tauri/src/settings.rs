@@ -4,6 +4,8 @@ use std::str::FromStr;
 
 use crate::llm::PromptSections;
 
+pub mod defaults;
+
 // ============================================================================
 // Network / proxy settings (stored in settings.json)
 // ============================================================================

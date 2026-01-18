@@ -41,7 +41,7 @@ Key settings used by Local Whisper:
 
 If you add/rename settings:
 
-1. Update default seeding/migrations in `ensure_default_settings(...)` (`app/src-tauri/src/lib.rs`)
+1. Update default seeding/migrations in `ensure_default_settings(...)` (`app/src-tauri/src/settings/defaults.rs`)
 2. Update TS normalization in `tauriAPI.getSettings()` (`app/src/lib/tauri.ts`)
 3. If overlays depend on it, emit `settings-changed` so secondary windows refresh.
 

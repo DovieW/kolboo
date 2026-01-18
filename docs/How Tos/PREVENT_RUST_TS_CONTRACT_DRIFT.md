@@ -82,7 +82,7 @@ Do this:
 
 You usually touch both sides:
 
-- Rust: seed/migrate it in `ensure_default_settings(...)` (currently in `app/src-tauri/src/lib.rs`).
+- Rust: seed/migrate it in `ensure_default_settings(...)` (`app/src-tauri/src/settings/defaults.rs`).
 - TS: normalize it and include it in the object returned by `tauriAPI.getSettings()`.
 
 Then:
