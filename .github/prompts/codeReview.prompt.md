@@ -21,6 +21,8 @@ Before you begin reviewing, read and follow the repo’s instruction files (they
 
 If your review recommendation depends on a “rule” (e.g. how settings syncing works, how overlay windows refresh, which commands CI runs), **cite the exact instruction file and section**.
 
+If the PR changes something that these instructions document (file locations, commands, conventions, settings behavior, contracts, etc.), you must **call that out explicitly** in the review and request an update to the relevant instruction file(s). (Don’t fix it in this first pass—just report it.)
+
 ## What to review (checklist)
 
 ### 1) Intent and scope

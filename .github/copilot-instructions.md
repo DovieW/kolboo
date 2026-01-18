@@ -1,5 +1,10 @@
 # Kolboo Copilot instructions
 
+- Keep instructions in sync:
+
+  - If your change is significant enough (or it overlaps with guidance here or in `.github/instructions/**`), update the relevant instruction file(s) in the same PR.
+  - Typical triggers: renamed/moved files, changed recommended commands, updated settings behavior, added/renamed Tauri commands/events, changed testing/CI expectations.
+
 - Common commands:
 
   - `pnpm -C app dev` (Tauri dev)
