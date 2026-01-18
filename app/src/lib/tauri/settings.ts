@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
 import { Store } from "@tauri-apps/plugin-store";
 import { DEFAULT_ACCENT_HEX, normalizeHexColor } from "../accentColor";
 import {
@@ -11,6 +10,7 @@ import {
 	DEFAULT_TOGGLE_HOTKEY,
 } from "../hotkeyDefaults";
 import { type HotkeyConfig, normalizeHotkeyConfig } from "../hotkeys";
+import { emitTyped } from "./events";
 import type {
 	AppSettings,
 	AudioCue,
@@ -1217,7 +1217,7 @@ export const tauriSettingsAPI = {
 		// Notify other windows (overlay) to refresh cached settings.
 		// Include the new accent in the payload so the overlay can update immediately
 		// without waiting for a disk reload.
-		await emit("settings-changed", { accent_color: normalized ?? null });
+		await emitTyped("settings-changed", { accent_color: normalized ?? null });
 	},
 
 	async updateMainWindowCloseBehavior(
@@ -1229,7 +1229,9 @@ export const tauriSettingsAPI = {
 		await store.save();
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", { main_window_close_behavior: normalized });
+		await emitTyped("settings-changed", {
+			main_window_close_behavior: normalized,
+		});
 	},
 
 	async updateGithubBackupGistId(gistId: string | null): Promise<void> {
@@ -1245,7 +1247,9 @@ export const tauriSettingsAPI = {
 		await store.save();
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", { github_backup_gist_id: trimmed || null });
+		await emitTyped("settings-changed", {
+			github_backup_gist_id: trimmed || null,
+		});
 	},
 
 	async updateToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
@@ -1405,7 +1409,7 @@ export const tauriSettingsAPI = {
 		await store.save();
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", {});
+		await emitTyped("settings-changed", {});
 	},
 
 	async updateSoundEnabled(enabled: boolean): Promise<void> {
@@ -1427,7 +1431,7 @@ export const tauriSettingsAPI = {
 		// Without this, a secondary window with a stale Store instance can later
 		// save another setting and inadvertently clobber this flag back to the
 		// default value.
-		await emit("settings-changed", { hotkey_debug_enabled: !!enabled });
+		await emitTyped("settings-changed", { hotkey_debug_enabled: !!enabled });
 	},
 
 	async updateAudioCue(cue: AudioCue): Promise<void> {
@@ -1436,7 +1440,7 @@ export const tauriSettingsAPI = {
 		await store.save();
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", {});
+		await emitTyped("settings-changed", {});
 	},
 
 	async updateRewriteLlmEnabled(enabled: boolean): Promise<void> {
@@ -1476,7 +1480,7 @@ export const tauriSettingsAPI = {
 		await store.save();
 
 		// Notify other windows (overlay/hover) to refresh cached settings.
-		await emit("settings-changed", {});
+		await emitTyped("settings-changed", {});
 	},
 
 	async updateSTTProvider(provider: string | null): Promise<void> {
@@ -1659,7 +1663,7 @@ export const tauriSettingsAPI = {
 		await invoke("set_overlay_mode", { mode });
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", {});
+		await emitTyped("settings-changed", {});
 	},
 
 	async updateOverlayShowDetailedLoading(enabled: boolean): Promise<void> {
@@ -1668,7 +1672,7 @@ export const tauriSettingsAPI = {
 		await store.save();
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", {
+		await emitTyped("settings-changed", {
 			overlay_show_detailed_loading: !!enabled,
 		});
 	},
@@ -1702,7 +1706,7 @@ export const tauriSettingsAPI = {
 		}
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", { overlay_monitor_target: normalized });
+		await emitTyped("settings-changed", { overlay_monitor_target: normalized });
 	},
 
 	async updateWidgetPosition(position: WidgetPosition): Promise<void> {
@@ -1713,7 +1717,7 @@ export const tauriSettingsAPI = {
 		await invoke("set_widget_position", { position });
 
 		// Notify other windows (overlay) to refresh cached settings.
-		await emit("settings-changed", {});
+		await emitTyped("settings-changed", {});
 	},
 
 	async updateOutputMode(mode: OutputMode): Promise<void> {
@@ -1954,7 +1958,7 @@ export const tauriSettingsAPI = {
 		}
 
 		// Notify other windows that persisted state changed.
-		await emit("settings-changed", { [SETTINGS_GUIDE_STATE_KEY]: state });
+		await emitTyped("settings-changed", { [SETTINGS_GUIDE_STATE_KEY]: state });
 	},
 
 	async resetHotkeysToDefaults(): Promise<void> {

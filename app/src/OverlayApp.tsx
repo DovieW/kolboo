@@ -24,7 +24,6 @@ import {
 	type ConnectionState,
 	type IntentRouterSettings,
 	type PipelineErrorPayload,
-	type PipelineStateEvent,
 	type PipelineTranscriptReadyPayload,
 	type RewriteProgramPromptProfile,
 	tauriAPI,
@@ -2252,8 +2251,8 @@ function RecordingControl() {
 		const setup = async () => {
 			// Canonical state update event (preferred): reduces event surface area.
 			unlisteners.push(
-				await listen<PipelineStateEvent>("pipeline-state-changed", (event) => {
-					const next = (event.payload ?? "").toString();
+				await listenTyped("pipeline-state-changed", (payload) => {
+					const next = (payload ?? "").toString();
 					if (isPipelineState(next)) {
 						setPipelineState("event", next);
 					}
