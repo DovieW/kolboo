@@ -1,5 +1,6 @@
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+#[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;

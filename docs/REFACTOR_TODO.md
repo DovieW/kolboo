@@ -50,16 +50,6 @@ These are the files that are *currently* the largest / most responsibility-dense
 
 ### Rust backend
 
-- **Split `app/src-tauri/src/lib.rs` (~256KB).**
-  - Why: it currently mixes app bootstrap, tray/window behavior, hotkeys, settings seeding/migration, pipeline orchestration, Quick Ask / Quick Replace flow wiring, and lots of event emission.
-  - Suggested splits (modules + functions):
-    - `bootstrap/*` (plugins, window creation, menu/tray setup)
-    - `shortcuts/*` (global shortcut registration + Escape-to-cancel lifecycle)
-    - `sessions/*` (record start/stop orchestration; Quick Ask / Quick Replace branches)
-    - `settings/defaults.rs` (keep `ensure_default_settings(...)` + migrations close to settings types)
-    - `overlay/*` (show/hide/position logic)
-  - Acceptance hint: the public Tauri command API stays the same; this is mostly moving code + adding thin wrappers.
-
 - **Split `app/src-tauri/src/pipeline.rs` (~188KB).**
   - Why: it contains unrelated concerns (provider construction/caching, routing logic, state machine + config, embedding cache/persistence, and helper utilities).
   - Suggested splits:

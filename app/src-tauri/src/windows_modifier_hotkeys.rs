@@ -7,7 +7,7 @@
 // Implementation:
 // - Install a low-level keyboard hook (WH_KEYBOARD_LL).
 // - Detect Right Alt (VK_RMENU) key down/up.
-// - Forward events to the app's handler (crate::handle_modifier_key_event).
+// - Forward events to the app's handler (crate::shortcuts::handle_modifier_key_event).
 // - Allow temporarily disabling while the UI is recording a new hotkey.
 
 use std::sync::atomic::AtomicU32;
@@ -417,7 +417,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
                 }
 
                 tauri::async_runtime::spawn(async move {
-                    crate::handle_modifier_key_event(&app, "Copilot", is_down, false);
+                    crate::shortcuts::handle_modifier_key_event(&app, "Copilot", is_down, false);
                 });
             }
 
@@ -503,7 +503,9 @@ unsafe extern "system" fn low_level_keyboard_proc(
 
                 // Keep the hook callback fast: defer work to the async runtime.
                 tauri::async_runtime::spawn(async move {
-                    crate::handle_modifier_key_event(&app, "AltRight", is_down, suppressed);
+                    crate::shortcuts::handle_modifier_key_event(
+                        &app, "AltRight", is_down, suppressed,
+                    );
                 });
             }
 

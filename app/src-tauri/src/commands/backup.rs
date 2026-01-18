@@ -149,7 +149,7 @@ fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> Resu
     store.save().map_err(|e| e.to_string())?;
 
     // Seed any newly-added defaults (and migrate legacy secrets best-effort).
-    let _ = crate::ensure_default_settings(app);
+    let _ = crate::settings::defaults::ensure_default_settings(app);
 
     // Best-effort: apply runtime config immediately.
     let _ = crate::commands::config::sync_pipeline_config(app.clone());

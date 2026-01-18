@@ -3,6 +3,7 @@ use tauri::AppHandle;
 
 use crate::text::inject::run_with_output_injection_lock;
 
+#[allow(unused_imports)]
 pub use crate::text::inject::{
     copy_to_clipboard, output_text_with_mode, output_text_with_mode_options,
     paste_and_keep_clipboard, type_as_keystrokes, type_text_blocking,
@@ -10,6 +11,7 @@ pub use crate::text::inject::{
 };
 
 #[cfg(desktop)]
+#[allow(unused_imports)]
 pub use crate::text::selection_probe::{
     probe_selected_text_via_copy, probe_selected_text_via_copy_with_app, ContextGrabMethod,
 };

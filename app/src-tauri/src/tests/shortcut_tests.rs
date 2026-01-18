@@ -1,4 +1,4 @@
-use crate::normalize_shortcut_string;
+use crate::shortcuts::normalize_shortcut_string;
 
 #[test]
 fn test_normalize_ctrl_to_control() {

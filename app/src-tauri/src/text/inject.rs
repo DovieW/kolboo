@@ -259,10 +259,6 @@ pub fn type_text_blocking_with_options(
     Ok(())
 }
 
-pub fn output_injection_lock_handle() -> &'static Mutex<()> {
-    output_injection_lock()
-}
-
 pub fn run_with_output_injection_lock<T>(
     work: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
