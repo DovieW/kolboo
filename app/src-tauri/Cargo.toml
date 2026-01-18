@@ -5,6 +5,7 @@ description = "Customizable AI-powered voice dictation tool"
 license = "AGPL-3.0"
 authors = ["kstonekuan"]
 edition = "2021"
+default-run = "kolboo"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]

@@ -24,6 +24,41 @@ This file is a parking lot for larger refactors that came up while working on sm
   - Right now some state lives in refs, some in `useState`, some in the reducer.
   - A follow-up could consolidate more of this into one predictable state machine, but that’s a larger change.
 
+## Testing seams (to avoid E2E)
+
+These are small refactors whose main purpose is making the “important stuff” testable and deterministic.
+
+### Testing “ideal state” follow-ups (optional)
+
+- **Raise TS per-file coverage thresholds gradually.**
+  - Current: we’ve started ratcheting `app/src/lib/tauri.ts` upward.
+  - Next suggested targets from the plan: **80% lines**, **70% branches** (only if the churn feels manageable).
+
+- **Add deterministic coverage for TanStack Query logic (`app/src/lib/queries.ts`).**
+  - Best approach: extract pure `queryFn` helpers and unit-test those.
+  - Optional: add a per-file coverage threshold for `queries.ts` once tests exist.
+
+- **Add at least one real “legacy settings” fixture test.**
+  - Goal: validate migrations/normalization for older `settings.json` shapes.
+  - Keep it deterministic (no network, no keys).
+
+### Frontend (React/TS)
+
+- **Extract TanStack Query `queryFn`s into pure helpers.**
+
+  - Target: `app/src/lib/queries.ts`.
+  - Why: it lets us unit-test the data fetching/transforms without mounting React.
+  - Suggested shape:
+    - `queries/queryFns.ts` exports functions that accept `tauriAPI` as a parameter.
+    - `queries.ts` becomes thin wrappers wiring those functions into `useQuery`.
+
+### Rust backend
+
+- **Introduce an “event sink” seam for command/orchestration tests.**
+
+  - Goal: test command logic (state changes + emitted events) without spinning up a full Tauri runtime.
+  - Suggested shape: a tiny trait like `EventSink` with `emit(name, payload)` that production implements via Tauri and tests implement via a `Vec`.
+
 ## Biggest “hot spot” files by size (worth refactoring)
 
 These are the files that are *currently* the largest / most responsibility-dense. They aren’t “bad”, but they’re the most likely to become painful to change.

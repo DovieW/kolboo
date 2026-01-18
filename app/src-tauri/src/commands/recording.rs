@@ -5,6 +5,7 @@
 
 use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
 use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
+use crate::commands::event_sink::{AppEventSink, EventSink};
 use crate::history::{HistoryStorage, RequestModelInfo};
 use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, SharedPipeline};
 use crate::recordings::{RecordingStore, RecordingsStats};
@@ -223,6 +224,11 @@ pub(crate) fn apply_transcription_retention(app: &AppHandle) {
 pub struct CommandError {
     pub message: String,
     pub error_type: String,
+}
+
+pub(crate) fn emit_pipeline_recording_started<S: EventSink>(sink: &S) {
+    sink.emit("pipeline-recording-started", &());
+    sink.emit("pipeline-state-changed", &PipelineStateEvent::Recording);
 }
 
 impl From<PipelineError> for CommandError {
@@ -493,8 +499,7 @@ pub fn pipeline_start_recording(
     crate::set_escape_cancel_shortcut_enabled(&app, true);
 
     // Emit event to frontend
-    let _ = app.emit("pipeline-recording-started", ());
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Recording);
+    emit_pipeline_recording_started(&AppEventSink(&app));
 
     Ok(())
 }

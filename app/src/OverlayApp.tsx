@@ -14,6 +14,16 @@ import {
 	useState,
 } from "react";
 import { applyAccentColor } from "./lib/accentColor";
+import { createOverlaySettingsChangedHandler } from "./lib/overlay/overlaySettings";
+import {
+  type ErrorInfo,
+  type OverlayAnimState,
+  type OverlayUiState,
+  type PipelineState,
+  type PipelineStateSource,
+  isPipelineState,
+  overlayUiReducer,
+} from "./lib/overlay/overlayUiReducer";
 import { useSettings, useTypeText } from "./lib/queries";
 import {
 	type ConnectionState,
@@ -39,123 +49,6 @@ function readBootAccentColor(): string | null {
 	}
 }
 
-/**
- * Pipeline state machine states (matches Rust PipelineState)
- */
-type PipelineState =
-	| "idle"
-	| "arming"
-	| "recording"
-	| "routing"
-	| "transcribing"
-	| "rewriting"
-	| "error";
-
-function isPipelineState(value: string): value is PipelineState {
-	return (
-		value === "idle" ||
-		// NOTE: "arming" is a UI-only state; Rust will never return it.
-		value === "arming" ||
-		value === "recording" ||
-		value === "routing" ||
-		value === "transcribing" ||
-		value === "rewriting" ||
-		value === "error"
-	);
-}
-
-
-/**
- * Error info for user feedback
- */
-interface ErrorInfo {
-	message: string;
-	recoverable: boolean;
-}
-
-type PipelineStateSource = "event" | "hotkey" | "poll" | "sync" | "ui";
-
-type OverlayAnimState = "enter" | "visible" | "exit";
-
-type OverlayUiState = {
-	pipelineState: PipelineState;
-	animState: OverlayAnimState;
-
-	lastError: ErrorInfo | null;
-	lastErrorDetail: string | null;
-	lastFailedRequestId: string | null;
-
-	// When we get a non-poll state update (hotkey/event/ui), suppress poll updates
-	// for a short time to avoid flicker/races.
-	ignorePollUntilTs: number;
-};
-
-type OverlayUiAction =
-	| {
-			type: "PIPELINE_SET";
-			source: PipelineStateSource;
-			next: PipelineState;
-			at: number;
-	  }
-	| {
-			type: "ANIM_SET";
-			next: OverlayAnimState;
-	  }
-	| {
-			type: "ERROR_CLEAR";
-	  }
-	| {
-			type: "ERROR_SET";
-			info: ErrorInfo;
-			detail: string | null;
-			requestId: string | null;
-	  };
-
-const PIPELINE_POLL_SUPPRESS_MS = 1500;
-
-function overlayUiReducer(state: OverlayUiState, action: OverlayUiAction) {
-	switch (action.type) {
-		case "PIPELINE_SET": {
-			// Poll is a backstop; ignore if we recently received a more authoritative signal.
-			if (
-				action.source === "poll" &&
-				action.at < state.ignorePollUntilTs &&
-				action.next !== state.pipelineState
-			) {
-				return state;
-			}
-
-			return {
-				...state,
-				pipelineState: action.next,
-				ignorePollUntilTs:
-					action.source === "poll"
-						? state.ignorePollUntilTs
-						: action.at + PIPELINE_POLL_SUPPRESS_MS,
-			};
-		}
-		case "ANIM_SET":
-			return { ...state, animState: action.next };
-		case "ERROR_CLEAR":
-			return {
-				...state,
-				lastError: null,
-				lastErrorDetail: null,
-				lastFailedRequestId: null,
-			};
-		case "ERROR_SET":
-			return {
-				...state,
-				lastError: action.info,
-				lastErrorDetail: action.detail,
-				lastFailedRequestId: action.requestId,
-			};
-		default: {
-			const _exhaustive: never = action;
-			return _exhaustive;
-		}
-	}
-}
 
 /**
  * Parse error message to user-friendly format
@@ -1584,6 +1477,17 @@ function RecordingControl() {
 	// Load settings (overlay mode + selected mic)
 	const { data: settings } = useSettings();
 
+	const onSettingsChanged = useMemo(
+    () =>
+      createOverlaySettingsChangedHandler({
+        applyAccentColor,
+        reloadSettingsFromDisk: () => tauriAPI.reloadSettingsFromDisk(),
+        queryClient,
+        invoke,
+      }),
+    [queryClient],
+  );
+
 	// Hover-revealed preset controls.
 	// IMPORTANT: Do NOT resize the main overlay window on hover (it causes cursor flicker/jitter).
 	// Instead, we show a dedicated hover window anchored to the overlay.
@@ -2444,46 +2348,18 @@ function RecordingControl() {
 
 	// Listen for settings changes from main window
 	useEffect(() => {
-		let unlisten: (() => void) | undefined;
+    let unlisten: (() => void) | undefined;
 
-		const setup = async () => {
-			unlisten = await tauriAPI.onSettingsChanged(async (payload) => {
-				// Apply accent immediately (without waiting on any disk reload).
-				try {
-					const maybeObj = payload as unknown;
-					if (maybeObj && typeof maybeObj === "object") {
-						const accent = (maybeObj as Record<string, unknown>).accent_color;
-						if (accent === null || typeof accent === "string") {
-							applyAccentColor(accent);
-						}
-					}
-				} catch (error) {
-					console.error("[Overlay] Failed to apply accent payload:", error);
-				}
+    const setup = async () => {
+      unlisten = await tauriAPI.onSettingsChanged(onSettingsChanged);
+    };
 
-				// In the overlay window, force a disk reload so *all* settings fields reflect
-				// the latest changes made by the main window.
-				try {
-					await tauriAPI.reloadSettingsFromDisk();
-				} catch (error) {
-					console.error(
-						"[Overlay] Failed to reload settings from disk:",
-						error,
-					);
-				}
+    setup();
 
-				queryClient.invalidateQueries({ queryKey: ["settings"] });
-				// Sync pipeline config when settings change
-				invoke("sync_pipeline_config").catch(console.error);
-			});
-		};
-
-		setup();
-
-		return () => {
-			unlisten?.();
-		};
-	}, [queryClient]);
+    return () => {
+      unlisten?.();
+    };
+  }, [onSettingsChanged]);
 
 	// Click behavior:
 	// - idle + collapsed: expand and start recording immediately
