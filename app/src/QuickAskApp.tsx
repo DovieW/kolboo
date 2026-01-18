@@ -8,8 +8,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { applyAccentColor } from "./lib/accentColor";
 import type {
-  QuickAskAnswerPayload,
-  QuickAskStartedPayload,
+	QuickAskAnswerPayload,
+	QuickAskStartedPayload,
 } from "./lib/tauri";
 import { listenTyped } from "./lib/tauri/events";
 import "./app.css";
@@ -231,7 +231,11 @@ export default function QuickAskApp() {
 			if (!awaitingAnswerRef.current) return;
 			awaitingAnswerRef.current = false;
 			const safePayload = payload as QuickAskAnswerPayload;
-			if (safePayload && typeof safePayload === "object" && "ok" in safePayload) {
+			if (
+				safePayload &&
+				typeof safePayload === "object" &&
+				"ok" in safePayload
+			) {
 				if (safePayload.ok) {
 					setClosing(false);
 					setPhase("ready");

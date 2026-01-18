@@ -43,17 +43,18 @@ if (!env.RUSTC_WRAPPER) {
 // - SCCACHE_DIR: cache location (put on a fast SSD)
 // - SCCACHE_CACHE_SIZE: e.g. "20G"
 
-const child = process.platform === "win32"
-	? spawn("cmd.exe", ["/d", "/s", "/c", "tauri", "dev"], {
-			cwd: appDir,
-			stdio: "inherit",
-			env,
-		})
-	: spawn("tauri", ["dev"], {
-			cwd: appDir,
-			stdio: "inherit",
-			env,
-		});
+const child =
+	process.platform === "win32"
+		? spawn("cmd.exe", ["/d", "/s", "/c", "tauri", "dev"], {
+				cwd: appDir,
+				stdio: "inherit",
+				env,
+			})
+		: spawn("tauri", ["dev"], {
+				cwd: appDir,
+				stdio: "inherit",
+				env,
+			});
 
 child.on("exit", (code) => {
 	process.exit(code ?? 1);

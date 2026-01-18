@@ -25,9 +25,7 @@ type SchemaVariant = {
 	enum?: string[];
 };
 
-function readSchema(
-	schemaFile: string,
-): {
+function readSchema(schemaFile: string): {
 	properties?: Record<string, unknown>;
 	definitions?: Record<string, SchemaDefinition>;
 	oneOf?: SchemaVariant[];
@@ -100,9 +98,7 @@ describe("schema contract: event payloads", () => {
 
 		const schema = readSchema("pipeline-state-changed.schema.json");
 		const enumValues =
-			schema.enum ??
-			schema.oneOf?.flatMap((v) => v.enum ?? []) ??
-			[];
+			schema.enum ?? schema.oneOf?.flatMap((v) => v.enum ?? []) ?? [];
 		expect(enumValues).toContain(sampleState);
 		expect(enumValues).toContain("recording");
 		expect(enumValues).toContain("transcribing");
@@ -149,7 +145,10 @@ describe("schema contract: event payloads", () => {
 	});
 
 	it("keeps pipeline-cancelled payload aligned with backend JSON schema", () => {
-		assertNullEventSchema("pipeline-cancelled.schema.json", "pipeline-cancelled");
+		assertNullEventSchema(
+			"pipeline-cancelled.schema.json",
+			"pipeline-cancelled",
+		);
 	});
 
 	it("keeps pipeline-reset payload aligned with backend JSON schema", () => {

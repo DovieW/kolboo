@@ -55,11 +55,11 @@ import {
 	useUpdateHotkeyDebugEnabled,
 } from "../lib/queries";
 import type {
-  LogEntry,
-  LogLevel,
-  RequestLog,
-  RequestStatus,
-  SystemEvent,
+	LogEntry,
+	LogLevel,
+	RequestLog,
+	RequestStatus,
+	SystemEvent,
 } from "../lib/tauri";
 import { tauriAPI } from "../lib/tauri";
 import { diffTextInline } from "../lib/textDiff";
@@ -1222,24 +1222,24 @@ export function LogsView(
 		Math.ceil(filteredLogs.length / LOGS_PAGE_SIZE),
 	);
 	const filterKey = useMemo(
-    () =>
-      JSON.stringify([
-        filterText,
-        showSuccess,
-        showError,
-        showCancelled,
-        durationMinSecs,
-        durationMaxSecs,
-      ]),
-    [
-      filterText,
-      showSuccess,
-      showError,
-      showCancelled,
-      durationMinSecs,
-      durationMaxSecs,
-    ],
-  );
+		() =>
+			JSON.stringify([
+				filterText,
+				showSuccess,
+				showError,
+				showCancelled,
+				durationMinSecs,
+				durationMaxSecs,
+			]),
+		[
+			filterText,
+			showSuccess,
+			showError,
+			showCancelled,
+			durationMinSecs,
+			durationMaxSecs,
+		],
+	);
 	const canGoPrev = page > 1;
 	const canGoNext = page < totalPages;
 
@@ -1248,9 +1248,9 @@ export function LogsView(
 	}, [totalPages]);
 
 	useEffect(() => {
-    void filterKey;
-    setPage(1);
-  }, [filterKey]);
+		void filterKey;
+		setPage(1);
+	}, [filterKey]);
 
 	const pageLogs = useMemo(() => {
 		const start = (page - 1) * LOGS_PAGE_SIZE;

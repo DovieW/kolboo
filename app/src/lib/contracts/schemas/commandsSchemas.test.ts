@@ -14,6 +14,7 @@ import type {
 	HistoryDeleteResult,
 	HistoryPageQuery,
 	HistoryPageResult,
+	IterateRewritePromptResponse,
 	LlmCompleteResponse,
 	LlmModelPricing,
 	LlmProviderInfo,
@@ -24,8 +25,8 @@ import type {
 	ModelPricing,
 	OpenWindowInfo,
 	ProviderCostTotal,
-	RequestLog,
 	RecordingsStats,
+	RequestLog,
 	SttModelPricing,
 	SystemProxyInfo,
 	TestLlmRewriteResponse,
@@ -34,7 +35,6 @@ import type {
 	WhisperModelDownloadStatus,
 	WhisperModelInfo,
 	WindowsInternetProxySettings,
-	IterateRewritePromptResponse,
 } from "../../tauri";
 import { configAPI } from "../../tauri";
 
@@ -138,7 +138,9 @@ describe("schema contract: command responses", () => {
 
 		const schema = readSchema("request-log.schema.json");
 		const schemaProps = schema.properties ?? {};
-		const missingKeys = Object.keys(sampleLog).filter((k) => !(k in schemaProps));
+		const missingKeys = Object.keys(sampleLog).filter(
+			(k) => !(k in schemaProps),
+		);
 
 		expect(
 			missingKeys,
@@ -427,9 +429,7 @@ describe("schema contract: command responses", () => {
 
 		const schema = readSchema("history-delete-mode.schema.json");
 		const enumValues =
-			schema.enum ??
-			schema.oneOf?.flatMap((v) => v.enum ?? []) ??
-			[];
+			schema.enum ?? schema.oneOf?.flatMap((v) => v.enum ?? []) ?? [];
 		expect(enumValues).toContain(sampleMode);
 	});
 
@@ -630,9 +630,7 @@ describe("schema contract: command responses", () => {
 
 		expect(
 			missingKeys,
-			`CostSummary keys missing in backend schema: ${missingKeys.join(
-				", ",
-			)}`,
+			`CostSummary keys missing in backend schema: ${missingKeys.join(", ")}`,
 		).toEqual([]);
 	});
 
@@ -707,9 +705,7 @@ describe("schema contract: command responses", () => {
 
 		expect(
 			missingKeys,
-			`ModelPricing keys missing in backend schema: ${missingKeys.join(
-				", ",
-			)}`,
+			`ModelPricing keys missing in backend schema: ${missingKeys.join(", ")}`,
 		).toEqual([]);
 
 		expect(
@@ -781,9 +777,7 @@ describe("schema contract: command responses", () => {
 
 		expect(
 			missingKeys,
-			`ModelOption keys missing in backend schema: ${missingKeys.join(
-				", ",
-			)}`,
+			`ModelOption keys missing in backend schema: ${missingKeys.join(", ")}`,
 		).toEqual([]);
 	});
 

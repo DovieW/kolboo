@@ -1,0 +1,552 @@
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { emitTyped } from "./events";
+import type {
+	AudioCaptureDiagnostics,
+	AudioSettingsTestWavs,
+	CacheRouterEmbeddingsResponse,
+	ConnectionState,
+	ConnectionStateChangedPayload,
+	CostByProvider,
+	CostSummary,
+	CostTimeframe,
+	DataStorageSummary,
+	DefaultSectionsResponse,
+	HistoryDeleteMode,
+	HistoryDeleteOptions,
+	HistoryDeleteResult,
+	HistoryEntry,
+	HistoryPageQuery,
+	HistoryPageResult,
+	LlmCompleteResponse,
+	LlmProviderInfo,
+	LocalWhisperBackendStatus,
+	ModelOption,
+	ModelPricing,
+	ModelPricingKind,
+	OpenAiReasoningEffort,
+	OpenWindowInfo,
+	RecordingsStats,
+	RequestLog,
+	SettingsChangedPayload,
+	SystemProxyInfo,
+	TestLlmRewriteResponse,
+	TestRewriteWithPromptResponse,
+	TrustedCaCertificate,
+	WhisperModelInfo,
+} from "./types";
+
+export const tauriAPI = {
+	async typeText(text: string): Promise<{ success: boolean; error?: string }> {
+		try {
+			await invoke("type_text", { text });
+			return { success: true };
+		} catch (error) {
+			return { success: false, error: String(error) };
+		}
+	},
+
+	async onStartRecording(callback: () => void): Promise<UnlistenFn> {
+		return listen("recording-start", callback);
+	},
+
+	async onStopRecording(callback: () => void): Promise<UnlistenFn> {
+		return listen("recording-stop", callback);
+	},
+
+	async getCostSummary(params: {
+		timeframe: CostTimeframe;
+		kind?: "all" | "stt" | "llm";
+		sttModelKeys?: string[];
+		llmModelKeys?: string[];
+		excludeFreeTier?: boolean;
+	}): Promise<CostSummary> {
+		const kind = params.kind === "all" ? undefined : params.kind;
+		return invoke("get_cost_summary_v2", {
+			params: {
+				timeframe: params.timeframe,
+				kind,
+				sttModelKeys: params.sttModelKeys,
+				llmModelKeys: params.llmModelKeys,
+				excludeFreeTier: params.excludeFreeTier,
+			},
+		});
+	},
+
+	async getCostByProvider(params: {
+		timeframe: CostTimeframe;
+		kind?: "all" | "stt" | "llm";
+		sttModelKeys?: string[];
+		llmModelKeys?: string[];
+		excludeFreeTier?: boolean;
+	}): Promise<CostByProvider> {
+		const kind = params.kind === "all" ? undefined : params.kind;
+		return invoke("get_cost_by_provider_v2", {
+			params: {
+				timeframe: params.timeframe,
+				kind,
+				sttModelKeys: params.sttModelKeys,
+				llmModelKeys: params.llmModelKeys,
+				excludeFreeTier: params.excludeFreeTier,
+			},
+		});
+	},
+
+	async getModelPricing(params: {
+		provider: string;
+		kind: ModelPricingKind;
+		model: string;
+	}): Promise<ModelPricing | null> {
+		return invoke("get_model_pricing", {
+			provider: params.provider,
+			kind: params.kind,
+			model: params.model,
+		});
+	},
+
+	async getSystemProxyInfo(): Promise<SystemProxyInfo> {
+		return invoke<SystemProxyInfo>("get_system_proxy_info");
+	},
+
+	async loadTrustedCaCertificateFromFile(
+		path: string,
+	): Promise<TrustedCaCertificate> {
+		return invoke<TrustedCaCertificate>(
+			"load_trusted_ca_certificate_from_file",
+			{
+				path,
+			},
+		);
+	},
+
+	async listOpenWindows(params?: {
+		includeTitles?: boolean;
+	}): Promise<OpenWindowInfo[]> {
+		if (params?.includeTitles) {
+			return invoke("list_open_windows", { includeTitles: true });
+		}
+		return invoke("list_open_windows");
+	},
+
+	async getForegroundProcessPath(): Promise<string | null> {
+		return invoke("get_foreground_process_path");
+	},
+
+	async isLocalWhisperAvailable(): Promise<boolean> {
+		return invoke("is_local_whisper_available");
+	},
+
+	async getLocalWhisperBackendStatus(): Promise<LocalWhisperBackendStatus> {
+		return invoke("get_local_whisper_backend_status");
+	},
+
+	async getWhisperModels(): Promise<WhisperModelInfo[]> {
+		return invoke("get_whisper_models");
+	},
+
+	async getWhisperModelsDir(): Promise<string> {
+		return invoke("get_whisper_models_dir");
+	},
+
+	async downloadWhisperModel(modelId: string): Promise<void> {
+		await invoke("download_whisper_model", { modelId });
+	},
+
+	async cancelWhisperModelDownload(modelId: string): Promise<void> {
+		await invoke("cancel_whisper_model_download", { modelId });
+	},
+
+	async deleteWhisperModel(modelId: string): Promise<void> {
+		await invoke("delete_whisper_model", { modelId });
+	},
+
+	async validateWhisperModel(modelId: string): Promise<boolean> {
+		return invoke("validate_whisper_model", { modelId });
+	},
+
+	async isLocalWhisperModelLoaded(): Promise<boolean> {
+		return invoke("is_local_whisper_model_loaded");
+	},
+
+	async loadLocalWhisperModel(): Promise<void> {
+		await invoke("load_local_whisper_model");
+	},
+
+	async unloadLocalWhisperModel(): Promise<void> {
+		await invoke("unload_local_whisper_model");
+	},
+
+	async isAudioMuteSupported(): Promise<boolean> {
+		return invoke("is_audio_mute_supported");
+	},
+
+	// API Key management
+	async hasApiKey(storeKey: string): Promise<boolean> {
+		return invoke("secrets_has_api_key", { storeKey });
+	},
+
+	async getApiKey(storeKey: string): Promise<string | null> {
+		const value = await invoke<string | null>("secrets_get_api_key", {
+			storeKey,
+		});
+		return value ?? null;
+	},
+
+	async setApiKey(storeKey: string, apiKey: string): Promise<void> {
+		await invoke("secrets_set_api_key", { storeKey, apiKey });
+	},
+
+	async clearApiKey(storeKey: string): Promise<void> {
+		await invoke("secrets_clear_api_key", { storeKey });
+	},
+
+	async registerShortcuts(): Promise<void> {
+		return invoke("register_shortcuts");
+	},
+
+	async unregisterShortcuts(): Promise<void> {
+		return invoke("unregister_shortcuts");
+	},
+
+	// History API
+	async addHistoryEntry(text: string): Promise<HistoryEntry> {
+		return invoke("add_history_entry", { text });
+	},
+
+	async getHistory(limit?: number): Promise<HistoryEntry[]> {
+		return invoke("get_history", { limit });
+	},
+
+	async getHistoryPage(params: HistoryPageQuery): Promise<HistoryPageResult> {
+		return invoke("get_history_page", { params });
+	},
+
+	async deleteHistoryEntry(id: string): Promise<boolean> {
+		return invoke("delete_history_entry", { id });
+	},
+
+	async getHistoryDeleteOptions(id: string): Promise<HistoryDeleteOptions> {
+		return invoke("get_history_delete_options", { id });
+	},
+
+	async deleteHistoryEntryEx(
+		id: string,
+		mode: HistoryDeleteMode,
+	): Promise<HistoryDeleteResult> {
+		return invoke("delete_history_entry_ex", { id, mode });
+	},
+
+	async clearHistory(): Promise<void> {
+		return invoke("clear_history");
+	},
+
+	// Overlay API
+	async resizeOverlay(width: number, height: number): Promise<void> {
+		return invoke("resize_overlay", { width, height });
+	},
+
+	async showOverlayHover(): Promise<void> {
+		return invoke("show_overlay_hover");
+	},
+
+	async scheduleHideOverlayHover(delayMs: number): Promise<void> {
+		return invoke("schedule_hide_overlay_hover", { delayMs });
+	},
+
+	async hideOverlayHover(): Promise<void> {
+		return invoke("hide_overlay_hover");
+	},
+
+	async startDragging(): Promise<void> {
+		const window = getCurrentWindow();
+		return window.startDragging();
+	},
+
+	// Connection state sync between windows
+	async emitConnectionState(state: ConnectionState): Promise<void> {
+		return emitTyped("connection-state-changed", { state });
+	},
+
+	async onConnectionStateChanged(
+		callback: (state: ConnectionState) => void,
+	): Promise<UnlistenFn> {
+		return listen<ConnectionStateChangedPayload>(
+			"connection-state-changed",
+			(event) => {
+				callback(event.payload.state);
+			},
+		);
+	},
+
+	// History sync between windows
+	async emitHistoryChanged(): Promise<void> {
+		return emitTyped("history-changed", null);
+	},
+
+	async onHistoryChanged(callback: () => void): Promise<UnlistenFn> {
+		return listen("history-changed", () => {
+			callback();
+		});
+	},
+
+	async onStatsChanged(callback: () => void): Promise<UnlistenFn> {
+		return listen("stats-changed", () => {
+			callback();
+		});
+	},
+
+	// Settings sync between windows (main -> overlay)
+	async emitSettingsChanged(
+		payload: SettingsChangedPayload = {},
+	): Promise<void> {
+		return emitTyped("settings-changed", payload);
+	},
+
+	async onSettingsChanged(
+		callback: (payload: SettingsChangedPayload) => void,
+	): Promise<UnlistenFn> {
+		return listen("settings-changed", (event) => {
+			callback((event.payload ?? {}) as SettingsChangedPayload);
+		});
+	},
+
+	async cacheRouterEmbeddings(params: {
+		profileId: string;
+		forceRefresh?: boolean;
+	}): Promise<CacheRouterEmbeddingsResponse> {
+		return invoke("cache_router_embeddings", {
+			profileId: params.profileId,
+			forceRefresh: params.forceRefresh ?? null,
+		});
+	},
+};
+
+export const llmAPI = {
+	getLlmProviders: () => invoke<LlmProviderInfo[]>("get_llm_providers"),
+
+	getFireworksModels: () => invoke<ModelOption[]>("fireworks_list_models"),
+	getOllamaModels: () => invoke<ModelOption[]>("ollama_list_models"),
+
+	testLlmRewrite: (params: { transcript: string; profileId?: string | null }) =>
+		invoke<TestLlmRewriteResponse>("test_llm_rewrite", {
+			transcript: params.transcript,
+			// IMPORTANT: Tauri command arg mapping uses camelCase in JS.
+			// Rust signature uses `profile_id`, which Tauri maps from `profileId`.
+			profileId: params.profileId ?? null,
+		}),
+
+	complete: (params: {
+		provider: string;
+		model?: string | null;
+		systemPrompt: string;
+		userPrompt: string;
+
+		// Optional provider-specific thinking knobs.
+		openAiReasoningEffort?: OpenAiReasoningEffort | null;
+		geminiThinkingBudget?: number | null;
+		geminiThinkingLevel?: "minimal" | "low" | "medium" | "high" | null;
+		anthropicThinkingBudget?: number | null;
+	}) =>
+		invoke<LlmCompleteResponse>("llm_complete", {
+			// Rust signature: llm_complete(pipeline, args: LlmCompleteArgs)
+			args: {
+				provider: params.provider,
+				model: params.model ?? null,
+
+				openAiReasoningEffort: params.openAiReasoningEffort ?? null,
+				geminiThinkingBudget: params.geminiThinkingBudget ?? null,
+				geminiThinkingLevel: params.geminiThinkingLevel ?? null,
+				anthropicThinkingBudget: params.anthropicThinkingBudget ?? null,
+
+				// The backend accepts both camelCase and snake_case via serde aliases.
+				systemPrompt: params.systemPrompt,
+				userPrompt: params.userPrompt,
+			},
+		}),
+
+	iterateRewritePrompt: (params: {
+		profileId?: string | null;
+		mode?: "fixed" | "new";
+		transcript: string;
+		problemOutput: string;
+		desiredOutput?: string | null;
+		currentPrompt: string;
+
+		// Optional overrides used by Prompt Lab only.
+		llmProvider?: string | null;
+		llmModel?: string | null;
+		openAiReasoningEffort?: OpenAiReasoningEffort | null;
+		geminiThinkingLevel?: "minimal" | "low" | "medium" | "high" | null;
+		geminiThinkingBudget?: number | null;
+		anthropicThinkingBudget?: number | null;
+	}) =>
+		invoke<IterateRewritePromptResponse>("iterate_rewrite_prompt", {
+			transcript: params.transcript,
+			problemOutput: params.problemOutput,
+			desiredOutput:
+				typeof params.desiredOutput === "string" && params.desiredOutput.trim()
+					? params.desiredOutput
+					: null,
+			currentPrompt: params.currentPrompt,
+			profileId: params.profileId ?? null,
+			mode: params.mode ?? null,
+
+			llmProvider: params.llmProvider ?? null,
+			llmModel: params.llmModel ?? null,
+			openAiReasoningEffort: params.openAiReasoningEffort ?? null,
+			geminiThinkingLevel: params.geminiThinkingLevel ?? null,
+			geminiThinkingBudget:
+				typeof params.geminiThinkingBudget === "number" &&
+				Number.isFinite(params.geminiThinkingBudget)
+					? params.geminiThinkingBudget
+					: null,
+			anthropicThinkingBudget:
+				typeof params.anthropicThinkingBudget === "number" &&
+				Number.isFinite(params.anthropicThinkingBudget)
+					? params.anthropicThinkingBudget
+					: null,
+		}),
+
+	testRewriteWithPrompt: (params: {
+		profileId?: string | null;
+		transcript: string;
+		prompt: string;
+	}) =>
+		invoke<TestRewriteWithPromptResponse>("test_rewrite_with_prompt", {
+			transcript: params.transcript,
+			prompt: params.prompt,
+			profileId: params.profileId ?? null,
+		}),
+};
+
+export const sttAPI = {
+	testTranscribeLastAudio: (params: { profileId?: string | null }) =>
+		invoke<string>("pipeline_test_transcribe_last_audio", {
+			// See note above: Rust uses `profile_id`, JS should pass `profileId`.
+			profileId: params.profileId ?? null,
+		}),
+
+	hasLastAudio: () => invoke<boolean>("pipeline_has_last_audio"),
+
+	getLastRecordingDiagnostics: () =>
+		invoke<AudioCaptureDiagnostics | null>(
+			"pipeline_get_last_recording_diagnostics",
+		),
+
+	// Retry a previous request using its persisted audio.
+	// Returns the final text (STT + optional LLM), same as normal transcription.
+	retryTranscription: (params: { requestId: string }) =>
+		invoke<string>("pipeline_retry_transcription", {
+			requestId: params.requestId,
+		}),
+};
+
+export const audioSettingsTestAPI = {
+	startRecording: () =>
+		invoke<void>("pipeline_test_audio_settings_start_recording"),
+	stopRecording: () =>
+		invoke<AudioSettingsTestWavs>(
+			"pipeline_test_audio_settings_stop_recording",
+		),
+};
+
+interface ProviderInfo {
+	value: string;
+	label: string;
+	is_local: boolean;
+}
+
+interface AvailableProvidersResponse {
+	stt: ProviderInfo[];
+	llm: ProviderInfo[];
+}
+
+export const configAPI = {
+	// Default prompt sections (from Tauri)
+	getDefaultSections: () =>
+		invoke<DefaultSectionsResponse>("get_default_sections"),
+
+	// Available providers (from Tauri, based on configured API keys)
+	getAvailableProviders: () =>
+		invoke<AvailableProvidersResponse>("get_available_providers"),
+
+	// Sync pipeline config when settings change
+	syncPipelineConfig: () => invoke<void>("sync_pipeline_config"),
+};
+
+export const logsAPI = {
+	getRequestLogs: (limit?: number) =>
+		invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 50 }),
+
+	clearRequestLogs: () => invoke<void>("clear_request_logs"),
+};
+
+export const dataAPI = {
+	getStorageSummary: () =>
+		invoke<DataStorageSummary>("get_data_storage_summary"),
+
+	deleteAllRecordings: () => invoke<number>("recordings_delete_all"),
+
+	deleteAllApiKeys: () => invoke<void>("delete_all_api_keys"),
+
+	deleteAllSettings: () => invoke<void>("delete_all_settings"),
+
+	deleteAllStats: () => invoke<void>("delete_all_stats"),
+
+	deleteAllData: () => invoke<void>("delete_all_data"),
+};
+
+export const backupAPI = {
+	exportSettingsBackupJson: () => invoke<string>("export_settings_backup_json"),
+
+	exportSettingsBackupToFile: (params: { path: string }) =>
+		invoke<void>("export_settings_backup_to_file", { path: params.path }),
+
+	importSettingsBackupJson: (params: { json: string }) =>
+		invoke<void>("import_settings_backup_json", { json: params.json }),
+
+	importSettingsBackupFromFile: (params: { path: string }) =>
+		invoke<void>("import_settings_backup_from_file", { path: params.path }),
+
+	githubBackupHasToken: () => invoke<boolean>("github_backup_has_token"),
+
+	githubBackupSetToken: (params: { token: string }) =>
+		invoke<void>("github_backup_set_token", { token: params.token }),
+
+	githubBackupClearToken: () => invoke<void>("github_backup_clear_token"),
+
+	githubBackupPushToGist: (params: { gistId?: string | null }) =>
+		invoke<string>("github_backup_push_to_gist", {
+			gistId: params.gistId ?? null,
+		}),
+
+	githubBackupPullFromGist: (params: { gistId: string }) =>
+		invoke<string>("github_backup_pull_from_gist", { gistId: params.gistId }),
+};
+
+export const recordingsAPI = {
+	// Returns a URL usable as an <audio src>, or null if no recording exists.
+	getRecordingAssetUrl: async (params: { requestId: string }) => {
+		const path = await invoke<string | null>("recording_get_wav_path", {
+			requestId: params.requestId,
+		});
+		return path ? convertFileSrc(path) : null;
+	},
+
+	// Returns base64 WAV bytes, or null if no recording exists.
+	getRecordingWavBase64: (params: { requestId: string }) =>
+		invoke<string | null>("recording_get_wav_base64", {
+			requestId: params.requestId,
+		}),
+
+	// Open recordings directory in file explorer.
+	openRecordingsFolder: () => invoke<void>("recordings_open_folder"),
+
+	// Total size (bytes) used by saved recordings.
+	getRecordingsStorageBytes: () =>
+		invoke<number>("recordings_get_storage_bytes"),
+
+	// Stats for UI display (count + bytes).
+	getRecordingsStats: () => invoke<RecordingsStats>("recordings_get_stats"),
+};
