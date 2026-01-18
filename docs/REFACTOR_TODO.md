@@ -24,6 +24,108 @@ This file is a parking lot for larger refactors that came up while working on sm
   - Right now some state lives in refs, some in `useState`, some in the reducer.
   - A follow-up could consolidate more of this into one predictable state machine, but that’s a larger change.
 
+## Biggest “hot spot” files by size (worth refactoring)
+
+These are the files that are *currently* the largest / most responsibility-dense. They aren’t “bad”, but they’re the most likely to become painful to change.
+
+### Rust backend
+
+- **Split `app/src-tauri/src/lib.rs` (~256KB).**
+  - Why: it currently mixes app bootstrap, tray/window behavior, hotkeys, settings seeding/migration, pipeline orchestration, Quick Ask / Quick Replace flow wiring, and lots of event emission.
+  - Suggested splits (modules + functions):
+    - `bootstrap/*` (plugins, window creation, menu/tray setup)
+    - `shortcuts/*` (global shortcut registration + Escape-to-cancel lifecycle)
+    - `sessions/*` (record start/stop orchestration; Quick Ask / Quick Replace branches)
+    - `settings/defaults.rs` (keep `ensure_default_settings(...)` + migrations close to settings types)
+    - `overlay/*` (show/hide/position logic)
+  - Acceptance hint: the public Tauri command API stays the same; this is mostly moving code + adding thin wrappers.
+
+- **Split `app/src-tauri/src/pipeline.rs` (~188KB).**
+  - Why: it contains unrelated concerns (provider construction/caching, routing logic, state machine + config, embedding cache/persistence, and helper utilities).
+  - Suggested splits:
+    - `pipeline/state.rs` (state machine + transitions/guards)
+    - `pipeline/config.rs` (PipelineConfig defaults + normalization)
+    - `pipeline/providers.rs` (STT/LLM provider creation + caching)
+    - `pipeline/router/*` (embeddings router + LLM router + diagnostics payload building)
+  - Bonus: lots of helper functions here are pure (e.g. path normalization / routing scoring) and can get fast unit tests once extracted.
+
+- **Break up `app/src-tauri/src/commands/text.rs` (~32KB) by responsibility.**
+  - Why: it’s doing 3 tricky OS-level jobs in one place: output injection, clipboard lifecycle (including WinRT “exclude from history”), and selection probing.
+  - Suggested splits:
+    - `text/clipboard.rs` (set/read/restore, platform-specific WinRT)
+    - `text/inject.rs` (enigo key injection + output modes + lock)
+    - `text/selection_probe.rs` (copy/insert/clipboard-only strategies)
+  - Acceptance hint: keep the public functions and `#[tauri::command]` signatures in `commands/text.rs` as wrappers so callers don’t change.
+
+### Frontend (React/TS)
+
+- **Split `app/src/components/settings/PromptSettings.tsx` (~253KB).**
+  - Why: it’s doing UI layout *and* business logic for presets/router/Quick Ask/Quick Replace.
+  - Suggested splits: presets editor, router panel, quick ask panel, quick replace panel, plus 1–2 hooks that own the data plumbing.
+
+- **Split `app/src/lib/tauri.ts` (~100KB).**
+  - Why: it mixes “invoke wrappers”, settings normalization/migrations, and a bunch of shared types.
+  - Suggested split:
+    - `lib/tauri/types.ts`
+    - `lib/tauri/settings.ts` (get/normalize/update + emit `settings-changed`)
+    - `lib/tauri/commands.ts` (thin invoke wrappers)
+    - (optional) `lib/tauri/events.ts` (listen/emit helpers)
+  - Goal: reduce Rust/TS contract drift and make it clearer which calls must also do `configAPI.syncPipelineConfig()` / emit events.
+
+- **Continue splitting `app/src/OverlayApp.tsx` (~81KB).**
+  - This is already tracked above, but size-wise it’s still one of the top hotspots.
+
+## Provider settings follow-ups
+
+- **Speechmatics language configurability**
+  - There’s an inline TODO in `app/src-tauri/src/stt/speechmatics.rs` to make language configurable.
+  - This likely wants a UI setting + plumbing into provider construction (plus defaults + TS normalization).
+
+## Core architecture / design improvements
+
+These are “bigger than a ticket” changes that would make the core easier to evolve safely.
+
+- **Create a clean layering boundary: “Tauri shell” vs “Core services”.**
+  - Today: a lot of orchestration lives in `app/src-tauri/src/lib.rs` and reaches into many subsystems.
+  - Goal: keep `lib.rs` focused on wiring (commands/events/windows/tray), and move real business logic into a small set of services/modules.
+  - Suggested shape:
+    - `core/*` (pipeline orchestration, quick ask/replace orchestration)
+    - `adapters/*` (tauri emit/invoke, filesystem, audio capture, clipboard)
+    - `commands/*` becomes thin wrappers around core services
+  - Why this helps: it’s much easier to test “core logic” without needing a Tauri runtime.
+
+- **Make settings a versioned, schema-driven contract (single source of truth).**
+  - Today: backend seeds defaults in `ensure_default_settings(...)`, and frontend normalizes/migrates in `app/src/lib/tauri.ts`.
+  - Add:
+    - `settings_version` stored in `settings.json`
+    - explicit migrations (vN -> vN+1) that run at startup (not when visiting a UI screen)
+    - a small “settings doctor” function/command: validate -> normalize -> report problems (for debugging)
+  - Bonus: this also reduces Rust/TS drift because the migration logic lives in one place.
+
+- **Introduce a typed event contract (avoid stringly-typed event drift).**
+  - Today: many events are string names with ad-hoc payloads (`pipeline-state-changed`, `overlay-audio-level`, etc.).
+  - Suggested: define a single event map (name -> payload type) in one place and export it:
+    - Rust: central module that emits only through typed helpers
+    - TS: `events.ts` that defines the same names + payload typing (generated if possible)
+  - Acceptance hint: callers can still “listen by string”, but new code should go through the typed wrapper.
+
+- **Standardize error handling across commands (one error shape to the UI).**
+  - Today: errors bubble up in different formats depending on where they come from.
+  - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.
+  - Why: frontend error UI becomes simpler and more consistent; telemetry/logging can attach codes.
+
+- **Dependency injection seams for hard IO (testability).**
+  - You already have good “seams” in places (e.g. `with_client(...)` patterns).
+  - Next step: formalize a few minimal traits/interfaces so the pipeline can be tested without:
+    - CPAL devices
+    - real filesystem
+    - real network
+  - Keep it small: only extract interfaces where unit tests would meaningfully increase confidence.
+
+- **Document the pipeline as a state machine contract (and enforce it).**
+  - Add a small transition table comment + a single “transition helper” that enforces allowed moves.
+  - This complements existing guard methods and makes it harder to accidentally introduce illegal transitions.
+
 ## Prevent Rust/TS contract drift
 
 - **Generate or validate TS types against backend schemas.**
