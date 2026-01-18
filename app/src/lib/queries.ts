@@ -6,6 +6,31 @@ import {
 } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import {
+	createAudioMuteSupportedQueryFn,
+	createAvailableProvidersQueryFn,
+	createCostByProviderQueryFn,
+	createCostSummaryQueryFn,
+	createDataStorageSummaryQueryFn,
+	createDefaultSectionsQueryFn,
+	createFireworksModelsQueryFn,
+	createHasLastAudioQueryFn,
+	createHistoryAllQueryFn,
+	createHistoryPageQueryFn,
+	createIsLocalWhisperAvailableQueryFn,
+	createIsLocalWhisperModelLoadedQueryFn,
+	createLastRecordingDiagnosticsQueryFn,
+	createLocalWhisperBackendStatusQueryFn,
+	createModelPricingQueryFn,
+	createOllamaModelsQueryFn,
+	createRecordingsStatsQueryFn,
+	createRequestLogsQueryFn,
+	createSettingsGuideStateQueryFn,
+	createSettingsQueryFn,
+	createSystemProxyInfoQueryFn,
+	createWhisperModelsDirQueryFn,
+	createWhisperModelsQueryFn,
+} from "./queries/queryFns";
+import {
 	type AppSettings,
 	type AudioCue,
 	audioSettingsTestAPI,
@@ -35,31 +60,6 @@ import {
 	validateHotkeyNotDuplicate,
 	type WhisperModelInfo,
 } from "./tauri";
-import {
-	createAudioMuteSupportedQueryFn,
-	createAvailableProvidersQueryFn,
-	createCostByProviderQueryFn,
-	createCostSummaryQueryFn,
-	createDataStorageSummaryQueryFn,
-	createDefaultSectionsQueryFn,
-	createFireworksModelsQueryFn,
-	createHasLastAudioQueryFn,
-	createHistoryAllQueryFn,
-	createHistoryPageQueryFn,
-	createIsLocalWhisperAvailableQueryFn,
-	createIsLocalWhisperModelLoadedQueryFn,
-	createLastRecordingDiagnosticsQueryFn,
-	createLocalWhisperBackendStatusQueryFn,
-	createModelPricingQueryFn,
-	createOllamaModelsQueryFn,
-	createRecordingsStatsQueryFn,
-	createRequestLogsQueryFn,
-	createSettingsGuideStateQueryFn,
-	createSettingsQueryFn,
-	createSystemProxyInfoQueryFn,
-	createWhisperModelsDirQueryFn,
-	createWhisperModelsQueryFn,
-} from "./queries/queryFns";
 
 const queryFnDeps = {
 	tauriAPI,
@@ -1109,10 +1109,7 @@ export function useHistoryAll(options?: { enabled?: boolean }) {
 }
 
 export function useHistoryPage(params: HistoryPageQuery) {
-	const { normalized, queryFn } = createHistoryPageQueryFn(
-		queryFnDeps,
-		params,
-	);
+	const { normalized, queryFn } = createHistoryPageQueryFn(queryFnDeps, params);
 
 	return useQuery({
 		queryKey: [

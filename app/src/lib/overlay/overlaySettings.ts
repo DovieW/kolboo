@@ -1,5 +1,5 @@
-import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
 import type { QueryClient } from "@tanstack/react-query";
+import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
 import type { SettingsChangedPayload } from "../tauri";
 
 type OverlaySettingsDeps = {
