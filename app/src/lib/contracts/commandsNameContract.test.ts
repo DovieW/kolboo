@@ -21,9 +21,10 @@ function extractInvokeCommandNames(source: string): string[] {
 
 function extractRustCommandNames(source: string): string[] {
 	const handlerMatch = source.match(/generate_handler!\s*\[([\s\S]*?)\]/);
-	if (!handlerMatch) return [];
+	const handlerBody = handlerMatch?.[1];
+	if (!handlerBody) return [];
 
-	const cleaned = handlerMatch[1]
+	const cleaned = handlerBody
 		.replace(/\/\/.*$/gm, "")
 		.replace(/\/\*[\s\S]*?\*\//g, "");
 

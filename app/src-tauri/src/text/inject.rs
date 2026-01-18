@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use crate::text::clipboard::{ClipboardRestoreGuard, set_clipboard_text_with_barrier};
+use crate::text::clipboard::{set_clipboard_text_with_barrier, ClipboardRestoreGuard};
 
 /// Delay between keyboard key press and release events
 const KEY_EVENT_DELAY_MS: u64 = 50;

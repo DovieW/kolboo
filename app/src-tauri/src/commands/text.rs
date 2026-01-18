@@ -4,8 +4,9 @@ use tauri::AppHandle;
 use crate::text::inject::run_with_output_injection_lock;
 
 pub use crate::text::inject::{
-    copy_to_clipboard, output_text_with_mode, output_text_with_mode_options, paste_and_keep_clipboard,
-    type_as_keystrokes, type_text_blocking, type_text_blocking_with_options, OutputMode,
+    copy_to_clipboard, output_text_with_mode, output_text_with_mode_options,
+    paste_and_keep_clipboard, type_as_keystrokes, type_text_blocking,
+    type_text_blocking_with_options, OutputMode,
 };
 
 #[cfg(desktop)]

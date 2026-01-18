@@ -1,3 +1,4 @@
+import type { InvokeArgs, InvokeOptions } from "@tauri-apps/api/core";
 import type { QueryClient } from "@tanstack/react-query";
 import type { SettingsChangedPayload } from "../tauri";
 
@@ -5,7 +6,11 @@ type OverlaySettingsDeps = {
 	applyAccentColor: (color: string | null) => void;
 	reloadSettingsFromDisk: () => Promise<void>;
 	queryClient: QueryClient;
-	invoke: (command: string, args?: unknown) => Promise<unknown>;
+	invoke: <T>(
+		command: string,
+		args?: InvokeArgs,
+		options?: InvokeOptions,
+	) => Promise<T>;
 };
 
 export function createOverlaySettingsChangedHandler(

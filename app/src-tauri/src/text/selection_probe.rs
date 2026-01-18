@@ -201,8 +201,12 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
 
             #[cfg(target_os = "windows")]
             match method {
-                ContextGrabMethod::CtrlShiftC => log::info!("Selection probe: injecting Ctrl+Shift+C"),
-                ContextGrabMethod::CtrlInsert => log::info!("Selection probe: injecting Ctrl+Insert"),
+                ContextGrabMethod::CtrlShiftC => {
+                    log::info!("Selection probe: injecting Ctrl+Shift+C")
+                }
+                ContextGrabMethod::CtrlInsert => {
+                    log::info!("Selection probe: injecting Ctrl+Insert")
+                }
                 _ => log::info!("Selection probe: injecting Ctrl+C"),
             }
 

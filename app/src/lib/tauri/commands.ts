@@ -19,6 +19,7 @@ import type {
 	HistoryEntry,
 	HistoryPageQuery,
 	HistoryPageResult,
+	IterateRewritePromptResponse,
 	LlmCompleteResponse,
 	LlmProviderInfo,
 	LocalWhisperBackendStatus,
