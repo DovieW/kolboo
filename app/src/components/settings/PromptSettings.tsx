@@ -69,6 +69,7 @@ import {
 } from "../../lib/tauri";
 import { HintSelect } from "../HintSelect";
 import { PromptSectionEditor } from "./PromptSectionEditor";
+import { QuickReplaceSettings } from "./QuickReplaceSettings";
 import { RewritePromptLabModal } from "./RewritePromptLabModal";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
@@ -6560,394 +6561,63 @@ export function PromptSettings({
 				</div>
 			) : null}
 
-			<div className="settings-mini-header">
-				<span className="settings-mini-header__text">Quick Replace</span>
-			</div>
-
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Quick Replace</p>
-					<p className="settings-description">
-						If you have text highlighted when transcription starts, Kolboo will
-						copy the selection, treat your transcript as instructions, rewrite
-						the selected text with an LLM, then output using your output mode
-						(Paste replaces the selection).
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && quickReplaceEnabledInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !quickReplaceEnabledInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Quick Replace override?",
-										onConfirm: () => {
-											setQuickReplaceEnabledInheriting(true);
-											setLocalProfileQuickReplaceEnabled(
-												defaultQuickReplaceEnabled,
-											);
-											saveProfileMetadata({ quick_replace_enabled: null });
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Switch
-						checked={localProfileQuickReplaceEnabled}
-						onChange={(e) => {
-							const enabled = e.currentTarget.checked;
-							if (!isDefaultScope) setQuickReplaceEnabledInheriting(false);
-							setLocalProfileQuickReplaceEnabled(enabled);
-							saveProfileMetadata({ quick_replace_enabled: enabled });
-						}}
-						color="gray"
-						size="md"
-					/>
-				</div>
-			</div>
-
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Include Clipboard Context</p>
-					<p className="settings-description">
-						When enabled, Kolboo reads your clipboard text and includes it as
-						optional context during Quick Replace.
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && quickReplaceIncludeClipboardContextInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope &&
-						!quickReplaceIncludeClipboardContextInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title:
-												"Disable Quick Replace Clipboard Context override?",
-											onConfirm: () => {
-												setQuickReplaceIncludeClipboardContextInheriting(true);
-												setLocalProfileQuickReplaceIncludeClipboardContext(
-													defaultQuickReplaceIncludeClipboardContext,
-												);
-												saveProfileMetadata({
-													quick_replace_include_clipboard_context: null,
-												});
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-					<Switch
-						checked={localProfileQuickReplaceIncludeClipboardContext}
-						onChange={(e) => {
-							const enabled = e.currentTarget.checked;
-							if (!isDefaultScope) {
-								setQuickReplaceIncludeClipboardContextInheriting(false);
-							}
-							setLocalProfileQuickReplaceIncludeClipboardContext(enabled);
-							saveProfileMetadata({
-								quick_replace_include_clipboard_context: enabled,
-							});
-						}}
-						color="gray"
-						size="md"
-					/>
-				</div>
-			</div>
-
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Provider</p>
-					<p className="settings-description">
-						AI service used to rewrite the highlighted text.
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && quickReplaceProviderInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{isDefaultScope &&
-						(activeProfile?.quick_replace_provider != null ||
-							activeProfile?.quick_replace_model != null) && (
-							<Tooltip label="Use Rewrite provider/model" withArrow>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() => {
-										setLocalProfileQuickReplaceProvider(
-											settings?.llm_provider ?? null,
-										);
-										setLocalProfileQuickReplaceModel(
-											settings?.llm_model ?? null,
-										);
-										saveProfileMetadata({
-											quick_replace_provider: null,
-											quick_replace_model: null,
-										});
-									}}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-					{!isDefaultScope && !quickReplaceProviderInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Quick Replace Provider override?",
-										onConfirm: () => {
-											setQuickReplaceProviderInheriting(true);
-											setQuickReplaceModelInheriting(true);
-											setLocalProfileQuickReplaceProvider(
-												defaultQuickReplaceProvider,
-											);
-											setLocalProfileQuickReplaceModel(
-												defaultQuickReplaceModel,
-											);
-											saveProfileMetadata({
-												quick_replace_provider: null,
-												quick_replace_model: null,
-											});
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Select
-						data={llmProviderOptions}
-						value={effectiveQuickReplaceProvider}
-						onChange={(value) => {
-							if (!value) return;
-
-							if (!isDefaultScope) {
-								setQuickReplaceProviderInheriting(false);
-								setQuickReplaceModelInheriting(false);
-							}
-
-							setLocalProfileQuickReplaceProvider(value);
-							const models = getLlmModelOptionsForProvider(value);
-							const firstModel = models[0]?.value ?? null;
-							setLocalProfileQuickReplaceModel(firstModel);
-							saveProfileMetadata({
-								quick_replace_provider: value,
-								quick_replace_model: firstModel,
-							});
-						}}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={
-							llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-						}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
-			</div>
-
-			{quickReplaceModelOptions.length > 0 ? (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Model</p>
-						<p className="settings-description">
-							LLM model used to rewrite the highlighted text.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && quickReplaceModelInheriting && (
-							<Tooltip label={INHERIT_TOOLTIP} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !quickReplaceModelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Quick Replace Model override?",
-											onConfirm: () => {
-												setQuickReplaceModelInheriting(true);
-												setLocalProfileQuickReplaceModel(
-													defaultQuickReplaceModel,
-												);
-												saveProfileMetadata({ quick_replace_model: null });
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						<Select
-							data={quickReplaceModelOptions}
-							value={selectedQuickReplaceModelForUi}
-							onChange={(value) => {
-								if (!value) return;
-								if (!isDefaultScope) setQuickReplaceModelInheriting(false);
-								setLocalProfileQuickReplaceModel(value);
-								saveProfileMetadata({ quick_replace_model: value });
-							}}
-							placeholder="Select model"
-							withCheckIcon={false}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								},
-							}}
-						/>
-					</div>
-				</div>
-			) : null}
-
-			<div
-				className="settings-accordion-block"
-				style={{ marginTop: 0, marginBottom: 16 }}
-			>
-				<Accordion variant="separated" radius="md">
-					<PromptSectionEditor
-						sectionKey={`${activeProfileId}-quick-replace-system-prompt`}
-						title="System Prompt"
-						description="Optional instructions that apply to all Quick Replace rewrites."
-						enabled={true}
-						hideToggle={true}
-						placeholder="(leave empty to use the default prompt)"
-						initialContent={localQuickReplaceSystemPrompt}
-						defaultContent={
-							isDefaultScope
-								? DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
-								: defaultQuickReplaceSystemPrompt
-						}
-						hasCustom={
-							isDefaultScope
-								? (() => {
-										const stored = activeProfile?.quick_replace_system_prompt;
-										if (stored == null) return false;
-										return stored !== DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT;
-									})()
-								: activeProfile?.quick_replace_system_prompt !== null &&
-									activeProfile?.quick_replace_system_prompt !== undefined
-						}
-						inheritMode={
-							isDefaultScope
-								? null
-								: quickReplaceSystemPromptInheriting
-									? "inheriting"
-									: "overriding"
-						}
-						inheritTooltip={INHERIT_TOOLTIP}
-						disableOverrideTooltip="Disable override (inherit from Default)"
-						onDisableOverride={
-							isDefaultScope
-								? undefined
-								: () =>
-										openDisableOverrideDialog({
-											title: "Disable Quick Replace System Prompt override?",
-											onConfirm: () => {
-												setQuickReplaceSystemPromptInheriting(true);
-												setLocalQuickReplaceSystemPrompt(
-													defaultQuickReplaceSystemPrompt,
-												);
-												saveProfileMetadata({
-													quick_replace_system_prompt: null,
-												});
-											},
-										})
-						}
-						onToggle={() => {}}
-						onSave={(content) => {
-							if (isDefaultScope) {
-								const normalized = content.trim();
-								const toStore: string | null =
-									normalized.length > 0 &&
-									content !== DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
-										? content
-										: null;
-
-								const nextLocal =
-									toStore == null
-										? DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT
-										: content;
-
-								setLocalQuickReplaceSystemPrompt(nextLocal);
-								saveProfileMetadata({ quick_replace_system_prompt: toStore });
-								return;
-							}
-
-							const base = defaultQuickReplaceSystemPrompt;
-							const toStore = content === base ? null : content;
-							const nextLocal = toStore == null ? base : content;
-
-							setLocalQuickReplaceSystemPrompt(nextLocal);
-							setQuickReplaceSystemPromptInheriting(toStore == null);
-							saveProfileMetadata({ quick_replace_system_prompt: toStore });
-						}}
-						onReset={() => {
-							if (isDefaultScope) {
-								setLocalQuickReplaceSystemPrompt(
-									DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT,
-								);
-								saveProfileMetadata({ quick_replace_system_prompt: null });
-								return;
-							}
-
-							const base = defaultQuickReplaceSystemPrompt;
-							setLocalQuickReplaceSystemPrompt(base);
-							setQuickReplaceSystemPromptInheriting(true);
-							saveProfileMetadata({ quick_replace_system_prompt: null });
-						}}
-						isSaving={updateRewriteProgramPromptProfiles.isPending}
-					/>
-				</Accordion>
-			</div>
+			<QuickReplaceSettings
+				activeProfileId={activeProfileId}
+				activeProfile={activeProfile}
+				isDefaultScope={isDefaultScope}
+				inheritTooltip={INHERIT_TOOLTIP}
+				defaultSystemPrompt={DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT}
+				defaultQuickReplaceEnabled={defaultQuickReplaceEnabled}
+				defaultQuickReplaceIncludeClipboardContext={
+					defaultQuickReplaceIncludeClipboardContext
+				}
+				defaultQuickReplaceProvider={defaultQuickReplaceProvider}
+				defaultQuickReplaceModel={defaultQuickReplaceModel}
+				defaultQuickReplaceSystemPrompt={defaultQuickReplaceSystemPrompt}
+				effectiveQuickReplaceProvider={effectiveQuickReplaceProvider}
+				llmProviderOptions={llmProviderOptions}
+				llmProviderDisabled={
+					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+				}
+				quickReplaceModelOptions={quickReplaceModelOptions}
+				selectedQuickReplaceModelForUi={selectedQuickReplaceModelForUi}
+				localProfileQuickReplaceEnabled={localProfileQuickReplaceEnabled}
+				localProfileQuickReplaceIncludeClipboardContext={
+					localProfileQuickReplaceIncludeClipboardContext
+				}
+				localQuickReplaceSystemPrompt={localQuickReplaceSystemPrompt}
+				quickReplaceEnabledInheriting={quickReplaceEnabledInheriting}
+				quickReplaceIncludeClipboardContextInheriting={
+					quickReplaceIncludeClipboardContextInheriting
+				}
+				quickReplaceProviderInheriting={quickReplaceProviderInheriting}
+				quickReplaceModelInheriting={quickReplaceModelInheriting}
+				quickReplaceSystemPromptInheriting={quickReplaceSystemPromptInheriting}
+				setQuickReplaceEnabledInheriting={setQuickReplaceEnabledInheriting}
+				setQuickReplaceIncludeClipboardContextInheriting={
+					setQuickReplaceIncludeClipboardContextInheriting
+				}
+				setQuickReplaceProviderInheriting={setQuickReplaceProviderInheriting}
+				setQuickReplaceModelInheriting={setQuickReplaceModelInheriting}
+				setQuickReplaceSystemPromptInheriting={
+					setQuickReplaceSystemPromptInheriting
+				}
+				setLocalProfileQuickReplaceEnabled={setLocalProfileQuickReplaceEnabled}
+				setLocalProfileQuickReplaceIncludeClipboardContext={
+					setLocalProfileQuickReplaceIncludeClipboardContext
+				}
+				setLocalProfileQuickReplaceProvider={
+					setLocalProfileQuickReplaceProvider
+				}
+				setLocalProfileQuickReplaceModel={setLocalProfileQuickReplaceModel}
+				setLocalQuickReplaceSystemPrompt={setLocalQuickReplaceSystemPrompt}
+				saveProfileMetadata={saveProfileMetadata}
+				openDisableOverrideDialog={openDisableOverrideDialog}
+				getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
+				rewriteProvider={settings?.llm_provider ?? null}
+				rewriteModel={settings?.llm_model ?? null}
+				isSaving={updateRewriteProgramPromptProfiles.isPending}
+			/>
 
 			<div className="settings-mini-header">
 				<span className="settings-mini-header__text">Quick Ask</span>
