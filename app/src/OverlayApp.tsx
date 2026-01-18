@@ -9,7 +9,6 @@ import {
 	useEffect,
 	useLayoutEffect,
 	useMemo,
-	useReducer,
 	useRef,
 	useState,
 } from "react";
@@ -18,11 +17,7 @@ import { createOverlaySettingsChangedHandler } from "./lib/overlay/overlaySettin
 import {
 	type ErrorInfo,
 	isPipelineState,
-	type OverlayAnimState,
-	type OverlayUiState,
-	overlayUiReducer,
 	type PipelineState,
-	type PipelineStateSource,
 } from "./lib/overlay/overlayUiReducer";
 import { useSettings, useTypeText } from "./lib/queries";
 import {
@@ -35,6 +30,7 @@ import {
 	tauriAPI,
 } from "./lib/tauri";
 import { listenTyped } from "./lib/tauri/events";
+import { useOverlayUiReducer } from "./lib/useOverlayUiReducer";
 import "./app.css";
 
 function readBootAccentColor(): string | null {
@@ -1384,43 +1380,17 @@ function AudioWave({
 
 function RecordingControl() {
 	const queryClient = useQueryClient();
-	const [ui, dispatchUi] = useReducer(overlayUiReducer, {
-		pipelineState: "idle",
-		animState: "visible",
-		lastError: null,
-		lastErrorDetail: null,
-		lastFailedRequestId: null,
-		ignorePollUntilTs: 0,
-	} as OverlayUiState);
 	const {
 		pipelineState,
 		animState,
 		lastError,
 		lastErrorDetail: _lastErrorDetail,
 		lastFailedRequestId,
-	} = ui;
-
-	const setPipelineState = useCallback(
-		(source: PipelineStateSource, next: PipelineState) => {
-			dispatchUi({ type: "PIPELINE_SET", source, next, at: Date.now() });
-		},
-		[],
-	);
-
-	const setAnimState = useCallback((next: OverlayAnimState) => {
-		dispatchUi({ type: "ANIM_SET", next });
-	}, []);
-
-	const clearError = useCallback(() => {
-		dispatchUi({ type: "ERROR_CLEAR" });
-	}, []);
-
-	const setError = useCallback(
-		(info: ErrorInfo, detail: string | null, requestId: string | null) => {
-			dispatchUi({ type: "ERROR_SET", info, detail, requestId });
-		},
-		[],
-	);
+		setPipelineState,
+		setAnimState,
+		clearError,
+		setError,
+	} = useOverlayUiReducer();
 	const [sessionPresetId, setSessionPresetId] = useState<string | null>(null);
 	const hoverCloseTimerRef = useRef<number | null>(null);
 	const lastMouseMoveTsRef = useRef<number>(Date.now());

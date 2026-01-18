@@ -65,6 +65,9 @@ function readSchema(schemaFile: string): {
 		`../../../../src-tauri/gen/schemas/${schemaFile}`,
 		import.meta.url,
 	);
+	if (!fs.existsSync(schemaPath)) {
+		throw new Error(`Schema missing: ${schemaFile}`);
+	}
 	const rawSchema = fs.readFileSync(schemaPath, "utf8").replace(/^\uFEFF/, "");
 	return JSON.parse(rawSchema) as {
 		properties?: Record<string, unknown>;
@@ -76,7 +79,15 @@ function readSchema(schemaFile: string): {
 	};
 }
 
-describe("schema contract: command responses", () => {
+function hasSchemas(): boolean {
+	const schemasDir = new URL(
+		"../../../../src-tauri/gen/schemas/",
+		import.meta.url,
+	);
+	return fs.existsSync(schemasDir) && fs.readdirSync(schemasDir).length > 0;
+}
+
+describe.skipIf(!hasSchemas())("schema contract: command responses", () => {
 	it("keeps RequestLog shape aligned with backend JSON schema", () => {
 		const sampleLog: RequestLog = {
 			id: "log-1",

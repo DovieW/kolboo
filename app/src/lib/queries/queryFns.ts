@@ -1,4 +1,8 @@
-import type { CostTimeframe, HistoryPageQuery, ModelPricingKind } from "../tauri";
+import type {
+	CostTimeframe,
+	HistoryPageQuery,
+	ModelPricingKind,
+} from "../tauri";
 
 type TauriAPI = typeof import("../tauri").tauriAPI;
 type SttAPI = typeof import("../tauri").sttAPI;
@@ -65,7 +69,9 @@ type NormalizedHistoryPageQuery = {
 	includeUsageCounts: boolean;
 };
 
-const normalizeCostFilters = (filters?: CostFilters): NormalizedCostFilters => ({
+const normalizeCostFilters = (
+	filters?: CostFilters,
+): NormalizedCostFilters => ({
 	kind: filters?.kind,
 	sttModelKeys: (filters?.sttModelKeys ?? []).slice().sort(),
 	llmModelKeys: (filters?.llmModelKeys ?? []).slice().sort(),
@@ -97,7 +103,11 @@ const normalizeHistoryPageQuery = (
 
 export const createModelPricingQueryFn = (
 	deps: QueryFnDeps,
-	params: { provider: string | null; kind: ModelPricingKind; model: string | null },
+	params: {
+		provider: string | null;
+		kind: ModelPricingKind;
+		model: string | null;
+	},
 ) => {
 	const normalized = normalizeModelPricingParams(params);
 	return {
@@ -161,8 +171,9 @@ export const createSystemProxyInfoQueryFn = (deps: QueryFnDeps) => () =>
 export const createSettingsGuideStateQueryFn = (deps: QueryFnDeps) => () =>
 	deps.tauriAPI.getSettingsGuideState();
 
-export const createLastRecordingDiagnosticsQueryFn = (deps: QueryFnDeps) => () =>
-	deps.sttAPI.getLastRecordingDiagnostics();
+export const createLastRecordingDiagnosticsQueryFn =
+	(deps: QueryFnDeps) => () =>
+		deps.sttAPI.getLastRecordingDiagnostics();
 
 export const createRecordingsStatsQueryFn = (deps: QueryFnDeps) => () =>
 	deps.recordingsAPI.getRecordingsStats();
@@ -196,8 +207,9 @@ export const createAvailableProvidersQueryFn = (deps: QueryFnDeps) => () =>
 export const createIsLocalWhisperAvailableQueryFn = (deps: QueryFnDeps) => () =>
 	deps.tauriAPI.isLocalWhisperAvailable();
 
-export const createLocalWhisperBackendStatusQueryFn = (deps: QueryFnDeps) => () =>
-	deps.tauriAPI.getLocalWhisperBackendStatus();
+export const createLocalWhisperBackendStatusQueryFn =
+	(deps: QueryFnDeps) => () =>
+		deps.tauriAPI.getLocalWhisperBackendStatus();
 
 export const createWhisperModelsQueryFn = (deps: QueryFnDeps) => () =>
 	deps.tauriAPI.getWhisperModels();
@@ -208,11 +220,13 @@ export const createFireworksModelsQueryFn = (deps: QueryFnDeps) => () =>
 export const createOllamaModelsQueryFn = (deps: QueryFnDeps) => () =>
 	deps.llmAPI.getOllamaModels();
 
-export const createIsLocalWhisperModelLoadedQueryFn = (deps: QueryFnDeps) => () =>
-	deps.tauriAPI.isLocalWhisperModelLoaded();
+export const createIsLocalWhisperModelLoadedQueryFn =
+	(deps: QueryFnDeps) => () =>
+		deps.tauriAPI.isLocalWhisperModelLoaded();
 
 export const createWhisperModelsDirQueryFn = (deps: QueryFnDeps) => () =>
 	deps.tauriAPI.getWhisperModelsDir();
 
-export const createRequestLogsQueryFn = (deps: QueryFnDeps, limit?: number) => () =>
-	deps.logsAPI.getRequestLogs(limit);
+export const createRequestLogsQueryFn =
+	(deps: QueryFnDeps, limit?: number) => () =>
+		deps.logsAPI.getRequestLogs(limit);

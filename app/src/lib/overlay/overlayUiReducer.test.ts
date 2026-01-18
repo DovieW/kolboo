@@ -3,7 +3,7 @@ import {
 	type OverlayUiState,
 	overlayUiReducer,
 	PIPELINE_POLL_SUPPRESS_MS,
-} from "./overlayUiReducer";
+} from "../useOverlayUiReducer";
 
 const baseState: OverlayUiState = {
 	pipelineState: "idle",
