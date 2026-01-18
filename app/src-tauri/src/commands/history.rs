@@ -1,5 +1,6 @@
 use crate::history::{HistoryEntry, HistoryPageQuery, HistoryPageResult, HistoryStorage};
 use crate::recordings::RecordingStore;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tauri::Manager;
@@ -120,14 +121,14 @@ pub async fn delete_history_entry(
     history.delete(&id)
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HistoryDeleteOptions {
     pub recording_id: Option<String>,
     pub recording_exists: bool,
     pub recording_ref_count: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryDeleteMode {
     /// Delete only this history entry.
@@ -141,7 +142,7 @@ pub enum HistoryDeleteMode {
     RecordingAndAllEntries,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HistoryDeleteResult {
     pub deleted_entries: u64,
     pub deleted_recording: bool,

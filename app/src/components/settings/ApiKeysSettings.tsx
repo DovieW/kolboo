@@ -55,8 +55,10 @@ import {
 	useWhisperModelsDir,
 } from "../../lib/queries";
 import type {
-	WhisperModelDownloadProgress,
-	WhisperModelInfo,
+  LocalWhisperLoadMode,
+  LocalWhisperModelLoadEvent,
+  WhisperModelDownloadProgress,
+  WhisperModelInfo,
 } from "../../lib/tauri";
 import { configAPI, tauriAPI } from "../../lib/tauri";
 
@@ -421,12 +423,6 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 const WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT = "whisper-model-download-progress";
 const LOCAL_WHISPER_MODEL_LOAD_EVENT = "local-whisper-model-load";
 
-type LocalWhisperModelLoadStatus = "started" | "completed" | "error";
-type LocalWhisperModelLoadEvent = {
-	status: LocalWhisperModelLoadStatus;
-	message: string | null;
-};
-
 function LocalWhisperModelsCard() {
 	const queryClient = useQueryClient();
 
@@ -755,11 +751,20 @@ function LocalWhisperModelsCard() {
 									{ value: "on_launch", label: "On launch" },
 								]}
 								onChange={(value) => {
-									updateLocalWhisperLoadMode.mutate(value as any, {
-										onSuccess: () => {
-											tauriAPI.emitSettingsChanged();
-										},
-									});
+									const nextMode: LocalWhisperLoadMode | null =
+                    value === "manual" ||
+                    value === "on_transcribe" ||
+                    value === "on_launch"
+                      ? value
+                      : null;
+
+                  if (!nextMode) return;
+
+                  updateLocalWhisperLoadMode.mutate(nextMode, {
+                    onSuccess: () => {
+                      tauriAPI.emitSettingsChanged();
+                    },
+                  });
 								}}
 							/>
 

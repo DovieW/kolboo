@@ -3,6 +3,7 @@
 //! This module provides commands that replace the Python server's config API,
 //! including default prompt sections and available providers.
 
+use schemars::JsonSchema;
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -85,7 +86,7 @@ world
 bye""#;
 
 /// Response containing default prompt sections
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct DefaultSectionsResponse {
     pub system: String,
 }
@@ -103,7 +104,7 @@ pub fn get_default_sections() -> DefaultSectionsResponse {
 // ============================================================================
 
 /// Information about a provider
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ProviderInfo {
     pub value: String,
     pub label: String,
@@ -111,7 +112,7 @@ pub struct ProviderInfo {
 }
 
 /// Response listing available providers
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct AvailableProvidersResponse {
     pub stt: Vec<ProviderInfo>,
     pub llm: Vec<ProviderInfo>,

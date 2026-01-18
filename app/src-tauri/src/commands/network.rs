@@ -1,7 +1,8 @@
 use crate::settings::{TrustedCaCertFormat, TrustedCaCertificate};
+use schemars::JsonSchema;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct SystemProxyInfo {
     pub env_http_proxy: Option<String>,
     pub env_https_proxy: Option<String>,
@@ -11,7 +12,7 @@ pub struct SystemProxyInfo {
     pub windows_internet_settings: Option<WindowsInternetProxySettings>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct WindowsInternetProxySettings {
     pub proxy_enable: Option<bool>,
     pub proxy_server: Option<String>,

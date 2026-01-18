@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -8,7 +9,7 @@ use tauri::State;
 use crate::cost::openai::UsdMicros;
 use crate::stats::{CostEvent, CostKind, StatsStore};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CostSummaryResponse {
     pub timeframe: String,
     pub total_usd_micros: UsdMicros,
@@ -18,7 +19,7 @@ pub struct CostSummaryResponse {
     pub latest_included_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ProviderCostTotal {
     pub provider: String,
     pub total_usd_micros: UsdMicros,
@@ -26,7 +27,7 @@ pub struct ProviderCostTotal {
     pub events_with_cost: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CostByProviderResponse {
     pub timeframe: String,
     pub providers: Vec<ProviderCostTotal>,

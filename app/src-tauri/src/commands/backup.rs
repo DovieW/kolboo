@@ -155,7 +155,7 @@ fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> Resu
     let _ = crate::commands::config::sync_pipeline_config(app.clone());
 
     // Notify other windows to refresh cached settings.
-    let _ = app.emit("settings-changed", serde_json::json!({}));
+    let _ = app.emit("settings-changed", crate::SettingsChangedPayload::new());
 
     Ok(())
 }

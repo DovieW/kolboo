@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -8,7 +9,7 @@ use crate::llm::PromptSections;
 // ============================================================================
 
 /// Proxy mode for outgoing HTTP requests.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProxyMode {
     /// Force-disable any proxy usage (ignore env/system proxies).
@@ -21,7 +22,7 @@ pub enum ProxyMode {
 }
 
 /// Manual proxy configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ManualProxySettings {
     /// Proxy URL (applied to both http + https). Example: "http://127.0.0.1:8080".
     #[serde(default)]
@@ -51,7 +52,7 @@ impl Default for ManualProxySettings {
 }
 
 /// Persistent proxy settings.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustedCaCertFormat {
     #[default]
@@ -62,7 +63,7 @@ pub enum TrustedCaCertFormat {
 /// A user-provided CA certificate that should be trusted for outgoing HTTPS.
 ///
 /// Stored in settings.json so it can be applied by reqwest at runtime.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TrustedCaCertificate {
     /// Stable ID for list operations in the UI.
     #[serde(default)]
@@ -79,7 +80,7 @@ pub struct TrustedCaCertificate {
 }
 
 /// Persistent proxy settings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProxySettings {
     #[serde(default)]
     pub mode: ProxyMode,
@@ -153,7 +154,7 @@ pub const DEFAULT_VAD_PRE_ROLL_MS: u32 = 300;
 // ============================================================================
 
 /// Configuration for a hotkey combination
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct HotkeyConfig {
     /// Modifier keys (e.g., ["ctrl", "alt"])
     pub modifiers: Vec<String>,
@@ -306,12 +307,12 @@ impl VadSettings {
 // Rewrite prompt settings (stored in settings.json)
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PromptSectionSetting {
     pub content: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CleanupPromptSectionsSetting {
     /// System prompt override. When missing/None, inherit from base prompts.
     #[serde(default)]
@@ -334,7 +335,7 @@ impl CleanupPromptSectionsSetting {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RewriteProgramPromptProfile {
     pub id: String,
     pub name: String,
@@ -451,18 +452,34 @@ pub struct RewriteProgramPromptProfile {
     pub quick_ask_gemini_thinking_level: Option<String>,
     #[serde(default)]
     pub quick_ask_anthropic_thinking_budget: Option<i64>,
+
+    // Per-profile overrides for UI (stored in settings.json).
+    #[serde(default)]
+    pub sound_enabled: Option<bool>,
+    #[serde(default)]
+    pub playing_audio_handling: Option<String>,
+    #[serde(default)]
+    pub overlay_mode: Option<String>,
+    #[serde(default)]
+    pub widget_position: Option<String>,
+    #[serde(default)]
+    pub output_mode: Option<String>,
+    #[serde(default)]
+    pub output_hit_enter: Option<bool>,
 }
 
 // ============================================================================
 // Presets + intent router (stored in settings.json)
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RewritePreset {
     #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
 
     /// Example utterances / short hints used by the intent router.
     // Some historical frontend versions wrote `routing_hints: null`.
@@ -502,6 +519,20 @@ pub struct RewritePreset {
     pub gemini_thinking_level: Option<String>,
     #[serde(default)]
     pub anthropic_thinking_budget: Option<i64>,
+
+    // Optional per-preset UI overrides (stored in settings.json).
+    #[serde(default)]
+    pub sound_enabled: Option<bool>,
+    #[serde(default)]
+    pub playing_audio_handling: Option<String>,
+    #[serde(default)]
+    pub overlay_mode: Option<String>,
+    #[serde(default)]
+    pub widget_position: Option<String>,
+    #[serde(default)]
+    pub output_mode: Option<String>,
+    #[serde(default)]
+    pub output_hit_enter: Option<bool>,
 }
 
 fn deserialize_null_to_default_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -530,7 +561,7 @@ where
     Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(true))
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IntentRouterStrategy {
     #[default]
@@ -539,7 +570,7 @@ pub enum IntentRouterStrategy {
     Llm,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct IntentRouterSettings {
     #[serde(default)]
     pub enabled: bool,

@@ -4,6 +4,7 @@ use std::fs;
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::history::HistoryStorage;
@@ -17,7 +18,7 @@ use tauri_plugin_store::StoreExt;
 #[cfg(desktop)]
 use crate::secrets::API_KEY_SETTING_KEYS;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DataStorageSummary {
     pub recordings_count: u64,
     pub recordings_bytes: u64,

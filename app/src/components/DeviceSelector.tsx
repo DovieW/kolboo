@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import { useSettings, useUpdateSelectedMic } from "../lib/queries";
+import type { MicTestAudioLevelPayload } from "../lib/tauri";
 
 interface AudioDevice {
 	deviceId: string;
@@ -14,14 +15,6 @@ interface AudioDevice {
 interface BackendAudioInputDeviceInfo {
 	id: string;
 	name: string;
-}
-
-interface MicTestAudioLevelPayload {
-	active?: boolean;
-	session_id?: number;
-	seq?: number;
-	rms?: number;
-	peak?: number;
 }
 
 export function DeviceSelector() {
@@ -181,28 +174,27 @@ export function DeviceSelector() {
 	// unique backend ID, persist the new ID. This avoids ambiguous backend selection
 	// when multiple devices share the same friendly name.
 	useEffect(() => {
-		if (migratedLegacyMicRef.current) return;
-		if (!storedMicId) return;
-		if (storedMicId === "default") return;
-		if (storedMicId.startsWith(MIC_ID_PREFIX)) return;
-		if (settingsLoading || isLoading) return;
-		if (error) return;
+    if (migratedLegacyMicRef.current) return;
+    if (!storedMicId) return;
+    if (storedMicId === "default") return;
+    if (storedMicId.startsWith(MIC_ID_PREFIX)) return;
+    if (settingsLoading || isLoading) return;
+    if (error) return;
 
-		const legacyMatch = devices.find((d) => d.name === storedMicId);
-		if (!legacyMatch) return;
-		if (!legacyMatch.deviceId.startsWith(MIC_ID_PREFIX)) return;
+    const legacyMatch = devices.find((d) => d.name === storedMicId);
+    if (!legacyMatch) return;
+    if (!legacyMatch.deviceId.startsWith(MIC_ID_PREFIX)) return;
 
-		migratedLegacyMicRef.current = true;
-		updateSelectedMic.mutate(legacyMatch.deviceId);
-	}, [
-		storedMicId,
-		devices,
-		settingsLoading,
-		isLoading,
-		error,
-		updateSelectedMic,
-		MIC_ID_PREFIX,
-	]);
+    migratedLegacyMicRef.current = true;
+    updateSelectedMic.mutate(legacyMatch.deviceId);
+  }, [
+    storedMicId,
+    devices,
+    settingsLoading,
+    isLoading,
+    error,
+    updateSelectedMic,
+  ]);
 
 	// If the selected mic changes while the user is testing, force-stop the test.
 	// This avoids rapid start/stop loops and makes switching devices predictable.

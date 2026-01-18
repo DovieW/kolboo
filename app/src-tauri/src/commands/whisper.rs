@@ -4,7 +4,7 @@
 
 #[cfg(feature = "local-whisper")]
 use crate::stt::WhisperModel;
-use serde_json::json;
+use schemars::JsonSchema;
 #[cfg(feature = "local-whisper")]
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -14,8 +14,34 @@ use tauri::{Emitter, Manager};
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct LocalWhisperBackendObserved {
+    pub nvidia_smi_available: bool,
+    pub pid: u32,
+    pub cuda_process_present: Option<bool>,
+    pub used_gpu_memory_mb: Option<u64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalWhisperComputeBackend {
+    Cpu,
+    Cuda,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct LocalWhisperBackendStatusResponse {
+    pub build_has_local_whisper: bool,
+    pub build_has_cuda: bool,
+    pub compute: LocalWhisperComputeBackend,
+    pub reason: Option<String>,
+    pub missing_dlls: Vec<String>,
+    pub observed: LocalWhisperBackendObserved,
+}
+
 #[cfg(target_os = "windows")]
-fn observe_cuda_usage_via_nvidia_smi() -> serde_json::Value {
+fn observe_cuda_usage_via_nvidia_smi() -> LocalWhisperBackendObserved {
     use std::process::Command;
 
     let pid = std::process::id();
@@ -28,24 +54,28 @@ fn observe_cuda_usage_via_nvidia_smi() -> serde_json::Value {
         .output();
 
     let Ok(output) = output else {
-        return json!({
-            "nvidia_smi_available": false,
-            "pid": pid,
-            "cuda_process_present": null,
-            "used_gpu_memory_mb": null,
-            "error": "Failed to launch nvidia-smi",
-        });
+        return LocalWhisperBackendObserved {
+            nvidia_smi_available: false,
+            pid,
+            cuda_process_present: None,
+            used_gpu_memory_mb: None,
+            error: Some("Failed to launch nvidia-smi".to_string()),
+        };
     };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return json!({
-            "nvidia_smi_available": false,
-            "pid": pid,
-            "cuda_process_present": null,
-            "used_gpu_memory_mb": null,
-            "error": if stderr.is_empty() { "nvidia-smi failed" } else { stderr.as_str() },
-        });
+        return LocalWhisperBackendObserved {
+            nvidia_smi_available: false,
+            pid,
+            cuda_process_present: None,
+            used_gpu_memory_mb: None,
+            error: Some(if stderr.is_empty() {
+                "nvidia-smi failed".to_string()
+            } else {
+                stderr
+            }),
+        };
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -72,24 +102,24 @@ fn observe_cuda_usage_via_nvidia_smi() -> serde_json::Value {
         break;
     }
 
-    json!({
-        "nvidia_smi_available": true,
-        "pid": pid,
-        "cuda_process_present": present,
-        "used_gpu_memory_mb": used_mb,
-        "error": null,
-    })
+    LocalWhisperBackendObserved {
+        nvidia_smi_available: true,
+        pid,
+        cuda_process_present: Some(present),
+        used_gpu_memory_mb: used_mb,
+        error: None,
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn observe_cuda_usage_via_nvidia_smi() -> serde_json::Value {
-    json!({
-        "nvidia_smi_available": false,
-        "pid": std::process::id(),
-        "cuda_process_present": null,
-        "used_gpu_memory_mb": null,
-        "error": "nvidia-smi observation is only implemented on Windows",
-    })
+fn observe_cuda_usage_via_nvidia_smi() -> LocalWhisperBackendObserved {
+    LocalWhisperBackendObserved {
+        nvidia_smi_available: false,
+        pid: std::process::id(),
+        cuda_process_present: None,
+        used_gpu_memory_mb: None,
+        error: Some("nvidia-smi observation is only implemented on Windows".to_string()),
+    }
 }
 
 #[cfg(feature = "local-whisper")]
@@ -97,7 +127,7 @@ pub const WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT: &str = "whisper-model-download-
 
 pub const LOCAL_WHISPER_MODEL_LOAD_EVENT: &str = "local-whisper-model-load";
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalWhisperModelLoadStatus {
     Started,
@@ -105,14 +135,13 @@ pub enum LocalWhisperModelLoadStatus {
     Error,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct LocalWhisperModelLoadEvent {
     pub status: LocalWhisperModelLoadStatus,
     pub message: Option<String>,
 }
 
-#[cfg(feature = "local-whisper")]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WhisperModelDownloadStatus {
     Queued,
@@ -123,8 +152,7 @@ pub enum WhisperModelDownloadStatus {
     Error,
 }
 
-#[cfg(feature = "local-whisper")]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct WhisperModelDownloadProgress {
     pub model_id: String,
     pub status: WhisperModelDownloadStatus,
@@ -180,7 +208,7 @@ impl From<String> for WhisperCommandError {
 }
 
 /// Information about a Whisper model
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct WhisperModelInfo {
     pub id: String,
     pub name: String,
@@ -203,32 +231,36 @@ pub fn is_local_whisper_available() -> bool {
 ///
 /// This is used by the UI to show "GPU vs CPU" and why GPU might be unavailable.
 #[tauri::command]
-pub fn get_local_whisper_backend_status() -> serde_json::Value {
+pub fn get_local_whisper_backend_status() -> LocalWhisperBackendStatusResponse {
     #[cfg(feature = "local-whisper")]
     {
         let s = crate::stt::get_local_whisper_backend_status();
         let observed = observe_cuda_usage_via_nvidia_smi();
+        let compute = match s.compute {
+            crate::stt::LocalWhisperComputeBackend::Cpu => LocalWhisperComputeBackend::Cpu,
+            crate::stt::LocalWhisperComputeBackend::Cuda => LocalWhisperComputeBackend::Cuda,
+        };
 
-        return json!({
-            "build_has_local_whisper": s.build_has_local_whisper,
-            "build_has_cuda": s.build_has_cuda,
-            "compute": s.compute,
-            "reason": s.reason,
-            "missing_dlls": s.missing_dlls,
-            "observed": observed,
-        });
+        return LocalWhisperBackendStatusResponse {
+            build_has_local_whisper: s.build_has_local_whisper,
+            build_has_cuda: s.build_has_cuda,
+            compute,
+            reason: s.reason,
+            missing_dlls: s.missing_dlls,
+            observed,
+        };
     }
 
     #[cfg(not(feature = "local-whisper"))]
     {
-        json!({
-            "build_has_local_whisper": false,
-            "build_has_cuda": false,
-            "compute": "cpu",
-            "reason": "Local Whisper feature is not enabled in this build.",
-            "missing_dlls": [],
-            "observed": observe_cuda_usage_via_nvidia_smi(),
-        })
+        LocalWhisperBackendStatusResponse {
+            build_has_local_whisper: false,
+            build_has_cuda: false,
+            compute: LocalWhisperComputeBackend::Cpu,
+            reason: Some("Local Whisper feature is not enabled in this build.".to_string()),
+            missing_dlls: Vec::new(),
+            observed: observe_cuda_usage_via_nvidia_smi(),
+        }
     }
 }
 

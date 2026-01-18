@@ -1,5 +1,7 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+
+use schemars::JsonSchema;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -30,6 +32,133 @@ mod stt;
 mod vad;
 mod windows_apps;
 
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct SystemEvent {
+    pub timestamp: String,
+    pub event_type: String,
+    pub message: String,
+    pub details: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct PipelineErrorPayload {
+    pub message: String,
+    pub request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct OverlayAudioLevelPayload {
+    pub seq: u64,
+    pub rms: f32,
+    pub peak: f32,
+    pub wave_seq: Option<u64>,
+    pub mins: Option<Vec<f32>>,
+    pub maxes: Option<Vec<f32>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct QuickAskStartedPayload {
+    pub question: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct QuickAskAnswerOkPayload {
+    pub ok: bool,
+    pub answer: String,
+    pub provider_used: Option<String>,
+    pub model_used: Option<String>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct QuickAskAnswerErrorPayload {
+    pub ok: bool,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum QuickAskAnswerPayload {
+    Ok(QuickAskAnswerOkPayload),
+    Err(QuickAskAnswerErrorPayload),
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineStateEvent {
+    Idle,
+    Recording,
+    Transcribing,
+    Routing,
+    Rewriting,
+    Error,
+}
+
+pub type PipelineTranscriptReadyPayload = String;
+pub type EmptyEventPayload = ();
+pub type SettingsChangedPayload = std::collections::BTreeMap<String, serde_json::Value>;
+
+#[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionStateEvent {
+    Disconnected,
+    Connecting,
+    Idle,
+    Recording,
+    Processing,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct ConnectionStateChangedPayload {
+    pub state: ConnectionStateEvent,
+}
+
+pub use audio_capture::AudioCaptureDiagnostics;
+pub use audio_capture::AudioLevelStats;
+pub use commands::audio::MicTestAudioLevelPayload;
+pub use commands::config::AvailableProvidersResponse;
+pub use commands::config::DefaultSectionsResponse;
+pub use commands::config::ProviderInfo;
+pub use commands::data::DataStorageSummary;
+pub use commands::fireworks::ModelOption;
+pub use commands::history::HistoryDeleteMode;
+pub use commands::history::HistoryDeleteOptions;
+pub use commands::history::HistoryDeleteResult;
+pub use commands::llm::IterateRewritePromptResponse;
+pub use commands::llm::LlmCompleteResponse;
+pub use commands::llm::LlmProviderInfo;
+pub use commands::llm::TestLlmRewriteResponse;
+pub use commands::llm::TestRewriteWithPromptResponse;
+pub use commands::network::SystemProxyInfo;
+pub use commands::network::WindowsInternetProxySettings;
+pub use commands::pricing::LlmModelPricing;
+pub use commands::pricing::ModelPricingResponse;
+pub use commands::pricing::SttModelPricing;
+pub use commands::recording::AudioSettingsTestWavs;
+pub use commands::router::CacheRouterEmbeddingsResponse;
+pub use commands::stats::CostByProviderResponse;
+pub use commands::stats::CostSummaryResponse;
+pub use commands::stats::ProviderCostTotal;
+pub use commands::whisper::LocalWhisperBackendStatusResponse as LocalWhisperBackendStatus;
+pub use commands::whisper::LocalWhisperComputeBackend;
+pub use commands::whisper::LocalWhisperModelLoadEvent;
+pub use commands::whisper::LocalWhisperModelLoadStatus;
+pub use commands::whisper::WhisperModelDownloadProgress;
+pub use commands::whisper::WhisperModelDownloadStatus;
+pub use commands::whisper::WhisperModelInfo;
+pub use history::HistoryPageQuery;
+pub use history::HistoryPageResult;
+pub use recordings::RecordingsStats;
+pub use request_log::RequestLog;
+pub use settings::HotkeyConfig;
+pub use settings::IntentRouterSettings;
+pub use settings::ProxySettings;
+pub use settings::RewritePreset;
+pub use settings::RewriteProgramPromptProfile;
+pub use windows_apps::OpenWindowInfo;
+
 #[cfg(target_os = "windows")]
 mod windows_modifier_hotkeys;
 
@@ -42,7 +171,7 @@ use recordings::RecordingStore;
 use request_log::{
     RequestKind, RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode,
 };
-use settings::HotkeyConfig;
+use settings::HotkeyConfig as InternalHotkeyConfig;
 use state::{AppState, MicTestMeterState, QuickAskConversationMemory, TrayKeepAlive};
 
 #[cfg(desktop)]
@@ -115,7 +244,7 @@ fn get_setting_from_store<T: serde::de::DeserializeOwned>(
 fn get_hotkey_from_store(
     app: &AppHandle,
     key: &str,
-    default_fn: fn() -> Option<HotkeyConfig>,
+    default_fn: fn() -> Option<InternalHotkeyConfig>,
 ) -> Option<HotkeyConfig> {
     use serde_json::Value;
 
@@ -127,7 +256,7 @@ fn get_hotkey_from_store(
     match raw {
         None => default_fn(),
         Some(Value::Null) => None,
-        Some(v) => serde_json::from_value::<HotkeyConfig>(v)
+        Some(v) => serde_json::from_value::<InternalHotkeyConfig>(v)
             .ok()
             .or_else(default_fn),
     }
@@ -481,14 +610,6 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
 /// Emit a system event to the frontend for debugging
 #[cfg(desktop)]
 fn emit_system_event(app: &AppHandle, event_type: &str, message: &str, details: Option<&str>) {
-    #[derive(serde::Serialize, Clone)]
-    struct SystemEvent {
-        timestamp: String,
-        event_type: String,
-        message: String,
-        details: Option<String>,
-    }
-
     let event = SystemEvent {
         timestamp: chrono::Utc::now().to_rfc3339(),
         event_type: event_type.to_string(),
@@ -854,12 +975,12 @@ fn start_recording(
                 &format!("{}: Failed to start recording", source),
                 Some(&error_msg),
             );
-            let payload = serde_json::json!({
-                "message": error_msg,
-                "request_id": null,
-            });
+            let payload = PipelineErrorPayload {
+                message: error_msg,
+                request_id: None,
+            };
             let _ = app.emit("pipeline-error", payload);
-            let _ = app.emit("pipeline-state-changed", "error");
+            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Error);
             return;
         }
 
@@ -891,7 +1012,7 @@ fn start_recording(
 
     // Pipeline started successfully - now update state and do side effects
     state.is_recording.store(true, Ordering::SeqCst);
-    let _ = app.emit("pipeline-state-changed", "recording");
+    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Recording);
 
     // Start the recording chime ASAP.
     // Showing/snapping the overlay window can be a bit slow on some systems (monitor queries,
@@ -922,14 +1043,14 @@ fn start_recording(
     // This also helps when the overlay is shown at start: the listener may not yet be
     // registered when the very first publisher tick runs.
     {
-        let payload = serde_json::json!({
-            "seq": 0,
-            "rms": 0.0,
-            "peak": 0.0,
-            "wave_seq": 0,
-            "mins": Vec::<f32>::new(),
-            "maxes": Vec::<f32>::new(),
-        });
+        let payload = OverlayAudioLevelPayload {
+            seq: 0,
+            rms: 0.0,
+            peak: 0.0,
+            wave_seq: Some(0),
+            mins: Some(Vec::<f32>::new()),
+            maxes: Some(Vec::<f32>::new()),
+        };
         if let Some(overlay) = app.get_webview_window("overlay") {
             let _ = overlay.emit("overlay-audio-level", payload);
         } else {
@@ -1354,7 +1475,10 @@ fn stop_recording(
                             pipeline::PipelineState::Transcribing
                             | pipeline::PipelineState::Rewriting => {
                                 let _ = app_for_evt.emit("pipeline-transcription-started", ());
-                                let _ = app_for_evt.emit("pipeline-state-changed", "transcribing");
+                                let _ = app_for_evt.emit(
+                                    "pipeline-state-changed",
+                                    PipelineStateEvent::Transcribing,
+                                );
 
                                 if should_play_stop_sound {
                                     crate::audio::play_sound(
@@ -1391,7 +1515,8 @@ fn stop_recording(
                         match pipeline_for_evt.state() {
                             pipeline::PipelineState::Routing => {
                                 let _ = app_for_evt.emit("pipeline-routing-started", ());
-                                let _ = app_for_evt.emit("pipeline-state-changed", "routing");
+                                let _ = app_for_evt
+                                    .emit("pipeline-state-changed", PipelineStateEvent::Routing);
                                 break;
                             }
                             pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
@@ -1423,7 +1548,8 @@ fn stop_recording(
                         match pipeline_for_evt.state() {
                             pipeline::PipelineState::Rewriting => {
                                 let _ = app_for_evt.emit("pipeline-rewriting-started", ());
-                                let _ = app_for_evt.emit("pipeline-state-changed", "rewriting");
+                                let _ = app_for_evt
+                                    .emit("pipeline-state-changed", PipelineStateEvent::Rewriting);
                                 break;
                             }
                             pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
@@ -1627,7 +1753,7 @@ fn stop_recording(
 
                     if let Some(ref text) = filtered_transcript {
                         let _ = app_clone.emit("pipeline-transcript-ready", text);
-                        let _ = app_clone.emit("pipeline-state-changed", "idle");
+                        let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Idle);
 
                         // Default output is the (possibly rewritten) pipeline transcript.
                         // Quick Replace may overwrite this when a selection is present.
@@ -1648,14 +1774,20 @@ fn stop_recording(
                                 .trim()
                                 .to_string();
 
-                            let emit_to_quick_ask =
-                                |app: &AppHandle, event: &str, payload: serde_json::Value| {
-                                    if let Some(win) = app.get_webview_window("quick_ask") {
-                                        let _ = win.emit(event, payload);
-                                    } else {
-                                        let _ = app.emit(event, payload);
-                                    }
+                            fn emit_to_quick_ask<T: serde::Serialize>(
+                                app: &AppHandle,
+                                event: &str,
+                                payload: T,
+                            ) {
+                                let Ok(value) = serde_json::to_value(payload) else {
+                                    return;
                                 };
+                                if let Some(win) = app.get_webview_window("quick_ask") {
+                                    let _ = win.emit(event, value);
+                                } else {
+                                    let _ = app.emit(event, value);
+                                }
+                            }
 
                             // Ensure the answer window is visible before we start the LLM call.
                             let _ =
@@ -1694,9 +1826,9 @@ fn stop_recording(
                                 emit_to_quick_ask(
                                     &app_clone,
                                     "quick-ask-answer",
-                                    serde_json::json!({
-                                        "ok": false,
-                                        "error": "No transcript to answer (empty)"
+                                    QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+                                        ok: false,
+                                        error: "No transcript to answer (empty)".to_string(),
                                     }),
                                 );
                             } else {
@@ -1822,11 +1954,11 @@ fn stop_recording(
                                 emit_to_quick_ask(
                                     &app_clone,
                                     "quick-ask-started",
-                                    serde_json::json!({
-                                        "question": question.clone(),
-                                        "provider": provider.clone(),
-                                        "model": model.clone(),
-                                    }),
+                                    QuickAskStartedPayload {
+                                        question: Some(question.clone()),
+                                        provider: Some(provider.clone()),
+                                        model: model.clone(),
+                                    },
                                 );
 
                                 let cfg = pipeline_clone.config();
@@ -1865,9 +1997,9 @@ fn stop_recording(
                                     emit_to_quick_ask(
                                         &app_clone,
                                         "quick-ask-answer",
-                                        serde_json::json!({
-                                            "ok": false,
-                                            "error": err,
+                                        QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+                                            ok: false,
+                                            error: err,
                                         }),
                                     );
                                 } else {
@@ -2194,13 +2326,19 @@ fn stop_recording(
                                             emit_to_quick_ask(
                                                 &app_clone,
                                                 "quick-ask-answer",
-                                                serde_json::json!({
-                                                    "ok": true,
-                                                    "answer": answer,
-                                                    "provider_used": provider_impl.name(),
-                                                    "model_used": provider_impl.model(),
-                                                    "duration_ms": duration_ms,
-                                                }),
+                                                QuickAskAnswerPayload::Ok(
+                                                    QuickAskAnswerOkPayload {
+                                                        ok: true,
+                                                        answer,
+                                                        provider_used: Some(
+                                                            provider_impl.name().to_string(),
+                                                        ),
+                                                        model_used: Some(
+                                                            provider_impl.model().to_string(),
+                                                        ),
+                                                        duration_ms: Some(duration_ms),
+                                                    },
+                                                ),
                                             );
                                         }
                                         Err(e) => {
@@ -2239,10 +2377,12 @@ fn stop_recording(
                                             emit_to_quick_ask(
                                                 &app_clone,
                                                 "quick-ask-answer",
-                                                serde_json::json!({
-                                                    "ok": false,
-                                                    "error": err,
-                                                }),
+                                                QuickAskAnswerPayload::Err(
+                                                    QuickAskAnswerErrorPayload {
+                                                        ok: false,
+                                                        error: err,
+                                                    },
+                                                ),
                                             );
                                         }
                                     }
@@ -2581,12 +2721,13 @@ fn stop_recording(
                                 let _ = commands::overlay::show_overlay(app_clone.clone()).await;
 
                                 // Emit pipeline-error so overlay shows error state + retry affordance.
-                                let payload = serde_json::json!({
-                                    "message": err,
-                                    "request_id": request_id.clone(),
-                                });
+                                let payload = PipelineErrorPayload {
+                                    message: err.to_string(),
+                                    request_id: request_id.clone(),
+                                };
                                 let _ = app_clone.emit("pipeline-error", payload);
-                                let _ = app_clone.emit("pipeline-state-changed", "error");
+                                let _ = app_clone
+                                    .emit("pipeline-state-changed", PipelineStateEvent::Error);
                             } else {
                                 // Output using the selected output mode.
                                 let output_clipboard_privacy_mode: bool = get_setting_from_store(
@@ -2647,18 +2788,24 @@ fn stop_recording(
                     } else {
                         // Emit empty transcript event so UI can update appropriately
                         let _ = app_clone.emit("pipeline-transcript-ready", "");
-                        let _ = app_clone.emit("pipeline-state-changed", "idle");
+                        let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Idle);
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
                         if is_quick_ask_session {
-                            let emit_to_quick_ask =
-                                |app: &AppHandle, event: &str, payload: serde_json::Value| {
-                                    if let Some(win) = app.get_webview_window("quick_ask") {
-                                        let _ = win.emit(event, payload);
-                                    } else {
-                                        let _ = app.emit(event, payload);
-                                    }
+                            fn emit_to_quick_ask<T: serde::Serialize>(
+                                app: &AppHandle,
+                                event: &str,
+                                payload: T,
+                            ) {
+                                let Ok(value) = serde_json::to_value(payload) else {
+                                    return;
                                 };
+                                if let Some(win) = app.get_webview_window("quick_ask") {
+                                    let _ = win.emit(event, value);
+                                } else {
+                                    let _ = app.emit(event, value);
+                                }
+                            }
 
                             // Ensure the answer window is visible so the error is actually seen.
                             let _ =
@@ -2692,9 +2839,9 @@ fn stop_recording(
                             emit_to_quick_ask(
                                 &app_clone,
                                 "quick-ask-answer",
-                                serde_json::json!({
-                                    "ok": false,
-                                    "error": "No transcript to answer (empty)",
+                                QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+                                    ok: false,
+                                    error: "No transcript to answer (empty)".to_string(),
                                 }),
                             );
                         }
@@ -2782,7 +2929,7 @@ fn stop_recording(
 
                         // Notify frontend and hide overlay if needed.
                         let _ = app_clone.emit("pipeline-cancelled", ());
-                        let _ = app_clone.emit("pipeline-state-changed", "idle");
+                        let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Idle);
 
                         // Best-effort: remove any in-progress history entry for this request
                         // so it doesn't remain stuck in "in_progress".
@@ -2806,12 +2953,12 @@ fn stop_recording(
                     }
 
                     log::error!("Transcription failed: {}", e);
-                    let payload = serde_json::json!({
-                        "message": e.to_string(),
-                        "request_id": request_id.clone(),
-                    });
+                    let payload = PipelineErrorPayload {
+                        message: e.to_string(),
+                        request_id: request_id.clone(),
+                    };
                     let _ = app_clone.emit("pipeline-error", payload);
-                    let _ = app_clone.emit("pipeline-state-changed", "error");
+                    let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Error);
 
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                         log_store.with_current(|log| {
@@ -3077,7 +3224,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
 
     // Notify frontend
     let _ = app.emit("pipeline-cancelled", ());
-    let _ = app.emit("pipeline-state-changed", "idle");
+    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
 
     // Disable Escape shortcut now that we're idle.
     set_escape_cancel_shortcut_enabled(app, false);
@@ -4048,14 +4195,14 @@ pub fn run() {
                             };
                             if should_emit {
                                 last_priming_emit = Some(Instant::now());
-                                let payload = serde_json::json!({
-                                    "seq": 0,
-                                    "rms": 0.0,
-                                    "peak": 0.0,
-                                    "wave_seq": 0,
-                                    "mins": Vec::<f32>::new(),
-                                    "maxes": Vec::<f32>::new(),
-                                });
+                                let payload = OverlayAudioLevelPayload {
+                                    seq: 0,
+                                    rms: 0.0,
+                                    peak: 0.0,
+                                    wave_seq: Some(0),
+                                    mins: Some(Vec::<f32>::new()),
+                                    maxes: Some(Vec::<f32>::new()),
+                                };
                                 if let Some(overlay) = app_handle.get_webview_window("overlay") {
                                     let _ = overlay.emit("overlay-audio-level", payload);
                                 } else {
@@ -4081,14 +4228,14 @@ pub fn run() {
 
                         // Emit directly to the overlay window when available.
                         // This avoids any ambiguity around app-wide vs window event targets.
-                        let payload = serde_json::json!({
-                            "seq": levels.seq,
-                            "rms": levels.rms,
-                            "peak": levels.peak,
-                            "wave_seq": wave.seq,
-                            "mins": wave.mins,
-                            "maxes": wave.maxes,
-                        });
+                            let payload = OverlayAudioLevelPayload {
+                                seq: levels.seq,
+                                rms: levels.rms,
+                                peak: levels.peak,
+                                wave_seq: Some(wave.seq),
+                                mins: Some(wave.mins),
+                                maxes: Some(wave.maxes),
+                            };
                         if let Some(overlay) = app_handle.get_webview_window("overlay") {
                             let _ = overlay.emit("overlay-audio-level", payload);
                         } else {

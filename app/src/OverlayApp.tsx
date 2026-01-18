@@ -18,9 +18,13 @@ import { useSettings, useTypeText } from "./lib/queries";
 import {
 	type ConnectionState,
 	type IntentRouterSettings,
+	type PipelineStateEvent,
+	type PipelineErrorPayload,
+	type PipelineTranscriptReadyPayload,
 	type RewriteProgramPromptProfile,
 	tauriAPI,
 } from "./lib/tauri";
+import { listenTyped } from "./lib/tauri/events";
 import "./app.css";
 
 function readBootAccentColor(): string | null {
@@ -60,10 +64,6 @@ function isPipelineState(value: string): value is PipelineState {
 	);
 }
 
-type PipelineErrorPayload = {
-	message: string;
-	request_id?: string | null;
-};
 
 /**
  * Error info for user feedback
@@ -301,14 +301,6 @@ type AudioWaveProps = {
 	className?: string;
 };
 
-type BackendAudioLevelPayload = {
-	seq: number;
-	rms: number;
-	peak: number;
-	wave_seq?: number;
-	mins?: number[];
-	maxes?: number[];
-};
 
 function BackendAudioWave({
 	isActive,
@@ -397,145 +389,141 @@ function BackendAudioWave({
 
 		let unlisten: (() => void) | undefined;
 		const setup = async () => {
-			unlisten = await listen<BackendAudioLevelPayload>(
-				"overlay-audio-level",
-				(event) => {
-					const p = event.payload;
-					if (!p) return;
+			unlisten = await listenTyped("overlay-audio-level", (p) => {
+          if (!p) return;
 
-					// If waveform buckets are available, prefer those for true DAW-style rendering.
-					if (
-						Array.isArray(p.mins) &&
-						Array.isArray(p.maxes) &&
-						p.mins.length > 0 &&
-						p.mins.length === p.maxes.length
-					) {
-						const n = p.mins.length;
-						const mins = new Float32Array(n);
-						const maxes = new Float32Array(n);
-						for (let i = 0; i < n; i++) {
-							const mn = p.mins[i] ?? 0;
-							const mx = p.maxes[i] ?? 0;
-							mins[i] = Number.isFinite(mn) ? Math.max(-1, Math.min(1, mn)) : 0;
-							maxes[i] = Number.isFinite(mx)
-								? Math.max(-1, Math.min(1, mx))
-								: 0;
-						}
+          // If waveform buckets are available, prefer those for true DAW-style rendering.
+          if (
+            Array.isArray(p.mins) &&
+            Array.isArray(p.maxes) &&
+            p.mins.length > 0 &&
+            p.mins.length === p.maxes.length
+          ) {
+            const n = p.mins.length;
+            const mins = new Float32Array(n);
+            const maxes = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+              const mn = p.mins[i] ?? 0;
+              const mx = p.maxes[i] ?? 0;
+              mins[i] = Number.isFinite(mn) ? Math.max(-1, Math.min(1, mn)) : 0;
+              maxes[i] = Number.isFinite(mx)
+                ? Math.max(-1, Math.min(1, mx))
+                : 0;
+            }
 
-						// Smooth across time to avoid jittery outlines.
-						const prevMins = waveMinRef.current;
-						const prevMaxes = waveMaxRef.current;
-						if (
-							prevMins &&
-							prevMaxes &&
-							prevMins.length === n &&
-							prevMaxes.length === n
-						) {
-							// Lower smoothing = more transient detail (peaks/valleys).
-							const a = 0.55; // higher = steadier
-							for (let i = 0; i < n; i++) {
-								mins[i] = (prevMins[i] ?? 0) * a + (mins[i] ?? 0) * (1 - a);
-								maxes[i] = (prevMaxes[i] ?? 0) * a + (maxes[i] ?? 0) * (1 - a);
-							}
-						}
+            // Smooth across time to avoid jittery outlines.
+            const prevMins = waveMinRef.current;
+            const prevMaxes = waveMaxRef.current;
+            if (
+              prevMins &&
+              prevMaxes &&
+              prevMins.length === n &&
+              prevMaxes.length === n
+            ) {
+              // Lower smoothing = more transient detail (peaks/valleys).
+              const a = 0.55; // higher = steadier
+              for (let i = 0; i < n; i++) {
+                mins[i] = (prevMins[i] ?? 0) * a + (mins[i] ?? 0) * (1 - a);
+                maxes[i] = (prevMaxes[i] ?? 0) * a + (maxes[i] ?? 0) * (1 - a);
+              }
+            }
 
-						// Light smoothing across bins (X axis) to keep the DAW bars stable
-						// without washing out contrast.
-						const mins2 = new Float32Array(n);
-						const maxes2 = new Float32Array(n);
-						for (let i = 0; i < n; i++) {
-							const l = i > 0 ? i - 1 : i;
-							const r = i + 1 < n ? i + 1 : i;
-							mins2[i] =
-								(mins[l] ?? 0) * 0.2 +
-								(mins[i] ?? 0) * 0.6 +
-								(mins[r] ?? 0) * 0.2;
-							maxes2[i] =
-								(maxes[l] ?? 0) * 0.2 +
-								(maxes[i] ?? 0) * 0.6 +
-								(maxes[r] ?? 0) * 0.2;
-						}
+            // Light smoothing across bins (X axis) to keep the DAW bars stable
+            // without washing out contrast.
+            const mins2 = new Float32Array(n);
+            const maxes2 = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+              const l = i > 0 ? i - 1 : i;
+              const r = i + 1 < n ? i + 1 : i;
+              mins2[i] =
+                (mins[l] ?? 0) * 0.2 +
+                (mins[i] ?? 0) * 0.6 +
+                (mins[r] ?? 0) * 0.2;
+              maxes2[i] =
+                (maxes[l] ?? 0) * 0.2 +
+                (maxes[i] ?? 0) * 0.6 +
+                (maxes[r] ?? 0) * 0.2;
+            }
 
-						// Convert to half-amplitude (DAW-style) and store a short rolling
-						// history so the waveform shows peaks/valleys across time.
-						if (waveHistBinsRef.current !== n || !waveHistBufRef.current) {
-							waveHistBinsRef.current = n;
-							waveHistWriteRef.current = 0;
-							waveHistBufRef.current = new Float32Array(
-								WAVE_HISTORY_FRAMES * n,
-							);
-							waveHistMaxAbsRef.current = new Float32Array(WAVE_HISTORY_FRAMES);
-						}
+            // Convert to half-amplitude (DAW-style) and store a short rolling
+            // history so the waveform shows peaks/valleys across time.
+            if (waveHistBinsRef.current !== n || !waveHistBufRef.current) {
+              waveHistBinsRef.current = n;
+              waveHistWriteRef.current = 0;
+              waveHistBufRef.current = new Float32Array(
+                WAVE_HISTORY_FRAMES * n,
+              );
+              waveHistMaxAbsRef.current = new Float32Array(WAVE_HISTORY_FRAMES);
+            }
 
-						const buf = waveHistBufRef.current;
-						const maxAbsByFrame = waveHistMaxAbsRef.current;
-						const write = waveHistWriteRef.current;
-						const base = write * n;
+            const buf = waveHistBufRef.current;
+            const maxAbsByFrame = waveHistMaxAbsRef.current;
+            const write = waveHistWriteRef.current;
+            const base = write * n;
 
-						let frameMaxAbs = 0;
-						for (let i = 0; i < n; i++) {
-							const half = ((maxes2[i] ?? 0) - (mins2[i] ?? 0)) * 0.5;
-							buf[base + i] = half;
-							frameMaxAbs = Math.max(frameMaxAbs, Math.abs(half));
-						}
-						if (maxAbsByFrame) maxAbsByFrame[write] = frameMaxAbs;
-						waveHistWriteRef.current = (write + 1) % WAVE_HISTORY_FRAMES;
+            let frameMaxAbs = 0;
+            for (let i = 0; i < n; i++) {
+              const half = ((maxes2[i] ?? 0) - (mins2[i] ?? 0)) * 0.5;
+              buf[base + i] = half;
+              frameMaxAbs = Math.max(frameMaxAbs, Math.abs(half));
+            }
+            if (maxAbsByFrame) maxAbsByFrame[write] = frameMaxAbs;
+            waveHistWriteRef.current = (write + 1) % WAVE_HISTORY_FRAMES;
 
-						// Track a recent max for auto-gain. (Small N, so scan is cheap.)
-						let recentMax = frameMaxAbs;
-						if (maxAbsByFrame) {
-							for (let i = 0; i < WAVE_HISTORY_FRAMES; i++) {
-								recentMax = Math.max(recentMax, maxAbsByFrame[i] ?? 0);
-							}
-						}
+            // Track a recent max for auto-gain. (Small N, so scan is cheap.)
+            let recentMax = frameMaxAbs;
+            if (maxAbsByFrame) {
+              for (let i = 0; i < WAVE_HISTORY_FRAMES; i++) {
+                recentMax = Math.max(recentMax, maxAbsByFrame[i] ?? 0);
+              }
+            }
 
-						// Always prefer true waveform buckets when present; renderer applies an
-						// auto-gain so normal speaking volume doesn't look flat.
-						waveMinRef.current = mins2;
-						waveMaxRef.current = maxes2;
-						waveMaxAbsRef.current = recentMax;
-						hasWaveformRef.current = true;
-						hasFrameRef.current = true;
-						return;
-					}
+            // Always prefer true waveform buckets when present; renderer applies an
+            // auto-gain so normal speaking volume doesn't look flat.
+            waveMinRef.current = mins2;
+            waveMaxRef.current = maxes2;
+            waveMaxAbsRef.current = recentMax;
+            hasWaveformRef.current = true;
+            hasFrameRef.current = true;
+            return;
+          }
 
-					// If we reach here, we either don't have buckets or they look like silence.
-					hasWaveformRef.current = false;
+          // If we reach here, we either don't have buckets or they look like silence.
+          hasWaveformRef.current = false;
 
-					// Fallback: loudness-based visualization.
-					// Backend values are in [0, 1], but typical voice RMS can be quite small.
-					// A dB mapping is much more perceptually linear and prevents a "nearly flat"
-					// waveform when RMS lives around 0.005–0.02.
-					const rms = Number.isFinite(p.rms)
-						? Math.max(0, Math.min(1, p.rms))
-						: 0;
-					const peak = Number.isFinite(p.peak)
-						? Math.max(0, Math.min(1, p.peak))
-						: 0;
+          // Fallback: loudness-based visualization.
+          // Backend values are in [0, 1], but typical voice RMS can be quite small.
+          // A dB mapping is much more perceptually linear and prevents a "nearly flat"
+          // waveform when RMS lives around 0.005–0.02.
+          const rms = Number.isFinite(p.rms)
+            ? Math.max(0, Math.min(1, p.rms))
+            : 0;
+          const peak = Number.isFinite(p.peak)
+            ? Math.max(0, Math.min(1, p.peak))
+            : 0;
 
-					const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-					const eps = 1e-6;
-					const rmsDb = 20 * Math.log10(Math.max(eps, rms));
-					const peakDb = 20 * Math.log10(Math.max(eps, peak));
+          const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+          const eps = 1e-6;
+          const rmsDb = 20 * Math.log10(Math.max(eps, rms));
+          const peakDb = 20 * Math.log10(Math.max(eps, peak));
 
-					// Normalize MIN_DB..0dB into 0..1. (Below MIN_DB is treated as silence.)
-					// Using a wider window makes quiet-but-real voice energy more visible.
-					const MIN_DB = -72;
-					const normDb = (db: number) => clamp01((db - MIN_DB) / (0 - MIN_DB));
-					const rmsNorm = normDb(rmsDb);
-					const peakNorm = normDb(peakDb);
+          // Normalize MIN_DB..0dB into 0..1. (Below MIN_DB is treated as silence.)
+          // Using a wider window makes quiet-but-real voice energy more visible.
+          const MIN_DB = -72;
+          const normDb = (db: number) => clamp01((db - MIN_DB) / (0 - MIN_DB));
+          const rmsNorm = normDb(rmsDb);
+          const peakNorm = normDb(peakDb);
 
-					// Prefer RMS (steady voice energy) but let peaks show punch.
-					let level = Math.max(rmsNorm * 1.25, peakNorm);
-					// Visual gain + curve so typical speaking doesn't look near-flat.
-					level = Math.min(1, level * 1.6);
-					level = level ** 0.72;
-					if (!Number.isFinite(level) || level < 0.003) level = 0;
+          // Prefer RMS (steady voice energy) but let peaks show punch.
+          let level = Math.max(rmsNorm * 1.25, peakNorm);
+          // Visual gain + curve so typical speaking doesn't look near-flat.
+          level = Math.min(1, level * 1.6);
+          level = level ** 0.72;
+          if (!Number.isFinite(level) || level < 0.003) level = 0;
 
-					hasFrameRef.current = true;
-					levelRef.current = level;
-				},
-			);
+          hasFrameRef.current = true;
+          levelRef.current = level;
+			});
 		};
 
 		setup();
@@ -1931,100 +1919,106 @@ function RecordingControl() {
 	}, [pipelineState]);
 
 	useEffect(() => {
-		const prev = prevPipelineForPhaseHoldRef.current;
-		prevPipelineForPhaseHoldRef.current = pipelineState;
+    const prev = prevPipelineForPhaseHoldRef.current;
+    prevPipelineForPhaseHoldRef.current = pipelineState;
 
-		if (
-			pipelineState === "transcribing" ||
-			pipelineState === "routing" ||
-			pipelineState === "rewriting"
-		) {
-			lastBusyPhaseRef.current = pipelineState;
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
-			}
-			if (!hoverPanelEnabled || !shouldShowHoverPresets) {
-				setHoldPhaseText(pipelineState);
-			}
-			return;
-		}
+    if (
+      pipelineState === "transcribing" ||
+      pipelineState === "routing" ||
+      pipelineState === "rewriting"
+    ) {
+      lastBusyPhaseRef.current = pipelineState;
+      if (holdPhaseTimerRef.current) {
+        window.clearTimeout(holdPhaseTimerRef.current);
+        holdPhaseTimerRef.current = null;
+      }
+      if (!hoverPanelEnabled || !shouldShowHoverPresets) {
+        setHoldPhaseText(pipelineState);
+      }
+      return;
+    }
 
-		// While recording-only, we expect the window to hide after a capture cycle,
-		// but `idle` can arrive slightly before `overlay-hide-requested`.
-		if (
-			settings?.overlay_mode === "recording_only" &&
-			pipelineState === "idle" &&
-			(prev === "transcribing" || prev === "routing" || prev === "rewriting")
-		) {
-			if (holdPhaseText !== prev) {
-				setHoldPhaseText(prev);
-			}
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-			}
-			// Small grace window; hide event typically arrives quickly. If it doesn't,
-			// we still don't want the overlay to look "stuck".
-			holdPhaseTimerRef.current = window.setTimeout(() => {
-				setHoldPhaseText(null);
-				holdPhaseTimerRef.current = null;
-			}, 650);
-			return;
-		}
+    // While recording-only, we expect the window to hide after a capture cycle,
+    // but `idle` can arrive slightly before `overlay-hide-requested`.
+    if (
+      settings?.overlay_mode === "recording_only" &&
+      pipelineState === "idle" &&
+      (prev === "transcribing" || prev === "routing" || prev === "rewriting")
+    ) {
+      if (holdPhaseText !== prev) {
+        setHoldPhaseText(prev);
+      }
+      if (holdPhaseTimerRef.current) {
+        window.clearTimeout(holdPhaseTimerRef.current);
+      }
+      // Small grace window; hide event typically arrives quickly. If it doesn't,
+      // we still don't want the overlay to look "stuck".
+      holdPhaseTimerRef.current = window.setTimeout(() => {
+        setHoldPhaseText(null);
+        holdPhaseTimerRef.current = null;
+      }, 650);
+      return;
+    }
 
-		// New capture cycle (or user action) should not inherit prior phase text.
-		if (pipelineState === "arming" || pipelineState === "recording") {
-			lastBusyPhaseRef.current = null;
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
-			}
-			if (holdPhaseText !== null) {
-				setHoldPhaseText(null);
-			}
-			return;
-		}
+    // New capture cycle (or user action) should not inherit prior phase text.
+    if (pipelineState === "arming" || pipelineState === "recording") {
+      lastBusyPhaseRef.current = null;
+      if (holdPhaseTimerRef.current) {
+        window.clearTimeout(holdPhaseTimerRef.current);
+        holdPhaseTimerRef.current = null;
+      }
+      if (holdPhaseText !== null) {
+        setHoldPhaseText(null);
+      }
+      return;
+    }
 
-		// In always-visible mode, don't let phase text linger after returning idle.
-		if (settings?.overlay_mode === "always" && pipelineState === "idle") {
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
-			}
-			if (holdPhaseText !== null) {
-				setHoldPhaseText(null);
-			}
-		}
-	}, [holdPhaseText, pipelineState, settings?.overlay_mode]);
+    // In always-visible mode, don't let phase text linger after returning idle.
+    if (settings?.overlay_mode === "always" && pipelineState === "idle") {
+      if (holdPhaseTimerRef.current) {
+        window.clearTimeout(holdPhaseTimerRef.current);
+        holdPhaseTimerRef.current = null;
+      }
+      if (holdPhaseText !== null) {
+        setHoldPhaseText(null);
+      }
+    }
+  }, [
+    holdPhaseText,
+    pipelineState,
+    hoverPanelEnabled,
+    shouldShowHoverPresets,
+    settings?.overlay_mode,
+  ]);
 
 	// Resize the native window for the target widget, and only then render it.
 	// This avoids the "intermediate step" where the widget is wider than the window
 	// (or vice versa) for a frame.
 	useEffect(() => {
-		if (expanded) {
-			// In recording-only mode, the backend controls show/hide. Never render a blank
-			// transparent window while we wait for resize observer/pipeline polling.
-			if (settings?.overlay_mode === "recording_only") {
-				setRenderExpanded(true);
-				tauriAPI.resizeOverlay(224, 56);
-				return;
-			}
+    if (expanded) {
+      // In recording-only mode, the backend controls show/hide. Never render a blank
+      // transparent window while we wait for resize observer/pipeline polling.
+      if (settings?.overlay_mode === "recording_only") {
+        setRenderExpanded(true);
+        tauriAPI.resizeOverlay(224, 56);
+        return;
+      }
 
-			// During an active capture cycle, prioritize responsiveness over avoiding a
-			// one-frame clipped border: render immediately so the waveform can warm up.
-			if (pipelineState !== "idle") {
-				setRenderExpanded(true);
-			} else {
-				setRenderExpanded(false);
-			}
-			tauriAPI.resizeOverlay(224, 56);
-			return;
-		}
+      // During an active capture cycle, prioritize responsiveness over avoiding a
+      // one-frame clipped border: render immediately so the waveform can warm up.
+      if (pipelineState !== "idle") {
+        setRenderExpanded(true);
+      } else {
+        setRenderExpanded(false);
+      }
+      tauriAPI.resizeOverlay(224, 56);
+      return;
+    }
 
-		// Collapse: hide expanded immediately, then shrink window.
-		setRenderExpanded(false);
-		tauriAPI.resizeOverlay(56, 56);
-	}, [expanded, hoverPanelEnabled, pipelineState, settings?.overlay_mode]);
+    // Collapse: hide expanded immediately, then shrink window.
+    setRenderExpanded(false);
+    tauriAPI.resizeOverlay(56, 56);
+  }, [expanded, pipelineState, settings?.overlay_mode]);
 
 	useEffect(() => {
 		if (!expanded) return;
@@ -2097,27 +2091,27 @@ function RecordingControl() {
 	}, [pipelineState, settings?.overlay_mode]);
 
 	const requestAnimatedHide = useCallback(() => {
-		if (exitTimerRef.current) {
-			window.clearTimeout(exitTimerRef.current);
-			exitTimerRef.current = null;
-		}
+    if (exitTimerRef.current) {
+      window.clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
 
-		setAnimState("exit");
-		// Keep duration in sync with CSS transition (180ms) + a tiny buffer.
-		exitTimerRef.current = window.setTimeout(() => {
-			invoke("hide_overlay").catch(console.error);
-			// Prep for next entrance.
-			setAnimState("enter");
-			// Clear held phase so the next show doesn't accidentally reuse it.
-			lastBusyPhaseRef.current = null;
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
-			}
-			setHoldPhaseText(null);
-			exitTimerRef.current = null;
-		}, 210);
-	}, []);
+    setAnimState("exit");
+    // Keep duration in sync with CSS transition (180ms) + a tiny buffer.
+    exitTimerRef.current = window.setTimeout(() => {
+      invoke("hide_overlay").catch(console.error);
+      // Prep for next entrance.
+      setAnimState("enter");
+      // Clear held phase so the next show doesn't accidentally reuse it.
+      lastBusyPhaseRef.current = null;
+      if (holdPhaseTimerRef.current) {
+        window.clearTimeout(holdPhaseTimerRef.current);
+        holdPhaseTimerRef.current = null;
+      }
+      setHoldPhaseText(null);
+      exitTimerRef.current = null;
+    }, 210);
+  }, [setAnimState]);
 
 	const dismissError = useCallback(() => {
 		// Reset pipeline state in backend so polling reflects reality.
@@ -2131,51 +2125,56 @@ function RecordingControl() {
 	}, [clearError, requestAnimatedHide, settings?.overlay_mode]);
 
 	const requestAnimatedShow = useCallback(() => {
-		if (exitTimerRef.current) {
-			window.clearTimeout(exitTimerRef.current);
-			exitTimerRef.current = null;
-		}
+    if (exitTimerRef.current) {
+      window.clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
 
-		// Force a transition even if we were previously visible.
-		setAnimState("enter");
-		markOverlayShownForHoverGating();
-		requestAnimationFrame(() => {
-			setAnimState("visible");
-		});
-	}, [markOverlayShownForHoverGating]);
+    // Force a transition even if we were previously visible.
+    setAnimState("enter");
+    markOverlayShownForHoverGating();
+    requestAnimationFrame(() => {
+      setAnimState("visible");
+    });
+  }, [markOverlayShownForHoverGating, setAnimState]);
 
 	// Entrance animation when recording starts (recording-only mode shows the window)
 	useEffect(() => {
-		if (settings?.overlay_mode === "always") {
-			setAnimState("visible");
-			return;
-		}
+    if (settings?.overlay_mode === "always") {
+      setAnimState("visible");
+      return;
+    }
 
-		if (
-			pipelineState === "arming" ||
-			pipelineState === "recording" ||
-			pipelineState === "transcribing" ||
-			pipelineState === "rewriting"
-		) {
-			requestAnimatedShow();
-		}
-	}, [pipelineState, requestAnimatedShow, settings?.overlay_mode]);
+    if (
+      pipelineState === "arming" ||
+      pipelineState === "recording" ||
+      pipelineState === "transcribing" ||
+      pipelineState === "rewriting"
+    ) {
+      requestAnimatedShow();
+    }
+  }, [
+    pipelineState,
+    requestAnimatedShow,
+    settings?.overlay_mode,
+    setAnimState,
+  ]);
 
 	// Backend can request a hide (so we can animate out before the window hides)
 	useEffect(() => {
-		let unlisten: (() => void) | undefined;
+    let unlisten: (() => void) | undefined;
 
-		const setup = async () => {
-			unlisten = await listen("overlay-hide-requested", () => {
-				requestAnimatedHide();
-			});
-		};
+    const setup = async () => {
+      unlisten = await listen("overlay-hide-requested", () => {
+        requestAnimatedHide();
+      });
+    };
 
-		setup();
-		return () => {
-			unlisten?.();
-		};
-	}, [requestAnimatedHide, settings?.overlay_mode]);
+    setup();
+    return () => {
+      unlisten?.();
+    };
+  }, [requestAnimatedHide]);
 
 	// If the overlay itself was used to record (not hotkey path), honor recording-only by
 	// animating out when we return to idle.
@@ -2385,13 +2384,13 @@ function RecordingControl() {
 		const setup = async () => {
 			// Canonical state update event (preferred): reduces event surface area.
 			unlisteners.push(
-				await listen<string>("pipeline-state-changed", (event) => {
-					const next = (event.payload ?? "").toString();
-					if (isPipelineState(next)) {
-						setPipelineState("event", next);
-					}
-				}),
-			);
+        await listen<PipelineStateEvent>("pipeline-state-changed", (event) => {
+          const next = (event.payload ?? "").toString();
+          if (isPipelineState(next)) {
+            setPipelineState("event", next);
+          }
+        }),
+      );
 
 			unlisteners.push(
 				await listen("pipeline-cancelled", () => {
@@ -2424,11 +2423,14 @@ function RecordingControl() {
 
 			// Listen for successful transcription (from hotkey-triggered recordings)
 			unlisteners.push(
-				await listen<string>("pipeline-transcript-ready", () => {
-					setPipelineState("event", "idle");
-					clearError();
-				}),
-			);
+        await listen<PipelineTranscriptReadyPayload>(
+          "pipeline-transcript-ready",
+          () => {
+            setPipelineState("event", "idle");
+            clearError();
+          },
+        ),
+      );
 		};
 
 		setup();

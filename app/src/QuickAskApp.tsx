@@ -7,6 +7,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { applyAccentColor } from "./lib/accentColor";
+import type {
+  QuickAskAnswerPayload,
+  QuickAskStartedPayload,
+} from "./lib/tauri";
+import { listenTyped } from "./lib/tauri/events";
 import "./app.css";
 
 function sanitizeExternalHref(href: string | undefined | null): string | null {
@@ -145,25 +150,6 @@ function readBootAccentColor(): string | null {
 	}
 }
 
-type QuickAskStartedPayload = {
-	question?: string;
-	provider?: string;
-	model?: string | null;
-};
-
-type QuickAskAnswerPayload =
-	| {
-			ok: true;
-			answer: string;
-			provider_used?: string;
-			model_used?: string;
-			duration_ms?: number;
-	  }
-	| {
-			ok: false;
-			error: string;
-	  };
-
 export default function QuickAskApp() {
 	const win = useMemo(() => getCurrentWindow(), []);
 	const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
@@ -220,13 +206,16 @@ export default function QuickAskApp() {
 		let unlistenRecordingStart: (() => void) | null = null;
 		let unlistenTranscriptionStart: (() => void) | null = null;
 
-		listen<QuickAskStartedPayload>("quick-ask-started", (evt) => {
-			const p = (evt.payload ?? {}) as QuickAskStartedPayload;
+		listenTyped("quick-ask-started", (payload) => {
+			const safePayload: QuickAskStartedPayload =
+				payload && typeof payload === "object" ? payload : {};
 			awaitingAnswerRef.current = true;
 			setPanelKey((k) => k + 1);
 			setClosing(false);
 			setPhase("loading");
-			setQuestion(typeof p.question === "string" ? p.question : "");
+			setQuestion(
+				typeof safePayload.question === "string" ? safePayload.question : "",
+			);
 			setAnswer("");
 			setError("");
 		})
@@ -237,27 +226,27 @@ export default function QuickAskApp() {
 				// ignore
 			});
 
-		listen<QuickAskAnswerPayload>("quick-ask-answer", (evt) => {
+		listenTyped("quick-ask-answer", (payload) => {
 			// If we aren't actively waiting for an answer, ignore late/stale events.
 			if (!awaitingAnswerRef.current) return;
 			awaitingAnswerRef.current = false;
-			const p = (evt.payload ?? {}) as QuickAskAnswerPayload;
-			if (p && typeof p === "object" && (p as any).ok === true) {
-				setClosing(false);
-				setPhase("ready");
-				setAnswer(
-					typeof (p as any).answer === "string" ? (p as any).answer : "",
-				);
-				setError("");
-				return;
+			const safePayload = payload as QuickAskAnswerPayload;
+			if (safePayload && typeof safePayload === "object" && "ok" in safePayload) {
+				if (safePayload.ok) {
+					setClosing(false);
+					setPhase("ready");
+					setAnswer(safePayload.answer);
+					setError("");
+					return;
+				}
 			}
 
 			setClosing(false);
 			setPhase("error");
 			setAnswer("");
 			setError(
-				typeof (p as any).error === "string"
-					? (p as any).error
+				safePayload && typeof safePayload === "object" && "error" in safePayload
+					? String((safePayload as { error?: string }).error ?? "Unknown error")
 					: "Unknown error",
 			);
 		})

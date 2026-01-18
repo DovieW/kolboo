@@ -55,24 +55,17 @@ import {
 	useUpdateHotkeyDebugEnabled,
 } from "../lib/queries";
 import type {
-	LogEntry,
-	LogLevel,
-	RequestLog,
-	RequestStatus,
+  LogEntry,
+  LogLevel,
+  RequestLog,
+  RequestStatus,
+  SystemEvent,
 } from "../lib/tauri";
 import { tauriAPI } from "../lib/tauri";
 import { diffTextInline } from "../lib/textDiff";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
 import { InlineTextDiff } from "./InlineTextDiff";
 import { LogJsonModal } from "./LogJsonModal";
-
-// System event from Rust backend
-interface SystemEvent {
-	timestamp: string;
-	event_type: string;
-	message: string;
-	details: string | null;
-}
 
 function formatTimestamp(timestamp: string): string {
 	const date = new Date(timestamp);
@@ -1228,6 +1221,25 @@ export function LogsView(
 		1,
 		Math.ceil(filteredLogs.length / LOGS_PAGE_SIZE),
 	);
+	const filterKey = useMemo(
+    () =>
+      JSON.stringify([
+        filterText,
+        showSuccess,
+        showError,
+        showCancelled,
+        durationMinSecs,
+        durationMaxSecs,
+      ]),
+    [
+      filterText,
+      showSuccess,
+      showError,
+      showCancelled,
+      durationMinSecs,
+      durationMaxSecs,
+    ],
+  );
 	const canGoPrev = page > 1;
 	const canGoNext = page < totalPages;
 
@@ -1236,15 +1248,9 @@ export function LogsView(
 	}, [totalPages]);
 
 	useEffect(() => {
-		setPage(1);
-	}, [
-		filterText,
-		showSuccess,
-		showError,
-		showCancelled,
-		durationMinSecs,
-		durationMaxSecs,
-	]);
+    void filterKey;
+    setPage(1);
+  }, [filterKey]);
 
 	const pageLogs = useMemo(() => {
 		const start = (page - 1) * LOGS_PAGE_SIZE;

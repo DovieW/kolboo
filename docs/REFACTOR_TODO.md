@@ -108,6 +108,7 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - Rust: central module that emits only through typed helpers
     - TS: `events.ts` that defines the same names + payload typing (generated if possible)
   - Acceptance hint: callers can still “listen by string”, but new code should go through the typed wrapper.
+  - Follow-up: audit payload types currently defined inside components (e.g. Quick Ask + pipeline events) and move them into the shared event map so they can get schema drift tests too.
 
 - **Standardize error handling across commands (one error shape to the UI).**
   - Today: errors bubble up in different formats depending on where they come from.
@@ -133,8 +134,19 @@ These are “bigger than a ticket” changes that would make the core easier to 
   - The CI failures we hit were mostly “frontend types lagging behind backend reality” (e.g. new request log fields / settings keys like `quick_replace_enabled`).
   - Ideas:
     - Generate TypeScript types from the Rust structs (or from the JSON schemas in `app/src-tauri/gen/schemas/`) and import those into `app/src/lib/tauri.ts`.
-    - Or add a small check that compares the settings keys expected by `tauriAPI.getSettings()` vs the keys seeded/migrated by `ensure_default_settings(...)` in Rust.
   - Goal: avoid shipping changes where Rust and TS disagree on the shape of settings/logs.
+
+- **Reduce duplication in schema export bins.**
+
+  - We now have a growing list of `src-tauri/src/bin/export_*_schema.rs` files that are nearly identical.
+  - Consider a small shared helper or a build script that exports all event schemas in one run, or a macro to reduce boilerplate.
+  - Goal: keep the contract drift tooling easy to extend without adding lots of copy/paste files.
+
+- **Centralize contract test path helpers.**
+
+  - The contract tests currently build relative `new URL("../../..")` paths per file.
+  - Consider extracting a tiny helper (e.g. `contractTestPaths.ts`) that resolves the app root and schema directory in one place.
+  - Goal: avoid brittle path math if test folders move again.
 
 ## Lint rule ratchet (Biome)
 

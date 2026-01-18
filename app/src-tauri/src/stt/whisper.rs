@@ -17,6 +17,7 @@
 
 use super::{AudioFormat, SttError, SttProvider};
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use std::path::PathBuf;
 use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
@@ -55,7 +56,7 @@ fn get_nvidia_smi_reported_cuda_version_windows() -> Option<f32> {
     None
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalWhisperComputeBackend {
     Cpu,
@@ -66,7 +67,7 @@ pub enum LocalWhisperComputeBackend {
 ///
 /// This is primarily for UI/debugging so users can see whether Kolboo is using
 /// GPU acceleration (CUDA) or falling back to CPU, and why.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct LocalWhisperBackendStatus {
     pub build_has_local_whisper: bool,
     pub build_has_cuda: bool,

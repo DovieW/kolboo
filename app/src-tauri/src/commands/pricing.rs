@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::cost::anthropic as anthropic_cost;
@@ -10,7 +11,7 @@ use crate::cost::groq as groq_cost;
 use crate::cost::openai as openai_cost;
 use crate::cost::speechmatics as speechmatics_cost;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct SttModelPricing {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usd_micros_per_minute: Option<openai_cost::UsdMicros>,
@@ -20,7 +21,7 @@ pub struct SttModelPricing {
     pub min_billed_secs: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct LlmModelPricing {
     pub input_usd_micros_per_1m: openai_cost::UsdMicros,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -28,7 +29,7 @@ pub struct LlmModelPricing {
     pub output_usd_micros_per_1m: openai_cost::UsdMicros,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ModelPricingResponse {
     pub kind: String,
     pub provider: String,

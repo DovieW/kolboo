@@ -8,6 +8,7 @@
 //! - Errors if any
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::VecDeque;
@@ -125,7 +126,7 @@ impl Default for RequestLogsRetentionConfig {
 }
 
 /// A single log entry within a request
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LogEntry {
     pub timestamp: DateTime<Utc>,
     pub level: LogLevel,
@@ -134,7 +135,7 @@ pub struct LogEntry {
 }
 
 /// Log level for entries
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Debug,
@@ -148,7 +149,7 @@ pub enum LogLevel {
 /// - `score` is strategy-dependent.
 ///   - embeddings router: cosine similarity (0..=1-ish)
 ///   - llm router: currently `None` (no numeric scoring)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RouterPresetScore {
     pub preset_id: String,
     pub preset_name: String,
@@ -163,7 +164,7 @@ pub struct RouterPresetScore {
 /// Most logs represent the main pipeline transcription+rewrite flow.
 /// Quick Ask sessions are also backed by the pipeline, but include an additional
 /// answer-generation step and should be surfaced separately in the UI.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestKind {
     #[default]
@@ -173,7 +174,7 @@ pub enum RequestKind {
 }
 
 /// A complete request log containing all entries for a single transcription request
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RequestLog {
     /// Unique ID for this request
     pub id: String,
@@ -395,7 +396,7 @@ pub struct RequestLog {
 }
 
 /// Status of a request
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestStatus {
     /// Request is in progress

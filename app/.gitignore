@@ -32,5 +32,6 @@ release
 
 # Tauri
 src-tauri/target/
+src-tauri/target-rust-analyzer/
 src-tauri/gen/
 src-tauri/Cargo.lock

@@ -3,6 +3,7 @@
 //! Primary use: list public model ids so the UI can offer a complete picker
 //! without hardcoding Fireworks' rapidly-changing catalog.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -11,7 +12,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ModelOption {
     pub value: String,
     pub label: String,

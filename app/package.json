@@ -24,6 +24,8 @@
 		"test": "vitest run --reporter=dot",
 		"coverage": "vitest run --coverage",
 		"test:watch": "vitest",
+		"schemas:generate": "node scripts/generate-schemas.mjs",
+		"schemas:check": "pnpm run schemas:generate && git diff --exit-code -- src-tauri/gen/schemas",
 		"test:all": "pnpm run typecheck && pnpm test && pnpm run cargo:test",
 		"cargo:clippy": "cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml",
 		"cargo:clippy:ci": "cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci",
@@ -36,7 +38,7 @@
 		"cargo:test:ci": "cargo test --quiet --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci",
 		"cargo": "pnpm run cargo:clippy && pnpm run cargo:fmt && pnpm run cargo:test",
 		"check": "pnpm run lint && pnpm run typecheck && pnpm run knip && pnpm test && pnpm run cargo",
-		"check:ci": "pnpm run lint:ci && pnpm run typecheck && pnpm run knip && pnpm test && pnpm run cargo:clippy:ci && pnpm run cargo:fmt:check && pnpm run cargo:test:ci",
+		"check:ci": "pnpm run lint:ci && pnpm run typecheck && pnpm run knip && pnpm run schemas:check && pnpm test && pnpm run cargo:clippy:ci && pnpm run cargo:fmt:check && pnpm run cargo:test:ci",
 		"check:ci:local-whisper": "pnpm run check:ci && pnpm run cargo:clippy:local-whisper:ci",
 		"tauri": "tauri"
 	},

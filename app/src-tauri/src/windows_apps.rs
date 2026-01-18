@@ -4,6 +4,7 @@
 
 #[cfg(target_os = "windows")]
 mod imp {
+    use schemars::JsonSchema;
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
@@ -23,7 +24,7 @@ mod imp {
         trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
     }
 
-    #[derive(Debug, Clone, serde::Serialize)]
+    #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
     pub struct OpenWindowInfo {
         pub title: String,
         pub process_path: String,
@@ -253,7 +254,9 @@ pub use imp::{get_foreground_process_path, list_open_windows, OpenWindowInfo};
 
 #[cfg(not(target_os = "windows"))]
 mod imp_stub {
-    #[derive(Debug, Clone, serde::Serialize)]
+    use schemars::JsonSchema;
+
+    #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
     pub struct OpenWindowInfo {
         pub title: String,
         pub process_path: String,

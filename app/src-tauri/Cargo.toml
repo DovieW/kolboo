@@ -9,6 +9,7 @@ edition = "2021"
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
 name = "kolboo_lib"
+doctest = false
 
 [features]
 default = []
@@ -42,6 +43,7 @@ tauri-plugin-dialog = "~2.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 log = "0.4.29"
+schemars = { version = "0.8.22", features = ["derive", "chrono"] }
 
 # Keyboard automation
 enigo = "0.6.1"

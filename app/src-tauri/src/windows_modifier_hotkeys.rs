@@ -17,6 +17,8 @@ use std::sync::OnceLock;
 use tauri::AppHandle;
 use tauri::Emitter;
 
+use crate::SystemEvent;
+
 use tauri_plugin_store::StoreExt;
 
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
@@ -198,14 +200,6 @@ pub fn hotkey_debug_runtime_enabled() -> bool {
 }
 
 fn emit_hotkey_debug_event(app: &AppHandle, message: &str, details: Option<String>) {
-    #[derive(serde::Serialize, Clone)]
-    struct SystemEvent {
-        timestamp: String,
-        event_type: String,
-        message: String,
-        details: Option<String>,
-    }
-
     let event = SystemEvent {
         timestamp: chrono::Utc::now().to_rfc3339(),
         event_type: "debug".to_string(),

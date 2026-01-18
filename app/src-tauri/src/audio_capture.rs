@@ -11,6 +11,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use crossbeam_queue::ArrayQueue;
 use hound::{WavSpec, WavWriter};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
@@ -368,7 +369,7 @@ impl Default for AudioEncodeConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct AudioCaptureDiagnostics {
     pub stats: AudioLevelStats,
     pub speech_detected: Option<bool>,
@@ -875,7 +876,7 @@ impl RollingBuffer {
 }
 
 /// Basic audio level metrics for gating/diagnostics.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct AudioLevelStats {
     pub duration_secs: f32,
     /// Root-mean-square amplitude in [0, 1].

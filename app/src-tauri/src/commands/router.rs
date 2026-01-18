@@ -1,6 +1,7 @@
 use crate::pipeline::SharedPipeline;
 use crate::router_embeddings_cache;
 use crate::settings::{IntentRouterStrategy, ProxySettings};
+use schemars::JsonSchema;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -10,7 +11,7 @@ use tauri::{AppHandle, State};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct CacheRouterEmbeddingsResponse {
     pub provider: String,
     pub model: String,

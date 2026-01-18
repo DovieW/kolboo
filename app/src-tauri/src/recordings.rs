@@ -1,9 +1,10 @@
+use schemars::JsonSchema;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::SystemTime;
 
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]
 pub struct RecordingsStats {
     pub count: u64,
     pub bytes: u64,

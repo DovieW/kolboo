@@ -1,7 +1,8 @@
 use crate::audio::{self, AudioCue, SoundType};
 use crate::audio_capture;
 use crate::state::{MicTestMeterState, MicTestPipelineRestore};
-use serde::Deserialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::thread;
 use std::time::Duration;
 
@@ -70,6 +71,15 @@ pub struct MicTestStartArgs {
     /// Accept both snake_case and common camelCase keys.
     #[serde(default, alias = "inputDeviceId", alias = "micId")]
     pub input_device_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MicTestAudioLevelPayload {
+    pub active: bool,
+    pub session_id: u64,
+    pub seq: u64,
+    pub rms: f32,
+    pub peak: f32,
 }
 
 /// Start a realtime microphone level meter for the Settings UI.
@@ -145,13 +155,13 @@ pub async fn mic_test_start_meter(
         // Prime UI immediately so it can un-grey the meter.
         let _ = app_handle.emit(
             "mic-test-audio-level",
-            serde_json::json!({
-                "active": true,
-                "session_id": session_id,
-                "seq": 0,
-                "rms": 0.0,
-                "peak": 0.0,
-            }),
+            MicTestAudioLevelPayload {
+                active: true,
+                session_id,
+                seq: 0,
+                rms: 0.0,
+                peak: 0.0,
+            },
         );
 
         tauri::async_runtime::spawn(async move {
@@ -183,26 +193,26 @@ pub async fn mic_test_start_meter(
 
                 let _ = app_handle.emit(
                     "mic-test-audio-level",
-                    serde_json::json!({
-                        "active": true,
-                        "session_id": session_id,
-                        "seq": s.seq,
-                        "rms": s.rms,
-                        "peak": s.peak,
-                    }),
+                    MicTestAudioLevelPayload {
+                        active: true,
+                        session_id,
+                        seq: s.seq,
+                        rms: s.rms,
+                        peak: s.peak,
+                    },
                 );
             }
 
             // Tell the UI to grey out.
             let _ = app_handle.emit(
                 "mic-test-audio-level",
-                serde_json::json!({
-                    "active": false,
-                    "session_id": session_id,
-                    "seq": last_seq,
-                    "rms": 0.0,
-                    "peak": 0.0,
-                }),
+                MicTestAudioLevelPayload {
+                    active: false,
+                    session_id,
+                    seq: last_seq,
+                    rms: 0.0,
+                    peak: 0.0,
+                },
             );
         });
 
@@ -251,13 +261,13 @@ pub async fn mic_test_stop_meter(
         // Best-effort: ensure UI returns to greyed state immediately.
         let _ = app.emit(
             "mic-test-audio-level",
-            serde_json::json!({
-                "active": false,
-                "session_id": session_id,
-                "seq": 0,
-                "rms": 0.0,
-                "peak": 0.0,
-            }),
+            MicTestAudioLevelPayload {
+                active: false,
+                session_id,
+                seq: 0,
+                rms: 0.0,
+                peak: 0.0,
+            },
         );
 
         Ok(())

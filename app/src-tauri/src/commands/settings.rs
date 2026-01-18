@@ -1,4 +1,5 @@
 use crate::settings::HotkeyConfig;
+use crate::SystemEvent;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(desktop)]
@@ -23,14 +24,6 @@ pub async fn set_hotkey_debug_enabled_runtime(app: AppHandle, enabled: bool) -> 
     #[cfg(target_os = "windows")]
     {
         crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(enabled);
-    }
-
-    #[derive(serde::Serialize, Clone)]
-    struct SystemEvent {
-        timestamp: String,
-        event_type: String,
-        message: String,
-        details: Option<String>,
     }
 
     let event = SystemEvent {

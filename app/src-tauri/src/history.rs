@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -22,7 +23,7 @@ fn effective_history_max(max_entries: Option<usize>) -> usize {
 }
 
 /// Status of a transcription attempt in history.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryStatus {
     InProgress,
@@ -32,7 +33,7 @@ pub enum HistoryStatus {
 }
 
 /// A single dictation history entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct HistoryEntry {
     pub id: String,
     pub timestamp: DateTime<Utc>,
@@ -783,14 +784,14 @@ impl HistoryStorage {
 // Server-side paging/filtering structs (UI API)
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsageCount {
     pub key: String,
     pub count: usize,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryPageQuery {
     pub filter_text: Option<String>,
@@ -807,7 +808,7 @@ pub struct HistoryPageQuery {
     pub include_usage_counts: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryPageResult {
     pub items: Vec<HistoryEntry>,

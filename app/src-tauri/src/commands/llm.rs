@@ -9,6 +9,7 @@ use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
 use crate::stats::EventStatus;
+use schemars::JsonSchema;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -43,28 +44,28 @@ pub struct LlmConfigPayload {
     pub timeout_secs: Option<u64>,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct TestLlmRewriteResponse {
     pub output: String,
     pub provider_used: String,
     pub model_used: String,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct IterateRewritePromptResponse {
     pub improved_prompt: String,
     pub provider_used: String,
     pub model_used: String,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct TestRewriteWithPromptResponse {
     pub output: String,
     pub provider_used: String,
     pub model_used: String,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct LlmCompleteResponse {
     pub output: String,
     pub provider_used: String,
@@ -1224,7 +1225,7 @@ pub async fn llm_complete(
 }
 
 /// LLM provider information for the frontend
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct LlmProviderInfo {
     pub id: String,
     pub name: String,
