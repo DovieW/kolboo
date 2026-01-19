@@ -61,24 +61,20 @@ fn normalize_input_device_selection(input_device: Option<&str>) -> Option<(Strin
     Some((raw.to_string(), 0, false))
 }
 
-fn select_input_device_from_host(
-    host: &cpal::Host,
+fn select_input_device_index_from_names(
+    names: &[String],
     selection: Option<&str>,
-) -> Option<cpal::Device> {
+) -> Option<usize> {
     let (desired_name, desired_ordinal, is_encoded) = normalize_input_device_selection(selection)?;
 
     // Prefer exact-name matching with ordinal disambiguation.
     let mut ordinal_for_name: usize = 0;
-    if let Ok(devices) = host.input_devices() {
-        for d in devices {
-            let Ok(desc) = d.description() else { continue };
-            let name = desc.to_string();
-            if name == desired_name {
-                if ordinal_for_name == desired_ordinal {
-                    return Some(d);
-                }
-                ordinal_for_name = ordinal_for_name.saturating_add(1);
+    for (idx, name) in names.iter().enumerate() {
+        if name == &desired_name {
+            if ordinal_for_name == desired_ordinal {
+                return Some(idx);
             }
+            ordinal_for_name = ordinal_for_name.saturating_add(1);
         }
     }
 
@@ -88,17 +84,34 @@ fn select_input_device_from_host(
         return None;
     }
 
-    if let Ok(devices) = host.input_devices() {
-        for d in devices {
-            let Ok(desc) = d.description() else { continue };
-            let name = desc.to_string();
-            if name.contains(&desired_name) {
-                return Some(d);
-            }
+    for (idx, name) in names.iter().enumerate() {
+        if name.contains(&desired_name) {
+            return Some(idx);
         }
     }
 
     None
+}
+
+fn select_input_device_from_host(
+    host: &cpal::Host,
+    selection: Option<&str>,
+) -> Option<cpal::Device> {
+    let Ok(devices) = host.input_devices() else {
+        return None;
+    };
+
+    let mut device_list: Vec<(cpal::Device, String)> = Vec::new();
+    for d in devices {
+        let Ok(desc) = d.description() else { continue };
+        let name = desc.to_string();
+        device_list.push((d, name));
+    }
+
+    let names: Vec<String> = device_list.iter().map(|(_, name)| name.clone()).collect();
+    let idx = select_input_device_index_from_names(&names, selection)?;
+
+    device_list.into_iter().nth(idx).map(|(device, _)| device)
 }
 
 fn clamp_u8_0_100(v: u8) -> u8 {
@@ -2204,5 +2217,61 @@ mod tests {
         buffer.append(&[0.0; 2000]);
         // Should be trimmed to 1 second
         assert_eq!(buffer.len(), 1000);
+    }
+
+    #[test]
+    fn test_mic_device_id_roundtrip() {
+        let name = "Built-in Mic";
+        let id = encode_mic_device_id(name, 2);
+        let decoded = decode_mic_device_id(&id).expect("Expected valid mic device id");
+        assert_eq!(decoded, (name.to_string(), 2));
+    }
+
+    #[test]
+    fn test_normalize_input_device_selection() {
+        assert_eq!(normalize_input_device_selection(None), None);
+        assert_eq!(normalize_input_device_selection(Some("")), None);
+        assert_eq!(normalize_input_device_selection(Some("default")), None);
+
+        let encoded = encode_mic_device_id("USB Mic", 1);
+        assert_eq!(
+            normalize_input_device_selection(Some(&encoded)),
+            Some(("USB Mic".to_string(), 1, true))
+        );
+
+        assert_eq!(
+            normalize_input_device_selection(Some("Plantronics")),
+            Some(("Plantronics".to_string(), 0, false))
+        );
+    }
+
+    #[test]
+    fn test_select_input_device_index_from_names() {
+        let names = vec!["Mic A", "Mic B", "Mic A"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            select_input_device_index_from_names(&names, Some("Mic A")),
+            Some(0)
+        );
+
+        let encoded = encode_mic_device_id("Mic A", 1);
+        assert_eq!(
+            select_input_device_index_from_names(&names, Some(&encoded)),
+            Some(2)
+        );
+
+        assert_eq!(
+            select_input_device_index_from_names(&names, Some("Mic")),
+            Some(0)
+        );
+
+        let missing = encode_mic_device_id("Unknown", 0);
+        assert_eq!(
+            select_input_device_index_from_names(&names, Some(&missing)),
+            None
+        );
     }
 }

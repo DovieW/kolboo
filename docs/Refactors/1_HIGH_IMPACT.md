@@ -46,7 +46,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - `app/src-tauri/src/pipeline.rs` (references to CPAL device selection + meter updates)
   - Small test seams:
     - Keep CPAL behind a tiny trait (e.g. “AudioCaptureBackend”) so pipeline state transitions can be tested with a fake capture backend that emits deterministic “audio level” events.
-    - Push more logic into pure helpers (device ID parsing/normalization, “what should happen when device missing”) and unit-test those without needing a CPAL host.
 
 - **Filesystem IO (history/recordings/stats/backups/models):**
   - Hot spots:
