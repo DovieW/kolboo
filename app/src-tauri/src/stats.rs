@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 use uuid::Uuid;
 
+use crate::app_paths::ensure_dir;
 use crate::cost::anthropic as anthropic_cost;
 use crate::cost::aquavoice as aquavoice_cost;
 use crate::cost::assemblyai as assemblyai_cost;
@@ -174,7 +175,7 @@ struct StatsWriterState {
 impl StatsStore {
     pub fn new(app_data_dir: PathBuf) -> Self {
         let dir = app_data_dir.join("stats");
-        if let Err(e) = fs::create_dir_all(&dir) {
+        if let Err(e) = ensure_dir(&dir) {
             log::warn!("Failed to create stats dir {:?}: {}", dir, e);
         }
         Self {
@@ -259,7 +260,7 @@ impl StatsStore {
     }
 
     pub fn append_cost_event(&self, event: &CostEvent) -> Result<(), String> {
-        fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+        ensure_dir(&self.dir)?;
 
         let date = event.created_at.format("%Y-%m-%d").to_string();
         let file_path = self.dir.join(format!("cost-events-{}.jsonl", date));
@@ -337,7 +338,7 @@ impl StatsStore {
     }
 
     pub fn prune(&self, cfg: StatsRetentionConfig) -> Result<(), String> {
-        fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+        ensure_dir(&self.dir)?;
 
         // Avoid deleting the currently-open shard file.
         let open_path = self.current_open_path();

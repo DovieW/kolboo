@@ -313,11 +313,9 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
             _ => WhisperModel::Base,
         };
 
-        app.path().app_data_dir().ok().map(|app_data_dir| {
-            let models_dir = app_data_dir.join("whisper-models");
-            let _ = std::fs::create_dir_all(&models_dir);
-            models_dir.join(model.filename())
-        })
+        crate::app_paths::app_data_subdir(&app, "whisper-models")
+            .ok()
+            .map(|models_dir| models_dir.join(model.filename()))
     };
 
     let local_whisper_load_mode: String = app

@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use uuid::Uuid;
 
+use crate::app_paths::ensure_dir;
+
 /// Hard safety cap to prevent unbounded growth of `history.json`.
 ///
 /// This is intentionally high so users can effectively keep history forever,
@@ -154,7 +156,7 @@ impl HistoryStorage {
 
         // Ensure the directory exists
         if let Some(parent) = file_path.parent() {
-            let _ = fs::create_dir_all(parent);
+            let _ = ensure_dir(parent);
         }
 
         // Load existing history or use empty

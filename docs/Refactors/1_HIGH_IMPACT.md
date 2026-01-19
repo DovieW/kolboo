@@ -56,7 +56,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - `app/src-tauri/src/commands/backup.rs` (read/write settings backup)
     - `app/src-tauri/src/commands/whisper.rs` + `app/src-tauri/src/commands/config.rs` (model dir creation/download temp files)
   - Small test seams:
-    - Centralize “app data path” + “ensure_dir” helpers so tests can point everything at a temp dir without reaching into many modules.
     - Consider a minimal “Fs” interface only where needed (read/write/list/delete) for the most critical code paths (history + recordings), but avoid big refactors.
 
 - **Network IO (reqwest providers + proxy config):**
