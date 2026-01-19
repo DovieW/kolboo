@@ -1,5 +1,1 @@
-fn main() {
-    kolboo_lib::schema_export::print_schema::<kolboo_lib::ModelPricingResponse>(
-        "ModelPricingResponse",
-    );
-}
+kolboo_lib::schema_export_bin!(kolboo_lib::ModelPricingResponse, "ModelPricingResponse");

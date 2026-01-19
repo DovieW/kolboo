@@ -78,12 +78,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
   - Goal: validate migrations/normalization for older `settings.json` shapes.
   - Keep it deterministic (no network, no keys).
 
-## Prevent Rust/TS contract drift (engineering hygiene)
-
-- **Reduce duplication in schema export bins.**
-  - We have a growing list of `app/src-tauri/src/bin/export_*_schema.rs` files that are nearly identical.
-  - Consider a small shared helper, a macro, or a single “export all” bin to reduce boilerplate.
-
 ## Lint rule ratchet (Biome)
 
 - **Re-enable stricter Biome rules gradually (ratchet).**

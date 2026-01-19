@@ -1,5 +1,4 @@
-fn main() {
-    kolboo_lib::schema_export::print_schema::<kolboo_lib::TestRewriteWithPromptResponse>(
-        "TestRewriteWithPromptResponse",
-    );
-}
+kolboo_lib::schema_export_bin!(
+    kolboo_lib::TestRewriteWithPromptResponse,
+    "TestRewriteWithPromptResponse"
+);

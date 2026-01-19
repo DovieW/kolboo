@@ -7,3 +7,12 @@ pub fn print_schema<T: JsonSchema>(label: &str) {
     });
     println!("{serialized}");
 }
+
+#[macro_export]
+macro_rules! schema_export_bin {
+    ($ty:ty, $label:expr) => {
+        fn main() {
+            $crate::schema_export::print_schema::<$ty>($label);
+        }
+    };
+}

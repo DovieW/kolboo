@@ -1,5 +1,1 @@
-fn main() {
-    kolboo_lib::schema_export::print_schema::<kolboo_lib::SettingsChangedPayload>(
-        "settings-changed",
-    );
-}
+kolboo_lib::schema_export_bin!(kolboo_lib::SettingsChangedPayload, "settings-changed");

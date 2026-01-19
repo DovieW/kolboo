@@ -1,3 +1,1 @@
-fn main() {
-    kolboo_lib::schema_export::print_schema::<kolboo_lib::RewritePreset>("RewritePreset");
-}
+kolboo_lib::schema_export_bin!(kolboo_lib::RewritePreset, "RewritePreset");

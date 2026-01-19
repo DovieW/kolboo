@@ -1,5 +1,4 @@
-fn main() {
-    kolboo_lib::schema_export::print_schema::<kolboo_lib::WhisperModelDownloadProgress>(
-        "WhisperModelDownloadProgress",
-    );
-}
+kolboo_lib::schema_export_bin!(
+    kolboo_lib::WhisperModelDownloadProgress,
+    "WhisperModelDownloadProgress"
+);
