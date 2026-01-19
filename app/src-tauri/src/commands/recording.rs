@@ -6,6 +6,7 @@
 use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
 use crate::commands::event_sink::{AppEventSink, EventSink};
 use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
+use crate::commands::CommandError;
 use crate::history::{HistoryStorage, RequestModelInfo};
 use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, SharedPipeline};
 use crate::recordings::{RecordingStore, RecordingsStats};
@@ -229,13 +230,6 @@ pub(crate) fn apply_transcription_retention(app: &AppHandle) {
     let _ = app.emit("history-changed", ());
 }
 
-/// Tauri-compatible error type for commands
-#[derive(Debug, serde::Serialize)]
-pub struct CommandError {
-    pub message: String,
-    pub error_type: String,
-}
-
 pub(crate) fn emit_pipeline_recording_started<S: EventSink>(sink: &S) {
     sink.emit("pipeline-recording-started", &());
     sink.emit("pipeline-state-changed", &PipelineStateEvent::Recording);
@@ -259,15 +253,6 @@ impl From<PipelineError> for CommandError {
         Self {
             message: err.to_string(),
             error_type: error_type.to_string(),
-        }
-    }
-}
-
-impl From<String> for CommandError {
-    fn from(message: String) -> Self {
-        Self {
-            message,
-            error_type: "unknown".to_string(),
         }
     }
 }
@@ -2110,15 +2095,4 @@ pub fn pipeline_force_reset(
     let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_command_error_from_string() {
-        let error = CommandError::from("test error".to_string());
-        assert_eq!(error.message, "test error");
-    }
 }

@@ -14,11 +14,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - explicit migrations (vN -> vN+1) that run at startup (not when visiting a UI screen)
   - Bonus: this also reduces Rust/TS drift because the migration logic lives in one place.
 
-- **Standardize error handling across commands (one error shape to the UI).**
-  - Today: errors bubble up in different formats depending on where they come from.
-  - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.
-  - Why: frontend error UI becomes simpler and more consistent; telemetry/logging can attach codes.
-
 - **Dependency injection seams for hard IO (testability).**
   - You already have good “seams” in places (e.g. `with_client(...)` patterns).
   - Next step: formalize a few minimal traits/interfaces so the pipeline can be tested without:

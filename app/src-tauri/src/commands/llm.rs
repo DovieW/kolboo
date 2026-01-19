@@ -1,5 +1,6 @@
 //! Tauri commands for LLM formatting configuration.
 
+use crate::commands::CommandError;
 use crate::llm::{
     format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider,
     FireworksLlmProvider, GeminiLlmProvider, GroqLlmProvider, LlmProvider, OllamaLlmProvider,
@@ -15,16 +16,8 @@ use std::time::Duration;
 use std::time::Instant;
 use tauri::{AppHandle, Manager, State};
 
-/// Error type for LLM commands
-#[derive(Debug, serde::Serialize)]
-pub struct LlmCommandError {
-    pub message: String,
-}
-
-impl From<String> for LlmCommandError {
-    fn from(message: String) -> Self {
-        Self { message }
-    }
+fn llm_error(message: impl Into<String>) -> CommandError {
+    CommandError::new(message, "llm")
 }
 
 /// LLM configuration payload from frontend
@@ -470,7 +463,7 @@ pub async fn test_llm_rewrite(
     pipeline: State<'_, SharedPipeline>,
     transcript: String,
     profile_id: Option<String>,
-) -> Result<TestLlmRewriteResponse, LlmCommandError> {
+) -> Result<TestLlmRewriteResponse, CommandError> {
     // Create a dedicated request-log entry for this test action.
     // This is intentionally *rewrite-only* (no STT step), and is the only way to have
     // a request log without an STT request/response.
@@ -502,7 +495,7 @@ pub async fn test_llm_rewrite(
                 .iter()
                 .find(|p| p.id == id)
                 .cloned()
-                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))
+                .ok_or_else(|| llm_error(format!("Unknown profile_id: {}", id)))
         })
         .transpose()?;
 
@@ -654,7 +647,7 @@ pub async fn test_llm_rewrite(
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }
 
-            Err(LlmCommandError::from(e.to_string()))
+            Err(llm_error(e.to_string()))
         }
     }
 }
@@ -683,7 +676,7 @@ pub async fn iterate_rewrite_prompt(
     gemini_thinking_level: Option<String>,
     gemini_thinking_budget: Option<i64>,
     anthropic_thinking_budget: Option<i64>,
-) -> Result<IterateRewritePromptResponse, LlmCommandError> {
+) -> Result<IterateRewritePromptResponse, CommandError> {
     let llm_started_at = Instant::now();
 
     let request_log_store = app
@@ -711,7 +704,7 @@ pub async fn iterate_rewrite_prompt(
                 .iter()
                 .find(|p| p.id == id)
                 .cloned()
-                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))
+                .ok_or_else(|| llm_error(format!("Unknown profile_id: {}", id)))
         })
         .transpose()?;
 
@@ -841,7 +834,7 @@ pub async fn iterate_rewrite_prompt(
     let goal_trimmed = problem_output.trim();
 
     if mode != "new" && desired_output_trimmed.is_none() {
-        return Err(LlmCommandError::from(
+        return Err(llm_error(
             "Desired output is required when improving an existing prompt".to_string(),
         ));
     }
@@ -851,7 +844,7 @@ pub async fn iterate_rewrite_prompt(
         let has_example_pair = !transcript_trimmed.is_empty() && desired_output_trimmed.is_some();
 
         if !has_goal && !has_example_pair {
-            return Err(LlmCommandError::from(
+            return Err(llm_error(
                 "For New prompt, provide either a prompt goal/description, or both transcript and desired output".to_string(),
             ));
         }
@@ -961,7 +954,7 @@ pub async fn iterate_rewrite_prompt(
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }
 
-            Err(LlmCommandError::from(e.to_string()))
+            Err(llm_error(e.to_string()))
         }
     }
 }
@@ -977,7 +970,7 @@ pub async fn test_rewrite_with_prompt(
     transcript: String,
     prompt: String,
     profile_id: Option<String>,
-) -> Result<TestRewriteWithPromptResponse, LlmCommandError> {
+) -> Result<TestRewriteWithPromptResponse, CommandError> {
     let llm_started_at = Instant::now();
 
     let request_log_store = app
@@ -1004,7 +997,7 @@ pub async fn test_rewrite_with_prompt(
                 .iter()
                 .find(|p| p.id == id)
                 .cloned()
-                .ok_or_else(|| LlmCommandError::from(format!("Unknown profile_id: {}", id)))
+                .ok_or_else(|| llm_error(format!("Unknown profile_id: {}", id)))
         })
         .transpose()?;
 
@@ -1146,7 +1139,7 @@ pub async fn test_rewrite_with_prompt(
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }
 
-            Err(LlmCommandError::from(e.to_string()))
+            Err(llm_error(e.to_string()))
         }
     }
 }
@@ -1160,7 +1153,7 @@ pub async fn llm_complete(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
     args: LlmCompleteArgs,
-) -> Result<LlmCompleteResponse, LlmCommandError> {
+) -> Result<LlmCompleteResponse, CommandError> {
     let config = pipeline.config();
 
     let desired_provider = args.provider;
@@ -1177,7 +1170,7 @@ pub async fn llm_complete(
     };
 
     if desired_provider != "ollama" && api_key.trim().is_empty() {
-        return Err(LlmCommandError::from(format!(
+        return Err(llm_error(format!(
             "No API key configured for provider: {}",
             desired_provider
         )));
@@ -1212,7 +1205,7 @@ pub async fn llm_complete(
     let output = provider
         .complete(args.system_prompt.as_str(), args.user_prompt.as_str())
         .await
-        .map_err(|e| LlmCommandError::from(e.to_string()))?;
+        .map_err(|e| llm_error(e.to_string()))?;
 
     // Best-effort: emit LLM cost event for the current request log (if any).
     crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
@@ -1239,7 +1232,7 @@ pub struct LlmProviderInfo {
 pub fn update_llm_config(
     pipeline: State<'_, SharedPipeline>,
     config: LlmConfigPayload,
-) -> Result<(), LlmCommandError> {
+) -> Result<(), CommandError> {
     // Get current pipeline config and update just the LLM portion
     // Note: This is a simplified approach - in a full implementation,
     // we'd want to preserve other config and only update LLM settings
@@ -1267,7 +1260,7 @@ pub fn update_llm_config(
 
     pipeline
         .update_config(new_config)
-        .map_err(|e| LlmCommandError::from(e.to_string()))?;
+        .map_err(|e| llm_error(e.to_string()))?;
 
     log::info!("LLM configuration updated");
     Ok(())
@@ -1278,7 +1271,7 @@ pub fn update_llm_config(
 pub fn update_llm_prompts(
     pipeline: State<'_, SharedPipeline>,
     prompts: PromptConfigPayload,
-) -> Result<(), LlmCommandError> {
+) -> Result<(), CommandError> {
     let current_config = get_current_pipeline_config(&pipeline)?;
     let mut llm_config = current_config.llm_config.clone();
     llm_config.prompts = prompts.into();
@@ -1290,7 +1283,7 @@ pub fn update_llm_prompts(
 
     pipeline
         .update_config(new_config)
-        .map_err(|e| LlmCommandError::from(e.to_string()))?;
+        .map_err(|e| llm_error(e.to_string()))?;
 
     log::info!("LLM prompts updated");
     Ok(())
@@ -1300,7 +1293,7 @@ pub fn update_llm_prompts(
 #[tauri::command]
 pub fn get_llm_config(
     pipeline: State<'_, SharedPipeline>,
-) -> Result<LlmConfigResponse, LlmCommandError> {
+) -> Result<LlmConfigResponse, CommandError> {
     let config = get_current_pipeline_config(&pipeline)?;
     Ok(LlmConfigResponse {
         enabled: config.llm_config.enabled,
@@ -1326,7 +1319,7 @@ pub struct LlmConfigResponse {
 /// Helper to get the current pipeline config.
 fn get_current_pipeline_config(
     pipeline: &State<'_, SharedPipeline>,
-) -> Result<crate::pipeline::PipelineConfig, LlmCommandError> {
+) -> Result<crate::pipeline::PipelineConfig, CommandError> {
     Ok(pipeline.config())
 }
 

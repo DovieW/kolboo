@@ -2,6 +2,7 @@
 //!
 //! These commands are only available when the `local-whisper` feature is enabled.
 
+use crate::commands::CommandError;
 #[cfg(feature = "local-whisper")]
 use crate::stt::WhisperModel;
 use schemars::JsonSchema;
@@ -195,16 +196,8 @@ impl WhisperDownloadManager {
     }
 }
 
-/// Error type for Whisper commands
-#[derive(Debug, serde::Serialize)]
-pub struct WhisperCommandError {
-    pub message: String,
-}
-
-impl From<String> for WhisperCommandError {
-    fn from(message: String) -> Self {
-        Self { message }
-    }
+fn whisper_error(message: impl Into<String>) -> CommandError {
+    CommandError::new(message, "stt")
 }
 
 /// Information about a Whisper model
@@ -264,17 +257,15 @@ pub fn get_local_whisper_backend_status() -> LocalWhisperBackendStatusResponse {
     }
 }
 
-fn get_pipeline(
-    app: &tauri::AppHandle,
-) -> Result<crate::pipeline::SharedPipeline, WhisperCommandError> {
+fn get_pipeline(app: &tauri::AppHandle) -> Result<crate::pipeline::SharedPipeline, CommandError> {
     app.try_state::<crate::pipeline::SharedPipeline>()
         .map(|s| s.inner().clone())
-        .ok_or_else(|| WhisperCommandError::from("Pipeline not initialized".to_string()))
+        .ok_or_else(|| whisper_error("Pipeline not initialized"))
 }
 
 /// Returns true if the current local-whisper model is already loaded in-memory.
 #[tauri::command]
-pub fn is_local_whisper_model_loaded(app: tauri::AppHandle) -> Result<bool, WhisperCommandError> {
+pub fn is_local_whisper_model_loaded(app: tauri::AppHandle) -> Result<bool, CommandError> {
     let pipeline = get_pipeline(&app)?;
     Ok(pipeline.is_local_whisper_loaded())
 }
@@ -283,7 +274,7 @@ pub fn is_local_whisper_model_loaded(app: tauri::AppHandle) -> Result<bool, Whis
 ///
 /// This is intended for the UI "Load model" button when load mode is "manual".
 #[tauri::command]
-pub fn load_local_whisper_model(app: tauri::AppHandle) -> Result<(), WhisperCommandError> {
+pub fn load_local_whisper_model(app: tauri::AppHandle) -> Result<(), CommandError> {
     let pipeline = get_pipeline(&app)?;
 
     // Emit a "started" event immediately so the UI can show a toast / spinner.
@@ -318,18 +309,16 @@ pub fn load_local_whisper_model(app: tauri::AppHandle) -> Result<(), WhisperComm
 
 /// Unload (evict) any cached local-whisper models.
 #[tauri::command]
-pub fn unload_local_whisper_model(app: tauri::AppHandle) -> Result<(), WhisperCommandError> {
+pub fn unload_local_whisper_model(app: tauri::AppHandle) -> Result<(), CommandError> {
     let pipeline = get_pipeline(&app)?;
     pipeline
         .unload_local_whisper()
-        .map_err(|e| WhisperCommandError::from(e.to_string()))
+        .map_err(|e| whisper_error(e.to_string()))
 }
 
 /// Get list of available Whisper models with download status
 #[tauri::command]
-pub fn get_whisper_models(
-    app: tauri::AppHandle,
-) -> Result<Vec<WhisperModelInfo>, WhisperCommandError> {
+pub fn get_whisper_models(app: tauri::AppHandle) -> Result<Vec<WhisperModelInfo>, CommandError> {
     #[cfg(feature = "local-whisper")]
     {
         let models_dir = get_models_dir(&app)?;
@@ -360,15 +349,13 @@ pub fn get_whisper_models(
     #[cfg(not(feature = "local-whisper"))]
     {
         let _ = app;
-        Err(WhisperCommandError::from(
-            "Local Whisper feature is not enabled".to_string(),
-        ))
+        Err(whisper_error("Local Whisper feature is not enabled"))
     }
 }
 
 /// Get the path to the models directory
 #[tauri::command]
-pub fn get_whisper_models_dir(app: tauri::AppHandle) -> Result<String, WhisperCommandError> {
+pub fn get_whisper_models_dir(app: tauri::AppHandle) -> Result<String, CommandError> {
     let models_dir = get_models_dir(&app)?;
     Ok(models_dir.to_string_lossy().to_string())
 }
@@ -378,7 +365,7 @@ pub fn get_whisper_models_dir(app: tauri::AppHandle) -> Result<String, WhisperCo
 pub fn is_whisper_model_downloaded(
     app: tauri::AppHandle,
     model_id: String,
-) -> Result<bool, WhisperCommandError> {
+) -> Result<bool, CommandError> {
     #[cfg(feature = "local-whisper")]
     {
         let model = parse_model_id(&model_id)?;
@@ -390,15 +377,13 @@ pub fn is_whisper_model_downloaded(
     #[cfg(not(feature = "local-whisper"))]
     {
         let _ = (app, model_id);
-        Err(WhisperCommandError::from(
-            "Local Whisper feature is not enabled".to_string(),
-        ))
+        Err(whisper_error("Local Whisper feature is not enabled"))
     }
 }
 
 /// Get the download URL for a model
 #[tauri::command]
-pub fn get_whisper_model_url(model_id: String) -> Result<String, WhisperCommandError> {
+pub fn get_whisper_model_url(model_id: String) -> Result<String, CommandError> {
     #[cfg(feature = "local-whisper")]
     {
         let model = parse_model_id(&model_id)?;
@@ -408,18 +393,13 @@ pub fn get_whisper_model_url(model_id: String) -> Result<String, WhisperCommandE
     #[cfg(not(feature = "local-whisper"))]
     {
         let _ = model_id;
-        Err(WhisperCommandError::from(
-            "Local Whisper feature is not enabled".to_string(),
-        ))
+        Err(whisper_error("Local Whisper feature is not enabled"))
     }
 }
 
 /// Delete a downloaded model
 #[tauri::command]
-pub fn delete_whisper_model(
-    app: tauri::AppHandle,
-    model_id: String,
-) -> Result<(), WhisperCommandError> {
+pub fn delete_whisper_model(app: tauri::AppHandle, model_id: String) -> Result<(), CommandError> {
     #[cfg(feature = "local-whisper")]
     {
         let model = parse_model_id(&model_id)?;
@@ -428,7 +408,7 @@ pub fn delete_whisper_model(
 
         if model_path.exists() {
             std::fs::remove_file(&model_path)
-                .map_err(|e| WhisperCommandError::from(format!("Failed to delete model: {}", e)))?;
+                .map_err(|e| whisper_error(format!("Failed to delete model: {}", e)))?;
             log::info!("Deleted Whisper model: {}", model.filename());
         }
 
@@ -438,9 +418,7 @@ pub fn delete_whisper_model(
     #[cfg(not(feature = "local-whisper"))]
     {
         let _ = (app, model_id);
-        Err(WhisperCommandError::from(
-            "Local Whisper feature is not enabled".to_string(),
-        ))
+        Err(whisper_error("Local Whisper feature is not enabled"))
     }
 }
 
@@ -449,7 +427,7 @@ pub fn delete_whisper_model(
 pub fn validate_whisper_model(
     app: tauri::AppHandle,
     model_id: String,
-) -> Result<bool, WhisperCommandError> {
+) -> Result<bool, CommandError> {
     #[cfg(feature = "local-whisper")]
     {
         let model = parse_model_id(&model_id)?;
@@ -461,9 +439,8 @@ pub fn validate_whisper_model(
         }
 
         // Quick size sanity check (at least 50% of expected)
-        let metadata = std::fs::metadata(&model_path).map_err(|e| {
-            WhisperCommandError::from(format!("Failed to read model metadata: {}", e))
-        })?;
+        let metadata = std::fs::metadata(&model_path)
+            .map_err(|e| whisper_error(format!("Failed to read model metadata: {}", e)))?;
 
         let expected_size = model.size_bytes();
         let actual_size = metadata.len();
@@ -484,14 +461,14 @@ pub fn validate_whisper_model(
         let mut hasher = Sha256::new();
 
         let mut file = std::fs::File::open(&model_path)
-            .map_err(|e| WhisperCommandError::from(format!("Failed to open model file: {}", e)))?;
+            .map_err(|e| whisper_error(format!("Failed to open model file: {}", e)))?;
 
         use std::io::Read;
         let mut buf = vec![0u8; 8 * 1024 * 1024];
         loop {
-            let n = file.read(&mut buf).map_err(|e| {
-                WhisperCommandError::from(format!("Failed reading model file: {}", e))
-            })?;
+            let n = file
+                .read(&mut buf)
+                .map_err(|e| whisper_error(format!("Failed reading model file: {}", e)))?;
             if n == 0 {
                 break;
             }
@@ -515,9 +492,7 @@ pub fn validate_whisper_model(
     #[cfg(not(feature = "local-whisper"))]
     {
         let _ = (app, model_id);
-        Err(WhisperCommandError::from(
-            "Local Whisper feature is not enabled".to_string(),
-        ))
+        Err(whisper_error("Local Whisper feature is not enabled"))
     }
 }
 
@@ -529,7 +504,7 @@ pub async fn download_whisper_model(
     app: tauri::AppHandle,
     state: tauri::State<'_, WhisperDownloadManager>,
     model_id: String,
-) -> Result<(), WhisperCommandError> {
+) -> Result<(), CommandError> {
     #[cfg(feature = "local-whisper")]
     {
         use futures_util::StreamExt;
@@ -541,7 +516,7 @@ pub async fn download_whisper_model(
 
         // Basic validation: don't re-download if already present.
         if model_path.exists() {
-            return Err(WhisperCommandError::from(format!(
+            return Err(whisper_error(format!(
                 "Model already downloaded: {}",
                 model_id
             )));
@@ -554,7 +529,7 @@ pub async fn download_whisper_model(
         {
             let mut jobs_guard = jobs.lock().await;
             if jobs_guard.contains_key(&model_id) {
-                return Err(WhisperCommandError::from(format!(
+                return Err(whisper_error(format!(
                     "Model is already downloading: {}",
                     model_id
                 )));
@@ -767,9 +742,7 @@ pub async fn download_whisper_model(
     #[cfg(not(feature = "local-whisper"))]
     {
         let _ = (app, state, model_id);
-        Err(WhisperCommandError::from(
-            "Local Whisper feature is not enabled".to_string(),
-        ))
+        Err(whisper_error("Local Whisper feature is not enabled"))
     }
 }
 
@@ -778,7 +751,7 @@ pub async fn download_whisper_model(
 pub async fn cancel_whisper_model_download(
     state: tauri::State<'_, WhisperDownloadManager>,
     model_id: String,
-) -> Result<(), WhisperCommandError> {
+) -> Result<(), CommandError> {
     let jobs = state.jobs.lock().await;
     if let Some(job) = jobs.get(&model_id) {
         job.cancel.cancel();
@@ -788,26 +761,25 @@ pub async fn cancel_whisper_model_download(
 
 // Helper functions
 
-fn get_models_dir(app: &tauri::AppHandle) -> Result<PathBuf, WhisperCommandError> {
+fn get_models_dir(app: &tauri::AppHandle) -> Result<PathBuf, CommandError> {
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| WhisperCommandError::from(format!("Failed to get app data dir: {}", e)))?;
+        .map_err(|e| whisper_error(format!("Failed to get app data dir: {}", e)))?;
 
     let models_dir = app_data_dir.join("whisper-models");
 
     // Create directory if it doesn't exist
     if !models_dir.exists() {
-        std::fs::create_dir_all(&models_dir).map_err(|e| {
-            WhisperCommandError::from(format!("Failed to create models directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&models_dir)
+            .map_err(|e| whisper_error(format!("Failed to create models directory: {}", e)))?;
     }
 
     Ok(models_dir)
 }
 
 #[cfg(feature = "local-whisper")]
-fn parse_model_id(model_id: &str) -> Result<WhisperModel, WhisperCommandError> {
+fn parse_model_id(model_id: &str) -> Result<WhisperModel, CommandError> {
     let model = match model_id.to_lowercase().as_str() {
         "tiny" => WhisperModel::Tiny,
         "tinyen" | "tiny_en" | "tiny-en" => WhisperModel::TinyEn,
@@ -822,10 +794,7 @@ fn parse_model_id(model_id: &str) -> Result<WhisperModel, WhisperCommandError> {
         "largev3" | "large_v3" | "large-v3" => WhisperModel::LargeV3,
         "largev3turbo" | "large_v3_turbo" | "large-v3-turbo" => WhisperModel::LargeV3Turbo,
         _ => {
-            return Err(WhisperCommandError::from(format!(
-                "Unknown model: {}",
-                model_id
-            )));
+            return Err(whisper_error(format!("Unknown model: {}", model_id)));
         }
     };
     Ok(model)

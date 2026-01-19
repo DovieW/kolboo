@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod backup;
+pub mod command_error;
 pub mod config;
 pub mod data;
 pub mod event_sink;
@@ -19,3 +20,5 @@ pub mod stats;
 pub mod text;
 pub mod whisper;
 pub mod windows;
+
+pub use command_error::CommandError;
