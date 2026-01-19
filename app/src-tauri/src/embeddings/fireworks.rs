@@ -4,7 +4,11 @@ use serde_json::Value as JsonValue;
 
 // Fireworks exposes an OpenAI-compatible embeddings endpoint.
 // Docs: https://api.fireworks.ai/inference/v1/embeddings
-const FIREWORKS_EMBEDDINGS_URL: &str = "https://api.fireworks.ai/inference/v1/embeddings";
+const DEFAULT_FIREWORKS_BASE_URL: &str = "https://api.fireworks.ai/inference/v1";
+
+fn embeddings_url_for_base_url(base_url: &str) -> String {
+    format!("{}/embeddings", base_url.trim_end_matches('/'))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum FireworksEmbeddingsError {
@@ -44,7 +48,18 @@ pub async fn embed_text(
     model: &str,
     input: &str,
 ) -> Result<Vec<f32>, FireworksEmbeddingsError> {
-    embed_text_with_url(client, api_key, model, input, FIREWORKS_EMBEDDINGS_URL).await
+    embed_text_with_base_url(client, api_key, model, input, DEFAULT_FIREWORKS_BASE_URL).await
+}
+
+pub async fn embed_text_with_base_url(
+    client: &Client,
+    api_key: &str,
+    model: &str,
+    input: &str,
+    base_url: &str,
+) -> Result<Vec<f32>, FireworksEmbeddingsError> {
+    let url = embeddings_url_for_base_url(base_url);
+    embed_text_with_url(client, api_key, model, input, &url).await
 }
 
 pub(crate) async fn embed_text_with_url(
@@ -109,8 +124,11 @@ pub async fn embed_text_with_debug(
         preview.push('…');
     }
 
+    let url = embeddings_url_for_base_url(DEFAULT_FIREWORKS_BASE_URL);
+    let url_for_request = url.clone();
+
     let request_json = serde_json::json!({
-        "url": FIREWORKS_EMBEDDINGS_URL,
+        "url": url,
         "model": model,
         "input_preview": preview,
         "input_len": input_len,
@@ -118,7 +136,7 @@ pub async fn embed_text_with_debug(
     });
 
     let resp = client
-        .post(FIREWORKS_EMBEDDINGS_URL)
+        .post(url_for_request)
         .bearer_auth(api_key)
         .json(&serde_json::json!({
             "model": model,
@@ -182,4 +200,21 @@ pub async fn embed_text_with_debug(
     });
 
     Ok((embedding, request_json, response_json))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::embeddings_url_for_base_url;
+
+    #[test]
+    fn embeddings_url_trims_trailing_slash() {
+        assert_eq!(
+            embeddings_url_for_base_url("https://api.fireworks.ai/inference/v1"),
+            "https://api.fireworks.ai/inference/v1/embeddings"
+        );
+        assert_eq!(
+            embeddings_url_for_base_url("https://api.fireworks.ai/inference/v1/"),
+            "https://api.fireworks.ai/inference/v1/embeddings"
+        );
+    }
 }

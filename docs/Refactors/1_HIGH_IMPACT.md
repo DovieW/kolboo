@@ -63,4 +63,3 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - Providers under `app/src-tauri/src/{llm,stt,embeddings}/**` (reqwest calls)
   - Small test seams:
     - Continue the existing pattern of `with_client(...)` constructors (already present in several providers) so tests can inject a preconfigured client.
-    - Prefer a **base URL override** (defaulting to production) for providers that hardcode endpoints, so Wiremock contract tests can target a local server.
