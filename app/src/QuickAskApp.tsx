@@ -1,5 +1,4 @@
 import { Loader, ScrollArea, Text } from "@mantine/core";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import hljs from "highlight.js/lib/core";
@@ -262,7 +261,7 @@ export default function QuickAskApp() {
 			});
 
 		// Starting a new recording/transcription should dismiss Quick Ask.
-		listen("recording-start", () => {
+		listenTyped("recording-start", () => {
 			hideNow();
 		})
 			.then((fn) => {
@@ -272,7 +271,7 @@ export default function QuickAskApp() {
 				// ignore
 			});
 
-		listen("pipeline-transcription-started", () => {
+		listenTyped("pipeline-transcription-started", () => {
 			hideNow();
 		})
 			.then((fn) => {

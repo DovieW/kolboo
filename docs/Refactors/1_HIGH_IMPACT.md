@@ -16,14 +16,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - a small “settings doctor” function/command: validate -> normalize -> report problems (for debugging)
   - Bonus: this also reduces Rust/TS drift because the migration logic lives in one place.
 
-- **Introduce a typed event contract (avoid stringly-typed event drift).**
-  - Today: many events are string names with ad-hoc payloads (`pipeline-state-changed`, `overlay-audio-level`, etc.).
-  - Suggested: define a single event map (name -> payload type) in one place and export it:
-    - Rust: central module that emits only through typed helpers
-    - TS: `events.ts` that defines the same names + payload typing (generated if possible)
-  - Acceptance hint: callers can still “listen by string”, but new code should go through the typed wrapper.
-  - Follow-up: audit payload types currently defined inside components (e.g. Quick Ask + pipeline events) and move them into the shared event map so they can get schema drift tests too.
-
 - **Standardize error handling across commands (one error shape to the UI).**
   - Today: errors bubble up in different formats depending on where they come from.
   - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.

@@ -1,13 +1,12 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { emitTyped } from "./events";
+import { emitTyped, listenTyped } from "./events";
 import type {
 	AudioCaptureDiagnostics,
 	AudioSettingsTestWavs,
 	CacheRouterEmbeddingsResponse,
 	ConnectionState,
-	ConnectionStateChangedPayload,
 	CostByProvider,
 	CostSummary,
 	CostTimeframe,
@@ -49,11 +48,15 @@ export const tauriAPI = {
 	},
 
 	async onStartRecording(callback: () => void): Promise<UnlistenFn> {
-		return listen("recording-start", callback);
+		return listenTyped("recording-start", () => {
+			callback();
+		});
 	},
 
 	async onStopRecording(callback: () => void): Promise<UnlistenFn> {
-		return listen("recording-stop", callback);
+		return listenTyped("recording-stop", () => {
+			callback();
+		});
 	},
 
 	async getCostSummary(params: {
@@ -272,12 +275,9 @@ export const tauriAPI = {
 	async onConnectionStateChanged(
 		callback: (state: ConnectionState) => void,
 	): Promise<UnlistenFn> {
-		return listen<ConnectionStateChangedPayload>(
-			"connection-state-changed",
-			(event) => {
-				callback(event.payload.state);
-			},
-		);
+		return listenTyped("connection-state-changed", (payload) => {
+			callback(payload.state);
+		});
 	},
 
 	// History sync between windows
@@ -286,13 +286,13 @@ export const tauriAPI = {
 	},
 
 	async onHistoryChanged(callback: () => void): Promise<UnlistenFn> {
-		return listen("history-changed", () => {
+		return listenTyped("history-changed", () => {
 			callback();
 		});
 	},
 
 	async onStatsChanged(callback: () => void): Promise<UnlistenFn> {
-		return listen("stats-changed", () => {
+		return listenTyped("stats-changed", () => {
 			callback();
 		});
 	},
@@ -307,8 +307,8 @@ export const tauriAPI = {
 	async onSettingsChanged(
 		callback: (payload: SettingsChangedPayload) => void,
 	): Promise<UnlistenFn> {
-		return listen("settings-changed", (event) => {
-			callback((event.payload ?? {}) as SettingsChangedPayload);
+		return listenTyped("settings-changed", (payload) => {
+			callback((payload ?? {}) as SettingsChangedPayload);
 		});
 	},
 

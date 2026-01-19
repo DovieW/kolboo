@@ -2,7 +2,6 @@ import { Loader } from "@mantine/core";
 import { useResizeObserver } from "@mantine/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useDrag } from "@use-gesture/react";
 import {
 	useCallback,
@@ -23,8 +22,6 @@ import { useSettings, useTypeText } from "./lib/queries";
 import {
 	type ConnectionState,
 	type IntentRouterSettings,
-	type PipelineErrorPayload,
-	type PipelineTranscriptReadyPayload,
 	type RewriteProgramPromptProfile,
 	tauriAPI,
 } from "./lib/tauri";
@@ -2032,7 +2029,7 @@ function RecordingControl() {
 		let unlisten: (() => void) | undefined;
 
 		const setup = async () => {
-			unlisten = await listen("overlay-hide-requested", () => {
+			unlisten = await listenTyped("overlay-hide-requested", () => {
 				requestAnimatedHide();
 			});
 		};
@@ -2260,14 +2257,14 @@ function RecordingControl() {
 			);
 
 			unlisteners.push(
-				await listen("pipeline-cancelled", () => {
+				await listenTyped("pipeline-cancelled", () => {
 					setPipelineState("event", "idle");
 					clearError();
 				}),
 			);
 
 			unlisteners.push(
-				await listen("pipeline-reset", () => {
+				await listenTyped("pipeline-reset", () => {
 					setPipelineState("event", "idle");
 					clearError();
 				}),
@@ -2275,28 +2272,25 @@ function RecordingControl() {
 
 			// Listen for pipeline errors (e.g., transcription failures from hotkey-triggered recordings)
 			unlisteners.push(
-				await listen<PipelineErrorPayload>("pipeline-error", (event) => {
-					console.error("[Pipeline] Error from Rust:", event.payload);
+				await listenTyped("pipeline-error", (payload) => {
+					console.error("[Pipeline] Error from Rust:", payload);
 					setPipelineState("event", "error");
 
-					const errorInfo = parseError(event.payload?.message);
+					const errorInfo = parseError(payload?.message);
 					setError(
 						errorInfo,
-						event.payload?.message ?? null,
-						event.payload?.request_id ?? null,
+						payload?.message ?? null,
+						payload?.request_id ?? null,
 					);
 				}),
 			);
 
 			// Listen for successful transcription (from hotkey-triggered recordings)
 			unlisteners.push(
-				await listen<PipelineTranscriptReadyPayload>(
-					"pipeline-transcript-ready",
-					() => {
-						setPipelineState("event", "idle");
-						clearError();
-					},
-				),
+				await listenTyped("pipeline-transcript-ready", () => {
+					setPipelineState("event", "idle");
+					clearError();
+				}),
 			);
 		};
 
