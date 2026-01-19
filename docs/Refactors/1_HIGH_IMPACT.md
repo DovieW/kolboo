@@ -22,6 +22,25 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - real network
   - Keep it small: only extract interfaces where unit tests would meaningfully increase confidence.
 
+- **Create a clean layering boundary: “Tauri shell” vs “Core services”.**
+  - Today: a lot of orchestration lives in `app/src-tauri/src/lib.rs` and reaches into many subsystems.
+  - Goal: keep `lib.rs` focused on wiring (commands/events/windows/tray), and move business logic into a small set of services/modules.
+  - Suggested shape:
+    - `core/*` (pipeline orchestration, quick ask/replace orchestration)
+    - `adapters/*` (tauri emit/invoke, filesystem, audio capture, clipboard)
+    - `commands/*` becomes thin wrappers around core services
+  - Why this helps: it’s much easier to test “core logic” without needing a Tauri runtime.
+
+- **Introduce a typed event contract (avoid stringly-typed event drift).**
+  - Today: events are string names with ad-hoc payloads (`pipeline-state-changed`, `overlay-audio-level`, etc.).
+  - Suggested: define a single event map (name -> payload type) and emit/listen through typed helpers.
+  - Acceptance hint: existing callers can still “listen by string”, but new code should go through the typed wrapper.
+
+- **Standardize error handling across commands (one error shape to the UI).**
+  - Today: errors bubble up in different formats depending on where they come from.
+  - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.
+  - Why: frontend error UI becomes simpler and more consistent; logging/telemetry can attach stable codes.
+
 ## Prevent Rust/TS contract drift
 
 - **Generate or validate TS types against backend schemas.**
@@ -29,6 +48,10 @@ These are “bigger than a ticket” changes that would make the core easier to 
   - Ideas:
     - Generate TypeScript types from the Rust structs (or from the JSON schemas in `app/src-tauri/gen/schemas/`) and import those into `app/src/lib/tauri.ts`.
   - Goal: avoid shipping changes where Rust and TS disagree on the shape of settings/logs.
+
+- **Document the pipeline as a state machine contract (and enforce it).**
+  - Add a small transition table comment + a single “transition helper” that enforces allowed moves.
+  - This complements existing guard methods and makes it harder to accidentally introduce illegal transitions.
 
 ## Rust deterministic testing seams (hard IO audit)
 
