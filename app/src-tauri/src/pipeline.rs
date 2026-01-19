@@ -933,6 +933,15 @@ pub enum PipelineError {
 // Backwards-compatibility: `PipelineError::NoProvider` is still part of the public API.
 
 /// Pipeline state machine
+///
+/// State transition contract (self -> next):
+/// - Idle -> Recording | Transcribing | Error
+/// - Recording -> Transcribing | Idle | Error
+/// - Transcribing -> Routing | Rewriting | Idle | Error
+/// - Routing -> Transcribing | Idle | Error
+/// - Rewriting -> Idle | Error
+/// - Error -> Idle | Recording | Transcribing
+/// - Self -> Self is allowed (idempotent updates)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineState {
     /// Pipeline is idle, ready to start recording
@@ -969,6 +978,41 @@ impl PipelineState {
                 | PipelineState::Rewriting
                 | PipelineState::Routing
         )
+    }
+
+    pub fn can_transition_to(self, next: PipelineState) -> bool {
+        if self == next {
+            return true;
+        }
+
+        match self {
+            PipelineState::Idle => matches!(
+                next,
+                PipelineState::Recording | PipelineState::Transcribing | PipelineState::Error
+            ),
+            PipelineState::Recording => matches!(
+                next,
+                PipelineState::Transcribing | PipelineState::Idle | PipelineState::Error
+            ),
+            PipelineState::Transcribing => matches!(
+                next,
+                PipelineState::Routing
+                    | PipelineState::Rewriting
+                    | PipelineState::Idle
+                    | PipelineState::Error
+            ),
+            PipelineState::Routing => matches!(
+                next,
+                PipelineState::Transcribing | PipelineState::Idle | PipelineState::Error
+            ),
+            PipelineState::Rewriting => {
+                matches!(next, PipelineState::Idle | PipelineState::Error)
+            }
+            PipelineState::Error => matches!(
+                next,
+                PipelineState::Idle | PipelineState::Recording | PipelineState::Transcribing
+            ),
+        }
     }
 }
 
@@ -1142,6 +1186,17 @@ struct PipelineInner {
 }
 
 impl PipelineInner {
+    fn transition_to(&mut self, next: PipelineState, context: &str) {
+        if self.state.can_transition_to(next) {
+            self.state = next;
+            return;
+        }
+
+        self.set_error(&format!(
+            "Invalid pipeline state transition {:?} -> {:?} ({})",
+            self.state, next, context
+        ));
+    }
     fn local_whisper_model_key_for_cache(&self) -> String {
         #[cfg(feature = "local-whisper")]
         {
@@ -1527,7 +1582,7 @@ impl PipelineInner {
 
     /// Reset to idle state, clearing any error condition
     fn reset_to_idle(&mut self) {
-        self.state = PipelineState::Idle;
+        self.transition_to(PipelineState::Idle, "reset_to_idle");
         self.cancel_token = None;
     }
 
@@ -1860,7 +1915,7 @@ impl SharedPipeline {
             .start_recording_session(max_duration, input_device_name.as_deref())
         {
             Ok(()) => {
-                inner.state = PipelineState::Recording;
+                inner.transition_to(PipelineState::Recording, "start_recording");
                 log::info!("Pipeline: Recording started");
                 Ok(())
             }
@@ -2261,7 +2316,7 @@ impl SharedPipeline {
                 return Err(PipelineError::RecordingTooLarge(wav_bytes.len(), max_bytes));
             }
 
-            inner.state = PipelineState::Transcribing;
+            inner.transition_to(PipelineState::Transcribing, "stop_and_transcribe_detailed");
 
             let llm_config = inner.config.llm_config.clone();
             let active_profile = session_profile_override
@@ -2585,7 +2640,10 @@ impl SharedPipeline {
                                     .lock()
                                     .map_err(|e| PipelineError::Lock(e.to_string()))?;
                                 if inner.state == PipelineState::Transcribing {
-                                    inner.state = PipelineState::Routing;
+                                    inner.transition_to(
+                                        PipelineState::Routing,
+                                        "stop_and_transcribe_detailed (route llm)",
+                                    );
                                 }
                             }
 
@@ -2652,7 +2710,10 @@ impl SharedPipeline {
                                     .lock()
                                     .map_err(|e| PipelineError::Lock(e.to_string()))?;
                                 if inner.state == PipelineState::Routing {
-                                    inner.state = PipelineState::Transcribing;
+                                    inner.transition_to(
+                                        PipelineState::Transcribing,
+                                        "stop_and_transcribe_detailed (route llm back)",
+                                    );
                                 }
                             }
                         }
@@ -2664,7 +2725,10 @@ impl SharedPipeline {
                                 .lock()
                                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
                             if inner.state == PipelineState::Transcribing {
-                                inner.state = PipelineState::Routing;
+                                inner.transition_to(
+                                    PipelineState::Routing,
+                                    "stop_and_transcribe_detailed (route embeddings)",
+                                );
                             }
                         }
 
@@ -2831,7 +2895,10 @@ impl SharedPipeline {
                                 .lock()
                                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
                             if inner.state == PipelineState::Routing {
-                                inner.state = PipelineState::Transcribing;
+                                inner.transition_to(
+                                    PipelineState::Transcribing,
+                                    "stop_and_transcribe_detailed (route embeddings back)",
+                                );
                             }
                         }
                     }
@@ -3059,7 +3126,10 @@ impl SharedPipeline {
                     .lock()
                     .map_err(|e| PipelineError::Lock(e.to_string()))?;
                 if inner.state == PipelineState::Transcribing {
-                    inner.state = PipelineState::Rewriting;
+                    inner.transition_to(
+                        PipelineState::Rewriting,
+                        "stop_and_transcribe_detailed (rewrite)",
+                    );
                 }
             }
 
@@ -3224,7 +3294,10 @@ impl SharedPipeline {
                 return Err(PipelineError::RecordingTooLarge(wav_bytes.len(), max_bytes));
             }
 
-            inner.state = PipelineState::Transcribing;
+            inner.transition_to(
+                PipelineState::Transcribing,
+                "transcribe_wav_bytes_detailed_for_profile",
+            );
 
             // Ensure we have a cancellation token for this attempt.
             let cancel_token = CancellationToken::new();
@@ -3510,7 +3583,10 @@ impl SharedPipeline {
                                     .lock()
                                     .map_err(|e| PipelineError::Lock(e.to_string()))?;
                                 if inner.state == PipelineState::Transcribing {
-                                    inner.state = PipelineState::Routing;
+                                    inner.transition_to(
+                                        PipelineState::Routing,
+                                        "transcribe_wav_bytes_detailed_for_profile (route llm)",
+                                    );
                                 }
                             }
 
@@ -3577,7 +3653,10 @@ impl SharedPipeline {
                                     .lock()
                                     .map_err(|e| PipelineError::Lock(e.to_string()))?;
                                 if inner.state == PipelineState::Routing {
-                                    inner.state = PipelineState::Transcribing;
+                                    inner.transition_to(
+                                        PipelineState::Transcribing,
+                                        "transcribe_wav_bytes_detailed_for_profile (route llm back)",
+                                    );
                                 }
                             }
                         }
@@ -3589,7 +3668,10 @@ impl SharedPipeline {
                                 .lock()
                                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
                             if inner.state == PipelineState::Transcribing {
-                                inner.state = PipelineState::Routing;
+                                inner.transition_to(
+                                    PipelineState::Routing,
+                                    "transcribe_wav_bytes_detailed_for_profile (route embeddings)",
+                                );
                             }
                         }
 
@@ -3756,7 +3838,10 @@ impl SharedPipeline {
                                 .lock()
                                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
                             if inner.state == PipelineState::Routing {
-                                inner.state = PipelineState::Transcribing;
+                                inner.transition_to(
+                                    PipelineState::Transcribing,
+                                    "transcribe_wav_bytes_detailed_for_profile (route embeddings back)",
+                                );
                             }
                         }
                     }
@@ -3976,7 +4061,10 @@ impl SharedPipeline {
                     .lock()
                     .map_err(|e| PipelineError::Lock(e.to_string()))?;
                 if inner.state == PipelineState::Transcribing {
-                    inner.state = PipelineState::Rewriting;
+                    inner.transition_to(
+                        PipelineState::Rewriting,
+                        "transcribe_wav_bytes_detailed_for_profile (rewrite)",
+                    );
                 }
             }
 
