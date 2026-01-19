@@ -22,6 +22,7 @@ mod pipeline;
 mod recordings;
 mod request_log;
 mod router_embeddings_cache;
+pub mod schema_export;
 mod secrets;
 #[path = "settings.rs"]
 mod settings;

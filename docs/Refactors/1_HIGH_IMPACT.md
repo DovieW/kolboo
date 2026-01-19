@@ -45,11 +45,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - Generate TypeScript types from the Rust structs (or from the JSON schemas in `app/src-tauri/gen/schemas/`) and import those into `app/src/lib/tauri.ts`.
   - Goal: avoid shipping changes where Rust and TS disagree on the shape of settings/logs.
 
-- **Reduce duplication in schema export bins.**
-  - We now have a growing list of `src-tauri/src/bin/export_*_schema.rs` files that are nearly identical.
-  - Consider a small shared helper or a build script that exports all event schemas in one run, or a macro to reduce boilerplate.
-  - Goal: keep the contract drift tooling easy to extend without adding lots of copy/paste files.
-
 ## Rust deterministic testing seams (hard IO audit)
 
 - **Audio device IO (CPAL):**

@@ -1,8 +1,3 @@
-use schemars::schema_for;
-
 fn main() {
-    let schema = schema_for!(kolboo_lib::OpenWindowInfo);
-    let serialized =
-        serde_json::to_string_pretty(&schema).expect("Failed to serialize OpenWindowInfo schema");
-    println!("{serialized}");
+    kolboo_lib::schema_export::print_schema::<kolboo_lib::OpenWindowInfo>("OpenWindowInfo");
 }

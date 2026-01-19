@@ -1,8 +1,5 @@
-use schemars::schema_for;
-
 fn main() {
-    let schema = schema_for!(kolboo_lib::WhisperModelDownloadProgress);
-    let serialized = serde_json::to_string_pretty(&schema)
-        .expect("Failed to serialize WhisperModelDownloadProgress schema");
-    println!("{serialized}");
+    kolboo_lib::schema_export::print_schema::<kolboo_lib::WhisperModelDownloadProgress>(
+        "WhisperModelDownloadProgress",
+    );
 }

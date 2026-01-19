@@ -1,8 +1,5 @@
-use schemars::schema_for;
-
 fn main() {
-    let schema = schema_for!(kolboo_lib::OverlayAudioLevelPayload);
-    let serialized = serde_json::to_string_pretty(&schema)
-        .expect("Failed to serialize OverlayAudioLevelPayload schema");
-    println!("{serialized}");
+    kolboo_lib::schema_export::print_schema::<kolboo_lib::OverlayAudioLevelPayload>(
+        "OverlayAudioLevelPayload",
+    );
 }
