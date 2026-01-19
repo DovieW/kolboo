@@ -2809,6 +2809,34 @@ pub fn run() {
                 settings::defaults::ensure_default_settings(app.handle())?;
             }
 
+            // Dev-only: validate settings shape at startup and print issues to the terminal.
+            #[cfg(all(desktop, debug_assertions))]
+            {
+                use tauri_plugin_store::StoreExt;
+
+                let store = app.store("settings.json")?;
+                let mut values = serde_json::Map::new();
+
+                for key in settings::doctor::SETTINGS_DOCTOR_KEYS {
+                    if let Some(value) = store.get(*key) {
+                        values.insert((*key).to_string(), value);
+                    }
+                }
+
+                let report = settings::doctor::validate_settings_map(&values);
+                if report.issues.is_empty() {
+                    log::info!("Settings doctor: no issues found");
+                } else {
+                    log::warn!(
+                        "Settings doctor: found {} issue(s)",
+                        report.issues.len()
+                    );
+                    for issue in report.issues {
+                        log::warn!("Settings doctor issue: {} -> {}", issue.key, issue.message);
+                    }
+                }
+            }
+
             // Startup window visibility:
             // - Show the main window only on first-run (when the setup guide is pending).
             // - Otherwise, keep it hidden; the tray icon is the explicit entrypoint.
