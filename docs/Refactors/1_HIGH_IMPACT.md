@@ -37,10 +37,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - real network
   - Keep it small: only extract interfaces where unit tests would meaningfully increase confidence.
 
-- **Document the pipeline as a state machine contract (and enforce it).**
-  - Add a small transition table comment + a single “transition helper” that enforces allowed moves.
-  - This complements existing guard methods and makes it harder to accidentally introduce illegal transitions.
-
 ## Prevent Rust/TS contract drift
 
 - **Generate or validate TS types against backend schemas.**
