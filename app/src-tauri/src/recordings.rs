@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::SystemTime;
 
+use crate::app_paths::ensure_dir;
+
 #[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]
 pub struct RecordingsStats {
     pub count: u64,
@@ -24,7 +26,7 @@ pub struct RecordingStore {
 impl RecordingStore {
     pub fn new(app_data_dir: PathBuf) -> Self {
         let dir = app_data_dir.join("recordings");
-        let _ = fs::create_dir_all(&dir);
+        let _ = ensure_dir(&dir);
         Self {
             dir,
             known_existing: RwLock::new(std::collections::HashSet::new()),

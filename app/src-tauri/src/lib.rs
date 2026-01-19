@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 // Extraction buckets: settings defaults, overlay wiring, shortcuts lifecycle, bootstrap wiring.
 
+mod app_paths;
 mod audio;
 mod audio_capture;
 mod audio_mute;
@@ -2903,9 +2904,7 @@ pub fn run() {
             }
 
             // Initialize history storage
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
+            let app_data_dir = app_paths::app_data_dir(app.handle())
                 .expect("Failed to get app data directory");
 
             // Initialize recording store (saved WAVs for retry)
