@@ -1,0 +1,85 @@
+# High-impact refactors (schedule / plan)
+
+These are the refactors that most directly reduce risk (settings breakage, Rust/TS drift), improve correctness, or unlock reliable automated testing.
+
+If you’re choosing what to do “on purpose” (not as a drive-by), start here.
+
+## Core architecture / design improvements
+
+These are “bigger than a ticket” changes that would make the core easier to evolve safely.
+
+- **Make settings a versioned, schema-driven contract (single source of truth).**
+  - Today: backend seeds defaults in `ensure_default_settings(...)`, and frontend normalizes/migrates in `app/src/lib/tauri.ts`.
+  - Add:
+    - `settings_version` stored in `settings.json`
+    - explicit migrations (vN -> vN+1) that run at startup (not when visiting a UI screen)
+    - a small “settings doctor” function/command: validate -> normalize -> report problems (for debugging)
+  - Bonus: this also reduces Rust/TS drift because the migration logic lives in one place.
+
+- **Introduce a typed event contract (avoid stringly-typed event drift).**
+  - Today: many events are string names with ad-hoc payloads (`pipeline-state-changed`, `overlay-audio-level`, etc.).
+  - Suggested: define a single event map (name -> payload type) in one place and export it:
+    - Rust: central module that emits only through typed helpers
+    - TS: `events.ts` that defines the same names + payload typing (generated if possible)
+  - Acceptance hint: callers can still “listen by string”, but new code should go through the typed wrapper.
+  - Follow-up: audit payload types currently defined inside components (e.g. Quick Ask + pipeline events) and move them into the shared event map so they can get schema drift tests too.
+
+- **Standardize error handling across commands (one error shape to the UI).**
+  - Today: errors bubble up in different formats depending on where they come from.
+  - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.
+  - Why: frontend error UI becomes simpler and more consistent; telemetry/logging can attach codes.
+
+- **Dependency injection seams for hard IO (testability).**
+  - You already have good “seams” in places (e.g. `with_client(...)` patterns).
+  - Next step: formalize a few minimal traits/interfaces so the pipeline can be tested without:
+    - CPAL devices
+    - real filesystem
+    - real network
+  - Keep it small: only extract interfaces where unit tests would meaningfully increase confidence.
+
+- **Document the pipeline as a state machine contract (and enforce it).**
+  - Add a small transition table comment + a single “transition helper” that enforces allowed moves.
+  - This complements existing guard methods and makes it harder to accidentally introduce illegal transitions.
+
+## Prevent Rust/TS contract drift
+
+- **Generate or validate TS types against backend schemas.**
+  - The CI failures we hit were mostly “frontend types lagging behind backend reality” (e.g. new request log fields / settings keys like `quick_replace_enabled`).
+  - Ideas:
+    - Generate TypeScript types from the Rust structs (or from the JSON schemas in `app/src-tauri/gen/schemas/`) and import those into `app/src/lib/tauri.ts`.
+  - Goal: avoid shipping changes where Rust and TS disagree on the shape of settings/logs.
+
+- **Reduce duplication in schema export bins.**
+  - We now have a growing list of `src-tauri/src/bin/export_*_schema.rs` files that are nearly identical.
+  - Consider a small shared helper or a build script that exports all event schemas in one run, or a macro to reduce boilerplate.
+  - Goal: keep the contract drift tooling easy to extend without adding lots of copy/paste files.
+
+## Rust deterministic testing seams (hard IO audit)
+
+- **Audio device IO (CPAL):**
+  - Hot spots:
+    - `app/src-tauri/src/audio_capture.rs` (CPAL host/device/stream + callback threading)
+    - `app/src-tauri/src/commands/audio.rs` (device listing, “ensure active stream” for meters)
+    - `app/src-tauri/src/pipeline.rs` (references to CPAL device selection + meter updates)
+  - Small test seams:
+    - Keep CPAL behind a tiny trait (e.g. “AudioCaptureBackend”) so pipeline state transitions can be tested with a fake capture backend that emits deterministic “audio level” events.
+    - Push more logic into pure helpers (device ID parsing/normalization, “what should happen when device missing”) and unit-test those without needing a CPAL host.
+
+- **Filesystem IO (history/recordings/stats/backups/models):**
+  - Hot spots:
+    - `app/src-tauri/src/history.rs` (read/write history file, metadata checks)
+    - `app/src-tauri/src/recordings.rs` (create/read/delete/list recordings)
+    - `app/src-tauri/src/stats.rs` and `app/src-tauri/src/commands/stats.rs` (append logs, list/delete)
+    - `app/src-tauri/src/commands/backup.rs` (read/write settings backup)
+    - `app/src-tauri/src/commands/whisper.rs` + `app/src-tauri/src/commands/config.rs` (model dir creation/download temp files)
+  - Small test seams:
+    - Centralize “app data path” + “ensure_dir” helpers so tests can point everything at a temp dir without reaching into many modules.
+    - Consider a minimal “Fs” interface only where needed (read/write/list/delete) for the most critical code paths (history + recordings), but avoid big refactors.
+
+- **Network IO (reqwest providers + proxy config):**
+  - Hot spots:
+    - `app/src-tauri/src/network.rs` + `app/src-tauri/src/commands/network.rs` (proxy + custom cert loading)
+    - Providers under `app/src-tauri/src/{llm,stt,embeddings}/**` (reqwest calls)
+  - Small test seams:
+    - Continue the existing pattern of `with_client(...)` constructors (already present in several providers) so tests can inject a preconfigured client.
+    - Prefer a **base URL override** (defaulting to production) for providers that hardcode endpoints, so Wiremock contract tests can target a local server.
