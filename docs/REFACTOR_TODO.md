@@ -30,13 +30,6 @@ These are small refactors whose main purpose is making the “important stuff”
   - Goal: validate migrations/normalization for older `settings.json` shapes.
   - Keep it deterministic (no network, no keys).
 
-### Tooling (DX)
-
-- **Tighten `app/scripts/run-with-timing.mjs` Windows execution.**
-
-  - Right now it often runs child processes with `shell: true` on Windows, which triggers Node's DEP0190 warning (args concatenation can be a security footgun).
-  - Follow-up idea: resolve `node_modules/.bin/<cmd>` explicitly (or use a small cross-platform runner library) so we can keep `shell: false` and avoid the warning.
-
 ### Rust backend
 
 - **Introduce an “event sink” seam for command/orchestration tests.**
@@ -60,10 +53,6 @@ These are the files that are *currently* the largest / most responsibility-dense
   - Bonus: lots of helper functions here are pure (e.g. path normalization / routing scoring) and can get fast unit tests once extracted.
 
 ### Frontend (React/TS)
-
-- **Split `app/src/components/settings/PromptSettings.tsx` (~253KB).**
-  - Why: it’s doing UI layout *and* business logic for presets/router/Quick Ask/Quick Replace.
-  - Suggested splits: presets editor, router panel, quick ask panel, quick replace panel, plus 1–2 hooks that own the data plumbing.
 
 - **Continue splitting `app/src/OverlayApp.tsx` (~81KB).**
   - This is already tracked above, but size-wise it’s still one of the top hotspots.
@@ -134,12 +123,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
   - We now have a growing list of `src-tauri/src/bin/export_*_schema.rs` files that are nearly identical.
   - Consider a small shared helper or a build script that exports all event schemas in one run, or a macro to reduce boilerplate.
   - Goal: keep the contract drift tooling easy to extend without adding lots of copy/paste files.
-
-- **Centralize contract test path helpers.**
-
-  - The contract tests currently build relative `new URL("../../..")` paths per file.
-  - Consider extracting a tiny helper (e.g. `contractTestPaths.ts`) that resolves the app root and schema directory in one place.
-  - Goal: avoid brittle path math if test folders move again.
 
 ## Lint rule ratchet (Biome)
 
