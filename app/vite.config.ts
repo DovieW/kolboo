@@ -24,10 +24,10 @@ export default defineConfig({
 			],
 			thresholds: {
 				"src/lib/tauri.ts": {
-					statements: 60,
-					branches: 50,
-					functions: 60,
-					lines: 60,
+					statements: 80,
+					branches: 70,
+					functions: 80,
+					lines: 80,
 				},
 			},
 		},

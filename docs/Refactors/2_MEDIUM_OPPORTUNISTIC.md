@@ -26,7 +26,3 @@ These are the files that are _currently_ the largest / most responsibility-dense
   - Bonus: lots of helper functions here are pure (e.g. path normalization / routing scoring) and can get fast unit tests once extracted.
 
 ## Testing “ideal state” follow-ups (optional)
-
-- **Raise TS per-file coverage thresholds gradually.**
-  - Current: we’ve started ratcheting the Tauri client modules upward (e.g. `app/src/lib/tauri/commands.ts`, `app/src/lib/tauri/settings.ts`).
-  - Next suggested targets from the plan: **80% lines**, **70% branches** (only if the churn feels manageable).
