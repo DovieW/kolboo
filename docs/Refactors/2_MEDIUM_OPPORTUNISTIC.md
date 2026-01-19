@@ -57,9 +57,3 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - Pick one rule at a time (e.g. `lint/correctness/useExhaustiveDependencies`) and fix the existing findings.
     - Flip it back to `error` once the repo is clean.
   - Goal: keep CI green while steadily improving quality instead of “big bang” lint migrations.
-
-## Prompt settings UI complexity
-
-- **Split `app/src/components/settings/PromptSettings.tsx` into smaller components + hooks.**
-  - Suggested splits: presets editor, intent router panel, Quick Replace panel, and shared “provider/model” sections.
-  - Goal: reduce file size, simplify hook dependencies, and make it easier to test isolated sections.

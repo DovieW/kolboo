@@ -25,7 +25,7 @@ type LlmOptionGroup = { group: string; items: LlmOption[] };
 
 type Mutation<Variables> = {
 	mutate: (variables: Variables, options?: { onSuccess?: () => void }) => void;
-	isPending?: boolean;
+	isPending: boolean;
 };
 
 type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high";
