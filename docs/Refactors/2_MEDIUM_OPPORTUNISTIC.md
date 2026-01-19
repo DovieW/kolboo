@@ -25,11 +25,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - `pipeline/router/*` (embeddings router + LLM router + diagnostics payload building)
   - Bonus: lots of helper functions here are pure (e.g. path normalization / routing scoring) and can get fast unit tests once extracted.
 
-### Frontend (React/TS)
-
-- **Continue splitting `app/src/OverlayApp.tsx` (~81KB).**
-  - This is already tracked above, but size-wise it’s still one of the top hotspots.
-
 ## Testing “ideal state” follow-ups (optional)
 
 - **Raise TS per-file coverage thresholds gradually.**
