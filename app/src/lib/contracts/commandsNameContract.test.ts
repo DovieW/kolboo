@@ -1,11 +1,9 @@
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { resolveRustLibPath, resolveTauriTsPath } from "./contractTestPaths";
 
-const tsTauriPath = fileURLToPath(new URL("../tauri.ts", import.meta.url));
-const rustLibPath = fileURLToPath(
-	new URL("../../../src-tauri/src/lib.rs", import.meta.url),
-);
+const tsTauriPath = resolveTauriTsPath();
+const rustLibPath = resolveRustLibPath();
 
 function extractInvokeCommandNames(source: string): string[] {
 	const names = new Set<string>();

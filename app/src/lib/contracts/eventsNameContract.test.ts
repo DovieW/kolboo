@@ -1,12 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { resolveRustSrcDir } from "./contractTestPaths";
 import { EVENT_NAMES } from "../tauri/events";
 
-const rustRoot = fileURLToPath(
-	new URL("../../../src-tauri/src", import.meta.url),
-);
+const rustRoot = resolveRustSrcDir();
 
 const ignoredDirs = new Set([
 	"target",
