@@ -75,6 +75,16 @@ fn resolve_profile_by_id(
     (Some(profile_id.to_string()), name)
 }
 
+fn program_basename_for_log(path: &str) -> String {
+    let trimmed = path.trim().trim_matches('"');
+    let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed).trim();
+    if base.is_empty() {
+        "<unknown>".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
 fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuration> {
     #[cfg(desktop)]
     {
@@ -443,9 +453,10 @@ pub fn pipeline_start_recording(
     }
 
     // One-time per recording: log what we saw so we can debug "always Default" reports.
+    let foreground_log = foreground.as_deref().map(program_basename_for_log);
     log::info!(
         "[profile] start_recording foreground={:?} profiles={} matched={}",
-        foreground,
+        foreground_log,
         config.llm_config.program_prompt_profiles.len(),
         matched_profile
             .as_ref()

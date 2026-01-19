@@ -238,7 +238,6 @@ Acceptance:
 
 - For the most important commands (start/stop/cancel, settings sync, overlay show/hide):
   - test “given input, what state changes and what events are emitted?”
-  - use an event sink abstraction for tests (collect emitted events into a vec)
 
 Acceptance:
 

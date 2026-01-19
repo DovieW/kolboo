@@ -184,13 +184,6 @@ Legend:
 
 ## Provider-specific enhancements
 
-### Speechmatics language configurability
-
-- **Where:** `app/src-tauri/src/stt/speechmatics.rs`
-- **Problem:** existing inline TODO to make language configurable.
-- **Todo:**
-  - Add a setting + optional per-program override for Speechmatics language.
-
 ### Improve provider error mapping
 
 - **Todo:**

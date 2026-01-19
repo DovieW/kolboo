@@ -30,7 +30,13 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config
+          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config libgtk-3-dev
+
+      - name: Verify GTK/GDK pkg-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg-config --exists gdk-3.0
 
       - name: Setup Node
         uses: actions/setup-node@v6
