@@ -10,7 +10,7 @@ import {
 } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "../../lib/queries";
 import { configAPI, type HotkeyConfig, tauriAPI } from "../../lib/tauri";
 import { Logo } from "../Logo";
@@ -111,10 +111,10 @@ export function SettingsGuideOverlay({
 	const sampleText =
 		"I can dictate with my voice anywhere, and tune settings per app and website.";
 
-	const clearWelcomeTimers = () => {
+	const clearWelcomeTimers = useCallback(() => {
 		for (const t of welcomeTimersRef.current) window.clearTimeout(t);
 		welcomeTimersRef.current = [];
-	};
+	}, []);
 
 	const enterGuideAt = (nextStep: Step) => {
 		clearWelcomeTimers();
@@ -123,7 +123,7 @@ export function SettingsGuideOverlay({
 		setSkipVisible(true);
 	};
 
-	const restartWelcomeSequence = () => {
+	const restartWelcomeSequence = useCallback(() => {
 		clearWelcomeTimers();
 
 		// Always restart the intro from scratch.
@@ -151,7 +151,7 @@ export function SettingsGuideOverlay({
 		}
 
 		welcomeTimersRef.current = timers;
-	};
+	}, [clearWelcomeTimers, welcomeContinueSeen]);
 
 	useEffect(() => {
 		if (!opened) return;
@@ -173,7 +173,7 @@ export function SettingsGuideOverlay({
 		return () => {
 			clearWelcomeTimers();
 		};
-	}, [opened]);
+	}, [opened, queryClient, restartWelcomeSequence, clearWelcomeTimers]);
 
 	useEffect(() => {
 		if (!opened) return;

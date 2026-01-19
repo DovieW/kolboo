@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import { Crosshair, Plus, RotateCcw, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	useSettings,
 	useUpdateRewriteProgramPromptProfiles,
@@ -49,6 +49,42 @@ export function ProfileConfigModal({
 		settings?.rewrite_program_prompt_profiles ?? [];
 
 	const didAutoCreate = useRef(false);
+
+	const addProfile = useCallback(() => {
+		// Create new profile with all settings in inherit mode (null)
+		// Settings will inherit from default until user explicitly changes them
+		const newProfile: RewriteProgramPromptProfile = {
+			id: createId(),
+			name: "New Profile",
+			program_paths: [],
+			cleanup_prompt_sections: null, // inherit
+			// AI settings - all inherit
+			stt_provider: null,
+			stt_model: null,
+			stt_timeout_seconds: null,
+			llm_provider: null,
+			llm_model: null,
+			rewrite_llm_enabled: null,
+			// UI settings - all inherit
+			sound_enabled: null,
+			playing_audio_handling: null,
+			overlay_mode: null,
+			widget_position: null,
+			output_mode: null,
+		};
+
+		const next = [...profiles, newProfile];
+		updateRewriteProgramPromptProfiles.mutate(next, {
+			onSuccess: () => {
+				tauriAPI.emitSettingsChanged();
+				onEditingProfileChange(newProfile.id);
+			},
+		});
+	}, [
+		profiles,
+		updateRewriteProgramPromptProfiles,
+		onEditingProfileChange,
+	]);
 
 	useEffect(() => {
 		if (!opened) {
@@ -123,37 +159,6 @@ export function ProfileConfigModal({
 		});
 	};
 
-	function addProfile() {
-		// Create new profile with all settings in inherit mode (null)
-		// Settings will inherit from default until user explicitly changes them
-		const newProfile: RewriteProgramPromptProfile = {
-			id: createId(),
-			name: "New Profile",
-			program_paths: [],
-			cleanup_prompt_sections: null, // inherit
-			// AI settings - all inherit
-			stt_provider: null,
-			stt_model: null,
-			stt_timeout_seconds: null,
-			llm_provider: null,
-			llm_model: null,
-			rewrite_llm_enabled: null,
-			// UI settings - all inherit
-			sound_enabled: null,
-			playing_audio_handling: null,
-			overlay_mode: null,
-			widget_position: null,
-			output_mode: null,
-		};
-
-		const next = [...profiles, newProfile];
-		updateRewriteProgramPromptProfiles.mutate(next, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-				onEditingProfileChange(newProfile.id);
-			},
-		});
-	}
 
 	const deleteSelectedProfile = () => {
 		if (!selectedProfile) return;
@@ -286,7 +291,6 @@ export function ProfileConfigModal({
 		opened,
 		windowPickerOpen,
 		confirmDialog,
-		localPaths,
 		pendingProgramPathFocusIndex,
 	]);
 

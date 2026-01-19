@@ -340,6 +340,10 @@ export function DataSettings({
 	} | null>(null);
 
 	useEffect(() => {
+		void logsRetentionModeFromSettings;
+		void logsRetentionAmountFromSettings;
+		void logsRetentionUnitFromSettings;
+		void logsRetentionValueFromSettings;
 		// Drop draft once settings refresh from disk so we stay source-of-truth.
 		setLogsRetentionDraft(null);
 	}, [
@@ -391,6 +395,10 @@ export function DataSettings({
 	} | null>(null);
 
 	useEffect(() => {
+		void recordingsRetentionModeFromSettings;
+		void recordingsRetentionAmountFromSettings;
+		void recordingsRetentionUnitFromSettings;
+		void recordingsRetentionValueFromSettings;
 		setRecordingsRetentionDraft(null);
 	}, [
 		recordingsRetentionModeFromSettings,
@@ -535,6 +543,10 @@ export function DataSettings({
 		} | null>(null);
 
 	useEffect(() => {
+		void transcriptionRetentionModeFromSettings;
+		void transcriptionRetentionAmountFromSettings;
+		void transcriptionRetentionUnitFromSettings;
+		void transcriptionRetentionValueFromSettings;
 		// Drop any draft once settings refresh from disk so we stay source-of-truth.
 		setTranscriptionRetentionDraft(null);
 	}, [
@@ -599,6 +611,8 @@ export function DataSettings({
 	} | null>(null);
 
 	useEffect(() => {
+		void statsRetentionUnitFromSettings;
+		void statsRetentionValueFromSettings;
 		setStatsRetentionDraft(null);
 	}, [statsRetentionUnitFromSettings, statsRetentionValueFromSettings]);
 

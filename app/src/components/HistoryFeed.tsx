@@ -890,6 +890,11 @@ export function HistoryFeed({
 
 	// When the filter changes, reset to page 1 so results are predictable.
 	useEffect(() => {
+		void filterText;
+		void showFailed;
+		void showEmptyTranscript;
+		void selectedSttModelKeys;
+		void selectedLlmModelKeys;
 		setPage(1);
 	}, [
 		filterText,
@@ -908,6 +913,7 @@ export function HistoryFeed({
 
 	// Probe recordings for currently visible entries (best-effort).
 	useEffect(() => {
+		void recordingsProbeTick;
 		let cancelled = false;
 
 		let timeout: number | null = null;

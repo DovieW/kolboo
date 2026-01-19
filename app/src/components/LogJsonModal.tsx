@@ -110,16 +110,9 @@ export function LogJsonModal({
 	// Reset selection when opening / switching log rows.
 	useEffect(() => {
 		if (!opened) return;
+		void log.id;
 		setTab("full");
-	}, [
-		opened,
-		log.id,
-		hasSttPayload,
-		hasLlmPayload,
-		hasQuickAskPayload,
-		hasQuickReplacePayload,
-		hasRouterPayload,
-	]);
+	}, [opened, log.id]);
 
 	return (
 		<Modal

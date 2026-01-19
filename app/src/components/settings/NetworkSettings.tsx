@@ -80,13 +80,7 @@ export function NetworkSettings({
 		if (!settings) return;
 		setModeDraft(settings.proxy_settings.mode);
 		setManualDraft(settings.proxy_settings.manual);
-	}, [
-		settings?.proxy_settings.mode,
-		settings?.proxy_settings.manual.proxy_url,
-		settings?.proxy_settings.manual.no_proxy,
-		settings?.proxy_settings.manual.username,
-		settings?.proxy_settings.manual.password,
-	]);
+	}, [settings]);
 
 	const canApplyManual = manualDraft.proxy_url.trim().length > 0;
 

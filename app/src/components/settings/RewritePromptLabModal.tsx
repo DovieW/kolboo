@@ -11,7 +11,7 @@ import {
 	Textarea,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { llmAPI } from "../../lib/tauri";
 
 function errorToMessage(err: unknown): string {
@@ -163,7 +163,13 @@ export function RewritePromptLabModal(props: {
 		setSelectedProvider(props.initialLlmProvider ?? null);
 		setSelectedModel(props.initialLlmModel ?? null);
 		setThinkingValue("default");
-	}, [props.opened, props.initialTranscript, props.initialProblemOutput]);
+	}, [
+		props.opened,
+		props.initialTranscript,
+		props.initialProblemOutput,
+		props.initialLlmProvider,
+		props.initialLlmModel,
+	]);
 
 	const supportsOpenAiReasoningEffort =
 		selectedProvider === "openai" &&
@@ -188,7 +194,7 @@ export function RewritePromptLabModal(props: {
 			selectedModel.includes("claude-4") ||
 			selectedModel.includes("-4-"));
 
-	const openAiThinkingEffortsForModel = (model: string): string[] => {
+	const openAiThinkingEffortsForModel = useCallback((model: string): string[] => {
 		// Keep aligned with ProvidersSettings.
 		if (model.startsWith("gpt-5-pro")) return ["high"];
 		if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1"))
@@ -196,7 +202,7 @@ export function RewritePromptLabModal(props: {
 		if (model.startsWith("gpt-5")) return ["low", "medium", "high"];
 		if (model.startsWith("o")) return ["low", "medium", "high"];
 		return [];
-	};
+	}, []);
 
 	const thinkingSelectKind:
 		| "none"
@@ -275,10 +281,11 @@ export function RewritePromptLabModal(props: {
 		}
 
 		return [{ value: "default", label: "Not supported" }];
-	}, [selectedModel, thinkingSelectKind]);
+	}, [openAiThinkingEffortsForModel, selectedModel, thinkingSelectKind]);
 
 	// Switching modes changes the meaning of inputs, so clear derived outputs.
 	useEffect(() => {
+		void mode;
 		setImprovedPrompt("");
 		setTestedOutput("");
 		setImproveError("");

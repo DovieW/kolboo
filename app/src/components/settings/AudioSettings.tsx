@@ -100,6 +100,7 @@ export function AudioSettings({
 	>(null);
 
 	useEffect(() => {
+		void noiseGateThresholdDbfsFromSettings;
 		// If settings update elsewhere (or after save), drop any draft value.
 		setNoiseGateThresholdDraft(null);
 	}, [noiseGateThresholdDbfsFromSettings]);
