@@ -12,6 +12,19 @@ use tauri_plugin_store::StoreExt;
 #[cfg(desktop)]
 use super::{HotkeyConfig, ProxySettings, VadSettings};
 
+/// Ensure settings shown in the UI match what the backend will use.
+///
+/// The frontend often treats missing keys as "unset" and shows fallback defaults.
+/// If the backend uses different fallbacks, this can cause confusing mismatches.
+///
+/// To prevent that, we eagerly seed `settings.json` with defaults for missing/null keys
+/// (without overwriting any existing values).
+#[cfg(desktop)]
+pub(crate) fn ensure_default_settings(
+    app: &AppHandle,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let store = app.store("settings.json")?;
+
     // Keep these defaults aligned with pipeline defaults / expected backend behavior.
     // We intentionally seed these so a brand new install has the same effective
     // settings that the pipeline will use at runtime (and what the UI shows).
