@@ -208,38 +208,6 @@ pub(crate) fn get_setting_from_store<T: serde::de::DeserializeOwned>(
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or(default)
 }
-/// Read a hotkey setting from the store.
-///
-/// Semantics:
-/// - missing key => use default
-/// - explicit null => disabled (None)
-/// - invalid value => use default
-#[cfg(desktop)]
-fn get_hotkey_from_store(
-    app: &AppHandle,
-    key: &str,
-    default_fn: fn() -> Option<InternalHotkeyConfig>,
-) -> Option<HotkeyConfig> {
-    use serde_json::Value;
-
-    let raw = app
-        .store("settings.json")
-        .ok()
-        .and_then(|store| store.get(key));
-
-    match raw {
-        None => default_fn(),
-        Some(Value::Null) => None,
-        Some(v) => serde_json::from_value::<InternalHotkeyConfig>(v)
-            .ok()
-            .or_else(default_fn),
-    }
-}
-
-#[cfg(desktop)]
-pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    settings::defaults::ensure_default_settings(app)
-}
 /// Emit a system event to the frontend for debugging
 #[cfg(desktop)]
 pub(crate) fn emit_system_event(

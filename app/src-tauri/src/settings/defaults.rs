@@ -20,9 +20,7 @@ use super::{HotkeyConfig, ProxySettings, VadSettings};
 /// To prevent that, we eagerly seed `settings.json` with defaults for missing/null keys
 /// (without overwriting any existing values).
 #[cfg(desktop)]
-pub(crate) fn ensure_default_settings(
-    app: &AppHandle,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let store = app.store("settings.json")?;
 
     // Keep these defaults aligned with pipeline defaults / expected backend behavior.

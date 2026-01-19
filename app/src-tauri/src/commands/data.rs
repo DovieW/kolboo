@@ -210,7 +210,8 @@ pub fn delete_all_settings(app: AppHandle) -> Result<(), String> {
     }
 
     // Recreate the store + seed defaults so UI/backend agree.
-    crate::settings::defaults::ensure_default_settings(&app).map_err(|e| e.to_string())?;
+    crate::settings::defaults::ensure_default_settings(&app)
+        .map_err(|e: Box<dyn std::error::Error>| e.to_string())?;
 
     // Best-effort: sync pipeline so it uses the new defaults.
     let _ = crate::commands::config::sync_pipeline_config(app);
