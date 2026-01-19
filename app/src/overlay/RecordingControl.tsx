@@ -27,6 +27,7 @@ import {
 import { listenTyped } from "../lib/tauri/events";
 import { useOverlayUiReducer } from "../lib/useOverlayUiReducer";
 import { AudioWave, BackendAudioWave } from "./AudioWave";
+import { useOverlayHoverGating } from "./useOverlayHoverGating";
 
 function readBootAccentColor(): string | null {
 	try {
@@ -193,12 +194,6 @@ export default function RecordingControl() {
 	const [sessionPresetId, setSessionPresetId] = useState<string | null>(null);
 
 	type OverlayControllerState = {
-		widgetEl: HTMLDivElement | null;
-		hoverCloseTimer: number | null;
-		lastMouseMoveTs: number;
-		lastMousePos: { x: number; y: number; ts: number } | null;
-		lastOverlayShowTs: number;
-		suppressHoverUntilLeave: boolean;
 		hasDragStarted: boolean;
 		exitTimer: number | null;
 		lastBusyPhase: "transcribing" | "routing" | "rewriting" | null;
@@ -209,12 +204,6 @@ export default function RecordingControl() {
 	};
 
 	const controllerRef = useRef<OverlayControllerState>({
-		widgetEl: null,
-		hoverCloseTimer: null,
-		lastMouseMoveTs: Date.now(),
-		lastMousePos: null,
-		lastOverlayShowTs: 0,
-		suppressHoverUntilLeave: false,
 		hasDragStarted: false,
 		exitTimer: null,
 		lastBusyPhase: null,
@@ -225,10 +214,11 @@ export default function RecordingControl() {
 	});
 
 	const [containerRef, rect] = useResizeObserver<HTMLDivElement>();
+	const widgetRef = useRef<HTMLDivElement | null>(null);
 
 	const setWidgetRef = useCallback(
 		(el: HTMLDivElement | null) => {
-			controllerRef.current.widgetEl = el;
+			widgetRef.current = el;
 			// Mantine's useResizeObserver returns a ref object.
 			(containerRef as React.MutableRefObject<HTMLDivElement | null>).current =
 				el;
@@ -342,6 +332,16 @@ export default function RecordingControl() {
 		routerIsEffectivelyOn &&
 		hoverHasPresets &&
 		rewriteIsEnabled;
+
+	const {
+		markOverlayShownForHoverGating,
+		handleMouseEnter,
+		handleMouseLeave,
+	} = useOverlayHoverGating({
+		enabled: hoverPanelEnabled,
+		shouldShowPresets: shouldShowHoverPresets,
+		getWidgetElement: () => widgetRef.current,
+	});
 
 	const _toggleRouterEnabled = useCallback(async () => {
 		if (!settings) return;
@@ -502,49 +502,6 @@ export default function RecordingControl() {
 		};
 	}, [animState, pipelineState, setPipelineState, settings?.overlay_mode]);
 
-	// Track mouse movement in this window so we can distinguish:
-	// - pointer actually moved onto the overlay (show hover)
-	// - overlay appeared underneath a stationary pointer (do NOT show hover)
-	useEffect(() => {
-		const onMoveWithPos = (e: MouseEvent) => {
-			const now = Date.now();
-			controllerRef.current.lastMouseMoveTs = now;
-			controllerRef.current.lastMousePos = { x: e.clientX, y: e.clientY, ts: now };
-		};
-
-		window.addEventListener("mousemove", onMoveWithPos, { passive: true });
-		return () => {
-			window.removeEventListener("mousemove", onMoveWithPos);
-		};
-	}, []);
-
-	const markOverlayShownForHoverGating = useCallback(() => {
-		controllerRef.current.lastOverlayShowTs = Date.now();
-		controllerRef.current.suppressHoverUntilLeave = false;
-
-		// If the overlay becomes visible under the cursor, we want to require
-		// leave + re-enter before showing the hover panel.
-		const pos = controllerRef.current.lastMousePos;
-		if (!pos) return;
-
-		const el = controllerRef.current.widgetEl;
-		if (!el) return;
-
-		// Wait two frames so layout/visibility has settled.
-		requestAnimationFrame(() => {
-			requestAnimationFrame(() => {
-				try {
-					const hit = document.elementFromPoint(pos.x, pos.y);
-					if (hit && el.contains(hit)) {
-						controllerRef.current.suppressHoverUntilLeave = true;
-						tauriAPI.hideOverlayHover().catch(() => {});
-					}
-				} catch {
-					// ignore
-				}
-			});
-		});
-	}, []);
 
 	// Resolve the active program profile periodically while expanded so we can
 	// show profile-scoped preset info in the hover panel.
@@ -1236,47 +1193,8 @@ export default function RecordingControl() {
 			{...bindDrag()}
 			className="overlay-widget"
 			data-anim={animState}
-			onMouseEnter={() => {
-				if (controllerRef.current.hoverCloseTimer) {
-					window.clearTimeout(controllerRef.current.hoverCloseTimer);
-					controllerRef.current.hoverCloseTimer = null;
-				}
-				if (!hoverPanelEnabled || !shouldShowHoverPresets) {
-					tauriAPI.hideOverlayHover().catch(() => {});
-					return;
-				}
-
-				// If the overlay just popped in underneath a stationary cursor, a
-				// mouseenter can fire without the user intending to hover.
-				// Suppress hover until the user leaves and re-enters.
-				if (controllerRef.current.suppressHoverUntilLeave) {
-					return;
-				}
-
-				const now = Date.now();
-				const justShown = now - controllerRef.current.lastOverlayShowTs < 650;
-				const movedRecently = now - controllerRef.current.lastMouseMoveTs < 120;
-				if (justShown && !movedRecently) {
-					controllerRef.current.suppressHoverUntilLeave = true;
-					tauriAPI.hideOverlayHover().catch(() => {});
-					return;
-				}
-
-				tauriAPI.showOverlayHover().catch(() => {});
-			}}
-			onMouseLeave={() => {
-				if (controllerRef.current.suppressHoverUntilLeave) {
-					// User has moved away; next enter is an intentional hover.
-					controllerRef.current.suppressHoverUntilLeave = false;
-					return;
-				}
-
-				if (!hoverPanelEnabled || !shouldShowHoverPresets) {
-					tauriAPI.hideOverlayHover().catch(() => {});
-					return;
-				}
-				tauriAPI.scheduleHideOverlayHover(220).catch(() => {});
-			}}
+			onMouseEnter={handleMouseEnter}
+			onMouseLeave={handleMouseLeave}
 			style={{
 				width: "100%",
 				position: "relative",

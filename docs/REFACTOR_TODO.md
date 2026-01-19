@@ -4,14 +4,6 @@ This file is a parking lot for larger refactors that came up while working on sm
 
 ## Overlay UI (React)
 
-- **Split `app/src/OverlayApp.tsx` into smaller modules.**
-
-  - Suggested extraction targets:
-    - `RecordingControl` (top-level controller)
-    - `BackendAudioWave` + rendering helpers
-    - `AudioWave` (browser analyser fallback)
-    - Hover gating logic (mouse tracking + suppress-on-show)
-
 - **Extract the overlay UI reducer into a dedicated hook.**
 
   - Move the reducer + action types into something like `app/src/lib/useOverlayUiReducer.ts`.
