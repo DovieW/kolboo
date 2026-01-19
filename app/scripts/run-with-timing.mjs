@@ -41,58 +41,58 @@ const resolveBin = (command) => {
 };
 
 const color = {
-  reset: "\u001b[0m",
-  gray: "\u001b[90m",
-  cyan: "\u001b[36m",
-  green: "\u001b[32m",
-  yellow: "\u001b[33m",
-  red: "\u001b[31m",
+	reset: "\u001b[0m",
+	gray: "\u001b[90m",
+	cyan: "\u001b[36m",
+	green: "\u001b[32m",
+	yellow: "\u001b[33m",
+	red: "\u001b[31m",
 };
 
 const formatLocalTime = (timestamp) => {
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: 3,
-    hour12: true,
-  });
+	const formatter = new Intl.DateTimeFormat(undefined, {
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "numeric",
+		minute: "2-digit",
+		second: "2-digit",
+		fractionalSecondDigits: 3,
+		hour12: true,
+	});
 
-  return formatter.format(new Date(timestamp));
+	return formatter.format(new Date(timestamp));
 };
 
 const formatDuration = (elapsedMs) => {
-  if (elapsedMs < 1000) {
-    return `${elapsedMs}ms`;
-  }
+	if (elapsedMs < 1000) {
+		return `${elapsedMs}ms`;
+	}
 
-  if (elapsedMs < 60_000) {
-    return `${(elapsedMs / 1000).toFixed(2)}s`;
-  }
+	if (elapsedMs < 60_000) {
+		return `${(elapsedMs / 1000).toFixed(2)}s`;
+	}
 
-  if (elapsedMs < 3_600_000) {
-    const minutes = Math.floor(elapsedMs / 60_000);
-    const seconds = Math.floor((elapsedMs % 60_000) / 1000)
-      .toString()
-      .padStart(2, "0");
-    return `${minutes}m ${seconds}s`;
-  }
+	if (elapsedMs < 3_600_000) {
+		const minutes = Math.floor(elapsedMs / 60_000);
+		const seconds = Math.floor((elapsedMs % 60_000) / 1000)
+			.toString()
+			.padStart(2, "0");
+		return `${minutes}m ${seconds}s`;
+	}
 
-  const hours = Math.floor(elapsedMs / 3_600_000);
-  const minutes = Math.floor((elapsedMs % 3_600_000) / 60_000)
-    .toString()
-    .padStart(2, "0");
-  return `${hours}h ${minutes}m`;
+	const hours = Math.floor(elapsedMs / 3_600_000);
+	const minutes = Math.floor((elapsedMs % 3_600_000) / 60_000)
+		.toString()
+		.padStart(2, "0");
+	return `${hours}h ${minutes}m`;
 };
 
 const logTime = (label, message, tint) => {
-  const prefix = `${color.cyan}[time]${color.reset}`;
-  const coloredLabel = tint ? `${tint}${label}${color.reset}` : label;
-  const coloredMessage = tint ? `${tint}${message}${color.reset}` : message;
-  console.log(`${prefix} ${coloredLabel}: ${coloredMessage}`);
+	const prefix = `${color.cyan}[time]${color.reset}`;
+	const coloredLabel = tint ? `${tint}${label}${color.reset}` : label;
+	const coloredMessage = tint ? `${tint}${message}${color.reset}` : message;
+	console.log(`${prefix} ${coloredLabel}: ${coloredMessage}`);
 };
 
 const start = Date.now();
@@ -113,23 +113,23 @@ if (useShell) {
 	commandLabel = [command, ...commandArgs].join(" ");
 	const resolvedCommand = resolveBin(command);
 	const isWindows = process.platform === "win32";
-  const isCmdShim = isWindows && /\.(cmd|bat)$/i.test(resolvedCommand);
+	const isCmdShim = isWindows && /\.(cmd|bat)$/i.test(resolvedCommand);
 
-  if (isCmdShim) {
-    child = spawn(
-      "cmd.exe",
-      ["/d", "/s", "/c", resolvedCommand, ...commandArgs],
-      {
-        stdio: "inherit",
-        env,
-      },
-    );
-  } else {
-    child = spawn(resolvedCommand, commandArgs, {
-      stdio: "inherit",
-      env,
-    });
-  }
+	if (isCmdShim) {
+		child = spawn(
+			"cmd.exe",
+			["/d", "/s", "/c", resolvedCommand, ...commandArgs],
+			{
+				stdio: "inherit",
+				env,
+			},
+		);
+	} else {
+		child = spawn(resolvedCommand, commandArgs, {
+			stdio: "inherit",
+			env,
+		});
+	}
 }
 
 logTime("start", `${formatLocalTime(start)} (${commandLabel})`, color.green);
@@ -138,12 +138,12 @@ child.on("close", (code, signal) => {
 	const end = Date.now();
 	const elapsedMs = end - start;
 	logTime("end", `${formatLocalTime(end)} (${commandLabel})`, color.green);
-  logTime("elapsed", formatDuration(elapsedMs), color.yellow);
+	logTime("elapsed", formatDuration(elapsedMs), color.yellow);
 
 	if (signal) {
 		console.error(
-      `${color.red}[time] terminated by signal ${signal}${color.reset}`,
-    );
+			`${color.red}[time] terminated by signal ${signal}${color.reset}`,
+		);
 		process.exit(1);
 	}
 
