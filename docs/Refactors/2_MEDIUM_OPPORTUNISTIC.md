@@ -6,13 +6,6 @@ They tend to improve maintainability and reduce future friction, but they’re n
 
 ## Overlay UI (React)
 
-- **Split `app/src/OverlayApp.tsx` into smaller modules.**
-  - Suggested extraction targets:
-    - `RecordingControl` (top-level controller)
-    - `BackendAudioWave` + rendering helpers
-    - `AudioWave` (browser analyser fallback)
-    - Hover gating logic (mouse tracking + suppress-on-show)
-
 - **Consider a single “overlay controller” state object.**
   - Right now some state lives in refs, some in `useState`, some in the reducer.
   - A follow-up could consolidate more of this into one predictable state machine, but that’s a larger change.
