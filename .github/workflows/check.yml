@@ -14,6 +14,98 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Detect relevant changes
+        id: changes
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ts:
+              - 'app/src/**'
+              - 'app/public/**'
+              - 'app/index.html'
+              - 'app/vite.config.ts'
+              - 'app/tsconfig.json'
+              - 'app/biome.json'
+              - 'app/package.json'
+              - 'app/pnpm-lock.yaml'
+              - '.github/workflows/check.yml'
+
+      - name: Setup Node
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Read pnpm version (from app/package.json)
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        id: pnpm-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm_version=$(node -p "require('./app/package.json').packageManager.split('@')[1]")
+          echo "pnpm_version=${pnpm_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Enable pnpm (Corepack)
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@${{ steps.pnpm-version.outputs.pnpm_version }} --activate
+          pnpm -v
+
+      - name: Get pnpm store directory
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        id: pnpm-store
+        shell: bash
+        run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.store_path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install app dependencies
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (CI)
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        working-directory: app
+        run: pnpm lint:ci
+
+      - name: Typecheck
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        working-directory: app
+        run: pnpm typecheck
+
+      - name: Knip
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        working-directory: app
+        run: pnpm knip
+
+      - name: Unit tests
+        if: github.event_name != 'pull_request' || steps.changes.outputs.ts == 'true'
+        working-directory: app
+        run: pnpm test
+
+      - name: Skip TS checks (no relevant changes)
+        if: github.event_name == 'pull_request' && steps.changes.outputs.ts != 'true'
+        run: echo "No TS/JS-related files changed; skipping TS checks."
+
   check:
     runs-on: ubuntu-latest
 
