@@ -660,6 +660,15 @@ export interface AppSettings {
 	github_backup_gist_id: string | null;
 }
 
+export interface SettingsDoctorIssue {
+	key: string;
+	message: string;
+}
+
+export interface SettingsDoctorReport {
+	issues: SettingsDoctorIssue[];
+}
+
 export interface OpenWindowInfo {
 	title: string;
 	process_path: string;

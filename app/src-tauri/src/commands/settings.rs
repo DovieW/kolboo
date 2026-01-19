@@ -8,6 +8,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
+use crate::settings::doctor::SettingsDoctorReport;
+#[cfg(desktop)]
+use crate::settings::doctor::{self, SETTINGS_DOCTOR_KEYS};
 #[cfg(desktop)]
 use std::collections::HashSet;
 
@@ -414,4 +417,29 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn register_shortcuts(_app: AppHandle) -> Result<(), String> {
     Ok(())
+}
+
+/// Validate settings.json after applying backend defaults.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn settings_doctor(app: AppHandle) -> Result<SettingsDoctorReport, String> {
+    crate::settings::defaults::ensure_default_settings(&app).map_err(|e| e.to_string())?;
+
+    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    let mut values = serde_json::Map::new();
+
+    for key in SETTINGS_DOCTOR_KEYS {
+        if let Some(value) = store.get(*key) {
+            values.insert((*key).to_string(), value);
+        }
+    }
+
+    Ok(doctor::validate_settings_map(&values))
+}
+
+// Stub for non-desktop platforms
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn settings_doctor(_app: AppHandle) -> Result<SettingsDoctorReport, String> {
+    Ok(SettingsDoctorReport::default())
 }

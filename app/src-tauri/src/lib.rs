@@ -2682,6 +2682,7 @@ pub fn run() {
             commands::settings::register_shortcuts,
             commands::settings::unregister_shortcuts,
             commands::settings::set_hotkey_debug_enabled_runtime,
+            commands::settings::settings_doctor,
             is_audio_mute_supported,
             commands::history::add_history_entry,
             commands::history::get_history,

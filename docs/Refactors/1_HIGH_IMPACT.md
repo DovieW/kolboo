@@ -12,7 +12,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
   - Today: backend seeds defaults in `ensure_default_settings(...)`, and frontend normalizes/migrates in `app/src/lib/tauri.ts`.
   - Add:
     - explicit migrations (vN -> vN+1) that run at startup (not when visiting a UI screen)
-    - a small “settings doctor” function/command: validate -> normalize -> report problems (for debugging)
   - Bonus: this also reduces Rust/TS drift because the migration logic lives in one place.
 
 - **Standardize error handling across commands (one error shape to the UI).**

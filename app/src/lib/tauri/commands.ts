@@ -30,6 +30,7 @@ import type {
 	RecordingsStats,
 	RequestLog,
 	SettingsChangedPayload,
+	SettingsDoctorReport,
 	SystemProxyInfo,
 	TestLlmRewriteResponse,
 	TestRewriteWithPromptResponse,
@@ -211,6 +212,10 @@ export const tauriAPI = {
 
 	async unregisterShortcuts(): Promise<void> {
 		return invoke("unregister_shortcuts");
+	},
+
+	async runSettingsDoctor(): Promise<SettingsDoctorReport> {
+		return invoke("settings_doctor");
 	},
 
 	// History API
