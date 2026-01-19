@@ -191,51 +191,66 @@ export default function RecordingControl() {
 		setError,
 	} = useOverlayUiReducer();
 	const [sessionPresetId, setSessionPresetId] = useState<string | null>(null);
-	const hoverCloseTimerRef = useRef<number | null>(null);
-	const lastMouseMoveTsRef = useRef<number>(Date.now());
-	const lastMousePosRef = useRef<{ x: number; y: number; ts: number } | null>(
-		null,
-	);
-	const lastOverlayShowTsRef = useRef<number>(0);
-	const suppressHoverUntilLeaveRef = useRef<boolean>(false);
+
+	type OverlayControllerState = {
+		widgetEl: HTMLDivElement | null;
+		hoverCloseTimer: number | null;
+		lastMouseMoveTs: number;
+		lastMousePos: { x: number; y: number; ts: number } | null;
+		lastOverlayShowTs: number;
+		suppressHoverUntilLeave: boolean;
+		hasDragStarted: boolean;
+		exitTimer: number | null;
+		lastBusyPhase: "transcribing" | "routing" | "rewriting" | null;
+		holdPhaseTimer: number | null;
+		prevPipelineForPhaseHold: PipelineState;
+		prevPipelineForExpand: PipelineState;
+		prevPipelineState: PipelineState;
+	};
+
+	const controllerRef = useRef<OverlayControllerState>({
+		widgetEl: null,
+		hoverCloseTimer: null,
+		lastMouseMoveTs: Date.now(),
+		lastMousePos: null,
+		lastOverlayShowTs: 0,
+		suppressHoverUntilLeave: false,
+		hasDragStarted: false,
+		exitTimer: null,
+		lastBusyPhase: null,
+		holdPhaseTimer: null,
+		prevPipelineForPhaseHold: "idle",
+		prevPipelineForExpand: "idle",
+		prevPipelineState: "idle",
+	});
 
 	const [containerRef, rect] = useResizeObserver<HTMLDivElement>();
 
-	const widgetElRef = useRef<HTMLDivElement | null>(null);
 	const setWidgetRef = useCallback(
 		(el: HTMLDivElement | null) => {
-			widgetElRef.current = el;
+			controllerRef.current.widgetEl = el;
 			// Mantine's useResizeObserver returns a ref object.
 			(containerRef as React.MutableRefObject<HTMLDivElement | null>).current =
 				el;
 		},
 		[containerRef],
 	);
-	const hasDragStartedRef = useRef(false);
-	const exitTimerRef = useRef<number | null>(null);
 
 	// During the exit animation, the backend may have already flipped the pipeline
 	// back to idle. Hold onto the last busy phase so we don't briefly render the
 	// waveform right before the window hides.
-	const lastBusyPhaseRef = useRef<
-		"transcribing" | "routing" | "rewriting" | null
-	>(null);
-
 	// In recording-only mode, the pipeline can reach `idle` slightly before we
 	// receive the backend's `overlay-hide-requested` event. Keep the phase text
 	// visible across that tiny gap too.
 	const [holdPhaseText, setHoldPhaseText] = useState<
 		"transcribing" | "routing" | "rewriting" | null
 	>(null);
-	const holdPhaseTimerRef = useRef<number | null>(null);
-	const prevPipelineForPhaseHoldRef = useRef<PipelineState>("idle");
 
 	// Collapsed/expanded UI state
 	const [expanded, setExpanded] = useState(false);
 	// We only render the expanded widget after the native window has resized wide enough,
 	// to avoid a one-frame clipped/"missing border" intermediate.
 	const [renderExpanded, setRenderExpanded] = useState(false);
-	const prevPipelineForExpandRef = useRef<PipelineState>("idle");
 
 	// Load settings (overlay mode + selected mic)
 	const { data: settings } = useSettings();
@@ -493,8 +508,8 @@ export default function RecordingControl() {
 	useEffect(() => {
 		const onMoveWithPos = (e: MouseEvent) => {
 			const now = Date.now();
-			lastMouseMoveTsRef.current = now;
-			lastMousePosRef.current = { x: e.clientX, y: e.clientY, ts: now };
+			controllerRef.current.lastMouseMoveTs = now;
+			controllerRef.current.lastMousePos = { x: e.clientX, y: e.clientY, ts: now };
 		};
 
 		window.addEventListener("mousemove", onMoveWithPos, { passive: true });
@@ -504,15 +519,15 @@ export default function RecordingControl() {
 	}, []);
 
 	const markOverlayShownForHoverGating = useCallback(() => {
-		lastOverlayShowTsRef.current = Date.now();
-		suppressHoverUntilLeaveRef.current = false;
+		controllerRef.current.lastOverlayShowTs = Date.now();
+		controllerRef.current.suppressHoverUntilLeave = false;
 
 		// If the overlay becomes visible under the cursor, we want to require
 		// leave + re-enter before showing the hover panel.
-		const pos = lastMousePosRef.current;
+		const pos = controllerRef.current.lastMousePos;
 		if (!pos) return;
 
-		const el = widgetElRef.current;
+		const el = controllerRef.current.widgetEl;
 		if (!el) return;
 
 		// Wait two frames so layout/visibility has settled.
@@ -521,7 +536,7 @@ export default function RecordingControl() {
 				try {
 					const hit = document.elementFromPoint(pos.x, pos.y);
 					if (hit && el.contains(hit)) {
-						suppressHoverUntilLeaveRef.current = true;
+						controllerRef.current.suppressHoverUntilLeave = true;
 						tauriAPI.hideOverlayHover().catch(() => {});
 					}
 				} catch {
@@ -586,18 +601,18 @@ export default function RecordingControl() {
 	}, [pipelineState]);
 
 	useEffect(() => {
-		const prev = prevPipelineForPhaseHoldRef.current;
-		prevPipelineForPhaseHoldRef.current = pipelineState;
+		const prev = controllerRef.current.prevPipelineForPhaseHold;
+		controllerRef.current.prevPipelineForPhaseHold = pipelineState;
 
 		if (
 			pipelineState === "transcribing" ||
 			pipelineState === "routing" ||
 			pipelineState === "rewriting"
 		) {
-			lastBusyPhaseRef.current = pipelineState;
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
+			controllerRef.current.lastBusyPhase = pipelineState;
+			if (controllerRef.current.holdPhaseTimer) {
+				window.clearTimeout(controllerRef.current.holdPhaseTimer);
+				controllerRef.current.holdPhaseTimer = null;
 			}
 			if (!hoverPanelEnabled || !shouldShowHoverPresets) {
 				setHoldPhaseText(pipelineState);
@@ -615,24 +630,24 @@ export default function RecordingControl() {
 			if (holdPhaseText !== prev) {
 				setHoldPhaseText(prev);
 			}
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
+			if (controllerRef.current.holdPhaseTimer) {
+				window.clearTimeout(controllerRef.current.holdPhaseTimer);
 			}
 			// Small grace window; hide event typically arrives quickly. If it doesn't,
 			// we still don't want the overlay to look "stuck".
-			holdPhaseTimerRef.current = window.setTimeout(() => {
+			controllerRef.current.holdPhaseTimer = window.setTimeout(() => {
 				setHoldPhaseText(null);
-				holdPhaseTimerRef.current = null;
+				controllerRef.current.holdPhaseTimer = null;
 			}, 650);
 			return;
 		}
 
 		// New capture cycle (or user action) should not inherit prior phase text.
 		if (pipelineState === "arming" || pipelineState === "recording") {
-			lastBusyPhaseRef.current = null;
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
+			controllerRef.current.lastBusyPhase = null;
+			if (controllerRef.current.holdPhaseTimer) {
+				window.clearTimeout(controllerRef.current.holdPhaseTimer);
+				controllerRef.current.holdPhaseTimer = null;
 			}
 			if (holdPhaseText !== null) {
 				setHoldPhaseText(null);
@@ -642,9 +657,9 @@ export default function RecordingControl() {
 
 		// In always-visible mode, don't let phase text linger after returning idle.
 		if (settings?.overlay_mode === "always" && pipelineState === "idle") {
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
+			if (controllerRef.current.holdPhaseTimer) {
+				window.clearTimeout(controllerRef.current.holdPhaseTimer);
+				controllerRef.current.holdPhaseTimer = null;
 			}
 			if (holdPhaseText !== null) {
 				setHoldPhaseText(null);
@@ -712,8 +727,8 @@ export default function RecordingControl() {
 
 	// Keep expanded while active; collapse when returning to idle.
 	useEffect(() => {
-		const prev = prevPipelineForExpandRef.current;
-		prevPipelineForExpandRef.current = pipelineState;
+		const prev = controllerRef.current.prevPipelineForExpand;
+		controllerRef.current.prevPipelineForExpand = pipelineState;
 
 		// In recording-only overlay mode, we never want to show the collapsed widget.
 		// The window itself is shown/hidden by the backend; the overlay should stay in
@@ -758,25 +773,25 @@ export default function RecordingControl() {
 	}, [pipelineState, settings?.overlay_mode]);
 
 	const requestAnimatedHide = useCallback(() => {
-		if (exitTimerRef.current) {
-			window.clearTimeout(exitTimerRef.current);
-			exitTimerRef.current = null;
+		if (controllerRef.current.exitTimer) {
+			window.clearTimeout(controllerRef.current.exitTimer);
+			controllerRef.current.exitTimer = null;
 		}
 
 		setAnimState("exit");
 		// Keep duration in sync with CSS transition (180ms) + a tiny buffer.
-		exitTimerRef.current = window.setTimeout(() => {
+		controllerRef.current.exitTimer = window.setTimeout(() => {
 			invoke("hide_overlay").catch(console.error);
 			// Prep for next entrance.
 			setAnimState("enter");
 			// Clear held phase so the next show doesn't accidentally reuse it.
-			lastBusyPhaseRef.current = null;
-			if (holdPhaseTimerRef.current) {
-				window.clearTimeout(holdPhaseTimerRef.current);
-				holdPhaseTimerRef.current = null;
+			controllerRef.current.lastBusyPhase = null;
+			if (controllerRef.current.holdPhaseTimer) {
+				window.clearTimeout(controllerRef.current.holdPhaseTimer);
+				controllerRef.current.holdPhaseTimer = null;
 			}
 			setHoldPhaseText(null);
-			exitTimerRef.current = null;
+			controllerRef.current.exitTimer = null;
 		}, 210);
 	}, [setAnimState]);
 
@@ -792,9 +807,9 @@ export default function RecordingControl() {
 	}, [clearError, requestAnimatedHide, settings?.overlay_mode]);
 
 	const requestAnimatedShow = useCallback(() => {
-		if (exitTimerRef.current) {
-			window.clearTimeout(exitTimerRef.current);
-			exitTimerRef.current = null;
+		if (controllerRef.current.exitTimer) {
+			window.clearTimeout(controllerRef.current.exitTimer);
+			controllerRef.current.exitTimer = null;
 		}
 
 		// Force a transition even if we were previously visible.
@@ -845,10 +860,9 @@ export default function RecordingControl() {
 
 	// If the overlay itself was used to record (not hotkey path), honor recording-only by
 	// animating out when we return to idle.
-	const prevPipelineStateRef = useRef<PipelineState>("idle");
 	useEffect(() => {
-		const prev = prevPipelineStateRef.current;
-		prevPipelineStateRef.current = pipelineState;
+		const prev = controllerRef.current.prevPipelineState;
+		controllerRef.current.prevPipelineState = pipelineState;
 
 		if (settings?.overlay_mode !== "recording_only") return;
 		if (pipelineState !== "idle") return;
@@ -1146,7 +1160,7 @@ export default function RecordingControl() {
 	const bindDrag = useDrag(
 		({ movement: [mx, my], first, last, memo }) => {
 			if (first) {
-				hasDragStartedRef.current = false;
+				controllerRef.current.hasDragStarted = false;
 				return false;
 			}
 
@@ -1154,13 +1168,13 @@ export default function RecordingControl() {
 			const DRAG_THRESHOLD = 5;
 
 			if (!memo && distance > DRAG_THRESHOLD) {
-				hasDragStartedRef.current = true;
+				controllerRef.current.hasDragStarted = true;
 				tauriAPI.startDragging();
 				return true;
 			}
 
 			if (last) {
-				hasDragStartedRef.current = false;
+				controllerRef.current.hasDragStarted = false;
 			}
 
 			return memo;
@@ -1194,9 +1208,10 @@ export default function RecordingControl() {
 		// While fading out, keep showing the last busy phase (if any) to avoid a
 		// one-frame flash of the waveform as the pipeline returns to idle.
 		if (animState === "exit") {
-			if (lastBusyPhaseRef.current === "rewriting") return "rewriting...";
-			if (lastBusyPhaseRef.current === "routing") return "routing...";
-			if (lastBusyPhaseRef.current === "transcribing") return "transcribing...";
+			if (controllerRef.current.lastBusyPhase === "rewriting") return "rewriting...";
+			if (controllerRef.current.lastBusyPhase === "routing") return "routing...";
+			if (controllerRef.current.lastBusyPhase === "transcribing")
+				return "transcribing...";
 		}
 
 		return null;
@@ -1222,9 +1237,9 @@ export default function RecordingControl() {
 			className="overlay-widget"
 			data-anim={animState}
 			onMouseEnter={() => {
-				if (hoverCloseTimerRef.current) {
-					window.clearTimeout(hoverCloseTimerRef.current);
-					hoverCloseTimerRef.current = null;
+				if (controllerRef.current.hoverCloseTimer) {
+					window.clearTimeout(controllerRef.current.hoverCloseTimer);
+					controllerRef.current.hoverCloseTimer = null;
 				}
 				if (!hoverPanelEnabled || !shouldShowHoverPresets) {
 					tauriAPI.hideOverlayHover().catch(() => {});
@@ -1234,15 +1249,15 @@ export default function RecordingControl() {
 				// If the overlay just popped in underneath a stationary cursor, a
 				// mouseenter can fire without the user intending to hover.
 				// Suppress hover until the user leaves and re-enters.
-				if (suppressHoverUntilLeaveRef.current) {
+				if (controllerRef.current.suppressHoverUntilLeave) {
 					return;
 				}
 
 				const now = Date.now();
-				const justShown = now - lastOverlayShowTsRef.current < 650;
-				const movedRecently = now - lastMouseMoveTsRef.current < 120;
+				const justShown = now - controllerRef.current.lastOverlayShowTs < 650;
+				const movedRecently = now - controllerRef.current.lastMouseMoveTs < 120;
 				if (justShown && !movedRecently) {
-					suppressHoverUntilLeaveRef.current = true;
+					controllerRef.current.suppressHoverUntilLeave = true;
 					tauriAPI.hideOverlayHover().catch(() => {});
 					return;
 				}
@@ -1250,9 +1265,9 @@ export default function RecordingControl() {
 				tauriAPI.showOverlayHover().catch(() => {});
 			}}
 			onMouseLeave={() => {
-				if (suppressHoverUntilLeaveRef.current) {
+				if (controllerRef.current.suppressHoverUntilLeave) {
 					// User has moved away; next enter is an intentional hover.
-					suppressHoverUntilLeaveRef.current = false;
+					controllerRef.current.suppressHoverUntilLeave = false;
 					return;
 				}
 

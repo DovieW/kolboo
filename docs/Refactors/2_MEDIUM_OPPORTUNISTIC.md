@@ -4,12 +4,6 @@ These are worthwhile, but I’d usually do them **when you’re already working 
 
 They tend to improve maintainability and reduce future friction, but they’re not as directly “risk reducing” as the high-impact list.
 
-## Overlay UI (React)
-
-- **Consider a single “overlay controller” state object.**
-  - Right now some state lives in refs, some in `useState`, some in the reducer.
-  - A follow-up could consolidate more of this into one predictable state machine, but that’s a larger change.
-
 ## Biggest “hot spot” files by size (worth refactoring)
 
 These are the files that are _currently_ the largest / most responsibility-dense. They aren’t “bad”, but they’re the most likely to become painful to change.
