@@ -114,6 +114,8 @@ describe("legacy settings fixtures", () => {
 		const { tauriAPI } = await import("../tauri");
 		const settings = await tauriAPI.getSettings();
 
+		expect(settings.settings_version).toBe(1);
+		expect(currentStore.data.get("settings_version")).toBe(1);
 		expect(settings.cleanup_prompt_sections).toEqual({
 			system: { content: "Legacy system prompt" },
 		});

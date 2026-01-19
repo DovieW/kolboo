@@ -11,7 +11,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
 - **Make settings a versioned, schema-driven contract (single source of truth).**
   - Today: backend seeds defaults in `ensure_default_settings(...)`, and frontend normalizes/migrates in `app/src/lib/tauri.ts`.
   - Add:
-    - `settings_version` stored in `settings.json`
     - explicit migrations (vN -> vN+1) that run at startup (not when visiting a UI screen)
     - a small “settings doctor” function/command: validate -> normalize -> report problems (for debugging)
   - Bonus: this also reduces Rust/TS drift because the migration logic lives in one place.

@@ -52,6 +52,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         false
     };
 
+    // Settings schema version (for forward migrations).
+    // Bump when adding migrations; keep TS/Rust/tests in sync.
+    // Start at version 1 for new installs.
+    dirty |= set_default("settings_version", json!(1u32), false);
+
     dirty |= set_default("stt_provider", json!("groq"), false);
     // Cerebras free-tier toggle (used by stats filtering).
     dirty |= set_default("cerebras_free_tier", json!(true), false);

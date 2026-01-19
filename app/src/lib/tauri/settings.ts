@@ -554,12 +554,26 @@ export const defaultQuickAskToggleHotkey = DEFAULT_QUICK_ASK_TOGGLE_HOTKEY;
 let storeInstance: Store | null = null;
 
 const SETTINGS_GUIDE_STATE_KEY = "settings_guide_state";
+const SETTINGS_VERSION_KEY = "settings_version";
+// Bump when adding settings migrations; keep TS/Rust/tests in sync.
+const SETTINGS_VERSION_DEFAULT = 1;
 
 function normalizeSettingsGuideState(value: unknown): SettingsGuideState {
 	if (value === "pending" || value === "skipped" || value === "completed") {
 		return value;
 	}
 	return "pending";
+}
+
+function normalizeSettingsVersion(value: unknown): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return SETTINGS_VERSION_DEFAULT;
+	}
+	const normalized = Math.trunc(value);
+	if (normalized < SETTINGS_VERSION_DEFAULT) {
+		return SETTINGS_VERSION_DEFAULT;
+	}
+	return normalized;
 }
 
 async function getStore(): Promise<Store> {
@@ -572,6 +586,13 @@ async function getStore(): Promise<Store> {
 export const tauriSettingsAPI = {
 	async getSettings(): Promise<AppSettings> {
 		const store = await getStore();
+
+		const rawSettingsVersion = await store.get(SETTINGS_VERSION_KEY);
+		const settingsVersion = normalizeSettingsVersion(rawSettingsVersion);
+		if (rawSettingsVersion !== settingsVersion) {
+			await store.set(SETTINGS_VERSION_KEY, settingsVersion);
+			await store.save();
+		}
 
 		// Keep a tiny subset of settings mirrored in localStorage so the UI can apply
 		// critical visuals (accent color) before the async store read completes.
@@ -892,6 +913,7 @@ export const tauriSettingsAPI = {
 				: rawQuickAskHold;
 
 		const settings: AppSettings = {
+			settings_version: settingsVersion,
 			toggle_hotkey: normalizeHotkeyConfig(
 				await store.get("toggle_hotkey"),
 				defaultToggleHotkey,

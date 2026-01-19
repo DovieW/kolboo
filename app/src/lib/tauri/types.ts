@@ -494,6 +494,8 @@ export type LocalWhisperLoadMode = "manual" | "on_transcribe" | "on_launch";
 export type MainWindowCloseBehavior = "exit_program" | "minimize_to_tray";
 
 export interface AppSettings {
+	// Settings schema version (used for migrations).
+	settings_version: number;
 	toggle_hotkey: HotkeyConfig | null;
 	hold_hotkey: HotkeyConfig | null;
 	paste_last_hotkey: HotkeyConfig | null;
