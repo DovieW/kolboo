@@ -12,9 +12,14 @@ import type {
 	WhisperModelInfo,
 } from "../tauri";
 import {
+	createAudioMuteSupportedQueryFn,
+	createCostByProviderQueryFn,
 	createCostSummaryQueryFn,
+	createHistoryAllQueryFn,
 	createHistoryPageQueryFn,
 	createModelPricingQueryFn,
+	createRequestLogsQueryFn,
+	createSettingsQueryFn,
 	type QueryFnDeps,
 } from "./queryFns";
 
@@ -135,6 +140,25 @@ describe("queryFns", () => {
 		});
 	});
 
+	it("normalizes cost-by-provider defaults", async () => {
+		const deps = createDeps();
+		const { normalized, queryFn } = createCostByProviderQueryFn(deps, "24h");
+
+		expect(normalized.sttModelKeys).toEqual([]);
+		expect(normalized.llmModelKeys).toEqual([]);
+		expect(normalized.excludeFreeTier).toBe(true);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getCostByProvider).toHaveBeenCalledWith({
+			timeframe: "24h",
+			kind: undefined,
+			sttModelKeys: [],
+			llmModelKeys: [],
+			excludeFreeTier: true,
+		});
+	});
+
 	it("normalizes history page query defaults", async () => {
 		const deps = createDeps();
 		const { normalized, queryFn } = createHistoryPageQueryFn(deps, {
@@ -166,6 +190,15 @@ describe("queryFns", () => {
 		});
 	});
 
+	it("history all query passes undefined limit", async () => {
+		const deps = createDeps();
+		const queryFn = createHistoryAllQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getHistory).toHaveBeenCalledWith(undefined);
+	});
+
 	it("normalizes model pricing params", async () => {
 		const deps = createDeps();
 		const { normalized, queryFn } = createModelPricingQueryFn(deps, {
@@ -184,5 +217,32 @@ describe("queryFns", () => {
 			kind: "llm",
 			model: "",
 		});
+	});
+
+	it("settings query calls getSettings", async () => {
+		const deps = createDeps();
+		const queryFn = createSettingsQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getSettings).toHaveBeenCalled();
+	});
+
+	it("audio mute supported query calls isAudioMuteSupported", async () => {
+		const deps = createDeps();
+		const queryFn = createAudioMuteSupportedQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.isAudioMuteSupported).toHaveBeenCalled();
+	});
+
+	it("request logs query forwards limit", async () => {
+		const deps = createDeps();
+		const queryFn = createRequestLogsQueryFn(deps, 25);
+
+		await queryFn();
+
+		expect(deps.logsAPI.getRequestLogs).toHaveBeenCalledWith(25);
 	});
 });

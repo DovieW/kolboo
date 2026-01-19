@@ -88,4 +88,65 @@ describe("overlayUiReducer", () => {
 		});
 		expect(next.animState).toBe("exit");
 	});
+
+	it("ignores stale poll right after event update", () => {
+		const eventAt = 1000;
+		const afterEvent = overlayUiReducer(baseState, {
+			type: "PIPELINE_SET",
+			source: "event",
+			next: "recording",
+			at: eventAt,
+		});
+
+		const pollAt = eventAt + 200;
+		const afterPoll = overlayUiReducer(afterEvent, {
+			type: "PIPELINE_SET",
+			source: "poll",
+			next: "idle",
+			at: pollAt,
+		});
+
+		expect(afterPoll).toBe(afterEvent);
+	});
+
+	it("accepts poll once suppression window passes", () => {
+		const eventAt = 1000;
+		const afterEvent = overlayUiReducer(baseState, {
+			type: "PIPELINE_SET",
+			source: "event",
+			next: "recording",
+			at: eventAt,
+		});
+
+		const pollAt = eventAt + PIPELINE_POLL_SUPPRESS_MS + 1;
+		const afterPoll = overlayUiReducer(afterEvent, {
+			type: "PIPELINE_SET",
+			source: "poll",
+			next: "idle",
+			at: pollAt,
+		});
+
+		expect(afterPoll.pipelineState).toBe("idle");
+		expect(afterPoll.ignorePollUntilTs).toBe(afterEvent.ignorePollUntilTs);
+	});
+
+	it("hotkey update beats poll until suppression ends", () => {
+		const hotkeyAt = 500;
+		const afterHotkey = overlayUiReducer(baseState, {
+			type: "PIPELINE_SET",
+			source: "hotkey",
+			next: "recording",
+			at: hotkeyAt,
+		});
+
+		const pollAt = hotkeyAt + 100;
+		const afterPoll = overlayUiReducer(afterHotkey, {
+			type: "PIPELINE_SET",
+			source: "poll",
+			next: "idle",
+			at: pollAt,
+		});
+
+		expect(afterPoll).toBe(afterHotkey);
+	});
 });

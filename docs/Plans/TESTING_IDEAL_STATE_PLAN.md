@@ -61,6 +61,18 @@ If these are correct, the app is usually “safe”:
    - hotkey normalization and duplicate detection
    - output mode logic (paste/keystrokes) as pure functions where possible
 
+## Frontend-specific “ideal state”
+
+If you’re specifically asking “what should we test in the React/TS app, and should we chase 80% coverage?”, see:
+
+- `docs/Plans/FRONTEND_TESTING_IDEAL_STATE_PLAN.md`
+
+## Backend-specific “ideal state”
+
+For a Rust/Tauri backend plan that focuses on pipeline safety, provider contract tests, deterministic IO, and test seams (no hardware required by default), see:
+
+- `docs/Plans/BACKEND_TESTING_IDEAL_STATE_PLAN.md`
+
 ## Current state snapshot (what we already have)
 
 ### TypeScript (Vitest)
