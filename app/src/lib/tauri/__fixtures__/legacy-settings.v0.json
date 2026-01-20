@@ -1,0 +1,41 @@
+{
+	"cleanup_prompt_sections": {
+		"main": "Legacy system prompt"
+	},
+	"quick_ask_hold_hotkey": null,
+	"quick_ask_hotkey": { "modifiers": ["Control"], "key": "K" },
+	"quick_ask_conversation_history_count": "banana",
+	"overlay_monitor_target": "activeWindow",
+	"output_mode": "keystrokes",
+	"playing_audio_handling": "force",
+	"rewrite_program_prompt_profiles": [
+		{
+			"id": "profile-1",
+			"name": "Legacy Profile",
+			"program_path": "C:\\Program Files\\Foo\\foo.exe",
+			"cleanup_prompt_sections": { "system": "bad" },
+			"auto_mute_audio": true,
+			"output_mode": "keystrokes",
+			"output_hit_enter": "yes",
+			"quick_replace_enabled": "true",
+			"router": {
+				"enabled": true,
+				"strategy": "vector",
+				"similarity_threshold": "nope"
+			},
+			"presets": [
+				{
+					"id": "preset-1",
+					"name": "Fix",
+					"routing_hints": ["  ", "Use this"],
+					"rewrite_llm_enabled": "maybe",
+					"output_mode": "auto_paste"
+				}
+			]
+		},
+		{
+			"id": "",
+			"name": "Invalid"
+		}
+	]
+}

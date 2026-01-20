@@ -55,10 +55,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
 - **Raise TS per-file coverage thresholds gradually.**
   - Treat this as a “ratchet”: only raise thresholds when tests already exist and churn is manageable.
 
-- **Add at least one real “legacy settings” fixture test.**
-  - Goal: validate migrations/normalization for older `settings.json` shapes.
-  - Keep it deterministic (no network, no keys).
-
 ## Lint rule ratchet (Biome)
 
 - **Re-enable stricter Biome rules gradually (ratchet).**
