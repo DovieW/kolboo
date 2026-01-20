@@ -42,9 +42,9 @@ These are the files that are _currently_ the largest / most responsibility-dense
      - Done: extracted `PromptIntentRouterSection` (router UI).
      - Next: Quick Ask panel wrapper, Quick Replace panel wrapper, STT provider UI.
      - Keep their props “dumb”: pass values + callbacks, no direct data fetching.
-   2) **Create a shared “profile state” hook** (e.g., `usePromptSettingsProfileState.ts`).
-     - Move `useState` + `useEffect` synchronization logic into the hook.
-     - Expose a compact API (values + setters + save helpers).
+   2) ✅ **Create a shared “profile state” hook** (e.g., `usePromptSettingsProfileState.ts`).
+     - Done: `usePromptSettingsProfileState` now owns profile-local state + sync effect.
+     - Exposes values + setters for profile overrides/inheritance state.
    3) **Move prompt test logic** (rewrite test + STT test) into a `usePromptSettingsTests.ts` hook.
      - Keep timing, errors, and output handling isolated.
    4) **Extract “provider/model selection” logic** into a `usePromptProviderOptions.ts` helper.
