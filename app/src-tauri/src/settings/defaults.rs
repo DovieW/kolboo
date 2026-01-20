@@ -103,6 +103,14 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("request_logs_retention_amount", json!(50), false);
     // Only used when mode == "time" (days; 0 = forever)
     dirty |= set_default("request_logs_retention_days", json!(7), false);
+    // Transcription retention mode (amount or time). Used by history capping.
+    dirty |= set_default("transcription_retention_mode", json!("time"), false);
+    dirty |= set_default("transcription_retention_amount", json!(1000), false);
+    // Recordings retention (amount or time). Time-based retention is UI-only today.
+    dirty |= set_default("recordings_retention_mode", json!("amount"), false);
+    dirty |= set_default("recordings_retention_amount", json!(1000), false);
+    dirty |= set_default("recordings_retention_unit", json!("days"), false);
+    dirty |= set_default("recordings_retention_value", json!(0.0), false);
     // Time-based retention for history/transcriptions. 0 = keep forever.
     dirty |= set_default("transcription_retention_days", json!(0), false);
     // New retention keys (unit+value) used by newer UI.

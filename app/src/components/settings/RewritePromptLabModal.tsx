@@ -24,6 +24,38 @@ function errorToMessage(err: unknown): string {
 	}
 }
 
+type OpenAiThinkingEffort = "none" | "low" | "medium" | "high";
+
+function coerceOpenAiReasoningEffort(
+	value: string | null,
+): OpenAiThinkingEffort | null {
+	if (
+		value === "none" ||
+		value === "low" ||
+		value === "medium" ||
+		value === "high"
+	) {
+		return value;
+	}
+
+	return null;
+}
+
+function coerceGeminiThinkingLevel(
+	value: string | null,
+): "minimal" | "low" | "medium" | "high" | null {
+	if (
+		value === "minimal" ||
+		value === "low" ||
+		value === "medium" ||
+		value === "high"
+	) {
+		return value;
+	}
+
+	return null;
+}
+
 export function RewritePromptLabModal(props: {
 	opened: boolean;
 	onClose: () => void;
@@ -555,11 +587,11 @@ export function RewritePromptLabModal(props: {
 									llmModel: selectedModel ?? undefined,
 									openAiReasoningEffort:
 										thinkingSelectKind === "openai"
-											? (selectedThinking as any)
+											? coerceOpenAiReasoningEffort(selectedThinking)
 											: null,
 									geminiThinkingLevel:
 										thinkingSelectKind === "geminiLevel"
-											? (selectedThinking as any)
+											? coerceGeminiThinkingLevel(selectedThinking)
 											: null,
 									geminiThinkingBudget:
 										thinkingSelectKind === "geminiBudget" && selectedThinking

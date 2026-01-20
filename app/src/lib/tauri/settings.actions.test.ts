@@ -156,4 +156,53 @@ describe("tauri settings side effects", () => {
 		expect(currentStore.data.get("transcription_retention_value")).toBe(4);
 		expect(currentStore.data.get("transcription_retention_days")).toBe(4);
 	});
+
+	it("updateRecordingsRetention stores retention settings", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.updateRecordingsRetention({
+			mode: "time",
+			amount: 250,
+			unit: "hours",
+			value: 12.5,
+		});
+
+		expect(currentStore.data.get("recordings_retention_mode")).toBe("time");
+		expect(currentStore.data.get("recordings_retention_amount")).toBe(250);
+		expect(currentStore.data.get("recordings_retention_unit")).toBe("hours");
+		expect(currentStore.data.get("recordings_retention_value")).toBe(12.5);
+		expect(currentStore.saveCalls).toBe(1);
+	});
+
+	it("updateTranscriptionRetentionPolicy persists mode and time retention", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.updateTranscriptionRetentionPolicy({
+			mode: "time",
+			amount: 2000,
+			unit: "days",
+			value: 2.2,
+		});
+
+		expect(currentStore.data.get("transcription_retention_mode")).toBe("time");
+		expect(currentStore.data.get("transcription_retention_amount")).toBe(2000);
+		expect(currentStore.data.get("transcription_retention_unit")).toBe("days");
+		expect(currentStore.data.get("transcription_retention_value")).toBe(2);
+		expect(currentStore.data.get("transcription_retention_days")).toBe(2);
+		
+		// amount mode disables time retention
+		await tauriSettingsAPI.updateTranscriptionRetentionPolicy({
+			mode: "amount",
+			amount: 100,
+			unit: "hours",
+			value: 12,
+		});
+
+		expect(currentStore.data.get("transcription_retention_mode")).toBe("amount");
+		expect(currentStore.data.get("transcription_retention_amount")).toBe(100);
+		expect(currentStore.data.get("transcription_retention_value")).toBe(0);
+		expect(currentStore.saveCalls).toBe(2);
+	});
 });

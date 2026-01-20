@@ -55,12 +55,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
 - **Raise TS per-file coverage thresholds gradually.**
   - Treat this as a “ratchet”: only raise thresholds when tests already exist and churn is manageable.
 
-## Lint rule ratchet (Biome)
-
-- **Re-enable stricter Biome rules gradually (ratchet).**
-  - Pick one rule at a time (e.g. `lint/correctness/useExhaustiveDependencies`), fix existing findings, then flip it back to `error`.
-  - Goal: keep CI green while steadily improving quality.
-
 ## Rust clippy warning backlog
 
 - **Chip away at clippy warnings so `cargo clippy` is more signal than noise.**

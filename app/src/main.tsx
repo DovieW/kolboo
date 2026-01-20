@@ -35,6 +35,8 @@ if (!rootElement) {
 	throw new Error("Root element not found");
 }
 
+let panicHandlersInstalled = false;
+
 type PanicKind = "react" | "error" | "unhandledrejection";
 
 type PanicInfo = {
@@ -79,8 +81,8 @@ function emitPanic(info: PanicInfo) {
 
 function installGlobalPanicHandlers() {
 	// Only install once.
-	if ((installGlobalPanicHandlers as any)._installed) return;
-	(installGlobalPanicHandlers as any)._installed = true;
+	if (panicHandlersInstalled) return;
+	panicHandlersInstalled = true;
 
 	window.addEventListener("error", (event) => {
 		// Resource loading errors may not have an Error object; still record what we can.

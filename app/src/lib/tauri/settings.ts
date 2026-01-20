@@ -544,6 +544,20 @@ function normalizeRequestLogsRetentionDays(value: unknown): number {
 	return Math.min(36500, Math.max(0, rounded));
 }
 
+function normalizeRetentionMode(
+	value: unknown,
+	fallback: "amount" | "time" = "amount",
+): "amount" | "time" {
+	return value === "time" || value === "amount" ? value : fallback;
+}
+
+function normalizeTranscriptionRetentionAmount(value: unknown): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return 1000;
+	const rounded = Math.round(value);
+	// 1..100000 (defensive)
+	return Math.min(100000, Math.max(1, rounded));
+}
+
 export const defaultToggleHotkey = DEFAULT_TOGGLE_HOTKEY;
 export const defaultHoldHotkey = DEFAULT_HOLD_HOTKEY;
 export const defaultPasteLastHotkey = DEFAULT_PASTE_LAST_HOTKEY;
@@ -912,6 +926,33 @@ export const tauriSettingsAPI = {
 				? await store.get("quick_ask_hotkey")
 				: rawQuickAskHold;
 
+		const maxSavedRecordings = normalizeMaxSavedRecordings(
+			await store.get("max_saved_recordings"),
+		);
+		const recordingsRetentionMode = normalizeRetentionMode(
+			await store.get("recordings_retention_mode"),
+			"amount",
+		);
+		const recordingsRetentionAmount = await (async () => {
+			const raw = await store.get("recordings_retention_amount");
+			if (raw == null) return maxSavedRecordings;
+			return normalizeMaxSavedRecordings(raw);
+		})();
+		const recordingsRetentionUnit = normalizeTranscriptionRetentionUnit(
+			await store.get("recordings_retention_unit"),
+		);
+		const recordingsRetentionValue = normalizeTranscriptionRetentionValue(
+			await store.get("recordings_retention_value"),
+			recordingsRetentionUnit,
+		);
+		const transcriptionRetentionMode = normalizeRetentionMode(
+			(await store.get("transcription_retention_mode")) ?? "time",
+			"time",
+		);
+		const transcriptionRetentionAmount = normalizeTranscriptionRetentionAmount(
+			await store.get("transcription_retention_amount"),
+		);
+
 		const settings: AppSettings = {
 			settings_version: settingsVersion,
 			toggle_hotkey: normalizeHotkeyConfig(
@@ -1131,9 +1172,11 @@ export const tauriSettingsAPI = {
 			audio_noise_suppression_enabled:
 				(await store.get<boolean>("audio_noise_suppression_enabled")) ?? false,
 
-			max_saved_recordings: normalizeMaxSavedRecordings(
-				await store.get("max_saved_recordings"),
-			),
+			max_saved_recordings: maxSavedRecordings,
+			recordings_retention_mode: recordingsRetentionMode,
+			recordings_retention_amount: recordingsRetentionAmount,
+			recordings_retention_unit: recordingsRetentionUnit,
+			recordings_retention_value: recordingsRetentionValue,
 
 			request_logs_retention_mode: normalizeRequestLogsRetentionMode(
 				await store.get("request_logs_retention_mode"),
@@ -1145,6 +1188,8 @@ export const tauriSettingsAPI = {
 				await store.get("request_logs_retention_days"),
 			),
 
+			transcription_retention_mode: transcriptionRetentionMode,
+			transcription_retention_amount: transcriptionRetentionAmount,
 			// Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
 			...(await (async () => {
 				const rawUnit = await store.get("transcription_retention_unit");
@@ -1865,6 +1910,25 @@ export const tauriSettingsAPI = {
 		await store.save();
 	},
 
+	async updateRecordingsRetention(params: {
+		mode: "amount" | "time";
+		amount: number;
+		unit: TranscriptionRetentionUnit;
+		value: number;
+	}): Promise<void> {
+		const store = await getStore();
+		const mode = normalizeRetentionMode(params.mode, "amount");
+		const amount = normalizeMaxSavedRecordings(params.amount);
+		const unit = normalizeTranscriptionRetentionUnit(params.unit);
+		const value = normalizeTranscriptionRetentionValue(params.value, unit);
+
+		await store.set("recordings_retention_mode", mode);
+		await store.set("recordings_retention_amount", amount);
+		await store.set("recordings_retention_unit", unit);
+		await store.set("recordings_retention_value", value);
+		await store.save();
+	},
+
 	async updateRequestLogsRetention(params: {
 		mode: AppSettings["request_logs_retention_mode"];
 		amount: number;
@@ -1879,6 +1943,33 @@ export const tauriSettingsAPI = {
 		await store.set("request_logs_retention_mode", mode);
 		await store.set("request_logs_retention_amount", amount);
 		await store.set("request_logs_retention_days", days);
+		await store.save();
+	},
+
+	async updateTranscriptionRetentionPolicy(params: {
+		mode: "amount" | "time";
+		amount: number;
+		unit: TranscriptionRetentionUnit;
+		value: number;
+	}): Promise<void> {
+		const store = await getStore();
+		const mode = normalizeRetentionMode(params.mode, "time");
+		const amount = normalizeTranscriptionRetentionAmount(params.amount);
+		const unit = normalizeTranscriptionRetentionUnit(params.unit);
+		const normalizedValue = normalizeTranscriptionRetentionValue(
+			params.value,
+			unit,
+		);
+		const effectiveValue = mode === "time" ? normalizedValue : 0;
+
+		await store.set("transcription_retention_mode", mode);
+		await store.set("transcription_retention_amount", amount);
+		await store.set("transcription_retention_unit", unit);
+		await store.set("transcription_retention_value", effectiveValue);
+		// Legacy key (kept for backward compatibility)
+		if (unit === "days") {
+			await store.set("transcription_retention_days", effectiveValue);
+		}
 		await store.save();
 	},
 

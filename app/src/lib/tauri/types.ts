@@ -636,10 +636,18 @@ export interface AppSettings {
 
 	// Time-based retention for transcriptions/history.
 	// 0 means keep forever.
+	transcription_retention_mode: RequestLogsRetentionMode;
+	transcription_retention_amount: number;
 	transcription_retention_unit: TranscriptionRetentionUnit;
 	transcription_retention_value: number;
 	// If enabled, deleting old transcriptions also deletes their recordings (best-effort).
 	transcription_retention_delete_recordings: boolean;
+
+	// Recordings retention (amount or time-based).
+	recordings_retention_mode: RequestLogsRetentionMode;
+	recordings_retention_amount: number;
+	recordings_retention_unit: TranscriptionRetentionUnit;
+	recordings_retention_value: number;
 
 	// Persisted stats retention (usage/cost events).
 	// 0 means keep forever.

@@ -37,7 +37,6 @@ import {
 	useRecordingsStats,
 	useSettings,
 	useUpdateMaxSavedRecordings,
-	useUpdateTranscriptionRetention,
 	useUpdateTranscriptionRetentionDeleteRecordings,
 } from "../../lib/queries";
 import {
@@ -71,9 +70,8 @@ export function DataSettings({
 		mutationFn: (params: {
 			mode: RequestLogsRetentionMode;
 			amount: number;
-			unit: RetentionUnit;
-			value: number;
-		}) => (tauriAPI as any).updateRequestLogsRetention(params),
+			days: number;
+		}) => tauriAPI.updateRequestLogsRetention(params),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 			queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
@@ -82,14 +80,13 @@ export function DataSettings({
 
 	const updateStatsRetention = useMutation({
 		mutationFn: (params: { unit: TranscriptionRetentionUnit; value: number }) =>
-			(tauriAPI as any).updateStatsRetention(params),
+			tauriAPI.updateStatsRetention(params),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
 	});
 
 	const updateMaxSavedRecordings = useUpdateMaxSavedRecordings();
-	const updateTranscriptionRetention = useUpdateTranscriptionRetention();
 	const updateTranscriptionRetentionDeleteRecordings =
 		useUpdateTranscriptionRetentionDeleteRecordings();
 
@@ -321,16 +318,14 @@ export function DataSettings({
 	// Logs retention
 	// ---------------------------------------------------------------------------
 
-	const settingsAny = settings as any;
-
 	const logsRetentionModeFromSettings: RequestLogsRetentionMode =
-		settingsAny?.request_logs_retention_mode ?? "amount";
+		settings?.request_logs_retention_mode ?? "amount";
 	const logsRetentionAmountFromSettings =
-		settingsAny?.request_logs_retention_amount ?? 10;
-	const logsRetentionUnitFromSettings: RetentionUnit =
-		settingsAny?.request_logs_retention_unit ?? "days";
-	const logsRetentionValueFromSettings =
-		settingsAny?.request_logs_retention_value ?? 7;
+		settings?.request_logs_retention_amount ?? 10;
+	const logsRetentionDaysFromSettings =
+		settings?.request_logs_retention_days ?? 7;
+	const logsRetentionUnitFromSettings: RetentionUnit = "days";
+	const logsRetentionValueFromSettings = logsRetentionDaysFromSettings;
 
 	const [logsRetentionDraft, setLogsRetentionDraft] = useState<{
 		mode: RequestLogsRetentionMode;
@@ -349,7 +344,6 @@ export function DataSettings({
 	}, [
 		logsRetentionModeFromSettings,
 		logsRetentionAmountFromSettings,
-		logsRetentionUnitFromSettings,
 		logsRetentionValueFromSettings,
 	]);
 
@@ -369,7 +363,13 @@ export function DataSettings({
 		value: number;
 	}) => {
 		setLogsRetentionDraft(next);
-		updateRequestLogsRetention.mutate(next);
+		const days =
+			next.unit === "hours" ? next.value / 24 : Math.max(0, next.value);
+		updateRequestLogsRetention.mutate({
+			mode: next.mode,
+			amount: next.amount,
+			days,
+		});
 	};
 
 	// ---------------------------------------------------------------------------
@@ -377,15 +377,15 @@ export function DataSettings({
 	// ---------------------------------------------------------------------------
 
 	const recordingsRetentionModeFromSettings: RetentionMode =
-		settingsAny?.recordings_retention_mode ?? "amount";
+		settings?.recordings_retention_mode ?? "amount";
 	const recordingsRetentionAmountFromSettings =
-		settingsAny?.recordings_retention_amount ??
+		settings?.recordings_retention_amount ??
 		settings?.max_saved_recordings ??
 		50;
 	const recordingsRetentionUnitFromSettings: RetentionUnit =
-		settingsAny?.recordings_retention_unit ?? "days";
+		settings?.recordings_retention_unit ?? "days";
 	const recordingsRetentionValueFromSettings =
-		settingsAny?.recordings_retention_value ?? 0;
+		settings?.recordings_retention_value ?? 0;
 
 	const [recordingsRetentionDraft, setRecordingsRetentionDraft] = useState<{
 		mode: RetentionMode;
@@ -422,7 +422,7 @@ export function DataSettings({
 			amount: number;
 			unit: RetentionUnit;
 			value: number;
-		}) => (tauriAPI as any).updateRecordingsRetention(params),
+		}) => tauriAPI.updateRecordingsRetention(params),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 			queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
@@ -523,9 +523,9 @@ export function DataSettings({
 	// ---------------------------------------------------------------------------
 
 	const transcriptionRetentionModeFromSettings: RetentionMode =
-		settingsAny?.transcription_retention_mode ?? "time";
+		settings?.transcription_retention_mode ?? "time";
 	const transcriptionRetentionAmountFromSettings =
-		settingsAny?.transcription_retention_amount ?? 1000;
+		settings?.transcription_retention_amount ?? 1000;
 
 	const transcriptionRetentionUnitFromSettings: TranscriptionRetentionUnit =
 		settings?.transcription_retention_unit ?? "days";
@@ -573,7 +573,7 @@ export function DataSettings({
 			amount: number;
 			unit: TranscriptionRetentionUnit;
 			value: number;
-		}) => (tauriAPI as any).updateTranscriptionRetentionPolicy(params),
+		}) => tauriAPI.updateTranscriptionRetentionPolicy(params),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -587,14 +587,6 @@ export function DataSettings({
 	}) => {
 		setTranscriptionRetentionDraft(next);
 		updateTranscriptionRetentionPolicy.mutate(next);
-
-		// Keep the legacy/new time keys in sync when mode is time.
-		if (next.mode === "time") {
-			updateTranscriptionRetention.mutate({
-				unit: next.unit,
-				value: next.value,
-			});
-		}
 	};
 
 	// ---------------------------------------------------------------------------
