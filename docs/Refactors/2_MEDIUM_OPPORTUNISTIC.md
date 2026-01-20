@@ -34,6 +34,29 @@ These are the files that are _currently_ the largest / most responsibility-dense
 - **Continue splitting `app/src/OverlayApp.tsx` if it grows again.**
   - Goal: keep overlay UI logic testable and predictable.
 
+- **Turn `app/src/components/settings/PromptSettings.tsx` into a thin page shell.**
+  - Why: it mixes UI rendering, state wiring, and backend mutations for many distinct settings sections.
+  - Ideal state: the file reads like a table of contents, with small focused subcomponents and a single place for shared state and orchestration.
+  - Step‑by‑step (for Dovie):
+   1) ✅ **Extract UI‑only sections** into their own components under `app/src/components/settings/prompt/`.
+     - Done: extracted `PromptIntentRouterSection` (router UI).
+     - Next: Quick Ask panel wrapper, Quick Replace panel wrapper, STT provider UI.
+     - Keep their props “dumb”: pass values + callbacks, no direct data fetching.
+   2) **Create a shared “profile state” hook** (e.g., `usePromptSettingsProfileState.ts`).
+     - Move `useState` + `useEffect` synchronization logic into the hook.
+     - Expose a compact API (values + setters + save helpers).
+   3) **Move prompt test logic** (rewrite test + STT test) into a `usePromptSettingsTests.ts` hook.
+     - Keep timing, errors, and output handling isolated.
+   4) **Extract “provider/model selection” logic** into a `usePromptProviderOptions.ts` helper.
+     - Consolidate the provider option building and model option derivation.
+   5) **Introduce a `PromptSettingsLayout` component** for the accordion/sections layout.
+     - The layout should only render sections and wire high‑level props.
+   6) **Trim `PromptSettings.tsx` imports** after each extraction.
+     - Goal: the file should be short (roughly <400 lines) and mostly a render skeleton.
+   7) **Add/adjust tests where logic moved** (hooks or utilities).
+     - Focus on pure logic (no network, no API keys).
+  - Acceptance hint: the main file should be readable top‑to‑bottom without scrolling for minutes; detailed logic lives in hooks/components.
+
 ## Overlay UI (React)
 
 - **Consolidate overlay state into a single “overlay controller” object (as needed).**
