@@ -44,7 +44,6 @@ import {
 	type CleanupPromptSections,
 	type CleanupPromptSectionsOverride,
 	type IntentRouterSettings,
-	type OpenAiReasoningEffort,
 	type RewritePreset,
 	type RewriteProgramPromptProfile,
 	tauriAPI,
@@ -69,6 +68,7 @@ import {
 import { usePromptProviderOptions } from "./prompt/usePromptProviderOptions";
 import { usePromptSettingsProfileState } from "./prompt/usePromptSettingsProfileState";
 import { usePromptSettingsTests } from "./prompt/usePromptSettingsTests";
+import { useRewriteSettingsHandlers } from "./prompt/useRewriteSettingsHandlers";
 import {
 	ANTHROPIC_THINKING_LEVEL_BUDGETS,
 	formatThinkingBudgetShort,
@@ -830,85 +830,6 @@ export function PromptSettings({
 		localProfileQuickAskAnthropicThinkingBudget,
 	});
 
-	const handleOpenAiThinkingChange = (value: string | null) => {
-		if (value == null || value === SELECT_DEFAULT) {
-			updateOpenAiReasoningEffort.mutate(null, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
-			return;
-		}
-
-		const v: OpenAiReasoningEffort | null =
-			value === "none" ||
-			value === "low" ||
-			value === "medium" ||
-			value === "high"
-				? value
-				: null;
-		if (v == null) return;
-
-		updateOpenAiReasoningEffort.mutate(v, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleGeminiThinkingLevelChange = (value: string | null) => {
-		const v =
-			value === "minimal" ||
-			value === "low" ||
-			value === "medium" ||
-			value === "high"
-				? value
-				: null;
-		updateGeminiThinkingLevel.mutate(v, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleGeminiThinkingBudgetChange = (value: string | null) => {
-		if (value == null || value === SELECT_DEFAULT) {
-			updateGeminiThinkingBudget.mutate(null, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
-			return;
-		}
-
-		const parsed = Number(value);
-		if (!Number.isFinite(parsed)) return;
-		updateGeminiThinkingBudget.mutate(parsed, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleAnthropicThinkingBudgetChange = (value: string | null) => {
-		if (value == null || value === SELECT_DEFAULT) {
-			updateAnthropicThinkingBudget.mutate(null, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
-			return;
-		}
-
-		const parsed = Number(value);
-		if (!Number.isFinite(parsed)) return;
-		updateAnthropicThinkingBudget.mutate(parsed, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
 	const baseStoredSections: CleanupPromptSections = settings
 		?.cleanup_prompt_sections?.system
 		? settings.cleanup_prompt_sections
@@ -1095,6 +1016,56 @@ export function PromptSettings({
 		saveProfileMetadata,
 	});
 
+	const {
+		handleRewriteEnabledChange,
+		handleDisableRewriteEnabledOverride,
+		handleRewriteIncludeClipboardContextChange,
+		handleDisableRewriteIncludeClipboardContextOverride,
+		handleRewriteLlmProviderChange,
+		handleDisableRewriteLlmProviderOverride,
+		handleRewriteLlmModelChange,
+		handleDisableRewriteLlmModelOverride,
+		handleRewriteOpenAiThinkingChange,
+		handleDisableRewriteOpenAiThinkingOverride,
+		handleRewriteGeminiThinkingLevelChange,
+		handleDisableRewriteGeminiThinkingLevelOverride,
+		handleRewriteGeminiThinkingBudgetChange,
+		handleDisableRewriteGeminiThinkingBudgetOverride,
+		handleRewriteAnthropicThinkingBudgetChange,
+		handleDisableRewriteAnthropicThinkingBudgetOverride,
+	} = useRewriteSettingsHandlers({
+		isDefaultScope,
+		settings,
+		defaultRewriteEnabled,
+		defaultRewriteIncludeClipboardContext,
+		setRewriteEnabledInheriting,
+		setLocalProfileRewriteEnabled,
+		setRewriteIncludeClipboardContextInheriting,
+		setLocalProfileRewriteIncludeClipboardContext,
+		setLlmProviderInheriting,
+		setLlmModelInheriting,
+		setLocalProfileLlmProvider,
+		setLocalProfileLlmModel,
+		setOpenAiReasoningEffortInheriting,
+		setLocalProfileOpenAiReasoningEffort,
+		setGeminiThinkingLevelInheriting,
+		setLocalProfileGeminiThinkingLevel,
+		setGeminiThinkingBudgetInheriting,
+		setLocalProfileGeminiThinkingBudget,
+		setAnthropicThinkingBudgetInheriting,
+		setLocalProfileAnthropicThinkingBudget,
+		updateRewriteLlmEnabled,
+		updateLLMProvider,
+		updateLLMModel,
+		updateOpenAiReasoningEffort,
+		updateGeminiThinkingLevel,
+		updateGeminiThinkingBudget,
+		updateAnthropicThinkingBudget,
+		getLlmModelOptionsForProvider,
+		saveProfileMetadata,
+		openDisableOverrideDialog,
+	});
+
 	const handleSave = (key: SectionKey, content: string) => {
 		setLocalSections((prev) => {
 			if (prev === null) return prev;
@@ -1144,29 +1115,6 @@ export function PromptSettings({
 	const handleDefaultSTTModelChange = (value: string | null) => {
 		if (!value) return;
 		updateSTTModel.mutate(value, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleDefaultLLMProviderChange = (value: string | null) => {
-		if (!value) return;
-		updateLLMProvider.mutate(value, {
-			onSuccess: () => {
-				const models = getLlmModelOptionsForProvider(value);
-				const firstModel = models?.[0];
-				if (firstModel) {
-					updateLLMModel.mutate(firstModel.value);
-				}
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleDefaultLLMModelChange = (value: string | null) => {
-		if (!value) return;
-		updateLLMModel.mutate(value, {
 			onSuccess: () => {
 				tauriAPI.emitSettingsChanged();
 			},
@@ -1343,227 +1291,6 @@ export function PromptSettings({
 					settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT,
 				);
 				saveProfileMetadata({ stt_timeout_seconds: null });
-			},
-		});
-	};
-
-	// ------------------------------------------------------
-	// Rewrite section handlers
-	// ------------------------------------------------------
-
-	const handleRewriteEnabledChange = (enabled: boolean) => {
-		if (isDefaultScope) {
-			updateRewriteLlmEnabled.mutate(enabled, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
-			return;
-		}
-		setRewriteEnabledInheriting(false);
-		setLocalProfileRewriteEnabled(enabled);
-		saveProfileMetadata({ rewrite_llm_enabled: enabled });
-	};
-
-	const handleDisableRewriteEnabledOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Rewrite Transcription override?",
-			onConfirm: () => {
-				setRewriteEnabledInheriting(true);
-				setLocalProfileRewriteEnabled(defaultRewriteEnabled);
-				saveProfileMetadata({ rewrite_llm_enabled: null });
-			},
-		});
-	};
-
-	const handleRewriteIncludeClipboardContextChange = (enabled: boolean) => {
-		if (!isDefaultScope) {
-			setRewriteIncludeClipboardContextInheriting(false);
-		}
-		setLocalProfileRewriteIncludeClipboardContext(enabled);
-		saveProfileMetadata({ rewrite_include_clipboard_context: enabled });
-	};
-
-	const handleDisableRewriteIncludeClipboardContextOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Rewrite Clipboard Context override?",
-			onConfirm: () => {
-				setRewriteIncludeClipboardContextInheriting(true);
-				setLocalProfileRewriteIncludeClipboardContext(
-					defaultRewriteIncludeClipboardContext,
-				);
-				saveProfileMetadata({ rewrite_include_clipboard_context: null });
-			},
-		});
-	};
-
-	const handleRewriteLlmProviderChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleDefaultLLMProviderChange(value);
-			return;
-		}
-		setLlmProviderInheriting(false);
-		setLlmModelInheriting(false);
-		setLocalProfileLlmProvider(value);
-		const models = getLlmModelOptionsForProvider(value);
-		const firstModel = models[0]?.value ?? null;
-		setLocalProfileLlmModel(firstModel);
-		saveProfileMetadata({
-			llm_provider: value,
-			llm_model: firstModel,
-		});
-	};
-
-	const handleDisableRewriteLlmProviderOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Language Model Provider override?",
-			onConfirm: () => {
-				setLlmProviderInheriting(true);
-				setLlmModelInheriting(true);
-				setLocalProfileLlmProvider(settings?.llm_provider ?? null);
-				setLocalProfileLlmModel(settings?.llm_model ?? null);
-				saveProfileMetadata({ llm_provider: null, llm_model: null });
-			},
-		});
-	};
-
-	const handleRewriteLlmModelChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleDefaultLLMModelChange(value);
-			return;
-		}
-		setLlmModelInheriting(false);
-		setLocalProfileLlmModel(value);
-		saveProfileMetadata({ llm_model: value });
-	};
-
-	const handleDisableRewriteLlmModelOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Rewrite LLM Model override?",
-			onConfirm: () => {
-				setLlmModelInheriting(true);
-				setLocalProfileLlmModel(settings?.llm_model ?? null);
-				saveProfileMetadata({ llm_model: null });
-			},
-		});
-	};
-
-	const handleRewriteOpenAiThinkingChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleOpenAiThinkingChange(value);
-			return;
-		}
-		setOpenAiReasoningEffortInheriting(false);
-		setLocalProfileOpenAiReasoningEffort(value);
-		const effort =
-			value === SELECT_DEFAULT
-				? null
-				: value === "none" ||
-						value === "low" ||
-						value === "medium" ||
-						value === "high"
-					? value
-					: null;
-		saveProfileMetadata({ openai_reasoning_effort: effort });
-	};
-
-	const handleDisableRewriteOpenAiThinkingOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Thinking (Reasoning Effort) override?",
-			onConfirm: () => {
-				setOpenAiReasoningEffortInheriting(true);
-				setLocalProfileOpenAiReasoningEffort(
-					settings?.openai_reasoning_effort ?? SELECT_DEFAULT,
-				);
-				saveProfileMetadata({ openai_reasoning_effort: null });
-			},
-		});
-	};
-
-	const handleRewriteGeminiThinkingLevelChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleGeminiThinkingLevelChange(value);
-			return;
-		}
-		setGeminiThinkingLevelInheriting(false);
-		setLocalProfileGeminiThinkingLevel(value);
-		const level =
-			value === SELECT_DEFAULT
-				? null
-				: value === "minimal" ||
-						value === "low" ||
-						value === "medium" ||
-						value === "high"
-					? value
-					: null;
-		saveProfileMetadata({ gemini_thinking_level: level });
-	};
-
-	const handleDisableRewriteGeminiThinkingLevelOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Thinking Level override?",
-			onConfirm: () => {
-				setGeminiThinkingLevelInheriting(true);
-				setLocalProfileGeminiThinkingLevel(
-					settings?.gemini_thinking_level ?? SELECT_DEFAULT,
-				);
-				saveProfileMetadata({ gemini_thinking_level: null });
-			},
-		});
-	};
-
-	const handleRewriteGeminiThinkingBudgetChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleGeminiThinkingBudgetChange(value);
-			return;
-		}
-		setGeminiThinkingBudgetInheriting(false);
-		const parsed = value === SELECT_DEFAULT ? null : Number(value);
-		setLocalProfileGeminiThinkingBudget(value);
-		saveProfileMetadata({ gemini_thinking_budget: parsed });
-	};
-
-	const handleDisableRewriteGeminiThinkingBudgetOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Thinking Budget override?",
-			onConfirm: () => {
-				setGeminiThinkingBudgetInheriting(true);
-				const inherited = settings?.gemini_thinking_budget;
-				setLocalProfileGeminiThinkingBudget(
-					inherited == null ? SELECT_DEFAULT : String(inherited),
-				);
-				saveProfileMetadata({ gemini_thinking_budget: null });
-			},
-		});
-	};
-
-	const handleRewriteAnthropicThinkingBudgetChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleAnthropicThinkingBudgetChange(value);
-			return;
-		}
-		setAnthropicThinkingBudgetInheriting(false);
-		const parsed = value === SELECT_DEFAULT ? null : Number(value);
-		setLocalProfileAnthropicThinkingBudget(value);
-		saveProfileMetadata({ anthropic_thinking_budget: parsed });
-	};
-
-	const handleDisableRewriteAnthropicThinkingBudgetOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Thinking Budget override?",
-			onConfirm: () => {
-				setAnthropicThinkingBudgetInheriting(true);
-				const inherited = settings?.anthropic_thinking_budget;
-				setLocalProfileAnthropicThinkingBudget(
-					inherited == null ? SELECT_DEFAULT : String(inherited),
-				);
-				saveProfileMetadata({ anthropic_thinking_budget: null });
 			},
 		});
 	};
