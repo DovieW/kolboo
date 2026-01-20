@@ -8,7 +8,6 @@ import {
 	useLayoutEffect,
 	useMemo,
 	useRef,
-	useState,
 } from "react";
 import { applyAccentColor } from "../lib/accentColor";
 import { createOverlaySettingsChangedHandler } from "../lib/overlay/overlaySettings";
@@ -27,6 +26,10 @@ import {
 import { listenTyped } from "../lib/tauri/events";
 import { useOverlayUiReducer } from "../lib/useOverlayUiReducer";
 import { AudioWave, BackendAudioWave } from "./AudioWave";
+import {
+	type ActiveProfileInfo,
+	useOverlayController,
+} from "./useOverlayController";
 import { useOverlayHoverGating } from "./useOverlayHoverGating";
 
 function readBootAccentColor(): string | null {
@@ -191,27 +194,21 @@ export default function RecordingControl() {
 		clearError,
 		setError,
 	} = useOverlayUiReducer();
-	const [sessionPresetId, setSessionPresetId] = useState<string | null>(null);
-
-	type OverlayControllerState = {
-		hasDragStarted: boolean;
-		exitTimer: number | null;
-		lastBusyPhase: "transcribing" | "routing" | "rewriting" | null;
-		holdPhaseTimer: number | null;
-		prevPipelineForPhaseHold: PipelineState;
-		prevPipelineForExpand: PipelineState;
-		prevPipelineState: PipelineState;
-	};
-
-	const controllerRef = useRef<OverlayControllerState>({
-		hasDragStarted: false,
-		exitTimer: null,
-		lastBusyPhase: null,
-		holdPhaseTimer: null,
-		prevPipelineForPhaseHold: "idle",
-		prevPipelineForExpand: "idle",
-		prevPipelineState: "idle",
-	});
+	const {
+		state: {
+			expanded,
+			renderExpanded,
+			holdPhaseText,
+			sessionPresetId,
+			activeProfile,
+		},
+		refs: controllerRef,
+		setExpanded,
+		setRenderExpanded,
+		setHoldPhaseText,
+		setSessionPresetId,
+		setActiveProfile,
+	} = useOverlayController();
 
 	const [containerRef, rect] = useResizeObserver<HTMLDivElement>();
 	const widgetRef = useRef<HTMLDivElement | null>(null);
@@ -225,22 +222,6 @@ export default function RecordingControl() {
 		},
 		[containerRef],
 	);
-
-	// During the exit animation, the backend may have already flipped the pipeline
-	// back to idle. Hold onto the last busy phase so we don't briefly render the
-	// waveform right before the window hides.
-	// In recording-only mode, the pipeline can reach `idle` slightly before we
-	// receive the backend's `overlay-hide-requested` event. Keep the phase text
-	// visible across that tiny gap too.
-	const [holdPhaseText, setHoldPhaseText] = useState<
-		"transcribing" | "routing" | "rewriting" | null
-	>(null);
-
-	// Collapsed/expanded UI state
-	const [expanded, setExpanded] = useState(false);
-	// We only render the expanded widget after the native window has resized wide enough,
-	// to avoid a one-frame clipped/"missing border" intermediate.
-	const [renderExpanded, setRenderExpanded] = useState(false);
 
 	// Load settings (overlay mode + selected mic)
 	const { data: settings } = useSettings();
@@ -264,15 +245,6 @@ export default function RecordingControl() {
 		expanded &&
 		(settings?.overlay_mode === "always" ||
 			settings?.overlay_mode === "recording_only");
-
-	type ActiveProfileInfo = {
-		profile_id: string | null;
-		profile_name: string | null;
-	};
-
-	const [activeProfile, setActiveProfile] = useState<ActiveProfileInfo | null>(
-		null,
-	);
 
 	const activeProfileId = activeProfile?.profile_id ?? null;
 
@@ -429,7 +401,7 @@ export default function RecordingControl() {
 				// ignore
 			}
 		},
-		[activeProfileId],
+		[activeProfileId, setSessionPresetId],
 	);
 
 	const bootAccent = useMemo(() => readBootAccentColor(), []);
@@ -530,14 +502,14 @@ export default function RecordingControl() {
 			cancelled = true;
 			if (interval) window.clearInterval(interval);
 		};
-	}, [expanded]);
+	}, [expanded, setActiveProfile]);
 
 	// If presets change (e.g. user deleted one), avoid keeping an invalid selection.
 	useEffect(() => {
 		if (!sessionPresetId) return;
 		if (activeProfilePresets.some((p) => p.id === sessionPresetId)) return;
 		setSessionPresetId(null);
-	}, [activeProfilePresets, sessionPresetId]);
+	}, [activeProfilePresets, sessionPresetId, setSessionPresetId]);
 
 	// If there are no presets for the active profile, the hover window should never show.
 	// Hide it proactively so we don't end up with an empty tiny "dot" panel.
@@ -551,7 +523,7 @@ export default function RecordingControl() {
 	useEffect(() => {
 		if (pipelineState !== "recording") return;
 		setSessionPresetId(null);
-	}, [pipelineState]);
+	}, [pipelineState, setSessionPresetId]);
 
 	useEffect(() => {
 		const prev = controllerRef.current.prevPipelineForPhaseHold;
@@ -619,10 +591,12 @@ export default function RecordingControl() {
 			}
 		}
 	}, [
+		controllerRef,
 		holdPhaseText,
 		pipelineState,
 		hoverPanelEnabled,
 		shouldShowHoverPresets,
+		setHoldPhaseText,
 		settings?.overlay_mode,
 	]);
 
@@ -653,7 +627,7 @@ export default function RecordingControl() {
 		// Collapse: hide expanded immediately, then shrink window.
 		setRenderExpanded(false);
 		tauriAPI.resizeOverlay(56, 56);
-	}, [expanded, pipelineState, settings?.overlay_mode]);
+	}, [expanded, pipelineState, setRenderExpanded, settings?.overlay_mode]);
 
 	useEffect(() => {
 		if (!expanded) return;
@@ -675,6 +649,7 @@ export default function RecordingControl() {
 		pipelineState,
 		rect.width,
 		renderExpanded,
+		setRenderExpanded,
 		settings?.overlay_mode,
 	]);
 
@@ -706,7 +681,7 @@ export default function RecordingControl() {
 		if (pipelineState === "idle" && prev !== "idle") {
 			setExpanded(false);
 		}
-	}, [pipelineState, settings?.overlay_mode]);
+	}, [controllerRef, pipelineState, setExpanded, settings?.overlay_mode]);
 
 	// If the user switches into recording-only mode while the window is visible,
 	// immediately force expanded so we don't flash the collapsed state.
@@ -714,7 +689,7 @@ export default function RecordingControl() {
 		if (settings?.overlay_mode === "recording_only") {
 			setExpanded(true);
 		}
-	}, [settings?.overlay_mode]);
+	}, [setExpanded, settings?.overlay_mode]);
 
 	// If we switch *out* of recording-only mode into always-visible while idle,
 	// collapse back to the default logo-only state immediately (otherwise we'd stay
@@ -723,7 +698,7 @@ export default function RecordingControl() {
 		if (settings?.overlay_mode !== "always") return;
 		if (pipelineState !== "idle") return;
 		setExpanded(false);
-	}, [pipelineState, settings?.overlay_mode]);
+	}, [pipelineState, setExpanded, settings?.overlay_mode]);
 
 	const requestAnimatedHide = useCallback(() => {
 		if (controllerRef.current.exitTimer) {
@@ -746,7 +721,7 @@ export default function RecordingControl() {
 			setHoldPhaseText(null);
 			controllerRef.current.exitTimer = null;
 		}, 210);
-	}, [setAnimState]);
+	}, [controllerRef, setAnimState, setHoldPhaseText]);
 
 	const dismissError = useCallback(() => {
 		// Reset pipeline state in backend so polling reflects reality.
@@ -771,7 +746,7 @@ export default function RecordingControl() {
 		requestAnimationFrame(() => {
 			setAnimState("visible");
 		});
-	}, [markOverlayShownForHoverGating, setAnimState]);
+	}, [controllerRef, markOverlayShownForHoverGating, setAnimState]);
 
 	// Entrance animation when recording starts (recording-only mode shows the window)
 	useEffect(() => {
@@ -827,7 +802,7 @@ export default function RecordingControl() {
 		) {
 			requestAnimatedHide();
 		}
-	}, [pipelineState, requestAnimatedHide, settings?.overlay_mode]);
+	}, [controllerRef, pipelineState, requestAnimatedHide, settings?.overlay_mode]);
 
 	// Start recording using the Rust pipeline
 	const onStartRecording = useCallback(async () => {
@@ -914,6 +889,7 @@ export default function RecordingControl() {
 		clearError,
 		pipelineState,
 		sessionPresetId,
+		setSessionPresetId,
 		setError,
 		setPipelineState,
 		typeTextMutation,
@@ -964,6 +940,7 @@ export default function RecordingControl() {
 		clearError,
 		lastFailedRequestId,
 		sessionPresetId,
+		setSessionPresetId,
 		setError,
 		setPipelineState,
 		typeTextMutation,
@@ -1107,7 +1084,7 @@ export default function RecordingControl() {
 			}
 			onStartRecording();
 		}
-	}, [expanded, onStartRecording, onStopRecording, pipelineState]);
+	}, [expanded, onStartRecording, onStopRecording, pipelineState, setExpanded]);
 
 	// Drag handler using @use-gesture/react
 	const bindDrag = useDrag(

@@ -22,8 +22,3 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - `pipeline/providers.rs` (STT/LLM provider creation + caching)
     - `pipeline/router/*` (embeddings router + LLM router + diagnostics payload building)
 
-## Overlay UI (React)
-
-- **Consolidate overlay state into a single “overlay controller” object (as needed).**
-  - Today some state lives in refs, some in `useState`, some in the reducer.
-  - A follow-up could consolidate more of this into one predictable state machine.
