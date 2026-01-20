@@ -27,7 +27,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - `pipeline/config.rs` (PipelineConfig defaults + normalization)
     - `pipeline/providers.rs` (STT/LLM provider creation + caching)
     - `pipeline/router/*` (embeddings router + LLM router + diagnostics payload building)
-  - Bonus: lots of helper functions here are pure (e.g. path normalization / routing scoring) and can get fast unit tests once extracted.
 
 ### Frontend (React/TS)
 

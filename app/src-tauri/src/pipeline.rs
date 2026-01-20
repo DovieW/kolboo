@@ -36,152 +36,15 @@ use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 mod config;
+mod program_profiles;
 
 use config::canonicalize_stt_provider_id;
 pub use config::PipelineConfig;
 
-fn normalize_program_path(path: &str) -> String {
-    // Windows comparisons are case-insensitive, and we want to treat / and \ equivalently.
-    // Also strip common Windows path prefixes that may appear depending on how the OS reports
-    // process image names.
-    let mut s = path.trim().trim_matches('"').replace('/', "\\");
-    if let Some(rest) = s.strip_prefix("\\\\?\\") {
-        s = rest.to_string();
-    } else if let Some(rest) = s.strip_prefix("\\\\??\\") {
-        s = rest.to_string();
-    }
-    s.to_lowercase()
-}
-
-fn program_basename_lower(path_norm: &str) -> &str {
-    path_norm.rsplit('\\').next().unwrap_or(path_norm).trim()
-}
-
-fn strip_exe_suffix(name: &str) -> &str {
-    name.strip_suffix(".exe").unwrap_or(name)
-}
-
-fn program_basename_for_log(path: &str) -> String {
-    // Only log the executable basename to avoid leaking sensitive filesystem paths
-    // (usernames, install locations) into logs.
-    let norm = normalize_program_path(path);
-    let base = program_basename_lower(&norm);
-    if base.is_empty() {
-        "<unknown>".to_string()
-    } else {
-        base.to_string()
-    }
-}
-
-pub(crate) fn select_profile_for_foreground_app(
-    llm_config: &LlmConfig,
-) -> Option<crate::llm::ProgramPromptProfile> {
-    let foreground = crate::windows_apps::get_foreground_process_path();
-    let Some(foreground) = foreground else {
-        log::debug!(
-            "Pipeline: Foreground process path unavailable; cannot select per-program profile (profiles={})",
-            llm_config.program_prompt_profiles.len()
-        );
-        return None;
-    };
-
-    let foreground_norm = normalize_program_path(&foreground);
-    let foreground_base = program_basename_lower(&foreground_norm);
-    let foreground_base_noexe = strip_exe_suffix(foreground_base);
-
-    for profile in &llm_config.program_prompt_profiles {
-        if profile.program_paths.iter().any(|p| {
-            let p_norm = normalize_program_path(p);
-            if p_norm == foreground_norm {
-                return true;
-            }
-
-            // Allow configuring just an executable name (e.g. "obsidian.exe") instead of
-            // the full path. Also handle cases where the stored path differs (portable installs,
-            // drive letter changes, etc.) but the basename is stable.
-            let p_base = program_basename_lower(&p_norm);
-            if !p_base.is_empty() {
-                if p_base == foreground_base {
-                    return true;
-                }
-                if strip_exe_suffix(p_base) == foreground_base_noexe {
-                    return true;
-                }
-            }
-
-            // If the stored path is a full path, basename check above already covers most
-            // mismatches. As a last resort, allow "ends_with" on the normalized path.
-            // This helps when the OS returns slightly different prefixes.
-            if p_norm.contains('\\') {
-                if foreground_norm.ends_with(&p_norm) {
-                    return true;
-                }
-                if !p_norm.ends_with(".exe") {
-                    let p_norm_exe = format!("{}.exe", p_norm);
-                    if foreground_norm.ends_with(&p_norm_exe) {
-                        return true;
-                    }
-                }
-            }
-
-            false
-        }) {
-            log::debug!(
-                "Pipeline: Using profile '{}' for foreground app {}",
-                profile.name,
-                program_basename_for_log(&foreground)
-            );
-            return Some(profile.clone());
-        }
-    }
-
-    // Helpful when users report everything is always "Default".
-    // Keep this at debug to avoid noisy logs, but include key derived values.
-    log::debug!(
-        "Pipeline: No program profile match for foreground_base='{}' (profiles={})",
-        program_basename_for_log(&foreground),
-        llm_config.program_prompt_profiles.len()
-    );
-
-    None
-}
-
-fn select_default_profile(llm_config: &LlmConfig) -> Option<crate::llm::ProgramPromptProfile> {
-    llm_config
-        .program_prompt_profiles
-        .iter()
-        .find(|p| p.id == "default")
-        .cloned()
-}
-
-fn select_effective_preset(
-    profile: &crate::llm::ProgramPromptProfile,
-) -> Option<&crate::llm::ProgramPreset> {
-    let find_by_id = |id: &str| profile.presets.iter().find(|p| p.id == id);
-
-    if let Some(id) = profile.active_preset_id.as_deref() {
-        return find_by_id(id);
-    }
-    if let Some(id) = profile.default_preset_id.as_deref() {
-        return find_by_id(id);
-    }
-    None
-}
-
-fn find_preset_by_id<'a>(
-    profile: &'a crate::llm::ProgramPromptProfile,
-    id: &'a str,
-) -> Option<&'a crate::llm::ProgramPreset> {
-    profile.presets.iter().find(|p| p.id == id)
-}
-
-fn router_enabled(profile: &crate::llm::ProgramPromptProfile) -> bool {
-    profile
-        .router
-        .as_ref()
-        .map(|r| r.enabled && r.strategy != IntentRouterStrategy::Off)
-        .unwrap_or(false)
-}
+pub(crate) use program_profiles::select_profile_for_foreground_app;
+use program_profiles::{
+    find_preset_by_id, router_enabled, select_default_profile, select_effective_preset,
+};
 
 fn preview_for_log(s: &str, max_chars: usize) -> (String, bool, usize) {
     let len = s.chars().count();
