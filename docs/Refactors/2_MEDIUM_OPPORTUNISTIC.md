@@ -22,16 +22,13 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - [x] Centralize remaining event constants in `events.rs`.
 
   - **Remaining (each provides real dedup or separation value):**
-    - [ ] **Extract Quick Ask answer flow** into `sessions/quick_ask_session.rs`.
-      - Why: the "call LLM -> emit events -> update request log" flow is a self-contained block (~300 lines) that doesn't need to live inline.
-      - Acceptance: `lib.rs` calls `quick_ask_session::run(...)` and awaits a result.
-    - [ ] **Extract Quick Replace rewrite flow** into `sessions/quick_replace_session.rs`.
-      - Why: same reasoning - self-contained, benefits from separation.
-      - Acceptance: `lib.rs` calls `quick_replace_session::run(...)`.
+    - *(No high-value items remaining for lib.rs - only large code moves without deduplication.)*
 
   - **Not doing (moving code without dedup is just churn):**
     - ~~Extract recording orchestration~~ - the main recording flow isn't duplicated; moving it just relocates complexity.
     - ~~Extract history/log updates~~ - these are already small helper calls; wrapping them in another module adds indirection without removing code.
+    - ~~Extract Quick Ask answer flow~~ - while large (~560 lines), it's a single inline block with many dependencies; moving it doesn't reduce code or dedup.
+    - ~~Extract Quick Replace rewrite flow~~ - same reasoning; cohesive but not duplicated.
 
 - **Split `app/src-tauri/src/pipeline.rs` (~188KB).**
   - Why: it contains unrelated concerns (provider construction/caching, routing logic, state machine + config, embedding cache/persistence, and helper utilities).
