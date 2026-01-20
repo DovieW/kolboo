@@ -33,14 +33,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
 
 ## Rust deterministic testing seams (hard IO audit)
 
-- **Audio device IO (CPAL):**
-  - Hot spots:
-    - `app/src-tauri/src/audio_capture.rs` (CPAL host/device/stream + callback threading)
-    - `app/src-tauri/src/commands/audio.rs` (device listing, “ensure active stream” for meters)
-    - `app/src-tauri/src/pipeline.rs` (references to CPAL device selection + meter updates)
-  - Small test seams:
-    - Keep CPAL behind a tiny trait (e.g. “AudioCaptureBackend”) so pipeline state transitions can be tested with a fake capture backend that emits deterministic “audio level” events.
-
 - **Network IO (reqwest providers + proxy config):**
   - Hot spots:
     - `app/src-tauri/src/network.rs` + `app/src-tauri/src/commands/network.rs` (proxy + custom cert loading)

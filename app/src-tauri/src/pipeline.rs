@@ -16,8 +16,8 @@
 //! - Configurable prompts for dictation cleanup
 
 use crate::audio_capture::{
-    AudioCapture, AudioCaptureDiagnostics, AudioCaptureError, AudioCaptureEvent, AudioEncodeConfig,
-    AudioLevelSnapshot, AudioLevelStats,
+    AudioCapture, AudioCaptureBackend, AudioCaptureDiagnostics, AudioCaptureError,
+    AudioCaptureEvent, AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats,
 };
 use crate::embeddings;
 use crate::llm::{
@@ -1032,7 +1032,7 @@ struct LlmProviderParams {
 
 /// Internal state for the recording pipeline
 struct PipelineInner {
-    audio_capture: AudioCapture,
+    audio_capture: Box<dyn AudioCaptureBackend>,
     stt_registry: SttRegistry,
     stt_provider_cache: HashMap<String, Arc<dyn SttProvider>>,
     llm_provider_cache: HashMap<String, Arc<dyn LlmProvider>>,
@@ -1136,8 +1136,10 @@ impl PipelineInner {
             .map_err(|e| PipelineError::Config(format!("Failed to create HTTP client: {}", e)))
     }
 
-    fn new(config: PipelineConfig) -> Self {
-        let audio_capture = AudioCapture::with_vad_config(config.vad_config.clone());
+    fn new_with_audio_capture(
+        config: PipelineConfig,
+        audio_capture: Box<dyn AudioCaptureBackend>,
+    ) -> Self {
         let mut inner = Self {
             audio_capture,
             stt_registry: SttRegistry::new(),
@@ -1151,6 +1153,13 @@ impl PipelineInner {
         };
         inner.initialize_providers(&config);
         inner
+    }
+
+    fn new(config: PipelineConfig) -> Self {
+        Self::new_with_audio_capture(
+            config.clone(),
+            Box::new(AudioCapture::with_vad_config(config.vad_config.clone())),
+        )
     }
 
     fn get_or_create_stt_provider(
@@ -1577,6 +1586,23 @@ impl SharedPipeline {
     /// Create a new shared pipeline
     pub fn new(config: PipelineConfig) -> Self {
         let inner = PipelineInner::new(config);
+        let level_meter = inner.audio_capture.shared_level_meter();
+        let waveform_meter = inner.audio_capture.shared_waveform_meter();
+        Self {
+            inner: Arc::new(Mutex::new(inner)),
+            level_meter,
+            waveform_meter,
+            embedding_cache: Arc::new(Mutex::new(HashMap::new())),
+            app_handle: Arc::new(Mutex::new(None)),
+            session_preset_lock: Arc::new(Mutex::new(None)),
+            session_profile_override: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn new_for_tests(config: PipelineConfig, audio_capture: Box<dyn AudioCaptureBackend>) -> Self {
+        let inner = PipelineInner::new_with_audio_capture(config, audio_capture);
         let level_meter = inner.audio_capture.shared_level_meter();
         let waveform_meter = inner.audio_capture.shared_waveform_meter();
         Self {
@@ -4399,7 +4425,115 @@ unsafe impl Sync for SharedPipeline {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio_capture::{
+        AudioCaptureBackend, AudioCaptureDiagnostics, AudioCaptureError, AudioCaptureEvent,
+        AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats, SharedAudioLevelMeter,
+        SharedAudioWaveformMeter,
+    };
     use tokio_util::sync::CancellationToken;
+
+    struct FakeAudioCapture {
+        level_meter: SharedAudioLevelMeter,
+        waveform_meter: SharedAudioWaveformMeter,
+        vad_enabled: bool,
+        vad_auto_stop: bool,
+        wav: Vec<u8>,
+        before_wav: Vec<u8>,
+        after_wav: Vec<u8>,
+        _queued_events: std::collections::VecDeque<AudioCaptureEvent>,
+    }
+
+    impl FakeAudioCapture {
+        fn new() -> Self {
+            Self {
+                level_meter: SharedAudioLevelMeter::new_for_tests(),
+                waveform_meter: SharedAudioWaveformMeter::new_for_tests(),
+                vad_enabled: false,
+                vad_auto_stop: false,
+                wav: vec![1, 2, 3],
+                before_wav: vec![9],
+                after_wav: vec![8],
+                _queued_events: std::collections::VecDeque::new(),
+            }
+        }
+
+        fn diagnostics() -> AudioCaptureDiagnostics {
+            AudioCaptureDiagnostics {
+                stats: AudioLevelStats {
+                    duration_secs: 0.5,
+                    rms: 0.1,
+                    peak: 0.2,
+                },
+                speech_detected: None,
+            }
+        }
+    }
+
+    impl AudioCaptureBackend for FakeAudioCapture {
+        fn shared_level_meter(&self) -> SharedAudioLevelMeter {
+            self.level_meter.clone()
+        }
+
+        fn shared_waveform_meter(&self) -> SharedAudioWaveformMeter {
+            self.waveform_meter.clone()
+        }
+
+        fn level_snapshot(&self) -> AudioLevelSnapshot {
+            self.level_meter.snapshot()
+        }
+
+        fn set_vad_config(&mut self, config: crate::audio_capture::VadAutoStopConfig) {
+            self.vad_enabled = config.enabled;
+            self.vad_auto_stop = config.auto_stop;
+        }
+
+        fn set_capture_behavior(
+            &mut self,
+            _hot_mic_enabled: bool,
+            _hot_mic_pre_roll_ms: u32,
+            _mic_auto_recover_enabled: bool,
+            _input_device_name: Option<&str>,
+        ) -> Result<(), AudioCaptureError> {
+            Ok(())
+        }
+
+        fn start_recording_session(
+            &mut self,
+            _max_duration_secs: f32,
+            _input_device_name: Option<&str>,
+        ) -> Result<(), AudioCaptureError> {
+            Ok(())
+        }
+
+        fn stop_and_get_wav_with_diagnostics(
+            &mut self,
+            _cfg: AudioEncodeConfig,
+        ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+            Ok((self.wav.clone(), Self::diagnostics()))
+        }
+
+        fn stop_and_get_wav_before_after(
+            &mut self,
+            _after_cfg: AudioEncodeConfig,
+        ) -> Result<(Vec<u8>, Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+            Ok((
+                self.before_wav.clone(),
+                self.after_wav.clone(),
+                Self::diagnostics(),
+            ))
+        }
+
+        fn stop_recording(&mut self) {}
+        fn stop(&mut self) {}
+
+        fn poll_vad_event(&self) -> Option<AudioCaptureEvent> {
+            None
+        }
+
+        fn is_vad_auto_stop_enabled(&self) -> bool {
+            self.vad_enabled && self.vad_auto_stop
+        }
+    }
 
     fn set_state_for_test(
         pipeline: &SharedPipeline,
@@ -4565,5 +4699,39 @@ mod tests {
         assert_eq!(pipeline.state(), PipelineState::Idle);
         assert!(pipeline.clone_last_wav_bytes().is_some());
         assert!(pipeline.get_cancel_token().is_none());
+    }
+
+    #[test]
+    fn pipeline_can_start_and_stop_without_cpal() {
+        let mut config = PipelineConfig::default();
+        config.max_recording_bytes = 1024;
+
+        let fake = FakeAudioCapture::new();
+        let meter_handle = fake.shared_level_meter();
+        let waveform_handle = fake.shared_waveform_meter();
+
+        let p = SharedPipeline::new_for_tests(config, Box::new(fake));
+
+        assert_eq!(p.try_state(), Some(PipelineState::Idle));
+        p.start_recording().expect("start recording should succeed");
+        assert_eq!(p.try_state(), Some(PipelineState::Recording));
+
+        // Simulate realtime meter updates without needing an actual CPAL callback.
+        let s0 = p.audio_level_snapshot_fast();
+        meter_handle.set_for_tests(0.25, 0.5);
+        let s1 = p.audio_level_snapshot_fast();
+        assert!(s1.seq > s0.seq);
+        assert!((s1.rms - 0.25).abs() < 1e-6);
+        assert!((s1.peak - 0.5).abs() < 1e-6);
+
+        // Same idea for the waveform meter: simulate samples without needing CPAL.
+        let w0 = p.audio_waveform_snapshot_fast();
+        waveform_handle.set_from_samples_for_tests(&[0.0, -0.25, 0.5, 1.0], 1);
+        let w1 = p.audio_waveform_snapshot_fast();
+        assert!(w1.seq > w0.seq);
+
+        let wav = p.stop_recording().expect("stop recording should succeed");
+        assert_eq!(wav, vec![1, 2, 3]);
+        assert_eq!(p.try_state(), Some(PipelineState::Idle));
     }
 }

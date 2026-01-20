@@ -953,6 +953,19 @@ impl SharedAudioWaveformMeter {
     pub fn snapshot(&self) -> AudioWaveformSnapshot {
         self.inner.snapshot()
     }
+
+    #[cfg(test)]
+    pub fn new_for_tests() -> Self {
+        Self {
+            inner: Arc::new(AudioWaveformMeter::default()),
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn set_from_samples_for_tests(&self, samples: &[f32], channels: usize) {
+        self.inner.update_from_f32_interleaved(samples, channels);
+    }
 }
 
 /// A cheap-to-clone handle for reading realtime audio levels without needing to
@@ -968,6 +981,59 @@ impl SharedAudioLevelMeter {
     pub fn snapshot(&self) -> AudioLevelSnapshot {
         self.inner.snapshot()
     }
+
+    #[cfg(test)]
+    pub fn new_for_tests() -> Self {
+        Self {
+            inner: Arc::new(AudioLevelMeter::default()),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn set_for_tests(&self, rms: f32, peak: f32) {
+        self.inner.update(rms, peak);
+    }
+}
+
+/// Minimal interface used by the pipeline so we can unit test state transitions
+/// without requiring a real CPAL device.
+///
+/// Real implementation: `AudioCapture`.
+pub trait AudioCaptureBackend: Send {
+    fn shared_level_meter(&self) -> SharedAudioLevelMeter;
+    fn shared_waveform_meter(&self) -> SharedAudioWaveformMeter;
+    fn level_snapshot(&self) -> AudioLevelSnapshot;
+
+    fn set_vad_config(&mut self, config: VadAutoStopConfig);
+    fn set_capture_behavior(
+        &mut self,
+        hot_mic_enabled: bool,
+        hot_mic_pre_roll_ms: u32,
+        mic_auto_recover_enabled: bool,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError>;
+
+    fn start_recording_session(
+        &mut self,
+        max_duration_secs: f32,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError>;
+
+    fn stop_and_get_wav_with_diagnostics(
+        &mut self,
+        cfg: AudioEncodeConfig,
+    ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError>;
+
+    fn stop_and_get_wav_before_after(
+        &mut self,
+        after_cfg: AudioEncodeConfig,
+    ) -> Result<(Vec<u8>, Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError>;
+
+    fn stop_recording(&mut self);
+    fn stop(&mut self);
+
+    fn poll_vad_event(&self) -> Option<AudioCaptureEvent>;
+    fn is_vad_auto_stop_enabled(&self) -> bool;
 }
 
 #[derive(Debug)]
@@ -1627,6 +1693,77 @@ impl AudioCapture {
     #[allow(dead_code)]
     pub fn channels(&self) -> u16 {
         self.channels
+    }
+}
+
+impl AudioCaptureBackend for AudioCapture {
+    fn shared_level_meter(&self) -> SharedAudioLevelMeter {
+        self.shared_level_meter()
+    }
+
+    fn shared_waveform_meter(&self) -> SharedAudioWaveformMeter {
+        self.shared_waveform_meter()
+    }
+
+    fn level_snapshot(&self) -> AudioLevelSnapshot {
+        self.level_snapshot()
+    }
+
+    fn set_vad_config(&mut self, config: VadAutoStopConfig) {
+        self.set_vad_config(config);
+    }
+
+    fn set_capture_behavior(
+        &mut self,
+        hot_mic_enabled: bool,
+        hot_mic_pre_roll_ms: u32,
+        mic_auto_recover_enabled: bool,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
+        self.set_capture_behavior(
+            hot_mic_enabled,
+            hot_mic_pre_roll_ms,
+            mic_auto_recover_enabled,
+            input_device_name,
+        )
+    }
+
+    fn start_recording_session(
+        &mut self,
+        max_duration_secs: f32,
+        input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
+        self.start_recording_session(max_duration_secs, input_device_name)
+    }
+
+    fn stop_and_get_wav_with_diagnostics(
+        &mut self,
+        cfg: AudioEncodeConfig,
+    ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+        self.stop_and_get_wav_with_diagnostics(cfg)
+    }
+
+    fn stop_and_get_wav_before_after(
+        &mut self,
+        after_cfg: AudioEncodeConfig,
+    ) -> Result<(Vec<u8>, Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+        self.stop_and_get_wav_before_after(after_cfg)
+    }
+
+    fn stop_recording(&mut self) {
+        self.stop_recording();
+    }
+
+    fn stop(&mut self) {
+        self.stop();
+    }
+
+    fn poll_vad_event(&self) -> Option<AudioCaptureEvent> {
+        self.poll_vad_event()
+    }
+
+    fn is_vad_auto_stop_enabled(&self) -> bool {
+        self.is_vad_auto_stop_enabled()
     }
 }
 
