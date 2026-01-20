@@ -4,7 +4,7 @@ import {
 	Button,
 	Group,
 	Loader,
-	Modal,
+  Modal,
 	NumberInput,
 	Select,
 	Switch,
@@ -69,6 +69,10 @@ import {
 import { HintSelect } from "../HintSelect";
 import { PromptSectionEditor } from "./PromptSectionEditor";
 import { QuickAskPanel } from "./prompt/QuickAskPanel";
+import {
+  PromptSettingsModals,
+  type LinkableProfileOption,
+} from "./prompt/PromptSettingsModals";
 import { TranscribeSettingsSection } from "./prompt/TranscribeSettingsSection";
 import { QuickReplaceSettings } from "./QuickReplaceSettings";
 import { RewritePromptLabModal } from "./RewritePromptLabModal";
@@ -578,8 +582,8 @@ export function PromptSettings({
 		setEditingPresetId(id);
 	};
 
-	const linkableProfiles = useMemo(() => {
-		return profiles
+  const linkableProfiles: LinkableProfileOption[] = useMemo(() => {
+    return profiles
 			.filter((p) => p.id !== activeProfileId)
 			.map((p) => {
 				const profilePresets = getPresetsForProfile(p);
@@ -632,6 +636,29 @@ export function PromptSettings({
 		setEditingPresetId(linkSourcePreset.id);
 		setLinkPresetModalOpen(false);
 	};
+
+  const handleLinkSourceProfileChange = (value: string) => {
+    setLinkSourceProfileId(value);
+    const nextProfile = linkableProfiles.find((p) => p.id === value) ?? null;
+    setLinkSourcePresetId(nextProfile?.presets[0]?.id ?? null);
+  };
+
+  const handleLinkSourcePresetChange = (value: string) => {
+    setLinkSourcePresetId(value);
+  };
+
+  const handleConfirmDeletePreset = () => {
+    const args = deletePresetDialog;
+    if (!args) return;
+    setDeletePresetDialog(null);
+    deletePreset(args.presetId);
+  };
+
+  const handleConfirmResetDialog = () => {
+    const confirm = resetDialog?.onConfirm;
+    setResetDialog(null);
+    confirm?.();
+  };
 
 	const normalizeRouter = useCallback(
 		(router: IntentRouterSettings | null | undefined): IntentRouterSettings => {
@@ -2697,135 +2724,26 @@ export function PromptSettings({
 		});
 	};
 
-	return (
+  return (
     <>
-      <Modal
-        opened={linkPresetModalOpen}
-        onClose={() => setLinkPresetModalOpen(false)}
-        title="Add preset from another profile"
-        centered
-        zIndex={1200}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <Select
-            label="Source profile"
-            data={linkableProfiles.map((p) => ({
-              value: p.id,
-              label: p.label,
-            }))}
-            value={linkSourceProfileId}
-            onChange={(value) => {
-              if (!value) return;
-              setLinkSourceProfileId(value);
-              const nextProfile =
-                linkableProfiles.find((p) => p.id === value) ?? null;
-              setLinkSourcePresetId(nextProfile?.presets[0]?.id ?? null);
-            }}
-            placeholder={
-              linkableProfiles.length === 0
-                ? "No other profiles"
-                : "Select profile"
-            }
-            withCheckIcon={false}
-          />
-
-          <Select
-            label="Preset"
-            data={(linkSourceProfile?.presets ?? []).map((p) => ({
-              value: p.id,
-              label: p.name?.trim() || p.id,
-            }))}
-            value={linkSourcePresetId}
-            onChange={(value) => {
-              if (!value) return;
-              setLinkSourcePresetId(value);
-            }}
-            disabled={!linkSourceProfile}
-            placeholder={
-              !linkSourceProfile ? "Select a profile first" : "Select preset"
-            }
-            withCheckIcon={false}
-          />
-        </div>
-
-        <Group justify="flex-end" mt="md" gap="sm">
-          <Button
-            variant="default"
-            onClick={() => setLinkPresetModalOpen(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            color="gray"
-            onClick={confirmLinkPreset}
-            disabled={!linkSourcePreset}
-          >
-            Add Preset
-          </Button>
-        </Group>
-      </Modal>
-
-      <Modal
-        opened={deletePresetDialog !== null}
-        onClose={() => setDeletePresetDialog(null)}
-        title="Delete preset?"
-        centered
-        zIndex={1300}
-      >
-        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
-          {deletePresetDialog?.isShared
-            ? "This preset is shared. Deleting it here only removes it from this profile; other profiles will keep it."
-            : "This will remove the preset from this profile."}
-        </Text>
-
-        <Text size="sm" mt="xs" style={{ lineHeight: 1.4 }}>
-          {deletePresetDialog?.presetName ?? ""}
-        </Text>
-
-        <Group justify="flex-end" mt="md" gap="sm">
-          <Button variant="default" onClick={() => setDeletePresetDialog(null)}>
-            Cancel
-          </Button>
-          <Button
-            color="red"
-            onClick={() => {
-              const args = deletePresetDialog;
-              if (!args) return;
-              setDeletePresetDialog(null);
-              deletePreset(args.presetId);
-            }}
-          >
-            Delete
-          </Button>
-        </Group>
-      </Modal>
-
-      <Modal
-        opened={resetDialog !== null}
-        onClose={() => setResetDialog(null)}
-        title={resetDialog?.title ?? ""}
-        centered
-      >
-        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
-          This setting is currently overriding the Default profile. Disable the
-          override to inherit from Default.
-        </Text>
-        <Group justify="flex-end" mt="md" gap="sm">
-          <Button variant="default" onClick={() => setResetDialog(null)}>
-            Keep override
-          </Button>
-          <Button
-            color="gray"
-            onClick={() => {
-              const confirm = resetDialog?.onConfirm;
-              setResetDialog(null);
-              confirm?.();
-            }}
-          >
-            Disable override
-          </Button>
-        </Group>
-      </Modal>
+      <PromptSettingsModals
+        linkPresetModalOpen={linkPresetModalOpen}
+        onCloseLinkPresetModal={() => setLinkPresetModalOpen(false)}
+        linkableProfiles={linkableProfiles}
+        linkSourceProfileId={linkSourceProfileId}
+        onLinkSourceProfileChange={handleLinkSourceProfileChange}
+        linkSourcePresetId={linkSourcePresetId}
+        onLinkSourcePresetChange={handleLinkSourcePresetChange}
+        linkSourceProfile={linkSourceProfile}
+        canConfirmLinkPreset={Boolean(linkSourcePreset)}
+        onConfirmLinkPreset={confirmLinkPreset}
+        deletePresetDialog={deletePresetDialog}
+        onCloseDeletePresetDialog={() => setDeletePresetDialog(null)}
+        onConfirmDeletePreset={handleConfirmDeletePreset}
+        resetDialog={resetDialog}
+        onCloseResetDialog={() => setResetDialog(null)}
+        onConfirmResetDialog={handleConfirmResetDialog}
+      />
 
       <RewritePromptLabModal
         opened={promptLabOpen}
