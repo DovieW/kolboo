@@ -65,6 +65,10 @@ import { usePromptProviderOptions } from "./prompt/usePromptProviderOptions";
 import { usePromptSettingsProfileState } from "./prompt/usePromptSettingsProfileState";
 import { usePromptSettingsTests } from "./prompt/usePromptSettingsTests";
 import { useRewriteSettingsHandlers } from "./prompt/useRewriteSettingsHandlers";
+import {
+	type SectionKey,
+	useSectionManagement,
+} from "./prompt/useSectionManagement";
 import { useSttSettingsHandlers } from "./prompt/useSttSettingsHandlers";
 import {
 	ANTHROPIC_THINKING_LEVEL_BUDGETS,
@@ -96,8 +100,6 @@ const DEFAULT_QUICK_ASK_SYSTEM_PROMPT =
 const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT =
 	"You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
 
-type SectionKey = "system";
-
 function errorToMessage(err: unknown): string {
 	if (err instanceof Error) return err.message;
 	if (typeof err === "string") return err;
@@ -111,14 +113,6 @@ function errorToMessage(err: unknown): string {
 		}
 	}
 	return String(err);
-}
-
-interface LocalSectionState {
-	content: string;
-}
-
-interface LocalSections {
-	system: LocalSectionState;
 }
 
 function _createId(): string {
@@ -461,74 +455,6 @@ export function PromptSettings({
 		setResetDialog(args);
 	};
 
-	// NOTE: Settings tabs unmount when switching (keepMounted=false). If we render
-	// switches immediately, they first render with placeholder values then “jump”
-	// once settings load. We avoid that by showing a loader until we have settings
-	// + defaults and local state is initialized.
-	const [localSections, setLocalSections] = useState<LocalSections | null>(
-		null,
-	);
-
-	const effectiveCurrentPrompt = useMemo(() => {
-		if (localSections == null) return "";
-
-		return (localSections.system.content ?? "").trim();
-	}, [localSections]);
-
-	// Keep PromptLab context aligned with current scope by default.
-	useEffect(() => {
-		if (!promptLabOpen) {
-			setPromptLabContextPrompt(effectiveCurrentPrompt);
-			setPromptLabContextLabel(activeProfileLabel);
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [effectiveCurrentPrompt, activeProfileLabel, promptLabOpen]);
-
-	// When updating per-section prompt overrides quickly (e.g., toggling Advanced then
-	// Dictionary immediately), relying on `activeProfile` can drop earlier changes
-	// because the component may not have re-rendered with the optimistic update yet.
-	// Keep a ref of the latest per-profile prompt overrides to merge safely.
-	const profilePromptOverridesRef =
-		useRef<CleanupPromptSectionsOverride | null>(null);
-
-	useEffect(() => {
-		profilePromptOverridesRef.current =
-			activeProfile?.cleanup_prompt_sections ?? null;
-	}, [activeProfile?.cleanup_prompt_sections]);
-
-	useEffect(() => {
-		if (settings !== undefined && defaultSections !== undefined) {
-			const base = settings.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
-
-			const profileOverrides: CleanupPromptSectionsOverride | null | undefined =
-				activeProfileId === "default"
-					? null
-					: profiles.find((p) => p.id === activeProfileId)
-							?.cleanup_prompt_sections;
-
-			const resolved: CleanupPromptSections =
-				activeProfileId === "default"
-					? base
-					: {
-							system: profileOverrides?.system ?? base.system,
-						};
-
-			setLocalSections({
-				system: {
-					content: resolved.system.content ?? defaultSections.system,
-				},
-			});
-		}
-	}, [settings, defaultSections, activeProfileId, profiles]);
-
-	const isLoading =
-		isLoadingSettings ||
-		isLoadingDefaultSections ||
-		isLoadingProviders ||
-		settings === undefined ||
-		defaultSections === undefined ||
-		localSections === null;
-
 	// One-time migration: ensure every profile has its own rewrite enable flag.
 	// This prevents the Default toggle from affecting other profiles.
 	const didEnsureDefaultProfile = useRef(false);
@@ -851,84 +777,6 @@ export function PromptSettings({
 			? "inheriting"
 			: "overriding";
 
-	const buildSections = (overrides?: {
-		key: SectionKey;
-		content?: string | null;
-	}): CleanupPromptSections => {
-		if (localSections === null) {
-			return DEFAULT_SECTIONS;
-		}
-
-		const getContent = (key: SectionKey): string | null => {
-			const content =
-				overrides?.key === key && overrides.content !== undefined
-					? overrides.content
-					: localSections[key].content;
-
-			// Return null if content matches default (to use server default)
-			if (content === defaultSections?.[key]) {
-				return null;
-			}
-			return content || null;
-		};
-
-		return {
-			system: { content: getContent("system") },
-		};
-	};
-
-	const saveAllSections = (sections: CleanupPromptSections) => {
-		// Only used for Default scope. Per-profile prompt changes are stored as per-section overrides.
-		updateCleanupPromptSections.mutate(sections, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const normalizePromptOverrides = (
-		overrides: CleanupPromptSectionsOverride,
-	): CleanupPromptSectionsOverride | null => {
-		const hasAny = overrides.system != null;
-		return hasAny ? overrides : null;
-	};
-
-	const saveProfileSectionOverride = (
-		key: SectionKey,
-		section: CleanupPromptSections[SectionKey] | null,
-	) => {
-		const current: CleanupPromptSectionsOverride =
-			profilePromptOverridesRef.current ?? {};
-		const next: CleanupPromptSectionsOverride = { ...current, [key]: section };
-		const normalized = normalizePromptOverrides(next);
-		profilePromptOverridesRef.current = normalized;
-
-		saveProfileMetadata({ cleanup_prompt_sections: normalized });
-	};
-
-	const buildSectionOverride = (
-		key: SectionKey,
-		overrides?: {
-			content?: string | null;
-		},
-	): CleanupPromptSections[SectionKey] => {
-		if (localSections === null) {
-			return DEFAULT_SECTIONS[key];
-		}
-
-		const contentRaw =
-			overrides?.content !== undefined
-				? overrides.content
-				: localSections[key].content;
-
-		const contentToStore =
-			contentRaw === defaultSections?.[key] ? null : contentRaw || null;
-
-		return {
-			content: contentToStore,
-		};
-	};
-
 	const saveProfileMetadata = (next: Partial<RewriteProgramPromptProfile>) => {
 		const exists = profiles.some((p) => p.id === activeProfileId);
 
@@ -972,6 +820,42 @@ export function PromptSettings({
 			},
 		});
 	};
+
+	// Section management (local section state, save/reset handlers)
+	const {
+		localSections,
+		setLocalSections,
+		effectiveCurrentPrompt,
+		profilePromptOverridesRef,
+		handleSave,
+		handleReset,
+		normalizePromptOverrides,
+	} = useSectionManagement({
+		settings,
+		defaultSections,
+		activeProfileId,
+		profiles,
+		activeProfile,
+		updateCleanupPromptSections,
+		saveProfileMetadata,
+	});
+
+	const isLoading =
+		isLoadingSettings ||
+		isLoadingDefaultSections ||
+		isLoadingProviders ||
+		settings === undefined ||
+		defaultSections === undefined ||
+		localSections === null;
+
+	// Keep PromptLab context aligned with current scope by default.
+	useEffect(() => {
+		if (!promptLabOpen) {
+			setPromptLabContextPrompt(effectiveCurrentPrompt);
+			setPromptLabContextLabel(activeProfileLabel);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [effectiveCurrentPrompt, activeProfileLabel, promptLabOpen]);
 
 	// Preset management (CRUD, linking, local form state)
 	const {
@@ -1090,38 +974,6 @@ export function PromptSettings({
 		saveProfileMetadata,
 		openDisableOverrideDialog,
 	});
-
-	const handleSave = (key: SectionKey, content: string) => {
-		setLocalSections((prev) => {
-			if (prev === null) return prev;
-			return { ...prev, [key]: { ...prev[key], content } };
-		});
-
-		if (activeProfileId === "default") {
-			saveAllSections(buildSections({ key, content }));
-			return;
-		}
-
-		saveProfileSectionOverride(key, buildSectionOverride(key, { content }));
-	};
-
-	const handleReset = (key: SectionKey) => {
-		const defaultContent = defaultSections?.[key] ?? "";
-		setLocalSections((prev) => {
-			if (prev === null) return prev;
-			return { ...prev, [key]: { ...prev[key], content: defaultContent } };
-		});
-
-		if (activeProfileId === "default") {
-			saveAllSections(buildSections({ key, content: null }));
-			return;
-		}
-
-		saveProfileSectionOverride(
-			key,
-			buildSectionOverride(key, { content: null }),
-		);
-	};
 
 	const handleDefaultQuickAskProviderChange = (value: string | null) => {
 		if (!value) return;
