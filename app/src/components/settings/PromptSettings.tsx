@@ -70,6 +70,8 @@ import {
 	useSectionManagement,
 } from "./prompt/useSectionManagement";
 import { useSttSettingsHandlers } from "./prompt/useSttSettingsHandlers";
+import { usePromptLabState } from "./prompt/usePromptLabState";
+import { useProfileMigrations } from "./prompt/useProfileMigrations";
 import {
 	ANTHROPIC_THINKING_LEVEL_BUDGETS,
 	formatThinkingBudgetShort,
@@ -350,17 +352,6 @@ export function PromptSettings({
 		testSttLastAudio,
 	});
 
-	const [promptLabOpen, setPromptLabOpen] = useState(false);
-	const [promptLabContextPrompt, setPromptLabContextPrompt] =
-		useState<string>("");
-	const [promptLabContextLabel, setPromptLabContextLabel] =
-		useState<string>("");
-	const [promptLabApplyTarget, setPromptLabApplyTarget] = useState<
-		| { type: "profile"; key: SectionKey }
-		| { type: "preset"; presetId: string; key: SectionKey }
-		| null
-	>(null);
-
 	const [isCachingRouterEmbeddings, setIsCachingRouterEmbeddings] =
 		useState(false);
 
@@ -455,98 +446,13 @@ export function PromptSettings({
 		setResetDialog(args);
 	};
 
-	// One-time migration: ensure every profile has its own rewrite enable flag.
-	// This prevents the Default toggle from affecting other profiles.
-	const didEnsureDefaultProfile = useRef(false);
-	useEffect(() => {
-		if (didEnsureDefaultProfile.current) return;
-		if (!settings) return;
-
-		// Ensure the Default profile exists as a real, persisted profile object so it can
-		// own presets/router configuration.
-		const hasDefault = profiles.some((p) => p.id === "default");
-		if (hasDefault) {
-			didEnsureDefaultProfile.current = true;
-			return;
-		}
-
-		didEnsureDefaultProfile.current = true;
-
-		const defaultProfile: RewriteProgramPromptProfile = {
-			id: "default",
-			name: "Default",
-			program_paths: [],
-			cleanup_prompt_sections: null,
-			presets: [],
-			default_preset_id: null,
-			default_preset_description: null,
-			default_target_rewrite_llm_enabled: true,
-			router: null,
-			active_preset_id: null,
-			// Default profile uses the global rewrite toggle.
-			rewrite_llm_enabled: null,
-			stt_provider: null,
-			stt_model: null,
-			stt_timeout_seconds: null,
-			llm_provider: null,
-			llm_model: null,
-			openai_reasoning_effort: null,
-			gemini_thinking_budget: null,
-			gemini_thinking_level: null,
-			anthropic_thinking_budget: null,
-
-			context_grab_method: null,
-
-			sound_enabled: null,
-			playing_audio_handling: null,
-			overlay_mode: null,
-			widget_position: null,
-			output_mode: null,
-			output_hit_enter: null,
-		};
-
-		// Insert Default first so it doesn't show up as a "program profile" elsewhere.
-		updateRewriteProgramPromptProfiles.mutate([defaultProfile, ...profiles], {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	}, [profiles, settings, updateRewriteProgramPromptProfiles]);
-
-	const didMigrateProfileRewriteEnabled = useRef(false);
-	useEffect(() => {
-		if (didMigrateProfileRewriteEnabled.current) return;
-		if (!settings) return;
-		if (profiles.length === 0) return;
-
-		const needsMigration = profiles.some(
-			(p) => p.id !== "default" && typeof p.rewrite_llm_enabled !== "boolean",
-		);
-		if (!needsMigration) {
-			didMigrateProfileRewriteEnabled.current = true;
-			return;
-		}
-
-		didMigrateProfileRewriteEnabled.current = true;
-
-		const migrated = profiles.map((p) => {
-			if (p.id === "default") return p;
-			const current = p.rewrite_llm_enabled;
-			if (typeof current === "boolean") return p;
-			return { ...p, rewrite_llm_enabled: defaultRewriteEnabled };
-		});
-
-		updateRewriteProgramPromptProfiles.mutate(migrated, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	}, [
+	// One-time profile migrations (default profile creation, rewrite flag migration)
+	useProfileMigrations({
 		settings,
 		profiles,
 		defaultRewriteEnabled,
 		updateRewriteProgramPromptProfiles,
-	]);
+	});
 
 	const isOpenAiStt = effectiveSttProvider === "openai";
 	const isAquavoiceStt = effectiveSttProvider === "aquavoice";
@@ -840,6 +746,19 @@ export function PromptSettings({
 		saveProfileMetadata,
 	});
 
+	const {
+		promptLabOpen,
+		promptLabContextPrompt,
+		promptLabContextLabel,
+		promptLabApplyTarget,
+		handleOpenPresetPromptLab,
+		handleOpenDefaultPromptLab,
+		closePromptLab,
+	} = usePromptLabState({
+		effectiveCurrentPrompt,
+		activeProfileLabel,
+	});
+
 	const isLoading =
 		isLoadingSettings ||
 		isLoadingDefaultSections ||
@@ -847,15 +766,6 @@ export function PromptSettings({
 		settings === undefined ||
 		defaultSections === undefined ||
 		localSections === null;
-
-	// Keep PromptLab context aligned with current scope by default.
-	useEffect(() => {
-		if (!promptLabOpen) {
-			setPromptLabContextPrompt(effectiveCurrentPrompt);
-			setPromptLabContextLabel(activeProfileLabel);
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [effectiveCurrentPrompt, activeProfileLabel, promptLabOpen]);
 
 	// Preset management (CRUD, linking, local form state)
 	const {
@@ -1115,25 +1025,6 @@ export function PromptSettings({
 		});
 	};
 
-	const handleOpenPresetPromptLab = (
-		preset: RewritePreset,
-		key: SectionKey,
-		initialContent: string,
-	) => {
-		const presetLabel = preset.name?.trim() || preset.id;
-		setPromptLabContextPrompt(initialContent.trim());
-		setPromptLabContextLabel(`${activeProfileLabel} · ${presetLabel}`);
-		setPromptLabApplyTarget({ type: "preset", presetId: preset.id, key });
-		setPromptLabOpen(true);
-	};
-
-	const handleOpenDefaultPromptLab = () => {
-		setPromptLabContextPrompt(effectiveCurrentPrompt);
-		setPromptLabContextLabel(activeProfileLabel);
-		setPromptLabApplyTarget({ type: "profile", key: "system" });
-		setPromptLabOpen(true);
-	};
-
 	const handleDisableDefaultSystemPromptOverride = () => {
 		openDisableOverrideDialog({
 			title: "Disable System Prompt override?",
@@ -1199,10 +1090,7 @@ export function PromptSettings({
 
 			<RewritePromptLabModal
 				opened={promptLabOpen}
-				onClose={() => {
-					setPromptLabOpen(false);
-					setPromptLabApplyTarget(null);
-				}}
+				onClose={closePromptLab}
 				profileId={activeProfileId}
 				profileLabel={promptLabContextLabel || activeProfileLabel}
 				initialLlmProvider={effectiveLlmProvider}
