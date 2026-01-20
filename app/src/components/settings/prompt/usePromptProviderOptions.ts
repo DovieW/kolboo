@@ -160,9 +160,9 @@ export function usePromptProviderOptions({
 		activeProfileId === "default"
 			? (settings?.quick_ask_provider ?? settings?.llm_provider ?? null)
 			: (localProfileQuickAskProvider ??
-					settings?.quick_ask_provider ??
-					settings?.llm_provider ??
-					null);
+				settings?.quick_ask_provider ??
+				settings?.llm_provider ??
+				null);
 	const effectiveQuickAskProvider =
 		rawQuickAskProvider && llmProviderValueSet.has(rawQuickAskProvider)
 			? rawQuickAskProvider
@@ -218,9 +218,9 @@ export function usePromptProviderOptions({
 			: activeProfileId === "default"
 				? (settings?.quick_ask_model ?? settings?.llm_model ?? null)
 				: (localProfileQuickAskModel ??
-						settings?.quick_ask_model ??
-						settings?.llm_model ??
-						null);
+					settings?.quick_ask_model ??
+					settings?.llm_model ??
+					null);
 
 	const fireworksModelsQuery = useFireworksModels(
 		effectiveLlmProvider === "fireworks" ||
@@ -273,11 +273,11 @@ export function usePromptProviderOptions({
 			? null
 			: isDefaultScope
 				? (settings?.quick_ask_model ??
-						(effectiveQuickAskProvider === effectiveLlmProvider
-							? settings?.llm_model
-							: null) ??
-						quickAskModelOptions[0]?.value ??
-						null)
+					(effectiveQuickAskProvider === effectiveLlmProvider
+						? settings?.llm_model
+						: null) ??
+					quickAskModelOptions[0]?.value ??
+					null)
 				: localProfileQuickAskModel;
 
 	const selectedQuickReplaceModelForUi =
@@ -285,11 +285,11 @@ export function usePromptProviderOptions({
 			? null
 			: isDefaultScope
 				? (localProfileQuickReplaceModel ??
-						(effectiveQuickReplaceProvider === effectiveLlmProvider
-							? settings?.llm_model
-							: null) ??
-						quickReplaceModelOptions[0]?.value ??
-						null)
+					(effectiveQuickReplaceProvider === effectiveLlmProvider
+						? settings?.llm_model
+						: null) ??
+					quickReplaceModelOptions[0]?.value ??
+					null)
 				: localProfileQuickReplaceModel;
 
 	const effectiveLlmModel =

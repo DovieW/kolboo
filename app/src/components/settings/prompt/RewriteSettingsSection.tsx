@@ -1,10 +1,4 @@
-import {
-	ActionIcon,
-	Select,
-	Switch,
-	Text,
-	Tooltip,
-} from "@mantine/core";
+import { ActionIcon, Select, Switch, Text, Tooltip } from "@mantine/core";
 import { Info, RotateCcw } from "lucide-react";
 import type { ModelOption } from "../../../lib/modelOptions";
 import type { AppSettings } from "../../../lib/tauri";
@@ -179,7 +173,9 @@ export function RewriteSettingsSection({
 					)}
 					<Switch
 						checked={
-							isDefaultScope ? defaultRewriteEnabled : localProfileRewriteEnabled
+							isDefaultScope
+								? defaultRewriteEnabled
+								: localProfileRewriteEnabled
 						}
 						onChange={(e) => onRewriteEnabledChange(e.currentTarget.checked)}
 						disabled={isUpdatingRewriteEnabled}
@@ -286,7 +282,10 @@ export function RewriteSettingsSection({
 							</Tooltip>
 						)}
 						{!isDefaultScope && !llmModelInheriting && (
-							<Tooltip label="Disable override (inherit from Default)" withArrow>
+							<Tooltip
+								label="Disable override (inherit from Default)"
+								withArrow
+							>
 								<ActionIcon
 									variant="subtle"
 									color="gray"
@@ -345,7 +344,10 @@ export function RewriteSettingsSection({
 							</Tooltip>
 						)}
 						{!isDefaultScope && !openAiReasoningEffortInheriting && (
-							<Tooltip label="Disable override (inherit from Default)" withArrow>
+							<Tooltip
+								label="Disable override (inherit from Default)"
+								withArrow
+							>
 								<ActionIcon
 									variant="subtle"
 									color="gray"
@@ -390,9 +392,9 @@ export function RewriteSettingsSection({
 										? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
 										: "medium"
 									: (settings?.openai_reasoning_effort ??
-											(effectiveLlmModel
-												? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-												: "medium"));
+										(effectiveLlmModel
+											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+											: "medium"));
 
 								return (
 									<div
@@ -426,9 +428,9 @@ export function RewriteSettingsSection({
 										? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
 										: "medium"
 									: (settings?.openai_reasoning_effort ??
-											(effectiveLlmModel
-												? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-												: "medium"));
+										(effectiveLlmModel
+											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+											: "medium"));
 
 								return (
 									<div
@@ -477,7 +479,10 @@ export function RewriteSettingsSection({
 						)}
 
 						{!isDefaultScope && !geminiThinkingLevelInheriting && (
-							<Tooltip label="Disable override (inherit from Default)" withArrow>
+							<Tooltip
+								label="Disable override (inherit from Default)"
+								withArrow
+							>
 								<ActionIcon
 									variant="subtle"
 									color="gray"
@@ -594,7 +599,10 @@ export function RewriteSettingsSection({
 							</Tooltip>
 						)}
 						{!isDefaultScope && !geminiThinkingBudgetInheriting && (
-							<Tooltip label="Disable override (inherit from Default)" withArrow>
+							<Tooltip
+								label="Disable override (inherit from Default)"
+								withArrow
+							>
 								<ActionIcon
 									variant="subtle"
 									color="gray"
@@ -725,7 +733,10 @@ export function RewriteSettingsSection({
 							</Tooltip>
 						)}
 						{!isDefaultScope && !anthropicThinkingBudgetInheriting && (
-							<Tooltip label="Disable override (inherit from Default)" withArrow>
+							<Tooltip
+								label="Disable override (inherit from Default)"
+								withArrow
+							>
 								<ActionIcon
 									variant="subtle"
 									color="gray"

@@ -1,5 +1,8 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import type { AppSettings, RewriteProgramPromptProfile } from "../../../lib/tauri";
+import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
+import type {
+	AppSettings,
+	RewriteProgramPromptProfile,
+} from "../../../lib/tauri";
 
 type UsePromptSettingsProfileStateOptions = {
 	activeProfileId: string;
@@ -144,8 +147,10 @@ export function usePromptSettingsProfileState({
 
 	const [localProfileQuickReplaceEnabled, setLocalProfileQuickReplaceEnabled] =
 		useState<boolean>(false);
-	const [localProfileQuickReplaceProvider, setLocalProfileQuickReplaceProvider] =
-		useState<string | null>(null);
+	const [
+		localProfileQuickReplaceProvider,
+		setLocalProfileQuickReplaceProvider,
+	] = useState<string | null>(null);
 	const [localProfileQuickReplaceModel, setLocalProfileQuickReplaceModel] =
 		useState<string | null>(null);
 	const [localQuickReplaceSystemPrompt, setLocalQuickReplaceSystemPrompt] =
@@ -209,7 +214,8 @@ export function usePromptSettingsProfileState({
 	const [sttTimeoutInheriting, setSttTimeoutInheriting] = useState(false);
 	const [llmProviderInheriting, setLlmProviderInheriting] = useState(false);
 	const [llmModelInheriting, setLlmModelInheriting] = useState(false);
-	const [rewriteEnabledInheriting, setRewriteEnabledInheriting] = useState(false);
+	const [rewriteEnabledInheriting, setRewriteEnabledInheriting] =
+		useState(false);
 
 	const [
 		rewriteIncludeClipboardContextInheriting,
@@ -230,8 +236,10 @@ export function usePromptSettingsProfileState({
 		useState(false);
 	const [geminiThinkingBudgetInheriting, setGeminiThinkingBudgetInheriting] =
 		useState(false);
-	const [anthropicThinkingBudgetInheriting, setAnthropicThinkingBudgetInheriting] =
-		useState(false);
+	const [
+		anthropicThinkingBudgetInheriting,
+		setAnthropicThinkingBudgetInheriting,
+	] = useState(false);
 
 	const [quickAskProviderInheriting, setQuickAskProviderInheriting] =
 		useState(false);
