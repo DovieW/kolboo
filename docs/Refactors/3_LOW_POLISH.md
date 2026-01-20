@@ -5,7 +5,7 @@ These are quality-of-life improvements. They’re totally valid, but they’re t
 ## A11y lint follow-ups
 
 - **Review remaining a11y ignores in UI hotspots.**
-	- Focus areas: `HistoryFeed` row click handling, `PromptSectionEditor` header action wrapper, and the audio preview widgets in `AudioSettings`.
+	- Focus areas: `PromptSectionEditor` header action wrapper and the audio preview widgets in `AudioSettings`.
 	- Goal: replace ignores with accessible patterns where feasible.
 
 ## Ralph harness (Copilot CLI) ergonomics

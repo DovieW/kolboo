@@ -1977,26 +1977,18 @@ export function HistoryFeed({
 								const hasCopyValue = Boolean(copyValue?.trim());
 
 								return (
-									// biome-ignore lint/a11y/noStaticElementInteractions: clickable row uses role+keyboard handlers; cannot be a <button> due to nested controls
-									<div
-										key={entry.id}
-										className="history-item"
-										onClick={() => handleCopyEntry(entry.id, copyValue)}
-										title={hasCopyValue ? "Click to copy" : undefined}
-										role={hasCopyValue ? "button" : undefined}
-										tabIndex={hasCopyValue ? 0 : -1}
-										onKeyDown={(e) => {
-											if (!hasCopyValue) return;
-											if (e.key === "Enter" || e.key === " ") {
-												e.preventDefault();
-												handleCopyEntry(entry.id, copyValue);
-											}
-										}}
-									>
-										<span className="history-time">
-											{formatTime(entry.timestamp)}
-										</span>
-										<div className="history-text">
+									<div key={entry.id} className="history-item">
+										<button
+											type="button"
+											className="history-item-button"
+											onClick={() => handleCopyEntry(entry.id, copyValue)}
+											title={hasCopyValue ? "Click to copy" : undefined}
+											disabled={!hasCopyValue}
+										>
+											<span className="history-time">
+												{formatTime(entry.timestamp)}
+											</span>
+											<div className="history-text">
 											{status === "in_progress" ? (
 												<Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
 													<Loader size="xs" color="orange" />
@@ -2063,7 +2055,8 @@ export function HistoryFeed({
 													{entry.text?.trim() ? entry.text : "No transcript"}
 												</Text>
 											)}
-										</div>
+											</div>
+										</button>
 										<div className="history-actions">
 											{(() => {
 												const profileLabel = (() => {

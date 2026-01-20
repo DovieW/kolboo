@@ -495,9 +495,27 @@ a:focus-visible {
 	background: var(--bg-card);
 	border-radius: 12px;
 	transition: all 0.2s ease;
-	cursor: pointer;
+	cursor: default;
 
 	border: 1px solid transparent;
+}
+
+.history-item-button {
+	display: flex;
+	align-items: flex-start;
+	gap: 16px;
+	flex: 1;
+	min-width: 0;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.history-item-button:disabled {
+	cursor: default;
 }
 
 .history-copy-icon {
