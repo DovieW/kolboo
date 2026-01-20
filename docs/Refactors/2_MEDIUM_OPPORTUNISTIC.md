@@ -47,8 +47,9 @@ These are the files that are _currently_ the largest / most responsibility-dense
      - Exposes values + setters for profile overrides/inheritance state.
    3) ✅ **Move prompt test logic** (rewrite test + STT test) into a `usePromptSettingsTests.ts` hook.
      - Done: rewrite + STT test state and runners moved into `usePromptSettingsTests`.
-   4) **Extract “provider/model selection” logic** into a `usePromptProviderOptions.ts` helper.
-     - Consolidate the provider option building and model option derivation.
+   4) ✅ **Extract "provider/model selection" logic** into a `usePromptProviderOptions.ts` helper.
+     - Done: provider dropdown options, effective providers/models, model options, default profile values, and model queries moved into hook.
+     - Also exports `getLlmModelOptionsForProvider` helper used by UI callbacks.
    5) **Introduce a `PromptSettingsLayout` component** for the accordion/sections layout.
      - The layout should only render sections and wire high‑level props.
    6) **Trim `PromptSettings.tsx` imports** after each extraction.
