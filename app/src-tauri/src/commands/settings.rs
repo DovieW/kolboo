@@ -25,10 +25,7 @@ use std::collections::HashSet;
 /// (multi-window store instances can lag behind the JS side).
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn set_hotkey_debug_enabled_runtime(
-    app: AppHandle,
-    enabled: bool,
-) -> CommandResult<()> {
+pub async fn set_hotkey_debug_enabled_runtime(app: AppHandle, enabled: bool) -> CommandResult<()> {
     #[cfg(target_os = "windows")]
     {
         crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(enabled);

@@ -248,8 +248,7 @@ pub fn github_backup_has_token(_app: AppHandle) -> bool {
 #[cfg(desktop)]
 #[tauri::command]
 pub fn github_backup_set_token(app: AppHandle, token: String) -> CommandResult<()> {
-    crate::secrets::set_secret(&app, GITHUB_GIST_TOKEN_KEY, token.as_str())
-        .map_err(Into::into)
+    crate::secrets::set_secret(&app, GITHUB_GIST_TOKEN_KEY, token.as_str()).map_err(Into::into)
 }
 
 #[cfg(not(desktop))]

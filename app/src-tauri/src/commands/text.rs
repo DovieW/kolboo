@@ -39,9 +39,7 @@ pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
     .map_err(|e| e.to_string())?;
 
     // Wait for result from main thread
-    let result = rx
-        .recv()
-        .map_err(|e| CommandError::from(e.to_string()))?;
+    let result = rx.recv().map_err(|e| CommandError::from(e.to_string()))?;
     match result {
         Ok(()) => Ok(()),
         Err(error) => Err(CommandError::from(error)),

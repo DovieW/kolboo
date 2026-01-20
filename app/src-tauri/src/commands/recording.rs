@@ -241,23 +241,24 @@ pub(crate) fn emit_pipeline_recording_started<S: EventSink>(sink: &S) {
 
 impl From<PipelineError> for CommandError {
     fn from(err: PipelineError) -> Self {
-        let error_type = match &err {
-            PipelineError::AudioCapture(_) => "audio",
-            PipelineError::Stt(_) => "stt",
-            PipelineError::Llm(_) => "llm",
-            PipelineError::NoProvider => "config",
-            PipelineError::AlreadyRecording => "state",
-            PipelineError::NotRecording => "state",
-            PipelineError::Config(_) => "config",
-            PipelineError::Lock(_) => "internal",
-            PipelineError::Cancelled => "cancelled",
-            PipelineError::Timeout(_) => "timeout",
-            PipelineError::RecordingTooLarge(_, _) => "size",
+        let (error_type, code, retryable) = match &err {
+            PipelineError::AudioCapture(_) => ("audio", "audio_capture", true),
+            PipelineError::Stt(_) => ("stt", "stt_error", true),
+            PipelineError::Llm(_) => ("llm", "llm_error", true),
+            PipelineError::NoProvider => ("config", "no_provider", false),
+            PipelineError::AlreadyRecording => ("state", "already_recording", false),
+            PipelineError::NotRecording => ("state", "not_recording", false),
+            PipelineError::Config(_) => ("config", "config_error", false),
+            PipelineError::Lock(_) => ("internal", "lock_error", false),
+            PipelineError::Cancelled => ("cancelled", "cancelled", false),
+            PipelineError::Timeout(_) => ("timeout", "timeout", true),
+            PipelineError::RecordingTooLarge(_, _) => ("size", "recording_too_large", false),
         };
-        Self {
-            message: err.to_string(),
-            error_type: error_type.to_string(),
-        }
+        let details = crate::request_log::format_error_chain(&err);
+        CommandError::new(err.to_string(), error_type)
+            .with_code(code)
+            .with_retryable(retryable)
+            .with_details(details)
     }
 }
 ///
@@ -819,7 +820,11 @@ pub async fn pipeline_stop_and_transcribe(
                 PipelineStateEvent::Error,
             );
 
-            return Err(CommandError::from(e));
+            let mut error = CommandError::from(e);
+            if let Some(req_id) = active_request_id.clone() {
+                error = error.with_request_id(req_id);
+            }
+            return Err(error);
         }
     };
 
@@ -1275,7 +1280,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 PipelineStateEvent::Error,
             );
 
-            return Err(CommandError::from(e));
+            let mut error = CommandError::from(e);
+            if let Some(req_id) = new_request_id.clone() {
+                error = error.with_request_id(req_id);
+            }
+            return Err(error);
         }
     };
 
@@ -1730,7 +1739,11 @@ pub async fn pipeline_dictate(
                 PipelineStateEvent::Error,
             );
 
-            return Err(CommandError::from(e));
+            let mut error = CommandError::from(e);
+            if let Some(req_id) = active_request_id.clone() {
+                error = error.with_request_id(req_id);
+            }
+            return Err(error);
         }
     };
 
@@ -1762,7 +1775,11 @@ pub async fn pipeline_dictate(
                         log.error(format!("Failed to type text: {}", e));
                     });
                 }
-                CommandError::from(e)
+                let mut error = CommandError::from(e);
+                if let Some(req_id) = active_request_id.clone() {
+                    error = error.with_request_id(req_id);
+                }
+                error
             })?;
     }
 

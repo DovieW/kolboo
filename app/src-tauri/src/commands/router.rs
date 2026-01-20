@@ -92,7 +92,9 @@ pub async fn cache_router_embeddings(
         .ok_or_else(|| "Profile has no router settings".to_string())?;
 
     if !router.enabled || router.strategy != IntentRouterStrategy::Embeddings {
-        return Err("Router must be enabled and set to embeddings".to_string().into());
+        return Err("Router must be enabled and set to embeddings"
+            .to_string()
+            .into());
     }
 
     let embedding_provider = router
@@ -104,9 +106,7 @@ pub async fn cache_router_embeddings(
         && embedding_provider != "cohere"
         && embedding_provider != "fireworks"
     {
-        return Err(
-            format!("Embeddings provider '{}' not supported", embedding_provider).into(),
-        );
+        return Err(format!("Embeddings provider '{}' not supported", embedding_provider).into());
     }
 
     let embedding_model_default = if embedding_provider == "cohere" {
@@ -130,13 +130,11 @@ pub async fn cache_router_embeddings(
         .map(|s| s.as_str())
         .unwrap_or("");
     if api_key.trim().is_empty() {
-        return Err(
-            format!(
-                "{} API key missing (required for embeddings router)",
-                embedding_provider
-            )
-            .into(),
-        );
+        return Err(format!(
+            "{} API key missing (required for embeddings router)",
+            embedding_provider
+        )
+        .into());
     }
 
     let proxy_settings: ProxySettings = config.proxy_settings.clone();

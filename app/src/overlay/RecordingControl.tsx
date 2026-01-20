@@ -18,10 +18,11 @@ import {
 } from "../lib/overlay/overlayUiReducer";
 import { useSettings, useTypeText } from "../lib/queries";
 import {
-	type ConnectionState,
-	type IntentRouterSettings,
-	type RewriteProgramPromptProfile,
-	tauriAPI,
+  type ConnectionState,
+  type CommandErrorPayload,
+  type IntentRouterSettings,
+  type RewriteProgramPromptProfile,
+  tauriAPI,
 } from "../lib/tauri";
 import { listenTyped } from "../lib/tauri/events";
 import { useOverlayUiReducer } from "../lib/useOverlayUiReducer";
@@ -44,69 +45,105 @@ function readBootAccentColor(): string | null {
 	}
 }
 
+type CommandErrorExtract = {
+  message: string;
+  details: string | null;
+  code: string | null;
+  retryable: boolean | null;
+  requestId: string | null;
+};
+
+function extractCommandError(error: unknown): CommandErrorExtract {
+  if (!error || typeof error !== "object") {
+    return {
+      message: String(error),
+      details: null,
+      code: null,
+      retryable: null,
+      requestId: null,
+    };
+  }
+
+  const payload = error as CommandErrorPayload;
+  const message =
+    typeof payload.message === "string" ? payload.message : String(error);
+  const details = typeof payload.details === "string" ? payload.details : null;
+  const code = typeof payload.code === "string" ? payload.code : null;
+  const retryable =
+    typeof payload.retryable === "boolean" ? payload.retryable : null;
+  const requestId =
+    typeof payload.request_id === "string" ? payload.request_id : null;
+
+  return {
+    message,
+    details,
+    code,
+    retryable,
+    requestId,
+  };
+}
+
 /**
  * Parse error message to user-friendly format
  */
-function parseError(error: unknown): ErrorInfo {
-	// Handle object errors (e.g., CommandError from Tauri with { message, error_type })
-	let errorStr: string;
-	if (error && typeof error === "object" && "message" in error) {
-		errorStr = String((error as { message: unknown }).message);
-	} else {
-		errorStr = String(error);
-	}
+function parseErrorMessage(
+  message: string,
+  retryable: boolean | null,
+): ErrorInfo {
+  const errorStr = message;
+  const recoverable = retryable ?? true;
 
-	// Missing persisted audio (retry can't run)
-	if (
-		errorStr.includes("Failed to read recording") ||
-		errorStr.includes("Recording store") ||
-		errorStr.includes("Cannot save recording")
-	) {
-		return { message: "No saved audio", recoverable: true };
-	}
+  // Missing persisted audio (retry can't run)
+  if (
+    errorStr.includes("Failed to read recording") ||
+    errorStr.includes("Recording store") ||
+    errorStr.includes("Cannot save recording")
+  ) {
+    return { message: "No saved audio", recoverable };
+  }
 
-	// Network/API errors
-	if (errorStr.includes("Network") || errorStr.includes("network")) {
-		return { message: "Network error", recoverable: true };
-	}
-	if (errorStr.includes("timeout") || errorStr.includes("Timeout")) {
-		return { message: "Timed out", recoverable: true };
-	}
-	if (errorStr.includes("API error") || errorStr.includes("401")) {
-		return { message: "API error", recoverable: true };
-	}
-	if (errorStr.includes("rate limit") || errorStr.includes("429")) {
-		return { message: "Rate limited", recoverable: true };
-	}
+  // Network/API errors
+  if (errorStr.includes("Network") || errorStr.includes("network")) {
+    return { message: "Network error", recoverable };
+  }
+  if (errorStr.includes("timeout") || errorStr.includes("Timeout")) {
+    return { message: "Timed out", recoverable };
+  }
+  if (errorStr.includes("API error") || errorStr.includes("401")) {
+    return { message: "API error", recoverable };
+  }
+  if (errorStr.includes("rate limit") || errorStr.includes("429")) {
+    return { message: "Rate limited", recoverable };
+  }
 
-	// Provider errors
-	if (errorStr.includes("NoProvider") || errorStr.includes("No STT provider")) {
-		return { message: "No STT provider configured", recoverable: true };
-	}
+  // Provider errors
+  if (errorStr.includes("NoProvider") || errorStr.includes("No STT provider")) {
+    return { message: "No STT provider configured", recoverable };
+  }
 
-	// Recording errors
-	if (errorStr.includes("NotRecording")) {
-		return { message: "Not recording", recoverable: true };
-	}
-	if (errorStr.includes("AlreadyRecording")) {
-		return { message: "Already recording", recoverable: true };
-	}
-	if (errorStr.includes("RecordingTooLarge")) {
-		return { message: "Recording too long", recoverable: true };
-	}
+  // Recording errors
+  if (errorStr.includes("NotRecording")) {
+    return { message: "Not recording", recoverable };
+  }
+  if (errorStr.includes("AlreadyRecording")) {
+    return { message: "Already recording", recoverable };
+  }
+  if (errorStr.includes("RecordingTooLarge")) {
+    return { message: "Recording too long", recoverable };
+  }
 
-	// Audio errors
-	if (errorStr.includes("audio") || errorStr.includes("Audio")) {
-		return { message: "Audio capture error", recoverable: true };
-	}
+  // Audio errors
+  if (errorStr.includes("audio") || errorStr.includes("Audio")) {
+    return { message: "Audio capture error", recoverable };
+  }
 
-	// Generic fallback
-	// If we have a real message, keep it short-ish and let the UI tooltip show the full text.
-	const trimmed = errorStr.trim();
-	if (trimmed && trimmed.length <= 64) {
-		return { message: trimmed, recoverable: true };
-	}
-	return { message: "Error", recoverable: true };
+  // Generic fallback
+  // If we have a real message, keep it short-ish and let the UI tooltip show the full text.
+  const trimmed = errorStr.trim();
+  if (trimmed && trimmed.length <= 64) {
+    return { message: trimmed, recoverable };
+  }
+  return { message: "Error", recoverable };
 }
 
 /**
@@ -830,8 +867,10 @@ export default function RecordingControl() {
 			}
 		} catch (error) {
 			console.error("[Pipeline] Failed to start recording:", error);
-			const errorInfo = parseError(error);
-			setError(errorInfo, String(error), null);
+			const payload = extractCommandError(error);
+      const errorInfo = parseErrorMessage(payload.message, payload.retryable);
+      const detail = payload.details ?? payload.code ?? null;
+      setError(errorInfo, detail, payload.requestId);
 			setPipelineState("ui", "error");
 		}
 	}, [clearError, pipelineState, setError, setPipelineState]);
@@ -868,8 +907,13 @@ export default function RecordingControl() {
 					await typeTextMutation.mutateAsync(transcript);
 				} catch (error) {
 					console.error("[Pipeline] Failed to type text:", error);
-					const errorInfo = parseError(error);
-					setError(errorInfo, String(error), null);
+					const payload = extractCommandError(error);
+          const errorInfo = parseErrorMessage(
+            payload.message,
+            payload.retryable,
+          );
+          const detail = payload.details ?? payload.code ?? null;
+          setError(errorInfo, detail, payload.requestId);
 				}
 			}
 
@@ -881,8 +925,10 @@ export default function RecordingControl() {
 			setPipelineState("ui", "error");
 
 			// Show error to user
-			const errorInfo = parseError(error);
-			setError(errorInfo, String(error), null);
+			const payload = extractCommandError(error);
+      const errorInfo = parseErrorMessage(payload.message, payload.retryable);
+      const detail = payload.details ?? payload.code ?? null;
+      setError(errorInfo, detail, payload.requestId);
 		}
 	}, [
 		activeProfileId,
@@ -923,7 +969,13 @@ export default function RecordingControl() {
 					await typeTextMutation.mutateAsync(transcript);
 				} catch (error) {
 					console.error("[Pipeline] Failed to type retry transcript:", error);
-					setError(parseError(error), String(error), null);
+					const payload = extractCommandError(error);
+          const errorInfo = parseErrorMessage(
+            payload.message,
+            payload.retryable,
+          );
+          const detail = payload.details ?? payload.code ?? null;
+          setError(errorInfo, detail, payload.requestId);
 				}
 			}
 
@@ -933,7 +985,10 @@ export default function RecordingControl() {
 		} catch (error) {
 			console.error("[Pipeline] Retry failed:", error);
 			setPipelineState("ui", "error");
-			setError(parseError(error), String(error), null);
+			const payload = extractCommandError(error);
+      const errorInfo = parseErrorMessage(payload.message, payload.retryable);
+      const detail = payload.details ?? payload.code ?? null;
+      setError(errorInfo, detail, payload.requestId);
 		}
 	}, [
 		activeProfileId,
@@ -1023,12 +1078,13 @@ export default function RecordingControl() {
 					console.error("[Pipeline] Error from Rust:", payload);
 					setPipelineState("event", "error");
 
-					const errorInfo = parseError(payload?.message);
-					setError(
-						errorInfo,
-						payload?.message ?? null,
-						payload?.request_id ?? null,
-					);
+					const errorPayload = extractCommandError(payload);
+          const errorInfo = parseErrorMessage(
+            errorPayload.message,
+            errorPayload.retryable,
+          );
+					const detail = errorPayload.details ?? errorPayload.code ?? null;
+          setError(errorInfo, detail, errorPayload.requestId);
 				}),
 			);
 

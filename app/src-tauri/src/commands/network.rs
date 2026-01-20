@@ -181,9 +181,7 @@ pub fn get_system_proxy_info() -> SystemProxyInfo {
 }
 
 #[tauri::command]
-pub fn load_trusted_ca_certificate_from_file(
-    path: String,
-) -> CommandResult<TrustedCaCertificate> {
+pub fn load_trusted_ca_certificate_from_file(path: String) -> CommandResult<TrustedCaCertificate> {
     use base64::Engine;
     use std::path::Path;
 
@@ -203,9 +201,7 @@ pub fn load_trusted_ca_certificate_from_file(
     // Defensive size limit (certs should be tiny).
     const MAX_CERT_BYTES: usize = 1024 * 1024;
     if data.len() > MAX_CERT_BYTES {
-        return Err(
-            format!("Certificate file is too large ({} bytes).", data.len()).into(),
-        );
+        return Err(format!("Certificate file is too large ({} bytes).", data.len()).into());
     }
 
     // Validate and detect format.

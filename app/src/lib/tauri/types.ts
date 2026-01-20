@@ -289,6 +289,15 @@ export interface SystemEvent {
 	details: string | null;
 }
 
+export interface CommandErrorPayload {
+  message: string;
+  error_type: string;
+  code?: string | null;
+  details?: string | null;
+  retryable?: boolean | null;
+  request_id?: string | null;
+}
+
 export interface PipelineErrorPayload {
 	message: string;
 	request_id: string | null;

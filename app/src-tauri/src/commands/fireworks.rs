@@ -285,9 +285,7 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
             }
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(
-                format!("Failed to list Fireworks models ({}): {}", status, body).into(),
-            );
+            return Err(format!("Failed to list Fireworks models ({}): {}", status, body).into());
         }
 
         let parsed: ListModelsResponse = resp

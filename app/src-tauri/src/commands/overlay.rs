@@ -5,9 +5,9 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(desktop)]
 use tauri::window::Monitor;
 
+use crate::commands::CommandResult;
 use crate::events;
 use crate::state::AppState;
-use crate::commands::CommandResult;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
