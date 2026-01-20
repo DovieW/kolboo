@@ -1,48 +1,41 @@
 # Medium-priority refactors (opportunistic)
 
-These are worthwhile, but I’d usually do them **when you’re already working nearby**, or when you have a dedicated cleanup window.
+These are worthwhile, but I'd usually do them **when you're already working nearby**, or when you have a dedicated cleanup window.
 
-They tend to improve maintainability and reduce future friction, but they’re not as directly “risk reducing” as the high-impact list.
+They tend to improve maintainability and reduce future friction, but they're not as directly "risk reducing" as the high-impact list.
 
-## Biggest “hot spot” files by size (worth refactoring)
+## Biggest "hot spot" files by size (worth refactoring)
 
-These are the files that are _currently_ the largest / most responsibility-dense. They aren’t “bad”, but they’re the most likely to become painful to change.
+These are the files that are _currently_ the largest / most responsibility-dense. They aren't "bad", but they're the most likely to become painful to change.
 
 ### Rust backend
 
 - **Continue shrinking `app/src-tauri/src/lib.rs` (still large).**
-  - Why: it’s still a very responsibility-dense file, even after prior extractions.
-  - Good next slice: extract the recording/Quick Ask/Quick Replace orchestration into a `sessions/*` module so `lib.rs` trends toward “wiring only”.
-  - Progress:
-    - Extracted shared Quick Ask helpers (emit + ensure window visible) into `app/src-tauri/src/sessions/quick_ask.rs`.
-    - Centralized Quick Ask event name constants so we stop duplicating magic strings.
-  - Remaining:
-    - Move the actual Quick Ask / Quick Replace / recording orchestration blocks out of `lib.rs` incrementally (keep commits small).
+  - Why: large files are harder for AI agents to edit correctly (context window limits, harder to find the right spot). Deduplication means fewer places to update when changing behavior.
+  - Goal: make `lib.rs` a thin "wiring" layer; move duplicated/cohesive logic into focused modules.
 
-  - Step-by-step path to “`lib.rs` is wiring only” (do these in small slices):
+  - **Done:**
     - [x] Create `sessions/` module scaffold (`app/src-tauri/src/sessions/mod.rs`).
-    - [x] Extract *shared* Quick Ask window helpers (`sessions/quick_ask.rs`).
+    - [x] Extract shared Quick Ask window helpers (`sessions/quick_ask.rs`).
     - [x] Centralize Quick Ask event constants (`EVENT_QUICK_ASK_*`) and window label.
-    - [ ] Extract “Quick Ask selection probe” into `sessions/quick_ask_probe.rs` (or `sessions/selection_probe.rs`).
-      - Goal: `lib.rs` shouldn’t know about epochs/locks/sentinels.
-      - Acceptance: `lib.rs` calls something like `quick_ask::spawn_selection_probe(...)`.
-    - [ ] Extract “Quick Replace selection probe” into the same probe module (shared impl, different config).
-      - Acceptance: both probes use one helper with a small config struct.
-    - [ ] Extract “Quick Ask answer generation” into `sessions/quick_ask_session.rs`.
-      - Inputs: question text, selected/clipboard context (optional), effective provider config.
-      - Output: emits started/answer events + request log updates (all in one place).
-    - [ ] Extract “Quick Replace rewrite selection” into `sessions/quick_replace_session.rs`.
-      - Acceptance: `lib.rs` just chooses the branch and passes inputs.
-    - [ ] Extract “recording stop -> pipeline run -> output/history/logs” orchestration into `sessions/recording_session.rs`.
-      - Keep it surgical: start by extracting a single helper like `handle_pipeline_result_success(...)`.
-    - [ ] Move “emit pipeline events” + “history updates” into tiny helpers/modules (only if it reduces duplication).
-      - Rule: don’t create a new abstraction unless it removes repeated code.
-    - [ ] Final cleanup pass: `lib.rs` should mostly contain:
-      - module declarations
-      - Tauri setup/registration (commands/events/windows/tray)
-      - small type exports
-      - *no* long async flows
-      - *no* request-log/history business logic
+
+  - **Remaining (each provides real dedup or separation value):**
+    - [ ] **Unify selection probes** into `sessions/selection_probe.rs`.
+      - Why: Quick Ask and Quick Replace both do nearly identical selection-probing (epoch/lock/sentinel dance). This is *actual duplication* that should be one function with a config param.
+      - Acceptance: `lib.rs` calls `selection_probe::spawn(...)` with a `ProbeKind::QuickAsk` or `ProbeKind::QuickReplace`.
+    - [ ] **Centralize remaining event constants** (pipeline events, overlay events).
+      - Why: scattered magic strings (`"pipeline-state-changed"`, `"overlay-audio-level"`, etc.) are easy to typo and hard to refactor.
+      - Acceptance: one `events.rs` module exports all event name constants; `lib.rs` uses those constants.
+    - [ ] **Extract Quick Ask answer flow** into `sessions/quick_ask_session.rs`.
+      - Why: the "call LLM -> emit events -> update request log" flow is a self-contained block (~300 lines) that doesn't need to live inline.
+      - Acceptance: `lib.rs` calls `quick_ask_session::run(...)` and awaits a result.
+    - [ ] **Extract Quick Replace rewrite flow** into `sessions/quick_replace_session.rs`.
+      - Why: same reasoning - self-contained, benefits from separation.
+      - Acceptance: `lib.rs` calls `quick_replace_session::run(...)`.
+
+  - **Not doing (moving code without dedup is just churn):**
+    - ~~Extract recording orchestration~~ - the main recording flow isn't duplicated; moving it just relocates complexity.
+    - ~~Extract history/log updates~~ - these are already small helper calls; wrapping them in another module adds indirection without removing code.
 
 - **Split `app/src-tauri/src/pipeline.rs` (~188KB).**
   - Why: it contains unrelated concerns (provider construction/caching, routing logic, state machine + config, embedding cache/persistence, and helper utilities).
