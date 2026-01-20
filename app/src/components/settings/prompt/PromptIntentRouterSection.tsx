@@ -12,10 +12,15 @@ import type {
 	AppSettings,
 	IntentRouterSettings,
 	ModelOption,
-	OpenAiReasoningEffort,
 	RewritePreset,
 } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
+import { isOpenAiReasoningEffort, normalizeRouter } from "./settingsUtils";
+import {
+	formatThinkingBudgetShort,
+	openAiDefaultReasoningEffortForModel,
+	openAiThinkingEffortsForModel,
+} from "./useThinkingOptions";
 
 type PromptIntentRouterSectionProps = {
 	activeProfileId: string;
@@ -32,14 +37,7 @@ type PromptIntentRouterSectionProps = {
 	anthropicThinkingBudgets: readonly number[];
 	getEmbeddingModelsForProvider: (provider: string) => ModelOption[];
 	getLlmModelOptionsForProvider: (provider: string | null) => ModelOption[];
-	normalizeRouter: (
-		router: IntentRouterSettings | null | undefined,
-	) => IntentRouterSettings;
 	saveRouter: (router: IntentRouterSettings | null) => void;
-	openAiThinkingEffortsForModel: (model: string) => string[];
-	openAiDefaultReasoningEffortForModel: (model: string) => string;
-	isOpenAiReasoningEffort: (value: unknown) => value is OpenAiReasoningEffort;
-	formatThinkingBudgetShort: (value: number) => string;
 	onCacheRouterEmbeddings: () => void;
 };
 
@@ -58,12 +56,7 @@ export function PromptIntentRouterSection({
 	anthropicThinkingBudgets,
 	getEmbeddingModelsForProvider,
 	getLlmModelOptionsForProvider,
-	normalizeRouter,
 	saveRouter,
-	openAiThinkingEffortsForModel,
-	openAiDefaultReasoningEffortForModel,
-	isOpenAiReasoningEffort,
-	formatThinkingBudgetShort,
 	onCacheRouterEmbeddings,
 }: PromptIntentRouterSectionProps) {
 	return (

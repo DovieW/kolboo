@@ -1,6 +1,6 @@
 import { Accordion, Button, Group, Loader, Select, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	EMBEDDING_MODELS,
 	type ModelOption,
@@ -54,6 +54,13 @@ import { PromptIntentRouterSection } from "./prompt/PromptIntentRouterSection";
 import { PromptSettingsModals } from "./prompt/PromptSettingsModals";
 import { QuickAskPanel } from "./prompt/QuickAskPanel";
 import { RewriteSettingsSection } from "./prompt/RewriteSettingsSection";
+import {
+	formatUsdRateFromMicros,
+	isGeminiThinkingLevel,
+	isOpenAiReasoningEffort,
+	isRecord,
+	normalizeRouter,
+} from "./prompt/settingsUtils";
 import { TranscribeSettingsSection } from "./prompt/TranscribeSettingsSection";
 import {
 	EDIT_DEFAULT_PRESET,
@@ -66,7 +73,6 @@ import {
 	ANTHROPIC_THINKING_LEVEL_BUDGETS,
 	formatThinkingBudgetShort,
 	openAiDefaultReasoningEffortForModel,
-	openAiThinkingEffortsForModel,
 	SELECT_DEFAULT,
 	useThinkingOptions,
 } from "./prompt/useThinkingOptions";
@@ -92,46 +98,6 @@ const DEFAULT_QUICK_ASK_SYSTEM_PROMPT =
 // Keep this aligned with backend defaults (see Quick Replace config resolution in `src-tauri/src/lib.rs`).
 const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT =
 	"You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-	return value != null && typeof value === "object";
-};
-
-const isOpenAiReasoningEffort = (
-	value: unknown,
-): value is OpenAiReasoningEffort => {
-	return (
-		value === "none" ||
-		value === "minimal" ||
-		value === "low" ||
-		value === "medium" ||
-		value === "high" ||
-		value === "xhigh"
-	);
-};
-
-const isGeminiThinkingLevel = (
-	value: unknown,
-): value is "minimal" | "low" | "medium" | "high" => {
-	return (
-		value === "minimal" ||
-		value === "low" ||
-		value === "medium" ||
-		value === "high"
-	);
-};
-
-function formatUsdRateFromMicros(micros: number): string {
-	const safeMicros =
-		typeof micros === "number" && Number.isFinite(micros) ? micros : 0;
-	const dollars = safeMicros / 1_000_000;
-
-	if (dollars > 0 && dollars < 0.01) {
-		return `$${dollars.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
-	}
-
-	return `$${dollars.toFixed(2).replace(/\.00$/, "")}`;
-}
 
 type SectionKey = "system";
 
@@ -413,75 +379,10 @@ export function PromptSettings({
 		confirm?.();
 	};
 
-	const normalizeRouter = useCallback(
-		(router: IntentRouterSettings | null | undefined): IntentRouterSettings => {
-			const r: Partial<IntentRouterSettings> = router ?? {};
-			const openai_reasoning_effort = isOpenAiReasoningEffort(
-				r.openai_reasoning_effort,
-			)
-				? r.openai_reasoning_effort
-				: null;
-			const gemini_thinking_level = isGeminiThinkingLevel(
-				r.gemini_thinking_level,
-			)
-				? r.gemini_thinking_level
-				: null;
-
-			return {
-				enabled: Boolean(r.enabled),
-				strategy:
-					r.strategy === "embeddings" || r.strategy === "llm"
-						? r.strategy
-						: "off",
-				embedding_provider:
-					r.embedding_provider === "openai" ||
-					r.embedding_provider === "cohere" ||
-					r.embedding_provider === "fireworks"
-						? r.embedding_provider
-						: null,
-				embedding_model:
-					typeof r.embedding_model === "string" ? r.embedding_model : null,
-				pick_highest_score:
-					typeof r.pick_highest_score === "boolean"
-						? r.pick_highest_score
-						: null,
-				similarity_threshold:
-					typeof r.similarity_threshold === "number" &&
-					Number.isFinite(r.similarity_threshold)
-						? r.similarity_threshold
-						: null,
-				similarity_margin:
-					typeof r.similarity_margin === "number" &&
-					Number.isFinite(r.similarity_margin)
-						? r.similarity_margin
-						: null,
-
-				llm_provider:
-					typeof r.llm_provider === "string" ? r.llm_provider : null,
-				llm_model: typeof r.llm_model === "string" ? r.llm_model : null,
-				openai_reasoning_effort,
-				gemini_thinking_budget:
-					typeof r.gemini_thinking_budget === "number" &&
-					Number.isFinite(r.gemini_thinking_budget)
-						? r.gemini_thinking_budget
-						: null,
-				gemini_thinking_level,
-				anthropic_thinking_budget:
-					typeof r.anthropic_thinking_budget === "number" &&
-					Number.isFinite(r.anthropic_thinking_budget)
-						? r.anthropic_thinking_budget
-						: null,
-				llm_system_prompt:
-					typeof r.llm_system_prompt === "string" ? r.llm_system_prompt : null,
-			};
-		},
-		[],
-	);
-
 	const effectiveRouter: IntentRouterSettings | null = useMemo(() => {
 		if (!activeProfile) return null;
 		return normalizeRouter(activeProfile.router);
-	}, [activeProfile, normalizeRouter]);
+	}, [activeProfile]);
 
 	const {
 		sttCloudProviders,
@@ -2285,14 +2186,7 @@ export function PromptSettings({
 							anthropicThinkingBudgets={ANTHROPIC_THINKING_LEVEL_BUDGETS}
 							getEmbeddingModelsForProvider={getEmbeddingModelsForProvider}
 							getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
-							normalizeRouter={normalizeRouter}
 							saveRouter={saveRouter}
-							openAiThinkingEffortsForModel={openAiThinkingEffortsForModel}
-							openAiDefaultReasoningEffortForModel={
-								openAiDefaultReasoningEffortForModel
-							}
-							isOpenAiReasoningEffort={isOpenAiReasoningEffort}
-							formatThinkingBudgetShort={formatThinkingBudgetShort}
 							onCacheRouterEmbeddings={handleCacheRouterEmbeddings}
 						/>
 					</Accordion>
