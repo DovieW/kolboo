@@ -18,11 +18,9 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - [x] Create `sessions/` module scaffold (`app/src-tauri/src/sessions/mod.rs`).
     - [x] Extract shared Quick Ask window helpers (`sessions/quick_ask.rs`).
     - [x] Centralize Quick Ask event constants (`EVENT_QUICK_ASK_*`) and window label.
+    - [x] Unify selection probes into `sessions/selection_probe.rs`.
 
   - **Remaining (each provides real dedup or separation value):**
-    - [ ] **Unify selection probes** into `sessions/selection_probe.rs`.
-      - Why: Quick Ask and Quick Replace both do nearly identical selection-probing (epoch/lock/sentinel dance). This is *actual duplication* that should be one function with a config param.
-      - Acceptance: `lib.rs` calls `selection_probe::spawn(...)` with a `ProbeKind::QuickAsk` or `ProbeKind::QuickReplace`.
     - [ ] **Centralize remaining event constants** (pipeline events, overlay events).
       - Why: scattered magic strings (`"pipeline-state-changed"`, `"overlay-audio-level"`, etc.) are easy to typo and hard to refactor.
       - Acceptance: one `events.rs` module exports all event name constants; `lib.rs` uses those constants.
