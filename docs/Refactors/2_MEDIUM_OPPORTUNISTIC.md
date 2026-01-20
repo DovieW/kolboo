@@ -29,14 +29,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - `pipeline/router/*` (embeddings router + LLM router + diagnostics payload building)
   - Bonus: lots of helper functions here are pure (e.g. path normalization / routing scoring) and can get fast unit tests once extracted.
 
-- **Break up `app/src-tauri/src/commands/text.rs` by responsibility.**
-  - Why: it does 3 tricky OS-level jobs in one place: output injection, clipboard lifecycle (including WinRT “exclude from history”), and selection probing.
-  - Suggested splits:
-    - `text/clipboard.rs` (set/read/restore, platform-specific WinRT)
-    - `text/inject.rs` (enigo key injection + output modes + lock)
-    - `text/selection_probe.rs` (copy/insert/clipboard-only strategies)
-  - Acceptance hint: keep `#[tauri::command]` signatures in `commands/text.rs` as wrappers so callers don’t change.
-
 ### Frontend (React/TS)
 
 - **Split `app/src/components/settings/PromptSettings.tsx` (very large).**
@@ -47,13 +39,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
   - Goal: keep overlay UI logic testable and predictable.
 
 ## Overlay UI (React)
-
-- **Extract the overlay UI reducer into a dedicated hook.**
-  - Move reducer + action types into something like `app/src/lib/useOverlayUiReducer.ts`.
-  - Add a short transition table comment that explains behavior when:
-    - hotkey fires before `pipeline-state-changed`
-    - polling returns a stale state
-    - recording-only mode hides right after going idle
 
 - **Consolidate overlay state into a single “overlay controller” object (as needed).**
   - Today some state lives in refs, some in `useState`, some in the reducer.
