@@ -844,87 +844,27 @@ pub(crate) fn stop_recording(
             }
         };
 
-        // Quick replace: if enabled for this profile, probe for currently highlighted text while
-        // transcription runs. This must not block transcription.
-        let quick_replace_epoch: u64 = if quick_replace_cfg.enabled
-            && context_grab_method != crate::commands::text::ContextGrabMethod::None
-        {
-            let epoch = state
-                .quick_replace_probe_epoch
-                .fetch_add(1, Ordering::SeqCst)
-                .saturating_add(1);
-
-            if let Ok(mut probe) = state.quick_replace_probe.lock() {
-                probe.epoch = epoch;
-                probe.ready = false;
-                probe.selection_text = None;
-            }
-
-            let app_for_probe = app.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let selection = crate::commands::text::probe_selected_text_via_copy_with_app(
-                    &app_for_probe,
-                    context_grab_method,
-                )
-                .ok()
-                .flatten();
-
-                let state = app_for_probe.state::<AppState>();
-                let lock_result = state.quick_replace_probe.lock();
-                if let Ok(mut probe) = lock_result {
-                    if probe.epoch == epoch {
-                        probe.selection_text = selection;
-                        probe.ready = true;
-                    }
-                }
-            });
-
-            epoch
+        // Quick Replace: probe for currently highlighted text while transcription runs.
+        let quick_replace_epoch: u64 = if quick_replace_cfg.enabled {
+            sessions::selection_probe::spawn_probe(
+                app,
+                sessions::selection_probe::ProbeKind::QuickReplace,
+                context_grab_method,
+            )
         } else {
             0
         };
 
-        // Quick Ask: if this was a Quick Ask session (and enabled by settings), probe for
-        // currently highlighted text to use as additional context for the question.
-        // This must not block transcription.
+        // Quick Ask: probe for currently highlighted text to use as additional context.
         let quick_ask_include_selected_text: bool =
             get_setting_from_store(app, "quick_ask_include_selected_text", false);
 
-        let quick_ask_epoch: u64 = if is_quick_ask_session
-            && quick_ask_include_selected_text
-            && context_grab_method != crate::commands::text::ContextGrabMethod::None
-        {
-            let epoch = state
-                .quick_ask_probe_epoch
-                .fetch_add(1, Ordering::SeqCst)
-                .saturating_add(1);
-
-            if let Ok(mut probe) = state.quick_ask_probe.lock() {
-                probe.epoch = epoch;
-                probe.ready = false;
-                probe.selection_text = None;
-            }
-
-            let app_for_probe = app.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let selection = crate::commands::text::probe_selected_text_via_copy_with_app(
-                    &app_for_probe,
-                    context_grab_method,
-                )
-                .ok()
-                .flatten();
-
-                let state = app_for_probe.state::<AppState>();
-                let lock_result = state.quick_ask_probe.lock();
-                if let Ok(mut probe) = lock_result {
-                    if probe.epoch == epoch {
-                        probe.selection_text = selection;
-                        probe.ready = true;
-                    }
-                }
-            });
-
-            epoch
+        let quick_ask_epoch: u64 = if is_quick_ask_session && quick_ask_include_selected_text {
+            sessions::selection_probe::spawn_probe(
+                app,
+                sessions::selection_probe::ProbeKind::QuickAsk,
+                context_grab_method,
+            )
         } else {
             0
         };
@@ -1507,31 +1447,14 @@ pub(crate) fn stop_recording(
 
                                     // Best-effort: attach any highlighted text captured at recording stop.
                                     // We keep this bounded so we don't blow up token usage.
-                                    let selected_context: Option<String> = if quick_ask_epoch != 0 {
-                                        let deadline = Instant::now() + Duration::from_millis(700);
-                                        loop {
-                                            let (ready, selection) = {
-                                                let state = app_clone.state::<AppState>();
-                                                let lock_result = state.quick_ask_probe.lock();
-                                                match lock_result {
-                                                    Ok(probe) if probe.epoch == quick_ask_epoch => {
-                                                        (probe.ready, probe.selection_text.clone())
-                                                    }
-                                                    _ => (true, None),
-                                                }
-                                            };
-
-                                            if ready {
-                                                break selection;
-                                            }
-                                            if Instant::now() >= deadline {
-                                                break None;
-                                            }
-                                            tokio::time::sleep(Duration::from_millis(20)).await;
-                                        }
-                                    } else {
-                                        None
-                                    };
+                                    let selected_context: Option<String> =
+                                        sessions::selection_probe::await_probe_result(
+                                            &app_clone,
+                                            sessions::selection_probe::ProbeKind::QuickAsk,
+                                            quick_ask_epoch,
+                                            700,
+                                        )
+                                        .await;
 
                                     let selected_context_trimmed = selected_context
                                         .as_deref()
@@ -1546,32 +1469,14 @@ pub(crate) fn stop_recording(
                                         // while it waits for the target app to copy the selection.
                                         // If we read clipboard context during that window, request logs can end up with
                                         // "__kolboo_selection_probe__..." as the clipboard context.
-                                        if quick_ask_epoch != 0 {
-                                            let deadline =
-                                                Instant::now() + Duration::from_millis(350);
-                                            loop {
-                                                let ready = {
-                                                    let state = app_clone.state::<AppState>();
-                                                    let lock_result = state.quick_ask_probe.lock();
-                                                    match lock_result {
-                                                        Ok(probe)
-                                                            if probe.epoch == quick_ask_epoch =>
-                                                        {
-                                                            probe.ready
-                                                        }
-                                                        _ => true,
-                                                    }
-                                                };
-
-                                                if ready {
-                                                    break;
-                                                }
-                                                if Instant::now() >= deadline {
-                                                    break;
-                                                }
-                                                tokio::time::sleep(Duration::from_millis(20)).await;
-                                            }
-                                        }
+                                        // Wait for probe to finish first.
+                                        let _ = sessions::selection_probe::await_probe_result(
+                                            &app_clone,
+                                            sessions::selection_probe::ProbeKind::QuickAsk,
+                                            quick_ask_epoch,
+                                            350,
+                                        )
+                                        .await;
 
                                         let is_probe_sentinel = |s: &str| {
                                             s.trim_start().starts_with("__kolboo_selection_probe__")
@@ -1876,31 +1781,13 @@ pub(crate) fn stop_recording(
                             // rewrite the selection using the transcript as an instruction.
                             if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
                                 // Wait briefly for the selection probe to finish (best-effort).
-                                let selected_text: Option<String> = {
-                                    let deadline = Instant::now() + Duration::from_millis(700);
-                                    loop {
-                                        let (ready, selection) = {
-                                            let state = app_clone.state::<AppState>();
-                                            let lock_result = state.quick_replace_probe.lock();
-                                            match lock_result {
-                                                Ok(probe) if probe.epoch == quick_replace_epoch => {
-                                                    (probe.ready, probe.selection_text.clone())
-                                                }
-                                                _ => (true, None),
-                                            }
-                                        };
-
-                                        if ready {
-                                            break selection;
-                                        }
-
-                                        if Instant::now() >= deadline {
-                                            break None;
-                                        }
-
-                                        tokio::time::sleep(Duration::from_millis(20)).await;
-                                    }
-                                };
+                                let selected_text = sessions::selection_probe::await_probe_result(
+                                    &app_clone,
+                                    sessions::selection_probe::ProbeKind::QuickReplace,
+                                    quick_replace_epoch,
+                                    700,
+                                )
+                                .await;
 
                                 if let Some(selected) = selected_text
                                     .as_ref()
