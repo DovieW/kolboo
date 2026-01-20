@@ -19,11 +19,9 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - [x] Extract shared Quick Ask window helpers (`sessions/quick_ask.rs`).
     - [x] Centralize Quick Ask event constants (`EVENT_QUICK_ASK_*`) and window label.
     - [x] Unify selection probes into `sessions/selection_probe.rs`.
+    - [x] Centralize remaining event constants in `events.rs`.
 
   - **Remaining (each provides real dedup or separation value):**
-    - [ ] **Centralize remaining event constants** (pipeline events, overlay events).
-      - Why: scattered magic strings (`"pipeline-state-changed"`, `"overlay-audio-level"`, etc.) are easy to typo and hard to refactor.
-      - Acceptance: one `events.rs` module exports all event name constants; `lib.rs` uses those constants.
     - [ ] **Extract Quick Ask answer flow** into `sessions/quick_ask_session.rs`.
       - Why: the "call LLM -> emit events -> update request log" flow is a self-contained block (~300 lines) that doesn't need to live inline.
       - Acceptance: `lib.rs` calls `quick_ask_session::run(...)` and awaits a result.
