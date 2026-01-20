@@ -50,8 +50,11 @@ These are the files that are _currently_ the largest / most responsibility-dense
    4) ✅ **Extract "provider/model selection" logic** into a `usePromptProviderOptions.ts` helper.
      - Done: provider dropdown options, effective providers/models, model options, default profile values, and model queries moved into hook.
      - Also exports `getLlmModelOptionsForProvider` helper used by UI callbacks.
-   5) **Introduce a `PromptSettingsLayout` component** for the accordion/sections layout.
+   5) 🚧 **Introduce a `PromptSettingsLayout` component** for the accordion/sections layout.
      - The layout should only render sections and wire high‑level props.
+     - In progress: created `RewriteSettingsSection.tsx` (~880 lines) to encapsulate the Rewrite section UI.
+     - Pending: integrate into `PromptSettings.tsx` by creating handler functions for the 16+ callbacks and passing them to the component.
+     - Challenge: the Rewrite section has many inline callbacks wrapping `openDisableOverrideDialog` + state setters + profile save calls. Need to extract these as named handlers before the component can be used.
    6) **Trim `PromptSettings.tsx` imports** after each extraction.
      - Goal: the file should be short (roughly <400 lines) and mostly a render skeleton.
    7) **Add/adjust tests where logic moved** (hooks or utilities).
