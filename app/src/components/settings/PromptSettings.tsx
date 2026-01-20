@@ -1,11 +1,7 @@
 import { Accordion, Button, Group, Loader, Select, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-	EMBEDDING_MODELS,
-	type ModelOption,
-	STT_MODELS,
-} from "../../lib/modelOptions";
+import { EMBEDDING_MODELS, type ModelOption } from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
 	useDefaultSections,
@@ -69,6 +65,7 @@ import { usePromptProviderOptions } from "./prompt/usePromptProviderOptions";
 import { usePromptSettingsProfileState } from "./prompt/usePromptSettingsProfileState";
 import { usePromptSettingsTests } from "./prompt/usePromptSettingsTests";
 import { useRewriteSettingsHandlers } from "./prompt/useRewriteSettingsHandlers";
+import { useSttSettingsHandlers } from "./prompt/useSttSettingsHandlers";
 import {
 	ANTHROPIC_THINKING_LEVEL_BUDGETS,
 	formatThinkingBudgetShort,
@@ -166,7 +163,7 @@ export function PromptSettings({
 	const updateAnthropicThinkingBudget = useUpdateAnthropicThinkingBudget();
 	const updateGeminiThinkingBudget = useUpdateGeminiThinkingBudget();
 	const updateGeminiThinkingLevel = useUpdateGeminiThinkingLevel();
-	const updateSTTTimeout = useUpdateSTTTimeout();
+	const _updateSTTTimeout = useUpdateSTTTimeout();
 
 	const updateQuickAskProvider = useUpdateQuickAskProvider();
 	const updateQuickAskModel = useUpdateQuickAskModel();
@@ -1066,6 +1063,34 @@ export function PromptSettings({
 		openDisableOverrideDialog,
 	});
 
+	const {
+		handleWhisperServerModelDraftBlur,
+		handleSttProviderChange,
+		handleSttModelChange,
+		handleSttTimeoutChange,
+		handleSttTimeoutBlur,
+		handleDisableSttProviderOverride,
+		handleDisableSttModelOverride,
+		handleDisableSttTimeoutOverride,
+	} = useSttSettingsHandlers({
+		isDefaultScope,
+		settings,
+		activeProfile,
+		whisperServerModelDraft,
+		localProfileSttTimeout,
+		setSttProviderInheriting,
+		setSttModelInheriting,
+		setSttTimeoutInheriting,
+		setLocalProfileSttProvider,
+		setLocalProfileSttModel,
+		setLocalProfileSttTimeout,
+		updateSTTProvider,
+		updateSTTModel,
+		updateSTTTimeout: _updateSTTTimeout,
+		saveProfileMetadata,
+		openDisableOverrideDialog,
+	});
+
 	const handleSave = (key: SectionKey, content: string) => {
 		setLocalSections((prev) => {
 			if (prev === null) return prev;
@@ -1098,29 +1123,6 @@ export function PromptSettings({
 		);
 	};
 
-	const handleDefaultSTTProviderChange = (value: string | null) => {
-		if (!value) return;
-		updateSTTProvider.mutate(value, {
-			onSuccess: () => {
-				const models = STT_MODELS[value];
-				const firstModel = models?.[0];
-				if (firstModel) {
-					updateSTTModel.mutate(firstModel.value);
-				}
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleDefaultSTTModelChange = (value: string | null) => {
-		if (!value) return;
-		updateSTTModel.mutate(value, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
 	const handleDefaultQuickAskProviderChange = (value: string | null) => {
 		if (!value) return;
 		updateQuickAskProvider.mutate(value, {
@@ -1140,157 +1142,6 @@ export function PromptSettings({
 		updateQuickAskModel.mutate(value, {
 			onSuccess: () => {
 				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleDefaultSTTTimeoutChange = (value: number) => {
-		updateSTTTimeout.mutate(value, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
-	};
-
-	const handleWhisperServerModelDraftBlur = () => {
-		const trimmed = whisperServerModelDraft.trim();
-		const toStore = trimmed.length > 0 ? trimmed : null;
-
-		if (isDefaultScope) {
-			const stored = settings?.stt_model?.trim() || null;
-			if (toStore === stored) return;
-			updateSTTModel.mutate(toStore, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
-			return;
-		}
-
-		setSttModelInheriting(false);
-		setLocalProfileSttModel(toStore);
-		saveProfileMetadata({ stt_model: toStore });
-	};
-
-	const handleSttProviderChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleDefaultSTTProviderChange(value);
-			return;
-		}
-
-		setSttProviderInheriting(false);
-		setSttModelInheriting(false);
-		setLocalProfileSttProvider(value);
-		const models = STT_MODELS[value] ?? [];
-		const firstModel = models[0]?.value ?? null;
-		setLocalProfileSttModel(firstModel);
-		saveProfileMetadata({
-			stt_provider: value,
-			stt_model: firstModel,
-		});
-	};
-
-	const handleSttModelChange = (value: string | null) => {
-		if (!value) return;
-		if (isDefaultScope) {
-			handleDefaultSTTModelChange(value);
-			return;
-		}
-
-		setSttModelInheriting(false);
-		setLocalProfileSttModel(value);
-		saveProfileMetadata({ stt_model: value });
-	};
-
-	const handleSttTimeoutChange = (value: number | string) => {
-		// Keep local state permissive so typing feels natural (e.g., allow clearing the field
-		// or temporarily typing an out-of-range intermediate value like "1" before "10").
-		setLocalProfileSttTimeout(value);
-
-		// Only persist when the value is a valid in-range number.
-		if (typeof value !== "number" || Number.isNaN(value)) return;
-		if (value < 5 || value > 120) return;
-
-		if (isDefaultScope) {
-			handleDefaultSTTTimeoutChange(value);
-			return;
-		}
-
-		setSttTimeoutInheriting(false);
-		saveProfileMetadata({ stt_timeout_seconds: value });
-	};
-
-	const handleSttTimeoutBlur = () => {
-		// On blur, clamp and normalize.
-		// If the user cleared the input, revert to the effective value without saving.
-		if (localProfileSttTimeout === "") {
-			const fallback = isDefaultScope
-				? (settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT)
-				: (activeProfile?.stt_timeout_seconds ??
-					settings?.stt_timeout_seconds ??
-					DEFAULT_STT_TIMEOUT);
-			setLocalProfileSttTimeout(fallback);
-			return;
-		}
-
-		if (
-			typeof localProfileSttTimeout !== "number" ||
-			Number.isNaN(localProfileSttTimeout)
-		) {
-			return;
-		}
-
-		const clamped = Math.max(5, Math.min(120, localProfileSttTimeout));
-		if (clamped !== localProfileSttTimeout) {
-			setLocalProfileSttTimeout(clamped);
-		}
-
-		if (isDefaultScope) {
-			handleDefaultSTTTimeoutChange(clamped);
-			return;
-		}
-
-		setSttTimeoutInheriting(false);
-		saveProfileMetadata({ stt_timeout_seconds: clamped });
-	};
-
-	const handleDisableSttProviderOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable Speech-to-Text Provider override?",
-			onConfirm: () => {
-				setSttProviderInheriting(true);
-				setSttModelInheriting(true);
-				setLocalProfileSttProvider(settings?.stt_provider ?? null);
-				setLocalProfileSttModel(settings?.stt_model ?? null);
-				saveProfileMetadata({
-					stt_provider: null,
-					stt_model: null,
-				});
-			},
-		});
-	};
-
-	const handleDisableSttModelOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable STT Model override?",
-			onConfirm: () => {
-				setSttModelInheriting(true);
-				setLocalProfileSttModel(settings?.stt_model ?? null);
-				saveProfileMetadata({ stt_model: null });
-			},
-		});
-	};
-
-	const handleDisableSttTimeoutOverride = () => {
-		openDisableOverrideDialog({
-			title: "Disable STT Timeout override?",
-			onConfirm: () => {
-				setSttTimeoutInheriting(true);
-				setLocalProfileSttTimeout(
-					settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT,
-				);
-				saveProfileMetadata({ stt_timeout_seconds: null });
 			},
 		});
 	};
