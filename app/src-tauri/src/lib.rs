@@ -25,6 +25,7 @@ mod request_log;
 mod router_embeddings_cache;
 pub mod schema_export;
 mod secrets;
+mod sessions;
 #[path = "settings.rs"]
 mod settings;
 mod shortcuts;
@@ -1276,29 +1277,8 @@ pub(crate) fn stop_recording(
                                 .trim()
                                 .to_string();
 
-                            fn emit_to_quick_ask<T: serde::Serialize>(
-                                app: &AppHandle,
-                                event: &str,
-                                payload: T,
-                            ) {
-                                let Ok(value) = serde_json::to_value(payload) else {
-                                    return;
-                                };
-                                if let Some(win) = app.get_webview_window("quick_ask") {
-                                    let _ = win.emit(event, value);
-                                } else {
-                                    let _ = app.emit(event, value);
-                                }
-                            }
-
                             // Ensure the answer window is visible before we start the LLM call.
-                            let _ =
-                                commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
-                            if let Some(win) = app_clone.get_webview_window("quick_ask") {
-                                let _ = win.set_always_on_top(true);
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                            }
+                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
 
                             if question.is_empty() {
                                 // Quick Ask is considered the "request" here, so mark the request log
@@ -1325,7 +1305,7 @@ pub(crate) fn stop_recording(
                                     log_store.complete_current();
                                 }
 
-                                emit_to_quick_ask(
+                                crate::sessions::quick_ask::emit_to_quick_ask(
                                     &app_clone,
                                     "quick-ask-answer",
                                     QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
@@ -1453,7 +1433,7 @@ pub(crate) fn stop_recording(
                                     });
                                 }
 
-                                emit_to_quick_ask(
+                                crate::sessions::quick_ask::emit_to_quick_ask(
                                     &app_clone,
                                     "quick-ask-started",
                                     QuickAskStartedPayload {
@@ -1496,7 +1476,7 @@ pub(crate) fn stop_recording(
                                         log_store.complete_current();
                                     }
 
-                                    emit_to_quick_ask(
+                                    crate::sessions::quick_ask::emit_to_quick_ask(
                                         &app_clone,
                                         "quick-ask-answer",
                                         QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
@@ -1825,7 +1805,7 @@ pub(crate) fn stop_recording(
                                                 log_store.complete_current();
                                             }
 
-                                            emit_to_quick_ask(
+                                            crate::sessions::quick_ask::emit_to_quick_ask(
                                                 &app_clone,
                                                 "quick-ask-answer",
                                                 QuickAskAnswerPayload::Ok(
@@ -1876,7 +1856,7 @@ pub(crate) fn stop_recording(
                                                 log_store.complete_current();
                                             }
 
-                                            emit_to_quick_ask(
+                                            crate::sessions::quick_ask::emit_to_quick_ask(
                                                 &app_clone,
                                                 "quick-ask-answer",
                                                 QuickAskAnswerPayload::Err(
@@ -2294,29 +2274,8 @@ pub(crate) fn stop_recording(
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
                         if is_quick_ask_session {
-                            fn emit_to_quick_ask<T: serde::Serialize>(
-                                app: &AppHandle,
-                                event: &str,
-                                payload: T,
-                            ) {
-                                let Ok(value) = serde_json::to_value(payload) else {
-                                    return;
-                                };
-                                if let Some(win) = app.get_webview_window("quick_ask") {
-                                    let _ = win.emit(event, value);
-                                } else {
-                                    let _ = app.emit(event, value);
-                                }
-                            }
-
                             // Ensure the answer window is visible so the error is actually seen.
-                            let _ =
-                                commands::overlay::position_quick_ask_to_target_monitor(&app_clone);
-                            if let Some(win) = app_clone.get_webview_window("quick_ask") {
-                                let _ = win.set_always_on_top(true);
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                            }
+                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
 
                             // Finalize the deferred Quick Ask request log.
                             if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
@@ -2338,7 +2297,7 @@ pub(crate) fn stop_recording(
                                 log_store.complete_current();
                             }
 
-                            emit_to_quick_ask(
+                            crate::sessions::quick_ask::emit_to_quick_ask(
                                 &app_clone,
                                 "quick-ask-answer",
                                 QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {

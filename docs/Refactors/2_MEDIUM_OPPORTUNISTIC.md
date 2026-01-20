@@ -13,6 +13,10 @@ These are the files that are _currently_ the largest / most responsibility-dense
 - **Continue shrinking `app/src-tauri/src/lib.rs` (still large).**
   - Why: it’s still a very responsibility-dense file, even after prior extractions.
   - Good next slice: extract the recording/Quick Ask/Quick Replace orchestration into a `sessions/*` module so `lib.rs` trends toward “wiring only”.
+  - Progress:
+    - Extracted shared Quick Ask helpers (emit + ensure window visible) into `app/src-tauri/src/sessions/quick_ask.rs`.
+  - Remaining:
+    - Move the actual Quick Ask / Quick Replace / recording orchestration blocks out of `lib.rs` incrementally (keep PRs small).
 
 - **Split `app/src-tauri/src/pipeline.rs` (~188KB).**
   - Why: it contains unrelated concerns (provider construction/caching, routing logic, state machine + config, embedding cache/persistence, and helper utilities).
