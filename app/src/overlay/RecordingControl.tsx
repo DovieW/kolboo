@@ -333,15 +333,12 @@ export default function RecordingControl() {
 		hoverHasPresets &&
 		rewriteIsEnabled;
 
-	const {
-		markOverlayShownForHoverGating,
-		handleMouseEnter,
-		handleMouseLeave,
-	} = useOverlayHoverGating({
-		enabled: hoverPanelEnabled,
-		shouldShowPresets: shouldShowHoverPresets,
-		getWidgetElement: () => widgetRef.current,
-	});
+	const { markOverlayShownForHoverGating, handleMouseEnter, handleMouseLeave } =
+		useOverlayHoverGating({
+			enabled: hoverPanelEnabled,
+			shouldShowPresets: shouldShowHoverPresets,
+			getWidgetElement: () => widgetRef.current,
+		});
 
 	const _toggleRouterEnabled = useCallback(async () => {
 		if (!settings) return;
@@ -501,7 +498,6 @@ export default function RecordingControl() {
 			if (interval) window.clearInterval(interval);
 		};
 	}, [animState, pipelineState, setPipelineState, settings?.overlay_mode]);
-
 
 	// Resolve the active program profile periodically while expanded so we can
 	// show profile-scoped preset info in the hover panel.
@@ -1165,8 +1161,10 @@ export default function RecordingControl() {
 		// While fading out, keep showing the last busy phase (if any) to avoid a
 		// one-frame flash of the waveform as the pipeline returns to idle.
 		if (animState === "exit") {
-			if (controllerRef.current.lastBusyPhase === "rewriting") return "rewriting...";
-			if (controllerRef.current.lastBusyPhase === "routing") return "routing...";
+			if (controllerRef.current.lastBusyPhase === "rewriting")
+				return "rewriting...";
+			if (controllerRef.current.lastBusyPhase === "routing")
+				return "routing...";
 			if (controllerRef.current.lastBusyPhase === "transcribing")
 				return "transcribing...";
 		}

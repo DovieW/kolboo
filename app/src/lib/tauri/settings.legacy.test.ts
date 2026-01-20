@@ -1,5 +1,5 @@
-import legacySettingsFixture from "./__fixtures__/legacy-settings.v0.json";
 import { describe, expect, it, vi } from "vitest";
+import legacySettingsFixture from "./__fixtures__/legacy-settings.v0.json";
 
 type StoreLike = {
 	get<T = unknown>(key: string): Promise<T | undefined>;
@@ -70,9 +70,10 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 describe("legacy settings fixtures", () => {
 	it("normalizes a legacy settings.json shape", async () => {
 		vi.resetModules();
-		const fixture = JSON.parse(
-			JSON.stringify(legacySettingsFixture),
-		) as Record<string, unknown>;
+		const fixture = JSON.parse(JSON.stringify(legacySettingsFixture)) as Record<
+			string,
+			unknown
+		>;
 		currentStore = new FakeStore(fixture);
 
 		const { tauriAPI } = await import("../tauri");

@@ -226,15 +226,18 @@ export function RewritePromptLabModal(props: {
 			selectedModel.includes("claude-4") ||
 			selectedModel.includes("-4-"));
 
-	const openAiThinkingEffortsForModel = useCallback((model: string): string[] => {
-		// Keep aligned with ProvidersSettings.
-		if (model.startsWith("gpt-5-pro")) return ["high"];
-		if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1"))
-			return ["none", "low", "medium", "high"];
-		if (model.startsWith("gpt-5")) return ["low", "medium", "high"];
-		if (model.startsWith("o")) return ["low", "medium", "high"];
-		return [];
-	}, []);
+	const openAiThinkingEffortsForModel = useCallback(
+		(model: string): string[] => {
+			// Keep aligned with ProvidersSettings.
+			if (model.startsWith("gpt-5-pro")) return ["high"];
+			if (model.startsWith("gpt-5.2") || model.startsWith("gpt-5.1"))
+				return ["none", "low", "medium", "high"];
+			if (model.startsWith("gpt-5")) return ["low", "medium", "high"];
+			if (model.startsWith("o")) return ["low", "medium", "high"];
+			return [];
+		},
+		[],
+	);
 
 	const thinkingSelectKind:
 		| "none"

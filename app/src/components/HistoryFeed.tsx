@@ -1989,72 +1989,72 @@ export function HistoryFeed({
 												{formatTime(entry.timestamp)}
 											</span>
 											<div className="history-text">
-											{status === "in_progress" ? (
-												<Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-													<Loader size="xs" color="orange" />
-													<Text size="sm" c="dimmed" style={{ minWidth: 0 }}>
-														Transcribing…
-													</Text>
-												</Group>
-											) : status === "error" ? (
-												<Group
-													gap={8}
-													wrap="nowrap"
-													align="flex-start"
-													style={{ minWidth: 0 }}
-												>
-													<Text size="sm" c="red">
-														Failed
-													</Text>
+												{status === "in_progress" ? (
+													<Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+														<Loader size="xs" color="orange" />
+														<Text size="sm" c="dimmed" style={{ minWidth: 0 }}>
+															Transcribing…
+														</Text>
+													</Group>
+												) : status === "error" ? (
+													<Group
+														gap={8}
+														wrap="nowrap"
+														align="flex-start"
+														style={{ minWidth: 0 }}
+													>
+														<Text size="sm" c="red">
+															Failed
+														</Text>
+														<Text
+															size="sm"
+															c="dimmed"
+															style={{
+																flex: 1,
+																minWidth: 0,
+																whiteSpace: "pre-wrap",
+																overflowWrap: "anywhere",
+																wordBreak: "break-word",
+															}}
+															title={entry.error_message ?? undefined}
+														>
+															{entry.error_message?.trim()
+																? entry.error_message
+																: "Try again"}
+														</Text>
+													</Group>
+												) : (
 													<Text
 														size="sm"
-														c="dimmed"
-														style={{
-															flex: 1,
-															minWidth: 0,
-															whiteSpace: "pre-wrap",
-															overflowWrap: "anywhere",
-															wordBreak: "break-word",
-														}}
-														title={entry.error_message ?? undefined}
-													>
-														{entry.error_message?.trim()
-															? entry.error_message
-															: "Try again"}
-													</Text>
-												</Group>
-											) : (
-												<Text
-													size="sm"
-													c={entry.text?.trim() ? undefined : "dimmed"}
-													style={(() => {
-														const hasText = Boolean(entry.text?.trim());
-														// Some history entries can contain long unbroken strings (URLs, CLI output)
-														// which would otherwise overflow the row. Keep newlines, but allow wrapping.
-														const wrapStyle = {
-															whiteSpace: "pre-wrap",
-															overflowWrap: "anywhere",
-															wordBreak: "break-word",
-														} as const;
+														c={entry.text?.trim() ? undefined : "dimmed"}
+														style={(() => {
+															const hasText = Boolean(entry.text?.trim());
+															// Some history entries can contain long unbroken strings (URLs, CLI output)
+															// which would otherwise overflow the row. Keep newlines, but allow wrapping.
+															const wrapStyle = {
+																whiteSpace: "pre-wrap",
+																overflowWrap: "anywhere",
+																wordBreak: "break-word",
+															} as const;
 
-														if (!hasText) {
-															return {
-																...wrapStyle,
-																fontStyle: "italic",
-															};
+															if (!hasText) {
+																return {
+																	...wrapStyle,
+																	fontStyle: "italic",
+																};
+															}
+
+															return wrapStyle;
+														})()}
+														title={
+															entry.text?.trim()
+																? undefined
+																: "No transcript was produced"
 														}
-
-														return wrapStyle;
-													})()}
-													title={
-														entry.text?.trim()
-															? undefined
-															: "No transcript was produced"
-													}
-												>
-													{entry.text?.trim() ? entry.text : "No transcript"}
-												</Text>
-											)}
+													>
+														{entry.text?.trim() ? entry.text : "No transcript"}
+													</Text>
+												)}
 											</div>
 										</button>
 										<div className="history-actions">

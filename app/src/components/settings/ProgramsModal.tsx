@@ -80,11 +80,7 @@ export function ProfileConfigModal({
 				onEditingProfileChange(newProfile.id);
 			},
 		});
-	}, [
-		profiles,
-		updateRewriteProgramPromptProfiles,
-		onEditingProfileChange,
-	]);
+	}, [profiles, updateRewriteProgramPromptProfiles, onEditingProfileChange]);
 
 	useEffect(() => {
 		if (!opened) {
@@ -158,7 +154,6 @@ export function ProfileConfigModal({
 			},
 		});
 	};
-
 
 	const deleteSelectedProfile = () => {
 		if (!selectedProfile) return;
@@ -287,12 +282,7 @@ export function ProfileConfigModal({
 		});
 
 		setPendingProgramPathFocusIndex(null);
-	}, [
-		opened,
-		windowPickerOpen,
-		confirmDialog,
-		pendingProgramPathFocusIndex,
-	]);
+	}, [opened, windowPickerOpen, confirmDialog, pendingProgramPathFocusIndex]);
 
 	useEffect(() => {
 		if (!windowPickerOpen) return;

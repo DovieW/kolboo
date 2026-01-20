@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveRustSrcDir } from "./contractTestPaths";
 import { EVENT_NAMES } from "../tauri/events";
+import { resolveRustSrcDir } from "./contractTestPaths";
 
 const rustRoot = resolveRustSrcDir();
 

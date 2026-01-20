@@ -191,7 +191,7 @@ describe("tauri settings side effects", () => {
 		expect(currentStore.data.get("transcription_retention_unit")).toBe("days");
 		expect(currentStore.data.get("transcription_retention_value")).toBe(2);
 		expect(currentStore.data.get("transcription_retention_days")).toBe(2);
-		
+
 		// amount mode disables time retention
 		await tauriSettingsAPI.updateTranscriptionRetentionPolicy({
 			mode: "amount",
@@ -200,7 +200,9 @@ describe("tauri settings side effects", () => {
 			value: 12,
 		});
 
-		expect(currentStore.data.get("transcription_retention_mode")).toBe("amount");
+		expect(currentStore.data.get("transcription_retention_mode")).toBe(
+			"amount",
+		);
 		expect(currentStore.data.get("transcription_retention_amount")).toBe(100);
 		expect(currentStore.data.get("transcription_retention_value")).toBe(0);
 		expect(currentStore.saveCalls).toBe(2);

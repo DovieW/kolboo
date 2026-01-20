@@ -93,9 +93,7 @@ export function PromptSettingsModals({
 						}}
 						disabled={!linkSourceProfile}
 						placeholder={
-							!linkSourceProfile
-								? "Select a profile first"
-								: "Select preset"
+							!linkSourceProfile ? "Select a profile first" : "Select preset"
 						}
 						withCheckIcon={false}
 					/>
