@@ -1307,7 +1307,7 @@ pub(crate) fn stop_recording(
 
                                 crate::sessions::quick_ask::emit_to_quick_ask(
                                     &app_clone,
-                                    "quick-ask-answer",
+                                    crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
                                     QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
                                         ok: false,
                                         error: "No transcript to answer (empty)".to_string(),
@@ -1435,7 +1435,7 @@ pub(crate) fn stop_recording(
 
                                 crate::sessions::quick_ask::emit_to_quick_ask(
                                     &app_clone,
-                                    "quick-ask-started",
+                                    crate::sessions::quick_ask::EVENT_QUICK_ASK_STARTED,
                                     QuickAskStartedPayload {
                                         question: Some(question.clone()),
                                         provider: Some(provider.clone()),
@@ -1478,7 +1478,7 @@ pub(crate) fn stop_recording(
 
                                     crate::sessions::quick_ask::emit_to_quick_ask(
                                         &app_clone,
-                                        "quick-ask-answer",
+                                        crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
                                         QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
                                             ok: false,
                                             error: err,
@@ -1807,7 +1807,7 @@ pub(crate) fn stop_recording(
 
                                             crate::sessions::quick_ask::emit_to_quick_ask(
                                                 &app_clone,
-                                                "quick-ask-answer",
+                                                crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
                                                 QuickAskAnswerPayload::Ok(
                                                     QuickAskAnswerOkPayload {
                                                         ok: true,
@@ -1858,7 +1858,7 @@ pub(crate) fn stop_recording(
 
                                             crate::sessions::quick_ask::emit_to_quick_ask(
                                                 &app_clone,
-                                                "quick-ask-answer",
+                                                crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
                                                 QuickAskAnswerPayload::Err(
                                                     QuickAskAnswerErrorPayload {
                                                         ok: false,
@@ -2299,7 +2299,7 @@ pub(crate) fn stop_recording(
 
                             crate::sessions::quick_ask::emit_to_quick_ask(
                                 &app_clone,
-                                "quick-ask-answer",
+                                crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
                                 QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
                                     ok: false,
                                     error: "No transcript to answer (empty)".to_string(),
