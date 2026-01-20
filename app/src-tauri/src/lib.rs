@@ -15,6 +15,7 @@ mod clipboard_context;
 mod commands;
 mod cost;
 mod embeddings;
+mod events;
 mod history;
 mod llm;
 mod network;
@@ -226,7 +227,7 @@ pub(crate) fn emit_system_event(
         details: details.map(|s| s.to_string()),
     };
 
-    let _ = app.emit("system-event", event);
+    let _ = app.emit(events::EVENT_SYSTEM_EVENT, event);
 }
 
 /// Normalize transcript text for output.
@@ -482,8 +483,11 @@ pub(crate) fn start_recording(
                 message: error_msg,
                 request_id: None,
             };
-            let _ = app.emit("pipeline-error", payload);
-            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Error);
+            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
+            let _ = app.emit(
+                events::EVENT_PIPELINE_STATE_CHANGED,
+                PipelineStateEvent::Error,
+            );
             return;
         }
 
@@ -515,7 +519,10 @@ pub(crate) fn start_recording(
 
     // Pipeline started successfully - now update state and do side effects
     state.is_recording.store(true, Ordering::SeqCst);
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Recording);
+    let _ = app.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        PipelineStateEvent::Recording,
+    );
 
     // Start the recording chime ASAP.
     // Showing/snapping the overlay window can be a bit slow on some systems (monitor queries,
@@ -555,16 +562,16 @@ pub(crate) fn start_recording(
             maxes: Some(Vec::<f32>::new()),
         };
         if let Some(overlay) = app.get_webview_window("overlay") {
-            let _ = overlay.emit("overlay-audio-level", payload);
+            let _ = overlay.emit(events::EVENT_OVERLAY_AUDIO_LEVEL, payload);
         } else {
-            let _ = app.emit("overlay-audio-level", payload);
+            let _ = app.emit(events::EVENT_OVERLAY_AUDIO_LEVEL, payload);
         }
     }
 
     // Notify frontend ASAP so the overlay can update/animate without waiting for
     // audio side-effects (which may block, e.g. when we ensure the cue finishes
     // before muting system audio).
-    let _ = app.emit("recording-start", ());
+    let _ = app.emit(events::EVENT_RECORDING_START, ());
 
     // Mute system audio if enabled.
     // If we played a cue, muting used to be deferred until after the cue finishes.
@@ -917,9 +924,10 @@ pub(crate) fn stop_recording(
                         match pipeline_for_evt.state() {
                             pipeline::PipelineState::Transcribing
                             | pipeline::PipelineState::Rewriting => {
-                                let _ = app_for_evt.emit("pipeline-transcription-started", ());
+                                let _ = app_for_evt
+                                    .emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
                                 let _ = app_for_evt.emit(
-                                    "pipeline-state-changed",
+                                    events::EVENT_PIPELINE_STATE_CHANGED,
                                     PipelineStateEvent::Transcribing,
                                 );
 
@@ -957,9 +965,12 @@ pub(crate) fn stop_recording(
                     loop {
                         match pipeline_for_evt.state() {
                             pipeline::PipelineState::Routing => {
-                                let _ = app_for_evt.emit("pipeline-routing-started", ());
-                                let _ = app_for_evt
-                                    .emit("pipeline-state-changed", PipelineStateEvent::Routing);
+                                let _ =
+                                    app_for_evt.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
+                                let _ = app_for_evt.emit(
+                                    events::EVENT_PIPELINE_STATE_CHANGED,
+                                    PipelineStateEvent::Routing,
+                                );
                                 break;
                             }
                             pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
@@ -990,9 +1001,12 @@ pub(crate) fn stop_recording(
                     loop {
                         match pipeline_for_evt.state() {
                             pipeline::PipelineState::Rewriting => {
-                                let _ = app_for_evt.emit("pipeline-rewriting-started", ());
-                                let _ = app_for_evt
-                                    .emit("pipeline-state-changed", PipelineStateEvent::Rewriting);
+                                let _ =
+                                    app_for_evt.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
+                                let _ = app_for_evt.emit(
+                                    events::EVENT_PIPELINE_STATE_CHANGED,
+                                    PipelineStateEvent::Rewriting,
+                                );
                                 break;
                             }
                             pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
@@ -1023,7 +1037,7 @@ pub(crate) fn stop_recording(
                             model_info,
                             commands::history::get_history_max_entries(&app_clone),
                         );
-                        let _ = app_clone.emit("history-changed", ());
+                        let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                     }
                 }
             }
@@ -1154,7 +1168,7 @@ pub(crate) fn stop_recording(
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                     let _ =
                                         history.set_request_preset(req_id, preset_id, preset_name);
-                                    let _ = app_clone.emit("history-changed", ());
+                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                                 }
                             }
                         }
@@ -1195,8 +1209,11 @@ pub(crate) fn stop_recording(
                     }
 
                     if let Some(ref text) = filtered_transcript {
-                        let _ = app_clone.emit("pipeline-transcript-ready", text);
-                        let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, text);
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Idle,
+                        );
 
                         // Default output is the (possibly rewritten) pipeline transcript.
                         // Quick Replace may overwrite this when a selection is present.
@@ -2094,9 +2111,11 @@ pub(crate) fn stop_recording(
                                     message: err.to_string(),
                                     request_id: request_id.clone(),
                                 };
-                                let _ = app_clone.emit("pipeline-error", payload);
-                                let _ = app_clone
-                                    .emit("pipeline-state-changed", PipelineStateEvent::Error);
+                                let _ = app_clone.emit(events::EVENT_PIPELINE_ERROR, payload);
+                                let _ = app_clone.emit(
+                                    events::EVENT_PIPELINE_STATE_CHANGED,
+                                    PipelineStateEvent::Error,
+                                );
                             } else {
                                 // Output using the selected output mode.
                                 let output_clipboard_privacy_mode: bool = get_setting_from_store(
@@ -2147,7 +2166,7 @@ pub(crate) fn stop_recording(
                                         (None, None)
                                     };
                                     let _ = history.set_request_llm_model(req_id, provider, model);
-                                    let _ = app_clone.emit("history-changed", ());
+                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                                 }
                             }
                         }
@@ -2156,8 +2175,11 @@ pub(crate) fn stop_recording(
                         commands::recording::apply_transcription_retention(&app_clone);
                     } else {
                         // Emit empty transcript event so UI can update appropriately
-                        let _ = app_clone.emit("pipeline-transcript-ready", "");
-                        let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, "");
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Idle,
+                        );
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
                         if is_quick_ask_session {
@@ -2209,7 +2231,7 @@ pub(crate) fn stop_recording(
                                         (None, None)
                                     };
                                     let _ = history.set_request_llm_model(req_id, provider, model);
-                                    let _ = app_clone.emit("history-changed", ());
+                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                                 }
                             }
                         }
@@ -2221,7 +2243,7 @@ pub(crate) fn stop_recording(
                     // Hide overlay after transcription completes if in "recording_only" mode.
                     // We request a hide so the frontend can animate (zoom-out) before the webview hides.
                     if overlay_mode_clone == "recording_only" {
-                        let _ = app_clone.emit("overlay-hide-requested", ());
+                        let _ = app_clone.emit(events::EVENT_OVERLAY_HIDE_REQUESTED, ());
 
                         // Fallback: if the overlay frontend isn't running/listening, hide anyway.
                         // Re-check the current overlay_mode before hiding to avoid races with settings changes.
@@ -2276,20 +2298,23 @@ pub(crate) fn stop_recording(
                         }
 
                         // Notify frontend and hide overlay if needed.
-                        let _ = app_clone.emit("pipeline-cancelled", ());
-                        let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_CANCELLED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Idle,
+                        );
 
                         // Best-effort: remove any in-progress history entry for this request
                         // so it doesn't remain stuck in "in_progress".
                         if let Some(req_id) = request_id.as_ref() {
                             if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                 let _ = history.delete(req_id);
-                                let _ = app_clone.emit("history-changed", ());
+                                let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                             }
                         }
 
                         if overlay_mode_clone == "recording_only" {
-                            let _ = app_clone.emit("overlay-hide-requested", ());
+                            let _ = app_clone.emit(events::EVENT_OVERLAY_HIDE_REQUESTED, ());
                             if let Some(window) = app_clone.get_webview_window("overlay") {
                                 let _ = window.hide();
                             }
@@ -2305,8 +2330,11 @@ pub(crate) fn stop_recording(
                         message: e.to_string(),
                         request_id: request_id.clone(),
                     };
-                    let _ = app_clone.emit("pipeline-error", payload);
-                    let _ = app_clone.emit("pipeline-state-changed", PipelineStateEvent::Error);
+                    let _ = app_clone.emit(events::EVENT_PIPELINE_ERROR, payload);
+                    let _ = app_clone.emit(
+                        events::EVENT_PIPELINE_STATE_CHANGED,
+                        PipelineStateEvent::Error,
+                    );
 
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                         log_store.with_current(|log| {
@@ -2353,7 +2381,7 @@ pub(crate) fn stop_recording(
                     if let Some(req_id) = request_id.as_ref() {
                         if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                             let _ = history.complete_request_error(req_id, e.to_string());
-                            let _ = app_clone.emit("history-changed", ());
+                            let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                         }
                     }
 
@@ -2375,7 +2403,7 @@ pub(crate) fn stop_recording(
         });
     }
 
-    let _ = app.emit("recording-stop", ());
+    let _ = app.emit(events::EVENT_RECORDING_STOP, ());
 }
 
 /// Check if audio mute is supported on this platform
