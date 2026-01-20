@@ -67,6 +67,7 @@ import { HintSelect } from "../HintSelect";
 import { PresetEditorModal } from "./prompt/PresetEditorModal";
 import { PromptIntentRouterSection } from "./prompt/PromptIntentRouterSection";
 import { usePromptSettingsProfileState } from "./prompt/usePromptSettingsProfileState";
+import { usePromptSettingsTests } from "./prompt/usePromptSettingsTests";
 import {
 	type LinkableProfileOption,
 	PromptSettingsModals,
@@ -379,13 +380,24 @@ export function PromptSettings({
 		defaultSttTimeout: DEFAULT_STT_TIMEOUT,
 	});
 
-	const [rewriteTestInput, setRewriteTestInput] = useState<string>("");
-	const [rewriteTestOutput, setRewriteTestOutput] = useState<string>("");
-	const [rewriteTestError, setRewriteTestError] = useState<string>("");
-	const [rewriteTestDurationMs, setRewriteTestDurationMs] = useState<
-		number | null
-	>(null);
-	const rewriteTestStartRef = useRef<number | null>(null);
+	const {
+		rewriteTestInput,
+		setRewriteTestInput,
+		rewriteTestOutput,
+		rewriteTestError,
+		rewriteTestDurationMs,
+		runRewriteTest,
+		sttTestOutput,
+		sttTestError,
+		sttTestDurationMs,
+		handleRunSttTest,
+	} = usePromptSettingsTests({
+		activeProfileId,
+		errorToMessage,
+		testLlmRewrite,
+		testRewriteWithPrompt,
+		testSttLastAudio,
+	});
 
 	const [promptLabOpen, setPromptLabOpen] = useState(false);
 	const [promptLabContextPrompt, setPromptLabContextPrompt] =
@@ -757,75 +769,8 @@ export function PromptSettings({
 		saveProfileMetadata({ router });
 	};
 
-	const runRewriteTest = (promptOverride?: string) => {
-		setRewriteTestError("");
-		setRewriteTestOutput("");
-		setRewriteTestDurationMs(null);
-		rewriteTestStartRef.current = performance.now();
-
-		if (typeof promptOverride === "string") {
-			testRewriteWithPrompt.mutate(
-				{
-					transcript: rewriteTestInput,
-					prompt: promptOverride,
-					profileId: activeProfileId,
-				},
-				{
-					onSuccess: (res) => {
-						const startedAt = rewriteTestStartRef.current;
-						rewriteTestStartRef.current = null;
-						if (typeof startedAt === "number") {
-							setRewriteTestDurationMs(performance.now() - startedAt);
-						}
-						setRewriteTestOutput(res.output);
-					},
-					onError: (err) => {
-						const startedAt = rewriteTestStartRef.current;
-						rewriteTestStartRef.current = null;
-						if (typeof startedAt === "number") {
-							setRewriteTestDurationMs(performance.now() - startedAt);
-						}
-						setRewriteTestError(errorToMessage(err));
-					},
-				},
-			);
-			return;
-		}
-
-		testLlmRewrite.mutate(
-			{
-				transcript: rewriteTestInput,
-				profileId: activeProfileId,
-			},
-			{
-				onSuccess: (res) => {
-					const startedAt = rewriteTestStartRef.current;
-					rewriteTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setRewriteTestDurationMs(performance.now() - startedAt);
-					}
-					setRewriteTestOutput(res.output);
-				},
-				onError: (err) => {
-					const startedAt = rewriteTestStartRef.current;
-					rewriteTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setRewriteTestDurationMs(performance.now() - startedAt);
-					}
-					setRewriteTestError(errorToMessage(err));
-				},
-			},
-		);
-	};
-
-	const [sttTestOutput, setSttTestOutput] = useState<string>("");
-	const [sttTestError, setSttTestError] = useState<string>("");
-	const [sttTestDurationMs, setSttTestDurationMs] = useState<number | null>(
-		null,
-	);
 	const [localSttTranscriptionPrompt, setLocalSttTranscriptionPrompt] =
 		useState<string>("");
-	const sttTestStartRef = useRef<number | null>(null);
 
 	const [quickAskTestInput, setQuickAskTestInput] = useState<string>("");
 	const [quickAskTestOutput, setQuickAskTestOutput] = useState<string>("");
@@ -2192,39 +2137,6 @@ export function PromptSettings({
 				saveProfileMetadata({ stt_timeout_seconds: null });
 			},
 		});
-	};
-
-	const handleRunSttTest = () => {
-		setSttTestError("");
-		setSttTestOutput("");
-		setSttTestDurationMs(null);
-		sttTestStartRef.current = performance.now();
-
-		testSttLastAudio.mutate(
-			{
-				profileId: activeProfileId,
-			},
-			{
-				onSuccess: (res) => {
-					const startedAt = sttTestStartRef.current;
-					sttTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setSttTestDurationMs(performance.now() - startedAt);
-					}
-
-					setSttTestOutput(res);
-				},
-				onError: (err) => {
-					const startedAt = sttTestStartRef.current;
-					sttTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setSttTestDurationMs(performance.now() - startedAt);
-					}
-
-					setSttTestError(errorToMessage(err));
-				},
-			},
-		);
 	};
 
 	if (isLoading) {
