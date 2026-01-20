@@ -49,10 +49,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - Generate TypeScript types from the Rust structs (or from the JSON schemas in `app/src-tauri/gen/schemas/`) and import those into `app/src/lib/tauri.ts`.
   - Goal: avoid shipping changes where Rust and TS disagree on the shape of settings/logs.
 
-- **Document the pipeline as a state machine contract (and enforce it).**
-  - Add a small transition table comment + a single “transition helper” that enforces allowed moves.
-  - This complements existing guard methods and makes it harder to accidentally introduce illegal transitions.
-
 ## Rust deterministic testing seams (hard IO audit)
 
 - **Audio device IO (CPAL):**

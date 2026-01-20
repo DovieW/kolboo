@@ -4438,6 +4438,72 @@ mod tests {
     }
 
     #[test]
+    fn test_pipeline_state_transition_contract() {
+        fn allowed_transitions(state: PipelineState) -> &'static [PipelineState] {
+            match state {
+                PipelineState::Idle => &[
+                    PipelineState::Idle,
+                    PipelineState::Recording,
+                    PipelineState::Transcribing,
+                    PipelineState::Error,
+                ],
+                PipelineState::Recording => &[
+                    PipelineState::Recording,
+                    PipelineState::Transcribing,
+                    PipelineState::Idle,
+                    PipelineState::Error,
+                ],
+                PipelineState::Transcribing => &[
+                    PipelineState::Transcribing,
+                    PipelineState::Routing,
+                    PipelineState::Rewriting,
+                    PipelineState::Idle,
+                    PipelineState::Error,
+                ],
+                PipelineState::Routing => &[
+                    PipelineState::Routing,
+                    PipelineState::Transcribing,
+                    PipelineState::Idle,
+                    PipelineState::Error,
+                ],
+                PipelineState::Rewriting => &[
+                    PipelineState::Rewriting,
+                    PipelineState::Idle,
+                    PipelineState::Error,
+                ],
+                PipelineState::Error => &[
+                    PipelineState::Error,
+                    PipelineState::Idle,
+                    PipelineState::Recording,
+                    PipelineState::Transcribing,
+                ],
+            }
+        }
+
+        let all_states = [
+            PipelineState::Idle,
+            PipelineState::Recording,
+            PipelineState::Transcribing,
+            PipelineState::Routing,
+            PipelineState::Rewriting,
+            PipelineState::Error,
+        ];
+
+        for &from in &all_states {
+            for &to in &all_states {
+                let expected = allowed_transitions(from).contains(&to);
+                assert_eq!(
+                    from.can_transition_to(to),
+                    expected,
+                    "unexpected transition {:?} -> {:?}",
+                    from,
+                    to
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_force_reset() {
         let config = PipelineConfig {
             stt_api_key: "test-key".to_string(),
