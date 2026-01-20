@@ -31,9 +31,12 @@ These are the files that are _currently_ the largest / most responsibility-dense
 
 ### Frontend (React/TS)
 
-- **Split `app/src/components/settings/PromptSettings.tsx` (very large).**
-  - Why: it’s doing UI layout *and* business logic for presets/router/Quick Ask/Quick Replace.
-  - Suggested splits: presets editor, router panel, quick ask panel, quick replace panel, plus 1–2 hooks that own the data plumbing.
+- **Further split `app/src/components/settings/PromptSettings.tsx` (still large).**
+  - Why: it still mixes data plumbing, preset editor UI, router UI, and settings coordination.
+  - Suggested splits:
+    - `PresetEditorPanel` (preset modal + CRUD + local state)
+    - `IntentRouterPanel` (router controls + helper selects)
+    - `usePromptSettingsHandlers` (STT/LLM update handlers + shared helpers)
 
 - **Continue splitting `app/src/OverlayApp.tsx` if it grows again.**
   - Goal: keep overlay UI logic testable and predictable.

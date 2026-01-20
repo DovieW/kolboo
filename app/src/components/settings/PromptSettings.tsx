@@ -69,6 +69,7 @@ import {
 import { HintSelect } from "../HintSelect";
 import { PromptSectionEditor } from "./PromptSectionEditor";
 import { QuickAskPanel } from "./prompt/QuickAskPanel";
+import { TranscribeSettingsSection } from "./prompt/TranscribeSettingsSection";
 import { QuickReplaceSettings } from "./QuickReplaceSettings";
 import { RewritePromptLabModal } from "./RewritePromptLabModal";
 
@@ -1571,6 +1572,9 @@ export function PromptSettings({
 		return "Transcription prompt is only supported for certain models.";
 	}, [effectiveSttProvider, effectiveSttModel]);
 
+	const hasStoredTranscriptionPrompt =
+    Boolean(settings?.stt_transcription_prompt?.trim()) && sttPromptSupported;
+
 	// Keep the local UI state in sync with persisted settings.
 	useEffect(() => {
 		setLocalSttTranscriptionPrompt(settings?.stt_transcription_prompt ?? "");
@@ -2427,6 +2431,182 @@ export function PromptSettings({
 		});
 	};
 
+	const handleWhisperServerModelDraftBlur = () => {
+    const trimmed = whisperServerModelDraft.trim();
+    const toStore = trimmed.length > 0 ? trimmed : null;
+
+    if (isDefaultScope) {
+      const stored = settings?.stt_model?.trim() || null;
+      if (toStore === stored) return;
+      updateSTTModel.mutate(toStore, {
+        onSuccess: () => {
+          tauriAPI.emitSettingsChanged();
+        },
+      });
+      return;
+    }
+
+    setSttModelInheriting(false);
+    setLocalProfileSttModel(toStore);
+    saveProfileMetadata({ stt_model: toStore });
+  };
+
+  const handleSttProviderChange = (value: string | null) => {
+    if (!value) return;
+    if (isDefaultScope) {
+      handleDefaultSTTProviderChange(value);
+      return;
+    }
+
+    setSttProviderInheriting(false);
+    setSttModelInheriting(false);
+    setLocalProfileSttProvider(value);
+    const models = STT_MODELS[value] ?? [];
+    const firstModel = models[0]?.value ?? null;
+    setLocalProfileSttModel(firstModel);
+    saveProfileMetadata({
+      stt_provider: value,
+      stt_model: firstModel,
+    });
+  };
+
+  const handleSttModelChange = (value: string | null) => {
+    if (!value) return;
+    if (isDefaultScope) {
+      handleDefaultSTTModelChange(value);
+      return;
+    }
+
+    setSttModelInheriting(false);
+    setLocalProfileSttModel(value);
+    saveProfileMetadata({ stt_model: value });
+  };
+
+  const handleSttTimeoutChange = (value: number | string) => {
+    // Keep local state permissive so typing feels natural (e.g., allow clearing the field
+    // or temporarily typing an out-of-range intermediate value like "1" before "10").
+    setLocalProfileSttTimeout(value);
+
+    // Only persist when the value is a valid in-range number.
+    if (typeof value !== "number" || Number.isNaN(value)) return;
+    if (value < 5 || value > 120) return;
+
+    if (isDefaultScope) {
+      handleDefaultSTTTimeoutChange(value);
+      return;
+    }
+
+    setSttTimeoutInheriting(false);
+    saveProfileMetadata({ stt_timeout_seconds: value });
+  };
+
+  const handleSttTimeoutBlur = () => {
+    // On blur, clamp and normalize.
+    // If the user cleared the input, revert to the effective value without saving.
+    if (localProfileSttTimeout === "") {
+      const fallback = isDefaultScope
+        ? (settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT)
+        : (activeProfile?.stt_timeout_seconds ??
+          settings?.stt_timeout_seconds ??
+          DEFAULT_STT_TIMEOUT);
+      setLocalProfileSttTimeout(fallback);
+      return;
+    }
+
+    if (
+      typeof localProfileSttTimeout !== "number" ||
+      Number.isNaN(localProfileSttTimeout)
+    ) {
+      return;
+    }
+
+    const clamped = Math.max(5, Math.min(120, localProfileSttTimeout));
+    if (clamped !== localProfileSttTimeout) {
+      setLocalProfileSttTimeout(clamped);
+    }
+
+    if (isDefaultScope) {
+      handleDefaultSTTTimeoutChange(clamped);
+      return;
+    }
+
+    setSttTimeoutInheriting(false);
+    saveProfileMetadata({ stt_timeout_seconds: clamped });
+  };
+
+  const handleDisableSttProviderOverride = () => {
+    openDisableOverrideDialog({
+      title: "Disable Speech-to-Text Provider override?",
+      onConfirm: () => {
+        setSttProviderInheriting(true);
+        setSttModelInheriting(true);
+        setLocalProfileSttProvider(settings?.stt_provider ?? null);
+        setLocalProfileSttModel(settings?.stt_model ?? null);
+        saveProfileMetadata({
+          stt_provider: null,
+          stt_model: null,
+        });
+      },
+    });
+  };
+
+  const handleDisableSttModelOverride = () => {
+    openDisableOverrideDialog({
+      title: "Disable STT Model override?",
+      onConfirm: () => {
+        setSttModelInheriting(true);
+        setLocalProfileSttModel(settings?.stt_model ?? null);
+        saveProfileMetadata({ stt_model: null });
+      },
+    });
+  };
+
+  const handleDisableSttTimeoutOverride = () => {
+    openDisableOverrideDialog({
+      title: "Disable STT Timeout override?",
+      onConfirm: () => {
+        setSttTimeoutInheriting(true);
+        setLocalProfileSttTimeout(
+          settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT,
+        );
+        saveProfileMetadata({ stt_timeout_seconds: null });
+      },
+    });
+  };
+
+  const handleRunSttTest = () => {
+    setSttTestError("");
+    setSttTestOutput("");
+    setSttTestDurationMs(null);
+    sttTestStartRef.current = performance.now();
+
+    testSttLastAudio.mutate(
+      {
+        profileId: activeProfileId,
+      },
+      {
+        onSuccess: (res) => {
+          const startedAt = sttTestStartRef.current;
+          sttTestStartRef.current = null;
+          if (typeof startedAt === "number") {
+            setSttTestDurationMs(performance.now() - startedAt);
+          }
+
+          setSttTestOutput(res);
+        },
+        onError: (err) => {
+          const startedAt = sttTestStartRef.current;
+          sttTestStartRef.current = null;
+          if (typeof startedAt === "number") {
+            setSttTestDurationMs(performance.now() - startedAt);
+          }
+
+          setSttTestError(errorToMessage(err));
+        },
+      },
+    );
+  };
+
 	if (isLoading) {
 		return (
 			<div
@@ -2518,4186 +2698,3711 @@ export function PromptSettings({
 	};
 
 	return (
-		<>
-			<Modal
-				opened={linkPresetModalOpen}
-				onClose={() => setLinkPresetModalOpen(false)}
-				title="Add preset from another profile"
-				centered
-				zIndex={1200}
-			>
-				<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-					<Select
-						label="Source profile"
-						data={linkableProfiles.map((p) => ({
-							value: p.id,
-							label: p.label,
-						}))}
-						value={linkSourceProfileId}
-						onChange={(value) => {
-							if (!value) return;
-							setLinkSourceProfileId(value);
-							const nextProfile =
-								linkableProfiles.find((p) => p.id === value) ?? null;
-							setLinkSourcePresetId(nextProfile?.presets[0]?.id ?? null);
-						}}
-						placeholder={
-							linkableProfiles.length === 0
-								? "No other profiles"
-								: "Select profile"
-						}
-						withCheckIcon={false}
-					/>
-
-					<Select
-						label="Preset"
-						data={(linkSourceProfile?.presets ?? []).map((p) => ({
-							value: p.id,
-							label: p.name?.trim() || p.id,
-						}))}
-						value={linkSourcePresetId}
-						onChange={(value) => {
-							if (!value) return;
-							setLinkSourcePresetId(value);
-						}}
-						disabled={!linkSourceProfile}
-						placeholder={
-							!linkSourceProfile ? "Select a profile first" : "Select preset"
-						}
-						withCheckIcon={false}
-					/>
-				</div>
-
-				<Group justify="flex-end" mt="md" gap="sm">
-					<Button
-						variant="default"
-						onClick={() => setLinkPresetModalOpen(false)}
-					>
-						Cancel
-					</Button>
-					<Button
-						color="gray"
-						onClick={confirmLinkPreset}
-						disabled={!linkSourcePreset}
-					>
-						Add Preset
-					</Button>
-				</Group>
-			</Modal>
-
-			<Modal
-				opened={deletePresetDialog !== null}
-				onClose={() => setDeletePresetDialog(null)}
-				title="Delete preset?"
-				centered
-				zIndex={1300}
-			>
-				<Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
-					{deletePresetDialog?.isShared
-						? "This preset is shared. Deleting it here only removes it from this profile; other profiles will keep it."
-						: "This will remove the preset from this profile."}
-				</Text>
-
-				<Text size="sm" mt="xs" style={{ lineHeight: 1.4 }}>
-					{deletePresetDialog?.presetName ?? ""}
-				</Text>
-
-				<Group justify="flex-end" mt="md" gap="sm">
-					<Button variant="default" onClick={() => setDeletePresetDialog(null)}>
-						Cancel
-					</Button>
-					<Button
-						color="red"
-						onClick={() => {
-							const args = deletePresetDialog;
-							if (!args) return;
-							setDeletePresetDialog(null);
-							deletePreset(args.presetId);
-						}}
-					>
-						Delete
-					</Button>
-				</Group>
-			</Modal>
-
-			<Modal
-				opened={resetDialog !== null}
-				onClose={() => setResetDialog(null)}
-				title={resetDialog?.title ?? ""}
-				centered
-			>
-				<Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
-					This setting is currently overriding the Default profile. Disable the
-					override to inherit from Default.
-				</Text>
-				<Group justify="flex-end" mt="md" gap="sm">
-					<Button variant="default" onClick={() => setResetDialog(null)}>
-						Keep override
-					</Button>
-					<Button
-						color="gray"
-						onClick={() => {
-							const confirm = resetDialog?.onConfirm;
-							setResetDialog(null);
-							confirm?.();
-						}}
-					>
-						Disable override
-					</Button>
-				</Group>
-			</Modal>
-
-			<RewritePromptLabModal
-				opened={promptLabOpen}
-				onClose={() => {
-					setPromptLabOpen(false);
-					setPromptLabApplyTarget(null);
-				}}
-				profileId={activeProfileId}
-				profileLabel={promptLabContextLabel || activeProfileLabel}
-				initialLlmProvider={effectiveLlmProvider}
-				initialLlmModel={effectiveLlmModel}
-				initialTranscript={rewriteTestInput}
-				initialProblemOutput={rewriteTestOutput}
-				currentPrompt={promptLabContextPrompt || effectiveCurrentPrompt}
-				onSetPrompt={(nextPrompt) => {
-					const trimmed = nextPrompt.trim();
-					if (!trimmed) return;
-
-					const target = promptLabApplyTarget;
-					if (!target || target.type === "profile") {
-						handleSave("system", trimmed);
-						return;
-					}
-
-					const preset = presets.find((p) => p.id === target.presetId);
-					if (!preset) {
-						// Preset was deleted/changed while modal was open.
-						handleSave("system", trimmed);
-						return;
-					}
-
-					const baseContent = profilePromptDefaultContent;
-					const contentToStore =
-						trimmed === baseContent ? null : trimmed || null;
-					const section =
-						contentToStore == null ? null : { content: contentToStore };
-					savePresetSectionOverride(preset, target.key, section);
-				}}
-				onIteratePrompt={async (params) => {
-					const res = await iterateRewritePrompt.mutateAsync({
-						transcript: params.transcript,
-						problemOutput: params.problemOutput,
-						desiredOutput: params.desiredOutput,
-						currentPrompt: params.currentPrompt,
-						profileId: params.profileId,
-						mode: params.mode,
-						llmProvider: params.llmProvider,
-						llmModel: params.llmModel,
-						openAiReasoningEffort: params.openAiReasoningEffort,
-						geminiThinkingLevel: params.geminiThinkingLevel,
-						geminiThinkingBudget: params.geminiThinkingBudget,
-						anthropicThinkingBudget: params.anthropicThinkingBudget,
-					});
-
-					return {
-						improvedPrompt: res.improved_prompt,
-						providerUsed: res.provider_used,
-						modelUsed: res.model_used,
-					};
-				}}
-				onTestPrompt={async (params) => {
-					const res = await testRewriteWithPrompt.mutateAsync({
-						transcript: params.transcript,
-						prompt: params.prompt,
-						profileId: params.profileId,
-					});
-
-					return {
-						output: res.output,
-						providerUsed: res.provider_used,
-						modelUsed: res.model_used,
-					};
-				}}
-			/>
-
-			<div className="settings-mini-header settings-mini-header--first">
-				<span className="settings-mini-header__text">Transcribe</span>
-			</div>
-
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Speech-to-Text Provider</p>
-					<p className="settings-description">Service for transcribing audio</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && sttProviderInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !sttProviderInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Speech-to-Text Provider override?",
-										onConfirm: () => {
-											setSttProviderInheriting(true);
-											setSttModelInheriting(true);
-											setLocalProfileSttProvider(
-												settings?.stt_provider ?? null,
-											);
-											setLocalProfileSttModel(settings?.stt_model ?? null);
-											saveProfileMetadata({
-												stt_provider: null,
-												stt_model: null,
-											});
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Select
-						data={sttProviderOptions}
-						value={effectiveSttProvider}
-						onChange={(value) => {
-							if (!value) return;
-							if (isDefaultScope) {
-								handleDefaultSTTProviderChange(value);
-								return;
-							}
-
-							setSttProviderInheriting(false);
-							setSttModelInheriting(false);
-							setLocalProfileSttProvider(value);
-							const models = STT_MODELS[value] ?? [];
-							const firstModel = models[0]?.value ?? null;
-							setLocalProfileSttModel(firstModel);
-							saveProfileMetadata({
-								stt_provider: value,
-								stt_model: firstModel,
-							});
-						}}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={
-							sttCloudProviders.length === 0 && sttLocalProviders.length === 0
-						}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
-			</div>
-
-			{sttProviderIsWhisperServer || sttModelOptions.length > 0 ? (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">STT Model</p>
-						<p className="settings-description">
-							Model to use for transcription
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && sttModelInheriting && (
-							<Tooltip label={INHERIT_TOOLTIP} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !sttModelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable STT Model override?",
-											onConfirm: () => {
-												setSttModelInheriting(true);
-												setLocalProfileSttModel(settings?.stt_model ?? null);
-												saveProfileMetadata({ stt_model: null });
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						{sttPricingLabel ? (
-							<Text
-								size="xs"
-								c="dimmed"
-								style={{ whiteSpace: "nowrap", lineHeight: 1 }}
-							>
-								{sttPricingLabel}
-							</Text>
-						) : null}
-						{sttProviderIsWhisperServer ? (
-							<TextInput
-								value={whisperServerModelDraft}
-								onChange={(e) =>
-									setWhisperServerModelDraft(e.currentTarget.value)
-								}
-								onBlur={() => {
-									const trimmed = whisperServerModelDraft.trim();
-									const toStore = trimmed.length > 0 ? trimmed : null;
-
-									if (isDefaultScope) {
-										const stored = settings?.stt_model?.trim() || null;
-										if (toStore === stored) return;
-										updateSTTModel.mutate(toStore, {
-											onSuccess: () => {
-												tauriAPI.emitSettingsChanged();
-											},
-										});
-										return;
-									}
-
-									setSttModelInheriting(false);
-									setLocalProfileSttModel(toStore);
-									saveProfileMetadata({ stt_model: toStore });
-								}}
-								placeholder="whisper-1"
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										minWidth: 200,
-									},
-								}}
-							/>
-						) : (
-							<Select
-								data={sttModelOptions}
-								value={selectedSttModelForUi}
-								onChange={(value) => {
-									if (!value) return;
-									if (isDefaultScope) {
-										handleDefaultSTTModelChange(value);
-										return;
-									}
-									setSttModelInheriting(false);
-									setLocalProfileSttModel(value);
-									saveProfileMetadata({ stt_model: value });
-								}}
-								placeholder="Select model"
-								withCheckIcon={false}
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										minWidth: 200,
-									},
-								}}
-							/>
-						)}
-					</div>
-				</div>
-			) : null}
-
-			<div className="settings-row no-divider">
-				<div>
-					<p className="settings-label">STT Timeout</p>
-					<p className="settings-description">
-						Increase if nothing is getting transcribed (seconds)
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && sttTimeoutInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !sttTimeoutInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable STT Timeout override?",
-										onConfirm: () => {
-											setSttTimeoutInheriting(true);
-											setLocalProfileSttTimeout(
-												settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT,
-											);
-											saveProfileMetadata({ stt_timeout_seconds: null });
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-
-					<NumberInput
-						value={localProfileSttTimeout}
-						onChange={(value) => {
-							// Keep local state permissive so typing feels natural (e.g., allow clearing the field
-							// or temporarily typing an out-of-range intermediate value like "1" before "10").
-							setLocalProfileSttTimeout(value);
-
-							// Only persist when the value is a valid in-range number.
-							if (typeof value !== "number" || Number.isNaN(value)) return;
-							if (value < 5 || value > 120) return;
-
-							if (isDefaultScope) {
-								handleDefaultSTTTimeoutChange(value);
-								return;
-							}
-
-							setSttTimeoutInheriting(false);
-							saveProfileMetadata({ stt_timeout_seconds: value });
-						}}
-						onBlur={() => {
-							// On blur, clamp and normalize.
-							// If the user cleared the input, revert to the effective value without saving.
-							if (localProfileSttTimeout === "") {
-								const fallback = isDefaultScope
-									? (settings?.stt_timeout_seconds ?? DEFAULT_STT_TIMEOUT)
-									: (activeProfile?.stt_timeout_seconds ??
-										settings?.stt_timeout_seconds ??
-										DEFAULT_STT_TIMEOUT);
-								setLocalProfileSttTimeout(fallback);
-								return;
-							}
-
-							if (
-								typeof localProfileSttTimeout !== "number" ||
-								Number.isNaN(localProfileSttTimeout)
-							) {
-								return;
-							}
-
-							const clamped = Math.max(
-								5,
-								Math.min(120, localProfileSttTimeout),
-							);
-							if (clamped !== localProfileSttTimeout) {
-								setLocalProfileSttTimeout(clamped);
-							}
-
-							if (isDefaultScope) {
-								handleDefaultSTTTimeoutChange(clamped);
-								return;
-							}
-
-							setSttTimeoutInheriting(false);
-							saveProfileMetadata({ stt_timeout_seconds: clamped });
-						}}
-						min={5}
-						max={120}
-						step={1}
-						clampBehavior="blur"
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								width: 140,
-							},
-						}}
-					/>
-				</div>
-			</div>
-
-			<div style={{ marginTop: 0, marginBottom: 16 }}>
-				<Accordion variant="separated" radius="md">
-					<Accordion.Item value={`${activeProfileId}-stt-prompt`}>
-						<Accordion.Control>
-							<Tooltip
-								label={sttPromptDisabledReason}
-								withArrow
-								disabled={sttPromptSupported}
-							>
-								<div style={{ opacity: sttPromptSupported ? 1 : 0.5 }}>
-									<p className="settings-label">Transcription prompt</p>
-									<p className="settings-description">
-										Optional context used during transcription.
-									</p>
-								</div>
-							</Tooltip>
-						</Accordion.Control>
-						<Accordion.Panel>
-							<div
-								style={{ display: "flex", flexDirection: "column", gap: 10 }}
-							>
-								<div style={{ width: "100%" }}>
-									<div
-										style={{
-											display: "flex",
-											alignItems: "center",
-											justifyContent: "space-between",
-											gap: 12,
-											marginBottom: 6,
-										}}
-									>
-										{isPrompt224CharLimited ? (
-											<Text size="xs" c="dimmed">
-												{localSttTranscriptionPrompt.length}/{promptMaxChars}{" "}
-												chars
-											</Text>
-										) : null}
-									</div>
-
-									<Textarea
-										value={localSttTranscriptionPrompt}
-										onChange={(e) => {
-											const next = e.currentTarget.value;
-
-											if (
-												isPrompt224CharLimited &&
-												next.length > promptMaxChars
-											) {
-												setLocalSttTranscriptionPrompt(
-													next.slice(0, promptMaxChars),
-												);
-												return;
-											}
-
-											setLocalSttTranscriptionPrompt(next);
-										}}
-										disabled={!sttPromptSupported}
-										placeholder={"Prompt"}
-										autosize
-										minRows={2}
-										maxLength={
-											isPrompt224CharLimited ? promptMaxChars : undefined
-										}
-										styles={{
-											input: {
-												backgroundColor: "var(--bg-elevated)",
-												borderColor: "var(--border-default)",
-												color: "var(--text-primary)",
-												fontFamily: "monospace",
-												fontSize: "13px",
-											},
-										}}
-									/>
-								</div>
-							</div>
-						</Accordion.Panel>
-					</Accordion.Item>
-
-					<Accordion.Item value={`${activeProfileId}-stt-test`}>
-						<Accordion.Control>
-							<div>
-								<p className="settings-label">Test transcription</p>
-								<p className="settings-description">
-									Run STT on the last recorded audio to validate provider/model
-									settings.
-								</p>
-							</div>
-						</Accordion.Control>
-						<Accordion.Panel>
-							<div
-								style={{ display: "flex", flexDirection: "column", gap: 10 }}
-							>
-								<div
-									style={{
-										display: "flex",
-										alignItems: "center",
-										justifyContent: "space-between",
-										gap: 12,
-									}}
-								>
-									<Text size="sm" c="dimmed">
-										{testSttLastAudio.isPending
-											? "Duration: running…"
-											: sttTestDurationMs === null
-												? "Duration: —"
-												: `Duration: ${(sttTestDurationMs / 1000).toFixed(2)}s`}
-									</Text>
-
-									<div
-										style={{
-											display: "flex",
-											alignItems: "center",
-											gap: 12,
-											marginLeft: "auto",
-										}}
-									>
-										<Text size="sm" c="dimmed">
-											Test with last created audio (and test audio settings)
-										</Text>
-										<Tooltip
-											label={
-												hasLastAudioForSttTest
-													? undefined
-													: "No previous audio found. Record once (toggle/hold hotkey), then come back and click Test."
-											}
-											withArrow
-											disabled={Boolean(hasLastAudioForSttTest)}
-										>
-											<span>
-												<Button
-													color="gray"
-													loading={testSttLastAudio.isPending}
-													disabled={!hasLastAudioForSttTest}
-													onClick={() => {
-														setSttTestError("");
-														setSttTestOutput("");
-														setSttTestDurationMs(null);
-														sttTestStartRef.current = performance.now();
-
-														testSttLastAudio.mutate(
-															{
-																profileId: activeProfileId,
-															},
-															{
-																onSuccess: (res) => {
-																	const startedAt = sttTestStartRef.current;
-																	sttTestStartRef.current = null;
-																	if (typeof startedAt === "number") {
-																		setSttTestDurationMs(
-																			performance.now() - startedAt,
-																		);
-																	}
-
-																	setSttTestOutput(res);
-																},
-																onError: (err) => {
-																	const startedAt = sttTestStartRef.current;
-																	sttTestStartRef.current = null;
-																	if (typeof startedAt === "number") {
-																		setSttTestDurationMs(
-																			performance.now() - startedAt,
-																		);
-																	}
-
-																	setSttTestError(errorToMessage(err));
-																},
-															},
-														);
-													}}
-												>
-													Test
-												</Button>
-											</span>
-										</Tooltip>
-									</div>
-								</div>
-
-								<div style={{ width: "100%" }}>
-									{sttTestError ? (
-										<Text size="sm" c="red" style={{ marginBottom: 8 }}>
-											{sttTestError}
-										</Text>
-									) : null}
-
-									{sttPromptSupported &&
-									(settings?.stt_transcription_prompt ?? "").trim().length >
-										0 ? (
-										<Text size="xs" c="dimmed" style={{ marginBottom: 8 }}>
-											Test transcription will include your global transcription
-											prompt.
-										</Text>
-									) : null}
-
-									<Textarea
-										value={sttTestOutput}
-										readOnly
-										placeholder="Transcript will appear here"
-										autosize
-										minRows={3}
-										styles={{
-											input: {
-												backgroundColor: "var(--bg-elevated)",
-												borderColor: "var(--border-default)",
-												color: "var(--text-primary)",
-												fontFamily: "monospace",
-												fontSize: "13px",
-											},
-										}}
-									/>
-								</div>
-							</div>
-						</Accordion.Panel>
-					</Accordion.Item>
-				</Accordion>
-			</div>
-
-			<div className="settings-mini-header">
-				<span className="settings-mini-header__text">Rewrite</span>
-			</div>
-
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Rewrite Transcription</p>
-					<p className="settings-description">
-						Enable or disable rewriting the transcription with an LLM
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && rewriteEnabledInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !rewriteEnabledInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Rewrite Transcription override?",
-										onConfirm: () => {
-											setRewriteEnabledInheriting(true);
-											setLocalProfileRewriteEnabled(defaultRewriteEnabled);
-											saveProfileMetadata({ rewrite_llm_enabled: null });
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Switch
-						checked={
-							isDefaultScope
-								? defaultRewriteEnabled
-								: localProfileRewriteEnabled
-						}
-						onChange={(e) => {
-							const enabled = e.currentTarget.checked;
-							if (isDefaultScope) {
-								updateRewriteLlmEnabled.mutate(enabled, {
-									onSuccess: () => {
-										tauriAPI.emitSettingsChanged();
-									},
-								});
-								return;
-							}
-
-							setRewriteEnabledInheriting(false);
-							setLocalProfileRewriteEnabled(enabled);
-							saveProfileMetadata({ rewrite_llm_enabled: enabled });
-						}}
-						color="gray"
-						size="md"
-					/>
-				</div>
-			</div>
-
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Include Clipboard Context</p>
-					<p className="settings-description">
-						When enabled, Kolboo reads your clipboard text and includes it as
-						optional context during the Rewrite step.
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && rewriteIncludeClipboardContextInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !rewriteIncludeClipboardContextInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Rewrite Clipboard Context override?",
-										onConfirm: () => {
-											setRewriteIncludeClipboardContextInheriting(true);
-											setLocalProfileRewriteIncludeClipboardContext(
-												defaultRewriteIncludeClipboardContext,
-											);
-											saveProfileMetadata({
-												rewrite_include_clipboard_context: null,
-											});
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Switch
-						checked={localProfileRewriteIncludeClipboardContext}
-						onChange={(e) => {
-							const enabled = e.currentTarget.checked;
-							if (!isDefaultScope) {
-								setRewriteIncludeClipboardContextInheriting(false);
-							}
-							setLocalProfileRewriteIncludeClipboardContext(enabled);
-							saveProfileMetadata({
-								rewrite_include_clipboard_context: enabled,
-							});
-						}}
-						color="gray"
-						size="md"
-					/>
-				</div>
-			</div>
-
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Language Model Provider</p>
-					<p className="settings-description">AI service for text formatting</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && llmProviderInheriting && (
-						<Tooltip label={INHERIT_TOOLTIP} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !llmProviderInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Language Model Provider override?",
-										onConfirm: () => {
-											setLlmProviderInheriting(true);
-											setLlmModelInheriting(true);
-											setLocalProfileLlmProvider(
-												settings?.llm_provider ?? null,
-											);
-											setLocalProfileLlmModel(settings?.llm_model ?? null);
-											saveProfileMetadata({
-												llm_provider: null,
-												llm_model: null,
-											});
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Select
-						data={llmProviderOptions}
-						value={effectiveLlmProvider}
-						onChange={(value) => {
-							if (!value) return;
-							if (isDefaultScope) {
-								handleDefaultLLMProviderChange(value);
-								return;
-							}
-
-							setLlmProviderInheriting(false);
-							setLlmModelInheriting(false);
-							setLocalProfileLlmProvider(value);
-							const models = getLlmModelOptionsForProvider(value);
-							const firstModel = models[0]?.value ?? null;
-							setLocalProfileLlmModel(firstModel);
-							saveProfileMetadata({
-								llm_provider: value,
-								llm_model: firstModel,
-							});
-						}}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={
-							llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-						}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
-			</div>
-
-			{llmModelOptions.length > 0 ? (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Rewrite LLM Model</p>
-						<p className="settings-description">
-							LLM Model used to rewrite the transcription.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && llmModelInheriting && (
-							<Tooltip label={INHERIT_TOOLTIP} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !llmModelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Rewrite LLM Model override?",
-											onConfirm: () => {
-												setLlmModelInheriting(true);
-												setLocalProfileLlmModel(settings?.llm_model ?? null);
-												saveProfileMetadata({ llm_model: null });
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						{llmPricingLabel ? (
-							<Text
-								size="xs"
-								c="dimmed"
-								style={{ whiteSpace: "nowrap", lineHeight: 1 }}
-							>
-								{llmPricingLabel}
-							</Text>
-						) : null}
-						<Select
-							data={llmModelOptions}
-							value={
-								isDefaultScope
-									? (settings?.llm_model ?? llmModelOptions[0]?.value ?? null)
-									: localProfileLlmModel
-							}
-							onChange={(value) => {
-								if (!value) return;
-								if (isDefaultScope) {
-									handleDefaultLLMModelChange(value);
-									return;
-								}
-
-								setLlmModelInheriting(false);
-								setLocalProfileLlmModel(value);
-								saveProfileMetadata({ llm_model: value });
-							}}
-							placeholder="Select model"
-							withCheckIcon={false}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								},
-							}}
-						/>
-					</div>
-				</div>
-			) : null}
-
-			{supportsOpenAiThinking && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking</p>
-						<p className="settings-description">
-							Set the reasoning effort for this model.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && openAiReasoningEffortInheriting && (
-							<Tooltip label={INHERIT_TOOLTIP} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !openAiReasoningEffortInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Thinking override?",
-											onConfirm: () => {
-												setOpenAiReasoningEffortInheriting(true);
-												setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
-												saveProfileMetadata({
-													openai_reasoning_effort: null,
-												});
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-
-						<HintSelect
-							data={openAiThinkingOptions}
-							value={
-								isDefaultScope
-									? (settings?.openai_reasoning_effort ?? SELECT_DEFAULT)
-									: localProfileOpenAiReasoningEffort
-							}
-							onChange={(value) => {
-								if (isDefaultScope) {
-									handleOpenAiThinkingChange(value);
-									return;
-								}
-
-								if (value == null || value === SELECT_DEFAULT) {
-									setOpenAiReasoningEffortInheriting(true);
-									setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
-									saveProfileMetadata({ openai_reasoning_effort: null });
-									return;
-								}
-
-								setOpenAiReasoningEffortInheriting(false);
-								setLocalProfileOpenAiReasoningEffort(value);
-								const effort = isOpenAiReasoningEffort(value) ? value : null;
-								if (!effort) return;
-								saveProfileMetadata({
-									openai_reasoning_effort: effort,
-								});
-							}}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? effectiveLlmModel
-										? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-										: "medium"
-									: (settings?.openai_reasoning_effort ??
-										(effectiveLlmModel
-											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-											: "medium"));
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? effectiveLlmModel
-										? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-										: "medium"
-									: (settings?.openai_reasoning_effort ??
-										(effectiveLlmModel
-											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-											: "medium"));
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-						/>
-					</div>
-				</div>
-			)}
-
-			{supportsGeminiThinkingLevel && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking Level</p>
-						<p className="settings-description">
-							{isGemini3Pro
-								? "Gemini 3 Pro supports low/high (default high)."
-								: "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
-						</p>
-					</div>
-
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && geminiThinkingLevelInheriting && (
-							<Tooltip label={INHERIT_TOOLTIP} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-
-						{!isDefaultScope && !geminiThinkingLevelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Thinking Level override?",
-											onConfirm: () => {
-												setGeminiThinkingLevelInheriting(true);
-												setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
-												saveProfileMetadata({ gemini_thinking_level: null });
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-
-						<HintSelect
-							data={geminiThinkingLevelOptions}
-							value={
-								isDefaultScope
-									? (settings?.gemini_thinking_level ?? SELECT_DEFAULT)
-									: localProfileGeminiThinkingLevel
-							}
-							onChange={(value) => {
-								if (isDefaultScope) {
-									handleGeminiThinkingLevelChange(value);
-									return;
-								}
-
-								if (value == null || value === SELECT_DEFAULT) {
-									setGeminiThinkingLevelInheriting(true);
-									setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
-									saveProfileMetadata({ gemini_thinking_level: null });
-									return;
-								}
-
-								const v =
-									value === "minimal" ||
-									value === "low" ||
-									value === "medium" ||
-									value === "high"
-										? value
-										: null;
-								if (v == null) return;
-
-								setGeminiThinkingLevelInheriting(false);
-								setLocalProfileGeminiThinkingLevel(v);
-								saveProfileMetadata({ gemini_thinking_level: v });
-							}}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? "high"
-									: (settings?.gemini_thinking_level ?? "high");
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? "high"
-									: (settings?.gemini_thinking_level ?? "high");
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-						/>
-					</div>
-				</div>
-			)}
-
-			{supportsGeminiThinkingBudget && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking Budget</p>
-						<p className="settings-description">
-							Token budget for Gemini 2.5 thinking.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && geminiThinkingBudgetInheriting && (
-							<Tooltip label={INHERIT_TOOLTIP} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !geminiThinkingBudgetInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Thinking Budget override?",
-											onConfirm: () => {
-												setGeminiThinkingBudgetInheriting(true);
-												setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
-												saveProfileMetadata({ gemini_thinking_budget: null });
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						<HintSelect
-							data={geminiThinkingBudgetOptions}
-							value={
-								isDefaultScope
-									? settings?.gemini_thinking_budget == null
-										? SELECT_DEFAULT
-										: String(settings.gemini_thinking_budget)
-									: localProfileGeminiThinkingBudget
-							}
-							onChange={(value) => {
-								if (isDefaultScope) {
-									handleGeminiThinkingBudgetChange(value);
-									return;
-								}
-
-								if (value == null || value === SELECT_DEFAULT) {
-									setGeminiThinkingBudgetInheriting(true);
-									setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
-									saveProfileMetadata({ gemini_thinking_budget: null });
-									return;
-								}
-
-								const parsed = Number(value);
-								if (!Number.isFinite(parsed)) return;
-								const asInt = Math.trunc(parsed);
-								setGeminiThinkingBudgetInheriting(false);
-								setLocalProfileGeminiThinkingBudget(String(asInt));
-								saveProfileMetadata({ gemini_thinking_budget: asInt });
-							}}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-								if (option.value !== SELECT_DEFAULT)
-									return <Text size="sm">{option.label}</Text>;
-
-								const inherited = settings?.gemini_thinking_budget;
-								const hint = isDefaultScope
-									? "dynamic"
-									: inherited == null
-										? "dynamic"
-										: inherited === 0
-											? "off"
-											: inherited === -1
-												? "dynamic"
-												: String(inherited);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const inherited = settings?.gemini_thinking_budget;
-								const hint = isDefaultScope
-									? "dynamic"
-									: inherited == null
-										? "dynamic"
-										: inherited === 0
-											? "off"
-											: inherited === -1
-												? "dynamic"
-												: String(inherited);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-						/>
-					</div>
-				</div>
-			)}
-
-			{supportsAnthropicThinkingBudget && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking</p>
-						<p className="settings-description">
-							Extended thinking level for Claude models.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && anthropicThinkingBudgetInheriting && (
-							<Tooltip label={INHERIT_TOOLTIP} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !anthropicThinkingBudgetInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Thinking override?",
-											onConfirm: () => {
-												setAnthropicThinkingBudgetInheriting(true);
-												setLocalProfileAnthropicThinkingBudget(SELECT_DEFAULT);
-												saveProfileMetadata({
-													anthropic_thinking_budget: null,
-												});
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						<HintSelect
-							data={anthropicThinkingLevelOptionsWithCustom}
-							value={
-								isDefaultScope
-									? settings?.anthropic_thinking_budget == null
-										? SELECT_DEFAULT
-										: String(settings.anthropic_thinking_budget)
-									: localProfileAnthropicThinkingBudget
-							}
-							onChange={(value) => {
-								if (isDefaultScope) {
-									handleAnthropicThinkingBudgetChange(value);
-									return;
-								}
-
-								if (value == null || value === SELECT_DEFAULT) {
-									setAnthropicThinkingBudgetInheriting(true);
-									setLocalProfileAnthropicThinkingBudget(SELECT_DEFAULT);
-									saveProfileMetadata({ anthropic_thinking_budget: null });
-									return;
-								}
-
-								const parsed = Number(value);
-								if (!Number.isFinite(parsed)) return;
-								const asInt = Math.trunc(parsed);
-								setAnthropicThinkingBudgetInheriting(false);
-								setLocalProfileAnthropicThinkingBudget(String(asInt));
-								saveProfileMetadata({ anthropic_thinking_budget: asInt });
-							}}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-
-								if (option.value === SELECT_DEFAULT) {
-									const inheritedBudget = settings?.anthropic_thinking_budget;
-									const hint = isDefaultScope
-										? "off"
-										: inheritedBudget == null
-											? "off"
-											: formatThinkingBudgetShort(inheritedBudget);
-
-									return (
-										<div
-											style={{
-												display: "flex",
-												alignItems: "baseline",
-												gap: 8,
-											}}
-										>
-											<span style={{ fontSize: 14 }}>{option.label}</span>
-											<span
-												style={{
-													fontSize: 11,
-													color: "var(--text-muted)",
-													opacity: 0.9,
-													lineHeight: 1,
-												}}
-											>
-												· {hint}
-											</span>
-										</div>
-									);
-								}
-
-								// Closed state: keep it simple (label only) unless it's a custom token budget.
-								if (option.label.startsWith("Custom")) {
-									const n = Number(option.value);
-									const suffix = Number.isFinite(n)
-										? formatThinkingBudgetShort(n)
-										: null;
-									return (
-										<div
-											style={{
-												display: "flex",
-												alignItems: "baseline",
-												gap: 8,
-											}}
-										>
-											<Text size="sm">{option.label}</Text>
-											{suffix && (
-												<Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
-													{suffix}
-												</Text>
-											)}
-										</div>
-									);
-								}
-
-								return <Text size="sm">{option.label}</Text>;
-							}}
-							renderOption={({ option }) => {
-								if (option.value === SELECT_DEFAULT) {
-									const inheritedBudget = settings?.anthropic_thinking_budget;
-									const hint = isDefaultScope
-										? "off"
-										: inheritedBudget == null
-											? "off"
-											: formatThinkingBudgetShort(inheritedBudget);
-
-									return (
-										<div
-											style={{
-												display: "flex",
-												alignItems: "baseline",
-												gap: 8,
-											}}
-										>
-											<span style={{ fontSize: 14 }}>{option.label}</span>
-											<span
-												style={{
-													fontSize: 11,
-													color: "var(--text-muted)",
-													opacity: 0.9,
-													lineHeight: 1,
-												}}
-											>
-												· {hint}
-											</span>
-										</div>
-									);
-								}
-
-								const n = Number(option.value);
-								const suffix = Number.isFinite(n)
-									? formatThinkingBudgetShort(n)
-									: null;
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<Text size="sm">{option.label}</Text>
-										{suffix && (
-											<Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
-												{suffix}
-											</Text>
-										)}
-									</div>
-								);
-							}}
-						/>
-					</div>
-				</div>
-			)}
-
-			{/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
-
-			{activeProfile ? (
-				<div
-					className="settings-accordion-block"
-					style={{ marginTop: 0, marginBottom: 16 }}
-				>
-					<Accordion variant="separated" radius="md">
-						<Accordion.Item value={`${activeProfileId}-presets`}>
-							<Accordion.Control>
-								<div>
-									<p className="settings-label">Presets</p>
-									<p className="settings-description">
-										Create multiple dictation modes for this program, then
-										choose one manually or let the intent router auto-select.
-									</p>
-								</div>
-							</Accordion.Control>
-							<Accordion.Panel>
-								<div
-									style={{
-										display: "flex",
-										flexDirection: "column",
-										gap: 12,
-									}}
-								>
-									<Group
-										justify="space-between"
-										align="center"
-										wrap="wrap"
-										gap={12}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: 12,
-												flexWrap: "wrap",
-											}}
-										>
-											<div>
-												<Text size="xs" c="dimmed" mb={4}>
-													Default preset
-												</Text>
-												<Select
-													data={[
-														{ value: "__none__", label: "Default" },
-														...presetSelectOptions,
-													]}
-													value={defaultPresetValue}
-													onChange={(value) => {
-														if (!value) return;
-														saveProfileMetadata({
-															default_preset_id:
-																value === "__none__" ? null : value,
-														});
-													}}
-													placeholder="Default"
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 220,
-														},
-													}}
-												/>
-											</div>
-
-											<div>
-												<Text size="xs" c="dimmed" mb={4}>
-													Manual preset override (persisted)
-												</Text>
-												<Select
-													data={[
-														{
-															value: "__none__",
-															label: "No override (use router/default)",
-														},
-														...presetSelectOptions,
-													]}
-													value={activePresetValue}
-													onChange={(value) => {
-														if (!value) return;
-														saveProfileMetadata({
-															active_preset_id:
-																value === "__none__" ? null : value,
-														});
-													}}
-													placeholder="Default"
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 260,
-														},
-													}}
-												/>
-											</div>
-										</div>
-
-										<Button
-											color="gray"
-											variant="light"
-											onClick={() => setPresetEditorOpen(true)}
-										>
-											Edit Presets
-										</Button>
-									</Group>
-
-									<Modal
-										opened={presetEditorOpen}
-										onClose={() => setPresetEditorOpen(false)}
-										title="Edit presets"
-										centered
-										size="xl"
-										keepMounted={false}
-										zIndex={1000}
-										styles={{
-											body: {
-												height: "70vh",
-												overflowY: "auto",
-											},
-										}}
-									>
-										<Group
-											justify="space-between"
-											align="flex-end"
-											wrap="wrap"
-											gap={12}
-											mb="sm"
-										>
-											<div style={{ flex: 1, minWidth: 260 }}>
-												<Text size="xs" c="dimmed" mb={4}>
-													Editing preset
-												</Text>
-												<Select
-													data={[
-														{
-															value: EDIT_DEFAULT_PRESET,
-															label: "Default",
-														},
-														...presetSelectOptions,
-													]}
-													value={editingPresetId ?? EDIT_DEFAULT_PRESET}
-													onChange={(value) => {
-														setEditingPresetId(value ?? EDIT_DEFAULT_PRESET);
-													}}
-													comboboxProps={{ withinPortal: true, zIndex: 1400 }}
-													placeholder="Default"
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-														},
-													}}
-												/>
-											</div>
-
-											<Group gap={8} wrap="wrap">
-												<Button color="gray" onClick={newPreset}>
-													New
-												</Button>
-												<Tooltip
-													label={
-														linkableProfiles.length === 0
-															? "No presets found in other profiles"
-															: "Add a shared preset from another profile"
-													}
-													disabled={linkableProfiles.length > 0}
-												>
-													<Button
-														color="gray"
-														variant="light"
-														onClick={openLinkPresetModal}
-														disabled={linkableProfiles.length === 0}
-													>
-														Add
-													</Button>
-												</Tooltip>
-
-												<ActionIcon
-													variant="light"
-													color="red"
-													size={36}
-													disabled={isEditingDefaultPreset || !selectedPreset}
-													onClick={() => {
-														if (isEditingDefaultPreset) return;
-														if (!selectedPreset) return;
-														setDeletePresetDialog({
-															presetId: selectedPreset.id,
-															presetName:
-																selectedPreset.name?.trim() ||
-																selectedPreset.id,
-															isShared: isSharedPresetId(selectedPreset.id),
-														});
-													}}
-													aria-label="Delete preset"
-												>
-													<Trash2 size={16} />
-												</ActionIcon>
-											</Group>
-										</Group>
-
-										<div
-											style={{
-												display: "flex",
-												flexDirection: "column",
-												gap: 12,
-											}}
-										>
-											{selectedPreset ? (
-												<div
-													style={{
-														display: "flex",
-														flexDirection: "column",
-														gap: 12,
-													}}
-												>
-													<TextInput
-														label="Preset name"
-														value={localPresetName}
-														onChange={(e) =>
-															setLocalPresetName(e.currentTarget.value)
-														}
-														onBlur={() => {
-															const next = localPresetName.trim();
-															if (next && next !== selectedPreset.name) {
-																updatePreset(selectedPreset.id, {
-																	name: next,
-																});
-															}
-														}}
-														styles={{
-															label: { fontSize: 12 },
-															input: {
-																backgroundColor: "var(--bg-elevated)",
-																borderColor: "var(--border-default)",
-																color: "var(--text-primary)",
-															},
-														}}
-													/>
-
-													<div>
-														<Text size="xs" c="dimmed" mb={4}>
-															Rewrite step
-														</Text>
-														<Select
-															data={[
-																{ value: "on", label: "On" },
-																{ value: "off", label: "Off" },
-															]}
-															value={
-																selectedPreset.rewrite_llm_enabled
-																	? "on"
-																	: "off"
-															}
-															onChange={(value) => {
-																if (!value) return;
-																updatePreset(selectedPreset.id, {
-																	rewrite_llm_enabled: value === "on",
-																});
-															}}
-															comboboxProps={{
-																withinPortal: true,
-																zIndex: 1400,
-															}}
-															withCheckIcon={false}
-															styles={{
-																input: {
-																	backgroundColor: "var(--bg-elevated)",
-																	borderColor: "var(--border-default)",
-																	color: "var(--text-primary)",
-																	minWidth: 220,
-																},
-															}}
-														/>
-													</div>
-
-													<Textarea
-														label="Routing hints (one per line)"
-														description="If empty, the router falls back to the preset name."
-														value={localPresetHintsText}
-														onChange={(e) =>
-															setLocalPresetHintsText(e.currentTarget.value)
-														}
-														onBlur={() => {
-															const lines = localPresetHintsText
-																.split(/\r?\n/)
-																.map((s) => s.trim())
-																.filter(Boolean);
-															const next = lines.length === 0 ? null : lines;
-															const current =
-																selectedPreset.routing_hints ?? null;
-															if (
-																JSON.stringify(current) !== JSON.stringify(next)
-															) {
-																updatePreset(selectedPreset.id, {
-																	routing_hints: next,
-																});
-															}
-														}}
-														autosize
-														minRows={3}
-														styles={{
-															label: { fontSize: 12 },
-															input: {
-																backgroundColor: "var(--bg-elevated)",
-																borderColor: "var(--border-default)",
-																color: "var(--text-primary)",
-																fontFamily: "monospace",
-																fontSize: "13px",
-															},
-														}}
-													/>
-
-													<div>
-														<Text size="sm" fw={600} mb={6}>
-															System Prompt override (relative to this profile)
-														</Text>
-
-														<Accordion variant="separated" radius="md">
-															{(() => {
-																const key: SectionKey = "system";
-																const override = getPresetPromptOverride(
-																	selectedPreset,
-																	key,
-																);
-																const baseContent = profilePromptDefaultContent;
-
-																const initialContent =
-																	override && override.content != null
-																		? override.content
-																		: baseContent;
-
-																const presetLabel =
-																	selectedPreset.name?.trim() ||
-																	selectedPreset.id;
-
-																return (
-																	<PromptSectionEditor
-																		key={`${activeProfileId}-${selectedPreset.id}-${key}`}
-																		sectionKey={`${activeProfileId}-preset-${selectedPreset.id}-${key}`}
-																		title="System Prompt"
-																		description="Override the profile System Prompt for this preset."
-																		enabled={true}
-																		hideToggle={true}
-																		headerActions={
-																			<Button
-																				variant="light"
-																				color="gray"
-																				disabled={
-																					updateRewriteProgramPromptProfiles.isPending
-																				}
-																				onClick={() => {
-																					setPromptLabContextPrompt(
-																						(initialContent ?? "").trim(),
-																					);
-																					setPromptLabContextLabel(
-																						`${activeProfileLabel} · ${presetLabel}`,
-																					);
-																					setPromptLabApplyTarget({
-																						type: "preset",
-																						presetId: selectedPreset.id,
-																						key,
-																					});
-																					setPromptLabOpen(true);
-																				}}
-																			>
-																				Prompt Lab
-																			</Button>
-																		}
-																		initialContent={initialContent}
-																		defaultContent={baseContent}
-																		hasCustom={override != null}
-																		inheritMode={
-																			override == null
-																				? "inheriting"
-																				: "overriding"
-																		}
-																		inheritTooltip="Inheriting from the profile System Prompt"
-																		disableOverrideTooltip="Disable override (inherit from profile)"
-																		onDisableOverride={() =>
-																			savePresetSectionOverride(
-																				selectedPreset,
-																				key,
-																				null,
-																			)
-																		}
-																		resetLabel="Reset to Profile"
-																		onToggle={() => {}}
-																		onSave={(content) => {
-																			const contentToStore =
-																				content === baseContent
-																					? null
-																					: content || null;
-																			const next = {
-																				content: contentToStore,
-																			};
-																			savePresetSectionOverride(
-																				selectedPreset,
-																				key,
-																				next,
-																			);
-																		}}
-																		onReset={() =>
-																			savePresetSectionOverride(
-																				selectedPreset,
-																				key,
-																				null,
-																			)
-																		}
-																		isSaving={
-																			updateRewriteProgramPromptProfiles.isPending
-																		}
-																	/>
-																);
-															})()}
-														</Accordion>
-													</div>
-
-													<div style={{ marginTop: 12 }}>
-														<Accordion variant="separated" radius="md">
-															<Accordion.Item
-																value={`${activeProfileId}-${selectedPreset.id}-test-rewrite`}
-															>
-																<Accordion.Control>
-																	<div>
-																		<p className="settings-label">
-																			Test rewrite
-																		</p>
-																		<p className="settings-description">
-																			Paste a raw transcript and run it through
-																			this preset’s effective System Prompt.
-																		</p>
-																	</div>
-																</Accordion.Control>
-																<Accordion.Panel>
-																	{(() => {
-																		const baseContent =
-																			profilePromptDefaultContent;
-																		const override = getPresetPromptOverride(
-																			selectedPreset,
-																			"system",
-																		);
-																		const promptForTest =
-																			override && override.content != null
-																				? override.content
-																				: baseContent;
-
-																		const isDisabled =
-																			rewriteTestInput.trim().length === 0 ||
-																			updateRewriteProgramPromptProfiles.isPending ||
-																			updateCleanupPromptSections.isPending ||
-																			updateRewriteLlmEnabled.isPending;
-
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					flexDirection: "column",
-																					gap: 10,
-																				}}
-																			>
-																				<Text size="xs" c="dimmed">
-																					Testing: {activeProfileLabel} ·{" "}
-																					{selectedPreset.name?.trim() ||
-																						selectedPreset.id}
-																				</Text>
-
-																				<Textarea
-																					value={rewriteTestInput}
-																					onChange={(e) => {
-																						setRewriteTestInput(
-																							e.currentTarget.value,
-																						);
-																					}}
-																					onKeyDown={(e) => {
-																						if (
-																							(e.ctrlKey || e.metaKey) &&
-																							e.key === "Enter"
-																						) {
-																							e.preventDefault();
-																							if (!isDisabled) {
-																								runRewriteTest(promptForTest);
-																							}
-																						}
-																					}}
-																					placeholder="Raw transcript"
-																					autosize
-																					minRows={3}
-																					styles={{
-																						input: {
-																							backgroundColor:
-																								"var(--bg-elevated)",
-																							borderColor:
-																								"var(--border-default)",
-																							color: "var(--text-primary)",
-																							fontFamily: "monospace",
-																							fontSize: "13px",
-																						},
-																					}}
-																				/>
-
-																				<div
-																					style={{
-																						display: "flex",
-																						alignItems: "center",
-																						gap: 12,
-																					}}
-																				>
-																					<Button
-																						color="gray"
-																						loading={
-																							testRewriteWithPrompt.isPending
-																						}
-																						disabled={isDisabled}
-																						onClick={() =>
-																							runRewriteTest(promptForTest)
-																						}
-																					>
-																						Test
-																					</Button>
-
-																					<Text size="sm" c="dimmed">
-																						{testRewriteWithPrompt.isPending
-																							? "Duration: running…"
-																							: rewriteTestDurationMs === null
-																								? "Duration: —"
-																								: `Duration: ${(
-																										rewriteTestDurationMs / 1000
-																									).toFixed(2)}s`}
-																					</Text>
-																				</div>
-
-																				{rewriteTestError ? (
-																					<Text size="sm" c="red">
-																						{rewriteTestError}
-																					</Text>
-																				) : null}
-
-																				{rewriteTestOutput ? (
-																					<Textarea
-																						value={rewriteTestOutput}
-																						readOnly
-																						autosize
-																						minRows={3}
-																						styles={{
-																							input: {
-																								backgroundColor:
-																									"var(--bg-elevated)",
-																								borderColor:
-																									"var(--border-default)",
-																								color: "var(--text-primary)",
-																								fontFamily: "monospace",
-																								fontSize: "13px",
-																							},
-																						}}
-																					/>
-																				) : null}
-																			</div>
-																		);
-																	})()}
-																</Accordion.Panel>
-															</Accordion.Item>
-														</Accordion>
-													</div>
-												</div>
-											) : isEditingDefaultPreset ? (
-												<>
-													<div
-														style={{
-															display: "flex",
-															flexWrap: "wrap",
-															gap: 12,
-															alignItems: "flex-end",
-														}}
-													>
-														<div>
-															<Text size="xs" c="dimmed" mb={4}>
-																Rewrite step
-															</Text>
-															<Select
-																data={[
-																	{ value: "on", label: "On" },
-																	{ value: "off", label: "Off" },
-																]}
-																value={defaultPresetRewriteStepValue}
-																onChange={(value) => {
-																	if (!value) return;
-																	saveProfileMetadata({
-																		default_target_rewrite_llm_enabled:
-																			value === "on",
-																	});
-																}}
-																comboboxProps={{
-																	withinPortal: true,
-																	zIndex: 1400,
-																}}
-																withCheckIcon={false}
-																styles={{
-																	input: {
-																		backgroundColor: "var(--bg-elevated)",
-																		borderColor: "var(--border-default)",
-																		color: "var(--text-primary)",
-																		minWidth: 240,
-																	},
-																}}
-															/>
-														</div>
-													</div>
-
-													<div style={{ marginTop: 8 }}>
-														<Accordion variant="separated" radius="md">
-															<PromptSectionEditor
-																sectionKey={`${activeProfileId}-default-system-prompt`}
-																title="System Prompt"
-																description="Instructions used when rewriting the transcript"
-																enabled={true}
-																hideToggle={true}
-																headerActions={
-																	<Button
-																		variant="light"
-																		color="gray"
-																		disabled={
-																			updateCleanupPromptSections.isPending ||
-																			updateRewriteProgramPromptProfiles.isPending ||
-																			updateRewriteLlmEnabled.isPending
-																		}
-																		onClick={() => {
-																			setPromptLabContextPrompt(
-																				effectiveCurrentPrompt,
-																			);
-																			setPromptLabContextLabel(
-																				activeProfileLabel,
-																			);
-																			setPromptLabApplyTarget({
-																				type: "profile",
-																				key: "system",
-																			});
-																			setPromptLabOpen(true);
-																		}}
-																	>
-																		Prompt Lab
-																	</Button>
-																}
-																initialContent={
-																	localSections?.system.content ?? ""
-																}
-																defaultContent={defaultSections?.system ?? ""}
-																hasCustom={hasCustomContent.system}
-																inheritMode={
-																	isDefaultScope
-																		? null
-																		: activeProfile?.cleanup_prompt_sections
-																					?.system == null
-																			? "inheriting"
-																			: "overriding"
-																}
-																onDisableOverride={
-																	isDefaultScope
-																		? undefined
-																		: () =>
-																				openDisableOverrideDialog({
-																					title:
-																						"Disable System Prompt override?",
-																					onConfirm: () => {
-																						const base =
-																							settings?.cleanup_prompt_sections ??
-																							DEFAULT_SECTIONS;
-
-																						const current: CleanupPromptSectionsOverride =
-																							activeProfile?.cleanup_prompt_sections ??
-																							{};
-																						const next =
-																							normalizePromptOverrides({
-																								...current,
-																								system: null,
-																							});
-																						profilePromptOverridesRef.current =
-																							next;
-
-																						const resolved: CleanupPromptSections =
-																							{
-																								system:
-																									next?.system ?? base.system,
-																							};
-
-																						setLocalSections({
-																							system: {
-																								content:
-																									resolved.system.content ??
-																									defaultSections?.system ??
-																									"",
-																							},
-																						});
-
-																						saveProfileMetadata({
-																							cleanup_prompt_sections: next,
-																						});
-																					},
-																				})
-																}
-																onToggle={() => {}}
-																onSave={(content) =>
-																	handleSave("system", content)
-																}
-																onReset={() => handleReset("system")}
-																isSaving={
-																	updateCleanupPromptSections.isPending ||
-																	updateRewriteProgramPromptProfiles.isPending
-																}
-															/>
-														</Accordion>
-													</div>
-
-													<Textarea
-														label="Default target routing hints (optional)"
-														description="Used by the intent router when deciding to use the profile defaults (no preset). You can put multiple lines here; the router will treat them as additional hints."
-														value={localDefaultPresetDescription}
-														onChange={(e) =>
-															setLocalDefaultPresetDescription(
-																e.currentTarget.value,
-															)
-														}
-														onBlur={() => {
-															const trimmed =
-																localDefaultPresetDescription.trim();
-															const next =
-																trimmed.length === 0 ? null : trimmed;
-															if (
-																(activeProfile?.default_preset_description ??
-																	null) !== next
-															) {
-																saveProfileMetadata({
-																	default_preset_description: next,
-																});
-															}
-														}}
-														autosize
-														minRows={2}
-														styles={{
-															label: { fontSize: 12 },
-															input: {
-																backgroundColor: "var(--bg-elevated)",
-																borderColor: "var(--border-default)",
-																color: "var(--text-primary)",
-															},
-														}}
-													/>
-
-													<div style={{ marginTop: 12 }}>
-														<Accordion variant="separated" radius="md">
-															<Accordion.Item
-																value={`${activeProfileId}-default-test-rewrite`}
-															>
-																<Accordion.Control>
-																	<div>
-																		<p className="settings-label">
-																			Test rewrite
-																		</p>
-																		<p className="settings-description">
-																			Paste a raw transcript and run it through
-																			the Default preset.
-																		</p>
-																	</div>
-																</Accordion.Control>
-																<Accordion.Panel>
-																	{(() => {
-																		const promptForTest =
-																			localSections?.system.content ?? "";
-																		const isDisabled =
-																			rewriteTestInput.trim().length === 0 ||
-																			updateRewriteProgramPromptProfiles.isPending ||
-																			updateCleanupPromptSections.isPending ||
-																			updateRewriteLlmEnabled.isPending;
-
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					flexDirection: "column",
-																					gap: 10,
-																				}}
-																			>
-																				<Text size="xs" c="dimmed">
-																					Testing: {activeProfileLabel} ·
-																					Default
-																				</Text>
-
-																				<Textarea
-																					value={rewriteTestInput}
-																					onChange={(e) => {
-																						setRewriteTestInput(
-																							e.currentTarget.value,
-																						);
-																					}}
-																					onKeyDown={(e) => {
-																						if (
-																							(e.ctrlKey || e.metaKey) &&
-																							e.key === "Enter"
-																						) {
-																							e.preventDefault();
-																							if (!isDisabled) {
-																								runRewriteTest(promptForTest);
-																							}
-																						}
-																					}}
-																					placeholder="Raw transcript"
-																					autosize
-																					minRows={3}
-																					styles={{
-																						input: {
-																							backgroundColor:
-																								"var(--bg-elevated)",
-																							borderColor:
-																								"var(--border-default)",
-																							color: "var(--text-primary)",
-																							fontFamily: "monospace",
-																							fontSize: "13px",
-																						},
-																					}}
-																				/>
-
-																				<div
-																					style={{
-																						display: "flex",
-																						alignItems: "center",
-																						gap: 12,
-																					}}
-																				>
-																					<Button
-																						color="gray"
-																						loading={
-																							testRewriteWithPrompt.isPending
-																						}
-																						disabled={isDisabled}
-																						onClick={() =>
-																							runRewriteTest(promptForTest)
-																						}
-																					>
-																						Test
-																					</Button>
-
-																					<Text size="sm" c="dimmed">
-																						{testRewriteWithPrompt.isPending
-																							? "Duration: running…"
-																							: rewriteTestDurationMs === null
-																								? "Duration: —"
-																								: `Duration: ${(
-																										rewriteTestDurationMs / 1000
-																									).toFixed(2)}s`}
-																					</Text>
-																				</div>
-
-																				{rewriteTestError ? (
-																					<Text size="sm" c="red">
-																						{rewriteTestError}
-																					</Text>
-																				) : null}
-
-																				{rewriteTestOutput ? (
-																					<Textarea
-																						value={rewriteTestOutput}
-																						readOnly
-																						autosize
-																						minRows={3}
-																						styles={{
-																							input: {
-																								backgroundColor:
-																									"var(--bg-elevated)",
-																								borderColor:
-																									"var(--border-default)",
-																								color: "var(--text-primary)",
-																								fontFamily: "monospace",
-																								fontSize: "13px",
-																							},
-																						}}
-																					/>
-																				) : null}
-																			</div>
-																		);
-																	})()}
-																</Accordion.Panel>
-															</Accordion.Item>
-														</Accordion>
-													</div>
-												</>
-											) : null}
-										</div>
-									</Modal>
-								</div>
-							</Accordion.Panel>
-						</Accordion.Item>
-
-						<Accordion.Item value={`${activeProfileId}-intent-router`}>
-							<Accordion.Control>
-								<div>
-									<p className="settings-label">Intent router</p>
-									<p className="settings-description">
-										Automatically select a preset based on the transcript.
-									</p>
-								</div>
-							</Accordion.Control>
-							<Accordion.Panel>
-								<div
-									style={{
-										display: "flex",
-										flexDirection: "column",
-										gap: 12,
-									}}
-								>
-									{presets.length === 0 ? (
-										<Text size="sm" c="dimmed">
-											Add at least one preset to enable routing.
-										</Text>
-									) : null}
-
-									<div
-										className="settings-row no-divider"
-										style={{ paddingTop: 0 }}
-									>
-										<div>
-											<p className="settings-label">Router strategy</p>
-											<p className="settings-description">
-												Off disables routing completely. Embeddings is fast and
-												deterministic; LLM can be more flexible but costs more.
-											</p>
-										</div>
-										<Select
-											data={[
-												{ value: "off", label: "Off" },
-												{ value: "embeddings", label: "Embeddings" },
-												{ value: "llm", label: "LLM" },
-											]}
-											value={routerStrategyValue}
-											onChange={(value) => {
-												if (!value) return;
-												if (value === "off") {
-													saveRouter({
-														enabled: false,
-														strategy: "off",
-														embedding_provider: null,
-														embedding_model: null,
-														pick_highest_score: null,
-														similarity_threshold: null,
-														similarity_margin: null,
-														llm_provider: null,
-														llm_model: null,
-														openai_reasoning_effort: null,
-														gemini_thinking_budget: null,
-														gemini_thinking_level: null,
-														anthropic_thinking_budget: null,
-														llm_system_prompt: null,
-													});
-													return;
-												}
-
-												if (value === "embeddings") {
-													const provider = "openai";
-													const modelOptions = EMBEDDING_MODELS[provider] ?? [];
-													const modelValue = modelOptions[0]?.value ?? null;
-
-													saveRouter({
-														enabled: true,
-														strategy: "embeddings",
-														embedding_provider: provider,
-														embedding_model: modelValue,
-														pick_highest_score:
-															effectiveRouter?.pick_highest_score ?? true,
-														similarity_threshold:
-															effectiveRouter?.similarity_threshold ?? null,
-														similarity_margin:
-															effectiveRouter?.similarity_margin ?? null,
-														llm_provider: null,
-														llm_model: null,
-														openai_reasoning_effort: null,
-														gemini_thinking_budget: null,
-														gemini_thinking_level: null,
-														anthropic_thinking_budget: null,
-														llm_system_prompt: null,
-													});
-													return;
-												}
-
-												const seedProvider =
-													settings?.llm_provider ??
-													effectiveRouter?.llm_provider ??
-													"openai";
-												const modelOptions =
-													getLlmModelOptionsForProvider(seedProvider);
-												const seedModel =
-													effectiveRouter?.llm_model ??
-													settings?.llm_model ??
-													modelOptions[0]?.value ??
-													null;
-
-												saveRouter({
-													enabled: true,
-													strategy: "llm",
-													embedding_provider: null,
-													embedding_model: null,
-													pick_highest_score: null,
-													similarity_threshold: null,
-													similarity_margin: null,
-
-													llm_provider: seedProvider,
-													llm_model: seedModel,
-													openai_reasoning_effort:
-														settings?.openai_reasoning_effort ?? null,
-													gemini_thinking_budget:
-														settings?.gemini_thinking_budget ?? null,
-													gemini_thinking_level:
-														settings?.gemini_thinking_level ?? null,
-													anthropic_thinking_budget:
-														settings?.anthropic_thinking_budget ?? null,
-													llm_system_prompt: null,
-												});
-											}}
-											withCheckIcon={false}
-											disabled={presets.length === 0}
-											styles={{
-												input: {
-													backgroundColor: "var(--bg-elevated)",
-													borderColor: "var(--border-default)",
-													color: "var(--text-primary)",
-													minWidth: 200,
-												},
-											}}
-										/>
-									</div>
-
-									{routerStrategyValue === "embeddings" ? (
-										<>
-											<Text size="xs" c="dimmed">
-												Uses your{" "}
-												{embeddingProviderValue === "cohere"
-													? "Cohere"
-													: "OpenAI"}{" "}
-												API key. Configure it in API Keys.
-											</Text>
-
-											<div className="settings-row">
-												<div>
-													<p className="settings-label">Embedding provider</p>
-													<p className="settings-description">
-														Provider used to embed the transcript and hints.
-													</p>
-												</div>
-												<Select
-													data={[
-														{ value: "openai", label: "OpenAI" },
-														{ value: "cohere", label: "Cohere" },
-													]}
-													value={embeddingProviderValue}
-													onChange={(value) => {
-														if (!value) return;
-														const models = EMBEDDING_MODELS[value] ?? [];
-														const nextModel = models[0]?.value ?? null;
-														const next = normalizeRouter(activeProfile.router);
-														const provider =
-															value === "openai" || value === "cohere"
-																? value
-																: null;
-														if (!provider) return;
-														saveRouter({
-															...next,
-															enabled: true,
-															strategy: "embeddings",
-															embedding_provider: provider,
-															embedding_model: nextModel,
-														});
-													}}
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 200,
-														},
-													}}
-												/>
-											</div>
-
-											<div className="settings-row">
-												<div>
-													<p className="settings-label">Embedding model</p>
-													<p className="settings-description">
-														Model used to embed the transcript and hints.
-													</p>
-												</div>
-												<Select
-													data={embeddingModels}
-													value={embeddingModelValue}
-													onChange={(value) => {
-														if (!value) return;
-														const next = normalizeRouter(activeProfile.router);
-														const provider =
-															embeddingProviderValue === "openai" ||
-															embeddingProviderValue === "cohere"
-																? embeddingProviderValue
-																: null;
-														if (!provider) return;
-														saveRouter({
-															...next,
-															enabled: true,
-															strategy: "embeddings",
-															embedding_provider: provider,
-															embedding_model: value,
-														});
-													}}
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 240,
-														},
-													}}
-												/>
-											</div>
-
-											<div className="settings-row">
-												<div>
-													<p className="settings-label">Pick highest score</p>
-													<p className="settings-description">
-														Always selects the candidate with the highest
-														similarity score. Disables threshold + margin.
-													</p>
-												</div>
-												<Switch
-													checked={Boolean(effectiveRouter?.pick_highest_score)}
-													onChange={(e) => {
-														const enabled = e.currentTarget.checked;
-														const next = normalizeRouter(activeProfile.router);
-														saveRouter({
-															...next,
-															enabled: true,
-															strategy: "embeddings",
-															pick_highest_score: enabled,
-														});
-													}}
-													color="gray"
-													size="md"
-													disabled={presets.length === 0}
-												/>
-											</div>
-
-											<div className="settings-row">
-												<div>
-													<p className="settings-label">
-														Store preset embeddings
-													</p>
-													<p className="settings-description">
-														Precompute and store embeddings for preset hints so
-														routing doesn’t re-embed them every run.
-													</p>
-												</div>
-												<Button
-													color="gray"
-													loading={isCachingRouterEmbeddings}
-													disabled={
-														isCachingRouterEmbeddings ||
-														presets.length === 0 ||
-														activeProfileId === "default" ||
-														!embeddingModelValue
-													}
-													onClick={async () => {
-														if (activeProfileId === "default") return;
-														setIsCachingRouterEmbeddings(true);
-														try {
-															const res = await tauriAPI.cacheRouterEmbeddings({
-																profileId: activeProfileId,
-															});
-															notifications.show({
-																title: "Stored router embeddings",
-																message: `Cached ${res.cached_now} / ${res.total_hints} hints (${res.skipped_existing} already cached) · ${res.provider} / ${res.model}`,
-																color: "gray",
-															});
-														} catch (e) {
-															notifications.show({
-																title: "Failed to store embeddings",
-																message: errorToMessage(e),
-																color: "red",
-															});
-														} finally {
-															setIsCachingRouterEmbeddings(false);
-														}
-													}}
-												>
-													Store embeddings
-												</Button>
-											</div>
-
-											<div className="settings-row">
-												<div>
-													<p className="settings-label">Similarity threshold</p>
-													<p className="settings-description">
-														Minimum cosine similarity to accept a match.
-													</p>
-												</div>
-												<NumberInput
-													value={effectiveRouter?.similarity_threshold ?? 0.78}
-													onChange={(value) => {
-														if (
-															typeof value !== "number" ||
-															Number.isNaN(value)
-														)
-															return;
-														const next = normalizeRouter(activeProfile.router);
-														saveRouter({
-															...next,
-															enabled: true,
-															strategy: "embeddings",
-															similarity_threshold: value,
-														});
-													}}
-													min={0}
-													max={1}
-													step={0.01}
-													clampBehavior="blur"
-													disabled={Boolean(
-														effectiveRouter?.pick_highest_score,
-													)}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															width: 140,
-														},
-													}}
-												/>
-											</div>
-
-											<div className="settings-row no-divider">
-												<div>
-													<p className="settings-label">Similarity margin</p>
-													<p className="settings-description">
-														Required gap between the best and second-best
-														preset.
-													</p>
-												</div>
-												<NumberInput
-													value={effectiveRouter?.similarity_margin ?? 0.05}
-													onChange={(value) => {
-														if (
-															typeof value !== "number" ||
-															Number.isNaN(value)
-														)
-															return;
-														const next = normalizeRouter(activeProfile.router);
-														saveRouter({
-															...next,
-															enabled: true,
-															strategy: "embeddings",
-															similarity_margin: value,
-														});
-													}}
-													min={0}
-													max={1}
-													step={0.01}
-													clampBehavior="blur"
-													disabled={Boolean(
-														effectiveRouter?.pick_highest_score,
-													)}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															width: 140,
-														},
-													}}
-												/>
-											</div>
-										</>
-									) : null}
-
-									{routerStrategyValue === "llm"
-										? (() => {
-												const routerProvider =
-													effectiveRouter?.llm_provider ??
-													settings?.llm_provider ??
-													"openai";
-												const modelOptions =
-													getLlmModelOptionsForProvider(routerProvider);
-												const routerModel =
-													effectiveRouter?.llm_model ??
-													settings?.llm_model ??
-													modelOptions[0]?.value ??
-													null;
-
-												const supportsRouterOpenAiThinking =
-													routerProvider === "openai" &&
-													!!routerModel &&
-													(routerModel.startsWith("gpt-5") ||
-														routerModel.startsWith("o"));
-
-												const routerOpenAiThinkingOptions =
-													!supportsRouterOpenAiThinking || !routerModel
-														? []
-														: [
-																{
-																	value: SELECT_DEFAULT,
-																	label: "Default",
-																},
-																...openAiThinkingEffortsForModel(
-																	routerModel,
-																).map((v) => ({
-																	value: v,
-																	label:
-																		v === "none"
-																			? "None"
-																			: v.charAt(0).toUpperCase() + v.slice(1),
-																})),
-															];
-
-												const supportsRouterGeminiThinkingLevel =
-													routerProvider === "gemini" &&
-													!!routerModel &&
-													routerModel.includes("gemini-3");
-
-												const routerIsGemini3Flash =
-													supportsRouterGeminiThinkingLevel &&
-													routerModel.includes("gemini-3-flash");
-
-												const routerIsGemini3Pro =
-													supportsRouterGeminiThinkingLevel &&
-													routerModel.includes("gemini-3-pro");
-
-												const routerGeminiThinkingLevelOptions =
-													!supportsRouterGeminiThinkingLevel
-														? []
-														: routerIsGemini3Flash
-															? [
-																	{
-																		value: SELECT_DEFAULT,
-																		label: "Default",
-																	},
-																	{ value: "minimal", label: "Minimal" },
-																	{ value: "low", label: "Low" },
-																	{ value: "medium", label: "Medium" },
-																	{ value: "high", label: "High" },
-																]
-															: [
-																	{
-																		value: SELECT_DEFAULT,
-																		label: "Default",
-																	},
-																	{ value: "low", label: "Low" },
-																	{ value: "high", label: "High" },
-																];
-
-												const supportsRouterGeminiThinkingBudget =
-													routerProvider === "gemini" &&
-													!!routerModel &&
-													routerModel.includes("gemini-2.5") &&
-													!routerModel.includes("flash-lite");
-
-												const routerCanDisableGemini25Thinking =
-													supportsRouterGeminiThinkingBudget &&
-													routerModel.includes("gemini-2.5-flash") &&
-													!routerModel.includes("gemini-2.5-pro");
-
-												const routerIsGemini25Pro =
-													supportsRouterGeminiThinkingBudget &&
-													routerModel.includes("gemini-2.5-pro");
-
-												const routerGemini25MaxBudget = routerIsGemini25Pro
-													? 32768
-													: 24576;
-
-												const routerGemini25MinBudget = routerIsGemini25Pro
-													? 128
-													: 0;
-
-												const routerGeminiThinkingBudgetOptions: Array<{
-													value: string;
-													label: string;
-												}> = !supportsRouterGeminiThinkingBudget
-													? []
-													: [
-															{ value: SELECT_DEFAULT, label: "Default" },
-															{ value: "-1", label: "Dynamic (-1)" },
-															...(routerCanDisableGemini25Thinking
-																? [{ value: "0", label: "Off (0)" }]
-																: []),
-															...(routerIsGemini25Pro
-																? [
-																		{
-																			value: String(routerGemini25MinBudget),
-																			label: "Minimal (128)",
-																		},
-																	]
-																: []),
-															{ value: "1024", label: "Light (1024)" },
-															{ value: "4096", label: "Medium (4096)" },
-															{ value: "16384", label: "High (16384)" },
-															...(routerGemini25MaxBudget > 16384
-																? [
-																		{
-																			value: String(routerGemini25MaxBudget),
-																			label: `Max (${routerGemini25MaxBudget})`,
-																		},
-																	]
-																: []),
-														];
-
-												const supportsRouterAnthropicThinkingBudget =
-													routerProvider === "anthropic" &&
-													!!routerModel &&
-													// Extended thinking is supported by newer Claude families. Keep conservative.
-													(routerModel.includes("claude-3-7") ||
-														routerModel.includes("claude-4") ||
-														routerModel.includes("-4-"));
-
-												const routerAnthropicThinkingLevelOptions: Array<{
-													value: string;
-													label: string;
-												}> = !supportsRouterAnthropicThinkingBudget
-													? []
-													: [
-															{ value: SELECT_DEFAULT, label: "Default" },
-															{ value: "0", label: "Off" },
-															{
-																value: String(
-																	ANTHROPIC_THINKING_LEVEL_BUDGETS[0],
-																),
-																label: "Low",
-															},
-															{
-																value: String(
-																	ANTHROPIC_THINKING_LEVEL_BUDGETS[1],
-																),
-																label: "Medium",
-															},
-															{
-																value: String(
-																	ANTHROPIC_THINKING_LEVEL_BUDGETS[2],
-																),
-																label: "High",
-															},
-															{
-																value: String(
-																	ANTHROPIC_THINKING_LEVEL_BUDGETS[3],
-																),
-																label: "Max",
-															},
-														];
-
-												const routerAnthropicThinkingLevelOptionsWithCustom =
-													(() => {
-														const vRaw =
-															effectiveRouter?.anthropic_thinking_budget;
-														const v =
-															typeof vRaw === "number" && Number.isFinite(vRaw)
-																? Math.trunc(vRaw)
-																: null;
-														if (v == null)
-															return routerAnthropicThinkingLevelOptions;
-
-														const asString = String(v);
-														const exists =
-															routerAnthropicThinkingLevelOptions.some(
-																(o) => o.value === asString,
-															);
-														if (exists)
-															return routerAnthropicThinkingLevelOptions;
-
-														return [
-															...routerAnthropicThinkingLevelOptions,
-															{ value: asString, label: `Custom (${v})` },
-														];
-													})();
-
-												return (
-													<>
-														<Text size="xs" c="dimmed">
-															Configure the provider/model used for routing. The
-															router uses structured output (JSON) when the
-															selected provider/model supports it.
-														</Text>
-
-														<div className="settings-row">
-															<div>
-																<p className="settings-label">Provider</p>
-																<p className="settings-description">
-																	LLM provider used only for routing.
-																</p>
-															</div>
-															<Select
-																data={[
-																	{ value: "openai", label: "OpenAI" },
-																	{ value: "gemini", label: "Gemini" },
-																	{ value: "anthropic", label: "Anthropic" },
-																	{ value: "groq", label: "Groq" },
-																	{ value: "fireworks", label: "Fireworks" },
-																	{ value: "ollama", label: "Ollama" },
-																]}
-																value={routerProvider}
-																onChange={(value) => {
-																	if (!value) return;
-																	const next = normalizeRouter(
-																		activeProfile.router,
-																	);
-																	const nextModelOptions =
-																		getLlmModelOptionsForProvider(value);
-																	const nextModel =
-																		nextModelOptions[0]?.value ?? null;
-																	saveRouter({
-																		...next,
-																		enabled: true,
-																		strategy: "llm",
-																		llm_provider: value,
-																		llm_model: nextModel,
-																	});
-																}}
-																withCheckIcon={false}
-																styles={{
-																	input: {
-																		backgroundColor: "var(--bg-elevated)",
-																		borderColor: "var(--border-default)",
-																		color: "var(--text-primary)",
-																		minWidth: 200,
-																	},
-																}}
-															/>
-														</div>
-
-														<div className="settings-row">
-															<div>
-																<p className="settings-label">Model</p>
-																<p className="settings-description">
-																	Model used for routing decisions.
-																</p>
-															</div>
-															{modelOptions.length > 0 ? (
-																<Select
-																	data={modelOptions}
-																	value={routerModel}
-																	onChange={(value) => {
-																		if (!value) return;
-																		const next = normalizeRouter(
-																			activeProfile.router,
-																		);
-																		saveRouter({
-																			...next,
-																			enabled: true,
-																			strategy: "llm",
-																			llm_provider: routerProvider,
-																			llm_model: value,
-																		});
-																	}}
-																	withCheckIcon={false}
-																	styles={{
-																		input: {
-																			backgroundColor: "var(--bg-elevated)",
-																			borderColor: "var(--border-default)",
-																			color: "var(--text-primary)",
-																			minWidth: 240,
-																		},
-																	}}
-																/>
-															) : (
-																<TextInput
-																	value={routerModel ?? ""}
-																	placeholder="Enter model id"
-																	onChange={(e) => {
-																		const value = e.currentTarget.value;
-																		const next = normalizeRouter(
-																			activeProfile.router,
-																		);
-																		saveRouter({
-																			...next,
-																			enabled: true,
-																			strategy: "llm",
-																			llm_provider: routerProvider,
-																			llm_model: value.trim().length
-																				? value
-																				: null,
-																		});
-																	}}
-																	styles={{
-																		input: {
-																			backgroundColor: "var(--bg-elevated)",
-																			borderColor: "var(--border-default)",
-																			color: "var(--text-primary)",
-																			minWidth: 240,
-																		},
-																	}}
-																/>
-															)}
-														</div>
-
-														{supportsRouterOpenAiThinking ? (
-															<div className="settings-row">
-																<div>
-																	<p className="settings-label">Thinking</p>
-																	<p className="settings-description">
-																		Reasoning effort for supported OpenAI
-																		models.
-																	</p>
-																</div>
-																<HintSelect
-																	data={routerOpenAiThinkingOptions}
-																	value={
-																		effectiveRouter?.openai_reasoning_effort ??
-																		SELECT_DEFAULT
-																	}
-																	onChange={(value) => {
-																		const next = normalizeRouter(
-																			activeProfile.router,
-																		);
-																		if (
-																			value == null ||
-																			value === SELECT_DEFAULT
-																		) {
-																			saveRouter({
-																				...next,
-																				enabled: true,
-																				strategy: "llm",
-																				llm_provider: routerProvider,
-																				llm_model: routerModel,
-																				openai_reasoning_effort: null,
-																			});
-																			return;
-																		}
-
-																		saveRouter({
-																			...next,
-																			enabled: true,
-																			strategy: "llm",
-																			llm_provider: routerProvider,
-																			llm_model: routerModel,
-																			openai_reasoning_effort:
-																				isOpenAiReasoningEffort(value)
-																					? value
-																					: null,
-																		});
-																	}}
-																	placeholder="Default"
-																	inputStyle={{
-																		backgroundColor: "var(--bg-elevated)",
-																		borderColor: "var(--border-default)",
-																		color: "var(--text-primary)",
-																		minWidth: 200,
-																	}}
-																	renderSelected={({ option, placeholder }) => {
-																		if (!option) {
-																			return (
-																				<Text size="sm" c="dimmed">
-																					{placeholder}
-																				</Text>
-																			);
-																		}
-
-																		if (option.value !== SELECT_DEFAULT) {
-																			return (
-																				<Text size="sm">{option.label}</Text>
-																			);
-																		}
-
-																		const hint = routerModel
-																			? (settings?.openai_reasoning_effort ??
-																				openAiDefaultReasoningEffortForModel(
-																					routerModel,
-																				))
-																			: (settings?.openai_reasoning_effort ??
-																				"medium");
-
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					alignItems: "baseline",
-																					gap: 8,
-																				}}
-																			>
-																				<span style={{ fontSize: 14 }}>
-																					{option.label}
-																				</span>
-																				<span
-																					style={{
-																						fontSize: 11,
-																						color: "var(--text-muted)",
-																						opacity: 0.9,
-																						lineHeight: 1,
-																					}}
-																				>
-																					· {hint}
-																				</span>
-																			</div>
-																		);
-																	}}
-																	renderOption={({ option }) => {
-																		if (option.value !== SELECT_DEFAULT) {
-																			return (
-																				<Text size="sm">{option.label}</Text>
-																			);
-																		}
-
-																		const hint = routerModel
-																			? (settings?.openai_reasoning_effort ??
-																				openAiDefaultReasoningEffortForModel(
-																					routerModel,
-																				))
-																			: (settings?.openai_reasoning_effort ??
-																				"medium");
-
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					alignItems: "baseline",
-																					gap: 8,
-																				}}
-																			>
-																				<span style={{ fontSize: 14 }}>
-																					{option.label}
-																				</span>
-																				<span
-																					style={{
-																						fontSize: 11,
-																						color: "var(--text-muted)",
-																						opacity: 0.9,
-																						lineHeight: 1,
-																					}}
-																				>
-																					· {hint}
-																				</span>
-																			</div>
-																		);
-																	}}
-																/>
-															</div>
-														) : null}
-
-														{supportsRouterGeminiThinkingLevel ? (
-															<div className="settings-row">
-																<div>
-																	<p className="settings-label">
-																		Thinking level
-																	</p>
-																	<p className="settings-description">
-																		{routerIsGemini3Pro
-																			? "Gemini 3 Pro supports low/high (default high)."
-																			: "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
-																	</p>
-																</div>
-																<HintSelect
-																	data={routerGeminiThinkingLevelOptions}
-																	value={
-																		effectiveRouter?.gemini_thinking_level ??
-																		SELECT_DEFAULT
-																	}
-																	onChange={(value) => {
-																		const next = normalizeRouter(
-																			activeProfile.router,
-																		);
-																		if (
-																			value == null ||
-																			value === SELECT_DEFAULT
-																		) {
-																			saveRouter({
-																				...next,
-																				enabled: true,
-																				strategy: "llm",
-																				llm_provider: routerProvider,
-																				llm_model: routerModel,
-																				gemini_thinking_level: null,
-																			});
-																			return;
-																		}
-
-																		const v =
-																			value === "minimal" ||
-																			value === "low" ||
-																			value === "medium" ||
-																			value === "high"
-																				? value
-																				: null;
-																		if (v == null) return;
-
-																		saveRouter({
-																			...next,
-																			enabled: true,
-																			strategy: "llm",
-																			llm_provider: routerProvider,
-																			llm_model: routerModel,
-																			gemini_thinking_level: v,
-																		});
-																	}}
-																	placeholder="Default"
-																	inputStyle={{
-																		backgroundColor: "var(--bg-elevated)",
-																		borderColor: "var(--border-default)",
-																		color: "var(--text-primary)",
-																		minWidth: 200,
-																	}}
-																	renderSelected={({ option, placeholder }) => {
-																		if (!option) {
-																			return (
-																				<Text size="sm" c="dimmed">
-																					{placeholder}
-																				</Text>
-																			);
-																		}
-																		if (option.value !== SELECT_DEFAULT) {
-																			return (
-																				<Text size="sm">{option.label}</Text>
-																			);
-																		}
-
-																		const hint =
-																			settings?.gemini_thinking_level ?? "high";
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					alignItems: "baseline",
-																					gap: 8,
-																				}}
-																			>
-																				<span style={{ fontSize: 14 }}>
-																					{option.label}
-																				</span>
-																				<span
-																					style={{
-																						fontSize: 11,
-																						color: "var(--text-muted)",
-																						opacity: 0.9,
-																						lineHeight: 1,
-																					}}
-																				>
-																					· {hint}
-																				</span>
-																			</div>
-																		);
-																	}}
-																	renderOption={({ option }) => {
-																		if (option.value !== SELECT_DEFAULT) {
-																			return (
-																				<Text size="sm">{option.label}</Text>
-																			);
-																		}
-
-																		const hint =
-																			settings?.gemini_thinking_level ?? "high";
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					alignItems: "baseline",
-																					gap: 8,
-																				}}
-																			>
-																				<span style={{ fontSize: 14 }}>
-																					{option.label}
-																				</span>
-																				<span
-																					style={{
-																						fontSize: 11,
-																						color: "var(--text-muted)",
-																						opacity: 0.9,
-																						lineHeight: 1,
-																					}}
-																				>
-																					· {hint}
-																				</span>
-																			</div>
-																		);
-																	}}
-																/>
-															</div>
-														) : null}
-
-														{supportsRouterGeminiThinkingBudget ? (
-															<div className="settings-row">
-																<div>
-																	<p className="settings-label">
-																		Thinking budget
-																	</p>
-																	<p className="settings-description">
-																		Token budget for Gemini 2.5 thinking.
-																	</p>
-																</div>
-																<HintSelect
-																	data={routerGeminiThinkingBudgetOptions}
-																	value={
-																		effectiveRouter?.gemini_thinking_budget ==
-																		null
-																			? SELECT_DEFAULT
-																			: String(
-																					effectiveRouter.gemini_thinking_budget,
-																				)
-																	}
-																	onChange={(value) => {
-																		const next = normalizeRouter(
-																			activeProfile.router,
-																		);
-
-																		if (
-																			value == null ||
-																			value === SELECT_DEFAULT
-																		) {
-																			saveRouter({
-																				...next,
-																				enabled: true,
-																				strategy: "llm",
-																				llm_provider: routerProvider,
-																				llm_model: routerModel,
-																				gemini_thinking_budget: null,
-																			});
-																			return;
-																		}
-
-																		const parsed = Number(value);
-																		if (!Number.isFinite(parsed)) return;
-																		const asInt = Math.trunc(parsed);
-																		saveRouter({
-																			...next,
-																			enabled: true,
-																			strategy: "llm",
-																			llm_provider: routerProvider,
-																			llm_model: routerModel,
-																			gemini_thinking_budget: asInt,
-																		});
-																	}}
-																	placeholder="Default"
-																	inputStyle={{
-																		backgroundColor: "var(--bg-elevated)",
-																		borderColor: "var(--border-default)",
-																		color: "var(--text-primary)",
-																		minWidth: 200,
-																	}}
-																	renderSelected={({ option, placeholder }) => {
-																		if (!option) {
-																			return (
-																				<Text size="sm" c="dimmed">
-																					{placeholder}
-																				</Text>
-																			);
-																		}
-																		if (option.value !== SELECT_DEFAULT)
-																			return (
-																				<Text size="sm">{option.label}</Text>
-																			);
-
-																		const inherited =
-																			settings?.gemini_thinking_budget;
-																		const hint =
-																			inherited == null
-																				? "dynamic"
-																				: inherited === 0
-																					? "off"
-																					: inherited === -1
-																						? "dynamic"
-																						: String(inherited);
-
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					alignItems: "baseline",
-																					gap: 8,
-																				}}
-																			>
-																				<span style={{ fontSize: 14 }}>
-																					{option.label}
-																				</span>
-																				<span
-																					style={{
-																						fontSize: 11,
-																						color: "var(--text-muted)",
-																						opacity: 0.9,
-																						lineHeight: 1,
-																					}}
-																				>
-																					· {hint}
-																				</span>
-																			</div>
-																		);
-																	}}
-																	renderOption={({ option }) => {
-																		if (option.value !== SELECT_DEFAULT) {
-																			return (
-																				<Text size="sm">{option.label}</Text>
-																			);
-																		}
-
-																		const inherited =
-																			settings?.gemini_thinking_budget;
-																		const hint =
-																			inherited == null
-																				? "dynamic"
-																				: inherited === 0
-																					? "off"
-																					: inherited === -1
-																						? "dynamic"
-																						: String(inherited);
-
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					alignItems: "baseline",
-																					gap: 8,
-																				}}
-																			>
-																				<span style={{ fontSize: 14 }}>
-																					{option.label}
-																				</span>
-																				<span
-																					style={{
-																						fontSize: 11,
-																						color: "var(--text-muted)",
-																						opacity: 0.9,
-																						lineHeight: 1,
-																					}}
-																				>
-																					· {hint}
-																				</span>
-																			</div>
-																		);
-																	}}
-																/>
-															</div>
-														) : null}
-
-														{supportsRouterAnthropicThinkingBudget ? (
-															<div className="settings-row">
-																<div>
-																	<p className="settings-label">Thinking</p>
-																	<p className="settings-description">
-																		Extended thinking level for Claude models.
-																	</p>
-																</div>
-																<HintSelect
-																	data={
-																		routerAnthropicThinkingLevelOptionsWithCustom
-																	}
-																	value={
-																		effectiveRouter?.anthropic_thinking_budget ==
-																		null
-																			? SELECT_DEFAULT
-																			: String(
-																					effectiveRouter.anthropic_thinking_budget,
-																				)
-																	}
-																	onChange={(value) => {
-																		const next = normalizeRouter(
-																			activeProfile.router,
-																		);
-
-																		if (
-																			value == null ||
-																			value === SELECT_DEFAULT
-																		) {
-																			saveRouter({
-																				...next,
-																				enabled: true,
-																				strategy: "llm",
-																				llm_provider: routerProvider,
-																				llm_model: routerModel,
-																				anthropic_thinking_budget: null,
-																			});
-																			return;
-																		}
-
-																		const parsed = Number(value);
-																		if (!Number.isFinite(parsed)) return;
-																		const asInt = Math.trunc(parsed);
-																		saveRouter({
-																			...next,
-																			enabled: true,
-																			strategy: "llm",
-																			llm_provider: routerProvider,
-																			llm_model: routerModel,
-																			anthropic_thinking_budget: asInt,
-																		});
-																	}}
-																	placeholder="Default"
-																	inputStyle={{
-																		backgroundColor: "var(--bg-elevated)",
-																		borderColor: "var(--border-default)",
-																		color: "var(--text-primary)",
-																		minWidth: 200,
-																	}}
-																	renderSelected={({ option, placeholder }) => {
-																		if (!option) {
-																			return (
-																				<Text size="sm" c="dimmed">
-																					{placeholder}
-																				</Text>
-																			);
-																		}
-
-																		if (option.value === SELECT_DEFAULT) {
-																			const inheritedBudget =
-																				settings?.anthropic_thinking_budget;
-																			const hint =
-																				inheritedBudget == null
-																					? "off"
-																					: formatThinkingBudgetShort(
-																							inheritedBudget,
-																						);
-
-																			return (
-																				<div
-																					style={{
-																						display: "flex",
-																						alignItems: "baseline",
-																						gap: 8,
-																					}}
-																				>
-																					<span style={{ fontSize: 14 }}>
-																						{option.label}
-																					</span>
-																					<span
-																						style={{
-																							fontSize: 11,
-																							color: "var(--text-muted)",
-																							opacity: 0.9,
-																							lineHeight: 1,
-																						}}
-																					>
-																						· {hint}
-																					</span>
-																				</div>
-																			);
-																		}
-
-																		if (option.label.startsWith("Custom")) {
-																			const n = Number(option.value);
-																			const suffix = Number.isFinite(n)
-																				? formatThinkingBudgetShort(n)
-																				: null;
-																			return (
-																				<div
-																					style={{
-																						display: "flex",
-																						alignItems: "baseline",
-																						gap: 8,
-																					}}
-																				>
-																					<Text size="sm">{option.label}</Text>
-																					{suffix && (
-																						<Text
-																							size="xs"
-																							c="dimmed"
-																							style={{ lineHeight: 1 }}
-																						>
-																							{suffix}
-																						</Text>
-																					)}
-																				</div>
-																			);
-																		}
-
-																		return (
-																			<Text size="sm">{option.label}</Text>
-																		);
-																	}}
-																	renderOption={({ option }) => {
-																		if (option.value === SELECT_DEFAULT) {
-																			const inheritedBudget =
-																				settings?.anthropic_thinking_budget;
-																			const hint =
-																				inheritedBudget == null
-																					? "off"
-																					: formatThinkingBudgetShort(
-																							inheritedBudget,
-																						);
-
-																			return (
-																				<div
-																					style={{
-																						display: "flex",
-																						alignItems: "baseline",
-																						gap: 8,
-																					}}
-																				>
-																					<span style={{ fontSize: 14 }}>
-																						{option.label}
-																					</span>
-																					<span
-																						style={{
-																							fontSize: 11,
-																							color: "var(--text-muted)",
-																							opacity: 0.9,
-																							lineHeight: 1,
-																						}}
-																					>
-																						· {hint}
-																					</span>
-																				</div>
-																			);
-																		}
-
-																		const n = Number(option.value);
-																		const suffix = Number.isFinite(n)
-																			? formatThinkingBudgetShort(n)
-																			: null;
-
-																		return (
-																			<div
-																				style={{
-																					display: "flex",
-																					alignItems: "baseline",
-																					gap: 8,
-																				}}
-																			>
-																				<Text size="sm">{option.label}</Text>
-																				{suffix && (
-																					<Text
-																						size="xs"
-																						c="dimmed"
-																						style={{ lineHeight: 1 }}
-																					>
-																						{suffix}
-																					</Text>
-																				)}
-																			</div>
-																		);
-																	}}
-																/>
-															</div>
-														) : null}
-
-														<div className="settings-row no-divider">
-															<div>
-																<p className="settings-label">
-																	System prompt (advanced)
-																</p>
-																<p className="settings-description">
-																	Optional override for the router’s system
-																	prompt. Structured output rules are still
-																	enforced.
-																</p>
-															</div>
-															<Textarea
-																value={effectiveRouter?.llm_system_prompt ?? ""}
-																placeholder="(leave empty to use default router prompt)"
-																onChange={(e) => {
-																	const value = e.currentTarget.value;
-																	const next = normalizeRouter(
-																		activeProfile.router,
-																	);
-																	saveRouter({
-																		...next,
-																		enabled: true,
-																		strategy: "llm",
-																		llm_provider: routerProvider,
-																		llm_model: routerModel,
-																		llm_system_prompt: value.trim().length
-																			? value
-																			: null,
-																	});
-																}}
-																autosize
-																minRows={2}
-																styles={{
-																	input: {
-																		backgroundColor: "var(--bg-elevated)",
-																		borderColor: "var(--border-default)",
-																		color: "var(--text-primary)",
-																		minWidth: 320,
-																	},
-																}}
-															/>
-														</div>
-													</>
-												);
-											})()
-										: null}
-								</div>
-							</Accordion.Panel>
-						</Accordion.Item>
-					</Accordion>
-				</div>
-			) : null}
-
-			<QuickReplaceSettings
-				activeProfileId={activeProfileId}
-				activeProfile={activeProfile}
-				isDefaultScope={isDefaultScope}
-				inheritTooltip={INHERIT_TOOLTIP}
-				defaultSystemPrompt={DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT}
-				defaultQuickReplaceEnabled={defaultQuickReplaceEnabled}
-				defaultQuickReplaceIncludeClipboardContext={
-					defaultQuickReplaceIncludeClipboardContext
-				}
-				defaultQuickReplaceProvider={defaultQuickReplaceProvider}
-				defaultQuickReplaceModel={defaultQuickReplaceModel}
-				defaultQuickReplaceSystemPrompt={defaultQuickReplaceSystemPrompt}
-				effectiveQuickReplaceProvider={effectiveQuickReplaceProvider}
-				llmProviderOptions={llmProviderOptions}
-				llmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
-				quickReplaceModelOptions={quickReplaceModelOptions}
-				selectedQuickReplaceModelForUi={selectedQuickReplaceModelForUi}
-				localProfileQuickReplaceEnabled={localProfileQuickReplaceEnabled}
-				localProfileQuickReplaceIncludeClipboardContext={
-					localProfileQuickReplaceIncludeClipboardContext
-				}
-				localQuickReplaceSystemPrompt={localQuickReplaceSystemPrompt}
-				quickReplaceEnabledInheriting={quickReplaceEnabledInheriting}
-				quickReplaceIncludeClipboardContextInheriting={
-					quickReplaceIncludeClipboardContextInheriting
-				}
-				quickReplaceProviderInheriting={quickReplaceProviderInheriting}
-				quickReplaceModelInheriting={quickReplaceModelInheriting}
-				quickReplaceSystemPromptInheriting={quickReplaceSystemPromptInheriting}
-				setQuickReplaceEnabledInheriting={setQuickReplaceEnabledInheriting}
-				setQuickReplaceIncludeClipboardContextInheriting={
-					setQuickReplaceIncludeClipboardContextInheriting
-				}
-				setQuickReplaceProviderInheriting={setQuickReplaceProviderInheriting}
-				setQuickReplaceModelInheriting={setQuickReplaceModelInheriting}
-				setQuickReplaceSystemPromptInheriting={
-					setQuickReplaceSystemPromptInheriting
-				}
-				setLocalProfileQuickReplaceEnabled={setLocalProfileQuickReplaceEnabled}
-				setLocalProfileQuickReplaceIncludeClipboardContext={
-					setLocalProfileQuickReplaceIncludeClipboardContext
-				}
-				setLocalProfileQuickReplaceProvider={
-					setLocalProfileQuickReplaceProvider
-				}
-				setLocalProfileQuickReplaceModel={setLocalProfileQuickReplaceModel}
-				setLocalQuickReplaceSystemPrompt={setLocalQuickReplaceSystemPrompt}
-				saveProfileMetadata={saveProfileMetadata}
-				openDisableOverrideDialog={openDisableOverrideDialog}
-				getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
-				rewriteProvider={settings?.llm_provider ?? null}
-				rewriteModel={settings?.llm_model ?? null}
-				isSaving={updateRewriteProgramPromptProfiles.isPending}
-			/>
-			<QuickAskPanel
-				activeProfileId={activeProfileId}
-				activeProfile={activeProfile}
-				isDefaultScope={isDefaultScope}
-				inheritTooltip={INHERIT_TOOLTIP}
-				defaultSystemPrompt={DEFAULT_QUICK_ASK_SYSTEM_PROMPT}
-				selectDefault={SELECT_DEFAULT}
-				settings={settings}
-				effectiveQuickAskProvider={effectiveQuickAskProvider}
-				effectiveQuickAskModel={effectiveQuickAskModel}
-				quickAskIncludeSelectedText={quickAskIncludeSelectedText}
-				quickAskConversationHistoryEnabled={quickAskConversationHistoryEnabled}
-				quickAskConversationHistoryCount={quickAskConversationHistoryCount}
-				quickAskIncludeClipboardContextInheriting={
-					quickAskIncludeClipboardContextInheriting
-				}
-				quickAskProviderInheriting={quickAskProviderInheriting}
-				quickAskModelInheriting={quickAskModelInheriting}
-				quickAskOpenAiReasoningEffortInheriting={
-					quickAskOpenAiReasoningEffortInheriting
-				}
-				quickAskGeminiThinkingLevelInheriting={
-					quickAskGeminiThinkingLevelInheriting
-				}
-				quickAskGeminiThinkingBudgetInheriting={
-					quickAskGeminiThinkingBudgetInheriting
-				}
-				quickAskAnthropicThinkingBudgetInheriting={
-					quickAskAnthropicThinkingBudgetInheriting
-				}
-				quickAskSystemPromptInheriting={quickAskSystemPromptInheriting}
-				defaultQuickAskIncludeClipboardContext={
-					defaultQuickAskIncludeClipboardContext
-				}
-				localProfileQuickAskIncludeClipboardContext={
-					localProfileQuickAskIncludeClipboardContext
-				}
-				localProfileQuickAskOpenAiReasoningEffort={
-					localProfileQuickAskOpenAiReasoningEffort
-				}
-				localProfileQuickAskGeminiThinkingLevel={
-					localProfileQuickAskGeminiThinkingLevel
-				}
-				localProfileQuickAskGeminiThinkingBudget={
-					localProfileQuickAskGeminiThinkingBudget
-				}
-				localProfileQuickAskAnthropicThinkingBudget={
-					localProfileQuickAskAnthropicThinkingBudget
-				}
-				localQuickAskSystemPrompt={localQuickAskSystemPrompt}
-				quickAskModelOptions={quickAskModelOptions}
-				selectedQuickAskModelForUi={selectedQuickAskModelForUi}
-				quickAskOpenAiThinkingOptions={quickAskOpenAiThinkingOptions}
-				quickAskGeminiThinkingLevelOptions={quickAskGeminiThinkingLevelOptions}
-				quickAskGeminiThinkingBudgetOptions={
-					quickAskGeminiThinkingBudgetOptions
-				}
-				quickAskAnthropicThinkingLevelOptionsWithCustom={
-					quickAskAnthropicThinkingLevelOptionsWithCustom
-				}
-				supportsQuickAskOpenAiThinking={supportsQuickAskOpenAiThinking}
-				supportsQuickAskGeminiThinkingLevel={
-					supportsQuickAskGeminiThinkingLevel
-				}
-				supportsQuickAskGeminiThinkingBudget={
-					supportsQuickAskGeminiThinkingBudget
-				}
-				supportsQuickAskAnthropicThinkingBudget={
-					supportsQuickAskAnthropicThinkingBudget
-				}
-				quickAskModelForThinking={quickAskModelForThinking}
-				llmProviderOptions={llmProviderOptions}
-				llmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
-				updateQuickAskIncludeSelectedText={updateQuickAskIncludeSelectedText}
-				updateQuickAskConversationHistoryEnabled={
-					updateQuickAskConversationHistoryEnabled
-				}
-				updateQuickAskConversationHistoryCount={
-					updateQuickAskConversationHistoryCount
-				}
-				updateQuickAskOpenAiReasoningEffort={
-					updateQuickAskOpenAiReasoningEffort
-				}
-				updateQuickAskGeminiThinkingLevel={updateQuickAskGeminiThinkingLevel}
-				updateQuickAskGeminiThinkingBudget={updateQuickAskGeminiThinkingBudget}
-				updateQuickAskAnthropicThinkingBudget={
-					updateQuickAskAnthropicThinkingBudget
-				}
-				updateQuickAskSystemPrompt={updateQuickAskSystemPrompt}
-				setQuickAskIncludeClipboardContextInheriting={
-					setQuickAskIncludeClipboardContextInheriting
-				}
-				setQuickAskProviderInheriting={setQuickAskProviderInheriting}
-				setQuickAskModelInheriting={setQuickAskModelInheriting}
-				setQuickAskOpenAiReasoningEffortInheriting={
-					setQuickAskOpenAiReasoningEffortInheriting
-				}
-				setQuickAskGeminiThinkingLevelInheriting={
-					setQuickAskGeminiThinkingLevelInheriting
-				}
-				setQuickAskGeminiThinkingBudgetInheriting={
-					setQuickAskGeminiThinkingBudgetInheriting
-				}
-				setQuickAskAnthropicThinkingBudgetInheriting={
-					setQuickAskAnthropicThinkingBudgetInheriting
-				}
-				setQuickAskSystemPromptInheriting={setQuickAskSystemPromptInheriting}
-				setLocalProfileQuickAskIncludeClipboardContext={
-					setLocalProfileQuickAskIncludeClipboardContext
-				}
-				setLocalProfileQuickAskProvider={setLocalProfileQuickAskProvider}
-				setLocalProfileQuickAskModel={setLocalProfileQuickAskModel}
-				setLocalProfileQuickAskOpenAiReasoningEffort={
-					setLocalProfileQuickAskOpenAiReasoningEffort
-				}
-				setLocalProfileQuickAskGeminiThinkingLevel={
-					setLocalProfileQuickAskGeminiThinkingLevel
-				}
-				setLocalProfileQuickAskGeminiThinkingBudget={
-					setLocalProfileQuickAskGeminiThinkingBudget
-				}
-				setLocalProfileQuickAskAnthropicThinkingBudget={
-					setLocalProfileQuickAskAnthropicThinkingBudget
-				}
-				setLocalQuickAskSystemPrompt={setLocalQuickAskSystemPrompt}
-				handleDefaultQuickAskProviderChange={
-					handleDefaultQuickAskProviderChange
-				}
-				handleDefaultQuickAskModelChange={handleDefaultQuickAskModelChange}
-				openDisableOverrideDialog={openDisableOverrideDialog}
-				saveProfileMetadata={saveProfileMetadata}
-				getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
-				isOpenAiReasoningEffort={isOpenAiReasoningEffort}
-				isGeminiThinkingLevel={isGeminiThinkingLevel}
-				openAiDefaultReasoningEffortForModel={
-					openAiDefaultReasoningEffortForModel
-				}
-				formatThinkingBudgetShort={formatThinkingBudgetShort}
-				isSavingProfile={updateRewriteProgramPromptProfiles.isPending}
-				errorToMessage={errorToMessage}
-				quickAskTestInput={quickAskTestInput}
-				quickAskTestOutput={quickAskTestOutput}
-				quickAskTestError={quickAskTestError}
-				quickAskTestDurationMs={quickAskTestDurationMs}
-				quickAskTestPending={quickAskTestPending}
-				quickAskTestStartRef={quickAskTestStartRef}
-				setQuickAskTestInput={setQuickAskTestInput}
-				setQuickAskTestOutput={setQuickAskTestOutput}
-				setQuickAskTestError={setQuickAskTestError}
-				setQuickAskTestDurationMs={setQuickAskTestDurationMs}
-				setQuickAskTestPending={setQuickAskTestPending}
-			/>
-		</>
-	);
+    <>
+      <Modal
+        opened={linkPresetModalOpen}
+        onClose={() => setLinkPresetModalOpen(false)}
+        title="Add preset from another profile"
+        centered
+        zIndex={1200}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Select
+            label="Source profile"
+            data={linkableProfiles.map((p) => ({
+              value: p.id,
+              label: p.label,
+            }))}
+            value={linkSourceProfileId}
+            onChange={(value) => {
+              if (!value) return;
+              setLinkSourceProfileId(value);
+              const nextProfile =
+                linkableProfiles.find((p) => p.id === value) ?? null;
+              setLinkSourcePresetId(nextProfile?.presets[0]?.id ?? null);
+            }}
+            placeholder={
+              linkableProfiles.length === 0
+                ? "No other profiles"
+                : "Select profile"
+            }
+            withCheckIcon={false}
+          />
+
+          <Select
+            label="Preset"
+            data={(linkSourceProfile?.presets ?? []).map((p) => ({
+              value: p.id,
+              label: p.name?.trim() || p.id,
+            }))}
+            value={linkSourcePresetId}
+            onChange={(value) => {
+              if (!value) return;
+              setLinkSourcePresetId(value);
+            }}
+            disabled={!linkSourceProfile}
+            placeholder={
+              !linkSourceProfile ? "Select a profile first" : "Select preset"
+            }
+            withCheckIcon={false}
+          />
+        </div>
+
+        <Group justify="flex-end" mt="md" gap="sm">
+          <Button
+            variant="default"
+            onClick={() => setLinkPresetModalOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="gray"
+            onClick={confirmLinkPreset}
+            disabled={!linkSourcePreset}
+          >
+            Add Preset
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={deletePresetDialog !== null}
+        onClose={() => setDeletePresetDialog(null)}
+        title="Delete preset?"
+        centered
+        zIndex={1300}
+      >
+        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
+          {deletePresetDialog?.isShared
+            ? "This preset is shared. Deleting it here only removes it from this profile; other profiles will keep it."
+            : "This will remove the preset from this profile."}
+        </Text>
+
+        <Text size="sm" mt="xs" style={{ lineHeight: 1.4 }}>
+          {deletePresetDialog?.presetName ?? ""}
+        </Text>
+
+        <Group justify="flex-end" mt="md" gap="sm">
+          <Button variant="default" onClick={() => setDeletePresetDialog(null)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            onClick={() => {
+              const args = deletePresetDialog;
+              if (!args) return;
+              setDeletePresetDialog(null);
+              deletePreset(args.presetId);
+            }}
+          >
+            Delete
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={resetDialog !== null}
+        onClose={() => setResetDialog(null)}
+        title={resetDialog?.title ?? ""}
+        centered
+      >
+        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
+          This setting is currently overriding the Default profile. Disable the
+          override to inherit from Default.
+        </Text>
+        <Group justify="flex-end" mt="md" gap="sm">
+          <Button variant="default" onClick={() => setResetDialog(null)}>
+            Keep override
+          </Button>
+          <Button
+            color="gray"
+            onClick={() => {
+              const confirm = resetDialog?.onConfirm;
+              setResetDialog(null);
+              confirm?.();
+            }}
+          >
+            Disable override
+          </Button>
+        </Group>
+      </Modal>
+
+      <RewritePromptLabModal
+        opened={promptLabOpen}
+        onClose={() => {
+          setPromptLabOpen(false);
+          setPromptLabApplyTarget(null);
+        }}
+        profileId={activeProfileId}
+        profileLabel={promptLabContextLabel || activeProfileLabel}
+        initialLlmProvider={effectiveLlmProvider}
+        initialLlmModel={effectiveLlmModel}
+        initialTranscript={rewriteTestInput}
+        initialProblemOutput={rewriteTestOutput}
+        currentPrompt={promptLabContextPrompt || effectiveCurrentPrompt}
+        onSetPrompt={(nextPrompt) => {
+          const trimmed = nextPrompt.trim();
+          if (!trimmed) return;
+
+          const target = promptLabApplyTarget;
+          if (!target || target.type === "profile") {
+            handleSave("system", trimmed);
+            return;
+          }
+
+          const preset = presets.find((p) => p.id === target.presetId);
+          if (!preset) {
+            // Preset was deleted/changed while modal was open.
+            handleSave("system", trimmed);
+            return;
+          }
+
+          const baseContent = profilePromptDefaultContent;
+          const contentToStore =
+            trimmed === baseContent ? null : trimmed || null;
+          const section =
+            contentToStore == null ? null : { content: contentToStore };
+          savePresetSectionOverride(preset, target.key, section);
+        }}
+        onIteratePrompt={async (params) => {
+          const res = await iterateRewritePrompt.mutateAsync({
+            transcript: params.transcript,
+            problemOutput: params.problemOutput,
+            desiredOutput: params.desiredOutput,
+            currentPrompt: params.currentPrompt,
+            profileId: params.profileId,
+            mode: params.mode,
+            llmProvider: params.llmProvider,
+            llmModel: params.llmModel,
+            openAiReasoningEffort: params.openAiReasoningEffort,
+            geminiThinkingLevel: params.geminiThinkingLevel,
+            geminiThinkingBudget: params.geminiThinkingBudget,
+            anthropicThinkingBudget: params.anthropicThinkingBudget,
+          });
+
+          return {
+            improvedPrompt: res.improved_prompt,
+            providerUsed: res.provider_used,
+            modelUsed: res.model_used,
+          };
+        }}
+        onTestPrompt={async (params) => {
+          const res = await testRewriteWithPrompt.mutateAsync({
+            transcript: params.transcript,
+            prompt: params.prompt,
+            profileId: params.profileId,
+          });
+
+          return {
+            output: res.output,
+            providerUsed: res.provider_used,
+            modelUsed: res.model_used,
+          };
+        }}
+      />
+
+      <TranscribeSettingsSection
+        activeProfileId={activeProfileId}
+        isDefaultScope={isDefaultScope}
+        inheritTooltip={INHERIT_TOOLTIP}
+        sttProviderInheriting={sttProviderInheriting}
+        sttModelInheriting={sttModelInheriting}
+        sttTimeoutInheriting={sttTimeoutInheriting}
+        effectiveSttProvider={effectiveSttProvider}
+        sttProviderOptions={sttProviderOptions}
+        isSttProviderOptionsDisabled={
+          sttCloudProviders.length === 0 && sttLocalProviders.length === 0
+        }
+        sttProviderIsWhisperServer={sttProviderIsWhisperServer}
+        sttModelOptions={sttModelOptions}
+        selectedSttModelForUi={selectedSttModelForUi}
+        sttPricingLabel={sttPricingLabel}
+        whisperServerModelDraft={whisperServerModelDraft}
+        onWhisperServerModelDraftChange={setWhisperServerModelDraft}
+        onWhisperServerModelBlur={handleWhisperServerModelDraftBlur}
+        onSttProviderChange={handleSttProviderChange}
+        onSttModelChange={handleSttModelChange}
+        onDisableSttProviderOverride={handleDisableSttProviderOverride}
+        onDisableSttModelOverride={handleDisableSttModelOverride}
+        onDisableSttTimeoutOverride={handleDisableSttTimeoutOverride}
+        localProfileSttTimeout={localProfileSttTimeout}
+        onSttTimeoutChange={handleSttTimeoutChange}
+        onSttTimeoutBlur={handleSttTimeoutBlur}
+        sttPromptSupported={sttPromptSupported}
+        sttPromptDisabledReason={sttPromptDisabledReason}
+        sttPromptMaxChars={promptMaxChars}
+        isPrompt224CharLimited={isPrompt224CharLimited}
+        localSttTranscriptionPrompt={localSttTranscriptionPrompt}
+        onSttPromptChange={setLocalSttTranscriptionPrompt}
+        sttTestDurationMs={sttTestDurationMs}
+        sttTestError={sttTestError}
+        sttTestOutput={sttTestOutput}
+        hasLastAudioForSttTest={Boolean(hasLastAudioForSttTest)}
+        isSttTestRunning={testSttLastAudio.isPending}
+        onRunSttTest={handleRunSttTest}
+        hasStoredTranscriptionPrompt={hasStoredTranscriptionPrompt}
+      />
+
+      <div className="settings-mini-header">
+        <span className="settings-mini-header__text">Rewrite</span>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Rewrite Transcription</p>
+          <p className="settings-description">
+            Enable or disable rewriting the transcription with an LLM
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && rewriteEnabledInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope && !rewriteEnabledInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Rewrite Transcription override?",
+                    onConfirm: () => {
+                      setRewriteEnabledInheriting(true);
+                      setLocalProfileRewriteEnabled(defaultRewriteEnabled);
+                      saveProfileMetadata({ rewrite_llm_enabled: null });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Switch
+            checked={
+              isDefaultScope
+                ? defaultRewriteEnabled
+                : localProfileRewriteEnabled
+            }
+            onChange={(e) => {
+              const enabled = e.currentTarget.checked;
+              if (isDefaultScope) {
+                updateRewriteLlmEnabled.mutate(enabled, {
+                  onSuccess: () => {
+                    tauriAPI.emitSettingsChanged();
+                  },
+                });
+                return;
+              }
+
+              setRewriteEnabledInheriting(false);
+              setLocalProfileRewriteEnabled(enabled);
+              saveProfileMetadata({ rewrite_llm_enabled: enabled });
+            }}
+            color="gray"
+            size="md"
+          />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Include Clipboard Context</p>
+          <p className="settings-description">
+            When enabled, Kolboo reads your clipboard text and includes it as
+            optional context during the Rewrite step.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && rewriteIncludeClipboardContextInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope && !rewriteIncludeClipboardContextInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Rewrite Clipboard Context override?",
+                    onConfirm: () => {
+                      setRewriteIncludeClipboardContextInheriting(true);
+                      setLocalProfileRewriteIncludeClipboardContext(
+                        defaultRewriteIncludeClipboardContext,
+                      );
+                      saveProfileMetadata({
+                        rewrite_include_clipboard_context: null,
+                      });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Switch
+            checked={localProfileRewriteIncludeClipboardContext}
+            onChange={(e) => {
+              const enabled = e.currentTarget.checked;
+              if (!isDefaultScope) {
+                setRewriteIncludeClipboardContextInheriting(false);
+              }
+              setLocalProfileRewriteIncludeClipboardContext(enabled);
+              saveProfileMetadata({
+                rewrite_include_clipboard_context: enabled,
+              });
+            }}
+            color="gray"
+            size="md"
+          />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <p className="settings-label">Language Model Provider</p>
+          <p className="settings-description">AI service for text formatting</p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!isDefaultScope && llmProviderInheriting && (
+            <Tooltip label={INHERIT_TOOLTIP} withArrow>
+              <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+            </Tooltip>
+          )}
+          {!isDefaultScope && !llmProviderInheriting && (
+            <Tooltip label="Disable override (inherit from Default)" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() =>
+                  openDisableOverrideDialog({
+                    title: "Disable Language Model Provider override?",
+                    onConfirm: () => {
+                      setLlmProviderInheriting(true);
+                      setLlmModelInheriting(true);
+                      setLocalProfileLlmProvider(
+                        settings?.llm_provider ?? null,
+                      );
+                      setLocalProfileLlmModel(settings?.llm_model ?? null);
+                      saveProfileMetadata({
+                        llm_provider: null,
+                        llm_model: null,
+                      });
+                    },
+                  })
+                }
+              >
+                <RotateCcw size={14} style={{ opacity: 0.65 }} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Select
+            data={llmProviderOptions}
+            value={effectiveLlmProvider}
+            onChange={(value) => {
+              if (!value) return;
+              if (isDefaultScope) {
+                handleDefaultLLMProviderChange(value);
+                return;
+              }
+
+              setLlmProviderInheriting(false);
+              setLlmModelInheriting(false);
+              setLocalProfileLlmProvider(value);
+              const models = getLlmModelOptionsForProvider(value);
+              const firstModel = models[0]?.value ?? null;
+              setLocalProfileLlmModel(firstModel);
+              saveProfileMetadata({
+                llm_provider: value,
+                llm_model: firstModel,
+              });
+            }}
+            placeholder="Select provider"
+            withCheckIcon={false}
+            disabled={
+              llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+            }
+            styles={{
+              input: {
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              },
+            }}
+          />
+        </div>
+      </div>
+
+      {llmModelOptions.length > 0 ? (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Rewrite LLM Model</p>
+            <p className="settings-description">
+              LLM Model used to rewrite the transcription.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && llmModelInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !llmModelInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Rewrite LLM Model override?",
+                      onConfirm: () => {
+                        setLlmModelInheriting(true);
+                        setLocalProfileLlmModel(settings?.llm_model ?? null);
+                        saveProfileMetadata({ llm_model: null });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            {llmPricingLabel ? (
+              <Text
+                size="xs"
+                c="dimmed"
+                style={{ whiteSpace: "nowrap", lineHeight: 1 }}
+              >
+                {llmPricingLabel}
+              </Text>
+            ) : null}
+            <Select
+              data={llmModelOptions}
+              value={
+                isDefaultScope
+                  ? (settings?.llm_model ?? llmModelOptions[0]?.value ?? null)
+                  : localProfileLlmModel
+              }
+              onChange={(value) => {
+                if (!value) return;
+                if (isDefaultScope) {
+                  handleDefaultLLMModelChange(value);
+                  return;
+                }
+
+                setLlmModelInheriting(false);
+                setLocalProfileLlmModel(value);
+                saveProfileMetadata({ llm_model: value });
+              }}
+              placeholder="Select model"
+              withCheckIcon={false}
+              styles={{
+                input: {
+                  backgroundColor: "var(--bg-elevated)",
+                  borderColor: "var(--border-default)",
+                  color: "var(--text-primary)",
+                  minWidth: 200,
+                },
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {supportsOpenAiThinking && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking</p>
+            <p className="settings-description">
+              Set the reasoning effort for this model.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && openAiReasoningEffortInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !openAiReasoningEffortInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking override?",
+                      onConfirm: () => {
+                        setOpenAiReasoningEffortInheriting(true);
+                        setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
+                        saveProfileMetadata({
+                          openai_reasoning_effort: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            <HintSelect
+              data={openAiThinkingOptions}
+              value={
+                isDefaultScope
+                  ? (settings?.openai_reasoning_effort ?? SELECT_DEFAULT)
+                  : localProfileOpenAiReasoningEffort
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleOpenAiThinkingChange(value);
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setOpenAiReasoningEffortInheriting(true);
+                  setLocalProfileOpenAiReasoningEffort(SELECT_DEFAULT);
+                  saveProfileMetadata({ openai_reasoning_effort: null });
+                  return;
+                }
+
+                setOpenAiReasoningEffortInheriting(false);
+                setLocalProfileOpenAiReasoningEffort(value);
+                const effort = isOpenAiReasoningEffort(value) ? value : null;
+                if (!effort) return;
+                saveProfileMetadata({
+                  openai_reasoning_effort: effort,
+                });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? effectiveLlmModel
+                    ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                    : "medium"
+                  : (settings?.openai_reasoning_effort ??
+                    (effectiveLlmModel
+                      ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                      : "medium"));
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? effectiveLlmModel
+                    ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                    : "medium"
+                  : (settings?.openai_reasoning_effort ??
+                    (effectiveLlmModel
+                      ? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+                      : "medium"));
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {supportsGeminiThinkingLevel && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking Level</p>
+            <p className="settings-description">
+              {isGemini3Pro
+                ? "Gemini 3 Pro supports low/high (default high)."
+                : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
+            </p>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && geminiThinkingLevelInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+
+            {!isDefaultScope && !geminiThinkingLevelInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking Level override?",
+                      onConfirm: () => {
+                        setGeminiThinkingLevelInheriting(true);
+                        setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
+                        saveProfileMetadata({ gemini_thinking_level: null });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+
+            <HintSelect
+              data={geminiThinkingLevelOptions}
+              value={
+                isDefaultScope
+                  ? (settings?.gemini_thinking_level ?? SELECT_DEFAULT)
+                  : localProfileGeminiThinkingLevel
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleGeminiThinkingLevelChange(value);
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setGeminiThinkingLevelInheriting(true);
+                  setLocalProfileGeminiThinkingLevel(SELECT_DEFAULT);
+                  saveProfileMetadata({ gemini_thinking_level: null });
+                  return;
+                }
+
+                const v =
+                  value === "minimal" ||
+                  value === "low" ||
+                  value === "medium" ||
+                  value === "high"
+                    ? value
+                    : null;
+                if (v == null) return;
+
+                setGeminiThinkingLevelInheriting(false);
+                setLocalProfileGeminiThinkingLevel(v);
+                saveProfileMetadata({ gemini_thinking_level: v });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? "high"
+                  : (settings?.gemini_thinking_level ?? "high");
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const hint = isDefaultScope
+                  ? "high"
+                  : (settings?.gemini_thinking_level ?? "high");
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {supportsGeminiThinkingBudget && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking Budget</p>
+            <p className="settings-description">
+              Token budget for Gemini 2.5 thinking.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && geminiThinkingBudgetInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !geminiThinkingBudgetInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking Budget override?",
+                      onConfirm: () => {
+                        setGeminiThinkingBudgetInheriting(true);
+                        setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
+                        saveProfileMetadata({ gemini_thinking_budget: null });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <HintSelect
+              data={geminiThinkingBudgetOptions}
+              value={
+                isDefaultScope
+                  ? settings?.gemini_thinking_budget == null
+                    ? SELECT_DEFAULT
+                    : String(settings.gemini_thinking_budget)
+                  : localProfileGeminiThinkingBudget
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleGeminiThinkingBudgetChange(value);
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setGeminiThinkingBudgetInheriting(true);
+                  setLocalProfileGeminiThinkingBudget(SELECT_DEFAULT);
+                  saveProfileMetadata({ gemini_thinking_budget: null });
+                  return;
+                }
+
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return;
+                const asInt = Math.trunc(parsed);
+                setGeminiThinkingBudgetInheriting(false);
+                setLocalProfileGeminiThinkingBudget(String(asInt));
+                saveProfileMetadata({ gemini_thinking_budget: asInt });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+                if (option.value !== SELECT_DEFAULT)
+                  return <Text size="sm">{option.label}</Text>;
+
+                const inherited = settings?.gemini_thinking_budget;
+                const hint = isDefaultScope
+                  ? "dynamic"
+                  : inherited == null
+                    ? "dynamic"
+                    : inherited === 0
+                      ? "off"
+                      : inherited === -1
+                        ? "dynamic"
+                        : String(inherited);
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+              renderOption={({ option }) => {
+                if (option.value !== SELECT_DEFAULT) {
+                  return <Text size="sm">{option.label}</Text>;
+                }
+
+                const inherited = settings?.gemini_thinking_budget;
+                const hint = isDefaultScope
+                  ? "dynamic"
+                  : inherited == null
+                    ? "dynamic"
+                    : inherited === 0
+                      ? "off"
+                      : inherited === -1
+                        ? "dynamic"
+                        : String(inherited);
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{option.label}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        opacity: 0.9,
+                        lineHeight: 1,
+                      }}
+                    >
+                      · {hint}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {supportsAnthropicThinkingBudget && (
+        <div className="settings-row">
+          <div>
+            <p className="settings-label">Thinking</p>
+            <p className="settings-description">
+              Extended thinking level for Claude models.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isDefaultScope && anthropicThinkingBudgetInheriting && (
+              <Tooltip label={INHERIT_TOOLTIP} withArrow>
+                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {!isDefaultScope && !anthropicThinkingBudgetInheriting && (
+              <Tooltip
+                label="Disable override (inherit from Default)"
+                withArrow
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() =>
+                    openDisableOverrideDialog({
+                      title: "Disable Thinking override?",
+                      onConfirm: () => {
+                        setAnthropicThinkingBudgetInheriting(true);
+                        setLocalProfileAnthropicThinkingBudget(SELECT_DEFAULT);
+                        saveProfileMetadata({
+                          anthropic_thinking_budget: null,
+                        });
+                      },
+                    })
+                  }
+                >
+                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <HintSelect
+              data={anthropicThinkingLevelOptionsWithCustom}
+              value={
+                isDefaultScope
+                  ? settings?.anthropic_thinking_budget == null
+                    ? SELECT_DEFAULT
+                    : String(settings.anthropic_thinking_budget)
+                  : localProfileAnthropicThinkingBudget
+              }
+              onChange={(value) => {
+                if (isDefaultScope) {
+                  handleAnthropicThinkingBudgetChange(value);
+                  return;
+                }
+
+                if (value == null || value === SELECT_DEFAULT) {
+                  setAnthropicThinkingBudgetInheriting(true);
+                  setLocalProfileAnthropicThinkingBudget(SELECT_DEFAULT);
+                  saveProfileMetadata({ anthropic_thinking_budget: null });
+                  return;
+                }
+
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed)) return;
+                const asInt = Math.trunc(parsed);
+                setAnthropicThinkingBudgetInheriting(false);
+                setLocalProfileAnthropicThinkingBudget(String(asInt));
+                saveProfileMetadata({ anthropic_thinking_budget: asInt });
+              }}
+              placeholder="Default"
+              inputStyle={{
+                backgroundColor: "var(--bg-elevated)",
+                borderColor: "var(--border-default)",
+                color: "var(--text-primary)",
+                minWidth: 200,
+              }}
+              renderSelected={({ option, placeholder }) => {
+                if (!option) {
+                  return (
+                    <Text size="sm" c="dimmed">
+                      {placeholder}
+                    </Text>
+                  );
+                }
+
+                if (option.value === SELECT_DEFAULT) {
+                  const inheritedBudget = settings?.anthropic_thinking_budget;
+                  const hint = isDefaultScope
+                    ? "off"
+                    : inheritedBudget == null
+                      ? "off"
+                      : formatThinkingBudgetShort(inheritedBudget);
+
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{option.label}</span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          opacity: 0.9,
+                          lineHeight: 1,
+                        }}
+                      >
+                        · {hint}
+                      </span>
+                    </div>
+                  );
+                }
+
+                // Closed state: keep it simple (label only) unless it's a custom token budget.
+                if (option.label.startsWith("Custom")) {
+                  const n = Number(option.value);
+                  const suffix = Number.isFinite(n)
+                    ? formatThinkingBudgetShort(n)
+                    : null;
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <Text size="sm">{option.label}</Text>
+                      {suffix && (
+                        <Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
+                          {suffix}
+                        </Text>
+                      )}
+                    </div>
+                  );
+                }
+
+                return <Text size="sm">{option.label}</Text>;
+              }}
+              renderOption={({ option }) => {
+                if (option.value === SELECT_DEFAULT) {
+                  const inheritedBudget = settings?.anthropic_thinking_budget;
+                  const hint = isDefaultScope
+                    ? "off"
+                    : inheritedBudget == null
+                      ? "off"
+                      : formatThinkingBudgetShort(inheritedBudget);
+
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{option.label}</span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          opacity: 0.9,
+                          lineHeight: 1,
+                        }}
+                      >
+                        · {hint}
+                      </span>
+                    </div>
+                  );
+                }
+
+                const n = Number(option.value);
+                const suffix = Number.isFinite(n)
+                  ? formatThinkingBudgetShort(n)
+                  : null;
+
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                    }}
+                  >
+                    <Text size="sm">{option.label}</Text>
+                    {suffix && (
+                      <Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
+                        {suffix}
+                      </Text>
+                    )}
+                  </div>
+                );
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
+
+      {activeProfile ? (
+        <div
+          className="settings-accordion-block"
+          style={{ marginTop: 0, marginBottom: 16 }}
+        >
+          <Accordion variant="separated" radius="md">
+            <Accordion.Item value={`${activeProfileId}-presets`}>
+              <Accordion.Control>
+                <div>
+                  <p className="settings-label">Presets</p>
+                  <p className="settings-description">
+                    Create multiple dictation modes for this program, then
+                    choose one manually or let the intent router auto-select.
+                  </p>
+                </div>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  <Group
+                    justify="space-between"
+                    align="center"
+                    wrap="wrap"
+                    gap={12}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Default preset
+                        </Text>
+                        <Select
+                          data={[
+                            { value: "__none__", label: "Default" },
+                            ...presetSelectOptions,
+                          ]}
+                          value={defaultPresetValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            saveProfileMetadata({
+                              default_preset_id:
+                                value === "__none__" ? null : value,
+                            });
+                          }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 220,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Manual preset override (persisted)
+                        </Text>
+                        <Select
+                          data={[
+                            {
+                              value: "__none__",
+                              label: "No override (use router/default)",
+                            },
+                            ...presetSelectOptions,
+                          ]}
+                          value={activePresetValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            saveProfileMetadata({
+                              active_preset_id:
+                                value === "__none__" ? null : value,
+                            });
+                          }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 260,
+                            },
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <Button
+                      color="gray"
+                      variant="light"
+                      onClick={() => setPresetEditorOpen(true)}
+                    >
+                      Edit Presets
+                    </Button>
+                  </Group>
+
+                  <Modal
+                    opened={presetEditorOpen}
+                    onClose={() => setPresetEditorOpen(false)}
+                    title="Edit presets"
+                    centered
+                    size="xl"
+                    keepMounted={false}
+                    zIndex={1000}
+                    styles={{
+                      body: {
+                        height: "70vh",
+                        overflowY: "auto",
+                      },
+                    }}
+                  >
+                    <Group
+                      justify="space-between"
+                      align="flex-end"
+                      wrap="wrap"
+                      gap={12}
+                      mb="sm"
+                    >
+                      <div style={{ flex: 1, minWidth: 260 }}>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Editing preset
+                        </Text>
+                        <Select
+                          data={[
+                            {
+                              value: EDIT_DEFAULT_PRESET,
+                              label: "Default",
+                            },
+                            ...presetSelectOptions,
+                          ]}
+                          value={editingPresetId ?? EDIT_DEFAULT_PRESET}
+                          onChange={(value) => {
+                            setEditingPresetId(value ?? EDIT_DEFAULT_PRESET);
+                          }}
+                          comboboxProps={{ withinPortal: true, zIndex: 1400 }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <Group gap={8} wrap="wrap">
+                        <Button color="gray" onClick={newPreset}>
+                          New
+                        </Button>
+                        <Tooltip
+                          label={
+                            linkableProfiles.length === 0
+                              ? "No presets found in other profiles"
+                              : "Add a shared preset from another profile"
+                          }
+                          disabled={linkableProfiles.length > 0}
+                        >
+                          <Button
+                            color="gray"
+                            variant="light"
+                            onClick={openLinkPresetModal}
+                            disabled={linkableProfiles.length === 0}
+                          >
+                            Add
+                          </Button>
+                        </Tooltip>
+
+                        <ActionIcon
+                          variant="light"
+                          color="red"
+                          size={36}
+                          disabled={isEditingDefaultPreset || !selectedPreset}
+                          onClick={() => {
+                            if (isEditingDefaultPreset) return;
+                            if (!selectedPreset) return;
+                            setDeletePresetDialog({
+                              presetId: selectedPreset.id,
+                              presetName:
+                                selectedPreset.name?.trim() ||
+                                selectedPreset.id,
+                              isShared: isSharedPresetId(selectedPreset.id),
+                            });
+                          }}
+                          aria-label="Delete preset"
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Group>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 12,
+                      }}
+                    >
+                      {selectedPreset ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 12,
+                          }}
+                        >
+                          <TextInput
+                            label="Preset name"
+                            value={localPresetName}
+                            onChange={(e) =>
+                              setLocalPresetName(e.currentTarget.value)
+                            }
+                            onBlur={() => {
+                              const next = localPresetName.trim();
+                              if (next && next !== selectedPreset.name) {
+                                updatePreset(selectedPreset.id, {
+                                  name: next,
+                                });
+                              }
+                            }}
+                            styles={{
+                              label: { fontSize: 12 },
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                              },
+                            }}
+                          />
+
+                          <div>
+                            <Text size="xs" c="dimmed" mb={4}>
+                              Rewrite step
+                            </Text>
+                            <Select
+                              data={[
+                                { value: "on", label: "On" },
+                                { value: "off", label: "Off" },
+                              ]}
+                              value={
+                                selectedPreset.rewrite_llm_enabled
+                                  ? "on"
+                                  : "off"
+                              }
+                              onChange={(value) => {
+                                if (!value) return;
+                                updatePreset(selectedPreset.id, {
+                                  rewrite_llm_enabled: value === "on",
+                                });
+                              }}
+                              comboboxProps={{
+                                withinPortal: true,
+                                zIndex: 1400,
+                              }}
+                              withCheckIcon={false}
+                              styles={{
+                                input: {
+                                  backgroundColor: "var(--bg-elevated)",
+                                  borderColor: "var(--border-default)",
+                                  color: "var(--text-primary)",
+                                  minWidth: 220,
+                                },
+                              }}
+                            />
+                          </div>
+
+                          <Textarea
+                            label="Routing hints (one per line)"
+                            description="If empty, the router falls back to the preset name."
+                            value={localPresetHintsText}
+                            onChange={(e) =>
+                              setLocalPresetHintsText(e.currentTarget.value)
+                            }
+                            onBlur={() => {
+                              const lines = localPresetHintsText
+                                .split(/\r?\n/)
+                                .map((s) => s.trim())
+                                .filter(Boolean);
+                              const next = lines.length === 0 ? null : lines;
+                              const current =
+                                selectedPreset.routing_hints ?? null;
+                              if (
+                                JSON.stringify(current) !== JSON.stringify(next)
+                              ) {
+                                updatePreset(selectedPreset.id, {
+                                  routing_hints: next,
+                                });
+                              }
+                            }}
+                            autosize
+                            minRows={3}
+                            styles={{
+                              label: { fontSize: 12 },
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                                fontFamily: "monospace",
+                                fontSize: "13px",
+                              },
+                            }}
+                          />
+
+                          <div>
+                            <Text size="sm" fw={600} mb={6}>
+                              System Prompt override (relative to this profile)
+                            </Text>
+
+                            <Accordion variant="separated" radius="md">
+                              {(() => {
+                                const key: SectionKey = "system";
+                                const override = getPresetPromptOverride(
+                                  selectedPreset,
+                                  key,
+                                );
+                                const baseContent = profilePromptDefaultContent;
+
+                                const initialContent =
+                                  override && override.content != null
+                                    ? override.content
+                                    : baseContent;
+
+                                const presetLabel =
+                                  selectedPreset.name?.trim() ||
+                                  selectedPreset.id;
+
+                                return (
+                                  <PromptSectionEditor
+                                    key={`${activeProfileId}-${selectedPreset.id}-${key}`}
+                                    sectionKey={`${activeProfileId}-preset-${selectedPreset.id}-${key}`}
+                                    title="System Prompt"
+                                    description="Override the profile System Prompt for this preset."
+                                    enabled={true}
+                                    hideToggle={true}
+                                    headerActions={
+                                      <Button
+                                        variant="light"
+                                        color="gray"
+                                        disabled={
+                                          updateRewriteProgramPromptProfiles.isPending
+                                        }
+                                        onClick={() => {
+                                          setPromptLabContextPrompt(
+                                            (initialContent ?? "").trim(),
+                                          );
+                                          setPromptLabContextLabel(
+                                            `${activeProfileLabel} · ${presetLabel}`,
+                                          );
+                                          setPromptLabApplyTarget({
+                                            type: "preset",
+                                            presetId: selectedPreset.id,
+                                            key,
+                                          });
+                                          setPromptLabOpen(true);
+                                        }}
+                                      >
+                                        Prompt Lab
+                                      </Button>
+                                    }
+                                    initialContent={initialContent}
+                                    defaultContent={baseContent}
+                                    hasCustom={override != null}
+                                    inheritMode={
+                                      override == null
+                                        ? "inheriting"
+                                        : "overriding"
+                                    }
+                                    inheritTooltip="Inheriting from the profile System Prompt"
+                                    disableOverrideTooltip="Disable override (inherit from profile)"
+                                    onDisableOverride={() =>
+                                      savePresetSectionOverride(
+                                        selectedPreset,
+                                        key,
+                                        null,
+                                      )
+                                    }
+                                    resetLabel="Reset to Profile"
+                                    onToggle={() => {}}
+                                    onSave={(content) => {
+                                      const contentToStore =
+                                        content === baseContent
+                                          ? null
+                                          : content || null;
+                                      const next = {
+                                        content: contentToStore,
+                                      };
+                                      savePresetSectionOverride(
+                                        selectedPreset,
+                                        key,
+                                        next,
+                                      );
+                                    }}
+                                    onReset={() =>
+                                      savePresetSectionOverride(
+                                        selectedPreset,
+                                        key,
+                                        null,
+                                      )
+                                    }
+                                    isSaving={
+                                      updateRewriteProgramPromptProfiles.isPending
+                                    }
+                                  />
+                                );
+                              })()}
+                            </Accordion>
+                          </div>
+
+                          <div style={{ marginTop: 12 }}>
+                            <Accordion variant="separated" radius="md">
+                              <Accordion.Item
+                                value={`${activeProfileId}-${selectedPreset.id}-test-rewrite`}
+                              >
+                                <Accordion.Control>
+                                  <div>
+                                    <p className="settings-label">
+                                      Test rewrite
+                                    </p>
+                                    <p className="settings-description">
+                                      Paste a raw transcript and run it through
+                                      this preset’s effective System Prompt.
+                                    </p>
+                                  </div>
+                                </Accordion.Control>
+                                <Accordion.Panel>
+                                  {(() => {
+                                    const baseContent =
+                                      profilePromptDefaultContent;
+                                    const override = getPresetPromptOverride(
+                                      selectedPreset,
+                                      "system",
+                                    );
+                                    const promptForTest =
+                                      override && override.content != null
+                                        ? override.content
+                                        : baseContent;
+
+                                    const isDisabled =
+                                      rewriteTestInput.trim().length === 0 ||
+                                      updateRewriteProgramPromptProfiles.isPending ||
+                                      updateCleanupPromptSections.isPending ||
+                                      updateRewriteLlmEnabled.isPending;
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          gap: 10,
+                                        }}
+                                      >
+                                        <Text size="xs" c="dimmed">
+                                          Testing: {activeProfileLabel} ·{" "}
+                                          {selectedPreset.name?.trim() ||
+                                            selectedPreset.id}
+                                        </Text>
+
+                                        <Textarea
+                                          value={rewriteTestInput}
+                                          onChange={(e) => {
+                                            setRewriteTestInput(
+                                              e.currentTarget.value,
+                                            );
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (
+                                              (e.ctrlKey || e.metaKey) &&
+                                              e.key === "Enter"
+                                            ) {
+                                              e.preventDefault();
+                                              if (!isDisabled) {
+                                                runRewriteTest(promptForTest);
+                                              }
+                                            }
+                                          }}
+                                          placeholder="Raw transcript"
+                                          autosize
+                                          minRows={3}
+                                          styles={{
+                                            input: {
+                                              backgroundColor:
+                                                "var(--bg-elevated)",
+                                              borderColor:
+                                                "var(--border-default)",
+                                              color: "var(--text-primary)",
+                                              fontFamily: "monospace",
+                                              fontSize: "13px",
+                                            },
+                                          }}
+                                        />
+
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 12,
+                                          }}
+                                        >
+                                          <Button
+                                            color="gray"
+                                            loading={
+                                              testRewriteWithPrompt.isPending
+                                            }
+                                            disabled={isDisabled}
+                                            onClick={() =>
+                                              runRewriteTest(promptForTest)
+                                            }
+                                          >
+                                            Test
+                                          </Button>
+
+                                          <Text size="sm" c="dimmed">
+                                            {testRewriteWithPrompt.isPending
+                                              ? "Duration: running…"
+                                              : rewriteTestDurationMs === null
+                                                ? "Duration: —"
+                                                : `Duration: ${(
+                                                    rewriteTestDurationMs / 1000
+                                                  ).toFixed(2)}s`}
+                                          </Text>
+                                        </div>
+
+                                        {rewriteTestError ? (
+                                          <Text size="sm" c="red">
+                                            {rewriteTestError}
+                                          </Text>
+                                        ) : null}
+
+                                        {rewriteTestOutput ? (
+                                          <Textarea
+                                            value={rewriteTestOutput}
+                                            readOnly
+                                            autosize
+                                            minRows={3}
+                                            styles={{
+                                              input: {
+                                                backgroundColor:
+                                                  "var(--bg-elevated)",
+                                                borderColor:
+                                                  "var(--border-default)",
+                                                color: "var(--text-primary)",
+                                                fontFamily: "monospace",
+                                                fontSize: "13px",
+                                              },
+                                            }}
+                                          />
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })()}
+                                </Accordion.Panel>
+                              </Accordion.Item>
+                            </Accordion>
+                          </div>
+                        </div>
+                      ) : isEditingDefaultPreset ? (
+                        <>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: 12,
+                              alignItems: "flex-end",
+                            }}
+                          >
+                            <div>
+                              <Text size="xs" c="dimmed" mb={4}>
+                                Rewrite step
+                              </Text>
+                              <Select
+                                data={[
+                                  { value: "on", label: "On" },
+                                  { value: "off", label: "Off" },
+                                ]}
+                                value={defaultPresetRewriteStepValue}
+                                onChange={(value) => {
+                                  if (!value) return;
+                                  saveProfileMetadata({
+                                    default_target_rewrite_llm_enabled:
+                                      value === "on",
+                                  });
+                                }}
+                                comboboxProps={{
+                                  withinPortal: true,
+                                  zIndex: 1400,
+                                }}
+                                withCheckIcon={false}
+                                styles={{
+                                  input: {
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 240,
+                                  },
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          <div style={{ marginTop: 8 }}>
+                            <Accordion variant="separated" radius="md">
+                              <PromptSectionEditor
+                                sectionKey={`${activeProfileId}-default-system-prompt`}
+                                title="System Prompt"
+                                description="Instructions used when rewriting the transcript"
+                                enabled={true}
+                                hideToggle={true}
+                                headerActions={
+                                  <Button
+                                    variant="light"
+                                    color="gray"
+                                    disabled={
+                                      updateCleanupPromptSections.isPending ||
+                                      updateRewriteProgramPromptProfiles.isPending ||
+                                      updateRewriteLlmEnabled.isPending
+                                    }
+                                    onClick={() => {
+                                      setPromptLabContextPrompt(
+                                        effectiveCurrentPrompt,
+                                      );
+                                      setPromptLabContextLabel(
+                                        activeProfileLabel,
+                                      );
+                                      setPromptLabApplyTarget({
+                                        type: "profile",
+                                        key: "system",
+                                      });
+                                      setPromptLabOpen(true);
+                                    }}
+                                  >
+                                    Prompt Lab
+                                  </Button>
+                                }
+                                initialContent={
+                                  localSections?.system.content ?? ""
+                                }
+                                defaultContent={defaultSections?.system ?? ""}
+                                hasCustom={hasCustomContent.system}
+                                inheritMode={
+                                  isDefaultScope
+                                    ? null
+                                    : activeProfile?.cleanup_prompt_sections
+                                          ?.system == null
+                                      ? "inheriting"
+                                      : "overriding"
+                                }
+                                onDisableOverride={
+                                  isDefaultScope
+                                    ? undefined
+                                    : () =>
+                                        openDisableOverrideDialog({
+                                          title:
+                                            "Disable System Prompt override?",
+                                          onConfirm: () => {
+                                            const base =
+                                              settings?.cleanup_prompt_sections ??
+                                              DEFAULT_SECTIONS;
+
+                                            const current: CleanupPromptSectionsOverride =
+                                              activeProfile?.cleanup_prompt_sections ??
+                                              {};
+                                            const next =
+                                              normalizePromptOverrides({
+                                                ...current,
+                                                system: null,
+                                              });
+                                            profilePromptOverridesRef.current =
+                                              next;
+
+                                            const resolved: CleanupPromptSections =
+                                              {
+                                                system:
+                                                  next?.system ?? base.system,
+                                              };
+
+                                            setLocalSections({
+                                              system: {
+                                                content:
+                                                  resolved.system.content ??
+                                                  defaultSections?.system ??
+                                                  "",
+                                              },
+                                            });
+
+                                            saveProfileMetadata({
+                                              cleanup_prompt_sections: next,
+                                            });
+                                          },
+                                        })
+                                }
+                                onToggle={() => {}}
+                                onSave={(content) =>
+                                  handleSave("system", content)
+                                }
+                                onReset={() => handleReset("system")}
+                                isSaving={
+                                  updateCleanupPromptSections.isPending ||
+                                  updateRewriteProgramPromptProfiles.isPending
+                                }
+                              />
+                            </Accordion>
+                          </div>
+
+                          <Textarea
+                            label="Default target routing hints (optional)"
+                            description="Used by the intent router when deciding to use the profile defaults (no preset). You can put multiple lines here; the router will treat them as additional hints."
+                            value={localDefaultPresetDescription}
+                            onChange={(e) =>
+                              setLocalDefaultPresetDescription(
+                                e.currentTarget.value,
+                              )
+                            }
+                            onBlur={() => {
+                              const trimmed =
+                                localDefaultPresetDescription.trim();
+                              const next =
+                                trimmed.length === 0 ? null : trimmed;
+                              if (
+                                (activeProfile?.default_preset_description ??
+                                  null) !== next
+                              ) {
+                                saveProfileMetadata({
+                                  default_preset_description: next,
+                                });
+                              }
+                            }}
+                            autosize
+                            minRows={2}
+                            styles={{
+                              label: { fontSize: 12 },
+                              input: {
+                                backgroundColor: "var(--bg-elevated)",
+                                borderColor: "var(--border-default)",
+                                color: "var(--text-primary)",
+                              },
+                            }}
+                          />
+
+                          <div style={{ marginTop: 12 }}>
+                            <Accordion variant="separated" radius="md">
+                              <Accordion.Item
+                                value={`${activeProfileId}-default-test-rewrite`}
+                              >
+                                <Accordion.Control>
+                                  <div>
+                                    <p className="settings-label">
+                                      Test rewrite
+                                    </p>
+                                    <p className="settings-description">
+                                      Paste a raw transcript and run it through
+                                      the Default preset.
+                                    </p>
+                                  </div>
+                                </Accordion.Control>
+                                <Accordion.Panel>
+                                  {(() => {
+                                    const promptForTest =
+                                      localSections?.system.content ?? "";
+                                    const isDisabled =
+                                      rewriteTestInput.trim().length === 0 ||
+                                      updateRewriteProgramPromptProfiles.isPending ||
+                                      updateCleanupPromptSections.isPending ||
+                                      updateRewriteLlmEnabled.isPending;
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          gap: 10,
+                                        }}
+                                      >
+                                        <Text size="xs" c="dimmed">
+                                          Testing: {activeProfileLabel} ·
+                                          Default
+                                        </Text>
+
+                                        <Textarea
+                                          value={rewriteTestInput}
+                                          onChange={(e) => {
+                                            setRewriteTestInput(
+                                              e.currentTarget.value,
+                                            );
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (
+                                              (e.ctrlKey || e.metaKey) &&
+                                              e.key === "Enter"
+                                            ) {
+                                              e.preventDefault();
+                                              if (!isDisabled) {
+                                                runRewriteTest(promptForTest);
+                                              }
+                                            }
+                                          }}
+                                          placeholder="Raw transcript"
+                                          autosize
+                                          minRows={3}
+                                          styles={{
+                                            input: {
+                                              backgroundColor:
+                                                "var(--bg-elevated)",
+                                              borderColor:
+                                                "var(--border-default)",
+                                              color: "var(--text-primary)",
+                                              fontFamily: "monospace",
+                                              fontSize: "13px",
+                                            },
+                                          }}
+                                        />
+
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 12,
+                                          }}
+                                        >
+                                          <Button
+                                            color="gray"
+                                            loading={
+                                              testRewriteWithPrompt.isPending
+                                            }
+                                            disabled={isDisabled}
+                                            onClick={() =>
+                                              runRewriteTest(promptForTest)
+                                            }
+                                          >
+                                            Test
+                                          </Button>
+
+                                          <Text size="sm" c="dimmed">
+                                            {testRewriteWithPrompt.isPending
+                                              ? "Duration: running…"
+                                              : rewriteTestDurationMs === null
+                                                ? "Duration: —"
+                                                : `Duration: ${(
+                                                    rewriteTestDurationMs / 1000
+                                                  ).toFixed(2)}s`}
+                                          </Text>
+                                        </div>
+
+                                        {rewriteTestError ? (
+                                          <Text size="sm" c="red">
+                                            {rewriteTestError}
+                                          </Text>
+                                        ) : null}
+
+                                        {rewriteTestOutput ? (
+                                          <Textarea
+                                            value={rewriteTestOutput}
+                                            readOnly
+                                            autosize
+                                            minRows={3}
+                                            styles={{
+                                              input: {
+                                                backgroundColor:
+                                                  "var(--bg-elevated)",
+                                                borderColor:
+                                                  "var(--border-default)",
+                                                color: "var(--text-primary)",
+                                                fontFamily: "monospace",
+                                                fontSize: "13px",
+                                              },
+                                            }}
+                                          />
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })()}
+                                </Accordion.Panel>
+                              </Accordion.Item>
+                            </Accordion>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  </Modal>
+                </div>
+              </Accordion.Panel>
+            </Accordion.Item>
+
+            <Accordion.Item value={`${activeProfileId}-intent-router`}>
+              <Accordion.Control>
+                <div>
+                  <p className="settings-label">Intent router</p>
+                  <p className="settings-description">
+                    Automatically select a preset based on the transcript.
+                  </p>
+                </div>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  {presets.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      Add at least one preset to enable routing.
+                    </Text>
+                  ) : null}
+
+                  <div
+                    className="settings-row no-divider"
+                    style={{ paddingTop: 0 }}
+                  >
+                    <div>
+                      <p className="settings-label">Router strategy</p>
+                      <p className="settings-description">
+                        Off disables routing completely. Embeddings is fast and
+                        deterministic; LLM can be more flexible but costs more.
+                      </p>
+                    </div>
+                    <Select
+                      data={[
+                        { value: "off", label: "Off" },
+                        { value: "embeddings", label: "Embeddings" },
+                        { value: "llm", label: "LLM" },
+                      ]}
+                      value={routerStrategyValue}
+                      onChange={(value) => {
+                        if (!value) return;
+                        if (value === "off") {
+                          saveRouter({
+                            enabled: false,
+                            strategy: "off",
+                            embedding_provider: null,
+                            embedding_model: null,
+                            pick_highest_score: null,
+                            similarity_threshold: null,
+                            similarity_margin: null,
+                            llm_provider: null,
+                            llm_model: null,
+                            openai_reasoning_effort: null,
+                            gemini_thinking_budget: null,
+                            gemini_thinking_level: null,
+                            anthropic_thinking_budget: null,
+                            llm_system_prompt: null,
+                          });
+                          return;
+                        }
+
+                        if (value === "embeddings") {
+                          const provider = "openai";
+                          const modelOptions = EMBEDDING_MODELS[provider] ?? [];
+                          const modelValue = modelOptions[0]?.value ?? null;
+
+                          saveRouter({
+                            enabled: true,
+                            strategy: "embeddings",
+                            embedding_provider: provider,
+                            embedding_model: modelValue,
+                            pick_highest_score:
+                              effectiveRouter?.pick_highest_score ?? true,
+                            similarity_threshold:
+                              effectiveRouter?.similarity_threshold ?? null,
+                            similarity_margin:
+                              effectiveRouter?.similarity_margin ?? null,
+                            llm_provider: null,
+                            llm_model: null,
+                            openai_reasoning_effort: null,
+                            gemini_thinking_budget: null,
+                            gemini_thinking_level: null,
+                            anthropic_thinking_budget: null,
+                            llm_system_prompt: null,
+                          });
+                          return;
+                        }
+
+                        const seedProvider =
+                          settings?.llm_provider ??
+                          effectiveRouter?.llm_provider ??
+                          "openai";
+                        const modelOptions =
+                          getLlmModelOptionsForProvider(seedProvider);
+                        const seedModel =
+                          effectiveRouter?.llm_model ??
+                          settings?.llm_model ??
+                          modelOptions[0]?.value ??
+                          null;
+
+                        saveRouter({
+                          enabled: true,
+                          strategy: "llm",
+                          embedding_provider: null,
+                          embedding_model: null,
+                          pick_highest_score: null,
+                          similarity_threshold: null,
+                          similarity_margin: null,
+
+                          llm_provider: seedProvider,
+                          llm_model: seedModel,
+                          openai_reasoning_effort:
+                            settings?.openai_reasoning_effort ?? null,
+                          gemini_thinking_budget:
+                            settings?.gemini_thinking_budget ?? null,
+                          gemini_thinking_level:
+                            settings?.gemini_thinking_level ?? null,
+                          anthropic_thinking_budget:
+                            settings?.anthropic_thinking_budget ?? null,
+                          llm_system_prompt: null,
+                        });
+                      }}
+                      withCheckIcon={false}
+                      disabled={presets.length === 0}
+                      styles={{
+                        input: {
+                          backgroundColor: "var(--bg-elevated)",
+                          borderColor: "var(--border-default)",
+                          color: "var(--text-primary)",
+                          minWidth: 200,
+                        },
+                      }}
+                    />
+                  </div>
+
+                  {routerStrategyValue === "embeddings" ? (
+                    <>
+                      <Text size="xs" c="dimmed">
+                        Uses your{" "}
+                        {embeddingProviderValue === "cohere"
+                          ? "Cohere"
+                          : "OpenAI"}{" "}
+                        API key. Configure it in API Keys.
+                      </Text>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Embedding provider</p>
+                          <p className="settings-description">
+                            Provider used to embed the transcript and hints.
+                          </p>
+                        </div>
+                        <Select
+                          data={[
+                            { value: "openai", label: "OpenAI" },
+                            { value: "cohere", label: "Cohere" },
+                          ]}
+                          value={embeddingProviderValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            const models = EMBEDDING_MODELS[value] ?? [];
+                            const nextModel = models[0]?.value ?? null;
+                            const next = normalizeRouter(activeProfile.router);
+                            const provider =
+                              value === "openai" || value === "cohere"
+                                ? value
+                                : null;
+                            if (!provider) return;
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              embedding_provider: provider,
+                              embedding_model: nextModel,
+                            });
+                          }}
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 200,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Embedding model</p>
+                          <p className="settings-description">
+                            Model used to embed the transcript and hints.
+                          </p>
+                        </div>
+                        <Select
+                          data={embeddingModels}
+                          value={embeddingModelValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            const next = normalizeRouter(activeProfile.router);
+                            const provider =
+                              embeddingProviderValue === "openai" ||
+                              embeddingProviderValue === "cohere"
+                                ? embeddingProviderValue
+                                : null;
+                            if (!provider) return;
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              embedding_provider: provider,
+                              embedding_model: value,
+                            });
+                          }}
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 240,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Pick highest score</p>
+                          <p className="settings-description">
+                            Always selects the candidate with the highest
+                            similarity score. Disables threshold + margin.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={Boolean(effectiveRouter?.pick_highest_score)}
+                          onChange={(e) => {
+                            const enabled = e.currentTarget.checked;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              pick_highest_score: enabled,
+                            });
+                          }}
+                          color="gray"
+                          size="md"
+                          disabled={presets.length === 0}
+                        />
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">
+                            Store preset embeddings
+                          </p>
+                          <p className="settings-description">
+                            Precompute and store embeddings for preset hints so
+                            routing doesn’t re-embed them every run.
+                          </p>
+                        </div>
+                        <Button
+                          color="gray"
+                          loading={isCachingRouterEmbeddings}
+                          disabled={
+                            isCachingRouterEmbeddings ||
+                            presets.length === 0 ||
+                            activeProfileId === "default" ||
+                            !embeddingModelValue
+                          }
+                          onClick={async () => {
+                            if (activeProfileId === "default") return;
+                            setIsCachingRouterEmbeddings(true);
+                            try {
+                              const res = await tauriAPI.cacheRouterEmbeddings({
+                                profileId: activeProfileId,
+                              });
+                              notifications.show({
+                                title: "Stored router embeddings",
+                                message: `Cached ${res.cached_now} / ${res.total_hints} hints (${res.skipped_existing} already cached) · ${res.provider} / ${res.model}`,
+                                color: "gray",
+                              });
+                            } catch (e) {
+                              notifications.show({
+                                title: "Failed to store embeddings",
+                                message: errorToMessage(e),
+                                color: "red",
+                              });
+                            } finally {
+                              setIsCachingRouterEmbeddings(false);
+                            }
+                          }}
+                        >
+                          Store embeddings
+                        </Button>
+                      </div>
+
+                      <div className="settings-row">
+                        <div>
+                          <p className="settings-label">Similarity threshold</p>
+                          <p className="settings-description">
+                            Minimum cosine similarity to accept a match.
+                          </p>
+                        </div>
+                        <NumberInput
+                          value={effectiveRouter?.similarity_threshold ?? 0.78}
+                          onChange={(value) => {
+                            if (
+                              typeof value !== "number" ||
+                              Number.isNaN(value)
+                            )
+                              return;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              similarity_threshold: value,
+                            });
+                          }}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          clampBehavior="blur"
+                          disabled={Boolean(
+                            effectiveRouter?.pick_highest_score,
+                          )}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              width: 140,
+                            },
+                          }}
+                        />
+                      </div>
+
+                      <div className="settings-row no-divider">
+                        <div>
+                          <p className="settings-label">Similarity margin</p>
+                          <p className="settings-description">
+                            Required gap between the best and second-best
+                            preset.
+                          </p>
+                        </div>
+                        <NumberInput
+                          value={effectiveRouter?.similarity_margin ?? 0.05}
+                          onChange={(value) => {
+                            if (
+                              typeof value !== "number" ||
+                              Number.isNaN(value)
+                            )
+                              return;
+                            const next = normalizeRouter(activeProfile.router);
+                            saveRouter({
+                              ...next,
+                              enabled: true,
+                              strategy: "embeddings",
+                              similarity_margin: value,
+                            });
+                          }}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          clampBehavior="blur"
+                          disabled={Boolean(
+                            effectiveRouter?.pick_highest_score,
+                          )}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              width: 140,
+                            },
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : null}
+
+                  {routerStrategyValue === "llm"
+                    ? (() => {
+                        const routerProvider =
+                          effectiveRouter?.llm_provider ??
+                          settings?.llm_provider ??
+                          "openai";
+                        const modelOptions =
+                          getLlmModelOptionsForProvider(routerProvider);
+                        const routerModel =
+                          effectiveRouter?.llm_model ??
+                          settings?.llm_model ??
+                          modelOptions[0]?.value ??
+                          null;
+
+                        const supportsRouterOpenAiThinking =
+                          routerProvider === "openai" &&
+                          !!routerModel &&
+                          (routerModel.startsWith("gpt-5") ||
+                            routerModel.startsWith("o"));
+
+                        const routerOpenAiThinkingOptions =
+                          !supportsRouterOpenAiThinking || !routerModel
+                            ? []
+                            : [
+                                {
+                                  value: SELECT_DEFAULT,
+                                  label: "Default",
+                                },
+                                ...openAiThinkingEffortsForModel(
+                                  routerModel,
+                                ).map((v) => ({
+                                  value: v,
+                                  label:
+                                    v === "none"
+                                      ? "None"
+                                      : v.charAt(0).toUpperCase() + v.slice(1),
+                                })),
+                              ];
+
+                        const supportsRouterGeminiThinkingLevel =
+                          routerProvider === "gemini" &&
+                          !!routerModel &&
+                          routerModel.includes("gemini-3");
+
+                        const routerIsGemini3Flash =
+                          supportsRouterGeminiThinkingLevel &&
+                          routerModel.includes("gemini-3-flash");
+
+                        const routerIsGemini3Pro =
+                          supportsRouterGeminiThinkingLevel &&
+                          routerModel.includes("gemini-3-pro");
+
+                        const routerGeminiThinkingLevelOptions =
+                          !supportsRouterGeminiThinkingLevel
+                            ? []
+                            : routerIsGemini3Flash
+                              ? [
+                                  {
+                                    value: SELECT_DEFAULT,
+                                    label: "Default",
+                                  },
+                                  { value: "minimal", label: "Minimal" },
+                                  { value: "low", label: "Low" },
+                                  { value: "medium", label: "Medium" },
+                                  { value: "high", label: "High" },
+                                ]
+                              : [
+                                  {
+                                    value: SELECT_DEFAULT,
+                                    label: "Default",
+                                  },
+                                  { value: "low", label: "Low" },
+                                  { value: "high", label: "High" },
+                                ];
+
+                        const supportsRouterGeminiThinkingBudget =
+                          routerProvider === "gemini" &&
+                          !!routerModel &&
+                          routerModel.includes("gemini-2.5") &&
+                          !routerModel.includes("flash-lite");
+
+                        const routerCanDisableGemini25Thinking =
+                          supportsRouterGeminiThinkingBudget &&
+                          routerModel.includes("gemini-2.5-flash") &&
+                          !routerModel.includes("gemini-2.5-pro");
+
+                        const routerIsGemini25Pro =
+                          supportsRouterGeminiThinkingBudget &&
+                          routerModel.includes("gemini-2.5-pro");
+
+                        const routerGemini25MaxBudget = routerIsGemini25Pro
+                          ? 32768
+                          : 24576;
+
+                        const routerGemini25MinBudget = routerIsGemini25Pro
+                          ? 128
+                          : 0;
+
+                        const routerGeminiThinkingBudgetOptions: Array<{
+                          value: string;
+                          label: string;
+                        }> = !supportsRouterGeminiThinkingBudget
+                          ? []
+                          : [
+                              { value: SELECT_DEFAULT, label: "Default" },
+                              { value: "-1", label: "Dynamic (-1)" },
+                              ...(routerCanDisableGemini25Thinking
+                                ? [{ value: "0", label: "Off (0)" }]
+                                : []),
+                              ...(routerIsGemini25Pro
+                                ? [
+                                    {
+                                      value: String(routerGemini25MinBudget),
+                                      label: "Minimal (128)",
+                                    },
+                                  ]
+                                : []),
+                              { value: "1024", label: "Light (1024)" },
+                              { value: "4096", label: "Medium (4096)" },
+                              { value: "16384", label: "High (16384)" },
+                              ...(routerGemini25MaxBudget > 16384
+                                ? [
+                                    {
+                                      value: String(routerGemini25MaxBudget),
+                                      label: `Max (${routerGemini25MaxBudget})`,
+                                    },
+                                  ]
+                                : []),
+                            ];
+
+                        const supportsRouterAnthropicThinkingBudget =
+                          routerProvider === "anthropic" &&
+                          !!routerModel &&
+                          // Extended thinking is supported by newer Claude families. Keep conservative.
+                          (routerModel.includes("claude-3-7") ||
+                            routerModel.includes("claude-4") ||
+                            routerModel.includes("-4-"));
+
+                        const routerAnthropicThinkingLevelOptions: Array<{
+                          value: string;
+                          label: string;
+                        }> = !supportsRouterAnthropicThinkingBudget
+                          ? []
+                          : [
+                              { value: SELECT_DEFAULT, label: "Default" },
+                              { value: "0", label: "Off" },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[0],
+                                ),
+                                label: "Low",
+                              },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[1],
+                                ),
+                                label: "Medium",
+                              },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[2],
+                                ),
+                                label: "High",
+                              },
+                              {
+                                value: String(
+                                  ANTHROPIC_THINKING_LEVEL_BUDGETS[3],
+                                ),
+                                label: "Max",
+                              },
+                            ];
+
+                        const routerAnthropicThinkingLevelOptionsWithCustom =
+                          (() => {
+                            const vRaw =
+                              effectiveRouter?.anthropic_thinking_budget;
+                            const v =
+                              typeof vRaw === "number" && Number.isFinite(vRaw)
+                                ? Math.trunc(vRaw)
+                                : null;
+                            if (v == null)
+                              return routerAnthropicThinkingLevelOptions;
+
+                            const asString = String(v);
+                            const exists =
+                              routerAnthropicThinkingLevelOptions.some(
+                                (o) => o.value === asString,
+                              );
+                            if (exists)
+                              return routerAnthropicThinkingLevelOptions;
+
+                            return [
+                              ...routerAnthropicThinkingLevelOptions,
+                              { value: asString, label: `Custom (${v})` },
+                            ];
+                          })();
+
+                        return (
+                          <>
+                            <Text size="xs" c="dimmed">
+                              Configure the provider/model used for routing. The
+                              router uses structured output (JSON) when the
+                              selected provider/model supports it.
+                            </Text>
+
+                            <div className="settings-row">
+                              <div>
+                                <p className="settings-label">Provider</p>
+                                <p className="settings-description">
+                                  LLM provider used only for routing.
+                                </p>
+                              </div>
+                              <Select
+                                data={[
+                                  { value: "openai", label: "OpenAI" },
+                                  { value: "gemini", label: "Gemini" },
+                                  { value: "anthropic", label: "Anthropic" },
+                                  { value: "groq", label: "Groq" },
+                                  { value: "fireworks", label: "Fireworks" },
+                                  { value: "ollama", label: "Ollama" },
+                                ]}
+                                value={routerProvider}
+                                onChange={(value) => {
+                                  if (!value) return;
+                                  const next = normalizeRouter(
+                                    activeProfile.router,
+                                  );
+                                  const nextModelOptions =
+                                    getLlmModelOptionsForProvider(value);
+                                  const nextModel =
+                                    nextModelOptions[0]?.value ?? null;
+                                  saveRouter({
+                                    ...next,
+                                    enabled: true,
+                                    strategy: "llm",
+                                    llm_provider: value,
+                                    llm_model: nextModel,
+                                  });
+                                }}
+                                withCheckIcon={false}
+                                styles={{
+                                  input: {
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  },
+                                }}
+                              />
+                            </div>
+
+                            <div className="settings-row">
+                              <div>
+                                <p className="settings-label">Model</p>
+                                <p className="settings-description">
+                                  Model used for routing decisions.
+                                </p>
+                              </div>
+                              {modelOptions.length > 0 ? (
+                                <Select
+                                  data={modelOptions}
+                                  value={routerModel}
+                                  onChange={(value) => {
+                                    if (!value) return;
+                                    const next = normalizeRouter(
+                                      activeProfile.router,
+                                    );
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: value,
+                                    });
+                                  }}
+                                  withCheckIcon={false}
+                                  styles={{
+                                    input: {
+                                      backgroundColor: "var(--bg-elevated)",
+                                      borderColor: "var(--border-default)",
+                                      color: "var(--text-primary)",
+                                      minWidth: 240,
+                                    },
+                                  }}
+                                />
+                              ) : (
+                                <TextInput
+                                  value={routerModel ?? ""}
+                                  placeholder="Enter model id"
+                                  onChange={(e) => {
+                                    const value = e.currentTarget.value;
+                                    const next = normalizeRouter(
+                                      activeProfile.router,
+                                    );
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: value.trim().length
+                                        ? value
+                                        : null,
+                                    });
+                                  }}
+                                  styles={{
+                                    input: {
+                                      backgroundColor: "var(--bg-elevated)",
+                                      borderColor: "var(--border-default)",
+                                      color: "var(--text-primary)",
+                                      minWidth: 240,
+                                    },
+                                  }}
+                                />
+                              )}
+                            </div>
+
+                            {supportsRouterOpenAiThinking ? (
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">Thinking</p>
+                                  <p className="settings-description">
+                                    Reasoning effort for supported OpenAI
+                                    models.
+                                  </p>
+                                </div>
+                                <HintSelect
+                                  data={routerOpenAiThinkingOptions}
+                                  value={
+                                    effectiveRouter?.openai_reasoning_effort ??
+                                    SELECT_DEFAULT
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router,
+                                    );
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        openai_reasoning_effort: null,
+                                      });
+                                      return;
+                                    }
+
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      openai_reasoning_effort:
+                                        isOpenAiReasoningEffort(value)
+                                          ? value
+                                          : null,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
+                                      return (
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
+                                      );
+                                    }
+
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const hint = routerModel
+                                      ? (settings?.openai_reasoning_effort ??
+                                        openAiDefaultReasoningEffortForModel(
+                                          routerModel,
+                                        ))
+                                      : (settings?.openai_reasoning_effort ??
+                                        "medium");
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                  renderOption={({ option }) => {
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const hint = routerModel
+                                      ? (settings?.openai_reasoning_effort ??
+                                        openAiDefaultReasoningEffortForModel(
+                                          routerModel,
+                                        ))
+                                      : (settings?.openai_reasoning_effort ??
+                                        "medium");
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+
+                            {supportsRouterGeminiThinkingLevel ? (
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">
+                                    Thinking level
+                                  </p>
+                                  <p className="settings-description">
+                                    {routerIsGemini3Pro
+                                      ? "Gemini 3 Pro supports low/high (default high)."
+                                      : "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
+                                  </p>
+                                </div>
+                                <HintSelect
+                                  data={routerGeminiThinkingLevelOptions}
+                                  value={
+                                    effectiveRouter?.gemini_thinking_level ??
+                                    SELECT_DEFAULT
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router,
+                                    );
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        gemini_thinking_level: null,
+                                      });
+                                      return;
+                                    }
+
+                                    const v =
+                                      value === "minimal" ||
+                                      value === "low" ||
+                                      value === "medium" ||
+                                      value === "high"
+                                        ? value
+                                        : null;
+                                    if (v == null) return;
+
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      gemini_thinking_level: v,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
+                                      return (
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
+                                      );
+                                    }
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const hint =
+                                      settings?.gemini_thinking_level ?? "high";
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                  renderOption={({ option }) => {
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const hint =
+                                      settings?.gemini_thinking_level ?? "high";
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+
+                            {supportsRouterGeminiThinkingBudget ? (
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">
+                                    Thinking budget
+                                  </p>
+                                  <p className="settings-description">
+                                    Token budget for Gemini 2.5 thinking.
+                                  </p>
+                                </div>
+                                <HintSelect
+                                  data={routerGeminiThinkingBudgetOptions}
+                                  value={
+                                    effectiveRouter?.gemini_thinking_budget ==
+                                    null
+                                      ? SELECT_DEFAULT
+                                      : String(
+                                          effectiveRouter.gemini_thinking_budget,
+                                        )
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router,
+                                    );
+
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        gemini_thinking_budget: null,
+                                      });
+                                      return;
+                                    }
+
+                                    const parsed = Number(value);
+                                    if (!Number.isFinite(parsed)) return;
+                                    const asInt = Math.trunc(parsed);
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      gemini_thinking_budget: asInt,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
+                                      return (
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
+                                      );
+                                    }
+                                    if (option.value !== SELECT_DEFAULT)
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+
+                                    const inherited =
+                                      settings?.gemini_thinking_budget;
+                                    const hint =
+                                      inherited == null
+                                        ? "dynamic"
+                                        : inherited === 0
+                                          ? "off"
+                                          : inherited === -1
+                                            ? "dynamic"
+                                            : String(inherited);
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                  renderOption={({ option }) => {
+                                    if (option.value !== SELECT_DEFAULT) {
+                                      return (
+                                        <Text size="sm">{option.label}</Text>
+                                      );
+                                    }
+
+                                    const inherited =
+                                      settings?.gemini_thinking_budget;
+                                    const hint =
+                                      inherited == null
+                                        ? "dynamic"
+                                        : inherited === 0
+                                          ? "off"
+                                          : inherited === -1
+                                            ? "dynamic"
+                                            : String(inherited);
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 14 }}>
+                                          {option.label}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 11,
+                                            color: "var(--text-muted)",
+                                            opacity: 0.9,
+                                            lineHeight: 1,
+                                          }}
+                                        >
+                                          · {hint}
+                                        </span>
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+
+                            {supportsRouterAnthropicThinkingBudget ? (
+                              <div className="settings-row">
+                                <div>
+                                  <p className="settings-label">Thinking</p>
+                                  <p className="settings-description">
+                                    Extended thinking level for Claude models.
+                                  </p>
+                                </div>
+                                <HintSelect
+                                  data={
+                                    routerAnthropicThinkingLevelOptionsWithCustom
+                                  }
+                                  value={
+                                    effectiveRouter?.anthropic_thinking_budget ==
+                                    null
+                                      ? SELECT_DEFAULT
+                                      : String(
+                                          effectiveRouter.anthropic_thinking_budget,
+                                        )
+                                  }
+                                  onChange={(value) => {
+                                    const next = normalizeRouter(
+                                      activeProfile.router,
+                                    );
+
+                                    if (
+                                      value == null ||
+                                      value === SELECT_DEFAULT
+                                    ) {
+                                      saveRouter({
+                                        ...next,
+                                        enabled: true,
+                                        strategy: "llm",
+                                        llm_provider: routerProvider,
+                                        llm_model: routerModel,
+                                        anthropic_thinking_budget: null,
+                                      });
+                                      return;
+                                    }
+
+                                    const parsed = Number(value);
+                                    if (!Number.isFinite(parsed)) return;
+                                    const asInt = Math.trunc(parsed);
+                                    saveRouter({
+                                      ...next,
+                                      enabled: true,
+                                      strategy: "llm",
+                                      llm_provider: routerProvider,
+                                      llm_model: routerModel,
+                                      anthropic_thinking_budget: asInt,
+                                    });
+                                  }}
+                                  placeholder="Default"
+                                  inputStyle={{
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 200,
+                                  }}
+                                  renderSelected={({ option, placeholder }) => {
+                                    if (!option) {
+                                      return (
+                                        <Text size="sm" c="dimmed">
+                                          {placeholder}
+                                        </Text>
+                                      );
+                                    }
+
+                                    if (option.value === SELECT_DEFAULT) {
+                                      const inheritedBudget =
+                                        settings?.anthropic_thinking_budget;
+                                      const hint =
+                                        inheritedBudget == null
+                                          ? "off"
+                                          : formatThinkingBudgetShort(
+                                              inheritedBudget,
+                                            );
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
+
+                                    if (option.label.startsWith("Custom")) {
+                                      const n = Number(option.value);
+                                      const suffix = Number.isFinite(n)
+                                        ? formatThinkingBudgetShort(n)
+                                        : null;
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <Text size="sm">{option.label}</Text>
+                                          {suffix && (
+                                            <Text
+                                              size="xs"
+                                              c="dimmed"
+                                              style={{ lineHeight: 1 }}
+                                            >
+                                              {suffix}
+                                            </Text>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+
+                                    return (
+                                      <Text size="sm">{option.label}</Text>
+                                    );
+                                  }}
+                                  renderOption={({ option }) => {
+                                    if (option.value === SELECT_DEFAULT) {
+                                      const inheritedBudget =
+                                        settings?.anthropic_thinking_budget;
+                                      const hint =
+                                        inheritedBudget == null
+                                          ? "off"
+                                          : formatThinkingBudgetShort(
+                                              inheritedBudget,
+                                            );
+
+                                      return (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 8,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 14 }}>
+                                            {option.label}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: 11,
+                                              color: "var(--text-muted)",
+                                              opacity: 0.9,
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            · {hint}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
+
+                                    const n = Number(option.value);
+                                    const suffix = Number.isFinite(n)
+                                      ? formatThinkingBudgetShort(n)
+                                      : null;
+
+                                    return (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "baseline",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <Text size="sm">{option.label}</Text>
+                                        {suffix && (
+                                          <Text
+                                            size="xs"
+                                            c="dimmed"
+                                            style={{ lineHeight: 1 }}
+                                          >
+                                            {suffix}
+                                          </Text>
+                                        )}
+                                      </div>
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+
+                            <div className="settings-row no-divider">
+                              <div>
+                                <p className="settings-label">
+                                  System prompt (advanced)
+                                </p>
+                                <p className="settings-description">
+                                  Optional override for the router’s system
+                                  prompt. Structured output rules are still
+                                  enforced.
+                                </p>
+                              </div>
+                              <Textarea
+                                value={effectiveRouter?.llm_system_prompt ?? ""}
+                                placeholder="(leave empty to use default router prompt)"
+                                onChange={(e) => {
+                                  const value = e.currentTarget.value;
+                                  const next = normalizeRouter(
+                                    activeProfile.router,
+                                  );
+                                  saveRouter({
+                                    ...next,
+                                    enabled: true,
+                                    strategy: "llm",
+                                    llm_provider: routerProvider,
+                                    llm_model: routerModel,
+                                    llm_system_prompt: value.trim().length
+                                      ? value
+                                      : null,
+                                  });
+                                }}
+                                autosize
+                                minRows={2}
+                                styles={{
+                                  input: {
+                                    backgroundColor: "var(--bg-elevated)",
+                                    borderColor: "var(--border-default)",
+                                    color: "var(--text-primary)",
+                                    minWidth: 320,
+                                  },
+                                }}
+                              />
+                            </div>
+                          </>
+                        );
+                      })()
+                    : null}
+                </div>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+        </div>
+      ) : null}
+
+      <QuickReplaceSettings
+        activeProfileId={activeProfileId}
+        activeProfile={activeProfile}
+        isDefaultScope={isDefaultScope}
+        inheritTooltip={INHERIT_TOOLTIP}
+        defaultSystemPrompt={DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT}
+        defaultQuickReplaceEnabled={defaultQuickReplaceEnabled}
+        defaultQuickReplaceIncludeClipboardContext={
+          defaultQuickReplaceIncludeClipboardContext
+        }
+        defaultQuickReplaceProvider={defaultQuickReplaceProvider}
+        defaultQuickReplaceModel={defaultQuickReplaceModel}
+        defaultQuickReplaceSystemPrompt={defaultQuickReplaceSystemPrompt}
+        effectiveQuickReplaceProvider={effectiveQuickReplaceProvider}
+        llmProviderOptions={llmProviderOptions}
+        llmProviderDisabled={
+          llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+        }
+        quickReplaceModelOptions={quickReplaceModelOptions}
+        selectedQuickReplaceModelForUi={selectedQuickReplaceModelForUi}
+        localProfileQuickReplaceEnabled={localProfileQuickReplaceEnabled}
+        localProfileQuickReplaceIncludeClipboardContext={
+          localProfileQuickReplaceIncludeClipboardContext
+        }
+        localQuickReplaceSystemPrompt={localQuickReplaceSystemPrompt}
+        quickReplaceEnabledInheriting={quickReplaceEnabledInheriting}
+        quickReplaceIncludeClipboardContextInheriting={
+          quickReplaceIncludeClipboardContextInheriting
+        }
+        quickReplaceProviderInheriting={quickReplaceProviderInheriting}
+        quickReplaceModelInheriting={quickReplaceModelInheriting}
+        quickReplaceSystemPromptInheriting={quickReplaceSystemPromptInheriting}
+        setQuickReplaceEnabledInheriting={setQuickReplaceEnabledInheriting}
+        setQuickReplaceIncludeClipboardContextInheriting={
+          setQuickReplaceIncludeClipboardContextInheriting
+        }
+        setQuickReplaceProviderInheriting={setQuickReplaceProviderInheriting}
+        setQuickReplaceModelInheriting={setQuickReplaceModelInheriting}
+        setQuickReplaceSystemPromptInheriting={
+          setQuickReplaceSystemPromptInheriting
+        }
+        setLocalProfileQuickReplaceEnabled={setLocalProfileQuickReplaceEnabled}
+        setLocalProfileQuickReplaceIncludeClipboardContext={
+          setLocalProfileQuickReplaceIncludeClipboardContext
+        }
+        setLocalProfileQuickReplaceProvider={
+          setLocalProfileQuickReplaceProvider
+        }
+        setLocalProfileQuickReplaceModel={setLocalProfileQuickReplaceModel}
+        setLocalQuickReplaceSystemPrompt={setLocalQuickReplaceSystemPrompt}
+        saveProfileMetadata={saveProfileMetadata}
+        openDisableOverrideDialog={openDisableOverrideDialog}
+        getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
+        rewriteProvider={settings?.llm_provider ?? null}
+        rewriteModel={settings?.llm_model ?? null}
+        isSaving={updateRewriteProgramPromptProfiles.isPending}
+      />
+      <QuickAskPanel
+        activeProfileId={activeProfileId}
+        activeProfile={activeProfile}
+        isDefaultScope={isDefaultScope}
+        inheritTooltip={INHERIT_TOOLTIP}
+        defaultSystemPrompt={DEFAULT_QUICK_ASK_SYSTEM_PROMPT}
+        selectDefault={SELECT_DEFAULT}
+        settings={settings}
+        effectiveQuickAskProvider={effectiveQuickAskProvider}
+        effectiveQuickAskModel={effectiveQuickAskModel}
+        quickAskIncludeSelectedText={quickAskIncludeSelectedText}
+        quickAskConversationHistoryEnabled={quickAskConversationHistoryEnabled}
+        quickAskConversationHistoryCount={quickAskConversationHistoryCount}
+        quickAskIncludeClipboardContextInheriting={
+          quickAskIncludeClipboardContextInheriting
+        }
+        quickAskProviderInheriting={quickAskProviderInheriting}
+        quickAskModelInheriting={quickAskModelInheriting}
+        quickAskOpenAiReasoningEffortInheriting={
+          quickAskOpenAiReasoningEffortInheriting
+        }
+        quickAskGeminiThinkingLevelInheriting={
+          quickAskGeminiThinkingLevelInheriting
+        }
+        quickAskGeminiThinkingBudgetInheriting={
+          quickAskGeminiThinkingBudgetInheriting
+        }
+        quickAskAnthropicThinkingBudgetInheriting={
+          quickAskAnthropicThinkingBudgetInheriting
+        }
+        quickAskSystemPromptInheriting={quickAskSystemPromptInheriting}
+        defaultQuickAskIncludeClipboardContext={
+          defaultQuickAskIncludeClipboardContext
+        }
+        localProfileQuickAskIncludeClipboardContext={
+          localProfileQuickAskIncludeClipboardContext
+        }
+        localProfileQuickAskOpenAiReasoningEffort={
+          localProfileQuickAskOpenAiReasoningEffort
+        }
+        localProfileQuickAskGeminiThinkingLevel={
+          localProfileQuickAskGeminiThinkingLevel
+        }
+        localProfileQuickAskGeminiThinkingBudget={
+          localProfileQuickAskGeminiThinkingBudget
+        }
+        localProfileQuickAskAnthropicThinkingBudget={
+          localProfileQuickAskAnthropicThinkingBudget
+        }
+        localQuickAskSystemPrompt={localQuickAskSystemPrompt}
+        quickAskModelOptions={quickAskModelOptions}
+        selectedQuickAskModelForUi={selectedQuickAskModelForUi}
+        quickAskOpenAiThinkingOptions={quickAskOpenAiThinkingOptions}
+        quickAskGeminiThinkingLevelOptions={quickAskGeminiThinkingLevelOptions}
+        quickAskGeminiThinkingBudgetOptions={
+          quickAskGeminiThinkingBudgetOptions
+        }
+        quickAskAnthropicThinkingLevelOptionsWithCustom={
+          quickAskAnthropicThinkingLevelOptionsWithCustom
+        }
+        supportsQuickAskOpenAiThinking={supportsQuickAskOpenAiThinking}
+        supportsQuickAskGeminiThinkingLevel={
+          supportsQuickAskGeminiThinkingLevel
+        }
+        supportsQuickAskGeminiThinkingBudget={
+          supportsQuickAskGeminiThinkingBudget
+        }
+        supportsQuickAskAnthropicThinkingBudget={
+          supportsQuickAskAnthropicThinkingBudget
+        }
+        quickAskModelForThinking={quickAskModelForThinking}
+        llmProviderOptions={llmProviderOptions}
+        llmProviderDisabled={
+          llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+        }
+        updateQuickAskIncludeSelectedText={updateQuickAskIncludeSelectedText}
+        updateQuickAskConversationHistoryEnabled={
+          updateQuickAskConversationHistoryEnabled
+        }
+        updateQuickAskConversationHistoryCount={
+          updateQuickAskConversationHistoryCount
+        }
+        updateQuickAskOpenAiReasoningEffort={
+          updateQuickAskOpenAiReasoningEffort
+        }
+        updateQuickAskGeminiThinkingLevel={updateQuickAskGeminiThinkingLevel}
+        updateQuickAskGeminiThinkingBudget={updateQuickAskGeminiThinkingBudget}
+        updateQuickAskAnthropicThinkingBudget={
+          updateQuickAskAnthropicThinkingBudget
+        }
+        updateQuickAskSystemPrompt={updateQuickAskSystemPrompt}
+        setQuickAskIncludeClipboardContextInheriting={
+          setQuickAskIncludeClipboardContextInheriting
+        }
+        setQuickAskProviderInheriting={setQuickAskProviderInheriting}
+        setQuickAskModelInheriting={setQuickAskModelInheriting}
+        setQuickAskOpenAiReasoningEffortInheriting={
+          setQuickAskOpenAiReasoningEffortInheriting
+        }
+        setQuickAskGeminiThinkingLevelInheriting={
+          setQuickAskGeminiThinkingLevelInheriting
+        }
+        setQuickAskGeminiThinkingBudgetInheriting={
+          setQuickAskGeminiThinkingBudgetInheriting
+        }
+        setQuickAskAnthropicThinkingBudgetInheriting={
+          setQuickAskAnthropicThinkingBudgetInheriting
+        }
+        setQuickAskSystemPromptInheriting={setQuickAskSystemPromptInheriting}
+        setLocalProfileQuickAskIncludeClipboardContext={
+          setLocalProfileQuickAskIncludeClipboardContext
+        }
+        setLocalProfileQuickAskProvider={setLocalProfileQuickAskProvider}
+        setLocalProfileQuickAskModel={setLocalProfileQuickAskModel}
+        setLocalProfileQuickAskOpenAiReasoningEffort={
+          setLocalProfileQuickAskOpenAiReasoningEffort
+        }
+        setLocalProfileQuickAskGeminiThinkingLevel={
+          setLocalProfileQuickAskGeminiThinkingLevel
+        }
+        setLocalProfileQuickAskGeminiThinkingBudget={
+          setLocalProfileQuickAskGeminiThinkingBudget
+        }
+        setLocalProfileQuickAskAnthropicThinkingBudget={
+          setLocalProfileQuickAskAnthropicThinkingBudget
+        }
+        setLocalQuickAskSystemPrompt={setLocalQuickAskSystemPrompt}
+        handleDefaultQuickAskProviderChange={
+          handleDefaultQuickAskProviderChange
+        }
+        handleDefaultQuickAskModelChange={handleDefaultQuickAskModelChange}
+        openDisableOverrideDialog={openDisableOverrideDialog}
+        saveProfileMetadata={saveProfileMetadata}
+        getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
+        isOpenAiReasoningEffort={isOpenAiReasoningEffort}
+        isGeminiThinkingLevel={isGeminiThinkingLevel}
+        openAiDefaultReasoningEffortForModel={
+          openAiDefaultReasoningEffortForModel
+        }
+        formatThinkingBudgetShort={formatThinkingBudgetShort}
+        isSavingProfile={updateRewriteProgramPromptProfiles.isPending}
+        errorToMessage={errorToMessage}
+        quickAskTestInput={quickAskTestInput}
+        quickAskTestOutput={quickAskTestOutput}
+        quickAskTestError={quickAskTestError}
+        quickAskTestDurationMs={quickAskTestDurationMs}
+        quickAskTestPending={quickAskTestPending}
+        quickAskTestStartRef={quickAskTestStartRef}
+        setQuickAskTestInput={setQuickAskTestInput}
+        setQuickAskTestOutput={setQuickAskTestOutput}
+        setQuickAskTestError={setQuickAskTestError}
+        setQuickAskTestDurationMs={setQuickAskTestDurationMs}
+        setQuickAskTestPending={setQuickAskTestPending}
+      />
+    </>
+  );
 }
