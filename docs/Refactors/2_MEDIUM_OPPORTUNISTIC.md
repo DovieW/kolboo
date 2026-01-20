@@ -55,10 +55,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
 - **Raise TS per-file coverage thresholds gradually.**
   - Treat this as a “ratchet”: only raise thresholds when tests already exist and churn is manageable.
 
-- **Add deterministic coverage for TanStack Query logic (`app/src/lib/queries.ts`).**
-  - Best approach: extract pure `queryFn` helpers and unit-test those.
-  - Optional: add a per-file coverage threshold for `queries.ts` once tests exist.
-
 - **Add at least one real “legacy settings” fixture test.**
   - Goal: validate migrations/normalization for older `settings.json` shapes.
   - Keep it deterministic (no network, no keys).

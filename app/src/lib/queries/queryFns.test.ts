@@ -13,13 +13,28 @@ import type {
 } from "../tauri";
 import {
 	createAudioMuteSupportedQueryFn,
+	createAvailableProvidersQueryFn,
 	createCostByProviderQueryFn,
 	createCostSummaryQueryFn,
+	createDataStorageSummaryQueryFn,
+	createDefaultSectionsQueryFn,
+	createFireworksModelsQueryFn,
+	createHasLastAudioQueryFn,
 	createHistoryAllQueryFn,
 	createHistoryPageQueryFn,
+	createIsLocalWhisperAvailableQueryFn,
+	createIsLocalWhisperModelLoadedQueryFn,
+	createLastRecordingDiagnosticsQueryFn,
+	createLocalWhisperBackendStatusQueryFn,
 	createModelPricingQueryFn,
+	createOllamaModelsQueryFn,
+	createRecordingsStatsQueryFn,
 	createRequestLogsQueryFn,
+	createSettingsGuideStateQueryFn,
 	createSettingsQueryFn,
+	createSystemProxyInfoQueryFn,
+	createWhisperModelsDirQueryFn,
+	createWhisperModelsQueryFn,
 	type QueryFnDeps,
 } from "./queryFns";
 
@@ -235,6 +250,141 @@ describe("queryFns", () => {
 		await queryFn();
 
 		expect(deps.tauriAPI.isAudioMuteSupported).toHaveBeenCalled();
+	});
+
+	it("has last audio query calls hasLastAudio", async () => {
+		const deps = createDeps();
+		const queryFn = createHasLastAudioQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.sttAPI.hasLastAudio).toHaveBeenCalled();
+	});
+
+	it("system proxy query calls getSystemProxyInfo", async () => {
+		const deps = createDeps();
+		const queryFn = createSystemProxyInfoQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getSystemProxyInfo).toHaveBeenCalled();
+	});
+
+	it("settings guide state query calls getSettingsGuideState", async () => {
+		const deps = createDeps();
+		const queryFn = createSettingsGuideStateQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getSettingsGuideState).toHaveBeenCalled();
+	});
+
+	it("last recording diagnostics query calls getLastRecordingDiagnostics", async () => {
+		const deps = createDeps();
+		const queryFn = createLastRecordingDiagnosticsQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.sttAPI.getLastRecordingDiagnostics).toHaveBeenCalled();
+	});
+
+	it("recordings stats query calls getRecordingsStats", async () => {
+		const deps = createDeps();
+		const queryFn = createRecordingsStatsQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.recordingsAPI.getRecordingsStats).toHaveBeenCalled();
+	});
+
+	it("data storage summary query calls getStorageSummary", async () => {
+		const deps = createDeps();
+		const queryFn = createDataStorageSummaryQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.dataAPI.getStorageSummary).toHaveBeenCalled();
+	});
+
+	it("default sections query calls getDefaultSections", async () => {
+		const deps = createDeps();
+		const queryFn = createDefaultSectionsQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.configAPI.getDefaultSections).toHaveBeenCalled();
+	});
+
+	it("available providers query calls getAvailableProviders", async () => {
+		const deps = createDeps();
+		const queryFn = createAvailableProvidersQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.configAPI.getAvailableProviders).toHaveBeenCalled();
+	});
+
+	it("local whisper availability query calls isLocalWhisperAvailable", async () => {
+		const deps = createDeps();
+		const queryFn = createIsLocalWhisperAvailableQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.isLocalWhisperAvailable).toHaveBeenCalled();
+	});
+
+	it("local whisper backend status query calls getLocalWhisperBackendStatus", async () => {
+		const deps = createDeps();
+		const queryFn = createLocalWhisperBackendStatusQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getLocalWhisperBackendStatus).toHaveBeenCalled();
+	});
+
+	it("whisper models query calls getWhisperModels", async () => {
+		const deps = createDeps();
+		const queryFn = createWhisperModelsQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getWhisperModels).toHaveBeenCalled();
+	});
+
+	it("fireworks models query calls getFireworksModels", async () => {
+		const deps = createDeps();
+		const queryFn = createFireworksModelsQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.llmAPI.getFireworksModels).toHaveBeenCalled();
+	});
+
+	it("ollama models query calls getOllamaModels", async () => {
+		const deps = createDeps();
+		const queryFn = createOllamaModelsQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.llmAPI.getOllamaModels).toHaveBeenCalled();
+	});
+
+	it("local whisper model loaded query calls isLocalWhisperModelLoaded", async () => {
+		const deps = createDeps();
+		const queryFn = createIsLocalWhisperModelLoadedQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.isLocalWhisperModelLoaded).toHaveBeenCalled();
+	});
+
+	it("whisper models dir query calls getWhisperModelsDir", async () => {
+		const deps = createDeps();
+		const queryFn = createWhisperModelsDirQueryFn(deps);
+
+		await queryFn();
+
+		expect(deps.tauriAPI.getWhisperModelsDir).toHaveBeenCalled();
 	});
 
 	it("request logs query forwards limit", async () => {
