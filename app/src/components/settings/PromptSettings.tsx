@@ -1,20 +1,19 @@
 import {
-	Accordion,
-	ActionIcon,
-	Button,
-	Group,
-	Loader,
-  Modal,
-	NumberInput,
-	Select,
-	Switch,
-	Text,
-	Textarea,
-	TextInput,
-	Tooltip,
+  Accordion,
+  ActionIcon,
+  Button,
+  Group,
+  Loader,
+  NumberInput,
+  Select,
+  Switch,
+  Text,
+  Textarea,
+  TextInput,
+  Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { Info, RotateCcw, Trash2 } from "lucide-react";
+import { Info, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	EMBEDDING_MODELS,
@@ -67,8 +66,8 @@ import {
 	tauriAPI,
 } from "../../lib/tauri";
 import { HintSelect } from "../HintSelect";
-import { PromptSectionEditor } from "./PromptSectionEditor";
 import { QuickAskPanel } from "./prompt/QuickAskPanel";
+import { PresetEditorModal } from "./prompt/PresetEditorModal";
 import {
   PromptSettingsModals,
   type LinkableProfileOption,
@@ -2227,6 +2226,12 @@ export function PromptSettings({
 		system: Boolean(storedSectionsResolved.system.content),
 	};
 
+  const defaultSystemPromptInheritMode = isDefaultScope
+    ? null
+    : activeProfile?.cleanup_prompt_sections?.system == null
+      ? "inheriting"
+      : "overriding";
+
 	const buildSections = (overrides?: {
 		key: SectionKey;
 		content?: string | null;
@@ -2723,6 +2728,67 @@ export function PromptSettings({
 			cleanup_prompt_sections: hasAny ? nextOverrides : null,
 		});
 	};
+
+  const handleOpenPresetPromptLab = (
+    preset: RewritePreset,
+    key: SectionKey,
+    initialContent: string,
+  ) => {
+    const presetLabel = preset.name?.trim() || preset.id;
+    setPromptLabContextPrompt(initialContent.trim());
+    setPromptLabContextLabel(`${activeProfileLabel} · ${presetLabel}`);
+    setPromptLabApplyTarget({ type: "preset", presetId: preset.id, key });
+    setPromptLabOpen(true);
+  };
+
+  const handleOpenDefaultPromptLab = () => {
+    setPromptLabContextPrompt(effectiveCurrentPrompt);
+    setPromptLabContextLabel(activeProfileLabel);
+    setPromptLabApplyTarget({ type: "profile", key: "system" });
+    setPromptLabOpen(true);
+  };
+
+  const handleDisableDefaultSystemPromptOverride = () => {
+    openDisableOverrideDialog({
+      title: "Disable System Prompt override?",
+      onConfirm: () => {
+        const base = settings?.cleanup_prompt_sections ?? DEFAULT_SECTIONS;
+
+        const current: CleanupPromptSectionsOverride =
+          activeProfile?.cleanup_prompt_sections ?? {};
+        const next = normalizePromptOverrides({
+          ...current,
+          system: null,
+        });
+        profilePromptOverridesRef.current = next;
+
+        const resolved: CleanupPromptSections = {
+          system: next?.system ?? base.system,
+        };
+
+        setLocalSections({
+          system: {
+            content: resolved.system.content ?? defaultSections?.system ?? "",
+          },
+        });
+
+        saveProfileMetadata({
+          cleanup_prompt_sections: next,
+        });
+      },
+    });
+  };
+
+  const handleDefaultPresetRewriteStepChange = (value: string) => {
+    if (!value) return;
+    saveProfileMetadata({
+      default_target_rewrite_llm_enabled: value === "on",
+    });
+  };
+
+  const handleSaveDefaultPresetDescription = (value: string | null) => {
+    saveProfileMetadata({ default_preset_description: value });
+  };
 
   return (
     <>
@@ -3933,789 +3999,98 @@ export function PromptSettings({
                     </Button>
                   </Group>
 
-                  <Modal
+                  <PresetEditorModal
                     opened={presetEditorOpen}
                     onClose={() => setPresetEditorOpen(false)}
-                    title="Edit presets"
-                    centered
-                    size="xl"
-                    keepMounted={false}
-                    zIndex={1000}
-                    styles={{
-                      body: {
-                        height: "70vh",
-                        overflowY: "auto",
-                      },
-                    }}
-                  >
-                    <Group
-                      justify="space-between"
-                      align="flex-end"
-                      wrap="wrap"
-                      gap={12}
-                      mb="sm"
-                    >
-                      <div style={{ flex: 1, minWidth: 260 }}>
-                        <Text size="xs" c="dimmed" mb={4}>
-                          Editing preset
-                        </Text>
-                        <Select
-                          data={[
-                            {
-                              value: EDIT_DEFAULT_PRESET,
-                              label: "Default",
-                            },
-                            ...presetSelectOptions,
-                          ]}
-                          value={editingPresetId ?? EDIT_DEFAULT_PRESET}
-                          onChange={(value) => {
-                            setEditingPresetId(value ?? EDIT_DEFAULT_PRESET);
-                          }}
-                          comboboxProps={{ withinPortal: true, zIndex: 1400 }}
-                          placeholder="Default"
-                          withCheckIcon={false}
-                          styles={{
-                            input: {
-                              backgroundColor: "var(--bg-elevated)",
-                              borderColor: "var(--border-default)",
-                              color: "var(--text-primary)",
-                            },
-                          }}
-                        />
-                      </div>
-
-                      <Group gap={8} wrap="wrap">
-                        <Button color="gray" onClick={newPreset}>
-                          New
-                        </Button>
-                        <Tooltip
-                          label={
-                            linkableProfiles.length === 0
-                              ? "No presets found in other profiles"
-                              : "Add a shared preset from another profile"
-                          }
-                          disabled={linkableProfiles.length > 0}
-                        >
-                          <Button
-                            color="gray"
-                            variant="light"
-                            onClick={openLinkPresetModal}
-                            disabled={linkableProfiles.length === 0}
-                          >
-                            Add
-                          </Button>
-                        </Tooltip>
-
-                        <ActionIcon
-                          variant="light"
-                          color="red"
-                          size={36}
-                          disabled={isEditingDefaultPreset || !selectedPreset}
-                          onClick={() => {
-                            if (isEditingDefaultPreset) return;
-                            if (!selectedPreset) return;
-                            setDeletePresetDialog({
-                              presetId: selectedPreset.id,
-                              presetName:
-                                selectedPreset.name?.trim() ||
-                                selectedPreset.id,
-                              isShared: isSharedPresetId(selectedPreset.id),
-                            });
-                          }}
-                          aria-label="Delete preset"
-                        >
-                          <Trash2 size={16} />
-                        </ActionIcon>
-                      </Group>
-                    </Group>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 12,
-                      }}
-                    >
-                      {selectedPreset ? (
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 12,
-                          }}
-                        >
-                          <TextInput
-                            label="Preset name"
-                            value={localPresetName}
-                            onChange={(e) =>
-                              setLocalPresetName(e.currentTarget.value)
-                            }
-                            onBlur={() => {
-                              const next = localPresetName.trim();
-                              if (next && next !== selectedPreset.name) {
-                                updatePreset(selectedPreset.id, {
-                                  name: next,
-                                });
-                              }
-                            }}
-                            styles={{
-                              label: { fontSize: 12 },
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                              },
-                            }}
-                          />
-
-                          <div>
-                            <Text size="xs" c="dimmed" mb={4}>
-                              Rewrite step
-                            </Text>
-                            <Select
-                              data={[
-                                { value: "on", label: "On" },
-                                { value: "off", label: "Off" },
-                              ]}
-                              value={
-                                selectedPreset.rewrite_llm_enabled
-                                  ? "on"
-                                  : "off"
-                              }
-                              onChange={(value) => {
-                                if (!value) return;
-                                updatePreset(selectedPreset.id, {
-                                  rewrite_llm_enabled: value === "on",
-                                });
-                              }}
-                              comboboxProps={{
-                                withinPortal: true,
-                                zIndex: 1400,
-                              }}
-                              withCheckIcon={false}
-                              styles={{
-                                input: {
-                                  backgroundColor: "var(--bg-elevated)",
-                                  borderColor: "var(--border-default)",
-                                  color: "var(--text-primary)",
-                                  minWidth: 220,
-                                },
-                              }}
-                            />
-                          </div>
-
-                          <Textarea
-                            label="Routing hints (one per line)"
-                            description="If empty, the router falls back to the preset name."
-                            value={localPresetHintsText}
-                            onChange={(e) =>
-                              setLocalPresetHintsText(e.currentTarget.value)
-                            }
-                            onBlur={() => {
-                              const lines = localPresetHintsText
-                                .split(/\r?\n/)
-                                .map((s) => s.trim())
-                                .filter(Boolean);
-                              const next = lines.length === 0 ? null : lines;
-                              const current =
-                                selectedPreset.routing_hints ?? null;
-                              if (
-                                JSON.stringify(current) !== JSON.stringify(next)
-                              ) {
-                                updatePreset(selectedPreset.id, {
-                                  routing_hints: next,
-                                });
-                              }
-                            }}
-                            autosize
-                            minRows={3}
-                            styles={{
-                              label: { fontSize: 12 },
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                                fontFamily: "monospace",
-                                fontSize: "13px",
-                              },
-                            }}
-                          />
-
-                          <div>
-                            <Text size="sm" fw={600} mb={6}>
-                              System Prompt override (relative to this profile)
-                            </Text>
-
-                            <Accordion variant="separated" radius="md">
-                              {(() => {
-                                const key: SectionKey = "system";
-                                const override = getPresetPromptOverride(
-                                  selectedPreset,
-                                  key,
-                                );
-                                const baseContent = profilePromptDefaultContent;
-
-                                const initialContent =
-                                  override && override.content != null
-                                    ? override.content
-                                    : baseContent;
-
-                                const presetLabel =
-                                  selectedPreset.name?.trim() ||
-                                  selectedPreset.id;
-
-                                return (
-                                  <PromptSectionEditor
-                                    key={`${activeProfileId}-${selectedPreset.id}-${key}`}
-                                    sectionKey={`${activeProfileId}-preset-${selectedPreset.id}-${key}`}
-                                    title="System Prompt"
-                                    description="Override the profile System Prompt for this preset."
-                                    enabled={true}
-                                    hideToggle={true}
-                                    headerActions={
-                                      <Button
-                                        variant="light"
-                                        color="gray"
-                                        disabled={
-                                          updateRewriteProgramPromptProfiles.isPending
-                                        }
-                                        onClick={() => {
-                                          setPromptLabContextPrompt(
-                                            (initialContent ?? "").trim(),
-                                          );
-                                          setPromptLabContextLabel(
-                                            `${activeProfileLabel} · ${presetLabel}`,
-                                          );
-                                          setPromptLabApplyTarget({
-                                            type: "preset",
-                                            presetId: selectedPreset.id,
-                                            key,
-                                          });
-                                          setPromptLabOpen(true);
-                                        }}
-                                      >
-                                        Prompt Lab
-                                      </Button>
-                                    }
-                                    initialContent={initialContent}
-                                    defaultContent={baseContent}
-                                    hasCustom={override != null}
-                                    inheritMode={
-                                      override == null
-                                        ? "inheriting"
-                                        : "overriding"
-                                    }
-                                    inheritTooltip="Inheriting from the profile System Prompt"
-                                    disableOverrideTooltip="Disable override (inherit from profile)"
-                                    onDisableOverride={() =>
-                                      savePresetSectionOverride(
-                                        selectedPreset,
-                                        key,
-                                        null,
-                                      )
-                                    }
-                                    resetLabel="Reset to Profile"
-                                    onToggle={() => {}}
-                                    onSave={(content) => {
-                                      const contentToStore =
-                                        content === baseContent
-                                          ? null
-                                          : content || null;
-                                      const next = {
-                                        content: contentToStore,
-                                      };
-                                      savePresetSectionOverride(
-                                        selectedPreset,
-                                        key,
-                                        next,
-                                      );
-                                    }}
-                                    onReset={() =>
-                                      savePresetSectionOverride(
-                                        selectedPreset,
-                                        key,
-                                        null,
-                                      )
-                                    }
-                                    isSaving={
-                                      updateRewriteProgramPromptProfiles.isPending
-                                    }
-                                  />
-                                );
-                              })()}
-                            </Accordion>
-                          </div>
-
-                          <div style={{ marginTop: 12 }}>
-                            <Accordion variant="separated" radius="md">
-                              <Accordion.Item
-                                value={`${activeProfileId}-${selectedPreset.id}-test-rewrite`}
-                              >
-                                <Accordion.Control>
-                                  <div>
-                                    <p className="settings-label">
-                                      Test rewrite
-                                    </p>
-                                    <p className="settings-description">
-                                      Paste a raw transcript and run it through
-                                      this preset’s effective System Prompt.
-                                    </p>
-                                  </div>
-                                </Accordion.Control>
-                                <Accordion.Panel>
-                                  {(() => {
-                                    const baseContent =
-                                      profilePromptDefaultContent;
-                                    const override = getPresetPromptOverride(
-                                      selectedPreset,
-                                      "system",
-                                    );
-                                    const promptForTest =
-                                      override && override.content != null
-                                        ? override.content
-                                        : baseContent;
-
-                                    const isDisabled =
-                                      rewriteTestInput.trim().length === 0 ||
-                                      updateRewriteProgramPromptProfiles.isPending ||
-                                      updateCleanupPromptSections.isPending ||
-                                      updateRewriteLlmEnabled.isPending;
-
-                                    return (
-                                      <div
-                                        style={{
-                                          display: "flex",
-                                          flexDirection: "column",
-                                          gap: 10,
-                                        }}
-                                      >
-                                        <Text size="xs" c="dimmed">
-                                          Testing: {activeProfileLabel} ·{" "}
-                                          {selectedPreset.name?.trim() ||
-                                            selectedPreset.id}
-                                        </Text>
-
-                                        <Textarea
-                                          value={rewriteTestInput}
-                                          onChange={(e) => {
-                                            setRewriteTestInput(
-                                              e.currentTarget.value,
-                                            );
-                                          }}
-                                          onKeyDown={(e) => {
-                                            if (
-                                              (e.ctrlKey || e.metaKey) &&
-                                              e.key === "Enter"
-                                            ) {
-                                              e.preventDefault();
-                                              if (!isDisabled) {
-                                                runRewriteTest(promptForTest);
-                                              }
-                                            }
-                                          }}
-                                          placeholder="Raw transcript"
-                                          autosize
-                                          minRows={3}
-                                          styles={{
-                                            input: {
-                                              backgroundColor:
-                                                "var(--bg-elevated)",
-                                              borderColor:
-                                                "var(--border-default)",
-                                              color: "var(--text-primary)",
-                                              fontFamily: "monospace",
-                                              fontSize: "13px",
-                                            },
-                                          }}
-                                        />
-
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: 12,
-                                          }}
-                                        >
-                                          <Button
-                                            color="gray"
-                                            loading={
-                                              testRewriteWithPrompt.isPending
-                                            }
-                                            disabled={isDisabled}
-                                            onClick={() =>
-                                              runRewriteTest(promptForTest)
-                                            }
-                                          >
-                                            Test
-                                          </Button>
-
-                                          <Text size="sm" c="dimmed">
-                                            {testRewriteWithPrompt.isPending
-                                              ? "Duration: running…"
-                                              : rewriteTestDurationMs === null
-                                                ? "Duration: —"
-                                                : `Duration: ${(
-                                                    rewriteTestDurationMs / 1000
-                                                  ).toFixed(2)}s`}
-                                          </Text>
-                                        </div>
-
-                                        {rewriteTestError ? (
-                                          <Text size="sm" c="red">
-                                            {rewriteTestError}
-                                          </Text>
-                                        ) : null}
-
-                                        {rewriteTestOutput ? (
-                                          <Textarea
-                                            value={rewriteTestOutput}
-                                            readOnly
-                                            autosize
-                                            minRows={3}
-                                            styles={{
-                                              input: {
-                                                backgroundColor:
-                                                  "var(--bg-elevated)",
-                                                borderColor:
-                                                  "var(--border-default)",
-                                                color: "var(--text-primary)",
-                                                fontFamily: "monospace",
-                                                fontSize: "13px",
-                                              },
-                                            }}
-                                          />
-                                        ) : null}
-                                      </div>
-                                    );
-                                  })()}
-                                </Accordion.Panel>
-                              </Accordion.Item>
-                            </Accordion>
-                          </div>
-                        </div>
-                      ) : isEditingDefaultPreset ? (
-                        <>
-                          <div
-                            style={{
-                              display: "flex",
-                              flexWrap: "wrap",
-                              gap: 12,
-                              alignItems: "flex-end",
-                            }}
-                          >
-                            <div>
-                              <Text size="xs" c="dimmed" mb={4}>
-                                Rewrite step
-                              </Text>
-                              <Select
-                                data={[
-                                  { value: "on", label: "On" },
-                                  { value: "off", label: "Off" },
-                                ]}
-                                value={defaultPresetRewriteStepValue}
-                                onChange={(value) => {
-                                  if (!value) return;
-                                  saveProfileMetadata({
-                                    default_target_rewrite_llm_enabled:
-                                      value === "on",
-                                  });
-                                }}
-                                comboboxProps={{
-                                  withinPortal: true,
-                                  zIndex: 1400,
-                                }}
-                                withCheckIcon={false}
-                                styles={{
-                                  input: {
-                                    backgroundColor: "var(--bg-elevated)",
-                                    borderColor: "var(--border-default)",
-                                    color: "var(--text-primary)",
-                                    minWidth: 240,
-                                  },
-                                }}
-                              />
-                            </div>
-                          </div>
-
-                          <div style={{ marginTop: 8 }}>
-                            <Accordion variant="separated" radius="md">
-                              <PromptSectionEditor
-                                sectionKey={`${activeProfileId}-default-system-prompt`}
-                                title="System Prompt"
-                                description="Instructions used when rewriting the transcript"
-                                enabled={true}
-                                hideToggle={true}
-                                headerActions={
-                                  <Button
-                                    variant="light"
-                                    color="gray"
-                                    disabled={
-                                      updateCleanupPromptSections.isPending ||
-                                      updateRewriteProgramPromptProfiles.isPending ||
-                                      updateRewriteLlmEnabled.isPending
-                                    }
-                                    onClick={() => {
-                                      setPromptLabContextPrompt(
-                                        effectiveCurrentPrompt,
-                                      );
-                                      setPromptLabContextLabel(
-                                        activeProfileLabel,
-                                      );
-                                      setPromptLabApplyTarget({
-                                        type: "profile",
-                                        key: "system",
-                                      });
-                                      setPromptLabOpen(true);
-                                    }}
-                                  >
-                                    Prompt Lab
-                                  </Button>
-                                }
-                                initialContent={
-                                  localSections?.system.content ?? ""
-                                }
-                                defaultContent={defaultSections?.system ?? ""}
-                                hasCustom={hasCustomContent.system}
-                                inheritMode={
-                                  isDefaultScope
-                                    ? null
-                                    : activeProfile?.cleanup_prompt_sections
-                                          ?.system == null
-                                      ? "inheriting"
-                                      : "overriding"
-                                }
-                                onDisableOverride={
-                                  isDefaultScope
-                                    ? undefined
-                                    : () =>
-                                        openDisableOverrideDialog({
-                                          title:
-                                            "Disable System Prompt override?",
-                                          onConfirm: () => {
-                                            const base =
-                                              settings?.cleanup_prompt_sections ??
-                                              DEFAULT_SECTIONS;
-
-                                            const current: CleanupPromptSectionsOverride =
-                                              activeProfile?.cleanup_prompt_sections ??
-                                              {};
-                                            const next =
-                                              normalizePromptOverrides({
-                                                ...current,
-                                                system: null,
-                                              });
-                                            profilePromptOverridesRef.current =
-                                              next;
-
-                                            const resolved: CleanupPromptSections =
-                                              {
-                                                system:
-                                                  next?.system ?? base.system,
-                                              };
-
-                                            setLocalSections({
-                                              system: {
-                                                content:
-                                                  resolved.system.content ??
-                                                  defaultSections?.system ??
-                                                  "",
-                                              },
-                                            });
-
-                                            saveProfileMetadata({
-                                              cleanup_prompt_sections: next,
-                                            });
-                                          },
-                                        })
-                                }
-                                onToggle={() => {}}
-                                onSave={(content) =>
-                                  handleSave("system", content)
-                                }
-                                onReset={() => handleReset("system")}
-                                isSaving={
-                                  updateCleanupPromptSections.isPending ||
-                                  updateRewriteProgramPromptProfiles.isPending
-                                }
-                              />
-                            </Accordion>
-                          </div>
-
-                          <Textarea
-                            label="Default target routing hints (optional)"
-                            description="Used by the intent router when deciding to use the profile defaults (no preset). You can put multiple lines here; the router will treat them as additional hints."
-                            value={localDefaultPresetDescription}
-                            onChange={(e) =>
-                              setLocalDefaultPresetDescription(
-                                e.currentTarget.value,
-                              )
-                            }
-                            onBlur={() => {
-                              const trimmed =
-                                localDefaultPresetDescription.trim();
-                              const next =
-                                trimmed.length === 0 ? null : trimmed;
-                              if (
-                                (activeProfile?.default_preset_description ??
-                                  null) !== next
-                              ) {
-                                saveProfileMetadata({
-                                  default_preset_description: next,
-                                });
-                              }
-                            }}
-                            autosize
-                            minRows={2}
-                            styles={{
-                              label: { fontSize: 12 },
-                              input: {
-                                backgroundColor: "var(--bg-elevated)",
-                                borderColor: "var(--border-default)",
-                                color: "var(--text-primary)",
-                              },
-                            }}
-                          />
-
-                          <div style={{ marginTop: 12 }}>
-                            <Accordion variant="separated" radius="md">
-                              <Accordion.Item
-                                value={`${activeProfileId}-default-test-rewrite`}
-                              >
-                                <Accordion.Control>
-                                  <div>
-                                    <p className="settings-label">
-                                      Test rewrite
-                                    </p>
-                                    <p className="settings-description">
-                                      Paste a raw transcript and run it through
-                                      the Default preset.
-                                    </p>
-                                  </div>
-                                </Accordion.Control>
-                                <Accordion.Panel>
-                                  {(() => {
-                                    const promptForTest =
-                                      localSections?.system.content ?? "";
-                                    const isDisabled =
-                                      rewriteTestInput.trim().length === 0 ||
-                                      updateRewriteProgramPromptProfiles.isPending ||
-                                      updateCleanupPromptSections.isPending ||
-                                      updateRewriteLlmEnabled.isPending;
-
-                                    return (
-                                      <div
-                                        style={{
-                                          display: "flex",
-                                          flexDirection: "column",
-                                          gap: 10,
-                                        }}
-                                      >
-                                        <Text size="xs" c="dimmed">
-                                          Testing: {activeProfileLabel} ·
-                                          Default
-                                        </Text>
-
-                                        <Textarea
-                                          value={rewriteTestInput}
-                                          onChange={(e) => {
-                                            setRewriteTestInput(
-                                              e.currentTarget.value,
-                                            );
-                                          }}
-                                          onKeyDown={(e) => {
-                                            if (
-                                              (e.ctrlKey || e.metaKey) &&
-                                              e.key === "Enter"
-                                            ) {
-                                              e.preventDefault();
-                                              if (!isDisabled) {
-                                                runRewriteTest(promptForTest);
-                                              }
-                                            }
-                                          }}
-                                          placeholder="Raw transcript"
-                                          autosize
-                                          minRows={3}
-                                          styles={{
-                                            input: {
-                                              backgroundColor:
-                                                "var(--bg-elevated)",
-                                              borderColor:
-                                                "var(--border-default)",
-                                              color: "var(--text-primary)",
-                                              fontFamily: "monospace",
-                                              fontSize: "13px",
-                                            },
-                                          }}
-                                        />
-
-                                        <div
-                                          style={{
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: 12,
-                                          }}
-                                        >
-                                          <Button
-                                            color="gray"
-                                            loading={
-                                              testRewriteWithPrompt.isPending
-                                            }
-                                            disabled={isDisabled}
-                                            onClick={() =>
-                                              runRewriteTest(promptForTest)
-                                            }
-                                          >
-                                            Test
-                                          </Button>
-
-                                          <Text size="sm" c="dimmed">
-                                            {testRewriteWithPrompt.isPending
-                                              ? "Duration: running…"
-                                              : rewriteTestDurationMs === null
-                                                ? "Duration: —"
-                                                : `Duration: ${(
-                                                    rewriteTestDurationMs / 1000
-                                                  ).toFixed(2)}s`}
-                                          </Text>
-                                        </div>
-
-                                        {rewriteTestError ? (
-                                          <Text size="sm" c="red">
-                                            {rewriteTestError}
-                                          </Text>
-                                        ) : null}
-
-                                        {rewriteTestOutput ? (
-                                          <Textarea
-                                            value={rewriteTestOutput}
-                                            readOnly
-                                            autosize
-                                            minRows={3}
-                                            styles={{
-                                              input: {
-                                                backgroundColor:
-                                                  "var(--bg-elevated)",
-                                                borderColor:
-                                                  "var(--border-default)",
-                                                color: "var(--text-primary)",
-                                                fontFamily: "monospace",
-                                                fontSize: "13px",
-                                              },
-                                            }}
-                                          />
-                                        ) : null}
-                                      </div>
-                                    );
-                                  })()}
-                                </Accordion.Panel>
-                              </Accordion.Item>
-                            </Accordion>
-                          </div>
-                        </>
-                      ) : null}
-                    </div>
-                  </Modal>
+                    editDefaultPresetId={EDIT_DEFAULT_PRESET}
+                    presetSelectOptions={presetSelectOptions}
+                    editingPresetId={editingPresetId}
+                    onEditingPresetChange={setEditingPresetId}
+                    onNewPreset={newPreset}
+                    linkableProfiles={linkableProfiles}
+                    onOpenLinkPresetModal={openLinkPresetModal}
+                    isEditingDefaultPreset={isEditingDefaultPreset}
+                    selectedPreset={selectedPreset}
+                    onRequestDeletePreset={(preset) =>
+                      setDeletePresetDialog({
+                        presetId: preset.id,
+                        presetName: preset.name?.trim() || preset.id,
+                        isShared: isSharedPresetId(preset.id),
+                      })
+                    }
+                    localPresetName={localPresetName}
+                    onLocalPresetNameChange={setLocalPresetName}
+                    localPresetHintsText={localPresetHintsText}
+                    onLocalPresetHintsChange={setLocalPresetHintsText}
+                    onUpdatePreset={updatePreset}
+                    getPresetPromptOverride={getPresetPromptOverride}
+                    profilePromptDefaultContent={profilePromptDefaultContent}
+                    activeProfileId={activeProfileId}
+                    activeProfileLabel={activeProfileLabel}
+                    onOpenPresetPromptLab={handleOpenPresetPromptLab}
+                    onSavePresetSectionOverride={savePresetSectionOverride}
+                    isSavingProfiles={
+                      updateRewriteProgramPromptProfiles.isPending
+                    }
+                    rewriteTestInput={rewriteTestInput}
+                    onRewriteTestInputChange={setRewriteTestInput}
+                    onRunRewriteTest={runRewriteTest}
+                    isTestingRewrite={testRewriteWithPrompt.isPending}
+                    rewriteTestDurationMs={rewriteTestDurationMs}
+                    rewriteTestError={rewriteTestError}
+                    rewriteTestOutput={rewriteTestOutput}
+                    defaultPresetRewriteStepValue={
+                      defaultPresetRewriteStepValue
+                    }
+                    onDefaultPresetRewriteStepChange={
+                      handleDefaultPresetRewriteStepChange
+                    }
+                    localDefaultPresetDescription={
+                      localDefaultPresetDescription
+                    }
+                    onLocalDefaultPresetDescriptionChange={
+                      setLocalDefaultPresetDescription
+                    }
+                    currentDefaultPresetDescription={
+                      activeProfile?.default_preset_description ?? null
+                    }
+                    onSaveDefaultPresetDescription={
+                      handleSaveDefaultPresetDescription
+                    }
+                    defaultSystemPromptContent={
+                      localSections?.system.content ?? ""
+                    }
+                    defaultSystemPromptDefaultContent={
+                      defaultSections?.system ?? ""
+                    }
+                    defaultSystemPromptHasCustom={hasCustomContent.system}
+                    defaultSystemPromptInheritMode={
+                      defaultSystemPromptInheritMode
+                    }
+                    onDisableDefaultSystemPromptOverride={
+                      isDefaultScope
+                        ? undefined
+                        : handleDisableDefaultSystemPromptOverride
+                    }
+                    onOpenDefaultPromptLab={handleOpenDefaultPromptLab}
+                    onSaveDefaultSystemPrompt={(content) =>
+                      handleSave("system", content)
+                    }
+                    onResetDefaultSystemPrompt={() => handleReset("system")}
+                    isDefaultPromptSaving={
+                      updateCleanupPromptSections.isPending ||
+                      updateRewriteProgramPromptProfiles.isPending
+                    }
+                    isDefaultPromptLabDisabled={
+                      updateCleanupPromptSections.isPending ||
+                      updateRewriteProgramPromptProfiles.isPending ||
+                      updateRewriteLlmEnabled.isPending
+                    }
+                    isSavingCleanupSections={
+                      updateCleanupPromptSections.isPending
+                    }
+                    isSavingRewriteEnabled={updateRewriteLlmEnabled.isPending}
+                  />
                 </div>
               </Accordion.Panel>
             </Accordion.Item>
