@@ -2,6 +2,8 @@
 
 use tauri::AppHandle;
 
+use crate::commands::CommandResult;
+
 /// Check whether an API key exists.
 ///
 /// This reads from OS secure storage when available, with a legacy fallback to
@@ -41,8 +43,8 @@ pub fn secrets_set_api_key(
     app: AppHandle,
     store_key: String,
     api_key: String,
-) -> Result<(), String> {
-    crate::secrets::set_api_key(&app, store_key.as_str(), api_key.as_str())
+) -> CommandResult<()> {
+    crate::secrets::set_api_key(&app, store_key.as_str(), api_key.as_str()).map_err(Into::into)
 }
 
 #[cfg(not(desktop))]
@@ -51,19 +53,19 @@ pub fn secrets_set_api_key(
     _app: AppHandle,
     _store_key: String,
     _api_key: String,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     Ok(())
 }
 
 /// Clear an API key.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn secrets_clear_api_key(app: AppHandle, store_key: String) -> Result<(), String> {
-    crate::secrets::clear_api_key(&app, store_key.as_str())
+pub fn secrets_clear_api_key(app: AppHandle, store_key: String) -> CommandResult<()> {
+    crate::secrets::clear_api_key(&app, store_key.as_str()).map_err(Into::into)
 }
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn secrets_clear_api_key(_app: AppHandle, _store_key: String) -> Result<(), String> {
+pub fn secrets_clear_api_key(_app: AppHandle, _store_key: String) -> CommandResult<()> {
     Ok(())
 }

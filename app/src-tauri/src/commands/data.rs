@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::commands::CommandResult;
 use crate::events;
 use crate::history::HistoryStorage;
 use crate::recordings::RecordingStore;
@@ -46,7 +47,7 @@ fn file_size_bytes(path: &std::path::Path) -> u64 {
 /// Useful for the Settings -> Data "Danger zone" UI so users can see what would be deleted.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn get_data_storage_summary(app: AppHandle) -> Result<DataStorageSummary, String> {
+pub fn get_data_storage_summary(app: AppHandle) -> CommandResult<DataStorageSummary> {
     // Recordings
     let (recordings_count, recordings_bytes) = if let Some(recs) = app.try_state::<RecordingStore>()
     {
@@ -147,7 +148,7 @@ pub fn get_data_storage_summary(app: AppHandle) -> Result<DataStorageSummary, St
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn get_data_storage_summary(_app: AppHandle) -> Result<DataStorageSummary, String> {
+pub fn get_data_storage_summary(_app: AppHandle) -> CommandResult<DataStorageSummary> {
     Ok(DataStorageSummary {
         recordings_count: 0,
         recordings_bytes: 0,
@@ -166,7 +167,7 @@ pub fn get_data_storage_summary(_app: AppHandle) -> Result<DataStorageSummary, S
 /// This removes known `*_api_key` keys.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn delete_all_api_keys(app: AppHandle) -> Result<(), String> {
+pub fn delete_all_api_keys(app: AppHandle) -> CommandResult<()> {
     // Delete from secure storage (and any legacy store copies).
     let mut unique_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for key in API_KEY_SETTING_KEYS {
@@ -184,7 +185,7 @@ pub fn delete_all_api_keys(app: AppHandle) -> Result<(), String> {
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn delete_all_api_keys(_app: AppHandle) -> Result<(), String> {
+pub fn delete_all_api_keys(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
@@ -193,7 +194,7 @@ pub fn delete_all_api_keys(_app: AppHandle) -> Result<(), String> {
 /// NOTE: This does not delete recordings/history/stats on disk.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn delete_all_settings(app: AppHandle) -> Result<(), String> {
+pub fn delete_all_settings(app: AppHandle) -> CommandResult<()> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -222,14 +223,14 @@ pub fn delete_all_settings(app: AppHandle) -> Result<(), String> {
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn delete_all_settings(_app: AppHandle) -> Result<(), String> {
+pub fn delete_all_settings(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
 /// Delete all persisted usage/cost stats (JSONL shards) from disk.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn delete_all_stats(app: AppHandle) -> Result<(), String> {
+pub fn delete_all_stats(app: AppHandle) -> CommandResult<()> {
     if let Some(stats) = app.try_state::<StatsStore>() {
         let dir = stats.dir().to_path_buf();
         if dir.exists() {
@@ -245,14 +246,14 @@ pub fn delete_all_stats(app: AppHandle) -> Result<(), String> {
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn delete_all_stats(_app: AppHandle) -> Result<(), String> {
+pub fn delete_all_stats(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
 /// Delete *all data* (superset): history, recordings, request logs, persisted stats, and settings.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn delete_all_data(app: AppHandle) -> Result<(), String> {
+pub fn delete_all_data(app: AppHandle) -> CommandResult<()> {
     // 1) History
     if let Some(history) = app.try_state::<HistoryStorage>() {
         let _ = history.clear();
@@ -286,6 +287,6 @@ pub fn delete_all_data(app: AppHandle) -> Result<(), String> {
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn delete_all_data(_app: AppHandle) -> Result<(), String> {
+pub fn delete_all_data(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }

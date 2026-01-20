@@ -3,6 +3,7 @@ use crate::settings::HotkeyConfig;
 use crate::SystemEvent;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::commands::CommandResult;
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
@@ -24,7 +25,10 @@ use std::collections::HashSet;
 /// (multi-window store instances can lag behind the JS side).
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn set_hotkey_debug_enabled_runtime(app: AppHandle, enabled: bool) -> Result<(), String> {
+pub async fn set_hotkey_debug_enabled_runtime(
+    app: AppHandle,
+    enabled: bool,
+) -> CommandResult<()> {
     #[cfg(target_os = "windows")]
     {
         crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(enabled);
@@ -47,7 +51,7 @@ pub async fn set_hotkey_debug_enabled_runtime(app: AppHandle, enabled: bool) -> 
 pub async fn set_hotkey_debug_enabled_runtime(
     _app: AppHandle,
     _enabled: bool,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     Ok(())
 }
 
@@ -62,7 +66,7 @@ fn is_windows_hook_handled_hotkey(hk: &HotkeyConfig) -> bool {
 /// Call this before capturing a new hotkey to prevent the shortcuts from intercepting key presses.
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn unregister_shortcuts(app: AppHandle) -> Result<(), String> {
+pub async fn unregister_shortcuts(app: AppHandle) -> CommandResult<()> {
     let _guard = crate::shortcuts_lock::global_shortcut_lock().lock().await;
     log::info!("Temporarily unregistering all shortcuts for hotkey capture");
 
@@ -82,7 +86,7 @@ pub async fn unregister_shortcuts(app: AppHandle) -> Result<(), String> {
 // Stub for non-desktop platforms
 #[cfg(not(desktop))]
 #[tauri::command]
-pub async fn unregister_shortcuts(_app: AppHandle) -> Result<(), String> {
+pub async fn unregister_shortcuts(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
@@ -119,7 +123,7 @@ fn get_hotkey_from_store(
 /// Falls back to defaults if stored values are invalid.
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
+pub async fn register_shortcuts(app: AppHandle) -> CommandResult<()> {
     let _guard = crate::shortcuts_lock::global_shortcut_lock().lock().await;
 
     // Hotkey capture ended; allow modifier-only hook hotkeys again.
@@ -416,14 +420,14 @@ pub async fn register_shortcuts(app: AppHandle) -> Result<(), String> {
 // Stub for non-desktop platforms
 #[cfg(not(desktop))]
 #[tauri::command]
-pub async fn register_shortcuts(_app: AppHandle) -> Result<(), String> {
+pub async fn register_shortcuts(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
 /// Validate settings.json after applying backend defaults.
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn settings_doctor(app: AppHandle) -> Result<SettingsDoctorReport, String> {
+pub async fn settings_doctor(app: AppHandle) -> CommandResult<SettingsDoctorReport> {
     crate::settings::defaults::ensure_default_settings(&app).map_err(|e| e.to_string())?;
 
     let store = app.store("settings.json").map_err(|e| e.to_string())?;
@@ -441,6 +445,6 @@ pub async fn settings_doctor(app: AppHandle) -> Result<SettingsDoctorReport, Str
 // Stub for non-desktop platforms
 #[cfg(not(desktop))]
 #[tauri::command]
-pub async fn settings_doctor(_app: AppHandle) -> Result<SettingsDoctorReport, String> {
+pub async fn settings_doctor(_app: AppHandle) -> CommandResult<SettingsDoctorReport> {
     Ok(SettingsDoctorReport::default())
 }

@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use tauri::AppHandle;
 
+use crate::commands::CommandResult;
 use crate::request_log::RequestLogStore;
 
 #[cfg(desktop)]
@@ -236,7 +237,7 @@ pub fn get_available_providers(_app: AppHandle) -> AvailableProvidersResponse {
 /// This re-initializes the STT provider based on current settings
 #[cfg(desktop)]
 #[tauri::command]
-pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
+pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
     use crate::pipeline::{PipelineConfig, SharedPipeline};
     use crate::stt::RetryConfig;
     use tauri::Manager;
@@ -811,7 +812,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> Result<(), String> {
 /// Stub for non-desktop platforms
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn sync_pipeline_config(_app: AppHandle) -> Result<(), String> {
+pub fn sync_pipeline_config(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
@@ -842,7 +843,7 @@ pub fn get_vad_settings(_app: AppHandle) -> VadSettings {
 /// Save VAD settings to the store
 #[cfg(desktop)]
 #[tauri::command]
-pub fn set_vad_settings(app: AppHandle, settings: VadSettings) -> Result<(), String> {
+pub fn set_vad_settings(app: AppHandle, settings: VadSettings) -> CommandResult<()> {
     let store = app
         .store("settings.json")
         .map_err(|e| format!("Failed to get store: {}", e))?;
@@ -867,7 +868,7 @@ pub fn set_vad_settings(app: AppHandle, settings: VadSettings) -> Result<(), Str
 /// Stub for non-desktop platforms
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn set_vad_settings(_app: AppHandle, _settings: VadSettings) -> Result<(), String> {
+pub fn set_vad_settings(_app: AppHandle, _settings: VadSettings) -> CommandResult<()> {
     Ok(())
 }
 

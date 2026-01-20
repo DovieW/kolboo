@@ -1,5 +1,6 @@
 use crate::audio::{self, AudioCue, SoundType};
 use crate::audio_capture;
+use crate::commands::CommandResult;
 use crate::events;
 use crate::state::{MicTestMeterState, MicTestPipelineRestore};
 use schemars::JsonSchema;
@@ -19,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 ///
 /// Frontend passes the cue string (e.g. "kolboo"). Unknown values fall back to the default cue.
 #[tauri::command]
-pub async fn play_audio_cue_preview(cue: String) -> Result<(), String> {
+pub async fn play_audio_cue_preview(cue: String) -> CommandResult<()> {
     let cue = AudioCue::from_str(&cue);
 
     // Preview both sounds so it's obvious which pair will be used during real recording.
@@ -92,23 +93,27 @@ pub async fn mic_test_start_meter(
     app: tauri::AppHandle,
     state: tauri::State<'_, MicTestMeterState>,
     args: MicTestStartArgs,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     #[cfg(not(desktop))]
     {
         let _ = app;
         let _ = state;
         let _ = args;
-        return Err("Mic test is not supported on this platform.".to_string());
+        return Err("Mic test is not supported on this platform."
+            .to_string()
+            .into());
     }
 
     #[cfg(desktop)]
     {
         // Avoid competing capture streams while actively recording.
         let Some(pipeline) = app.try_state::<SharedPipeline>() else {
-            return Err("Pipeline is not initialized yet.".to_string());
+            return Err("Pipeline is not initialized yet.".to_string().into());
         };
         if (*pipeline).try_state() == Some(PipelineState::Recording) {
-            return Err("Cannot test microphone level while recording.".to_string());
+            return Err("Cannot test microphone level while recording."
+                .to_string()
+                .into());
         }
 
         let mut guard = state
@@ -227,7 +232,7 @@ pub async fn mic_test_start_meter(
 pub async fn mic_test_stop_meter(
     app: tauri::AppHandle,
     state: tauri::State<'_, MicTestMeterState>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     #[cfg(not(desktop))]
     {
         let _ = app;

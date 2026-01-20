@@ -6,6 +6,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use tauri::State;
 
+use crate::commands::CommandResult;
 use crate::cost::openai::UsdMicros;
 use crate::stats::{CostEvent, CostKind, StatsStore};
 
@@ -129,7 +130,7 @@ pub fn get_cost_summary(
     stt_model_keys: Option<Vec<String>>,
     llm_model_keys: Option<Vec<String>>,
     exclude_free_tier: Option<bool>,
-) -> Result<CostSummaryResponse, String> {
+) -> CommandResult<CostSummaryResponse> {
     let exclude_free_tier = exclude_free_tier.unwrap_or(false);
     let cache_key = make_cache_key_for_summary(
         timeframe.as_str(),
@@ -274,7 +275,7 @@ pub fn get_cost_summary(
 pub fn get_cost_summary_v2(
     stats_store: State<'_, StatsStore>,
     params: GetCostSummaryParams,
-) -> Result<CostSummaryResponse, String> {
+) -> CommandResult<CostSummaryResponse> {
     get_cost_summary(
         stats_store,
         params.timeframe,
@@ -294,7 +295,7 @@ pub fn get_cost_summary_v2(
 pub fn get_cost_by_provider_v2(
     stats_store: State<'_, StatsStore>,
     params: GetCostSummaryParams,
-) -> Result<CostByProviderResponse, String> {
+) -> CommandResult<CostByProviderResponse> {
     let cache_key = make_cache_key_for_by_provider(&params);
     if let Some(cached) =
         stats_store.cache_get_cost_by_provider::<CostByProviderResponse>(&cache_key)

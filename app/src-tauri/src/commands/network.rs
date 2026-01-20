@@ -2,6 +2,7 @@ use crate::settings::{TrustedCaCertFormat, TrustedCaCertificate};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::commands::CommandResult;
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct SystemProxyInfo {
     pub env_http_proxy: Option<String>,
@@ -180,7 +181,9 @@ pub fn get_system_proxy_info() -> SystemProxyInfo {
 }
 
 #[tauri::command]
-pub fn load_trusted_ca_certificate_from_file(path: String) -> Result<TrustedCaCertificate, String> {
+pub fn load_trusted_ca_certificate_from_file(
+    path: String,
+) -> CommandResult<TrustedCaCertificate> {
     use base64::Engine;
     use std::path::Path;
 
@@ -194,16 +197,15 @@ pub fn load_trusted_ca_certificate_from_file(path: String) -> Result<TrustedCaCe
     let data = std::fs::read(p).map_err(|e| format!("Failed to read certificate file: {e}"))?;
 
     if data.is_empty() {
-        return Err("Certificate file is empty".to_string());
+        return Err("Certificate file is empty".to_string().into());
     }
 
     // Defensive size limit (certs should be tiny).
     const MAX_CERT_BYTES: usize = 1024 * 1024;
     if data.len() > MAX_CERT_BYTES {
-        return Err(format!(
-            "Certificate file is too large ({} bytes).",
-            data.len()
-        ));
+        return Err(
+            format!("Certificate file is too large ({} bytes).", data.len()).into(),
+        );
     }
 
     // Validate and detect format.

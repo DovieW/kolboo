@@ -1,6 +1,7 @@
 use std::sync::mpsc;
 use tauri::AppHandle;
 
+use crate::commands::{CommandError, CommandResult};
 use crate::text::inject::run_with_output_injection_lock;
 
 #[allow(unused_imports)]
@@ -24,7 +25,7 @@ pub async fn get_server_url() -> String {
 }
 
 #[tauri::command]
-pub async fn type_text(app: AppHandle, text: String) -> Result<(), String> {
+pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
     // macOS HIToolbox APIs (used by enigo) must run on the main thread
     // Use a channel to get the result back from the main thread
     let (tx, rx) = mpsc::channel::<Result<(), String>>();
@@ -38,5 +39,11 @@ pub async fn type_text(app: AppHandle, text: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
 
     // Wait for result from main thread
-    rx.recv().map_err(|e| e.to_string())?
+    let result = rx
+        .recv()
+        .map_err(|e| CommandError::from(e.to_string()))?;
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => Err(CommandError::from(error)),
+    }
 }

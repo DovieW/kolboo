@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use tauri::Manager;
 use tauri::{AppHandle, State};
 
+use crate::commands::{CommandError, CommandResult};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
@@ -86,9 +87,9 @@ pub async fn add_history_entry(
     app: AppHandle,
     text: String,
     history: State<'_, HistoryStorage>,
-) -> Result<HistoryEntry, String> {
+) -> CommandResult<HistoryEntry> {
     let max = get_history_max_entries(&app);
-    history.add_entry(text, max)
+    history.add_entry(text, max).map_err(CommandError::from)
 }
 
 /// Get dictation history entries
@@ -96,8 +97,8 @@ pub async fn add_history_entry(
 pub async fn get_history(
     limit: Option<usize>,
     history: State<'_, HistoryStorage>,
-) -> Result<Vec<HistoryEntry>, String> {
-    history.get_all(limit)
+) -> CommandResult<Vec<HistoryEntry>> {
+    history.get_all(limit).map_err(CommandError::from)
 }
 
 /// Get a filtered/paginated slice of history entries.
@@ -108,8 +109,8 @@ pub async fn get_history(
 pub async fn get_history_page(
     params: HistoryPageQuery,
     history: State<'_, HistoryStorage>,
-) -> Result<HistoryPageResult, String> {
-    history.query_page(params)
+) -> CommandResult<HistoryPageResult> {
+    history.query_page(params).map_err(CommandError::from)
 }
 
 /// Delete a history entry by ID
@@ -117,8 +118,8 @@ pub async fn get_history_page(
 pub async fn delete_history_entry(
     id: String,
     history: State<'_, HistoryStorage>,
-) -> Result<bool, String> {
-    history.delete(&id)
+) -> CommandResult<bool> {
+    history.delete(&id).map_err(CommandError::from)
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -212,9 +213,9 @@ pub async fn get_history_delete_options(
     app: AppHandle,
     id: String,
     history: State<'_, HistoryStorage>,
-) -> Result<HistoryDeleteOptions, String> {
+) -> CommandResult<HistoryDeleteOptions> {
     let Some(entry) = history.get_by_id(&id)? else {
-        return Err("History entry not found".to_string());
+        return Err("History entry not found".to_string().into());
     };
 
     let recording_id = resolve_recording_source_id(&app, &history, &entry)?;
@@ -247,7 +248,7 @@ pub async fn delete_history_entry_ex(
     id: String,
     mode: HistoryDeleteMode,
     history: State<'_, HistoryStorage>,
-) -> Result<HistoryDeleteResult, String> {
+) -> CommandResult<HistoryDeleteResult> {
     let entry = history
         .get_by_id(&id)?
         .ok_or_else(|| "History entry not found".to_string())?;
@@ -332,6 +333,6 @@ pub async fn delete_history_entry_ex(
 
 /// Clear all history entries
 #[tauri::command]
-pub async fn clear_history(history: State<'_, HistoryStorage>) -> Result<(), String> {
-    history.clear()
+pub async fn clear_history(history: State<'_, HistoryStorage>) -> CommandResult<()> {
+    history.clear().map_err(CommandError::from)
 }

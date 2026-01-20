@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandError {
@@ -31,6 +32,14 @@ impl From<&str> for CommandError {
     }
 }
 
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+pub type CommandResult<T> = Result<T, CommandError>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -47,5 +56,11 @@ mod tests {
         let error: CommandError = "test error".to_string().into();
         assert_eq!(error.message, "test error");
         assert_eq!(error.error_type, "unknown");
+    }
+
+    #[test]
+    fn command_error_display_uses_message() {
+        let error = CommandError::new("hello", "test");
+        assert_eq!(format!("{}", error), "hello");
     }
 }

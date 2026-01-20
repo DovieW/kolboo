@@ -21,4 +21,4 @@ pub mod text;
 pub mod whisper;
 pub mod windows;
 
-pub use command_error::CommandError;
+pub use command_error::{CommandError, CommandResult};

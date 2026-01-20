@@ -12,6 +12,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
+use crate::commands::CommandResult;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ModelOption {
     pub value: String,
@@ -187,12 +188,12 @@ fn is_probably_llm_model_id(name: &str) -> bool {
 /// and whisper) to match UI use.
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn fireworks_list_models(app: AppHandle) -> Result<Vec<ModelOption>, String> {
+pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOption>> {
     let api_key: String =
         crate::secrets::get_api_key(&app, "fireworks_api_key").unwrap_or_default();
     let api_key_trimmed = api_key.trim();
     if api_key_trimmed.is_empty() {
-        return Err("No Fireworks API key configured".to_string());
+        return Err("No Fireworks API key configured".to_string().into());
     }
 
     // Cache so Settings can re-render without repeatedly hitting Fireworks.
@@ -284,10 +285,9 @@ pub async fn fireworks_list_models(app: AppHandle) -> Result<Vec<ModelOption>, S
             }
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!(
-                "Failed to list Fireworks models ({}): {}",
-                status, body
-            ));
+            return Err(
+                format!("Failed to list Fireworks models ({}): {}", status, body).into(),
+            );
         }
 
         let parsed: ListModelsResponse = resp
@@ -360,6 +360,6 @@ pub async fn fireworks_list_models(app: AppHandle) -> Result<Vec<ModelOption>, S
 /// Stub for non-desktop platforms.
 #[cfg(not(desktop))]
 #[tauri::command]
-pub async fn fireworks_list_models(_app: AppHandle) -> Result<Vec<ModelOption>, String> {
+pub async fn fireworks_list_models(_app: AppHandle) -> CommandResult<Vec<ModelOption>> {
     Ok(Vec::new())
 }

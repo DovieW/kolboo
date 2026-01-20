@@ -7,6 +7,7 @@ use tauri::window::Monitor;
 
 use crate::events;
 use crate::state::AppState;
+use crate::commands::CommandResult;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -157,9 +158,9 @@ fn resolve_target_monitor(window: &tauri::WebviewWindow, app: &AppHandle) -> Opt
         .or_else(|| window.available_monitors().ok().and_then(|mut m| m.pop()))
 }
 
-fn set_widget_position_impl(app: &AppHandle, position: &str) -> Result<(), String> {
+fn set_widget_position_impl(app: &AppHandle, position: &str) -> CommandResult<()> {
     let Some(window) = app.get_webview_window("overlay") else {
-        return Err("Overlay window not found".to_string());
+        return Err("Overlay window not found".to_string().into());
     };
 
     // Select a monitor based on settings (main/cursor/active window), with fallbacks.
@@ -218,7 +219,7 @@ fn set_widget_position_impl(app: &AppHandle, position: &str) -> Result<(), Strin
             origin_x_px + screen_width_px - window_width_px - margin_px,
             origin_y_px + screen_height_px - window_height_px - margin_px,
         ),
-        _ => return Err(format!("Invalid widget position: {}", position)),
+        _ => return Err(format!("Invalid widget position: {}", position).into()),
     };
 
     // Clamp to screen bounds with a small margin. This avoids cases where size estimates
@@ -261,7 +262,7 @@ fn set_widget_position_impl(app: &AppHandle, position: &str) -> Result<(), Strin
 /// Intended for cases where the overlay is not always visible (recording-only/never) and
 /// the user may have dragged it away since the last time it was shown.
 #[cfg(desktop)]
-pub fn snap_overlay_to_saved_position(app: &AppHandle) -> Result<(), String> {
+pub fn snap_overlay_to_saved_position(app: &AppHandle) -> CommandResult<()> {
     let position: String =
         get_setting_from_store(app, "widget_position", "bottom-center".to_string());
     set_widget_position_impl(app, position.as_str())
@@ -270,7 +271,7 @@ pub fn snap_overlay_to_saved_position(app: &AppHandle) -> Result<(), String> {
 /// Show the overlay window and, if the current mode is not "always", reset the window
 /// back to the saved preset position.
 #[cfg(desktop)]
-pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> Result<(), String> {
+pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<()> {
     let overlay_mode: String =
         get_setting_from_store(app, "overlay_mode", "recording_only".to_string());
 
@@ -355,7 +356,7 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> CommandResult<()> {
     // Enforce minimum dimensions to prevent invisible window
     let min_size = 48.0;
     let width = width.max(min_size);
@@ -469,7 +470,7 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> Result<(
 }
 
 #[tauri::command]
-pub async fn show_overlay(app: AppHandle) -> Result<(), String> {
+pub async fn show_overlay(app: AppHandle) -> CommandResult<()> {
     #[cfg(desktop)]
     {
         show_overlay_with_reset_if_not_always(&app)
@@ -485,7 +486,7 @@ pub async fn show_overlay(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn hide_overlay(app: AppHandle) -> Result<(), String> {
+pub async fn hide_overlay(app: AppHandle) -> CommandResult<()> {
     if let Some(window) = app.get_webview_window("overlay") {
         window.hide().map_err(|e| e.to_string())?;
     }
@@ -498,12 +499,12 @@ pub async fn hide_overlay(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn show_overlay_hover(app: AppHandle) -> Result<(), String> {
+pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
     let Some(overlay) = app.get_webview_window("overlay") else {
-        return Err("Overlay window not found".to_string());
+        return Err("Overlay window not found".to_string().into());
     };
     let Some(hover) = app.get_webview_window("overlay_hover") else {
-        return Err("Overlay hover window not found".to_string());
+        return Err("Overlay hover window not found".to_string().into());
     };
 
     app.state::<AppState>()
@@ -581,7 +582,7 @@ pub async fn show_overlay_hover(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn hide_overlay_hover(app: AppHandle) -> Result<(), String> {
+pub async fn hide_overlay_hover(app: AppHandle) -> CommandResult<()> {
     if let Some(window) = app.get_webview_window("overlay_hover") {
         window.hide().map_err(|e| e.to_string())?;
     }
@@ -595,7 +596,7 @@ pub async fn hide_overlay_hover(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Result<(), String> {
+pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> CommandResult<()> {
     let expected_epoch = app
         .state::<AppState>()
         .overlay_hover_epoch
@@ -625,7 +626,7 @@ pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Resul
 
 /// Set overlay mode: "always", "never", or "recording_only"
 #[tauri::command]
-pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String> {
+pub async fn set_overlay_mode(app: AppHandle, mode: String) -> CommandResult<()> {
     if let Some(window) = app.get_webview_window("overlay") {
         match mode.as_str() {
             "always" => {
@@ -684,7 +685,7 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
                 });
             }
             _ => {
-                return Err(format!("Invalid overlay mode: {}", mode));
+                return Err(format!("Invalid overlay mode: {}", mode).into());
             }
         }
     }
@@ -693,7 +694,7 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
 
 /// Set overlay widget position on screen
 #[tauri::command]
-pub async fn set_widget_position(app: AppHandle, position: String) -> Result<(), String> {
+pub async fn set_widget_position(app: AppHandle, position: String) -> CommandResult<()> {
     set_widget_position_impl(&app, position.as_str())
 }
 
@@ -701,9 +702,9 @@ pub async fn set_widget_position(app: AppHandle, position: String) -> Result<(),
 ///
 /// Quick Ask is implemented as a transparent always-on-top window that covers a full monitor.
 #[cfg(desktop)]
-pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> Result<(), String> {
+pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()> {
     let Some(win) = app.get_webview_window("quick_ask") else {
-        return Err("Quick Ask window not found".to_string());
+        return Err("Quick Ask window not found".to_string().into());
     };
 
     let monitor = resolve_target_monitor(&win, app).ok_or("No monitor found")?;

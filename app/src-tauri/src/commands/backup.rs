@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
+use crate::commands::{CommandError, CommandResult};
 use crate::events;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -43,7 +44,7 @@ fn should_exclude_setting_key_from_backup(key: &str) -> bool {
 }
 
 #[cfg(desktop)]
-fn load_settings_json_from_disk(app: &AppHandle) -> Result<serde_json::Value, String> {
+fn load_settings_json_from_disk(app: &AppHandle) -> CommandResult<serde_json::Value> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -85,7 +86,7 @@ fn sanitize_settings_for_backup(raw: serde_json::Value) -> serde_json::Value {
 }
 
 #[cfg(desktop)]
-fn build_backup_payload(app: &AppHandle) -> Result<SettingsBackupPayload, String> {
+fn build_backup_payload(app: &AppHandle) -> CommandResult<SettingsBackupPayload> {
     let raw = load_settings_json_from_disk(app)?;
     let settings = sanitize_settings_for_backup(raw);
     Ok(SettingsBackupPayload {
@@ -99,21 +100,21 @@ fn build_backup_payload(app: &AppHandle) -> Result<SettingsBackupPayload, String
 /// Export settings backup as a JSON string (pretty-printed).
 #[cfg(desktop)]
 #[tauri::command]
-pub fn export_settings_backup_json(app: AppHandle) -> Result<String, String> {
+pub fn export_settings_backup_json(app: AppHandle) -> CommandResult<String> {
     let payload = build_backup_payload(&app)?;
-    serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
+    serde_json::to_string_pretty(&payload).map_err(|e| e.to_string().into())
 }
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn export_settings_backup_json(_app: AppHandle) -> Result<String, String> {
+pub fn export_settings_backup_json(_app: AppHandle) -> CommandResult<String> {
     Ok("{}".to_string())
 }
 
 /// Export settings backup to a file.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn export_settings_backup_to_file(app: AppHandle, path: String) -> Result<(), String> {
+pub fn export_settings_backup_to_file(app: AppHandle, path: String) -> CommandResult<()> {
     let payload = build_backup_payload(&app)?;
     let json = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
 
@@ -128,15 +129,15 @@ pub fn export_settings_backup_to_file(app: AppHandle, path: String) -> Result<()
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn export_settings_backup_to_file(_app: AppHandle, _path: String) -> Result<(), String> {
+pub fn export_settings_backup_to_file(_app: AppHandle, _path: String) -> CommandResult<()> {
     Ok(())
 }
 
 #[cfg(desktop)]
-fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> Result<(), String> {
+fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> CommandResult<()> {
     let settings_obj = match value {
         serde_json::Value::Object(o) => o,
-        _ => return Err("Backup settings must be an object".to_string()),
+        _ => return Err("Backup settings must be an object".to_string().into()),
     };
 
     let store = app.store("settings.json").map_err(|e| e.to_string())?;
@@ -172,7 +173,7 @@ fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> Resu
 /// - or a raw settings object `{ ... }`
 #[cfg(desktop)]
 #[tauri::command]
-pub fn import_settings_backup_json(app: AppHandle, json: String) -> Result<(), String> {
+pub fn import_settings_backup_json(app: AppHandle, json: String) -> CommandResult<()> {
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
 
     // Wrapper format
@@ -186,14 +187,14 @@ pub fn import_settings_backup_json(app: AppHandle, json: String) -> Result<(), S
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn import_settings_backup_json(_app: AppHandle, _json: String) -> Result<(), String> {
+pub fn import_settings_backup_json(_app: AppHandle, _json: String) -> CommandResult<()> {
     Ok(())
 }
 
 /// Import settings backup from a file.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn import_settings_backup_from_file(app: AppHandle, path: String) -> Result<(), String> {
+pub fn import_settings_backup_from_file(app: AppHandle, path: String) -> CommandResult<()> {
     let path = PathBuf::from(path);
     let bytes = std::fs::read(&path)
         .map_err(|e| format!("Failed to read backup file {}: {}", path.display(), e))?;
@@ -203,7 +204,7 @@ pub fn import_settings_backup_from_file(app: AppHandle, path: String) -> Result<
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn import_settings_backup_from_file(_app: AppHandle, _path: String) -> Result<(), String> {
+pub fn import_settings_backup_from_file(_app: AppHandle, _path: String) -> CommandResult<()> {
     Ok(())
 }
 
@@ -226,9 +227,9 @@ fn github_client() -> reqwest::Client {
 }
 
 #[cfg(desktop)]
-fn github_token(app: &AppHandle) -> Result<String, String> {
+fn github_token(app: &AppHandle) -> CommandResult<String> {
     let token = crate::secrets::get_secret(app, GITHUB_GIST_TOKEN_KEY)
-        .ok_or_else(|| "GitHub token not configured".to_string())?;
+        .ok_or_else(|| CommandError::new("GitHub token not configured", "secrets"))?;
     Ok(token)
 }
 
@@ -246,25 +247,26 @@ pub fn github_backup_has_token(_app: AppHandle) -> bool {
 
 #[cfg(desktop)]
 #[tauri::command]
-pub fn github_backup_set_token(app: AppHandle, token: String) -> Result<(), String> {
+pub fn github_backup_set_token(app: AppHandle, token: String) -> CommandResult<()> {
     crate::secrets::set_secret(&app, GITHUB_GIST_TOKEN_KEY, token.as_str())
+        .map_err(Into::into)
 }
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn github_backup_set_token(_app: AppHandle, _token: String) -> Result<(), String> {
+pub fn github_backup_set_token(_app: AppHandle, _token: String) -> CommandResult<()> {
     Ok(())
 }
 
 #[cfg(desktop)]
 #[tauri::command]
-pub fn github_backup_clear_token(app: AppHandle) -> Result<(), String> {
-    crate::secrets::clear_secret(&app, GITHUB_GIST_TOKEN_KEY)
+pub fn github_backup_clear_token(app: AppHandle) -> CommandResult<()> {
+    crate::secrets::clear_secret(&app, GITHUB_GIST_TOKEN_KEY).map_err(Into::into)
 }
 
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn github_backup_clear_token(_app: AppHandle) -> Result<(), String> {
+pub fn github_backup_clear_token(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
@@ -273,7 +275,7 @@ pub fn github_backup_clear_token(_app: AppHandle) -> Result<(), String> {
 pub async fn github_backup_push_to_gist(
     app: AppHandle,
     gist_id: Option<String>,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let token = github_token(&app)?;
     let payload = build_backup_payload(&app)?;
     let content = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
@@ -330,7 +332,7 @@ pub async fn github_backup_push_to_gist(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error ({}): {}", status, text));
+        return Err(format!("GitHub API error ({}): {}", status, text).into());
     }
 
     let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
@@ -340,7 +342,7 @@ pub async fn github_backup_push_to_gist(
         .unwrap_or("")
         .to_string();
     if id.trim().is_empty() {
-        return Err("GitHub response missing gist id".to_string());
+        return Err("GitHub response missing gist id".to_string().into());
     }
 
     Ok(id)
@@ -351,7 +353,7 @@ pub async fn github_backup_push_to_gist(
 pub async fn github_backup_push_to_gist(
     _app: AppHandle,
     _gist_id: Option<String>,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     Ok("".to_string())
 }
 
@@ -360,11 +362,11 @@ pub async fn github_backup_push_to_gist(
 pub async fn github_backup_pull_from_gist(
     app: AppHandle,
     gist_id: String,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let token = github_token(&app)?;
     let id = gist_id.trim();
     if id.is_empty() {
-        return Err("Missing gist id".to_string());
+        return Err("Missing gist id".to_string().into());
     }
 
     let client = github_client();
@@ -379,7 +381,7 @@ pub async fn github_backup_pull_from_gist(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!("GitHub API error ({}): {}", status, text));
+        return Err(format!("GitHub API error ({}): {}", status, text).into());
     }
 
     let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
@@ -392,12 +394,12 @@ pub async fn github_backup_pull_from_gist(
     let file = files
         .get(GITHUB_GIST_BACKUP_FILE_NAME)
         .or_else(|| files.values().find(|vv| vv.get("content").is_some()))
-        .ok_or_else(|| "Gist has no files".to_string())?;
+        .ok_or_else(|| CommandError::new("Gist has no files", "backup"))?;
 
     let content = file
         .get("content")
         .and_then(|c| c.as_str())
-        .ok_or_else(|| "Gist file content missing".to_string())?;
+        .ok_or_else(|| CommandError::new("Gist file content missing", "backup"))?;
 
     Ok(content.to_string())
 }
@@ -407,6 +409,6 @@ pub async fn github_backup_pull_from_gist(
 pub async fn github_backup_pull_from_gist(
     _app: AppHandle,
     _gist_id: String,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     Ok("".to_string())
 }

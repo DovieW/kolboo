@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 use tauri::{AppHandle, State};
 
+use crate::commands::CommandResult;
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
@@ -72,7 +73,7 @@ pub async fn cache_router_embeddings(
     pipeline: State<'_, SharedPipeline>,
     profile_id: String,
     force_refresh: Option<bool>,
-) -> Result<CacheRouterEmbeddingsResponse, String> {
+) -> CommandResult<CacheRouterEmbeddingsResponse> {
     let force_refresh = force_refresh.unwrap_or(false);
 
     // Resolve profile.
@@ -91,7 +92,7 @@ pub async fn cache_router_embeddings(
         .ok_or_else(|| "Profile has no router settings".to_string())?;
 
     if !router.enabled || router.strategy != IntentRouterStrategy::Embeddings {
-        return Err("Router must be enabled and set to embeddings".to_string());
+        return Err("Router must be enabled and set to embeddings".to_string().into());
     }
 
     let embedding_provider = router
@@ -103,10 +104,9 @@ pub async fn cache_router_embeddings(
         && embedding_provider != "cohere"
         && embedding_provider != "fireworks"
     {
-        return Err(format!(
-            "Embeddings provider '{}' not supported",
-            embedding_provider
-        ));
+        return Err(
+            format!("Embeddings provider '{}' not supported", embedding_provider).into(),
+        );
     }
 
     let embedding_model_default = if embedding_provider == "cohere" {
@@ -130,10 +130,13 @@ pub async fn cache_router_embeddings(
         .map(|s| s.as_str())
         .unwrap_or("");
     if api_key.trim().is_empty() {
-        return Err(format!(
-            "{} API key missing (required for embeddings router)",
-            embedding_provider
-        ));
+        return Err(
+            format!(
+                "{} API key missing (required for embeddings router)",
+                embedding_provider
+            )
+            .into(),
+        );
     }
 
     let proxy_settings: ProxySettings = config.proxy_settings.clone();
@@ -293,6 +296,6 @@ pub async fn cache_router_embeddings(
     _pipeline: State<'_, SharedPipeline>,
     _profile_id: String,
     _force_refresh: Option<bool>,
-) -> Result<CacheRouterEmbeddingsResponse, String> {
-    Err("Not supported on this platform".to_string())
+) -> CommandResult<CacheRouterEmbeddingsResponse> {
+    Err("Not supported on this platform".to_string().into())
 }

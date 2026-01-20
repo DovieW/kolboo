@@ -31,11 +31,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - `commands/*` becomes thin wrappers around core services
   - Why this helps: it’s much easier to test “core logic” without needing a Tauri runtime.
 
-- **Standardize error handling across commands (one error shape to the UI).**
-  - Today: errors bubble up in different formats depending on where they come from.
-  - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.
-  - Why: frontend error UI becomes simpler and more consistent; logging/telemetry can attach stable codes.
-
 ## Rust deterministic testing seams (hard IO audit)
 
 - **Audio device IO (CPAL):**
