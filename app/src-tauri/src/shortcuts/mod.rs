@@ -29,7 +29,7 @@ pub(crate) fn normalize_shortcut_string(s: &str) -> String {
     // Canonicalize for comparison across:
     // - different modifier aliases (ctrl vs control)
     // - different output ordering (e.g. "ctrl+shift+f3" vs "shift+control+f3")
-    let mut parts: Vec<String> = s
+    let parts: Vec<String> = s
         .split('+')
         .map(|p| p.trim().to_lowercase())
         .filter(|p| !p.is_empty())
@@ -42,8 +42,22 @@ pub(crate) fn normalize_shortcut_string(s: &str) -> String {
         })
         .collect();
 
-    parts.sort();
-    parts.join("+")
+    let mut modifiers: Vec<String> = Vec::new();
+    let mut keys: Vec<String> = Vec::new();
+
+    for part in parts {
+        let is_modifier = matches!(part.as_str(), "control" | "alt" | "shift" | "super");
+        if is_modifier {
+            modifiers.push(part);
+        } else {
+            keys.push(part);
+        }
+    }
+
+    modifiers.sort();
+    keys.sort();
+    modifiers.extend(keys);
+    modifiers.join("+")
 }
 
 /// Read a hotkey setting from the store.

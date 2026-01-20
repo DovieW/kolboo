@@ -7,26 +7,26 @@ fn test_normalize_ctrl_to_control() {
 
 #[test]
 fn test_normalize_uppercase_ctrl() {
-    // Canonical form sorts tokens.
-    assert_eq!(normalize_shortcut_string("CTRL+A"), "a+control");
+    // Canonical form puts modifiers first.
+    assert_eq!(normalize_shortcut_string("CTRL+A"), "control+a");
 }
 
 #[test]
 fn test_normalize_cmd_to_super() {
-    // Canonical form sorts tokens.
-    assert_eq!(normalize_shortcut_string("cmd+shift+a"), "a+shift+super");
+    // Canonical form puts modifiers first.
+    assert_eq!(normalize_shortcut_string("cmd+shift+a"), "shift+super+a");
 }
 
 #[test]
 fn test_normalize_win_to_super() {
-    // Canonical form sorts tokens.
-    assert_eq!(normalize_shortcut_string("WIN+a"), "a+super");
+    // Canonical form puts modifiers first.
+    assert_eq!(normalize_shortcut_string("WIN+a"), "super+a");
 }
 
 #[test]
 fn test_normalize_meta_to_super() {
-    // Canonical form sorts tokens.
-    assert_eq!(normalize_shortcut_string("Meta+b"), "b+super");
+    // Canonical form puts modifiers first.
+    assert_eq!(normalize_shortcut_string("Meta+b"), "super+b");
 }
 
 #[test]
@@ -55,8 +55,8 @@ fn test_normalize_is_order_insensitive() {
 fn test_normalize_preserves_non_modifier_parts() {
     assert_eq!(
         normalize_shortcut_string("ctrl+Backquote"),
-        // Canonical form sorts tokens.
-        "backquote+control"
+        // Canonical form puts modifiers first.
+        "control+backquote"
     );
 }
 
