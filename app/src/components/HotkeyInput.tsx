@@ -844,11 +844,7 @@ export function HotkeyInput({
 
 			{captureError && <div className="hotkey-error">{captureError}</div>}
 
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: wrapper only prevents click-through while interacting with the Select */}
-			<div
-				className="hotkey-special-row"
-				onMouseDown={(e) => e.stopPropagation()}
-			>
+			<div className="hotkey-special-row">
 				<div className="hotkey-special-meta">
 					<div className="hotkey-special-label">Special key</div>
 				</div>

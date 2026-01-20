@@ -177,28 +177,21 @@ export function PromptSectionEditor({
 							)}
 
 							{!hideToggle && (
-								// biome-ignore lint/a11y/noStaticElementInteractions: wrapper only prevents accordion toggle when interacting with the Switch
-								<span
-									// IMPORTANT: Don't stop propagation in *capture* phase here.
-									// Doing so can prevent the Switch's underlying input from
-									// receiving pointer events, which makes toggles flaky.
-									onPointerDown={(e) => {
+								<Switch
+									checked={enabled}
+									onPointerDownCapture={(e) => {
 										e.stopPropagation();
 									}}
-									onMouseDown={(e) => {
+									onMouseDownCapture={(e) => {
 										e.stopPropagation();
 									}}
-								>
-									<Switch
-										checked={enabled}
-										onChange={(e) => {
-											e.stopPropagation();
-											onToggle(e.currentTarget.checked);
-										}}
-										color="gray"
-										size="md"
-									/>
-								</span>
+									onChange={(e) => {
+										e.stopPropagation();
+										onToggle(e.currentTarget.checked);
+									}}
+									color="gray"
+									size="md"
+								/>
 							)}
 						</div>
 					)}

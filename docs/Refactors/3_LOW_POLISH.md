@@ -4,9 +4,9 @@ These are quality-of-life improvements. They’re totally valid, but they’re t
 
 ## A11y lint follow-ups
 
-- **Audit and reduce inline Biome a11y ignores.**
-	- Some patterns are genuinely constrained (e.g. Mantine `Accordion.Control` nesting rules), but others can be fixed with small UI refactors.
-	- Goal: reduce “ignore sprawl” and re-evaluate which a11y rules can be safely re-enabled.
+- **Review remaining a11y ignores in UI hotspots.**
+	- Focus areas: `HistoryFeed` row click handling, `PromptSectionEditor` header action wrapper, and the audio preview widgets in `AudioSettings`.
+	- Goal: replace ignores with accessible patterns where feasible.
 
 ## Ralph harness (Copilot CLI) ergonomics
 
