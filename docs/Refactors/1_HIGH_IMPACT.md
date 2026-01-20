@@ -8,18 +8,6 @@ If you’re choosing what to do “on purpose” (not as a drive-by), start here
 
 These are “bigger than a ticket” changes that would make the core easier to evolve safely.
 
-- **Make settings a versioned, schema-driven contract (single source of truth).**
-  - Today: backend seeds defaults in `ensure_default_settings(...)`, and frontend normalizes/migrates in `app/src/lib/tauri.ts`.
-  - Upgrade the model:
-    - Make migrations explicit and ordered (vN -> vN+1).
-    - Run migrations at startup *once* (before any UI depends on settings).
-    - Keep a `settings_version` in persisted state and bump it for every shape change.
-  - Strong recommended variant (multi-window safety):
-    - **Backend is the only writer.** Frontend windows send “patches”; Rust validates, writes, and emits `settings-changed`.
-    - This avoids last-write-wins clobber bugs when multiple windows write `settings.json` from stale snapshots.
-  - End goal:
-    - TS reads a trusted, migrated shape (so TS normalization can shrink from “repair everything” to “validate + default”).
-
 - **Dependency injection seams for hard IO (testability).**
   - You already have good “seams” in places (e.g. `with_client(...)` patterns).
   - Next step: formalize a few minimal traits/interfaces so the pipeline can be tested without:

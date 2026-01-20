@@ -41,7 +41,6 @@ class FakeStore implements StoreLike {
 let currentStore: FakeStore;
 
 const invokeMock = vi.fn();
-const emitTypedMock = vi.fn();
 const storeLoadMock = vi.fn(async () => currentStore);
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -52,10 +51,6 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 	Store: {
 		load: storeLoadMock,
 	},
-}));
-
-vi.mock("./events", () => ({
-	emitTyped: emitTypedMock,
 }));
 
 describe("tauri settings side effects", () => {
@@ -76,26 +71,23 @@ describe("tauri settings side effects", () => {
 	beforeEach(() => {
 		currentStore = new FakeStore();
 		invokeMock.mockReset();
-		emitTypedMock.mockReset();
 		storeLoadMock.mockClear();
 	});
 
-	it("updateHotkeyDebugEnabled syncs runtime and emits settings-changed", async () => {
+	it("updateHotkeyDebugEnabled syncs runtime and patches settings", async () => {
 		vi.resetModules();
 		const { tauriSettingsAPI } = await import("./settings");
 
 		await tauriSettingsAPI.updateHotkeyDebugEnabled(true);
 
-		expect(invokeMock).toHaveBeenCalledWith(
+		expect(invokeMock).toHaveBeenNthCalledWith(
+			1,
 			"set_hotkey_debug_enabled_runtime",
-			{
-				enabled: true,
-			},
+			{ enabled: true },
 		);
-		expect(currentStore.data.get("hotkey_debug_enabled")).toBe(true);
-		expect(currentStore.saveCalls).toBe(1);
-		expect(emitTypedMock).toHaveBeenCalledWith("settings-changed", {
-			hotkey_debug_enabled: true,
+		expect(invokeMock).toHaveBeenNthCalledWith(2, "settings_apply_patch", {
+			patch: { hotkey_debug_enabled: true },
+			deleteKeys: [],
 		});
 	});
 
@@ -105,23 +97,24 @@ describe("tauri settings side effects", () => {
 
 		await tauriSettingsAPI.updateOverlayMode("always");
 
-		expect(currentStore.data.get("overlay_mode")).toBe("always");
-		expect(invokeMock).toHaveBeenCalledWith("set_overlay_mode", {
+		expect(invokeMock).toHaveBeenNthCalledWith(1, "settings_apply_patch", {
+			patch: { overlay_mode: "always" },
+			deleteKeys: [],
+		});
+		expect(invokeMock).toHaveBeenNthCalledWith(2, "set_overlay_mode", {
 			mode: "always",
 		});
-		expect(emitTypedMock).toHaveBeenCalledWith("settings-changed", {});
 	});
 
-	it("updateAccentColor writes to the store and emits", async () => {
+	it("updateAccentColor patches settings", async () => {
 		vi.resetModules();
 		const { tauriSettingsAPI } = await import("./settings");
 
 		await tauriSettingsAPI.updateAccentColor("#123456");
 
-		expect(currentStore.data.get("accent_color")).toBe("#123456");
-		expect(currentStore.saveCalls).toBe(1);
-		expect(emitTypedMock).toHaveBeenCalledWith("settings-changed", {
-			accent_color: "#123456",
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: { accent_color: "#123456" },
+			deleteKeys: [],
 		});
 	});
 
@@ -132,14 +125,12 @@ describe("tauri settings side effects", () => {
 
 		await tauriSettingsAPI.updateOverlayMonitorTarget("active_window");
 
-		expect(currentStore.data.get("overlay_monitor_target")).toBe(
-			"active_window",
-		);
-		expect(invokeMock).toHaveBeenCalledWith("set_widget_position", {
-			position: "top-right",
+		expect(invokeMock).toHaveBeenNthCalledWith(1, "settings_apply_patch", {
+			patch: { overlay_monitor_target: "active_window" },
+			deleteKeys: [],
 		});
-		expect(emitTypedMock).toHaveBeenCalledWith("settings-changed", {
-			overlay_monitor_target: "active_window",
+		expect(invokeMock).toHaveBeenNthCalledWith(2, "set_widget_position", {
+			position: "top-right",
 		});
 	});
 
@@ -151,10 +142,14 @@ describe("tauri settings side effects", () => {
 			unit: "days",
 			value: 3.6,
 		});
-
-		expect(currentStore.data.get("transcription_retention_unit")).toBe("days");
-		expect(currentStore.data.get("transcription_retention_value")).toBe(4);
-		expect(currentStore.data.get("transcription_retention_days")).toBe(4);
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: {
+				transcription_retention_unit: "days",
+				transcription_retention_value: 4,
+				transcription_retention_days: 4,
+			},
+			deleteKeys: [],
+		});
 	});
 
 	it("updateRecordingsRetention stores retention settings", async () => {
@@ -167,12 +162,15 @@ describe("tauri settings side effects", () => {
 			unit: "hours",
 			value: 12.5,
 		});
-
-		expect(currentStore.data.get("recordings_retention_mode")).toBe("time");
-		expect(currentStore.data.get("recordings_retention_amount")).toBe(250);
-		expect(currentStore.data.get("recordings_retention_unit")).toBe("hours");
-		expect(currentStore.data.get("recordings_retention_value")).toBe(12.5);
-		expect(currentStore.saveCalls).toBe(1);
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: {
+				recordings_retention_mode: "time",
+				recordings_retention_amount: 250,
+				recordings_retention_unit: "hours",
+				recordings_retention_value: 12.5,
+			},
+			deleteKeys: [],
+		});
 	});
 
 	it("updateTranscriptionRetentionPolicy persists mode and time retention", async () => {
@@ -185,12 +183,16 @@ describe("tauri settings side effects", () => {
 			unit: "days",
 			value: 2.2,
 		});
-
-		expect(currentStore.data.get("transcription_retention_mode")).toBe("time");
-		expect(currentStore.data.get("transcription_retention_amount")).toBe(2000);
-		expect(currentStore.data.get("transcription_retention_unit")).toBe("days");
-		expect(currentStore.data.get("transcription_retention_value")).toBe(2);
-		expect(currentStore.data.get("transcription_retention_days")).toBe(2);
+		expect(invokeMock).toHaveBeenNthCalledWith(1, "settings_apply_patch", {
+			patch: {
+				transcription_retention_mode: "time",
+				transcription_retention_amount: 2000,
+				transcription_retention_unit: "days",
+				transcription_retention_value: 2,
+				transcription_retention_days: 2,
+			},
+			deleteKeys: [],
+		});
 
 		// amount mode disables time retention
 		await tauriSettingsAPI.updateTranscriptionRetentionPolicy({
@@ -199,12 +201,14 @@ describe("tauri settings side effects", () => {
 			unit: "hours",
 			value: 12,
 		});
-
-		expect(currentStore.data.get("transcription_retention_mode")).toBe(
-			"amount",
-		);
-		expect(currentStore.data.get("transcription_retention_amount")).toBe(100);
-		expect(currentStore.data.get("transcription_retention_value")).toBe(0);
-		expect(currentStore.saveCalls).toBe(2);
+		expect(invokeMock).toHaveBeenNthCalledWith(2, "settings_apply_patch", {
+			patch: {
+				transcription_retention_mode: "amount",
+				transcription_retention_amount: 100,
+				transcription_retention_unit: "hours",
+				transcription_retention_value: 0,
+			},
+			deleteKeys: [],
+		});
 	});
 });

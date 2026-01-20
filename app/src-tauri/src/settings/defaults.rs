@@ -10,7 +10,7 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 #[cfg(desktop)]
-use super::{HotkeyConfig, ProxySettings, VadSettings};
+use super::{migrations, HotkeyConfig, ProxySettings, VadSettings};
 
 /// Ensure settings shown in the UI match what the backend will use.
 ///
@@ -23,6 +23,8 @@ use super::{HotkeyConfig, ProxySettings, VadSettings};
 pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let store = app.store("settings.json")?;
 
+    let mut dirty = migrations::run_settings_migrations(&store)?;
+
     // Keep these defaults aligned with pipeline defaults / expected backend behavior.
     // We intentionally seed these so a brand new install has the same effective
     // settings that the pipeline will use at runtime (and what the UI shows).
@@ -30,7 +32,6 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
 
     let is_missing = |v: Option<Value>| -> bool { matches!(v, None | Some(Value::Null)) };
 
-    let mut dirty = false;
     // Some settings intentionally use explicit null as a meaningful value.
     // For those keys, we only seed defaults when the key is truly absent.
     //
@@ -55,7 +56,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Settings schema version (for forward migrations).
     // Bump when adding migrations; keep TS/Rust/tests in sync.
     // Start at version 1 for new installs.
-    dirty |= set_default("settings_version", json!(1u32), false);
+    dirty |= set_default(
+        "settings_version",
+        json!(migrations::SETTINGS_VERSION_LATEST),
+        false,
+    );
 
     dirty |= set_default("stt_provider", json!("groq"), false);
     // Cerebras free-tier toggle (used by stats filtering).
@@ -265,17 +270,6 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Quick Ask highlighted selection context (disabled by default).
     // When false, we won't probe/capture the currently highlighted text for Quick Ask.
     dirty |= set_default("quick_ask_include_selected_text", json!(false), false);
-
-    // Migration: legacy `quick_ask_hotkey` (hold-to-record) -> `quick_ask_hold_hotkey`.
-    // Only migrate when the new key is truly absent (not when explicitly null).
-    if store.get("quick_ask_hold_hotkey").is_none() {
-        if let Some(v) = store.get("quick_ask_hotkey") {
-            if !matches!(v, Value::Null) {
-                store.set("quick_ask_hold_hotkey".to_string(), v);
-                dirty = true;
-            }
-        }
-    }
 
     // VAD settings are used by the pipeline.
     dirty |= set_default(

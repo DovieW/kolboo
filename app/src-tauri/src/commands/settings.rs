@@ -3,6 +3,8 @@ use crate::settings::HotkeyConfig;
 use crate::SystemEvent;
 use tauri::{AppHandle, Emitter, Manager};
 
+#[cfg(desktop)]
+use crate::commands::CommandError;
 use crate::commands::CommandResult;
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -15,6 +17,9 @@ use crate::settings::doctor::SettingsDoctorReport;
 use crate::settings::doctor::{self, SETTINGS_DOCTOR_KEYS};
 #[cfg(desktop)]
 use std::collections::HashSet;
+
+#[cfg(desktop)]
+use serde_json::{Map, Value};
 
 /// Update the backend runtime flag for hotkey debug events.
 ///
@@ -439,9 +444,46 @@ pub async fn settings_doctor(app: AppHandle) -> CommandResult<SettingsDoctorRepo
     Ok(doctor::validate_settings_map(&values))
 }
 
+/// Apply a patch to settings.json, save it, and emit `settings-changed`.
+///
+/// This centralizes settings writes in the backend to avoid multi-window store
+/// instances clobbering each other (a known footgun when each JS window has its
+/// own in-memory Store instance).
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn settings_apply_patch(
+    app: AppHandle,
+    patch: Map<String, Value>,
+    delete_keys: Vec<String>,
+) -> CommandResult<()> {
+    let store = app
+        .store("settings.json")
+        .map_err(|e| CommandError::unknown(format!("Failed to open settings store: {}", e)))?;
+
+    let payload = crate::settings::patch::apply_settings_patch(&store, patch, delete_keys)?;
+
+    store
+        .save()
+        .map_err(|e| CommandError::unknown(format!("Failed to save settings store: {}", e)))?;
+
+    let _ = app.emit(events::EVENT_SETTINGS_CHANGED, payload);
+    Ok(())
+}
+
 // Stub for non-desktop platforms
 #[cfg(not(desktop))]
 #[tauri::command]
 pub async fn settings_doctor(_app: AppHandle) -> CommandResult<SettingsDoctorReport> {
     Ok(SettingsDoctorReport::default())
+}
+
+// Stub for non-desktop platforms
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn settings_apply_patch(
+    _app: AppHandle,
+    _patch: serde_json::Map<String, serde_json::Value>,
+    _delete_keys: Vec<String>,
+) -> CommandResult<()> {
+    Ok(())
 }

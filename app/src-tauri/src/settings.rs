@@ -8,6 +8,10 @@ use crate::llm::PromptSections;
 pub mod defaults;
 #[path = "settings/doctor.rs"]
 pub mod doctor;
+#[path = "settings/migrations.rs"]
+pub mod migrations;
+#[path = "settings/patch.rs"]
+pub mod patch;
 
 // ============================================================================
 // Network / proxy settings (stored in settings.json)

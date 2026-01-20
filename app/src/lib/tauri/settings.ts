@@ -10,7 +10,6 @@ import {
 	DEFAULT_TOGGLE_HOTKEY,
 } from "../hotkeyDefaults";
 import { type HotkeyConfig, normalizeHotkeyConfig } from "../hotkeys";
-import { emitTyped } from "./events";
 import type {
 	AppSettings,
 	AudioCue,
@@ -570,7 +569,7 @@ let storeInstance: Store | null = null;
 const SETTINGS_GUIDE_STATE_KEY = "settings_guide_state";
 const SETTINGS_VERSION_KEY = "settings_version";
 // Bump when adding settings migrations; keep TS/Rust/tests in sync.
-const SETTINGS_VERSION_DEFAULT = 1;
+const SETTINGS_VERSION_DEFAULT = 3;
 
 function normalizeSettingsGuideState(value: unknown): SettingsGuideState {
 	if (value === "pending" || value === "skipped" || value === "completed") {
@@ -597,16 +596,33 @@ async function getStore(): Promise<Store> {
 	return storeInstance;
 }
 
+async function reloadSettingsStoreFromDisk(): Promise<void> {
+	// @tauri-apps/plugin-store doesn't expose an instance reload API.
+	// Recreate the Store instance so future reads come from disk.
+	storeInstance = await Store.load("settings.json");
+}
+
+async function applySettingsPatch(params: {
+	patch?: Record<string, unknown>;
+	deleteKeys?: string[];
+}): Promise<void> {
+	await invoke("settings_apply_patch", {
+		patch: params.patch ?? {},
+		deleteKeys: params.deleteKeys ?? [],
+	});
+	await reloadSettingsStoreFromDisk();
+}
+
 export const tauriSettingsAPI = {
 	async getSettings(): Promise<AppSettings> {
 		const store = await getStore();
 
 		const rawSettingsVersion = await store.get(SETTINGS_VERSION_KEY);
 		const settingsVersion = normalizeSettingsVersion(rawSettingsVersion);
-		if (rawSettingsVersion !== settingsVersion) {
-			await store.set(SETTINGS_VERSION_KEY, settingsVersion);
-			await store.save();
-		}
+		// IMPORTANT: This getter should be read-only.
+		//
+		// Writes are centralized in the backend so multi-window store instances
+		// can't accidentally clobber each other.
 
 		// Keep a tiny subset of settings mirrored in localStorage so the UI can apply
 		// critical visuals (accent color) before the async store read completes.
@@ -993,11 +1009,7 @@ export const tauriSettingsAPI = {
 
 				// If unset/invalid, default to the app's default accent.
 				// (Tangerine is an explicit option in the UI, not the implicit default.)
-				if (!normalized) {
-					await store.set("accent_color", DEFAULT_ACCENT_HEX);
-					await store.save();
-					return DEFAULT_ACCENT_HEX;
-				}
+					if (!normalized) return DEFAULT_ACCENT_HEX;
 
 				return normalized;
 			})(),
@@ -1008,27 +1020,6 @@ export const tauriSettingsAPI = {
 			cleanup_prompt_sections: await (async () => {
 				const raw = await store.get<unknown>("cleanup_prompt_sections");
 				const normalized = normalizeCleanupPromptSections(raw);
-
-				// If we had legacy/invalid shapes, write back the normalized value to
-				// avoid runtime errors and keep the store clean.
-				const rawIsObject = raw && typeof raw === "object";
-				const rawHasSystem = rawIsObject ? Object.hasOwn(raw, "system") : false;
-				const rawHasLegacyMain = rawIsObject
-					? Object.hasOwn(raw, "main")
-					: false;
-
-				const rawJson = rawIsObject ? JSON.stringify(raw) : null;
-				const normalizedJson = normalized ? JSON.stringify(normalized) : null;
-
-				if (
-					normalized &&
-					(rawHasLegacyMain ||
-						(rawIsObject && !rawHasSystem) ||
-						rawJson !== normalizedJson)
-				) {
-					await store.set("cleanup_prompt_sections", normalized);
-					await store.save();
-				}
 
 				return normalized;
 			})(),
@@ -1251,13 +1242,10 @@ export const tauriSettingsAPI = {
 	},
 
 	async reloadSettingsFromDisk(): Promise<void> {
-		// @tauri-apps/plugin-store doesn't expose an instance reload API.
-		// Recreate the Store instance so future reads come from disk.
-		storeInstance = await Store.load("settings.json");
+		await reloadSettingsStoreFromDisk();
 	},
 
 	async updateAccentColor(color: string | null): Promise<void> {
-		const store = await getStore();
 		const normalized = normalizeHexColor(color);
 
 		try {
@@ -1274,85 +1262,52 @@ export const tauriSettingsAPI = {
 		}
 
 		if (!normalized) {
-			await store.delete("accent_color");
+			await applySettingsPatch({ deleteKeys: ["accent_color"] });
 		} else {
-			await store.set("accent_color", normalized);
+			await applySettingsPatch({ patch: { accent_color: normalized } });
 		}
-
-		await store.save();
-
-		// Notify other windows (overlay) to refresh cached settings.
-		// Include the new accent in the payload so the overlay can update immediately
-		// without waiting for a disk reload.
-		await emitTyped("settings-changed", { accent_color: normalized ?? null });
 	},
 
 	async updateMainWindowCloseBehavior(
 		behavior: MainWindowCloseBehavior,
 	): Promise<void> {
-		const store = await getStore();
 		const normalized = normalizeMainWindowCloseBehavior(behavior);
-		await store.set("main_window_close_behavior", normalized);
-		await store.save();
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", {
-			main_window_close_behavior: normalized,
+		await applySettingsPatch({
+			patch: { main_window_close_behavior: normalized },
 		});
 	},
 
 	async updateGithubBackupGistId(gistId: string | null): Promise<void> {
-		const store = await getStore();
 		const trimmed = (gistId ?? "").trim();
-
 		if (!trimmed) {
-			await store.delete("github_backup_gist_id");
+			await applySettingsPatch({ deleteKeys: ["github_backup_gist_id"] });
 		} else {
-			await store.set("github_backup_gist_id", trimmed);
+			await applySettingsPatch({ patch: { github_backup_gist_id: trimmed } });
 		}
-
-		await store.save();
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", {
-			github_backup_gist_id: trimmed || null,
-		});
 	},
 
 	async updateToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		const store = await getStore();
-		await store.set("toggle_hotkey", hotkey);
-		await store.save();
+		await applySettingsPatch({ patch: { toggle_hotkey: hotkey } });
 	},
 
 	async updateHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		const store = await getStore();
-		await store.set("hold_hotkey", hotkey);
-		await store.save();
+		await applySettingsPatch({ patch: { hold_hotkey: hotkey } });
 	},
 
 	async updatePasteLastHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		const store = await getStore();
-		await store.set("paste_last_hotkey", hotkey);
-		await store.save();
+		await applySettingsPatch({ patch: { paste_last_hotkey: hotkey } });
 	},
 
 	async updateRetryHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		const store = await getStore();
-		await store.set("retry_hotkey", hotkey);
-		await store.save();
+		await applySettingsPatch({ patch: { retry_hotkey: hotkey } });
 	},
 
 	async updateQuickAskHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		const store = await getStore();
-		await store.set("quick_ask_hold_hotkey", hotkey);
-		await store.save();
+		await applySettingsPatch({ patch: { quick_ask_hold_hotkey: hotkey } });
 	},
 
 	async updateQuickAskToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		const store = await getStore();
-		await store.set("quick_ask_toggle_hotkey", hotkey);
-		await store.save();
+		await applySettingsPatch({ patch: { quick_ask_toggle_hotkey: hotkey } });
 	},
 
 	/**
@@ -1361,128 +1316,118 @@ export const tauriSettingsAPI = {
 	 * Writes both keys for backward compatibility.
 	 */
 	async updateQuickAskHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		const store = await getStore();
-		await store.set("quick_ask_hotkey", hotkey);
-		await store.set("quick_ask_hold_hotkey", hotkey);
-		await store.save();
+		await applySettingsPatch({
+			patch: { quick_ask_hotkey: hotkey, quick_ask_hold_hotkey: hotkey },
+		});
 	},
 
 	async updateQuickAskProvider(provider: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("quick_ask_provider", provider);
-		await store.save();
+		await applySettingsPatch({ patch: { quick_ask_provider: provider } });
 	},
 
 	async updateQuickAskModel(model: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("quick_ask_model", model);
-		await store.save();
+		await applySettingsPatch({ patch: { quick_ask_model: model } });
 	},
 
 	async updateQuickAskSystemPrompt(prompt: string | null): Promise<void> {
-		const store = await getStore();
 		const normalized = typeof prompt === "string" ? prompt.trim() : "";
-		await store.set(
-			"quick_ask_system_prompt",
-			normalized.length > 0 ? normalized : null,
-		);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				quick_ask_system_prompt: normalized.length > 0 ? normalized : null,
+			},
+		});
 	},
 
 	async updateQuickAskIncludeSelectedText(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("quick_ask_include_selected_text", Boolean(enabled));
-		await store.save();
+		await applySettingsPatch({
+			patch: { quick_ask_include_selected_text: Boolean(enabled) },
+		});
 	},
 
 	async updateQuickAskConversationHistoryEnabled(
 		enabled: boolean,
 	): Promise<void> {
-		const store = await getStore();
-		await store.set("quick_ask_conversation_history_enabled", Boolean(enabled));
-		await store.save();
+		await applySettingsPatch({
+			patch: { quick_ask_conversation_history_enabled: Boolean(enabled) },
+		});
 	},
 
 	async updateQuickAskConversationHistoryCount(count: number): Promise<void> {
-		const store = await getStore();
 		const normalized = normalizeQuickAskConversationHistoryCount(count);
-		await store.set("quick_ask_conversation_history_count", normalized);
-		await store.save();
+		await applySettingsPatch({
+			patch: { quick_ask_conversation_history_count: normalized },
+		});
 	},
 
 	async updateQuickAskOpenAiReasoningEffort(
 		effort: OpenAiReasoningEffort | null,
 	): Promise<void> {
-		const store = await getStore();
 		if (effort == null) {
-			await store.delete("quick_ask_openai_reasoning_effort");
-		} else {
-			await store.set(
-				"quick_ask_openai_reasoning_effort",
-				normalizeOpenAiReasoningEffort(effort),
-			);
+			await applySettingsPatch({
+				deleteKeys: ["quick_ask_openai_reasoning_effort"],
+			});
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(effort),
+			},
+		});
 	},
 
 	async updateQuickAskAnthropicThinkingBudget(
 		budget: number | null,
 	): Promise<void> {
-		const store = await getStore();
 		if (budget == null) {
-			await store.delete("quick_ask_anthropic_thinking_budget");
-		} else {
-			await store.set(
-				"quick_ask_anthropic_thinking_budget",
-				normalizeAnthropicThinkingBudget(budget),
-			);
+			await applySettingsPatch({
+				deleteKeys: ["quick_ask_anthropic_thinking_budget"],
+			});
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				quick_ask_anthropic_thinking_budget:
+					normalizeAnthropicThinkingBudget(budget),
+			},
+		});
 	},
 
 	async updateQuickAskGeminiThinkingBudget(
 		budget: number | null,
 	): Promise<void> {
-		const store = await getStore();
 		if (budget == null) {
-			await store.delete("quick_ask_gemini_thinking_budget");
-		} else {
-			await store.set(
-				"quick_ask_gemini_thinking_budget",
-				normalizeGeminiThinkingBudget(budget),
-			);
+			await applySettingsPatch({
+				deleteKeys: ["quick_ask_gemini_thinking_budget"],
+			});
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: { quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(budget) },
+		});
 	},
 
 	async updateQuickAskGeminiThinkingLevel(
 		level: "minimal" | "low" | "medium" | "high" | null,
 	): Promise<void> {
-		const store = await getStore();
 		if (level == null) {
-			await store.delete("quick_ask_gemini_thinking_level");
-		} else {
-			await store.set(
-				"quick_ask_gemini_thinking_level",
-				normalizeGeminiThinkingLevel(level),
-			);
+			await applySettingsPatch({
+				deleteKeys: ["quick_ask_gemini_thinking_level"],
+			});
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(level),
+			},
+		});
 	},
 
 	async updateSelectedMic(micId: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("selected_mic_id", micId);
-		await store.save();
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", {});
+		await applySettingsPatch({ patch: { selected_mic_id: micId } });
 	},
 
 	async updateSoundEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("sound_enabled", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { sound_enabled: enabled } });
 	},
 
 	async updateHotkeyDebugEnabled(enabled: boolean): Promise<void> {
@@ -1490,45 +1435,28 @@ export const tauriSettingsAPI = {
 		// without waiting for store writes / reloads.
 		await invoke("set_hotkey_debug_enabled_runtime", { enabled: !!enabled });
 
-		const store = await getStore();
-		await store.set("hotkey_debug_enabled", !!enabled);
-		await store.save();
-
-		// Notify other windows (overlay) to refresh cached settings.
-		// Without this, a secondary window with a stale Store instance can later
-		// save another setting and inadvertently clobber this flag back to the
-		// default value.
-		await emitTyped("settings-changed", { hotkey_debug_enabled: !!enabled });
+		await applySettingsPatch({
+			patch: { hotkey_debug_enabled: !!enabled },
+		});
 	},
 
 	async updateAudioCue(cue: AudioCue): Promise<void> {
-		const store = await getStore();
-		await store.set("audio_cue", normalizeAudioCue(cue));
-		await store.save();
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", {});
+		await applySettingsPatch({ patch: { audio_cue: normalizeAudioCue(cue) } });
 	},
 
 	async updateRewriteLlmEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("rewrite_llm_enabled", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { rewrite_llm_enabled: enabled } });
 	},
 
 	async updateCleanupPromptSections(
 		sections: CleanupPromptSections | null,
 	): Promise<void> {
-		const store = await getStore();
-		await store.set("cleanup_prompt_sections", sections);
-		await store.save();
+		await applySettingsPatch({ patch: { cleanup_prompt_sections: sections } });
 	},
 
 	async updateRewriteProgramPromptProfiles(
 		profiles: RewriteProgramPromptProfile[],
 	): Promise<void> {
-		const store = await getStore();
-
 		// Normalize a couple of legacy/nullable shapes before writing so the backend
 		// can deserialize reliably.
 		const sanitized = profiles.map((profile) => {
@@ -1543,219 +1471,164 @@ export const tauriSettingsAPI = {
 			};
 		});
 
-		await store.set("rewrite_program_prompt_profiles", sanitized);
-		await store.save();
-
-		// Notify other windows (overlay/hover) to refresh cached settings.
-		await emitTyped("settings-changed", {});
+		await applySettingsPatch({
+			patch: { rewrite_program_prompt_profiles: sanitized },
+		});
 	},
 
 	async updateSTTProvider(provider: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("stt_provider", provider);
-		await store.save();
+		await applySettingsPatch({ patch: { stt_provider: provider } });
 	},
 
 	async updateCerebrasFreeTier(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("cerebras_free_tier", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { cerebras_free_tier: !!enabled } });
 	},
 
 	async updateGroqFreeTier(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("groq_free_tier", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { groq_free_tier: !!enabled } });
 	},
 
 	async updateElevenLabsFreeTier(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("elevenlabs_free_tier", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { elevenlabs_free_tier: !!enabled } });
 	},
 
 	async updateCohereFreeTier(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("cohere_free_tier", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { cohere_free_tier: !!enabled } });
 	},
 
 	async updateAssemblyAiFreeTier(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("assemblyai_free_tier", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { assemblyai_free_tier: !!enabled } });
 	},
 
 	async updateSpeechmaticsFreeTier(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("speechmatics_free_tier", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { speechmatics_free_tier: !!enabled } });
 	},
 
 	async updateSTTModel(model: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("stt_model", model);
-		await store.save();
+		await applySettingsPatch({ patch: { stt_model: model } });
 	},
 
 	async updateSTTTranscriptionPrompt(prompt: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("stt_transcription_prompt", prompt);
-		await store.save();
+		await applySettingsPatch({ patch: { stt_transcription_prompt: prompt } });
 	},
 
 	async updateWhisperServerBaseUrl(baseUrl: string | null): Promise<void> {
-		const store = await getStore();
 		const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
-		await store.set("whisper_server_base_url", normalized);
-		await store.save();
+		await applySettingsPatch({
+			patch: { whisper_server_base_url: normalized },
+		});
 	},
 
 	async updateOllamaUrl(baseUrl: string | null): Promise<void> {
-		const store = await getStore();
 		const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
-		await store.set("ollama_url", normalized);
-		await store.save();
+		await applySettingsPatch({ patch: { ollama_url: normalized } });
 	},
 
 	async updateLocalWhisperModelId(modelId: string | null): Promise<void> {
-		const store = await getStore();
 		const normalized = modelId?.trim() ? modelId.trim().toLowerCase() : null;
-		await store.set("local_whisper_model_id", normalized);
-		await store.save();
+		await applySettingsPatch({
+			patch: { local_whisper_model_id: normalized },
+		});
 	},
 
 	async updateLocalWhisperLoadMode(mode: LocalWhisperLoadMode): Promise<void> {
-		const store = await getStore();
-		await store.set(
-			"local_whisper_load_mode",
-			normalizeLocalWhisperLoadMode(mode),
-		);
-		await store.save();
+		await applySettingsPatch({
+			patch: { local_whisper_load_mode: normalizeLocalWhisperLoadMode(mode) },
+		});
 	},
 
 	async updateProxySettings(proxySettings: ProxySettings): Promise<void> {
-		const store = await getStore();
-		await store.set("proxy_settings", normalizeProxySettings(proxySettings));
-		await store.save();
+		await applySettingsPatch({
+			patch: { proxy_settings: normalizeProxySettings(proxySettings) },
+		});
 	},
 
 	async updateLLMProvider(provider: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("llm_provider", provider);
-		await store.save();
+		await applySettingsPatch({ patch: { llm_provider: provider } });
 	},
 
 	async updateLLMModel(model: string | null): Promise<void> {
-		const store = await getStore();
-		await store.set("llm_model", model);
-		await store.save();
+		await applySettingsPatch({ patch: { llm_model: model } });
 	},
 
 	async updateOpenAiReasoningEffort(
 		effort: OpenAiReasoningEffort | null,
 	): Promise<void> {
-		const store = await getStore();
 		if (effort == null) {
-			await store.delete("openai_reasoning_effort");
-		} else {
-			await store.set(
-				"openai_reasoning_effort",
-				normalizeOpenAiReasoningEffort(effort),
-			);
+			await applySettingsPatch({ deleteKeys: ["openai_reasoning_effort"] });
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: { openai_reasoning_effort: normalizeOpenAiReasoningEffort(effort) },
+		});
 	},
 
 	async updateAnthropicThinkingBudget(budget: number | null): Promise<void> {
-		const store = await getStore();
 		if (budget == null) {
-			await store.delete("anthropic_thinking_budget");
-		} else {
-			await store.set(
-				"anthropic_thinking_budget",
-				normalizeAnthropicThinkingBudget(budget),
-			);
+			await applySettingsPatch({ deleteKeys: ["anthropic_thinking_budget"] });
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				anthropic_thinking_budget: normalizeAnthropicThinkingBudget(budget),
+			},
+		});
 	},
 
 	async updateGeminiThinkingBudget(budget: number | null): Promise<void> {
-		const store = await getStore();
 		if (budget == null) {
-			await store.delete("gemini_thinking_budget");
-		} else {
-			await store.set(
-				"gemini_thinking_budget",
-				normalizeGeminiThinkingBudget(budget),
-			);
+			await applySettingsPatch({ deleteKeys: ["gemini_thinking_budget"] });
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: { gemini_thinking_budget: normalizeGeminiThinkingBudget(budget) },
+		});
 	},
 
 	async updateGeminiThinkingLevel(
 		level: "minimal" | "low" | "medium" | "high" | null,
 	): Promise<void> {
-		const store = await getStore();
 		if (level == null) {
-			await store.delete("gemini_thinking_level");
-		} else {
-			await store.set(
-				"gemini_thinking_level",
-				normalizeGeminiThinkingLevel(level),
-			);
+			await applySettingsPatch({ deleteKeys: ["gemini_thinking_level"] });
+			return;
 		}
-		await store.save();
+		await applySettingsPatch({
+			patch: { gemini_thinking_level: normalizeGeminiThinkingLevel(level) },
+		});
 	},
 
 	async updatePlayingAudioHandling(
 		handling: PlayingAudioHandling,
 	): Promise<void> {
-		const store = await getStore();
-		await store.set("playing_audio_handling", handling);
-		await store.save();
+		await applySettingsPatch({ patch: { playing_audio_handling: handling } });
 	},
 
 	async updateSTTTimeout(timeoutSeconds: number | null): Promise<void> {
-		const store = await getStore();
-		await store.set("stt_timeout_seconds", timeoutSeconds);
-		await store.save();
+		await applySettingsPatch({ patch: { stt_timeout_seconds: timeoutSeconds } });
 	},
 
 	async updateOverlayMode(mode: OverlayMode): Promise<void> {
-		const store = await getStore();
-		await store.set("overlay_mode", mode);
-		await store.save();
+		await applySettingsPatch({ patch: { overlay_mode: mode } });
 		// Apply the mode immediately
 		await invoke("set_overlay_mode", { mode });
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", {});
 	},
 
 	async updateOverlayShowDetailedLoading(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("overlay_show_detailed_loading", !!enabled);
-		await store.save();
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", {
-			overlay_show_detailed_loading: !!enabled,
+		await applySettingsPatch({
+			patch: { overlay_show_detailed_loading: !!enabled },
 		});
 	},
 
 	async updateOverlayMonitorTarget(
 		target: OverlayMonitorTarget,
 	): Promise<void> {
-		const store = await getStore();
 		const normalized = normalizeOverlayMonitorTarget(target);
-
-		await store.set("overlay_monitor_target", normalized);
-		await store.save();
+		await applySettingsPatch({ patch: { overlay_monitor_target: normalized } });
 
 		// Best-effort: immediately re-snap overlay windows to the selected monitor.
 		// This uses the user's saved widget_position.
 		try {
+			const store = await getStore();
 			const raw = await store.get("widget_position");
 			const position =
 				raw === "center" ||
@@ -1771,143 +1644,106 @@ export const tauriSettingsAPI = {
 		} catch {
 			// ignore
 		}
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", { overlay_monitor_target: normalized });
 	},
 
 	async updateWidgetPosition(position: WidgetPosition): Promise<void> {
-		const store = await getStore();
-		await store.set("widget_position", position);
-		await store.save();
+		await applySettingsPatch({ patch: { widget_position: position } });
 		// Apply the position immediately
 		await invoke("set_widget_position", { position });
-
-		// Notify other windows (overlay) to refresh cached settings.
-		await emitTyped("settings-changed", {});
 	},
 
 	async updateOutputMode(mode: OutputMode): Promise<void> {
-		const store = await getStore();
-		await store.set("output_mode", mode);
-		await store.save();
+		await applySettingsPatch({ patch: { output_mode: mode } });
 	},
 
 	async updateOutputHitEnter(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("output_hit_enter", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { output_hit_enter: enabled } });
 	},
 
 	async updateQuietAudioGateEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("quiet_audio_gate_enabled", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { quiet_audio_gate_enabled: enabled } });
 	},
 
 	async updateQuietAudioMinDurationSecs(seconds: number): Promise<void> {
-		const store = await getStore();
-		await store.set("quiet_audio_min_duration_secs", seconds);
-		await store.save();
+		await applySettingsPatch({ patch: { quiet_audio_min_duration_secs: seconds } });
 	},
 
 	async updateQuietAudioRmsDbfsThreshold(dbfs: number): Promise<void> {
-		const store = await getStore();
-		await store.set("quiet_audio_rms_dbfs_threshold", dbfs);
-		await store.save();
+		await applySettingsPatch({ patch: { quiet_audio_rms_dbfs_threshold: dbfs } });
 	},
 
 	async updateQuietAudioPeakDbfsThreshold(dbfs: number): Promise<void> {
-		const store = await getStore();
-		await store.set("quiet_audio_peak_dbfs_threshold", dbfs);
-		await store.save();
+		await applySettingsPatch({ patch: { quiet_audio_peak_dbfs_threshold: dbfs } });
 	},
 
 	async updateQuietAudioRequireSpeech(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("quiet_audio_require_speech", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { quiet_audio_require_speech: enabled } });
 	},
 
 	async updateHotMicEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("hot_mic_enabled", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { hot_mic_enabled: !!enabled } });
 	},
 
 	async updateHotMicPreRollMs(ms: number): Promise<void> {
-		const store = await getStore();
 		const normalized = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
-		await store.set("hot_mic_pre_roll_ms", normalized);
-		await store.save();
+		await applySettingsPatch({ patch: { hot_mic_pre_roll_ms: normalized } });
 	},
 
 	async updateMicAutoRecoverEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("mic_auto_recover_enabled", !!enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { mic_auto_recover_enabled: !!enabled } });
 	},
 
 	async updateNoiseGateThresholdDbfs(
 		thresholdDbfs: number | null,
 	): Promise<void> {
-		const store = await getStore();
 		const normalized = normalizeNoiseGateThresholdDbfs(thresholdDbfs);
-		await store.set("noise_gate_threshold_dbfs", normalized);
-		// Best-effort legacy key for downgrade compatibility.
-		await store.set(
-			"noise_gate_strength",
-			noiseGateThresholdDbfsToStrength(normalized),
-		);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				noise_gate_threshold_dbfs: normalized,
+				// Best-effort legacy key for downgrade compatibility.
+				noise_gate_strength: noiseGateThresholdDbfsToStrength(normalized),
+			},
+		});
 	},
 
 	async updateNoiseGateStrength(strength: number): Promise<void> {
-		const store = await getStore();
 		const normalizedStrength = normalizeNoiseGateStrength(strength);
-		await store.set("noise_gate_strength", normalizedStrength);
-		// Keep the new key in sync for newer builds.
-		await store.set(
-			"noise_gate_threshold_dbfs",
-			noiseGateStrengthToThresholdDbfs(normalizedStrength),
-		);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				noise_gate_strength: normalizedStrength,
+				// Keep the new key in sync for newer builds.
+				noise_gate_threshold_dbfs:
+					noiseGateStrengthToThresholdDbfs(normalizedStrength),
+			},
+		});
 	},
 
 	async updateAudioDownmixToMono(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("audio_downmix_to_mono", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { audio_downmix_to_mono: enabled } });
 	},
 
 	async updateAudioResampleTo16khz(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("audio_resample_to_16khz", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { audio_resample_to_16khz: enabled } });
 	},
 
 	async updateAudioHighpassEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("audio_highpass_enabled", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { audio_highpass_enabled: enabled } });
 	},
 
 	async updateAudioAgcEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("audio_agc_enabled", enabled);
-		await store.save();
+		await applySettingsPatch({ patch: { audio_agc_enabled: enabled } });
 	},
 
 	async updateAudioNoiseSuppressionEnabled(enabled: boolean): Promise<void> {
-		const store = await getStore();
-		await store.set("audio_noise_suppression_enabled", enabled);
-		await store.save();
+		await applySettingsPatch({
+			patch: { audio_noise_suppression_enabled: enabled },
+		});
 	},
 
 	async updateMaxSavedRecordings(max: number): Promise<void> {
-		const store = await getStore();
-		await store.set("max_saved_recordings", normalizeMaxSavedRecordings(max));
-		await store.save();
+		await applySettingsPatch({
+			patch: { max_saved_recordings: normalizeMaxSavedRecordings(max) },
+		});
 	},
 
 	async updateRecordingsRetention(params: {
@@ -1916,17 +1752,18 @@ export const tauriSettingsAPI = {
 		unit: TranscriptionRetentionUnit;
 		value: number;
 	}): Promise<void> {
-		const store = await getStore();
 		const mode = normalizeRetentionMode(params.mode, "amount");
 		const amount = normalizeMaxSavedRecordings(params.amount);
 		const unit = normalizeTranscriptionRetentionUnit(params.unit);
 		const value = normalizeTranscriptionRetentionValue(params.value, unit);
-
-		await store.set("recordings_retention_mode", mode);
-		await store.set("recordings_retention_amount", amount);
-		await store.set("recordings_retention_unit", unit);
-		await store.set("recordings_retention_value", value);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				recordings_retention_mode: mode,
+				recordings_retention_amount: amount,
+				recordings_retention_unit: unit,
+				recordings_retention_value: value,
+			},
+		});
 	},
 
 	async updateRequestLogsRetention(params: {
@@ -1934,16 +1771,16 @@ export const tauriSettingsAPI = {
 		amount: number;
 		days: number;
 	}): Promise<void> {
-		const store = await getStore();
-
 		const mode = normalizeRequestLogsRetentionMode(params.mode);
 		const amount = normalizeRequestLogsRetentionAmount(params.amount);
 		const days = normalizeRequestLogsRetentionDays(params.days);
-
-		await store.set("request_logs_retention_mode", mode);
-		await store.set("request_logs_retention_amount", amount);
-		await store.set("request_logs_retention_days", days);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				request_logs_retention_mode: mode,
+				request_logs_retention_amount: amount,
+				request_logs_retention_days: days,
+			},
+		});
 	},
 
 	async updateTranscriptionRetentionPolicy(params: {
@@ -1952,7 +1789,6 @@ export const tauriSettingsAPI = {
 		unit: TranscriptionRetentionUnit;
 		value: number;
 	}): Promise<void> {
-		const store = await getStore();
 		const mode = normalizeRetentionMode(params.mode, "time");
 		const amount = normalizeTranscriptionRetentionAmount(params.amount);
 		const unit = normalizeTranscriptionRetentionUnit(params.unit);
@@ -1961,59 +1797,60 @@ export const tauriSettingsAPI = {
 			unit,
 		);
 		const effectiveValue = mode === "time" ? normalizedValue : 0;
-
-		await store.set("transcription_retention_mode", mode);
-		await store.set("transcription_retention_amount", amount);
-		await store.set("transcription_retention_unit", unit);
-		await store.set("transcription_retention_value", effectiveValue);
-		// Legacy key (kept for backward compatibility)
-		if (unit === "days") {
-			await store.set("transcription_retention_days", effectiveValue);
-		}
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				transcription_retention_mode: mode,
+				transcription_retention_amount: amount,
+				transcription_retention_unit: unit,
+				transcription_retention_value: effectiveValue,
+				// Legacy key (kept for backward compatibility)
+				...(unit === "days"
+					? { transcription_retention_days: effectiveValue }
+					: {}),
+			},
+		});
 	},
 
 	async updateTranscriptionRetentionDays(days: number): Promise<void> {
-		const store = await getStore();
 		const normalized = normalizeTranscriptionRetentionValue(days, "days");
-		// Legacy key (kept for backward compatibility)
-		await store.set("transcription_retention_days", normalized);
-		// New keys
-		await store.set("transcription_retention_unit", "days");
-		await store.set("transcription_retention_value", normalized);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				// Legacy key (kept for backward compatibility)
+				transcription_retention_days: normalized,
+				// New keys
+				transcription_retention_unit: "days",
+				transcription_retention_value: normalized,
+			},
+		});
 	},
 
 	async updateTranscriptionRetention(params: {
 		unit: TranscriptionRetentionUnit;
 		value: number;
 	}): Promise<void> {
-		const store = await getStore();
 		const unit = normalizeTranscriptionRetentionUnit(params.unit);
 		const value = normalizeTranscriptionRetentionValue(params.value, unit);
-
-		await store.set("transcription_retention_unit", unit);
-		await store.set("transcription_retention_value", value);
-
-		// Best-effort: keep the legacy days key in sync when unit is days.
-		// (If unit is hours, we leave the legacy key untouched to avoid silently
-		// changing semantics for older builds.)
-		if (unit === "days") {
-			await store.set("transcription_retention_days", value);
-		}
-
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				transcription_retention_unit: unit,
+				transcription_retention_value: value,
+				// Best-effort: keep the legacy days key in sync when unit is days.
+				// (If unit is hours, we leave the legacy key untouched to avoid silently
+				// changing semantics for older builds.)
+				...(unit === "days" ? { transcription_retention_days: value } : {}),
+			},
+		});
 	},
 
 	async updateTranscriptionRetentionDeleteRecordings(
 		enabled: boolean,
 	): Promise<void> {
-		const store = await getStore();
-		await store.set(
-			"transcription_retention_delete_recordings",
-			normalizeTranscriptionRetentionDeleteRecordings(enabled),
-		);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				transcription_retention_delete_recordings:
+					normalizeTranscriptionRetentionDeleteRecordings(enabled),
+			},
+		});
 	},
 
 	async updateStatsRetention(params: {
@@ -2021,21 +1858,21 @@ export const tauriSettingsAPI = {
 		value: number;
 		max_bytes?: number;
 	}): Promise<void> {
-		const store = await getStore();
 		const unit = normalizeTranscriptionRetentionUnit(params.unit);
 		const value = normalizeTranscriptionRetentionValue(params.value, unit);
-
-		await store.set("stats_retention_unit", unit);
-		await store.set("stats_retention_value", value);
-
-		if (typeof params.max_bytes === "number") {
-			await store.set(
-				"stats_retention_max_bytes",
-				normalizeStatsRetentionMaxBytes(params.max_bytes),
-			);
-		}
-
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				stats_retention_unit: unit,
+				stats_retention_value: value,
+				...(typeof params.max_bytes === "number"
+					? {
+						stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
+							params.max_bytes,
+						),
+					}
+					: {}),
+			},
+		});
 	},
 
 	async getSettingsGuideState(): Promise<SettingsGuideState> {
@@ -2055,12 +1892,11 @@ export const tauriSettingsAPI = {
 	},
 
 	async setSettingsGuideState(state: SettingsGuideState): Promise<void> {
-		const store = await getStore();
-		await store.set(
-			SETTINGS_GUIDE_STATE_KEY,
-			normalizeSettingsGuideState(state),
-		);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				[SETTINGS_GUIDE_STATE_KEY]: normalizeSettingsGuideState(state),
+			},
+		});
 
 		try {
 			if (typeof window !== "undefined" && window.localStorage) {
@@ -2070,20 +1906,21 @@ export const tauriSettingsAPI = {
 			// ignore
 		}
 
-		// Notify other windows that persisted state changed.
-		await emitTyped("settings-changed", { [SETTINGS_GUIDE_STATE_KEY]: state });
+		// No explicit event emit here; the backend patch command emits settings-changed.
 	},
 
 	async resetHotkeysToDefaults(): Promise<void> {
-		const store = await getStore();
-		await store.set("toggle_hotkey", DEFAULT_TOGGLE_HOTKEY);
-		await store.set("hold_hotkey", DEFAULT_HOLD_HOTKEY);
-		await store.set("paste_last_hotkey", DEFAULT_PASTE_LAST_HOTKEY);
-		await store.set("retry_hotkey", DEFAULT_RETRY_HOTKEY);
-		await store.set("quick_ask_hold_hotkey", DEFAULT_QUICK_ASK_HOLD_HOTKEY);
-		await store.set("quick_ask_toggle_hotkey", DEFAULT_QUICK_ASK_TOGGLE_HOTKEY);
-		// Legacy alias (pre split): keep in sync.
-		await store.set("quick_ask_hotkey", DEFAULT_QUICK_ASK_HOLD_HOTKEY);
-		await store.save();
+		await applySettingsPatch({
+			patch: {
+				toggle_hotkey: DEFAULT_TOGGLE_HOTKEY,
+				hold_hotkey: DEFAULT_HOLD_HOTKEY,
+				paste_last_hotkey: DEFAULT_PASTE_LAST_HOTKEY,
+				retry_hotkey: DEFAULT_RETRY_HOTKEY,
+				quick_ask_hold_hotkey: DEFAULT_QUICK_ASK_HOLD_HOTKEY,
+				quick_ask_toggle_hotkey: DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
+				// Legacy alias (pre split): keep in sync.
+				quick_ask_hotkey: DEFAULT_QUICK_ASK_HOLD_HOTKEY,
+			},
+		});
 	},
 };

@@ -71,7 +71,7 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 }));
 
 describe("tauriAPI.getSettings() normalization", () => {
-	it("migrates legacy cleanup_prompt_sections.main -> cleanup_prompt_sections.system and writes back", async () => {
+	it("migrates legacy cleanup_prompt_sections.main -> cleanup_prompt_sections.system (read-only)", async () => {
 		vi.resetModules();
 		currentStore = new FakeStore({
 			cleanup_prompt_sections: {
@@ -86,19 +86,12 @@ describe("tauriAPI.getSettings() normalization", () => {
 			system: { content: "Hello legacy prompt" },
 		});
 
-		// Should have cleaned up the legacy shape.
-		expect(
-			currentStore.setCalls.some(
-				(c) =>
-					c.key === "cleanup_prompt_sections" &&
-					JSON.stringify(c.value) ===
-						JSON.stringify({ system: { content: "Hello legacy prompt" } }),
-			),
-		).toBe(true);
-		expect(currentStore.saveCalls).toBeGreaterThan(0);
+		// Getter should not mutate the store.
+		expect(currentStore.setCalls).toHaveLength(0);
+		expect(currentStore.saveCalls).toBe(0);
 	});
 
-	it("defaults invalid accent_color to DEFAULT_ACCENT_HEX and writes back", async () => {
+	it("defaults invalid accent_color to DEFAULT_ACCENT_HEX (read-only)", async () => {
 		vi.resetModules();
 		currentStore = new FakeStore({
 			accent_color: "not-a-color",
@@ -110,12 +103,8 @@ describe("tauriAPI.getSettings() normalization", () => {
 		// Don’t hardcode the hex; import the canonical constant.
 		const { DEFAULT_ACCENT_HEX } = await import("./accentColor");
 		expect(settings.accent_color).toBe(DEFAULT_ACCENT_HEX);
-		expect(
-			currentStore.setCalls.some(
-				(c) => c.key === "accent_color" && c.value === DEFAULT_ACCENT_HEX,
-			),
-		).toBe(true);
-		expect(currentStore.saveCalls).toBeGreaterThan(0);
+		expect(currentStore.setCalls).toHaveLength(0);
+		expect(currentStore.saveCalls).toBe(0);
 	});
 
 	it("migrates legacy profile program_path -> program_paths[]", async () => {
@@ -195,7 +184,7 @@ describe("tauriAPI.getSettings() normalization", () => {
 		expect(settings3.quick_ask_conversation_history_count).toBe(20);
 	});
 
-	it("normalizes malformed cleanup_prompt_sections.system and writes back", async () => {
+	it("normalizes malformed cleanup_prompt_sections.system (read-only)", async () => {
 		vi.resetModules();
 		currentStore = new FakeStore({
 			cleanup_prompt_sections: {
@@ -210,15 +199,8 @@ describe("tauriAPI.getSettings() normalization", () => {
 		expect(settings.cleanup_prompt_sections).toEqual({
 			system: { content: null },
 		});
-		expect(
-			currentStore.setCalls.some(
-				(c) =>
-					c.key === "cleanup_prompt_sections" &&
-					JSON.stringify(c.value) ===
-						JSON.stringify({ system: { content: null } }),
-			),
-		).toBe(true);
-		expect(currentStore.saveCalls).toBeGreaterThan(0);
+		expect(currentStore.setCalls).toHaveLength(0);
+		expect(currentStore.saveCalls).toBe(0);
 	});
 
 	it("migrates legacy auto_mute_audio boolean into playing_audio_handling", async () => {
