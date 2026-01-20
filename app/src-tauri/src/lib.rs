@@ -16,6 +16,7 @@ mod commands;
 mod cost;
 mod embeddings;
 pub mod events;
+mod fs;
 mod history;
 mod llm;
 mod network;

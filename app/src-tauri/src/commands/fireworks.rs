@@ -12,7 +12,11 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
-use crate::commands::CommandResult;
+use crate::commands::{CommandError, CommandResult};
+
+fn fireworks_error(message: impl Into<String>) -> CommandError {
+    CommandError::new(message, "llm")
+}
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ModelOption {
     pub value: String,
@@ -51,13 +55,14 @@ fn now_unix_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn fireworks_models_cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn fireworks_models_cache_path(app: &AppHandle) -> Result<PathBuf, CommandError> {
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+        .map_err(|e| fireworks_error(format!("Failed to resolve app data dir: {e}")))?;
     let cache_dir = app_data_dir.join("cache");
-    let _ = std::fs::create_dir_all(&cache_dir);
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| fireworks_error(format!("Failed to create cache dir: {e}")))?;
     Ok(cache_dir.join("fireworks-models.json"))
 }
 
@@ -193,7 +198,7 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
         crate::secrets::get_api_key(&app, "fireworks_api_key").unwrap_or_default();
     let api_key_trimmed = api_key.trim();
     if api_key_trimmed.is_empty() {
-        return Err("No Fireworks API key configured".to_string().into());
+        return Err(fireworks_error("No Fireworks API key configured"));
     }
 
     // Cache so Settings can re-render without repeatedly hitting Fireworks.
@@ -241,10 +246,9 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
 
         if let Ok(resp) = resp {
             if resp.status().is_success() {
-                let parsed: OpenAiModelsResponse = resp
-                    .json()
-                    .await
-                    .map_err(|e| format!("Failed to parse Fireworks models response: {}", e))?;
+                let parsed: OpenAiModelsResponse = resp.json().await.map_err(|e| {
+                    fireworks_error(format!("Failed to parse Fireworks models response: {}", e))
+                })?;
                 callable_ids = parsed
                     .data
                     .into_iter()
@@ -261,7 +265,7 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
     // Safety: cap pagination.
     for _ in 0..10 {
         let mut url = reqwest::Url::parse("https://api.fireworks.ai/v1/accounts/fireworks/models")
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| fireworks_error(e.to_string()))?;
         {
             let mut qp = url.query_pairs_mut();
             qp.append_pair("pageSize", "200");
@@ -275,7 +279,7 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
             .header("Authorization", format!("Bearer {}", api_key_trimmed))
             .send()
             .await
-            .map_err(|e| format!("Failed to list Fireworks models: {}", e))?;
+            .map_err(|e| fireworks_error(format!("Failed to list Fireworks models: {}", e)))?;
 
         if !resp.status().is_success() {
             // Best-effort: if we already have callable models, don't fail just because
@@ -285,13 +289,15 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
             }
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!("Failed to list Fireworks models ({}): {}", status, body).into());
+            return Err(fireworks_error(format!(
+                "Failed to list Fireworks models ({}): {}",
+                status, body
+            )));
         }
 
-        let parsed: ListModelsResponse = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse Fireworks models response: {}", e))?;
+        let parsed: ListModelsResponse = resp.json().await.map_err(|e| {
+            fireworks_error(format!("Failed to parse Fireworks models response: {}", e))
+        })?;
 
         catalog_models.extend(parsed.models.into_iter());
 

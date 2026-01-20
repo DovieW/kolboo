@@ -10,6 +10,10 @@ use crate::commands::{CommandError, CommandResult};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
+fn history_error(message: impl Into<String>) -> CommandError {
+    CommandError::new(message, "history")
+}
+
 pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
     #[cfg(desktop)]
     {
@@ -153,7 +157,7 @@ fn resolve_recording_source_id(
     app: &AppHandle,
     history: &HistoryStorage,
     entry: &HistoryEntry,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, CommandError> {
     if let Some(rid) = entry.recording_request_id.as_ref() {
         let r = rid.trim();
         if !r.is_empty() {
@@ -176,7 +180,7 @@ fn compute_recording_ref_count(
     app: &AppHandle,
     history: &HistoryStorage,
     recording_id: &str,
-) -> Result<u64, String> {
+) -> Result<u64, CommandError> {
     let entries = history.get_all(None)?;
 
     let mut count = 0u64;
@@ -215,7 +219,7 @@ pub async fn get_history_delete_options(
     history: State<'_, HistoryStorage>,
 ) -> CommandResult<HistoryDeleteOptions> {
     let Some(entry) = history.get_by_id(&id)? else {
-        return Err("History entry not found".to_string().into());
+        return Err(history_error("History entry not found"));
     };
 
     let recording_id = resolve_recording_source_id(&app, &history, &entry)?;
@@ -251,7 +255,7 @@ pub async fn delete_history_entry_ex(
 ) -> CommandResult<HistoryDeleteResult> {
     let entry = history
         .get_by_id(&id)?
-        .ok_or_else(|| "History entry not found".to_string())?;
+        .ok_or_else(|| history_error("History entry not found"))?;
 
     let recording_id = resolve_recording_source_id(&app, &history, &entry)?;
 

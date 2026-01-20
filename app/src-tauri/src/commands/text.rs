@@ -28,20 +28,21 @@ pub async fn get_server_url() -> String {
 pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
     // macOS HIToolbox APIs (used by enigo) must run on the main thread
     // Use a channel to get the result back from the main thread
-    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    let (tx, rx) = mpsc::channel::<Result<(), CommandError>>();
 
     app.run_on_main_thread(move || {
         // Serialize output across all modes to avoid interleaving key events.
-        let _ = tx.send(run_with_output_injection_lock(|| {
-            type_text_blocking(&text, false)
-        }));
+        let _ = tx.send(
+            run_with_output_injection_lock(|| type_text_blocking(&text, false))
+                .map_err(CommandError::from),
+        );
     })
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| CommandError::from(e.to_string()))?;
 
     // Wait for result from main thread
     let result = rx.recv().map_err(|e| CommandError::from(e.to_string()))?;
     match result {
         Ok(()) => Ok(()),
-        Err(error) => Err(CommandError::from(error)),
+        Err(error) => Err(error),
     }
 }

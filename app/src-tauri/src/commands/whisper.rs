@@ -618,7 +618,7 @@ pub async fn download_whisper_model(
                     .ok();
             };
 
-            let result: Result<(), String> = async {
+            let result: Result<(), CommandError> = async {
                 send_progress(
                     WhisperModelDownloadStatus::Downloading,
                     0,
@@ -630,23 +630,26 @@ pub async fn download_whisper_model(
                     .get(url)
                     .send()
                     .await
-                    .map_err(|e| format!("Request failed: {}", e))?;
+                    .map_err(|e| whisper_error(format!("Request failed: {}", e)))?;
 
                 if !resp.status().is_success() {
-                    return Err(format!("Download failed (HTTP {})", resp.status()));
+                    return Err(whisper_error(format!(
+                        "Download failed (HTTP {})",
+                        resp.status()
+                    )));
                 }
 
                 let total = resp.content_length();
 
                 if let Some(parent) = tmp_path.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|e| format!("Failed to create models dir: {}", e))?;
+                    tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                        whisper_error(format!("Failed to create models dir: {}", e))
+                    })?;
                 }
 
                 let mut file = tokio::fs::File::create(&tmp_path)
                     .await
-                    .map_err(|e| format!("Failed to create temp file: {}", e))?;
+                    .map_err(|e| whisper_error(format!("Failed to create temp file: {}", e)))?;
 
                 let mut hasher = Sha256::new();
                 let mut downloaded: u64 = 0;
@@ -655,14 +658,14 @@ pub async fn download_whisper_model(
 
                 while let Some(next) = stream.next().await {
                     if cancel.is_cancelled() {
-                        return Err("cancelled".to_string());
+                        return Err(whisper_error("cancelled"));
                     }
 
-                    let chunk = next.map_err(|e| format!("Stream error: {}", e))?;
+                    let chunk = next.map_err(|e| whisper_error(format!("Stream error: {}", e)))?;
                     hasher.update(&chunk);
                     file.write_all(&chunk)
                         .await
-                        .map_err(|e| format!("Write failed: {}", e))?;
+                        .map_err(|e| whisper_error(format!("Write failed: {}", e)))?;
                     downloaded = downloaded.saturating_add(chunk.len() as u64);
 
                     let should_emit = last_emit.elapsed() >= std::time::Duration::from_millis(250);
@@ -679,7 +682,7 @@ pub async fn download_whisper_model(
 
                 file.flush()
                     .await
-                    .map_err(|e| format!("Flush failed: {}", e))?;
+                    .map_err(|e| whisper_error(format!("Flush failed: {}", e)))?;
                 drop(file);
 
                 send_progress(
@@ -691,10 +694,10 @@ pub async fn download_whisper_model(
 
                 let actual_sha = format!("{:x}", hasher.finalize());
                 if actual_sha != expected_sha {
-                    return Err(format!(
+                    return Err(whisper_error(format!(
                         "SHA-256 mismatch (expected {}, got {})",
                         expected_sha, actual_sha
-                    ));
+                    )));
                 }
 
                 // Move into place.
@@ -704,7 +707,7 @@ pub async fn download_whisper_model(
 
                 tokio::fs::rename(&tmp_path, &model_path)
                     .await
-                    .map_err(|e| format!("Failed to finalize model file: {}", e))?;
+                    .map_err(|e| whisper_error(format!("Failed to finalize model file: {}", e)))?;
 
                 send_progress(
                     WhisperModelDownloadStatus::Completed,
@@ -719,7 +722,7 @@ pub async fn download_whisper_model(
 
             match result {
                 Ok(()) => {}
-                Err(e) if e == "cancelled" => {
+                Err(e) if e.message == "cancelled" => {
                     let _ = tokio::fs::remove_file(&tmp_path).await;
                     send_progress(
                         WhisperModelDownloadStatus::Cancelled,
@@ -730,7 +733,7 @@ pub async fn download_whisper_model(
                 }
                 Err(e) => {
                     let _ = tokio::fs::remove_file(&tmp_path).await;
-                    send_progress(WhisperModelDownloadStatus::Error, 0, None, Some(e));
+                    send_progress(WhisperModelDownloadStatus::Error, 0, None, Some(e.message));
                 }
             }
 

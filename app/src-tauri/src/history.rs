@@ -3,12 +3,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fs;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use crate::app_paths::ensure_dir;
+use crate::fs::{Fs, RealFs};
 
 /// Hard safety cap to prevent unbounded growth of `history.json`.
 ///
@@ -147,11 +147,17 @@ struct HistoryData {
 pub struct HistoryStorage {
     data: RwLock<HistoryData>,
     file_path: PathBuf,
+    fs: Arc<dyn Fs>,
 }
 
 impl HistoryStorage {
     /// Create a new history storage with the given app data directory
     pub fn new(app_data_dir: PathBuf) -> Self {
+        Self::with_fs(app_data_dir, Arc::new(RealFs))
+    }
+
+    /// Create a new history storage with a custom filesystem implementation.
+    pub fn with_fs(app_data_dir: PathBuf, fs: Arc<dyn Fs>) -> Self {
         let file_path = app_data_dir.join("history.json");
 
         // Ensure the directory exists
@@ -160,17 +166,18 @@ impl HistoryStorage {
         }
 
         // Load existing history or use empty
-        let data = Self::load_from_file(&file_path).unwrap_or_default();
+        let data = Self::load_from_file(fs.as_ref(), &file_path).unwrap_or_default();
 
         Self {
             data: RwLock::new(data),
             file_path,
+            fs,
         }
     }
 
     /// Load history from the JSON file
-    fn load_from_file(file_path: &PathBuf) -> Option<HistoryData> {
-        let content = fs::read_to_string(file_path).ok()?;
+    fn load_from_file(fs: &dyn Fs, file_path: &PathBuf) -> Option<HistoryData> {
+        let content = fs.read_to_string(file_path).ok()?;
         serde_json::from_str(&content).ok()
     }
 
@@ -184,7 +191,8 @@ impl HistoryStorage {
         let content = serde_json::to_string_pretty(&*data)
             .map_err(|e| format!("Failed to serialize history: {}", e))?;
 
-        fs::write(&self.file_path, content)
+        self.fs
+            .write(&self.file_path, content.as_bytes())
             .map_err(|e| format!("Failed to write history file: {}", e))?;
 
         Ok(())
@@ -688,7 +696,8 @@ impl HistoryStorage {
 
     /// Best-effort history file size on disk (bytes).
     pub fn file_size_bytes(&self) -> u64 {
-        std::fs::metadata(&self.file_path)
+        self.fs
+            .metadata(&self.file_path)
             .map(|m| m.len())
             .unwrap_or(0)
     }
@@ -825,6 +834,79 @@ pub struct HistoryPageResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::io;
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    use crate::fs::Fs;
+
+    #[derive(Debug, Default)]
+    struct MemoryFs {
+        files: Mutex<HashMap<PathBuf, Vec<u8>>>,
+    }
+
+    impl MemoryFs {
+        fn get_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
+            let guard = self
+                .files
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "memory fs lock poisoned"))?;
+            guard
+                .get(path)
+                .cloned()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "file not found"))
+        }
+    }
+
+    impl Fs for MemoryFs {
+        fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+            self.get_bytes(path)
+        }
+
+        fn read_to_string(&self, path: &Path) -> io::Result<String> {
+            let bytes = self.get_bytes(path)?;
+            String::from_utf8(bytes)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        }
+
+        fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+            let mut guard = self
+                .files
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "memory fs lock poisoned"))?;
+            guard.insert(path.to_path_buf(), contents.to_vec());
+            Ok(())
+        }
+
+        fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn read_dir(&self, _path: &Path) -> io::Result<Vec<PathBuf>> {
+            Ok(Vec::new())
+        }
+
+        fn metadata(&self, _path: &Path) -> io::Result<std::fs::Metadata> {
+            Err(io::Error::new(io::ErrorKind::NotFound, "no metadata"))
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            let mut guard = self
+                .files
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "memory fs lock poisoned"))?;
+            guard.remove(path);
+            Ok(())
+        }
+
+        fn exists(&self, path: &Path) -> bool {
+            let Ok(guard) = self.files.lock() else {
+                return false;
+            };
+            guard.contains_key(path)
+        }
+    }
 
     fn make_temp_app_dir() -> PathBuf {
         let mut dir = std::env::temp_dir();
@@ -897,5 +979,21 @@ mod tests {
             after.error_message.as_deref(),
             Some("Interrupted (app restarted)")
         );
+    }
+
+    #[test]
+    fn history_storage_with_custom_fs_writes_to_memory() {
+        let fs = Arc::new(MemoryFs::default());
+        let dir = PathBuf::from("mem://history");
+        let history = HistoryStorage::with_fs(dir.clone(), fs.clone());
+
+        let _ = history
+            .add_entry("hello".to_string(), None)
+            .expect("add_entry failed");
+
+        let contents = fs
+            .read_to_string(&dir.join("history.json"))
+            .expect("read_to_string failed");
+        assert!(contents.contains("hello"));
     }
 }

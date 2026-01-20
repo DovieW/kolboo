@@ -41,16 +41,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
   - Small test seams:
     - Keep CPAL behind a tiny trait (e.g. “AudioCaptureBackend”) so pipeline state transitions can be tested with a fake capture backend that emits deterministic “audio level” events.
 
-- **Filesystem IO (history/recordings/stats/backups/models):**
-  - Hot spots:
-    - `app/src-tauri/src/history.rs` (read/write history file, metadata checks)
-    - `app/src-tauri/src/recordings.rs` (create/read/delete/list recordings)
-    - `app/src-tauri/src/stats.rs` and `app/src-tauri/src/commands/stats.rs` (append logs, list/delete)
-    - `app/src-tauri/src/commands/backup.rs` (read/write settings backup)
-    - `app/src-tauri/src/commands/whisper.rs` + `app/src-tauri/src/commands/config.rs` (model dir creation/download temp files)
-  - Small test seams:
-    - Consider a minimal “Fs” interface only where needed (read/write/list/delete) for the most critical code paths (history + recordings), but avoid big refactors.
-
 - **Network IO (reqwest providers + proxy config):**
   - Hot spots:
     - `app/src-tauri/src/network.rs` + `app/src-tauri/src/commands/network.rs` (proxy + custom cert loading)

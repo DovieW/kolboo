@@ -1,10 +1,10 @@
 use schemars::JsonSchema;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
 use crate::app_paths::ensure_dir;
+use crate::fs::{Fs, RealFs};
 
 #[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]
 pub struct RecordingsStats {
@@ -21,15 +21,21 @@ pub struct RecordingStore {
     // Keep a tiny in-memory cache of existence checks to avoid repeated fs hits.
     // This is best-effort; correctness still relies on the filesystem.
     known_existing: RwLock<std::collections::HashSet<String>>,
+    fs: Arc<dyn Fs>,
 }
 
 impl RecordingStore {
     pub fn new(app_data_dir: PathBuf) -> Self {
+        Self::with_fs(app_data_dir, Arc::new(RealFs))
+    }
+
+    pub fn with_fs(app_data_dir: PathBuf, fs: Arc<dyn Fs>) -> Self {
         let dir = app_data_dir.join("recordings");
         let _ = ensure_dir(&dir);
         Self {
             dir,
             known_existing: RwLock::new(std::collections::HashSet::new()),
+            fs,
         }
     }
 
@@ -57,12 +63,12 @@ impl RecordingStore {
         if let Ok(known) = self.known_existing.read() {
             if known.contains(id) {
                 let p = self.path_for_id(id);
-                return Ok(if p.exists() { Some(p) } else { None });
+                return Ok(if self.fs.exists(&p) { Some(p) } else { None });
             }
         }
 
         let path = self.path_for_id(id);
-        if path.exists() {
+        if self.fs.exists(&path) {
             if let Ok(mut known) = self.known_existing.write() {
                 known.insert(id.to_string());
             }
@@ -79,7 +85,7 @@ impl RecordingStore {
                 return true;
             }
         }
-        self.path_for_id(id).exists()
+        self.fs.exists(&self.path_for_id(id))
     }
 
     pub fn save_wav(&self, id: &str, wav_bytes: &[u8]) -> Result<(), String> {
@@ -92,11 +98,13 @@ impl RecordingStore {
 
         let path = self.path_for_id(id);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
+            self.fs
+                .create_dir_all(parent)
                 .map_err(|e| format!("Failed to create recordings dir: {}", e))?;
         }
 
-        fs::write(&path, wav_bytes)
+        self.fs
+            .write(&path, wav_bytes)
             .map_err(|e| format!("Failed to write recording {}: {}", path.display(), e))?;
 
         if let Ok(mut known) = self.known_existing.write() {
@@ -108,7 +116,9 @@ impl RecordingStore {
 
     pub fn load_wav(&self, id: &str) -> Result<Vec<u8>, String> {
         let path = self.path_for_id(id);
-        fs::read(&path).map_err(|e| format!("Failed to read recording {}: {}", path.display(), e))
+        self.fs
+            .read(&path)
+            .map_err(|e| format!("Failed to read recording {}: {}", path.display(), e))
     }
 
     /// Delete a saved WAV file if it exists.
@@ -120,7 +130,7 @@ impl RecordingStore {
         }
 
         let path = self.path_for_id(id);
-        if !path.exists() {
+        if !self.fs.exists(&path) {
             // Keep existence cache best-effort in sync.
             if let Ok(mut known) = self.known_existing.write() {
                 known.remove(id);
@@ -128,7 +138,8 @@ impl RecordingStore {
             return Ok(false);
         }
 
-        fs::remove_file(&path)
+        self.fs
+            .remove_file(&path)
             .map_err(|e| format!("Failed to delete recording {}: {}", path.display(), e))?;
 
         if let Ok(mut known) = self.known_existing.write() {
@@ -143,7 +154,7 @@ impl RecordingStore {
     /// Best-effort: skips individual files it cannot stat.
     pub fn total_size_bytes(&self) -> Result<u64, String> {
         let mut total: u64 = 0;
-        let entries = fs::read_dir(&self.dir).map_err(|e| {
+        let entries = self.fs.read_dir(&self.dir).map_err(|e| {
             format!(
                 "Failed to read recordings dir {}: {}",
                 self.dir.display(),
@@ -151,17 +162,14 @@ impl RecordingStore {
             )
         })?;
 
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
+        for path in entries {
+            let meta = match self.fs.metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
             };
-            let path = entry.path();
-            if !path.is_file() {
+            if !meta.is_file() {
                 continue;
             }
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
             total = total.saturating_add(meta.len());
         }
 
@@ -178,7 +186,7 @@ impl RecordingStore {
         let mut count: u64 = 0;
         let mut bytes: u64 = 0;
 
-        let entries = fs::read_dir(&self.dir).map_err(|e| {
+        let entries = self.fs.read_dir(&self.dir).map_err(|e| {
             format!(
                 "Failed to read recordings dir {}: {}",
                 self.dir.display(),
@@ -186,14 +194,15 @@ impl RecordingStore {
             )
         })?;
 
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
+        for path in entries {
+            let meta = match self.fs.metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
             };
-            let path = entry.path();
-            if !path.is_file() {
+            if !meta.is_file() {
                 continue;
             }
+
             if path
                 .extension()
                 .and_then(|s| s.to_str())
@@ -201,10 +210,6 @@ impl RecordingStore {
                 .to_lowercase()
                 != "wav"
             {
-                continue;
-            }
-
-            let Ok(meta) = entry.metadata() else {
                 continue;
             };
 
@@ -225,7 +230,7 @@ impl RecordingStore {
         }
 
         let mut files: Vec<(PathBuf, SystemTime)> = Vec::new();
-        let entries = fs::read_dir(&self.dir).map_err(|e| {
+        let entries = self.fs.read_dir(&self.dir).map_err(|e| {
             format!(
                 "Failed to read recordings dir {}: {}",
                 self.dir.display(),
@@ -233,12 +238,12 @@ impl RecordingStore {
             )
         })?;
 
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
+        for path in entries {
+            let meta = match self.fs.metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
             };
-            let path = entry.path();
-            if !path.is_file() {
+            if !meta.is_file() {
                 continue;
             }
             // Only manage .wav files (be conservative).
@@ -252,9 +257,6 @@ impl RecordingStore {
                 continue;
             }
 
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
             let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
             files.push((path, modified));
         }
@@ -270,7 +272,7 @@ impl RecordingStore {
         let mut deleted = 0usize;
         for (path, _) in files.into_iter().take(delete_count) {
             // Best-effort delete.
-            if fs::remove_file(&path).is_ok() {
+            if self.fs.remove_file(&path).is_ok() {
                 deleted += 1;
 
                 // Keep existence cache best-effort in sync.
@@ -291,7 +293,7 @@ impl RecordingStore {
     pub fn delete_all_wavs(&self) -> Result<u64, String> {
         let mut deleted: u64 = 0;
 
-        let entries = fs::read_dir(&self.dir).map_err(|e| {
+        let entries = self.fs.read_dir(&self.dir).map_err(|e| {
             format!(
                 "Failed to read recordings dir {}: {}",
                 self.dir.display(),
@@ -299,12 +301,12 @@ impl RecordingStore {
             )
         })?;
 
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
+        for path in entries {
+            let meta = match self.fs.metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
             };
-            let path = entry.path();
-            if !path.is_file() {
+            if !meta.is_file() {
                 continue;
             }
             if path
@@ -317,7 +319,7 @@ impl RecordingStore {
                 continue;
             }
 
-            if fs::remove_file(&path).is_ok() {
+            if self.fs.remove_file(&path).is_ok() {
                 deleted = deleted.saturating_add(1);
             }
         }
