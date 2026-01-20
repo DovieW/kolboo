@@ -10,15 +10,9 @@ These are the files that are _currently_ the largest / most responsibility-dense
 
 ### Rust backend
 
-- **Split `app/src-tauri/src/lib.rs` (very large).**
-  - Why: it mixes app bootstrap, tray/window behavior, hotkeys, settings seeding/migration, pipeline orchestration, Quick Ask/Replace wiring, and event emission.
-  - Suggested splits:
-    - `bootstrap/*` (plugins, window creation, menu/tray setup)
-    - `shortcuts/*` (global shortcut registration + Escape-to-cancel lifecycle)
-    - `sessions/*` (record start/stop orchestration; Quick Ask / Quick Replace branches)
-    - `settings/defaults.rs` (keep `ensure_default_settings(...)` + migrations close to settings types)
-    - `overlay/*` (show/hide/position logic)
-  - Acceptance hint: keep the public Tauri command API the same; this is mostly moving code + adding thin wrappers.
+- **Continue shrinking `app/src-tauri/src/lib.rs` (still large).**
+  - Why: it’s still a very responsibility-dense file, even after prior extractions.
+  - Good next slice: extract the recording/Quick Ask/Quick Replace orchestration into a `sessions/*` module so `lib.rs` trends toward “wiring only”.
 
 - **Split `app/src-tauri/src/pipeline.rs` (~188KB).**
   - Why: it contains unrelated concerns (provider construction/caching, routing logic, state machine + config, embedding cache/persistence, and helper utilities).
@@ -27,11 +21,6 @@ These are the files that are _currently_ the largest / most responsibility-dense
     - `pipeline/config.rs` (PipelineConfig defaults + normalization)
     - `pipeline/providers.rs` (STT/LLM provider creation + caching)
     - `pipeline/router/*` (embeddings router + LLM router + diagnostics payload building)
-
-### Frontend (React/TS)
-
-- **Continue splitting `app/src/OverlayApp.tsx` if it grows again.**
-  - Goal: keep overlay UI logic testable and predictable.
 
 ## Overlay UI (React)
 

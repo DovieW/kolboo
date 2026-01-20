@@ -942,17 +942,6 @@ export function useUpdateMaxSavedRecordings() {
 	});
 }
 
-export function useUpdateTranscriptionRetention() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (params: { unit: "days" | "hours"; value: number }) =>
-			tauriAPI.updateTranscriptionRetention(params),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
-}
-
 export function useUpdateTranscriptionRetentionDeleteRecordings() {
 	const queryClient = useQueryClient();
 	return useMutation({
