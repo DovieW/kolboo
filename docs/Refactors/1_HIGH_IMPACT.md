@@ -41,14 +41,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
   - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.
   - Why: frontend error UI becomes simpler and more consistent; logging/telemetry can attach stable codes.
 
-## Prevent Rust/TS contract drift
-
-- **Generate or validate TS types against backend schemas.**
-  - The CI failures we hit were mostly “frontend types lagging behind backend reality” (e.g. new request log fields / settings keys like `quick_replace_enabled`).
-  - Ideas:
-    - Generate TypeScript types from the Rust structs (or from the JSON schemas in `app/src-tauri/gen/schemas/`) and import those into `app/src/lib/tauri.ts`.
-  - Goal: avoid shipping changes where Rust and TS disagree on the shape of settings/logs.
-
 ## Rust deterministic testing seams (hard IO audit)
 
 - **Audio device IO (CPAL):**

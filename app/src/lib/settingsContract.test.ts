@@ -1,6 +1,7 @@
 // Deprecated: split into app/src/lib/contracts/** tests.
+// Kept as a skipped file to avoid duplicate contract assertions.
 import fs from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { describe as baseDescribe, expect, it, vi } from "vitest";
 import type {
 	AudioCaptureDiagnostics,
 	AudioLevelStats,
@@ -55,6 +56,8 @@ import type {
 	WindowsInternetProxySettings,
 } from "./tauri";
 import { configAPI } from "./tauri";
+
+const describe = baseDescribe.skip;
 
 type AvailableProvidersResponse = Awaited<
 	ReturnType<typeof configAPI.getAvailableProviders>
@@ -142,7 +145,7 @@ function extractRustSeededSettingsKeys(rustSource: string): string[] {
 	return [...keys].sort();
 }
 
-describe.skip("settings contract: Rust defaults vs TS getSettings", () => {
+describe("settings contract: Rust defaults vs TS getSettings", () => {
 	it("keeps TS getSettings() in sync with backend-seeded settings keys", async () => {
 		vi.resetModules();
 		currentStore = new FakeStore({});
