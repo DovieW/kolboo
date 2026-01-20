@@ -7,6 +7,7 @@ use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
 use crate::commands::event_sink::{AppEventSink, EventSink};
 use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
 use crate::commands::CommandError;
+use crate::events;
 use crate::history::{HistoryStorage, RequestModelInfo};
 use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, SharedPipeline};
 use crate::recordings::{RecordingStore, RecordingsStats};
@@ -227,12 +228,15 @@ pub(crate) fn apply_transcription_retention(app: &AppHandle) {
         }
     }
 
-    let _ = app.emit("history-changed", ());
+    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
 }
 
 pub(crate) fn emit_pipeline_recording_started<S: EventSink>(sink: &S) {
-    sink.emit("pipeline-recording-started", &());
-    sink.emit("pipeline-state-changed", &PipelineStateEvent::Recording);
+    sink.emit(events::EVENT_PIPELINE_RECORDING_STARTED, &());
+    sink.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        &PipelineStateEvent::Recording,
+    );
 }
 
 impl From<PipelineError> for CommandError {
@@ -256,8 +260,6 @@ impl From<PipelineError> for CommandError {
         }
     }
 }
-
-/// Get the absolute path to a saved WAV recording for a given request id.
 ///
 /// Returns `null` when the recording doesn't exist.
 #[tauri::command]
@@ -275,8 +277,6 @@ pub fn recording_get_wav_path(
     Ok(path.map(|p| p.to_string_lossy().to_string()))
 }
 
-/// Get saved WAV bytes for a given request id as base64.
-///
 /// Some webviews can fail to play `convertFileSrc` URLs for WAVs if the asset protocol
 /// serves an unexpected content-type; base64+Blob playback is a reliable fallback.
 ///
@@ -305,8 +305,6 @@ pub fn recording_get_wav_base64(
     Ok(Some(encoded))
 }
 
-/// Delete all saved recordings from disk.
-///
 /// Returns the number of `.wav` files deleted.
 #[tauri::command]
 pub fn recordings_delete_all(app: AppHandle) -> Result<u64, CommandError> {
@@ -318,7 +316,6 @@ pub fn recordings_delete_all(app: AppHandle) -> Result<u64, CommandError> {
     Ok(deleted)
 }
 
-/// Open the recordings folder in the OS file manager.
 #[tauri::command]
 pub fn recordings_open_folder(app: AppHandle) -> Result<(), CommandError> {
     let store = app
@@ -329,7 +326,6 @@ pub fn recordings_open_folder(app: AppHandle) -> Result<(), CommandError> {
         .map_err(|e| CommandError::from(format!("Failed to open recordings folder: {}", e)))
 }
 
-/// Total bytes used by saved recordings on disk.
 #[tauri::command]
 pub fn recordings_get_storage_bytes(app: AppHandle) -> Result<u64, CommandError> {
     let store = app
@@ -339,7 +335,6 @@ pub fn recordings_get_storage_bytes(app: AppHandle) -> Result<u64, CommandError>
     store.total_size_bytes().map_err(CommandError::from)
 }
 
-/// Stats about saved recordings (count + total bytes).
 #[tauri::command]
 pub fn recordings_get_stats(app: AppHandle) -> Result<RecordingsStats, CommandError> {
     let store = app
@@ -571,7 +566,7 @@ pub async fn pipeline_stop_and_transcribe(
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
-            let _ = app.emit("history-changed", ());
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
 
@@ -614,13 +609,15 @@ pub async fn pipeline_stop_and_transcribe(
 
                             if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                 let _ = history.set_request_profile(req_id, pid, pname);
-                                let _ = app_clone.emit("history-changed", ());
+                                let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                             }
                         }
 
-                        let _ = app_clone.emit("pipeline-transcription-started", ());
-                        let _ = app_clone
-                            .emit("pipeline-state-changed", PipelineStateEvent::Transcribing);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Transcribing,
+                        );
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -651,9 +648,11 @@ pub async fn pipeline_stop_and_transcribe(
             loop {
                 match pipeline_clone.state() {
                     PipelineState::Routing => {
-                        let _ = app_clone.emit("pipeline-routing-started", ());
-                        let _ =
-                            app_clone.emit("pipeline-state-changed", PipelineStateEvent::Routing);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Routing,
+                        );
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -688,9 +687,11 @@ pub async fn pipeline_stop_and_transcribe(
             loop {
                 match pipeline_clone.state() {
                     PipelineState::Rewriting => {
-                        let _ = app_clone.emit("pipeline-rewriting-started", ());
-                        let _ =
-                            app_clone.emit("pipeline-state-changed", PipelineStateEvent::Rewriting);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Rewriting,
+                        );
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -748,12 +749,15 @@ pub async fn pipeline_stop_and_transcribe(
             if let Some(req_id) = active_request_id.as_deref() {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.delete(req_id);
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
 
-            let _ = app.emit("pipeline-cancelled", ());
-            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+            let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
+            let _ = app.emit(
+                events::EVENT_PIPELINE_STATE_CHANGED,
+                PipelineStateEvent::Idle,
+            );
             return Ok(String::new());
         }
         Err(e) => {
@@ -785,7 +789,7 @@ pub async fn pipeline_stop_and_transcribe(
             if let Some(req_id) = active_request_id.as_deref() {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.complete_request_error(req_id, e.to_string());
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
 
@@ -809,8 +813,11 @@ pub async fn pipeline_stop_and_transcribe(
                 "message": e.to_string(),
                 "request_id": active_request_id.clone(),
             });
-            let _ = app.emit("pipeline-error", payload);
-            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Error);
+            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
+            let _ = app.emit(
+                events::EVENT_PIPELINE_STATE_CHANGED,
+                PipelineStateEvent::Error,
+            );
 
             return Err(CommandError::from(e));
         }
@@ -925,7 +932,7 @@ pub async fn pipeline_stop_and_transcribe(
             if let Some((preset_id, preset_name)) = preset_meta {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.set_request_preset(req_id, preset_id, preset_name);
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
         }
@@ -942,7 +949,7 @@ pub async fn pipeline_stop_and_transcribe(
                     (None, None)
                 };
                 let _ = history.set_request_llm_model(req_id, provider, model);
-                let _ = app.emit("history-changed", ());
+                let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
             }
         }
 
@@ -961,7 +968,7 @@ pub async fn pipeline_stop_and_transcribe(
                 // Mark that this history entry has a recording available (it is stored under req_id).
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.set_request_recording_id(req_id, Some(req_id.to_string()));
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
         }
@@ -981,7 +988,7 @@ pub async fn pipeline_stop_and_transcribe(
                 (None, None)
             };
             let _ = history.set_request_llm_model(req_id, provider, model);
-            let _ = app.emit("history-changed", ());
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
 
@@ -989,8 +996,11 @@ pub async fn pipeline_stop_and_transcribe(
     apply_transcription_retention(&app);
 
     // Emit transcript ready event
-    let _ = app.emit("pipeline-transcript-ready", &final_text);
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+    let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, &final_text);
+    let _ = app.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        PipelineStateEvent::Idle,
+    );
 
     // Done transcribing - stop stealing Escape.
     #[cfg(desktop)]
@@ -1107,12 +1117,15 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             // Ensure play/rerun for this new entry points at the original recording.
             let _ = history.set_request_recording_id(req_id, Some(recording_source_id.clone()));
 
-            let _ = app.emit("history-changed", ());
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
 
-    let _ = app.emit("pipeline-transcription-started", ());
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Transcribing);
+    let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
+    let _ = app.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        PipelineStateEvent::Transcribing,
+    );
 
     // If we know the original preset, set a one-shot session lock so the retry uses the
     // same preset as the entry being rerun (instead of whatever the profile/router would
@@ -1148,9 +1161,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             loop {
                 match pipeline_clone.state() {
                     PipelineState::Rewriting => {
-                        let _ = app_clone.emit("pipeline-rewriting-started", ());
-                        let _ =
-                            app_clone.emit("pipeline-state-changed", PipelineStateEvent::Rewriting);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Rewriting,
+                        );
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1179,9 +1194,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             loop {
                 match pipeline_clone.state() {
                     PipelineState::Routing => {
-                        let _ = app_clone.emit("pipeline-routing-started", ());
-                        let _ =
-                            app_clone.emit("pipeline-state-changed", PipelineStateEvent::Routing);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Routing,
+                        );
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1210,8 +1227,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         Err(PipelineError::Cancelled) => {
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
-            let _ = app.emit("pipeline-cancelled", ());
-            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+            let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
+            let _ = app.emit(
+                events::EVENT_PIPELINE_STATE_CHANGED,
+                PipelineStateEvent::Idle,
+            );
             return Ok(String::new());
         }
         Err(e) => {
@@ -1240,7 +1260,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             if let Some(req_id) = new_request_id.as_deref() {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.complete_request_error(req_id, e.to_string());
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
 
@@ -1249,8 +1269,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 "message": e.to_string(),
                 "request_id": new_request_id,
             });
-            let _ = app.emit("pipeline-error", payload);
-            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Error);
+            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
+            let _ = app.emit(
+                events::EVENT_PIPELINE_STATE_CHANGED,
+                PipelineStateEvent::Error,
+            );
 
             return Err(CommandError::from(e));
         }
@@ -1308,7 +1331,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             if let Some((preset_id, preset_name)) = preset_meta {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.set_request_preset(req_id, preset_id, preset_name);
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
         }
@@ -1330,13 +1353,16 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 (None, None)
             };
             let _ = history.set_request_llm_model(req_id, provider, model);
-            let _ = app.emit("history-changed", ());
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
 
     // Emit transcript ready event
-    let _ = app.emit("pipeline-transcript-ready", &final_text);
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+    let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, &final_text);
+    let _ = app.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        PipelineStateEvent::Idle,
+    );
 
     #[cfg(desktop)]
     crate::set_escape_cancel_shortcut_enabled(&app, false);
@@ -1375,8 +1401,11 @@ pub fn pipeline_cancel(
         pipeline.cancel();
 
         // Emit cancelled event
-        let _ = app.emit("pipeline-cancelled", ());
-        let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+        let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
+        let _ = app.emit(
+            events::EVENT_PIPELINE_STATE_CHANGED,
+            PipelineStateEvent::Idle,
+        );
 
         Ok(())
     }
@@ -1530,7 +1559,7 @@ pub async fn pipeline_dictate(
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
-            let _ = app.emit("history-changed", ());
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
 
@@ -1557,9 +1586,11 @@ pub async fn pipeline_dictate(
                     PipelineState::Transcribing
                     | PipelineState::Routing
                     | PipelineState::Rewriting => {
-                        let _ = app_clone.emit("pipeline-transcription-started", ());
-                        let _ = app_clone
-                            .emit("pipeline-state-changed", PipelineStateEvent::Transcribing);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Transcribing,
+                        );
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1585,9 +1616,11 @@ pub async fn pipeline_dictate(
             loop {
                 match pipeline_clone.state() {
                     PipelineState::Routing => {
-                        let _ = app_clone.emit("pipeline-routing-started", ());
-                        let _ =
-                            app_clone.emit("pipeline-state-changed", PipelineStateEvent::Routing);
+                        let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
+                        let _ = app_clone.emit(
+                            events::EVENT_PIPELINE_STATE_CHANGED,
+                            PipelineStateEvent::Routing,
+                        );
                         break;
                     }
                     PipelineState::Idle | PipelineState::Error => {
@@ -1611,8 +1644,11 @@ pub async fn pipeline_dictate(
         Err(PipelineError::Cancelled) => {
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
-            let _ = app.emit("pipeline-cancelled", ());
-            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+            let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
+            let _ = app.emit(
+                events::EVENT_PIPELINE_STATE_CHANGED,
+                PipelineStateEvent::Idle,
+            );
 
             // Best-effort: mark request as cancelled in logs + history.
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
@@ -1626,7 +1662,7 @@ pub async fn pipeline_dictate(
             if let Some(req_id) = active_request_id.as_deref() {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.complete_request_error(req_id, "Cancelled".to_string());
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
 
@@ -1676,7 +1712,7 @@ pub async fn pipeline_dictate(
             if let Some(req_id) = active_request_id.as_deref() {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.complete_request_error(req_id, e.to_string());
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
 
@@ -1688,8 +1724,11 @@ pub async fn pipeline_dictate(
                 "message": e.to_string(),
                 "request_id": active_request_id.clone(),
             });
-            let _ = app.emit("pipeline-error", payload);
-            let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Error);
+            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
+            let _ = app.emit(
+                events::EVENT_PIPELINE_STATE_CHANGED,
+                PipelineStateEvent::Error,
+            );
 
             return Err(CommandError::from(e));
         }
@@ -1701,8 +1740,11 @@ pub async fn pipeline_dictate(
     let wav_bytes = pipeline.clone_last_wav_bytes();
 
     // Emit transcript ready event
-    let _ = app.emit("pipeline-transcript-ready", &final_text);
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+    let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, &final_text);
+    let _ = app.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        PipelineStateEvent::Idle,
+    );
 
     // Type the transcript
     if !final_text.is_empty() {
@@ -1807,7 +1849,7 @@ pub async fn pipeline_dictate(
             if let Some((preset_id, preset_name)) = preset_meta {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
                     let _ = history.set_request_preset(req_id, preset_id, preset_name);
-                    let _ = app.emit("history-changed", ());
+                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
                 }
             }
         }
@@ -1841,7 +1883,7 @@ pub async fn pipeline_dictate(
                 (None, None)
             };
             let _ = history.set_request_llm_model(req_id, provider, model);
-            let _ = app.emit("history-changed", ());
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
 
@@ -2065,8 +2107,11 @@ pub async fn pipeline_toggle(
             });
         }
 
-        let _ = app.emit("pipeline-recording-started", ());
-        let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Recording);
+        let _ = app.emit(events::EVENT_PIPELINE_RECORDING_STARTED, ());
+        let _ = app.emit(
+            events::EVENT_PIPELINE_STATE_CHANGED,
+            PipelineStateEvent::Recording,
+        );
         Ok(String::new())
     }
 }
@@ -2091,8 +2136,11 @@ pub fn pipeline_force_reset(
     crate::set_escape_cancel_shortcut_enabled(&app, false);
 
     // Emit reset event
-    let _ = app.emit("pipeline-reset", ());
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+    let _ = app.emit(events::EVENT_PIPELINE_RESET, ());
+    let _ = app.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        PipelineStateEvent::Idle,
+    );
 
     Ok(())
 }

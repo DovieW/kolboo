@@ -1,3 +1,4 @@
+use crate::events;
 use crate::settings::HotkeyConfig;
 use crate::SystemEvent;
 use tauri::{AppHandle, Emitter, Manager};
@@ -36,7 +37,7 @@ pub async fn set_hotkey_debug_enabled_runtime(app: AppHandle, enabled: bool) -> 
         details: Some("(confirmation event from backend)".to_string()),
     };
 
-    let _ = app.emit("system-event", event);
+    let _ = app.emit(events::EVENT_SYSTEM_EVENT, event);
     Ok(())
 }
 

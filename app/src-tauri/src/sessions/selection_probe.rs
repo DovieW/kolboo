@@ -142,24 +142,3 @@ pub async fn await_probe_result(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
-
-/// Check if a probe is ready without blocking.
-///
-/// Returns `(ready, selection_text)`. If epoch is 0 or mismatched, returns `(true, None)`.
-pub fn check_probe_ready(app: &AppHandle, kind: ProbeKind, epoch: u64) -> (bool, Option<String>) {
-    if epoch == 0 {
-        return (true, None);
-    }
-
-    let state = app.state::<crate::state::AppState>();
-    match kind {
-        ProbeKind::QuickAsk => match state.quick_ask_probe.lock() {
-            Ok(probe) if probe.epoch == epoch => (probe.ready, probe.selection_text.clone()),
-            _ => (true, None),
-        },
-        ProbeKind::QuickReplace => match state.quick_replace_probe.lock() {
-            Ok(probe) if probe.epoch == epoch => (probe.ready, probe.selection_text.clone()),
-            _ => (true, None),
-        },
-    }
-}

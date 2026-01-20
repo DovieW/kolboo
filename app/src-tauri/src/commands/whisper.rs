@@ -3,6 +3,7 @@
 //! These commands are only available when the `local-whisper` feature is enabled.
 
 use crate::commands::CommandError;
+use crate::events;
 #[cfg(feature = "local-whisper")]
 use crate::stt::WhisperModel;
 use schemars::JsonSchema;
@@ -124,9 +125,10 @@ fn observe_cuda_usage_via_nvidia_smi() -> LocalWhisperBackendObserved {
 }
 
 #[cfg(feature = "local-whisper")]
-pub const WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT: &str = "whisper-model-download-progress";
+pub const WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT: &str =
+    events::EVENT_WHISPER_MODEL_DOWNLOAD_PROGRESS;
 
-pub const LOCAL_WHISPER_MODEL_LOAD_EVENT: &str = "local-whisper-model-load";
+pub const LOCAL_WHISPER_MODEL_LOAD_EVENT: &str = events::EVENT_LOCAL_WHISPER_MODEL_LOAD;
 
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

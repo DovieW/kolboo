@@ -5,6 +5,7 @@ use tauri::{
 };
 
 use crate::commands;
+use crate::events;
 use crate::history::HistoryStorage;
 use crate::llm;
 use crate::pipeline;
@@ -101,7 +102,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
                 log::info!("Tray menu: quit");
                 // Emit disconnect request to frontend before exiting
                 if let Some(window) = app.get_webview_window("overlay") {
-                    let _ = window.emit("request-disconnect", ());
+                    let _ = window.emit(events::EVENT_REQUEST_DISCONNECT, ());
                 }
                 // Give frontend time to disconnect gracefully
                 std::thread::sleep(std::time::Duration::from_millis(500));

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::events;
 use crate::history::HistoryStorage;
 use crate::recordings::RecordingStore;
 use crate::request_log::RequestLogStore;
@@ -255,7 +256,7 @@ pub fn delete_all_data(app: AppHandle) -> Result<(), String> {
     // 1) History
     if let Some(history) = app.try_state::<HistoryStorage>() {
         let _ = history.clear();
-        let _ = app.emit("history-changed", ());
+        let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
     }
 
     // 2) Request logs

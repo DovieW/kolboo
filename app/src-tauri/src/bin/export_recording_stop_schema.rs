@@ -1,1 +1,4 @@
-kolboo_lib::schema_export_bin!(kolboo_lib::EmptyEventPayload, "recording-stop");
+kolboo_lib::schema_export_bin!(
+    kolboo_lib::EmptyEventPayload,
+    kolboo_lib::events::EVENT_RECORDING_STOP
+);

@@ -1,4 +1,4 @@
 kolboo_lib::schema_export_bin!(
     kolboo_lib::EmptyEventPayload,
-    "pipeline-transcription-started"
+    kolboo_lib::events::EVENT_PIPELINE_TRANSCRIPTION_STARTED
 );

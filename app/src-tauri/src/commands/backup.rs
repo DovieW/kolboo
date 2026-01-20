@@ -12,6 +12,8 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
 
+use crate::events;
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SettingsBackupPayload {
     pub format: String,
@@ -155,7 +157,10 @@ fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> Resu
     let _ = crate::commands::config::sync_pipeline_config(app.clone());
 
     // Notify other windows to refresh cached settings.
-    let _ = app.emit("settings-changed", crate::SettingsChangedPayload::new());
+    let _ = app.emit(
+        events::EVENT_SETTINGS_CHANGED,
+        crate::SettingsChangedPayload::new(),
+    );
 
     Ok(())
 }

@@ -15,7 +15,7 @@ mod clipboard_context;
 mod commands;
 mod cost;
 mod embeddings;
-mod events;
+pub mod events;
 mod history;
 mod llm;
 mod network;

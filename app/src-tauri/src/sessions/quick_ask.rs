@@ -1,9 +1,11 @@
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::events;
+
 pub(crate) const QUICK_ASK_WINDOW_LABEL: &str = "quick_ask";
 
-pub(crate) const EVENT_QUICK_ASK_STARTED: &str = "quick-ask-started";
-pub(crate) const EVENT_QUICK_ASK_ANSWER: &str = "quick-ask-answer";
+pub(crate) const EVENT_QUICK_ASK_STARTED: &str = events::EVENT_QUICK_ASK_STARTED;
+pub(crate) const EVENT_QUICK_ASK_ANSWER: &str = events::EVENT_QUICK_ASK_ANSWER;
 
 /// Emit an event intended for the Quick Ask window.
 ///

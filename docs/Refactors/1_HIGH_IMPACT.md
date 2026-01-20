@@ -31,11 +31,6 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - `commands/*` becomes thin wrappers around core services
   - Why this helps: it’s much easier to test “core logic” without needing a Tauri runtime.
 
-- **Introduce a typed event contract (avoid stringly-typed event drift).**
-  - Today: events are string names with ad-hoc payloads (`pipeline-state-changed`, `overlay-audio-level`, etc.).
-  - Suggested: define a single event map (name -> payload type) and emit/listen through typed helpers.
-  - Acceptance hint: existing callers can still “listen by string”, but new code should go through the typed wrapper.
-
 - **Standardize error handling across commands (one error shape to the UI).**
   - Today: errors bubble up in different formats depending on where they come from.
   - Suggested: one `AppError` type with stable fields (code, message, details, retryable, request_id?) and a single conversion path to Tauri command errors.

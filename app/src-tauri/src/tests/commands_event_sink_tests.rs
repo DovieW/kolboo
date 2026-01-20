@@ -1,5 +1,6 @@
 use crate::commands::event_sink::EventSink;
 use crate::commands::recording::emit_pipeline_recording_started;
+use crate::events;
 use crate::PipelineStateEvent;
 use serde::Serialize;
 use serde_json::Value;
@@ -25,9 +26,9 @@ fn test_emit_pipeline_recording_started_emits_expected_events() {
 
     let events = sink.events.borrow();
     assert_eq!(events.len(), 2);
-    assert_eq!(events[0].0, "pipeline-recording-started");
+    assert_eq!(events[0].0, events::EVENT_PIPELINE_RECORDING_STARTED);
     assert_eq!(events[0].1, Value::Null);
-    assert_eq!(events[1].0, "pipeline-state-changed");
+    assert_eq!(events[1].0, events::EVENT_PIPELINE_STATE_CHANGED);
     assert_eq!(
         events[1].1,
         serde_json::to_value(PipelineStateEvent::Recording).unwrap()

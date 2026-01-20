@@ -1,5 +1,6 @@
 use crate::audio::{self, AudioCue, SoundType};
 use crate::audio_capture;
+use crate::events;
 use crate::state::{MicTestMeterState, MicTestPipelineRestore};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -154,7 +155,7 @@ pub async fn mic_test_start_meter(
 
         // Prime UI immediately so it can un-grey the meter.
         let _ = app_handle.emit(
-            "mic-test-audio-level",
+            events::EVENT_MIC_TEST_AUDIO_LEVEL,
             MicTestAudioLevelPayload {
                 active: true,
                 session_id,
@@ -192,7 +193,7 @@ pub async fn mic_test_start_meter(
                 last_emit = Instant::now();
 
                 let _ = app_handle.emit(
-                    "mic-test-audio-level",
+                    events::EVENT_MIC_TEST_AUDIO_LEVEL,
                     MicTestAudioLevelPayload {
                         active: true,
                         session_id,
@@ -205,7 +206,7 @@ pub async fn mic_test_start_meter(
 
             // Tell the UI to grey out.
             let _ = app_handle.emit(
-                "mic-test-audio-level",
+                events::EVENT_MIC_TEST_AUDIO_LEVEL,
                 MicTestAudioLevelPayload {
                     active: false,
                     session_id,
@@ -260,7 +261,7 @@ pub async fn mic_test_stop_meter(
 
         // Best-effort: ensure UI returns to greyed state immediately.
         let _ = app.emit(
-            "mic-test-audio-level",
+            events::EVENT_MIC_TEST_AUDIO_LEVEL,
             MicTestAudioLevelPayload {
                 active: false,
                 session_id,

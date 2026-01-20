@@ -1,1 +1,4 @@
-kolboo_lib::schema_export_bin!(kolboo_lib::EmptyEventPayload, "pipeline-routing-started");
+kolboo_lib::schema_export_bin!(
+    kolboo_lib::EmptyEventPayload,
+    kolboo_lib::events::EVENT_PIPELINE_ROUTING_STARTED
+);

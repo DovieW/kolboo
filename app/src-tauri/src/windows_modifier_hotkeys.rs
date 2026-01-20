@@ -17,6 +17,7 @@ use std::sync::OnceLock;
 use tauri::AppHandle;
 use tauri::Emitter;
 
+use crate::events;
 use crate::SystemEvent;
 
 use tauri_plugin_store::StoreExt;
@@ -207,7 +208,7 @@ fn emit_hotkey_debug_event(app: &AppHandle, message: &str, details: Option<Strin
         details,
     };
 
-    let _ = app.emit("system-event", event);
+    let _ = app.emit(events::EVENT_SYSTEM_EVENT, event);
 }
 
 /// Enable/disable modifier-only hotkeys.

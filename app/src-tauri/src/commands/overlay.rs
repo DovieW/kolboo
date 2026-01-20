@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(desktop)]
 use tauri::window::Monitor;
 
+use crate::events;
 use crate::state::AppState;
 
 #[cfg(desktop)]
@@ -632,7 +633,7 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
             }
             "never" => {
                 // Ask the frontend to animate out before we hide.
-                let _ = app.emit("overlay-hide-requested", ());
+                let _ = app.emit(events::EVENT_OVERLAY_HIDE_REQUESTED, ());
 
                 // Fallback hide (in case the overlay UI isn't ready to handle the event).
                 let window_clone = window.clone();
@@ -659,7 +660,7 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> Result<(), String
             }
             "recording_only" => {
                 // Hide initially, will be shown when recording starts
-                let _ = app.emit("overlay-hide-requested", ());
+                let _ = app.emit(events::EVENT_OVERLAY_HIDE_REQUESTED, ());
                 let window_clone = window.clone();
                 let app_clone = app.clone();
                 let expected_epoch = app

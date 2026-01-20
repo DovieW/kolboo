@@ -10,6 +10,7 @@ use tauri_plugin_store::StoreExt;
 
 use crate::audio;
 use crate::commands;
+use crate::events;
 use crate::history::HistoryStorage;
 use crate::pipeline;
 use crate::recordings::RecordingStore;
@@ -350,7 +351,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.delete(req_id);
-            let _ = app.emit("history-changed", ());
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
 
@@ -363,7 +364,7 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     let overlay_mode: String =
         get_setting_from_store(app, "overlay_mode", "recording_only".to_string());
     if overlay_mode == "recording_only" {
-        let _ = app.emit("overlay-hide-requested", ());
+        let _ = app.emit(events::EVENT_OVERLAY_HIDE_REQUESTED, ());
 
         if let Some(window) = app.get_webview_window("overlay") {
             let window_clone = window.clone();
@@ -391,8 +392,11 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     }
 
     // Notify frontend
-    let _ = app.emit("pipeline-cancelled", ());
-    let _ = app.emit("pipeline-state-changed", PipelineStateEvent::Idle);
+    let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
+    let _ = app.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        PipelineStateEvent::Idle,
+    );
 
     // Disable Escape shortcut now that we're idle.
     set_escape_cancel_shortcut_enabled(app, false);

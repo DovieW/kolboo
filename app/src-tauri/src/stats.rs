@@ -26,6 +26,7 @@ use crate::cost::gemini as gemini_cost;
 use crate::cost::groq as groq_cost;
 use crate::cost::openai as openai_cost;
 use crate::cost::speechmatics as speechmatics_cost;
+use crate::events;
 use crate::request_log::RequestLogStore;
 use tauri::AppHandle;
 use tauri::{Emitter, Manager};
@@ -1043,7 +1044,7 @@ pub fn emit_cost_events_for_current_request(
     let _ = stats_store.prune(cfg);
 
     if any_stats_written {
-        let _ = app.emit("stats-changed", ());
+        let _ = app.emit(events::EVENT_STATS_CHANGED, ());
     }
 }
 

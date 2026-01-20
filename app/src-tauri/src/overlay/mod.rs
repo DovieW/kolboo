@@ -4,6 +4,7 @@ use tauri::{App, AppHandle, Emitter, Manager};
 use tauri_utils::config::BackgroundThrottlingPolicy;
 
 use crate::commands;
+use crate::events;
 use crate::pipeline;
 use crate::{get_setting_from_store, OverlayAudioLevelPayload};
 
@@ -67,9 +68,9 @@ pub(crate) fn spawn_overlay_waveform_publisher(app: &AppHandle) {
                         maxes: Some(Vec::<f32>::new()),
                     };
                     if let Some(overlay) = app_handle.get_webview_window("overlay") {
-                        let _ = overlay.emit("overlay-audio-level", payload);
+                        let _ = overlay.emit(events::EVENT_OVERLAY_AUDIO_LEVEL, payload);
                     } else {
-                        let _ = app_handle.emit("overlay-audio-level", payload);
+                        let _ = app_handle.emit(events::EVENT_OVERLAY_AUDIO_LEVEL, payload);
                     }
                 }
                 continue;
@@ -100,9 +101,9 @@ pub(crate) fn spawn_overlay_waveform_publisher(app: &AppHandle) {
                 maxes: Some(wave.maxes),
             };
             if let Some(overlay) = app_handle.get_webview_window("overlay") {
-                let _ = overlay.emit("overlay-audio-level", payload);
+                let _ = overlay.emit(events::EVENT_OVERLAY_AUDIO_LEVEL, payload);
             } else {
-                let _ = app_handle.emit("overlay-audio-level", payload);
+                let _ = app_handle.emit(events::EVENT_OVERLAY_AUDIO_LEVEL, payload);
             }
         }
     });
