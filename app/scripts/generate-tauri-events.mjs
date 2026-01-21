@@ -6,7 +6,13 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
 
 const rustEventsPath = path.join(appRoot, "src-tauri", "src", "events.rs");
-const outPath = path.join(appRoot, "src", "lib", "tauri", "events.generated.ts");
+const outPath = path.join(
+	appRoot,
+	"src",
+	"lib",
+	"tauri",
+	"events.generated.ts",
+);
 
 if (!fs.existsSync(rustEventsPath)) {
 	throw new Error(`Rust events file not found: ${rustEventsPath}`);
@@ -15,8 +21,7 @@ if (!fs.existsSync(rustEventsPath)) {
 const source = fs.readFileSync(rustEventsPath, "utf8").replace(/^\uFEFF/, "");
 
 // Match: pub const EVENT_FOO: &str = "some-event";
-const constRegex =
-	/\bpub\s+const\s+[A-Z0-9_]+\s*:\s*&str\s*=\s*"([^"]+)"\s*;/g;
+const constRegex = /\bpub\s+const\s+[A-Z0-9_]+\s*:\s*&str\s*=\s*"([^"]+)"\s*;/g;
 
 const namesInOrder = [];
 const seen = new Set();
@@ -53,7 +58,9 @@ for (const n of namesInOrder) {
 }
 lines.push("] as const;");
 lines.push("");
-lines.push("export type BackendEventName = (typeof BACKEND_EVENT_NAMES)[number];");
+lines.push(
+	"export type BackendEventName = (typeof BACKEND_EVENT_NAMES)[number];",
+);
 lines.push("");
 
 const content = `${lines.join("\n")}\n`;
@@ -61,4 +68,6 @@ const content = `${lines.join("\n")}\n`;
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, content, "utf8");
 
-console.log(`Generated ${namesInOrder.length} backend event names -> ${outPath}`);
+console.log(
+	`Generated ${namesInOrder.length} backend event names -> ${outPath}`,
+);

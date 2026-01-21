@@ -61,6 +61,8 @@ import {
 	EDIT_DEFAULT_PRESET,
 	usePresetManagement,
 } from "./prompt/usePresetManagement";
+import { useProfileMigrations } from "./prompt/useProfileMigrations";
+import { usePromptLabState } from "./prompt/usePromptLabState";
 import { usePromptProviderOptions } from "./prompt/usePromptProviderOptions";
 import { usePromptSettingsProfileState } from "./prompt/usePromptSettingsProfileState";
 import { usePromptSettingsTests } from "./prompt/usePromptSettingsTests";
@@ -70,8 +72,6 @@ import {
 	useSectionManagement,
 } from "./prompt/useSectionManagement";
 import { useSttSettingsHandlers } from "./prompt/useSttSettingsHandlers";
-import { usePromptLabState } from "./prompt/usePromptLabState";
-import { useProfileMigrations } from "./prompt/useProfileMigrations";
 import {
 	ANTHROPIC_THINKING_LEVEL_BUDGETS,
 	formatThinkingBudgetShort,

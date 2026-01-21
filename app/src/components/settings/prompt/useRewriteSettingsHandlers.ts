@@ -1,10 +1,10 @@
 import { useCallback } from "react";
+import type { ModelOption } from "../../../lib/modelOptions";
 import type {
 	AppSettings,
 	OpenAiReasoningEffort,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
-import type { ModelOption } from "../../../lib/modelOptions";
 import { tauriAPI } from "../../../lib/tauri";
 import { SELECT_DEFAULT } from "./useThinkingOptions";
 
@@ -315,24 +315,25 @@ export function useRewriteSettingsHandlers({
 		],
 	);
 
-	const handleDisableRewriteIncludeClipboardContextOverride = useCallback(() => {
-		openDisableOverrideDialog({
-			title: "Disable Rewrite Clipboard Context override?",
-			onConfirm: () => {
-				setRewriteIncludeClipboardContextInheriting(true);
-				setLocalProfileRewriteIncludeClipboardContext(
-					defaultRewriteIncludeClipboardContext,
-				);
-				saveProfileMetadata({ rewrite_include_clipboard_context: null });
-			},
-		});
-	}, [
-		defaultRewriteIncludeClipboardContext,
-		openDisableOverrideDialog,
-		saveProfileMetadata,
-		setLocalProfileRewriteIncludeClipboardContext,
-		setRewriteIncludeClipboardContextInheriting,
-	]);
+	const handleDisableRewriteIncludeClipboardContextOverride =
+		useCallback(() => {
+			openDisableOverrideDialog({
+				title: "Disable Rewrite Clipboard Context override?",
+				onConfirm: () => {
+					setRewriteIncludeClipboardContextInheriting(true);
+					setLocalProfileRewriteIncludeClipboardContext(
+						defaultRewriteIncludeClipboardContext,
+					);
+					saveProfileMetadata({ rewrite_include_clipboard_context: null });
+				},
+			});
+		}, [
+			defaultRewriteIncludeClipboardContext,
+			openDisableOverrideDialog,
+			saveProfileMetadata,
+			setLocalProfileRewriteIncludeClipboardContext,
+			setRewriteIncludeClipboardContextInheriting,
+		]);
 
 	const handleRewriteLlmProviderChange = useCallback(
 		(value: string | null) => {
@@ -581,25 +582,26 @@ export function useRewriteSettingsHandlers({
 		],
 	);
 
-	const handleDisableRewriteAnthropicThinkingBudgetOverride = useCallback(() => {
-		openDisableOverrideDialog({
-			title: "Disable Thinking Budget override?",
-			onConfirm: () => {
-				setAnthropicThinkingBudgetInheriting(true);
-				const inherited = settings?.anthropic_thinking_budget;
-				setLocalProfileAnthropicThinkingBudget(
-					inherited == null ? SELECT_DEFAULT : String(inherited),
-				);
-				saveProfileMetadata({ anthropic_thinking_budget: null });
-			},
-		});
-	}, [
-		openDisableOverrideDialog,
-		saveProfileMetadata,
-		setAnthropicThinkingBudgetInheriting,
-		setLocalProfileAnthropicThinkingBudget,
-		settings?.anthropic_thinking_budget,
-	]);
+	const handleDisableRewriteAnthropicThinkingBudgetOverride =
+		useCallback(() => {
+			openDisableOverrideDialog({
+				title: "Disable Thinking Budget override?",
+				onConfirm: () => {
+					setAnthropicThinkingBudgetInheriting(true);
+					const inherited = settings?.anthropic_thinking_budget;
+					setLocalProfileAnthropicThinkingBudget(
+						inherited == null ? SELECT_DEFAULT : String(inherited),
+					);
+					saveProfileMetadata({ anthropic_thinking_budget: null });
+				},
+			});
+		}, [
+			openDisableOverrideDialog,
+			saveProfileMetadata,
+			setAnthropicThinkingBudgetInheriting,
+			setLocalProfileAnthropicThinkingBudget,
+			settings?.anthropic_thinking_budget,
+		]);
 
 	return {
 		handleRewriteEnabledChange,

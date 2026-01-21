@@ -10,6 +10,7 @@ import {
 	DEFAULT_TOGGLE_HOTKEY,
 } from "../hotkeyDefaults";
 import { type HotkeyConfig, normalizeHotkeyConfig } from "../hotkeys";
+import { emitTyped } from "./events";
 import type {
 	AppSettings,
 	AudioCue,
@@ -31,7 +32,6 @@ import type {
 	TranscriptionRetentionUnit,
 	WidgetPosition,
 } from "./types";
-import { emitTyped } from "./events";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
 	return value != null && typeof value === "object" && !Array.isArray(value);
@@ -1010,7 +1010,7 @@ export const tauriSettingsAPI = {
 
 				// If unset/invalid, default to the app's default accent.
 				// (Tangerine is an explicit option in the UI, not the implicit default.)
-					if (!normalized) return DEFAULT_ACCENT_HEX;
+				if (!normalized) return DEFAULT_ACCENT_HEX;
 
 				return normalized;
 			})(),
@@ -1371,7 +1371,8 @@ export const tauriSettingsAPI = {
 		}
 		await applySettingsPatch({
 			patch: {
-				quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(effort),
+				quick_ask_openai_reasoning_effort:
+					normalizeOpenAiReasoningEffort(effort),
 			},
 		});
 	},
@@ -1403,7 +1404,9 @@ export const tauriSettingsAPI = {
 			return;
 		}
 		await applySettingsPatch({
-			patch: { quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(budget) },
+			patch: {
+				quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(budget),
+			},
 		});
 	},
 
@@ -1560,7 +1563,9 @@ export const tauriSettingsAPI = {
 			return;
 		}
 		await applySettingsPatch({
-			patch: { openai_reasoning_effort: normalizeOpenAiReasoningEffort(effort) },
+			patch: {
+				openai_reasoning_effort: normalizeOpenAiReasoningEffort(effort),
+			},
 		});
 	},
 
@@ -1605,7 +1610,9 @@ export const tauriSettingsAPI = {
 	},
 
 	async updateSTTTimeout(timeoutSeconds: number | null): Promise<void> {
-		await applySettingsPatch({ patch: { stt_timeout_seconds: timeoutSeconds } });
+		await applySettingsPatch({
+			patch: { stt_timeout_seconds: timeoutSeconds },
+		});
 	},
 
 	async updateOverlayMode(mode: OverlayMode): Promise<void> {
@@ -1668,19 +1675,27 @@ export const tauriSettingsAPI = {
 	},
 
 	async updateQuietAudioMinDurationSecs(seconds: number): Promise<void> {
-		await applySettingsPatch({ patch: { quiet_audio_min_duration_secs: seconds } });
+		await applySettingsPatch({
+			patch: { quiet_audio_min_duration_secs: seconds },
+		});
 	},
 
 	async updateQuietAudioRmsDbfsThreshold(dbfs: number): Promise<void> {
-		await applySettingsPatch({ patch: { quiet_audio_rms_dbfs_threshold: dbfs } });
+		await applySettingsPatch({
+			patch: { quiet_audio_rms_dbfs_threshold: dbfs },
+		});
 	},
 
 	async updateQuietAudioPeakDbfsThreshold(dbfs: number): Promise<void> {
-		await applySettingsPatch({ patch: { quiet_audio_peak_dbfs_threshold: dbfs } });
+		await applySettingsPatch({
+			patch: { quiet_audio_peak_dbfs_threshold: dbfs },
+		});
 	},
 
 	async updateQuietAudioRequireSpeech(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { quiet_audio_require_speech: enabled } });
+		await applySettingsPatch({
+			patch: { quiet_audio_require_speech: enabled },
+		});
 	},
 
 	async updateHotMicEnabled(enabled: boolean): Promise<void> {
@@ -1693,7 +1708,9 @@ export const tauriSettingsAPI = {
 	},
 
 	async updateMicAutoRecoverEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { mic_auto_recover_enabled: !!enabled } });
+		await applySettingsPatch({
+			patch: { mic_auto_recover_enabled: !!enabled },
+		});
 	},
 
 	async updateNoiseGateThresholdDbfs(
@@ -1869,10 +1886,10 @@ export const tauriSettingsAPI = {
 				stats_retention_value: value,
 				...(typeof params.max_bytes === "number"
 					? {
-						stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
-							params.max_bytes,
-						),
-					}
+							stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
+								params.max_bytes,
+							),
+						}
 					: {}),
 			},
 		});

@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
-import type { RewriteProgramPromptProfile } from "../../../lib/tauri";
+import type {
+	AppSettings,
+	RewriteProgramPromptProfile,
+} from "../../../lib/tauri";
 import { tauriAPI } from "../../../lib/tauri";
-import type { AppSettings } from "../../../lib/tauri";
 
 type UpdateMutation = {
 	mutate: (

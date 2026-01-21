@@ -72,4 +72,3 @@ export function emitTyped<K extends EventName>(
 ): Promise<void> {
 	return emit(name, payload);
 }
-

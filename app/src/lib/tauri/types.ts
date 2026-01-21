@@ -290,12 +290,12 @@ export interface SystemEvent {
 }
 
 export interface CommandErrorPayload {
-  message: string;
-  error_type: string;
-  code?: string | null;
-  details?: string | null;
-  retryable?: boolean | null;
-  request_id?: string | null;
+	message: string;
+	error_type: string;
+	code?: string | null;
+	details?: string | null;
+	retryable?: boolean | null;
+	request_id?: string | null;
 }
 
 export interface PipelineErrorPayload {
