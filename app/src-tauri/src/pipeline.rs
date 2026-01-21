@@ -514,6 +514,30 @@ impl SharedPipeline {
         let _ = inner.stt_registry.set_current(&provider_id);
     }
 
+    /// Test-only seam: inject an LLM provider into the pipeline cache so we can run
+    /// end-to-end pipeline tests with rewrite enabled without real network calls.
+    #[cfg(test)]
+    fn inject_llm_provider_for_tests(
+        &self,
+        provider_id: &str,
+        model: Option<&str>,
+        provider: Arc<dyn LlmProvider>,
+    ) {
+        let mut inner = self.inner.lock().expect("pipeline lock");
+
+        // Build a cache key that matches the normal lookup in `get_or_create_llm_provider`.
+        // We use simplified defaults for test keys; real lookups include more fields.
+        let model_key = model
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<default>".to_string());
+        let cache_key = format!(
+            "{}::{}::30::<default-url>::<default-effort>::<default-budget>::<default-level>::<default-budget>",
+            provider_id, model_key
+        );
+
+        inner.llm_provider_cache.insert(cache_key, provider);
+    }
+
     /// Provide an app handle for best-effort persistence of recreatable caches.
     pub fn set_app_handle(&self, app: AppHandle) {
         if let Ok(mut guard) = self.app_handle.lock() {

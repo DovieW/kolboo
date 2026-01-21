@@ -62,7 +62,7 @@ pub enum PipelineEvent {
 /// Reason the optional LLM formatting step was not attempted.
 ///
 /// This is used to make request logs unambiguous when the rewrite step does not run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LlmNotAttemptedReason {
     /// Recording was gated as quiet (STT skipped), so LLM rewrite was never reached.
     QuietAudioGate,
@@ -125,7 +125,7 @@ impl LlmNotAttemptedReason {
 }
 
 /// Outcome of the optional LLM formatting step.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LlmOutcome {
     /// LLM step was not attempted.
     NotAttempted(LlmNotAttemptedReason),

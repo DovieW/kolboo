@@ -136,6 +136,30 @@ impl SttProvider for MockSttProvider {
     }
 }
 
+/// A mock LLM provider that returns a canned completion without making network calls.
+struct MockLlmProvider {
+    response: String,
+}
+
+#[async_trait]
+impl crate::llm::LlmProvider for MockLlmProvider {
+    async fn complete(
+        &self,
+        _system_prompt: &str,
+        _user_message: &str,
+    ) -> Result<String, crate::llm::LlmError> {
+        Ok(self.response.clone())
+    }
+
+    fn name(&self) -> &'static str {
+        "mock"
+    }
+
+    fn model(&self) -> &str {
+        "mock-model"
+    }
+}
+
 fn set_state_for_test(
     pipeline: &SharedPipeline,
     state: PipelineState,
@@ -284,5 +308,67 @@ async fn pipeline_can_transcribe_without_network_or_hardware() {
     // Then: we get a transcript without hitting any real IO.
     assert_eq!(result.stt_text, "hello from tests");
     assert_eq!(result.final_text, "hello from tests");
+    assert_eq!(p.state(), PipelineState::Idle);
+}
+
+#[tokio::test]
+async fn pipeline_can_transcribe_and_rewrite_without_network_or_hardware() {
+    // Given: a pipeline with fake audio capture, fake STT, AND fake LLM providers.
+    use crate::llm::{LlmConfig, PromptSections};
+
+    let llm_config = LlmConfig {
+        enabled: true,
+        provider: "mock".to_string(),
+        api_key: String::new(),
+        model: None,
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: Vec::new(),
+        timeout: std::time::Duration::from_secs(30),
+    };
+
+    let mut config = PipelineConfig::default();
+    config.stt_provider = "mock".to_string();
+    config.max_recording_bytes = 1024;
+    config.quiet_audio_gate_enabled = false;
+    config.llm_config = llm_config;
+    // Insert fake API key so the pipeline doesn't bail early.
+    config
+        .llm_api_keys
+        .insert("mock".to_string(), "test-key".to_string());
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockSttProvider {
+            text: "hello from stt".to_string(),
+        }),
+    );
+    p.inject_llm_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockLlmProvider {
+            response: "Hello from LLM".to_string(),
+        }),
+    );
+
+    p.start_recording().expect("start recording should succeed");
+
+    // When: we stop and transcribe (with rewrite enabled)
+    let result = p
+        .stop_and_transcribe_detailed()
+        .await
+        .expect("stop/transcribe should succeed");
+
+    // Then: the final output should be the LLM-rewritten text, not the raw STT.
+    assert_eq!(result.stt_text, "hello from stt");
+    assert_eq!(result.final_text, "Hello from LLM");
+    assert!(result.llm_attempted());
+    assert_eq!(result.llm_outcome, crate::pipeline::LlmOutcome::Succeeded);
     assert_eq!(p.state(), PipelineState::Idle);
 }
