@@ -19,6 +19,31 @@
 					}
 				}
 			}
+		},
+		{
+			"includes": [
+				"src/overlay/**",
+				"src/OverlayApp.tsx",
+				"src/OverlayHoverApp.tsx",
+				"src/QuickAskApp.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["**/components/**"],
+										"message": "Overlay windows should not import from components/. Use shared lib/ modules instead."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
 		}
 	],
 	"formatter": {
@@ -29,6 +54,9 @@
 		"enabled": true,
 		"rules": {
 			"recommended": true,
+			"nursery": {
+				"noFloatingPromises": "warn"
+			},
 			"correctness": {
 				"useExhaustiveDependencies": "error",
 				"noUnusedVariables": "error",
