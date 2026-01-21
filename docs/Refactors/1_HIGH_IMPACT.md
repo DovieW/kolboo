@@ -8,14 +8,6 @@ If you’re choosing what to do “on purpose” (not as a drive-by), start here
 
 These are “bigger than a ticket” changes that would make the core easier to evolve safely.
 
-- **Create a clean layering boundary: “Tauri shell” vs “Core services”.**
-  - Today: a lot of orchestration lives in `app/src-tauri/src/lib.rs` and reaches into many subsystems.
-  - Goal: keep `lib.rs` focused on wiring (commands/events/windows/tray), and move business logic into a small set of services/modules.
-  - Suggested shape:
-    - `core/*` (pipeline orchestration, quick ask/replace orchestration)
-    - `adapters/*` (tauri emit/invoke, filesystem, audio capture, clipboard)
-    - `commands/*` becomes thin wrappers around core services
-  - Why this helps: it’s much easier to test “core logic” without needing a Tauri runtime.
 
 - **Make UI↔backend contract drift hard/impossible.**
   - Current risk: “string glue” (command names, event names, payload shapes) can drift without compile-time errors.
@@ -56,9 +48,3 @@ These are “bigger than a ticket” changes that would make the core easier to 
 - **Audio capture IO (CPAL device dependency):**
   - If you can’t run pipeline tests in CI without a microphone/device, you don’t really have pipeline tests.
   - Add (or finish) an `AudioCapture` abstraction so tests can inject sample buffers deterministically.
-
-## Suggested sequencing (so refactors don’t turn into a “forever project”)
-
-- Phase 1 (risk killers): backend-only settings writer + explicit versioned migrations.
-- Phase 2 (safety net): deterministic pipeline tests with fakes.
-- Phase 3 (structure): split `lib.rs` into core/adapters/commands; decompose `pipeline.rs` into modules.
