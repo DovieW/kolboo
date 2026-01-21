@@ -6,9 +6,6 @@
   - Add embeddings routing injection (or a deterministic offline substitute) for full integration-level routing tests
   - Add routing/preset selection invariants
 
-- **Continue extraction of remaining "god file" areas from `app/src-tauri/src/pipeline.rs` (~3000 lines):**
+- **Continue extraction of remaining "god file" areas from `app/src-tauri/src/pipeline.rs` (~2100 lines, reduced from ~3400):**
   - `pipeline/audio_loop.rs` (CPAL/VAD orchestration) — audio capture is already behind `AudioCaptureBackend` trait, but orchestration code remains in main file
-  - **Complete `pipeline/transcription_flow.rs` integration** — module exists with shared routing + LLM rewrite logic (`TranscriptionContext`, `TranscriptionCallbacks` trait, `complete_transcription_flow()`). `PipelineCallbacks` adapter is implemented. Remaining work:
-    1. Replace inline routing/rewrite code in `stop_and_transcribe_detailed` with calls to `complete_transcription_flow()`
-    2. Replace inline routing/rewrite code in `transcribe_wav_bytes_detailed_for_profile` with calls to `complete_transcription_flow()`
-    3. Remove the duplicate inline implementations (~600+ lines of duplicated code)
+  - ✅ **`pipeline/transcription_flow.rs` integration COMPLETE** — shared routing + LLM rewrite logic extracted (~895 lines). Both `stop_and_transcribe_detailed` and `transcribe_wav_bytes_detailed_for_profile` now delegate to `complete_transcription_flow()`. Net reduction: ~1300 lines from `pipeline.rs`.
