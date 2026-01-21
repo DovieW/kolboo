@@ -8,5 +8,5 @@ These are small/medium follow-ups discovered while doing other work.
   - `pipeline/audio_loop.rs` (CPAL/VAD orchestration)
   - `pipeline/stt.rs` (STT provider selection + retry/timeout + request logging)
 
-- Consider moving the large `pipeline.rs` test module into `app/src-tauri/src/pipeline/tests.rs` (or `app/src-tauri/src/pipeline/tests/mod.rs`) once the module layout is stable.
-  - Goal: make `pipeline.rs` a clearer orchestration entrypoint.
+- ✅ ~~Consider moving the large `pipeline.rs` test module into `app/src-tauri/src/pipeline/tests.rs`.~~
+  - Done: Tests now live in `pipeline/tests.rs`.

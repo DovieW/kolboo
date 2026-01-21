@@ -2,9 +2,8 @@
 
 They tend to improve maintainability and reduce future friction, but they're not as directly "risk reducing" as the high-impact list.
 
-- **Run Rust tests in CI.**
-	- If CI runs clippy but not `cargo test`, regressions can slip through even when you have good tests locally.
-	- Prefer a targeted run (only when Rust changes) if CI time is a concern.
+- ✅ ~~**Run Rust tests in CI.**~~
+	- Added `cargo test --lib` step to `.github/workflows/check.yml` (runs when Rust files change).
 
 - **Generate TypeScript types from Rust-exported JSON schemas.**
 	- You already export schemas; generating TS types from them reduces manual sync work.

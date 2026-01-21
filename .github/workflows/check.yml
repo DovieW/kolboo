@@ -180,6 +180,16 @@ jobs:
           cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml --target-dir app/src-tauri/target-ci
           sccache --show-stats || true
 
+      - name: Run Rust tests
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SCCACHE_NO_DAEMON="1"
+          export RUSTC_WRAPPER=sccache
+          # Run library tests only; schema-export bins require special build setup.
+          cargo test --quiet --lib --manifest-path app/src-tauri/Cargo.toml --target-dir app/src-tauri/target-ci
+
       - name: Skip Rust/Tauri checks (no relevant changes)
         if: github.event_name == 'pull_request' && steps.changes.outputs.rust != 'true'
         run: echo "No Rust/Tauri-related files changed; skipping Rust checks."
