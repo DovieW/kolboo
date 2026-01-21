@@ -26,6 +26,8 @@
 		"test:watch": "node scripts/run-with-timing.mjs vitest",
 		"schemas:generate": "node scripts/run-with-timing.mjs node scripts/generate-schemas.mjs",
 		"schemas:check": "node scripts/run-with-timing.mjs --shell \"pnpm run schemas:generate && git diff --exit-code -- src-tauri/gen/schemas\"",
+		"tauri-events:generate": "node scripts/run-with-timing.mjs node scripts/generate-tauri-events.mjs",
+		"tauri-events:check": "node scripts/run-with-timing.mjs --shell \"pnpm run tauri-events:generate && git diff --exit-code -- src/lib/tauri/events.generated.ts\"",
 		"test:all": "node scripts/run-with-timing.mjs --shell \"pnpm run typecheck && pnpm test && pnpm run cargo:test\"",
 		"cargo:clippy": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml",
 		"cargo:clippy:ci": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci",
@@ -38,7 +40,7 @@
 		"cargo:test:ci": "node scripts/run-with-timing.mjs cargo test --quiet --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci",
 		"cargo": "node scripts/run-with-timing.mjs --shell \"pnpm run cargo:clippy && pnpm run cargo:fmt && pnpm run cargo:test\"",
 		"check": "node scripts/run-with-timing.mjs --shell \"pnpm run lint && pnpm run typecheck && pnpm run knip && pnpm test && pnpm run cargo\"",
-		"check:ci": "node scripts/run-with-timing.mjs --shell \"pnpm run lint:ci && pnpm run typecheck && pnpm run knip && pnpm run schemas:check && pnpm test && pnpm run cargo:clippy:ci && pnpm run cargo:fmt:check && pnpm run cargo:test:ci\"",
+		"check:ci": "node scripts/run-with-timing.mjs --shell \"pnpm run lint:ci && pnpm run typecheck && pnpm run knip && pnpm run schemas:check && pnpm run tauri-events:check && pnpm test && pnpm run cargo:clippy:ci && pnpm run cargo:fmt:check && pnpm run cargo:test:ci\"",
 		"check:ci:local-whisper": "node scripts/run-with-timing.mjs --shell \"pnpm run check:ci && pnpm run cargo:clippy:local-whisper:ci\"",
 		"tauri": "tauri"
 	},
@@ -85,3 +87,4 @@
 		"vitest": "4.0.17"
 	}
 }
+

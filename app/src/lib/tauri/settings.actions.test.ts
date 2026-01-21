@@ -42,9 +42,15 @@ let currentStore: FakeStore;
 
 const invokeMock = vi.fn();
 const storeLoadMock = vi.fn(async () => currentStore);
+const emitMock = vi.fn(async () => undefined);
 
 vi.mock("@tauri-apps/api/core", () => ({
 	invoke: invokeMock,
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+	emit: emitMock,
+	listen: vi.fn(async () => () => undefined),
 }));
 
 vi.mock("@tauri-apps/plugin-store", () => ({
@@ -71,6 +77,7 @@ describe("tauri settings side effects", () => {
 	beforeEach(() => {
 		currentStore = new FakeStore();
 		invokeMock.mockReset();
+		emitMock.mockReset();
 		storeLoadMock.mockClear();
 	});
 

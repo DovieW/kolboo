@@ -31,6 +31,7 @@ import type {
 	TranscriptionRetentionUnit,
 	WidgetPosition,
 } from "./types";
+import { emitTyped } from "./events";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
 	return value != null && typeof value === "object" && !Array.isArray(value);
@@ -1611,6 +1612,8 @@ export const tauriSettingsAPI = {
 		await applySettingsPatch({ patch: { overlay_mode: mode } });
 		// Apply the mode immediately
 		await invoke("set_overlay_mode", { mode });
+		// Best-effort: notify other windows immediately (the backend also emits this).
+		await emitTyped("settings-changed", {});
 	},
 
 	async updateOverlayShowDetailedLoading(enabled: boolean): Promise<void> {

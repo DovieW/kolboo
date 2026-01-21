@@ -1,4 +1,5 @@
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { BACKEND_EVENT_NAMES, type BackendEventName } from "./events.generated";
 import type {
 	ConnectionStateChangedPayload,
 	EmptyEventPayload,
@@ -13,7 +14,7 @@ import type {
 	SettingsChangedPayload,
 	SystemEvent,
 	WhisperModelDownloadProgress,
-} from "../tauri";
+} from "./types";
 
 export type EventMap = {
 	"connection-state-changed": ConnectionStateChangedPayload;
@@ -42,34 +43,19 @@ export type EventMap = {
 	"whisper-model-download-progress": WhisperModelDownloadProgress;
 };
 
-export type EventName = keyof EventMap;
+export type EventName = BackendEventName;
 
-export const EVENT_NAMES = [
-	"connection-state-changed",
-	"history-changed",
-	"local-whisper-model-load",
-	"mic-test-audio-level",
-	"overlay-audio-level",
-	"overlay-hide-requested",
-	"pipeline-cancelled",
-	"pipeline-error",
-	"pipeline-recording-started",
-	"pipeline-reset",
-	"pipeline-rewriting-started",
-	"pipeline-routing-started",
-	"pipeline-state-changed",
-	"pipeline-transcript-ready",
-	"pipeline-transcription-started",
-	"quick-ask-answer",
-	"quick-ask-started",
-	"recording-start",
-	"recording-stop",
-	"request-disconnect",
-	"settings-changed",
-	"stats-changed",
-	"system-event",
-	"whisper-model-download-progress",
-] as const satisfies ReadonlyArray<EventName>;
+type MissingInTs = Exclude<BackendEventName, keyof EventMap>;
+type ExtraInTs = Exclude<keyof EventMap, BackendEventName>;
+// If backend adds/removes/renames an event, this should become a type error.
+const _EVENT_MAP_KEYS_MATCH_BACKEND: MissingInTs extends never
+	? ExtraInTs extends never
+		? true
+		: never
+	: never = true;
+
+export const EVENT_NAMES =
+	BACKEND_EVENT_NAMES satisfies ReadonlyArray<EventName>;
 
 export async function listenTyped<K extends EventName>(
 	name: K,
@@ -86,3 +72,4 @@ export function emitTyped<K extends EventName>(
 ): Promise<void> {
 	return emit(name, payload);
 }
+

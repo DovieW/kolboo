@@ -9,12 +9,6 @@ If you’re choosing what to do “on purpose” (not as a drive-by), start here
 These are “bigger than a ticket” changes that would make the core easier to evolve safely.
 
 
-- **Make UI↔backend contract drift hard/impossible.**
-  - Current risk: “string glue” (command names, event names, payload shapes) can drift without compile-time errors.
-  - Direction:
-    - Prefer generation for the contract surface where practical (commands/events/payload types), so renames become build errors.
-    - Keep contract tests, but aim for a world where they mostly confirm the generator is working.
-
 - **Decompose `pipeline.rs` into modules while preserving the state machine.**
   - Motivation: reduce blast radius and make “routing”, “transcription”, and “audio loop” testable in isolation.
   - Target shape (example):
