@@ -372,3 +372,58 @@ async fn pipeline_can_transcribe_and_rewrite_without_network_or_hardware() {
     assert_eq!(result.llm_outcome, crate::pipeline::LlmOutcome::Succeeded);
     assert_eq!(p.state(), PipelineState::Idle);
 }
+
+#[tokio::test]
+async fn rewrite_disabled_falls_back_to_stt_text() {
+    // Given: a pipeline with LLM rewrite explicitly disabled.
+    use crate::llm::{LlmConfig, PromptSections};
+
+    let llm_config = LlmConfig {
+        enabled: false, // <-- rewrite disabled
+        provider: "mock".to_string(),
+        api_key: String::new(),
+        model: None,
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: Vec::new(),
+        timeout: std::time::Duration::from_secs(30),
+    };
+
+    let mut config = PipelineConfig::default();
+    config.stt_provider = "mock".to_string();
+    config.max_recording_bytes = 1024;
+    config.quiet_audio_gate_enabled = false;
+    config.llm_config = llm_config;
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockSttProvider {
+            text: "raw stt transcript".to_string(),
+        }),
+    );
+    // NOTE: we do NOT inject an LLM provider — rewrite should not be attempted.
+
+    p.start_recording().expect("start recording should succeed");
+
+    // When: we stop and transcribe
+    let result = p
+        .stop_and_transcribe_detailed()
+        .await
+        .expect("stop/transcribe should succeed");
+
+    // Then: final_text should match stt_text (no rewrite).
+    assert_eq!(result.stt_text, "raw stt transcript");
+    assert_eq!(result.final_text, "raw stt transcript");
+    assert!(!result.llm_attempted());
+    assert!(matches!(
+        result.llm_outcome,
+        crate::pipeline::LlmOutcome::NotAttempted(_)
+    ));
+    assert_eq!(p.state(), PipelineState::Idle);
+}
