@@ -1,4 +1,4 @@
-use crate::embeddings;
+use crate::embeddings::{self, EmbeddingsProvider};
 use crate::llm::LlmProvider;
 use crate::settings::{IntentRouterStrategy, ProxySettings};
 use serde_json::Value as JsonValue;
@@ -41,6 +41,11 @@ impl RouterCallState {
     }
 }
 
+/// Route to a preset using embeddings-based similarity matching.
+///
+/// When `injected_provider` is `Some`, uses the injected provider for all embedding requests.
+/// This is primarily for testing to enable deterministic, offline integration tests.
+/// When `None`, creates real HTTP-based providers based on `llm_api_keys`.
 pub(super) async fn route_preset_id_with_embeddings(
     profile: &crate::llm::ProgramPromptProfile,
     transcript: &str,
@@ -48,6 +53,7 @@ pub(super) async fn route_preset_id_with_embeddings(
     llm_api_keys: &HashMap<String, String>,
     embedding_cache: &Arc<Mutex<HashMap<String, Vec<f32>>>>,
     persist_app: Option<AppHandle>,
+    injected_provider: Option<Arc<dyn EmbeddingsProvider>>,
 ) -> Option<(
     Option<String>,
     Vec<(String, f32)>,
@@ -105,28 +111,40 @@ pub(super) async fn route_preset_id_with_embeddings(
     let threshold = router.similarity_threshold.unwrap_or(0.78);
     let margin = router.similarity_margin.unwrap_or(0.05);
 
-    let api_key = llm_api_keys
-        .get(embedding_provider)
-        .map(|s| s.as_str())
-        .unwrap_or("");
-    if api_key.trim().is_empty() {
-        log::warn!(
-            "Intent router: {} API key missing; embeddings routing skipped",
-            embedding_provider
-        );
-        return None;
-    }
+    // When an injected provider is present, we skip API key validation and HTTP client
+    // creation since the provider handles everything internally (useful for testing).
+    let api_key: String;
+    let client: Option<reqwest::Client>;
 
-    let client = match crate::network::build_http_client_with_timeout(
-        proxy_settings,
-        Duration::from_secs(30),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("Intent router: failed to build HTTP client: {}", e);
+    if injected_provider.is_some() {
+        // Injected provider handles its own auth/network
+        api_key = String::new();
+        client = None;
+    } else {
+        let key = llm_api_keys
+            .get(embedding_provider)
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        if key.trim().is_empty() {
+            log::warn!(
+                "Intent router: {} API key missing; embeddings routing skipped",
+                embedding_provider
+            );
             return None;
         }
-    };
+        api_key = key.to_string();
+
+        client = match crate::network::build_http_client_with_timeout(
+            proxy_settings,
+            Duration::from_secs(30),
+        ) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                log::warn!("Intent router: failed to build HTTP client: {}", e);
+                return None;
+            }
+        };
+    }
 
     let transcript = transcript.trim();
     if transcript.is_empty() {
@@ -191,30 +209,53 @@ pub(super) async fn route_preset_id_with_embeddings(
         (router_request_json, router_response_json)
     }
 
+    // Embed the transcript
+    let transcript_input_type = if embedding_provider == "cohere" {
+        Some("search_query")
+    } else {
+        None
+    };
+
     let transcript_embedding_result: Result<(Vec<f32>, JsonValue, JsonValue), String> =
-        if embedding_provider == "cohere" {
-            embeddings::cohere::embed_text_with_debug(
-                &client,
-                api_key,
-                embedding_model,
-                "search_query",
-                transcript,
-            )
-            .await
-            .map_err(|e| e.to_string())
-        } else if embedding_provider == "fireworks" {
-            embeddings::fireworks::embed_text_with_debug(
-                &client,
-                api_key,
-                embedding_model,
-                transcript,
-            )
-            .await
-            .map_err(|e| e.to_string())
-        } else {
-            embeddings::openai::embed_text_with_debug(&client, api_key, embedding_model, transcript)
+        if let Some(ref provider) = injected_provider {
+            // Use injected provider (for testing)
+            provider
+                .embed_text(transcript, transcript_input_type)
                 .await
                 .map_err(|e| e.to_string())
+        } else if let Some(ref http_client) = client {
+            // Use real HTTP-based providers
+            if embedding_provider == "cohere" {
+                embeddings::cohere::embed_text_with_debug(
+                    http_client,
+                    &api_key,
+                    embedding_model,
+                    "search_query",
+                    transcript,
+                )
+                .await
+                .map_err(|e| e.to_string())
+            } else if embedding_provider == "fireworks" {
+                embeddings::fireworks::embed_text_with_debug(
+                    http_client,
+                    &api_key,
+                    embedding_model,
+                    transcript,
+                )
+                .await
+                .map_err(|e| e.to_string())
+            } else {
+                embeddings::openai::embed_text_with_debug(
+                    http_client,
+                    &api_key,
+                    embedding_model,
+                    transcript,
+                )
+                .await
+                .map_err(|e| e.to_string())
+            }
+        } else {
+            Err("No embeddings provider available".to_string())
         };
 
     let transcript_embedding = match transcript_embedding_result {
@@ -347,35 +388,53 @@ pub(super) async fn route_preset_id_with_embeddings(
                 );
                 cached_hint_embedding
             } else {
+                // Embed the hint
+                let hint_input_type = if embedding_provider == "cohere" {
+                    Some("search_document")
+                } else {
+                    None
+                };
+
                 let embed_result: Result<(Vec<f32>, JsonValue, JsonValue), String> =
-                    if embedding_provider == "cohere" {
-                        embeddings::cohere::embed_text_with_debug(
-                            &client,
-                            api_key,
-                            embedding_model,
-                            "search_document",
-                            &hint,
-                        )
-                        .await
-                        .map_err(|e| e.to_string())
-                    } else if embedding_provider == "fireworks" {
-                        embeddings::fireworks::embed_text_with_debug(
-                            &client,
-                            api_key,
-                            embedding_model,
-                            &hint,
-                        )
-                        .await
-                        .map_err(|e| e.to_string())
+                    if let Some(ref provider) = injected_provider {
+                        // Use injected provider (for testing)
+                        provider
+                            .embed_text(&hint, hint_input_type)
+                            .await
+                            .map_err(|e| e.to_string())
+                    } else if let Some(ref http_client) = client {
+                        // Use real HTTP-based providers
+                        if embedding_provider == "cohere" {
+                            embeddings::cohere::embed_text_with_debug(
+                                http_client,
+                                &api_key,
+                                embedding_model,
+                                "search_document",
+                                &hint,
+                            )
+                            .await
+                            .map_err(|e| e.to_string())
+                        } else if embedding_provider == "fireworks" {
+                            embeddings::fireworks::embed_text_with_debug(
+                                http_client,
+                                &api_key,
+                                embedding_model,
+                                &hint,
+                            )
+                            .await
+                            .map_err(|e| e.to_string())
+                        } else {
+                            embeddings::openai::embed_text_with_debug(
+                                http_client,
+                                &api_key,
+                                embedding_model,
+                                &hint,
+                            )
+                            .await
+                            .map_err(|e| e.to_string())
+                        }
                     } else {
-                        embeddings::openai::embed_text_with_debug(
-                            &client,
-                            api_key,
-                            embedding_model,
-                            &hint,
-                        )
-                        .await
-                        .map_err(|e| e.to_string())
+                        Err("No embeddings provider available".to_string())
                     };
 
                 match embed_result {

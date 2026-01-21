@@ -1,6 +1,178 @@
+// Allow dead code for provider infrastructure that's not yet wired into production
+// but is used by tests and will be used when embeddings routing is fully integrated.
+#![allow(dead_code)]
+
 pub mod cohere;
 pub mod fireworks;
 pub mod openai;
+
+use async_trait::async_trait;
+use serde_json::Value as JsonValue;
+use std::sync::Arc;
+
+/// Error type for embeddings operations
+#[derive(Debug, thiserror::Error)]
+pub enum EmbeddingsError {
+    #[error("HTTP error: {0}")]
+    Http(String),
+
+    #[error("API error: {0}")]
+    Api(String),
+
+    #[error("Missing embedding in response")]
+    MissingEmbedding,
+
+    #[error("No API key configured for provider: {0}")]
+    NoApiKey(String),
+
+    #[error("Provider not available: {0}")]
+    ProviderNotAvailable(String),
+}
+
+/// Trait for embeddings providers that can embed text into vector representations.
+///
+/// This trait is designed to be injectable for testing, allowing deterministic
+/// offline tests without making real API calls.
+#[async_trait]
+pub trait EmbeddingsProvider: Send + Sync {
+    /// Embed a single text into a vector representation.
+    ///
+    /// Returns the embedding vector along with request/response JSON for debugging.
+    async fn embed_text(
+        &self,
+        text: &str,
+        input_type: Option<&str>,
+    ) -> Result<(Vec<f32>, JsonValue, JsonValue), EmbeddingsError>;
+
+    /// Get the provider name (e.g., "openai", "cohere", "fireworks")
+    fn name(&self) -> &'static str;
+
+    /// Get the current model being used
+    fn model(&self) -> &str;
+}
+
+/// A boxed embeddings provider for dynamic dispatch
+pub type BoxedEmbeddingsProvider = Arc<dyn EmbeddingsProvider>;
+
+// --------------------------------------------------------------------------
+// Concrete provider implementations wrapping existing API functions
+// --------------------------------------------------------------------------
+
+/// OpenAI embeddings provider
+pub struct OpenAiEmbeddingsProvider {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+}
+
+impl OpenAiEmbeddingsProvider {
+    pub fn new(client: reqwest::Client, api_key: String, model: String) -> Self {
+        Self {
+            client,
+            api_key,
+            model,
+        }
+    }
+}
+
+#[async_trait]
+impl EmbeddingsProvider for OpenAiEmbeddingsProvider {
+    async fn embed_text(
+        &self,
+        text: &str,
+        _input_type: Option<&str>,
+    ) -> Result<(Vec<f32>, JsonValue, JsonValue), EmbeddingsError> {
+        openai::embed_text_with_debug(&self.client, &self.api_key, &self.model, text)
+            .await
+            .map_err(|e| EmbeddingsError::Api(e.to_string()))
+    }
+
+    fn name(&self) -> &'static str {
+        "openai"
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+}
+
+/// Cohere embeddings provider
+pub struct CohereEmbeddingsProvider {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+}
+
+impl CohereEmbeddingsProvider {
+    pub fn new(client: reqwest::Client, api_key: String, model: String) -> Self {
+        Self {
+            client,
+            api_key,
+            model,
+        }
+    }
+}
+
+#[async_trait]
+impl EmbeddingsProvider for CohereEmbeddingsProvider {
+    async fn embed_text(
+        &self,
+        text: &str,
+        input_type: Option<&str>,
+    ) -> Result<(Vec<f32>, JsonValue, JsonValue), EmbeddingsError> {
+        // Cohere requires an input_type; default to "search_query" if not specified
+        let input_type = input_type.unwrap_or("search_query");
+        cohere::embed_text_with_debug(&self.client, &self.api_key, &self.model, input_type, text)
+            .await
+            .map_err(|e| EmbeddingsError::Api(e.to_string()))
+    }
+
+    fn name(&self) -> &'static str {
+        "cohere"
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+}
+
+/// Fireworks embeddings provider
+pub struct FireworksEmbeddingsProvider {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+}
+
+impl FireworksEmbeddingsProvider {
+    pub fn new(client: reqwest::Client, api_key: String, model: String) -> Self {
+        Self {
+            client,
+            api_key,
+            model,
+        }
+    }
+}
+
+#[async_trait]
+impl EmbeddingsProvider for FireworksEmbeddingsProvider {
+    async fn embed_text(
+        &self,
+        text: &str,
+        _input_type: Option<&str>,
+    ) -> Result<(Vec<f32>, JsonValue, JsonValue), EmbeddingsError> {
+        fireworks::embed_text_with_debug(&self.client, &self.api_key, &self.model, text)
+            .await
+            .map_err(|e| EmbeddingsError::Api(e.to_string()))
+    }
+
+    fn name(&self) -> &'static str {
+        "fireworks"
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+}
 
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> Option<f32> {
     if a.len() != b.len() || a.is_empty() {

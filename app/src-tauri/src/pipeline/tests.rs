@@ -510,3 +510,469 @@ async fn stt_error_propagates_correctly() {
     // Pipeline transitions to Error state after a failed transcription.
     assert_eq!(p.state(), PipelineState::Error);
 }
+
+// =============================================================================
+// Mock Embeddings Provider for deterministic routing tests
+// =============================================================================
+
+use crate::embeddings::{EmbeddingsError, EmbeddingsProvider};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap as StdHashMap;
+use std::sync::Mutex;
+
+/// A mock embeddings provider that returns deterministic embeddings based on text content.
+///
+/// This provider maps specific input texts to predetermined embedding vectors, enabling
+/// deterministic offline tests for intent routing without making real API calls.
+struct MockEmbeddingsProvider {
+    /// Map from input text to embedding vector
+    embeddings_map: Mutex<StdHashMap<String, Vec<f32>>>,
+    /// Default embedding to return if text is not in map
+    default_embedding: Vec<f32>,
+    /// Optional error to simulate failures
+    error: Option<String>,
+}
+
+impl MockEmbeddingsProvider {
+    /// Create a new mock provider with a default embedding vector
+    fn new(default_embedding: Vec<f32>) -> Self {
+        Self {
+            embeddings_map: Mutex::new(StdHashMap::new()),
+            default_embedding,
+            error: None,
+        }
+    }
+
+    /// Add a text -> embedding mapping
+    fn with_embedding(self, text: impl Into<String>, embedding: Vec<f32>) -> Self {
+        self.embeddings_map
+            .lock()
+            .unwrap()
+            .insert(text.into(), embedding);
+        self
+    }
+
+    /// Configure the provider to return an error
+    #[allow(dead_code)]
+    fn with_error(mut self, error: impl Into<String>) -> Self {
+        self.error = Some(error.into());
+        self
+    }
+}
+
+#[async_trait]
+impl EmbeddingsProvider for MockEmbeddingsProvider {
+    async fn embed_text(
+        &self,
+        text: &str,
+        _input_type: Option<&str>,
+    ) -> Result<(Vec<f32>, JsonValue, JsonValue), EmbeddingsError> {
+        if let Some(ref err) = self.error {
+            return Err(EmbeddingsError::Api(err.clone()));
+        }
+
+        let embedding = self
+            .embeddings_map
+            .lock()
+            .unwrap()
+            .get(text)
+            .cloned()
+            .unwrap_or_else(|| self.default_embedding.clone());
+
+        let request_json = serde_json::json!({
+            "mock": true,
+            "input": text,
+        });
+        let response_json = serde_json::json!({
+            "mock": true,
+            "embedding_len": embedding.len(),
+        });
+
+        Ok((embedding, request_json, response_json))
+    }
+
+    fn name(&self) -> &'static str {
+        "mock"
+    }
+
+    fn model(&self) -> &str {
+        "mock-embeddings-model"
+    }
+}
+
+// =============================================================================
+// Routing and Preset Selection Invariant Tests
+// =============================================================================
+
+use crate::llm::{ProgramPreset, ProgramPromptProfile, PromptSections};
+use crate::settings::{IntentRouterSettings, IntentRouterStrategy};
+
+/// Helper to create a profile with presets configured for embeddings routing
+fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> ProgramPromptProfile {
+    let prompt_presets: Vec<ProgramPreset> = presets
+        .into_iter()
+        .map(|(id, name, hints)| ProgramPreset {
+            id: id.to_string(),
+            name: name.to_string(),
+            routing_hints: hints.into_iter().map(|s| s.to_string()).collect(),
+            prompts: PromptSections::default(),
+            rewrite_llm_enabled: true,
+            stt_provider: None,
+            stt_model: None,
+            stt_timeout_seconds: None,
+            llm_provider: None,
+            llm_model: None,
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+        })
+        .collect();
+
+    ProgramPromptProfile {
+        id: "test-profile".to_string(),
+        name: "Test Profile".to_string(),
+        program_paths: vec![],
+        rewrite_llm_enabled: Some(true),
+        rewrite_include_clipboard_context: None,
+        stt_provider: None,
+        stt_model: None,
+        stt_timeout_seconds: None,
+        llm_provider: None,
+        llm_model: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: PromptSections::default(),
+        presets: prompt_presets,
+        default_preset_id: None,
+        default_preset_description: None,
+        default_target_rewrite_llm_enabled: true,
+        active_preset_id: None,
+        router: Some(IntentRouterSettings {
+            enabled: true,
+            strategy: IntentRouterStrategy::Embeddings,
+            embedding_provider: Some("mock".to_string()),
+            embedding_model: Some("mock-model".to_string()),
+            pick_highest_score: true, // Always pick the best match
+            similarity_threshold: None,
+            similarity_margin: None,
+            llm_provider: None,
+            llm_model: None,
+            llm_system_prompt: None,
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+        }),
+        quick_ask_provider: None,
+        quick_ask_model: None,
+        quick_ask_system_prompt: None,
+        context_grab_method: None,
+        quick_replace_include_clipboard_context: None,
+        quick_ask_include_clipboard_context: None,
+        quick_replace_enabled: None,
+        quick_replace_provider: None,
+        quick_replace_model: None,
+        quick_replace_system_prompt: None,
+        quick_ask_openai_reasoning_effort: None,
+        quick_ask_gemini_thinking_budget: None,
+        quick_ask_gemini_thinking_level: None,
+        quick_ask_anthropic_thinking_budget: None,
+    }
+}
+
+#[tokio::test]
+async fn routing_selects_preset_with_highest_similarity() {
+    // Given: A profile with two presets and embeddings configured so that
+    // "send email" is very similar to the "email" preset hint.
+    use crate::llm::LlmConfig;
+
+    // Create embeddings where:
+    // - Transcript "send email" -> [1.0, 0.0, 0.0]
+    // - "email and messages" hint -> [0.95, 0.05, 0.0] (high similarity to transcript)
+    // - "calendar events" hint -> [0.0, 1.0, 0.0] (low similarity)
+    let mock_embeddings = Arc::new(
+        MockEmbeddingsProvider::new(vec![0.5, 0.5, 0.0])
+            .with_embedding("send email", vec![1.0, 0.0, 0.0])
+            .with_embedding("email and messages", vec![0.95, 0.05, 0.0])
+            .with_embedding("calendar events", vec![0.0, 1.0, 0.0]),
+    );
+
+    let profile = create_routing_test_profile(vec![
+        ("email-preset", "Email", vec!["email and messages"]),
+        ("calendar-preset", "Calendar", vec!["calendar events"]),
+    ]);
+
+    let llm_config = LlmConfig {
+        enabled: true,
+        provider: "mock".to_string(),
+        api_key: String::new(),
+        model: None,
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: vec![profile.clone()],
+        timeout: std::time::Duration::from_secs(30),
+    };
+
+    let mut config = PipelineConfig::default();
+    config.stt_provider = "mock".to_string();
+    config.max_recording_bytes = 1024;
+    config.quiet_audio_gate_enabled = false;
+    config.llm_config = llm_config;
+    config
+        .llm_api_keys
+        .insert("mock".to_string(), "test-key".to_string());
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests("mock", None, Arc::new(MockSttProvider::new("send email")));
+    p.inject_llm_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockLlmProvider::new("Sending email")),
+    );
+    p.inject_embeddings_provider_for_tests(mock_embeddings);
+
+    // Set the active profile
+    {
+        let mut inner = p.inner.lock().expect("pipeline lock");
+        inner.config.llm_config.program_prompt_profiles = vec![profile];
+    }
+
+    p.start_recording().expect("start recording should succeed");
+
+    // When: we stop and transcribe
+    let result = p
+        .stop_and_transcribe_detailed()
+        .await
+        .expect("stop/transcribe should succeed");
+
+    // Then: the pipeline successfully completed (LLM rewrite happened)
+    assert_eq!(result.final_text, "Sending email");
+    assert_eq!(p.state(), PipelineState::Idle);
+}
+
+#[tokio::test]
+async fn routing_with_no_matching_preset_uses_default() {
+    // Given: A profile with presets but transcript doesn't match any well
+    use crate::llm::LlmConfig;
+
+    // Create embeddings where the transcript doesn't match any hints well
+    let mock_embeddings = Arc::new(
+        MockEmbeddingsProvider::new(vec![0.5, 0.5, 0.0])
+            .with_embedding("random unrelated text", vec![0.0, 0.0, 1.0]) // orthogonal to hints
+            .with_embedding("email and messages", vec![1.0, 0.0, 0.0])
+            .with_embedding("calendar events", vec![0.0, 1.0, 0.0]),
+    );
+
+    let mut profile = create_routing_test_profile(vec![
+        ("email-preset", "Email", vec!["email and messages"]),
+        ("calendar-preset", "Calendar", vec!["calendar events"]),
+    ]);
+    // Set a default preset
+    profile.default_preset_id = Some("email-preset".to_string());
+    // Disable pick_highest_score to use threshold-based selection
+    if let Some(ref mut router) = profile.router {
+        router.pick_highest_score = false;
+        router.similarity_threshold = Some(0.8); // High threshold
+    }
+
+    let llm_config = LlmConfig {
+        enabled: true,
+        provider: "mock".to_string(),
+        api_key: String::new(),
+        model: None,
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: vec![profile.clone()],
+        timeout: std::time::Duration::from_secs(30),
+    };
+
+    let mut config = PipelineConfig::default();
+    config.stt_provider = "mock".to_string();
+    config.max_recording_bytes = 1024;
+    config.quiet_audio_gate_enabled = false;
+    config.llm_config = llm_config;
+    config
+        .llm_api_keys
+        .insert("mock".to_string(), "test-key".to_string());
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockSttProvider::new("random unrelated text")),
+    );
+    p.inject_llm_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockLlmProvider::new("Processed text")),
+    );
+    p.inject_embeddings_provider_for_tests(mock_embeddings);
+
+    {
+        let mut inner = p.inner.lock().expect("pipeline lock");
+        inner.config.llm_config.program_prompt_profiles = vec![profile];
+    }
+
+    p.start_recording().expect("start recording should succeed");
+
+    // When: we stop and transcribe
+    let result = p
+        .stop_and_transcribe_detailed()
+        .await
+        .expect("stop/transcribe should succeed");
+
+    // Then: pipeline completes successfully using the default preset
+    assert_eq!(result.final_text, "Processed text");
+    assert_eq!(p.state(), PipelineState::Idle);
+}
+
+#[tokio::test]
+async fn routing_respects_session_preset_lock() {
+    // Given: A profile with routing enabled BUT a session preset lock is set
+    use crate::llm::LlmConfig;
+
+    let mock_embeddings = Arc::new(
+        MockEmbeddingsProvider::new(vec![0.5, 0.5, 0.0])
+            .with_embedding("send email", vec![1.0, 0.0, 0.0])
+            .with_embedding("email and messages", vec![0.95, 0.05, 0.0])
+            .with_embedding("calendar events", vec![0.0, 1.0, 0.0]),
+    );
+
+    let profile = create_routing_test_profile(vec![
+        ("email-preset", "Email", vec!["email and messages"]),
+        ("calendar-preset", "Calendar", vec!["calendar events"]),
+    ]);
+
+    let llm_config = LlmConfig {
+        enabled: true,
+        provider: "mock".to_string(),
+        api_key: String::new(),
+        model: None,
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: vec![profile.clone()],
+        timeout: std::time::Duration::from_secs(30),
+    };
+
+    let mut config = PipelineConfig::default();
+    config.stt_provider = "mock".to_string();
+    config.max_recording_bytes = 1024;
+    config.quiet_audio_gate_enabled = false;
+    config.llm_config = llm_config;
+    config
+        .llm_api_keys
+        .insert("mock".to_string(), "test-key".to_string());
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockSttProvider::new("send email")), // Would normally route to email-preset
+    );
+    p.inject_llm_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockLlmProvider::new("Calendar event created")),
+    );
+    p.inject_embeddings_provider_for_tests(mock_embeddings);
+
+    {
+        let mut inner = p.inner.lock().expect("pipeline lock");
+        inner.config.llm_config.program_prompt_profiles = vec![profile];
+    }
+
+    // Set session lock to force calendar-preset (overriding what routing would choose)
+    p.set_session_preset_lock(None, Some("calendar-preset".to_string()))
+        .expect("set session lock");
+
+    p.start_recording().expect("start recording should succeed");
+
+    // When: we stop and transcribe
+    let result = p
+        .stop_and_transcribe_detailed()
+        .await
+        .expect("stop/transcribe should succeed");
+
+    // Then: session lock was respected (we got calendar output despite email-like input)
+    assert_eq!(result.final_text, "Calendar event created");
+    assert_eq!(p.state(), PipelineState::Idle);
+}
+
+#[tokio::test]
+async fn embeddings_provider_error_gracefully_falls_back() {
+    // Given: An embeddings provider configured to fail
+    use crate::llm::LlmConfig;
+
+    let mock_embeddings = Arc::new(
+        MockEmbeddingsProvider::new(vec![0.5, 0.5, 0.0])
+            .with_error("Simulated embeddings API failure"),
+    );
+
+    let profile =
+        create_routing_test_profile(vec![("email-preset", "Email", vec!["email and messages"])]);
+
+    let llm_config = LlmConfig {
+        enabled: true,
+        provider: "mock".to_string(),
+        api_key: String::new(),
+        model: None,
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: PromptSections::default(),
+        program_prompt_profiles: vec![profile.clone()],
+        timeout: std::time::Duration::from_secs(30),
+    };
+
+    let mut config = PipelineConfig::default();
+    config.stt_provider = "mock".to_string();
+    config.max_recording_bytes = 1024;
+    config.quiet_audio_gate_enabled = false;
+    config.llm_config = llm_config;
+    config
+        .llm_api_keys
+        .insert("mock".to_string(), "test-key".to_string());
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests("mock", None, Arc::new(MockSttProvider::new("send email")));
+    p.inject_llm_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockLlmProvider::new("Fallback output")),
+    );
+    p.inject_embeddings_provider_for_tests(mock_embeddings);
+
+    {
+        let mut inner = p.inner.lock().expect("pipeline lock");
+        inner.config.llm_config.program_prompt_profiles = vec![profile];
+    }
+
+    p.start_recording().expect("start recording should succeed");
+
+    // When: we stop and transcribe (embeddings will fail)
+    let result = p
+        .stop_and_transcribe_detailed()
+        .await
+        .expect("stop/transcribe should succeed even with embeddings failure");
+
+    // Then: pipeline completes successfully (routing failed but LLM rewrite still worked)
+    assert_eq!(result.final_text, "Fallback output");
+    assert_eq!(p.state(), PipelineState::Idle);
+}

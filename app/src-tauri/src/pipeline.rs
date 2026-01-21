@@ -61,6 +61,8 @@ struct PipelineInner {
     stt_registry: SttRegistry,
     stt_provider_cache: HashMap<String, Arc<dyn SttProvider>>,
     llm_provider_cache: HashMap<String, Arc<dyn LlmProvider>>,
+    /// Injected embeddings provider for testing (bypasses real API calls).
+    injected_embeddings_provider: Option<Arc<dyn crate::embeddings::EmbeddingsProvider>>,
     state: PipelineState,
     config: PipelineConfig,
     /// Cancellation token for the current operation
@@ -170,6 +172,7 @@ impl PipelineInner {
             stt_registry: SttRegistry::new(),
             stt_provider_cache: HashMap::new(),
             llm_provider_cache: HashMap::new(),
+            injected_embeddings_provider: None,
             state: PipelineState::Idle,
             config: config.clone(),
             cancel_token: None,
@@ -582,6 +585,17 @@ impl SharedPipeline {
         );
 
         inner.llm_provider_cache.insert(cache_key, provider);
+    }
+
+    /// Test-only seam: inject an embeddings provider into the pipeline so we can run
+    /// end-to-end pipeline tests with routing enabled without real network calls.
+    #[cfg(test)]
+    fn inject_embeddings_provider_for_tests(
+        &self,
+        provider: Arc<dyn crate::embeddings::EmbeddingsProvider>,
+    ) {
+        let mut inner = self.inner.lock().expect("pipeline lock");
+        inner.injected_embeddings_provider = Some(provider);
     }
 
     /// Provide an app handle for best-effort persistence of recreatable caches.
@@ -1342,6 +1356,15 @@ impl SharedPipeline {
         let session_lock = self.take_session_preset_lock();
         let persist_app = self.app_handle.lock().ok().and_then(|g| g.clone());
 
+        // Retrieve injected embeddings provider for testing (None in production)
+        let injected_embeddings_provider = {
+            let inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            inner.injected_embeddings_provider.clone()
+        };
+
         let ctx = TranscriptionContext {
             active_profile: active_profile.clone(),
             llm_enabled_global,
@@ -1356,6 +1379,7 @@ impl SharedPipeline {
             embedding_cache: &self.embedding_cache,
             persist_app,
             cancel_token: cancel_token.clone(),
+            injected_embeddings_provider,
         };
 
         let callbacks = PipelineCallbacks {
@@ -1638,6 +1662,15 @@ impl SharedPipeline {
         let session_lock = self.take_session_preset_lock();
         let persist_app = self.app_handle.lock().ok().and_then(|g| g.clone());
 
+        // Retrieve injected embeddings provider for testing (None in production)
+        let injected_embeddings_provider = {
+            let inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            inner.injected_embeddings_provider.clone()
+        };
+
         let ctx = TranscriptionContext {
             active_profile: active_profile.clone(),
             llm_enabled_global,
@@ -1652,6 +1685,7 @@ impl SharedPipeline {
             embedding_cache: &self.embedding_cache,
             persist_app,
             cancel_token: cancel_token.clone(),
+            injected_embeddings_provider,
         };
 
         let callbacks = PipelineCallbacks {

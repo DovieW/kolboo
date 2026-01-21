@@ -55,6 +55,8 @@ pub(super) struct TranscriptionContext<'a> {
     pub persist_app: Option<AppHandle>,
     /// Cancellation token.
     pub cancel_token: CancellationToken,
+    /// Injected embeddings provider for testing (bypasses real API calls).
+    pub injected_embeddings_provider: Option<Arc<dyn crate::embeddings::EmbeddingsProvider>>,
 }
 
 /// Session preset lock state.
@@ -325,6 +327,7 @@ async fn run_embeddings_router<C: TranscriptionCallbacks>(
         &ctx.llm_api_keys,
         ctx.embedding_cache,
         ctx.persist_app.clone(),
+        ctx.injected_embeddings_provider.clone(),
     )
     .await;
 
