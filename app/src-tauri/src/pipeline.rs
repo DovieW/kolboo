@@ -30,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 mod config;
 mod llm_provider;
 mod program_profiles;
+mod recording;
 mod routing;
 mod state_machine;
 mod stt_flow;
@@ -51,7 +52,7 @@ use program_profiles::{select_default_profile, select_effective_preset};
 
 use llm_provider::{create_llm_provider, LlmProviderParams};
 use stt_flow::run_stt_transcription;
-use utils::{amp_to_dbfs, is_effectively_quiet, seconds_to_duration_or};
+use utils::seconds_to_duration_or;
 
 // Intent routing helpers live in `pipeline/routing.rs`.
 
@@ -769,7 +770,7 @@ impl SharedPipeline {
             .map_err(|e| PipelineError::Lock(e.to_string()))?;
 
         // State guard: only allow starting from Idle or Error states
-        if !inner.state.can_start_recording() {
+        if !recording::can_start_recording(inner.state) {
             return Err(PipelineError::AlreadyRecording);
         }
 
@@ -781,10 +782,11 @@ impl SharedPipeline {
         // Clone out of the config to avoid borrowing `inner` immutably while calling into
         // `audio_capture` mutably.
         let input_device_name = inner.config.input_device_name.clone();
-        match inner
-            .audio_capture
-            .start_recording_session(max_duration, input_device_name.as_deref())
-        {
+        match recording::start_recording_session(
+            inner.audio_capture.as_mut(),
+            max_duration,
+            input_device_name.as_deref(),
+        ) {
             Ok(()) => {
                 inner.transition_to(PipelineState::Recording, "start_recording");
                 log::info!("Pipeline: Recording started");
@@ -792,7 +794,7 @@ impl SharedPipeline {
             }
             Err(e) => {
                 inner.set_error(&format!("Failed to start recording: {}", e));
-                Err(PipelineError::AudioCapture(e))
+                Err(e)
             }
         }
     }
@@ -805,37 +807,39 @@ impl SharedPipeline {
             .lock()
             .map_err(|e| PipelineError::Lock(e.to_string()))?;
 
-        if !inner.state.can_stop_recording() {
+        if !recording::can_stop_recording(inner.state) {
             return Err(PipelineError::NotRecording);
         }
 
         let encode_cfg = inner.config.audio_encode_config();
-        match inner
-            .audio_capture
-            .stop_and_get_wav_with_diagnostics(encode_cfg)
-        {
-            Ok((wav_bytes, diagnostics)) => {
+        match recording::stop_recording_session(inner.audio_capture.as_mut(), encode_cfg) {
+            Ok(outcome) => {
                 // Keep a copy for STT testing/debugging UI.
-                inner.last_wav_bytes = Some(wav_bytes.clone());
-                inner.last_recording_diagnostics = Some(diagnostics);
+                inner.last_wav_bytes = Some(outcome.wav_bytes.clone());
+                inner.last_recording_diagnostics = Some(outcome.diagnostics);
 
                 // Check size limit
                 let max_bytes = inner.config.max_recording_bytes;
-                if max_bytes > 0 && wav_bytes.len() > max_bytes {
-                    inner.set_error(&format!("Recording too large: {} bytes", wav_bytes.len()));
-                    return Err(PipelineError::RecordingTooLarge(wav_bytes.len(), max_bytes));
+                if let Err(e) =
+                    recording::validate_recording_size(outcome.wav_bytes.len(), max_bytes)
+                {
+                    inner.set_error(&format!(
+                        "Recording too large: {} bytes",
+                        outcome.wav_bytes.len()
+                    ));
+                    return Err(e);
                 }
 
                 inner.reset_to_idle();
                 log::info!(
                     "Pipeline: Recording stopped, {} bytes captured",
-                    wav_bytes.len()
+                    outcome.wav_bytes.len()
                 );
-                Ok(wav_bytes)
+                Ok(outcome.wav_bytes)
             }
             Err(e) => {
                 inner.set_error(&format!("Failed to stop recording: {}", e));
-                Err(PipelineError::AudioCapture(e))
+                Err(e)
             }
         }
     }
@@ -853,43 +857,44 @@ impl SharedPipeline {
             .lock()
             .map_err(|e| PipelineError::Lock(e.to_string()))?;
 
-        if !inner.state.can_stop_recording() {
+        if !recording::can_stop_recording(inner.state) {
             return Err(PipelineError::NotRecording);
         }
 
         let encode_cfg = inner.config.audio_encode_config();
-        match inner
-            .audio_capture
-            .stop_and_get_wav_before_after(encode_cfg)
-        {
-            Ok((before_wav, after_wav, diagnostics)) => {
+        match recording::stop_recording_before_after(inner.audio_capture.as_mut(), encode_cfg) {
+            Ok(outcome) => {
                 // Keep a copy of the processed output for STT test + debugging.
-                inner.last_wav_bytes = Some(after_wav.clone());
-                inner.last_recording_diagnostics = Some(diagnostics);
+                inner.last_wav_bytes = Some(outcome.after_wav.clone());
+                inner.last_recording_diagnostics = Some(outcome.diagnostics);
 
                 // Check size limit (both, to avoid surprising huge payloads)
                 let max_bytes = inner.config.max_recording_bytes;
-                if max_bytes > 0 {
-                    if before_wav.len() > max_bytes {
-                        inner
-                            .set_error(&format!("Recording too large: {} bytes", before_wav.len()));
-                        return Err(PipelineError::RecordingTooLarge(
-                            before_wav.len(),
-                            max_bytes,
-                        ));
-                    }
-                    if after_wav.len() > max_bytes {
-                        inner.set_error(&format!("Recording too large: {} bytes", after_wav.len()));
-                        return Err(PipelineError::RecordingTooLarge(after_wav.len(), max_bytes));
-                    }
+                if let Err(e) =
+                    recording::validate_recording_size(outcome.before_wav.len(), max_bytes)
+                {
+                    inner.set_error(&format!(
+                        "Recording too large: {} bytes",
+                        outcome.before_wav.len()
+                    ));
+                    return Err(e);
+                }
+                if let Err(e) =
+                    recording::validate_recording_size(outcome.after_wav.len(), max_bytes)
+                {
+                    inner.set_error(&format!(
+                        "Recording too large: {} bytes",
+                        outcome.after_wav.len()
+                    ));
+                    return Err(e);
                 }
 
                 inner.reset_to_idle();
-                Ok((before_wav, after_wav))
+                Ok((outcome.before_wav, outcome.after_wav))
             }
             Err(e) => {
                 inner.set_error(&format!("Failed to stop recording: {}", e));
-                Err(PipelineError::AudioCapture(e))
+                Err(e)
             }
         }
     }
@@ -1063,91 +1068,74 @@ impl SharedPipeline {
                 .lock()
                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
 
-            if !inner.state.can_stop_recording() {
+            if !recording::can_stop_recording(inner.state) {
                 return Err(PipelineError::NotRecording);
             }
 
             let encode_cfg = inner.config.audio_encode_config();
-            let (wav_bytes, diagnostics) = match inner
-                .audio_capture
-                .stop_and_get_wav_with_diagnostics(encode_cfg)
-            {
-                Ok(out) => out,
-                Err(e) => {
-                    inner.set_error(&format!("Failed to stop recording: {}", e));
-                    return Err(PipelineError::AudioCapture(e));
-                }
-            };
-
-            let stats = diagnostics.stats;
+            let outcome =
+                match recording::stop_recording_session(inner.audio_capture.as_mut(), encode_cfg) {
+                    Ok(out) => out,
+                    Err(e) => {
+                        inner.set_error(&format!("Failed to stop recording: {}", e));
+                        return Err(e);
+                    }
+                };
 
             // Persist diagnostics for UI readout.
-            inner.last_recording_diagnostics = Some(diagnostics);
+            inner.last_recording_diagnostics = Some(outcome.diagnostics);
 
             // Keep a copy for STT testing/debugging UI.
-            inner.last_wav_bytes = Some(wav_bytes.clone());
+            inner.last_wav_bytes = Some(outcome.wav_bytes.clone());
 
-            // Optional extra hallucination protection: if VAD says "no speech", skip STT.
-            if inner.config.quiet_audio_gate_enabled
-                && inner.config.quiet_audio_require_speech
-                && inner
-                    .last_recording_diagnostics
-                    .and_then(|d| d.speech_detected)
-                    == Some(false)
-            {
-                log::info!(
-                    "Pipeline: Skipping STT because no speech was detected by offline VAD (duration {:.2}s, rms {:.1} dBFS, peak {:.1} dBFS)",
-                    stats.duration_secs,
-                    amp_to_dbfs(stats.rms),
-                    amp_to_dbfs(stats.peak)
-                );
-
-                inner.reset_to_idle();
-                return Ok(TranscriptionResult {
-                    stt_text: String::new(),
-                    final_text: String::new(),
-                    stt_duration_ms: 0,
-                    llm_duration_ms: None,
-                    llm_provider_used: None,
-                    llm_model_used: None,
-                    llm_outcome: LlmOutcome::NotAttempted(
-                        LlmNotAttemptedReason::NoSpeechDetectedByVad,
-                    ),
-                });
-            }
-
-            if inner.config.quiet_audio_gate_enabled
-                && is_effectively_quiet(
-                    stats,
-                    inner.config.quiet_audio_min_duration_secs,
-                    inner.config.quiet_audio_rms_dbfs_threshold,
-                    inner.config.quiet_audio_peak_dbfs_threshold,
-                )
-            {
-                log::info!(
-                    "Pipeline: Skipping STT because recording is quiet (duration {:.2}s, rms {:.1} dBFS, peak {:.1} dBFS)",
-                    stats.duration_secs,
-                    amp_to_dbfs(stats.rms),
-                    amp_to_dbfs(stats.peak)
-                );
-
-                inner.reset_to_idle();
-                return Ok(TranscriptionResult {
-                    stt_text: String::new(),
-                    final_text: String::new(),
-                    stt_duration_ms: 0,
-                    llm_duration_ms: None,
-                    llm_provider_used: None,
-                    llm_model_used: None,
-                    llm_outcome: LlmOutcome::NotAttempted(LlmNotAttemptedReason::QuietAudioGate),
-                });
+            // Evaluate quiet audio gate (VAD-based speech detection + amplitude thresholds).
+            let gate_config = recording::QuietAudioGateConfig {
+                enabled: inner.config.quiet_audio_gate_enabled,
+                require_speech: inner.config.quiet_audio_require_speech,
+                min_duration_secs: inner.config.quiet_audio_min_duration_secs,
+                rms_dbfs_threshold: inner.config.quiet_audio_rms_dbfs_threshold,
+                peak_dbfs_threshold: inner.config.quiet_audio_peak_dbfs_threshold,
+            };
+            match recording::evaluate_quiet_audio_gate(&outcome.diagnostics, gate_config) {
+                recording::QuietAudioGateResult::NoSpeechDetected => {
+                    inner.reset_to_idle();
+                    return Ok(TranscriptionResult {
+                        stt_text: String::new(),
+                        final_text: String::new(),
+                        stt_duration_ms: 0,
+                        llm_duration_ms: None,
+                        llm_provider_used: None,
+                        llm_model_used: None,
+                        llm_outcome: LlmOutcome::NotAttempted(
+                            LlmNotAttemptedReason::NoSpeechDetectedByVad,
+                        ),
+                    });
+                }
+                recording::QuietAudioGateResult::Quiet => {
+                    inner.reset_to_idle();
+                    return Ok(TranscriptionResult {
+                        stt_text: String::new(),
+                        final_text: String::new(),
+                        stt_duration_ms: 0,
+                        llm_duration_ms: None,
+                        llm_provider_used: None,
+                        llm_model_used: None,
+                        llm_outcome: LlmOutcome::NotAttempted(
+                            LlmNotAttemptedReason::QuietAudioGate,
+                        ),
+                    });
+                }
+                recording::QuietAudioGateResult::NotQuiet => {}
             }
 
             // Check size limit
             let max_bytes = inner.config.max_recording_bytes;
-            if max_bytes > 0 && wav_bytes.len() > max_bytes {
-                inner.set_error(&format!("Recording too large: {} bytes", wav_bytes.len()));
-                return Err(PipelineError::RecordingTooLarge(wav_bytes.len(), max_bytes));
+            if let Err(e) = recording::validate_recording_size(outcome.wav_bytes.len(), max_bytes) {
+                inner.set_error(&format!(
+                    "Recording too large: {} bytes",
+                    outcome.wav_bytes.len()
+                ));
+                return Err(e);
             }
 
             inner.transition_to(PipelineState::Transcribing, "stop_and_transcribe_detailed");
@@ -1293,7 +1281,7 @@ impl SharedPipeline {
                 .unwrap_or_else(CancellationToken::new);
 
             (
-                wav_bytes,
+                outcome.wav_bytes,
                 stt_provider,
                 retry_config,
                 desired_timeout,
