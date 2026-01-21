@@ -116,9 +116,35 @@ impl AudioCaptureBackend for FakeAudioCapture {
     }
 }
 
+/// Configurable behavior for mock providers.
+#[derive(Clone, Default)]
+pub(super) struct MockBehavior {
+    /// Artificial delay before returning a response.
+    pub delay: Option<std::time::Duration>,
+    /// If set, the mock will return this error instead of success.
+    pub error: Option<String>,
+}
+
 /// A mock STT provider that returns a canned transcript without making network calls.
+/// Supports configurable latency and error simulation for testing edge cases.
 struct MockSttProvider {
     text: String,
+    behavior: MockBehavior,
+}
+
+impl MockSttProvider {
+    fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            behavior: MockBehavior::default(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn with_behavior(mut self, behavior: MockBehavior) -> Self {
+        self.behavior = behavior;
+        self
+    }
 }
 
 #[async_trait]
@@ -128,6 +154,12 @@ impl SttProvider for MockSttProvider {
         _audio: &[u8],
         _format: &AudioFormat,
     ) -> Result<String, crate::stt::SttError> {
+        if let Some(delay) = self.behavior.delay {
+            tokio::time::sleep(delay).await;
+        }
+        if let Some(ref err) = self.behavior.error {
+            return Err(crate::stt::SttError::Api(err.clone()));
+        }
         Ok(self.text.clone())
     }
 
@@ -137,8 +169,25 @@ impl SttProvider for MockSttProvider {
 }
 
 /// A mock LLM provider that returns a canned completion without making network calls.
+/// Supports configurable latency and error simulation for testing edge cases.
 struct MockLlmProvider {
     response: String,
+    behavior: MockBehavior,
+}
+
+impl MockLlmProvider {
+    fn new(response: impl Into<String>) -> Self {
+        Self {
+            response: response.into(),
+            behavior: MockBehavior::default(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn with_behavior(mut self, behavior: MockBehavior) -> Self {
+        self.behavior = behavior;
+        self
+    }
 }
 
 #[async_trait]
@@ -148,6 +197,12 @@ impl crate::llm::LlmProvider for MockLlmProvider {
         _system_prompt: &str,
         _user_message: &str,
     ) -> Result<String, crate::llm::LlmError> {
+        if let Some(delay) = self.behavior.delay {
+            tokio::time::sleep(delay).await;
+        }
+        if let Some(ref err) = self.behavior.error {
+            return Err(crate::llm::LlmError::Api(err.clone()));
+        }
         Ok(self.response.clone())
     }
 
@@ -292,9 +347,7 @@ async fn pipeline_can_transcribe_without_network_or_hardware() {
     p.inject_stt_provider_for_tests(
         "mock",
         None,
-        Arc::new(MockSttProvider {
-            text: "hello from tests".to_string(),
-        }),
+        Arc::new(MockSttProvider::new("hello from tests")),
     );
 
     p.start_recording().expect("start recording should succeed");
@@ -345,16 +398,12 @@ async fn pipeline_can_transcribe_and_rewrite_without_network_or_hardware() {
     p.inject_stt_provider_for_tests(
         "mock",
         None,
-        Arc::new(MockSttProvider {
-            text: "hello from stt".to_string(),
-        }),
+        Arc::new(MockSttProvider::new("hello from stt")),
     );
     p.inject_llm_provider_for_tests(
         "mock",
         None,
-        Arc::new(MockLlmProvider {
-            response: "Hello from LLM".to_string(),
-        }),
+        Arc::new(MockLlmProvider::new("Hello from LLM")),
     );
 
     p.start_recording().expect("start recording should succeed");
@@ -403,9 +452,7 @@ async fn rewrite_disabled_falls_back_to_stt_text() {
     p.inject_stt_provider_for_tests(
         "mock",
         None,
-        Arc::new(MockSttProvider {
-            text: "raw stt transcript".to_string(),
-        }),
+        Arc::new(MockSttProvider::new("raw stt transcript")),
     );
     // NOTE: we do NOT inject an LLM provider — rewrite should not be attempted.
 
@@ -426,4 +473,39 @@ async fn rewrite_disabled_falls_back_to_stt_text() {
         crate::pipeline::LlmOutcome::NotAttempted(_)
     ));
     assert_eq!(p.state(), PipelineState::Idle);
+}
+
+#[tokio::test]
+async fn stt_error_propagates_correctly() {
+    // Given: a pipeline with an STT provider that will fail.
+    let mut config = PipelineConfig::default();
+    config.stt_provider = "mock".to_string();
+    config.max_recording_bytes = 1024;
+    config.quiet_audio_gate_enabled = false;
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        "mock",
+        None,
+        Arc::new(MockSttProvider::new("unused").with_behavior(MockBehavior {
+            error: Some("Simulated API failure".to_string()),
+            ..Default::default()
+        })),
+    );
+
+    p.start_recording().expect("start recording should succeed");
+
+    // When: we stop and transcribe
+    let result = p.stop_and_transcribe_detailed().await;
+
+    // Then: we get an error, not a success.
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, crate::pipeline::PipelineError::Stt(_)),
+        "Expected STT error, got: {:?}",
+        err
+    );
+    // Pipeline transitions to Error state after a failed transcription.
+    assert_eq!(p.state(), PipelineState::Error);
 }
