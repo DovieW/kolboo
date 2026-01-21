@@ -428,15 +428,66 @@ impl PipelineInner {
     }
 }
 
+// Re-export SessionPresetLock from transcription_flow module (shared definition)
+use transcription_flow::SessionPresetLock;
+
+/// Callbacks adapter for integrating transcription_flow with SharedPipeline.
+///
+/// This implements `TranscriptionCallbacks` by acquiring locks on the pipeline's
+/// inner state as needed for state transitions and provider creation.
+///
+/// NOTE: This struct is prepared for wiring up the transcription_flow module.
+/// See `docs/Refactors/1_HIGH.md` for remaining integration work.
+#[allow(dead_code)]
+struct PipelineCallbacks {
+    inner: Arc<Mutex<PipelineInner>>,
+}
+
+impl transcription_flow::TranscriptionCallbacks for PipelineCallbacks {
+    fn transition_to_routing(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.state == PipelineState::Transcribing {
+                inner.transition_to(PipelineState::Routing, "transcription_flow (routing)");
+            }
+        }
+    }
+
+    fn transition_from_routing(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.state == PipelineState::Routing {
+                inner.transition_to(
+                    PipelineState::Transcribing,
+                    "transcription_flow (routing done)",
+                );
+            }
+        }
+    }
+
+    fn transition_to_rewriting(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.state == PipelineState::Transcribing {
+                inner.transition_to(PipelineState::Rewriting, "transcription_flow (rewrite)");
+            }
+        }
+    }
+
+    fn get_or_create_llm_provider(
+        &self,
+        provider_id: &str,
+        params: LlmProviderParams,
+    ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+        inner.get_or_create_llm_provider(provider_id, params)
+    }
+}
+
 /// Thread-safe wrapper for the recording pipeline
 ///
 /// Uses standard Mutex to be Send + Sync for Tauri state management.
 /// Provides robust error handling and cancellation support.
-#[derive(Debug, Clone)]
-struct SessionPresetLock {
-    profile_id: Option<String>,
-    preset_id: String,
-}
 
 #[derive(Clone)]
 pub struct SharedPipeline {

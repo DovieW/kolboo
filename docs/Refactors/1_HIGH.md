@@ -8,4 +8,7 @@
 
 - **Continue extraction of remaining "god file" areas from `app/src-tauri/src/pipeline.rs` (~3000 lines):**
   - `pipeline/audio_loop.rs` (CPAL/VAD orchestration) — audio capture is already behind `AudioCaptureBackend` trait, but orchestration code remains in main file
-  - **Wire up `pipeline/transcription_flow.rs`** — module was created with shared routing + LLM rewrite logic, but `stop_and_transcribe_detailed` and `transcribe_wav_bytes_detailed_for_profile` still use inline implementations. The next step is to replace the inline code with calls to the new `complete_transcription_flow()` function.
+  - **Complete `pipeline/transcription_flow.rs` integration** — module exists with shared routing + LLM rewrite logic (`TranscriptionContext`, `TranscriptionCallbacks` trait, `complete_transcription_flow()`). `PipelineCallbacks` adapter is implemented. Remaining work:
+    1. Replace inline routing/rewrite code in `stop_and_transcribe_detailed` with calls to `complete_transcription_flow()`
+    2. Replace inline routing/rewrite code in `transcribe_wav_bytes_detailed_for_profile` with calls to `complete_transcription_flow()`
+    3. Remove the duplicate inline implementations (~600+ lines of duplicated code)
