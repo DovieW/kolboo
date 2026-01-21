@@ -1616,6 +1616,38 @@ impl SharedPipeline {
         }
     }
 
+    /// Test-only seam: inject an STT provider into the pipeline cache so we can run
+    /// end-to-end pipeline tests without real network calls.
+    ///
+    /// This intentionally bypasses API-key validation in `get_or_create_stt_provider` by
+    /// pre-populating the cache key the pipeline will look up.
+    #[cfg(test)]
+    fn inject_stt_provider_for_tests(
+        &self,
+        provider_id: &str,
+        model: Option<&str>,
+        provider: Arc<dyn SttProvider>,
+    ) {
+        let mut inner = self.inner.lock().expect("pipeline lock");
+        let provider_id = canonicalize_stt_provider_id(provider_id);
+
+        // Keep cache-key construction aligned with `PipelineInner::get_or_create_stt_provider`.
+        // For Local Whisper this is special-cased; for tests we keep it simple and only
+        // support a normal provider id.
+        let model_key = if provider_id == "local-whisper" {
+            inner.local_whisper_model_key_for_cache()
+        } else {
+            model
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<default>".to_string())
+        };
+        let cache_key = format!("{}::{}", provider_id, model_key);
+
+        inner.stt_provider_cache.insert(cache_key, provider.clone());
+        inner.stt_registry.register(&provider_id, provider);
+        let _ = inner.stt_registry.set_current(&provider_id);
+    }
+
     /// Provide an app handle for best-effort persistence of recreatable caches.
     pub fn set_app_handle(&self, app: AppHandle) {
         if let Ok(mut guard) = self.app_handle.lock() {
@@ -4430,6 +4462,7 @@ mod tests {
         AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats, SharedAudioLevelMeter,
         SharedAudioWaveformMeter,
     };
+    use async_trait::async_trait;
     use tokio_util::sync::CancellationToken;
 
     struct FakeAudioCapture {
@@ -4733,5 +4766,56 @@ mod tests {
         let wav = p.stop_recording().expect("stop recording should succeed");
         assert_eq!(wav, vec![1, 2, 3]);
         assert_eq!(p.try_state(), Some(PipelineState::Idle));
+    }
+
+    struct MockSttProvider {
+        text: String,
+    }
+
+    #[async_trait]
+    impl SttProvider for MockSttProvider {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+            _format: &AudioFormat,
+        ) -> Result<String, SttError> {
+            Ok(self.text.clone())
+        }
+
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+    }
+
+    #[tokio::test]
+    async fn pipeline_can_transcribe_without_network_or_hardware() {
+        // Given: a pipeline with fake audio capture (no CPAL device) and a fake STT provider
+        // injected into the provider cache (no network).
+        let mut config = PipelineConfig::default();
+        config.stt_provider = "mock".to_string();
+        config.max_recording_bytes = 1024;
+        config.quiet_audio_gate_enabled = false;
+
+        let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+        p.inject_stt_provider_for_tests(
+            "mock",
+            None,
+            Arc::new(MockSttProvider {
+                text: "hello from tests".to_string(),
+            }),
+        );
+
+        p.start_recording().expect("start recording should succeed");
+
+        // When: we stop and transcribe
+        let result = p
+            .stop_and_transcribe_detailed()
+            .await
+            .expect("stop/transcribe should succeed");
+
+        // Then: we get a transcript without hitting any real IO.
+        assert_eq!(result.stt_text, "hello from tests");
+        assert_eq!(result.final_text, "hello from tests");
+        assert_eq!(p.state(), PipelineState::Idle);
     }
 }

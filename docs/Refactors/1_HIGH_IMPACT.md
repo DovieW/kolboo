@@ -8,14 +8,6 @@ If you’re choosing what to do “on purpose” (not as a drive-by), start here
 
 These are “bigger than a ticket” changes that would make the core easier to evolve safely.
 
-- **Dependency injection seams for hard IO (testability).**
-  - You already have good “seams” in places (e.g. `with_client(...)` patterns).
-  - Next step: formalize a few minimal traits/interfaces so the pipeline can be tested without:
-    - CPAL devices
-    - real filesystem
-    - real network
-  - Keep it small: only extract interfaces where unit tests would meaningfully increase confidence.
-
 - **Create a clean layering boundary: “Tauri shell” vs “Core services”.**
   - Today: a lot of orchestration lives in `app/src-tauri/src/lib.rs` and reaches into many subsystems.
   - Goal: keep `lib.rs` focused on wiring (commands/events/windows/tray), and move business logic into a small set of services/modules.
