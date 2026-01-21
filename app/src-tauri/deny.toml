@@ -1,0 +1,112 @@
+# cargo-deny configuration for Kolboo
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Target platforms we care about for supply-chain checks
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+]
+all-features = false
+
+# ============================================================
+# ADVISORIES - Check for known security vulnerabilities
+# ============================================================
+[advisories]
+# Ignore specific advisories that are transitive dependencies from Tauri
+# and cannot be fixed by us. These are mostly unmaintained crate warnings.
+ignore = [
+    # GTK3-rs crates are unmaintained but required by Tauri on Linux
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0412", # gdk
+    "RUSTSEC-2024-0413", # atk
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0415", # gtk
+    "RUSTSEC-2024-0416", # atk-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    "RUSTSEC-2024-0418", # gdk-sys
+    "RUSTSEC-2024-0419", # gtk3-macros
+    "RUSTSEC-2024-0420", # gtk-sys
+    # proc-macro-error unmaintained (used by glib-macros in Tauri)
+    "RUSTSEC-2024-0370",
+    # fxhash unmaintained (used by selectors in tauri-utils)
+    "RUSTSEC-2025-0057",
+    # unic-* crates unmaintained (used by urlpattern in tauri-utils)
+    "RUSTSEC-2025-0075", # unic-char-range
+    "RUSTSEC-2025-0080", # unic-common
+    "RUSTSEC-2025-0081", # unic-char-property
+    "RUSTSEC-2025-0098", # unic-ucd-version
+    "RUSTSEC-2025-0100", # unic-ucd-ident
+]
+
+# ============================================================
+# LICENSES - Ensure all dependencies use allowed licenses
+# ============================================================
+[licenses]
+# Don't warn if an allowed license isn't currently encountered
+unused-allowed-license = "allow"
+# High confidence when inferring licenses from text
+confidence-threshold = 0.93
+# Common permissive licenses that are compatible with AGPL-3.0
+allow = [
+    "AGPL-3.0-only",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# Exceptions for crates with unique licenses
+exceptions = [
+    # aws-lc-sys uses OpenSSL license (already allowed above, but explicit)
+    { allow = ["OpenSSL"], crate = "aws-lc-sys" },
+]
+
+# Private crates that don't need license checking
+[[licenses.clarify]]
+crate = "kolboo"
+expression = "AGPL-3.0-only"
+license-files = []
+
+# tauri-nspanel doesn't have a license field in its manifest
+[[licenses.clarify]]
+crate = "tauri-nspanel"
+expression = "MIT"
+license-files = []
+
+# ============================================================
+# BANS - Prevent specific crates or patterns
+# ============================================================
+[bans]
+# Allow duplicate versions for now (Tauri pulls many transitive duplicates)
+multiple-versions = "allow"
+# Allow wildcard dependencies (needed for git branch pins like tauri-nspanel)
+wildcards = "allow"
+# Specific crates to ban (can add problematic crates here)
+deny = []
+# Skip specific crate versions from multiple-versions check
+skip = []
+skip-tree = []
+
+# ============================================================
+# SOURCES - Restrict where crates can be fetched from
+# ============================================================
+[sources]
+# Deny crates from unknown registries
+unknown-registry = "deny"
+# Warn on git sources (common in Tauri ecosystem, so don't fail yet)
+unknown-git = "warn"
+# Allowed git sources
+allow-git = [
+    "https://github.com/ahkohd/tauri-nspanel",
+]

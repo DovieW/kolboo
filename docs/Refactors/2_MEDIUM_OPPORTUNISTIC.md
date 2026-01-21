@@ -21,9 +21,8 @@ They tend to improve maintainability and reduce future friction, but they're not
 	- Add request/session spans so logs for “one recording” can be followed across async tasks.
 	- This is especially useful once you have cancellation, retries, and concurrent windows/events.
 
-- **Supply chain & security gates.**
-	- Add Rust advisory/license checks (e.g., audit/deny style tooling) once and let them guard the repo.
-	- Expect a one-time tuning cost.
+- ✅ ~~**Supply chain & security gates.**~~
+	- Added `cargo-deny` config in `app/src-tauri/deny.toml` and tuned it for current transitive deps.
 
 - **Benchmarks for hot paths (optional but useful).**
 	- Audio processing, VAD/resampling, routing similarity, and request-building are good candidates.

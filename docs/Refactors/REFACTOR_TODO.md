@@ -10,3 +10,8 @@ These are small/medium follow-ups discovered while doing other work.
 
 - ✅ ~~Consider moving the large `pipeline.rs` test module into `app/src-tauri/src/pipeline/tests.rs`.~~
   - Done: Tests now live in `pipeline/tests.rs`.
+
+## Supply chain follow-ups
+
+- Investigate reducing/removing GTK3 transitive dependencies on Linux (Tauri pulls GTK3 crates that are now unmaintained).
+  - Evaluate GTK4-compatible stack or alternative windowing path for Linux.
