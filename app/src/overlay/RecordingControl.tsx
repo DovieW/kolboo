@@ -496,7 +496,7 @@ export default function RecordingControl() {
 		};
 
 		// Sync on mount and whenever polling mode changes.
-		syncState();
+		void syncState();
 
 		if (pollMs > 0) {
 			interval = window.setInterval(syncState, pollMs);
@@ -532,7 +532,7 @@ export default function RecordingControl() {
 			}
 		};
 
-		sync();
+		void sync();
 		interval = window.setInterval(sync, 1500);
 
 		return () => {
@@ -817,7 +817,7 @@ export default function RecordingControl() {
 			});
 		};
 
-		setup();
+		void setup();
 		return () => {
 			unlisten?.();
 		};
@@ -1035,7 +1035,7 @@ export default function RecordingControl() {
 			});
 		};
 
-		setup();
+		void setup();
 
 		return () => {
 			unlistenStart?.();
@@ -1102,7 +1102,7 @@ export default function RecordingControl() {
 			);
 		};
 
-		setup();
+		void setup();
 
 		return () => {
 			for (const unlisten of unlisteners) {
@@ -1119,7 +1119,7 @@ export default function RecordingControl() {
 			unlisten = await tauriAPI.onSettingsChanged(onSettingsChanged);
 		};
 
-		setup();
+		void setup();
 		return () => {
 			unlisten?.();
 		};
@@ -1131,7 +1131,7 @@ export default function RecordingControl() {
 	// - recording: stop recording
 	const handleClick = useCallback(() => {
 		if (pipelineState === "recording") {
-			onStopRecording();
+			void onStopRecording();
 			return;
 		}
 
@@ -1143,7 +1143,7 @@ export default function RecordingControl() {
 			if (!expanded) {
 				setExpanded(true);
 			}
-			onStartRecording();
+			void onStartRecording();
 		}
 	}, [expanded, onStartRecording, onStopRecording, pipelineState, setExpanded]);
 
@@ -1323,7 +1323,7 @@ export default function RecordingControl() {
 											data-variant="dim"
 											onClick={(e) => {
 												e.stopPropagation();
-												onRetry();
+												void onRetry();
 											}}
 										>
 											Retry

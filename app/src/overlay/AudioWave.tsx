@@ -228,7 +228,7 @@ function BackendAudioWave({
 			});
 		};
 
-		setup();
+		void setup();
 		return () => {
 			unlisten?.();
 		};
@@ -1170,7 +1170,7 @@ function AudioWave({
 			}
 		};
 
-		setupAudio();
+		void setupAudio();
 
 		return () => {
 			mounted = false;

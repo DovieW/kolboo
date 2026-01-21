@@ -650,7 +650,7 @@ export function HistoryFeed({
 			}
 		};
 
-		hydrate();
+		void hydrate();
 
 		return () => {
 			cancelled = true;
@@ -678,7 +678,7 @@ export function HistoryFeed({
 				}
 			};
 
-			persist();
+			void persist();
 		}, 250);
 
 		return () => clearTimeout(timeout);
@@ -703,7 +703,7 @@ export function HistoryFeed({
 			});
 		};
 
-		setup();
+		void setup();
 
 		return () => {
 			unlisten?.();
@@ -711,7 +711,7 @@ export function HistoryFeed({
 	}, [queryClient]);
 
 	const handleDelete = (id: string) => {
-		(async () => {
+		void (async () => {
 			try {
 				const options = await tauriAPI.getHistoryDeleteOptions(id);
 
@@ -994,7 +994,7 @@ export function HistoryFeed({
 
 		const batch = selected.slice(0, maxChecksPerTick);
 
-		(async () => {
+		void (async () => {
 			await Promise.all(
 				batch.map(async (id) => {
 					try {
@@ -2219,7 +2219,7 @@ export function HistoryFeed({
 																onClick={(e) => {
 																	e.stopPropagation();
 																	if (!recordingId) return;
-																	player.toggle(recordingId);
+																	void player.toggle(recordingId);
 																}}
 																aria-label={
 																	isKnownMissing

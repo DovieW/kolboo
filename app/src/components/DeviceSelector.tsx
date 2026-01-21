@@ -67,7 +67,7 @@ export function DeviceSelector() {
 			}
 		}
 
-		loadDevices();
+		void loadDevices();
 
 		return;
 	}, []);
@@ -143,7 +143,7 @@ export function DeviceSelector() {
 			}
 		};
 
-		setup();
+		void setup();
 
 		return () => {
 			try {

@@ -67,7 +67,7 @@ export default function OverlayHoverApp() {
 			}
 		};
 
-		sync();
+		void sync();
 		interval = window.setInterval(sync, 1500);
 		return () => {
 			cancelled = true;
@@ -95,7 +95,7 @@ export default function OverlayHoverApp() {
 			}
 		};
 
-		sync();
+		void sync();
 		interval = window.setInterval(sync, 600);
 		return () => {
 			cancelled = true;
@@ -209,7 +209,7 @@ export default function OverlayHoverApp() {
 						data-active={!sessionLock.preset_id ? "true" : "false"}
 						disabled={!activeProfileId}
 						onClick={() => {
-							setSessionPresetLock(null);
+							void setSessionPresetLock(null);
 						}}
 					>
 						Auto
@@ -227,9 +227,9 @@ export default function OverlayHoverApp() {
 							if (!routerIsEffectivelyOn && sessionLock.preset_id === p.id) {
 								// When routing is off we hide the explicit "Auto" button.
 								// Clicking the active preset again clears the one-shot lock.
-								setSessionPresetLock(null);
+								void setSessionPresetLock(null);
 							} else {
-								setSessionPresetLock(p.id);
+								void setSessionPresetLock(p.id);
 							}
 						}}
 					>

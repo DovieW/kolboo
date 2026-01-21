@@ -20,7 +20,7 @@ export default function OverlayApp() {
 			}
 		};
 
-		init();
+		void init();
 	}, []);
 
 	if (!ready) {

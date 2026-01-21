@@ -170,7 +170,7 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 			});
 			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
 			// Sync pipeline config when API keys change
-			configAPI.syncPipelineConfig();
+			void configAPI.syncPipelineConfig();
 			// Keep the saved value in the field so the button disables when unchanged.
 			setValue((prev) => prev.trim());
 			hasHydratedRef.current = true;
@@ -459,51 +459,61 @@ function LocalWhisperModelsCard() {
 		let disposed = false;
 		let unlisten: (() => void) | null = null;
 
-		(async () => {
-			const nextUnlisten = await listen<WhisperModelDownloadProgress>(
-				WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT,
-				(event) => {
-					const payload = event.payload;
+		const setup = async () => {
+			try {
+				const nextUnlisten = await listen<WhisperModelDownloadProgress>(
+					WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT,
+					(event) => {
+						const payload = event.payload;
 
-					// Normalize nulls (Rust Option -> null)
-					const normalized: WhisperModelDownloadProgress = {
-						...payload,
-						total_bytes: payload.total_bytes ?? null,
-						percent: payload.percent ?? null,
-						message: payload.message ?? null,
-					};
+						// Normalize nulls (Rust Option -> null)
+						const normalized: WhisperModelDownloadProgress = {
+							...payload,
+							total_bytes: payload.total_bytes ?? null,
+							percent: payload.percent ?? null,
+							message: payload.message ?? null,
+						};
 
-					setProgressById((prev) => ({
-						...prev,
-						[normalized.model_id]: normalized,
-					}));
-
-					if (normalized.status === "error") {
-						setErrorById((prev) => ({
+						setProgressById((prev) => ({
 							...prev,
-							[normalized.model_id]: normalized.message ?? "Download failed",
+							[normalized.model_id]: normalized,
 						}));
-					}
 
-					if (
-						normalized.status === "completed" ||
-						normalized.status === "cancelled" ||
-						normalized.status === "error"
-					) {
-						queryClient.invalidateQueries({ queryKey: ["whisperModels"] });
-					}
-				},
-			);
+						if (normalized.status === "error") {
+							setErrorById((prev) => ({
+								...prev,
+								[normalized.model_id]:
+									normalized.message ?? "Download failed",
+							}));
+						}
 
-			// React StrictMode (dev) mounts effects twice; if we were disposed before
-			// `listen()` resolves, immediately unregister to avoid leaked duplicate listeners.
-			if (disposed) {
-				nextUnlisten();
-				return;
+						if (
+							normalized.status === "completed" ||
+							normalized.status === "cancelled" ||
+							normalized.status === "error"
+						) {
+							queryClient.invalidateQueries({ queryKey: ["whisperModels"] });
+						}
+					},
+				);
+
+				// React StrictMode (dev) mounts effects twice; if we were disposed before
+				// `listen()` resolves, immediately unregister to avoid leaked duplicate listeners.
+				if (disposed) {
+					nextUnlisten();
+					return;
+				}
+
+				unlisten = nextUnlisten;
+			} catch (e) {
+				console.warn(
+					"Failed to listen for whisper model download progress events:",
+					e,
+				);
 			}
+		};
 
-			unlisten = nextUnlisten;
-		})();
+		void setup();
 
 		return () => {
 			disposed = true;
@@ -518,29 +528,46 @@ function LocalWhisperModelsCard() {
 		let disposed = false;
 		let unlisten: (() => void) | null = null;
 
-		(async () => {
-			const nextUnlisten = await listen<LocalWhisperModelLoadEvent>(
-				LOCAL_WHISPER_MODEL_LOAD_EVENT,
-				(event) => {
-					const payload = event.payload;
-					const status = payload.status;
+		const setup = async () => {
+			try {
+				const nextUnlisten = await listen<LocalWhisperModelLoadEvent>(
+					LOCAL_WHISPER_MODEL_LOAD_EVENT,
+					(event) => {
+						const payload = event.payload;
+						const status = payload.status;
 
-					if (status === "started") {
-						setIsLocalWhisperLoading(true);
-						notifications.show({
-							title: "Local Whisper",
-							message: "Loading model…",
-							color: "orange",
-						});
-						return;
-					}
+						if (status === "started") {
+							setIsLocalWhisperLoading(true);
+							notifications.show({
+								title: "Local Whisper",
+								message: "Loading model…",
+								color: "orange",
+							});
+							return;
+						}
 
-					if (status === "completed") {
+						if (status === "completed") {
+							setIsLocalWhisperLoading(false);
+							notifications.show({
+								title: "Local Whisper",
+								message: "Model loaded.",
+								color: "green",
+							});
+							queryClient.invalidateQueries({
+								queryKey: ["localWhisperModelLoaded"],
+							});
+							queryClient.invalidateQueries({
+								queryKey: ["localWhisperBackendStatus"],
+							});
+							return;
+						}
+
+						// error
 						setIsLocalWhisperLoading(false);
 						notifications.show({
 							title: "Local Whisper",
-							message: "Model loaded.",
-							color: "green",
+							message: payload.message ?? "Model load failed",
+							color: "red",
 						});
 						queryClient.invalidateQueries({
 							queryKey: ["localWhisperModelLoaded"],
@@ -548,34 +575,26 @@ function LocalWhisperModelsCard() {
 						queryClient.invalidateQueries({
 							queryKey: ["localWhisperBackendStatus"],
 						});
-						return;
-					}
+					},
+				);
 
-					// error
-					setIsLocalWhisperLoading(false);
-					notifications.show({
-						title: "Local Whisper",
-						message: payload.message ?? "Model load failed",
-						color: "red",
-					});
-					queryClient.invalidateQueries({
-						queryKey: ["localWhisperModelLoaded"],
-					});
-					queryClient.invalidateQueries({
-						queryKey: ["localWhisperBackendStatus"],
-					});
-				},
-			);
+				// React StrictMode (dev) mounts effects twice; if we were disposed before
+				// `listen()` resolves, immediately unregister to avoid leaked duplicate listeners.
+				if (disposed) {
+					nextUnlisten();
+					return;
+				}
 
-			// React StrictMode (dev) mounts effects twice; if we were disposed before
-			// `listen()` resolves, immediately unregister to avoid leaked duplicate listeners.
-			if (disposed) {
-				nextUnlisten();
-				return;
+				unlisten = nextUnlisten;
+			} catch (e) {
+				console.warn(
+					"Failed to listen for local whisper model load events:",
+					e,
+				);
 			}
+		};
 
-			unlisten = nextUnlisten;
-		})();
+		void setup();
 
 		return () => {
 			disposed = true;

@@ -415,7 +415,7 @@ export function SettingsGuideOverlay({
 												},
 											}}
 											onKeyDown={(e) => {
-												if (e.key === "Enter") handleSaveGroqKey();
+													if (e.key === "Enter") void handleSaveGroqKey();
 											}}
 										/>
 										<Group justify="flex-end" mt="sm">

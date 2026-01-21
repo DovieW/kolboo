@@ -1101,7 +1101,7 @@ export function LogsView(
 		});
 
 		return () => {
-			unlisten.then((fn) => fn());
+			void unlisten.then((fn) => fn()).catch(() => {});
 		};
 	}, []);
 
