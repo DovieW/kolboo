@@ -1,0 +1,894 @@
+//! Transcription flow orchestration.
+//!
+//! This module extracts the shared transcription logic used by:
+//! - `stop_and_transcribe_detailed` (after stopping recording)
+//! - `transcribe_wav_bytes_detailed_for_profile` (for retry/replay)
+//!
+//! The flow consists of:
+//! 1. STT transcription with retries and timeout
+//! 2. Preset routing (embeddings or LLM-based)
+//! 3. LLM rewrite with fallback to raw transcript
+//!
+//! NOTE: This module is currently not fully integrated with the main pipeline methods.
+//! See `docs/Refactors/1_HIGH.md` for the remaining work to wire this up.
+
+#![allow(dead_code)]
+
+use crate::llm::{format_text, LlmProvider, ProgramPromptProfile};
+use crate::request_log::RequestLogStore;
+use crate::settings::{IntentRouterStrategy, ProxySettings};
+use crate::stt::{with_retry, AudioFormat, RetryConfig, SttProvider};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tauri::AppHandle;
+use tokio_util::sync::CancellationToken;
+
+use super::llm_provider::LlmProviderParams;
+use super::program_profiles::{find_preset_by_id, router_enabled};
+use super::routing::{route_preset_id_with_embeddings, route_preset_id_with_llm};
+use super::types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionResult};
+use super::utils::normalize_stt_text;
+
+/// Context needed for transcription flow.
+///
+/// This bundles together all the dependencies and configuration needed for
+/// the transcription pipeline without requiring access to the full SharedPipeline.
+pub(super) struct TranscriptionContext<'a> {
+    /// Active profile for this transcription (already resolved from foreground app or override).
+    pub active_profile: Option<ProgramPromptProfile>,
+    /// Whether LLM rewrite is enabled globally (used as fallback for Default profile).
+    pub llm_enabled_global: bool,
+    /// Default profile's include_clipboard_context setting.
+    pub default_rewrite_include_clipboard_context: bool,
+    /// Session preset lock (if any).
+    pub session_lock: Option<SessionPresetLock>,
+    /// Proxy settings for network requests.
+    pub proxy_settings: ProxySettings,
+    /// LLM API keys by provider.
+    pub llm_api_keys: HashMap<String, String>,
+    /// Request log store for diagnostics.
+    pub request_log_store: Option<RequestLogStore>,
+    /// Embedding cache for intent routing.
+    pub embedding_cache: &'a Arc<Mutex<HashMap<String, Vec<f32>>>>,
+    /// App handle for persisting embedding cache.
+    pub persist_app: Option<AppHandle>,
+    /// Cancellation token.
+    pub cancel_token: CancellationToken,
+}
+
+/// Session preset lock state.
+#[derive(Debug, Clone)]
+pub(super) struct SessionPresetLock {
+    pub profile_id: Option<String>,
+    pub preset_id: String,
+}
+
+/// Callbacks for state transitions during transcription.
+///
+/// These allow the caller to update pipeline state and log provider creation.
+pub(super) trait TranscriptionCallbacks: Send + Sync {
+    /// Called when the pipeline should transition to routing state.
+    fn transition_to_routing(&self);
+    /// Called when the pipeline should transition back from routing.
+    fn transition_from_routing(&self);
+    /// Called when the pipeline should transition to rewriting state.
+    fn transition_to_rewriting(&self);
+    /// Get or create an LLM provider.
+    fn get_or_create_llm_provider(
+        &self,
+        provider_id: &str,
+        params: LlmProviderParams,
+    ) -> Result<Arc<dyn LlmProvider>, PipelineError>;
+}
+
+/// Result of the routing phase.
+struct RoutingResult {
+    routed_preset_id: Option<String>,
+}
+
+/// Result of resolving the LLM provider for rewrite.
+pub(super) struct LlmResolution {
+    provider: Option<Arc<dyn LlmProvider>>,
+    prompts: crate::llm::PromptSections,
+    timeout: Duration,
+    not_attempted_reason: Option<LlmNotAttemptedReason>,
+}
+
+/// Run STT transcription with retry and timeout.
+pub(super) async fn run_stt_transcription(
+    wav_bytes: Arc<Vec<u8>>,
+    stt_provider: Arc<dyn SttProvider>,
+    retry_config: &RetryConfig,
+    timeout: Duration,
+    cancel_token: &CancellationToken,
+) -> Result<(String, u64), PipelineError> {
+    let format = AudioFormat::default();
+
+    let transcription_future = async {
+        with_retry(retry_config, || {
+            let provider = stt_provider.clone();
+            let wav = wav_bytes.clone();
+            let format = format.clone();
+            async move { provider.transcribe(wav.as_slice(), &format).await }
+        })
+        .await
+    };
+
+    let stt_start = std::time::Instant::now();
+
+    // Race between transcription, timeout, and cancellation
+    let stt_result = tokio::select! {
+        biased;
+
+        // Cancellation takes priority
+        _ = cancel_token.cancelled() => {
+            log::info!("Pipeline: Transcription cancelled");
+            Err(PipelineError::Cancelled)
+        }
+
+        // Timeout
+        _ = tokio::time::sleep(timeout) => {
+            log::warn!("Pipeline: Transcription timed out after {:?}", timeout);
+            Err(PipelineError::Timeout(timeout))
+        }
+
+        // Actual transcription
+        result = transcription_future => {
+            result.map_err(PipelineError::from)
+        }
+    };
+
+    let stt_text = stt_result.map(normalize_stt_text)?;
+    let stt_duration_ms = stt_start.elapsed().as_millis() as u64;
+
+    log::info!("Pipeline: STT complete, {} chars", stt_text.len());
+    Ok((stt_text, stt_duration_ms))
+}
+
+/// Route to a preset based on the transcript.
+async fn route_preset<C: TranscriptionCallbacks>(
+    ctx: &TranscriptionContext<'_>,
+    callbacks: &C,
+    stt_text: &str,
+) -> RoutingResult {
+    let mut routed_preset_id: Option<String> = None;
+
+    let profile_rewrite_enabled = ctx
+        .active_profile
+        .as_ref()
+        .and_then(|p| p.rewrite_llm_enabled)
+        .unwrap_or(ctx.llm_enabled_global);
+
+    if !profile_rewrite_enabled {
+        return RoutingResult { routed_preset_id };
+    }
+
+    let Some(profile) = ctx.active_profile.as_ref() else {
+        return RoutingResult { routed_preset_id };
+    };
+
+    // Session override wins over everything else.
+    if let Some(lock) = ctx.session_lock.as_ref() {
+        let profile_ok = lock
+            .profile_id
+            .as_deref()
+            .map(|pid| pid == profile.id)
+            .unwrap_or(true);
+
+        if profile_ok && find_preset_by_id(profile, lock.preset_id.as_str()).is_some() {
+            routed_preset_id = Some(lock.preset_id.clone());
+        }
+    }
+
+    // Persisted manual override wins over router/default.
+    if routed_preset_id.is_none() {
+        if let Some(id) = profile.active_preset_id.as_deref() {
+            routed_preset_id = Some(id.to_string());
+        }
+    }
+
+    // Run router if enabled and no override is set.
+    if routed_preset_id.is_none() && router_enabled(profile) {
+        routed_preset_id = run_intent_router(ctx, callbacks, profile, stt_text).await;
+    }
+
+    // Default preset is the fallback when routing is off/undecided.
+    if routed_preset_id.is_none() {
+        routed_preset_id = profile.default_preset_id.clone();
+    }
+
+    RoutingResult { routed_preset_id }
+}
+
+/// Run intent router (embeddings or LLM-based).
+async fn run_intent_router<C: TranscriptionCallbacks>(
+    ctx: &TranscriptionContext<'_>,
+    callbacks: &C,
+    profile: &ProgramPromptProfile,
+    stt_text: &str,
+) -> Option<String> {
+    let router = profile.router.as_ref()?;
+
+    if router.strategy == IntentRouterStrategy::Llm {
+        run_llm_router(ctx, callbacks, profile, stt_text).await
+    } else {
+        run_embeddings_router(ctx, callbacks, profile, stt_text).await
+    }
+}
+
+/// Run LLM-based intent router.
+async fn run_llm_router<C: TranscriptionCallbacks>(
+    ctx: &TranscriptionContext<'_>,
+    callbacks: &C,
+    profile: &ProgramPromptProfile,
+    stt_text: &str,
+) -> Option<String> {
+    let llm_config = ctx
+        .active_profile
+        .as_ref()
+        .map(|_| ()) // We just need to know there's a profile
+        .and_then(|_| {
+            // Build provider params from router config or global defaults
+            let router_cfg = profile.router.as_ref();
+            let desired_provider = router_cfg
+                .and_then(|r| r.llm_provider.clone())
+                .unwrap_or_else(|| "openai".to_string());
+            let desired_model = router_cfg.and_then(|r| r.llm_model.clone());
+            let desired_openai_effort = router_cfg.and_then(|r| r.openai_reasoning_effort.clone());
+            let desired_gemini_budget = router_cfg.and_then(|r| r.gemini_thinking_budget);
+            let desired_gemini_level = router_cfg.and_then(|r| r.gemini_thinking_level.clone());
+            let desired_anthropic_budget = router_cfg.and_then(|r| r.anthropic_thinking_budget);
+
+            Some((
+                desired_provider,
+                desired_model,
+                desired_openai_effort,
+                desired_gemini_budget,
+                desired_gemini_level,
+                desired_anthropic_budget,
+            ))
+        });
+
+    let Some((
+        desired_provider,
+        desired_model,
+        desired_openai_effort,
+        desired_gemini_budget,
+        desired_gemini_level,
+        desired_anthropic_budget,
+    )) = llm_config
+    else {
+        return None;
+    };
+
+    let maybe_provider = callbacks
+        .get_or_create_llm_provider(
+            desired_provider.as_str(),
+            LlmProviderParams {
+                model: desired_model,
+                timeout: Duration::from_secs(30),
+                ollama_url: None,
+                openai_reasoning_effort: desired_openai_effort,
+                gemini_thinking_budget: desired_gemini_budget,
+                gemini_thinking_level: desired_gemini_level,
+                anthropic_thinking_budget: desired_anthropic_budget,
+            },
+        )
+        .ok();
+
+    let provider = maybe_provider?;
+
+    // Expose routing as a distinct UI phase.
+    callbacks.transition_to_routing();
+
+    let router_start = std::time::Instant::now();
+    let llm_out = route_preset_id_with_llm(profile, stt_text, provider.as_ref()).await;
+
+    let routed_preset_id = if let Some((selected, router_req, router_resp)) = llm_out {
+        if let Some(store) = ctx.request_log_store.as_ref() {
+            store.with_current(|log| {
+                log.router_request_json = Some(router_req);
+                log.router_response_json = Some(router_resp);
+            });
+        }
+
+        let router_duration_ms = router_start.elapsed().as_millis() as u64;
+        log_router_scores(ctx, profile, &selected, router_duration_ms, "llm", &[]);
+
+        selected
+    } else {
+        None
+    };
+
+    // Restore the phase from routing.
+    callbacks.transition_from_routing();
+
+    routed_preset_id
+}
+
+/// Run embeddings-based intent router.
+async fn run_embeddings_router<C: TranscriptionCallbacks>(
+    ctx: &TranscriptionContext<'_>,
+    callbacks: &C,
+    profile: &ProgramPromptProfile,
+    stt_text: &str,
+) -> Option<String> {
+    // Expose routing as a distinct UI phase.
+    callbacks.transition_to_routing();
+
+    let router_start = std::time::Instant::now();
+    let embeddings_out = route_preset_id_with_embeddings(
+        profile,
+        stt_text,
+        &ctx.proxy_settings,
+        &ctx.llm_api_keys,
+        ctx.embedding_cache,
+        ctx.persist_app.clone(),
+    )
+    .await;
+
+    let routed_preset_id =
+        if let Some((selected, scores_raw, threshold, margin, router_req, router_resp)) =
+            embeddings_out
+        {
+            if let Some(store) = ctx.request_log_store.as_ref() {
+                store.with_current(|log| {
+                    log.router_request_json = Some(router_req);
+                    log.router_response_json = Some(router_resp);
+                });
+            }
+
+            let router_duration_ms = router_start.elapsed().as_millis() as u64;
+            log_embeddings_router_scores(
+                ctx,
+                profile,
+                &selected,
+                router_duration_ms,
+                &scores_raw,
+                threshold,
+                margin,
+            );
+
+            selected
+        } else {
+            None
+        };
+
+    // Restore the phase from routing.
+    callbacks.transition_from_routing();
+
+    routed_preset_id
+}
+
+/// Log router scores for LLM-based routing.
+fn log_router_scores(
+    ctx: &TranscriptionContext<'_>,
+    profile: &ProgramPromptProfile,
+    selected: &Option<String>,
+    router_duration_ms: u64,
+    strategy: &str,
+    _scores_raw: &[(String, f32)],
+) {
+    if let Some(store) = ctx.request_log_store.as_ref() {
+        let mut scores: Vec<crate::request_log::RouterPresetScore> = profile
+            .presets
+            .iter()
+            .map(|preset| crate::request_log::RouterPresetScore {
+                preset_id: preset.id.clone(),
+                preset_name: preset.name.clone(),
+                score: None,
+                selected: selected
+                    .as_deref()
+                    .map(|id| id == preset.id)
+                    .unwrap_or(false),
+            })
+            .collect();
+
+        // Include the implicit Default (no preset) target when configured.
+        if profile
+            .default_preset_description
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            scores.push(crate::request_log::RouterPresetScore {
+                preset_id: "__default__".to_string(),
+                preset_name: "Default (no preset)".to_string(),
+                score: None,
+                selected: selected.is_none(),
+            });
+        }
+
+        store.with_current(|log| {
+            log.router_duration_ms = Some(router_duration_ms);
+            log.router_strategy = Some(strategy.to_string());
+            log.router_scores = Some(scores);
+            log.info(format!(
+                "Intent router ({}) completed in {}ms",
+                strategy, router_duration_ms
+            ));
+        });
+    }
+}
+
+/// Log router scores for embeddings-based routing.
+fn log_embeddings_router_scores(
+    ctx: &TranscriptionContext<'_>,
+    profile: &ProgramPromptProfile,
+    selected: &Option<String>,
+    router_duration_ms: u64,
+    scores_raw: &[(String, f32)],
+    threshold: f32,
+    margin: f32,
+) {
+    let Some(store) = ctx.request_log_store.as_ref() else {
+        return;
+    };
+
+    let pick_highest_score = profile
+        .router
+        .as_ref()
+        .map(|r| r.pick_highest_score)
+        .unwrap_or(false);
+
+    let selected_default = {
+        let mut best_id: Option<&str> = None;
+        let mut best_score: f32 = 0.0;
+        let mut second_best_score: Option<f32> = None;
+
+        for (id, score) in scores_raw {
+            let score = *score;
+            match best_id {
+                None => {
+                    best_id = Some(id.as_str());
+                    best_score = score;
+                }
+                Some(_) if score > best_score => {
+                    second_best_score = Some(best_score);
+                    best_id = Some(id.as_str());
+                    best_score = score;
+                }
+                Some(_) => {
+                    if score <= best_score && second_best_score.map(|s| score > s).unwrap_or(true) {
+                        second_best_score = Some(score);
+                    }
+                }
+            }
+        }
+
+        if pick_highest_score {
+            matches!(best_id, Some("__default__"))
+        } else {
+            match best_id {
+                Some("__default__") if best_score >= threshold => second_best_score
+                    .map(|s| best_score - s >= margin)
+                    .unwrap_or(true),
+                _ => false,
+            }
+        }
+    };
+
+    // Map raw candidate score list -> per-preset scores.
+    let mut score_map: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+    for (id, score) in scores_raw {
+        score_map.insert(id.clone(), *score);
+    }
+
+    let mut scores: Vec<crate::request_log::RouterPresetScore> = profile
+        .presets
+        .iter()
+        .map(|preset| crate::request_log::RouterPresetScore {
+            preset_id: preset.id.clone(),
+            preset_name: preset.name.clone(),
+            score: score_map.get(&preset.id).copied(),
+            selected: selected
+                .as_deref()
+                .map(|id| id == preset.id)
+                .unwrap_or(false),
+        })
+        .collect();
+
+    // Include the implicit Default (no preset) target when configured.
+    if profile
+        .default_preset_description
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+    {
+        scores.push(crate::request_log::RouterPresetScore {
+            preset_id: "__default__".to_string(),
+            preset_name: "Default (no preset)".to_string(),
+            score: score_map.get("__default__").copied(),
+            selected: selected_default,
+        });
+    }
+
+    // Sort by score desc, with None last.
+    scores.sort_by(|a, b| match (a.score, b.score) {
+        (Some(sa), Some(sb)) => sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+
+    store.with_current(|log| {
+        log.router_duration_ms = Some(router_duration_ms);
+        log.router_strategy = Some("embeddings".to_string());
+        log.router_scores = Some(scores);
+        if pick_highest_score {
+            log.info_with_details(
+                format!(
+                    "Intent router (embeddings) completed in {}ms",
+                    router_duration_ms
+                ),
+                "pick_highest_score=true".to_string(),
+            );
+        } else {
+            log.info_with_details(
+                format!(
+                    "Intent router (embeddings) completed in {}ms",
+                    router_duration_ms
+                ),
+                format!("threshold={:.3}, margin={:.3}", threshold, margin),
+            );
+        }
+    });
+}
+
+/// Log preset selection info.
+pub(super) fn log_preset_selection(
+    ctx: &TranscriptionContext<'_>,
+    routed_preset_id: &Option<String>,
+) {
+    let Some(store) = ctx.request_log_store.as_ref() else {
+        return;
+    };
+
+    // Persist the selected preset (or lack of preset) into the request log.
+    let (preset_id, preset_name) = if let Some(profile) = ctx.active_profile.as_ref() {
+        let preset_name = routed_preset_id
+            .as_deref()
+            .and_then(|id| find_preset_by_id(profile, id))
+            .map(|p| p.name.clone());
+        (routed_preset_id.clone(), preset_name)
+    } else {
+        (None, None)
+    };
+
+    store.with_current(|log| {
+        log.preset_id = preset_id;
+        log.preset_name = preset_name;
+    });
+
+    if let Some(profile) = ctx.active_profile.as_ref() {
+        if let Some(id) = routed_preset_id.as_deref() {
+            if let Some(preset) = find_preset_by_id(profile, id) {
+                let reason = if ctx
+                    .session_lock
+                    .as_ref()
+                    .map(|l| l.preset_id == id)
+                    .unwrap_or(false)
+                {
+                    "Session override selected preset"
+                } else if profile
+                    .active_preset_id
+                    .as_deref()
+                    .map(|l| l == id)
+                    .unwrap_or(false)
+                {
+                    "Manual (persisted) override selected preset"
+                } else if router_enabled(profile) {
+                    "Intent router selected preset"
+                } else {
+                    "Default preset selected"
+                };
+
+                store.with_current(|log| {
+                    log.info_with_details(reason, format!("{} ({})", preset.name, preset.id));
+                });
+            }
+        }
+    }
+}
+
+/// Resolve LLM provider and prompts for the rewrite step.
+pub(super) fn resolve_llm_for_rewrite<C: TranscriptionCallbacks>(
+    ctx: &TranscriptionContext<'_>,
+    callbacks: &C,
+    routed_preset_id: &Option<String>,
+    llm_config: &crate::llm::LlmConfig,
+) -> LlmResolution {
+    let selected_profile = ctx.active_profile.as_ref();
+    let selected_preset = selected_profile.and_then(|p| {
+        routed_preset_id
+            .as_deref()
+            .and_then(|id| find_preset_by_id(p, id))
+    });
+
+    let llm_prompts = selected_preset
+        .map(|p| p.prompts.clone())
+        .or_else(|| selected_profile.map(|p| p.prompts.clone()))
+        .unwrap_or_else(|| llm_config.prompts.clone());
+
+    let llm_timeout = llm_config.timeout;
+
+    let selected_preset_rewrite_enabled = selected_preset.map(|p| p.rewrite_llm_enabled);
+    let default_target_rewrite_enabled = selected_profile
+        .map(|p| p.default_target_rewrite_llm_enabled)
+        .unwrap_or(true);
+
+    // Rewrite gates
+    let default_profile_enabled = ctx.llm_enabled_global;
+
+    let profile_enabled = match selected_profile {
+        Some(p) => match p.rewrite_llm_enabled {
+            Some(v) => v,
+            None => {
+                if p.id == "default" {
+                    default_profile_enabled
+                } else {
+                    true
+                }
+            }
+        },
+        None => default_profile_enabled,
+    };
+
+    let effective_llm_enabled = if let Some(preset) = selected_preset {
+        profile_enabled && preset.rewrite_llm_enabled
+    } else {
+        profile_enabled && default_target_rewrite_enabled
+    };
+
+    let disabled_reason = if !profile_enabled {
+        if selected_profile
+            .as_ref()
+            .map(|p| p.id == "default" && p.rewrite_llm_enabled.is_none())
+            .unwrap_or(false)
+            && !default_profile_enabled
+        {
+            Some(LlmNotAttemptedReason::DisabledByDefaultProfile)
+        } else {
+            Some(LlmNotAttemptedReason::DisabledByProfile)
+        }
+    } else if selected_preset_rewrite_enabled == Some(false) {
+        Some(LlmNotAttemptedReason::DisabledByPreset)
+    } else if selected_preset.is_none() && !default_target_rewrite_enabled {
+        Some(LlmNotAttemptedReason::DisabledByDefaultTarget)
+    } else {
+        None
+    };
+
+    let (llm_provider, not_attempted_reason) = if effective_llm_enabled {
+        let desired_llm_provider = selected_preset
+            .and_then(|p| p.llm_provider.clone())
+            .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
+            .unwrap_or_else(|| llm_config.provider.clone());
+        let desired_llm_model = selected_preset
+            .and_then(|p| p.llm_model.clone())
+            .or_else(|| selected_profile.and_then(|p| p.llm_model.clone()))
+            .or_else(|| llm_config.model.clone());
+
+        // Resolve effective provider-specific thinking knobs.
+        let effective_openai_reasoning_effort = selected_preset
+            .and_then(|p| p.openai_reasoning_effort.clone())
+            .or_else(|| selected_profile.and_then(|p| p.openai_reasoning_effort.clone()))
+            .or_else(|| llm_config.openai_reasoning_effort.clone());
+        let effective_gemini_thinking_budget = selected_preset
+            .and_then(|p| p.gemini_thinking_budget)
+            .or_else(|| selected_profile.and_then(|p| p.gemini_thinking_budget))
+            .or(llm_config.gemini_thinking_budget);
+        let effective_gemini_thinking_level = selected_preset
+            .and_then(|p| p.gemini_thinking_level.clone())
+            .or_else(|| selected_profile.and_then(|p| p.gemini_thinking_level.clone()))
+            .or_else(|| llm_config.gemini_thinking_level.clone());
+        let effective_anthropic_thinking_budget = selected_preset
+            .and_then(|p| p.anthropic_thinking_budget)
+            .or_else(|| selected_profile.and_then(|p| p.anthropic_thinking_budget))
+            .or(llm_config.anthropic_thinking_budget);
+
+        callbacks
+            .get_or_create_llm_provider(
+                desired_llm_provider.as_str(),
+                LlmProviderParams {
+                    model: desired_llm_model.clone(),
+                    timeout: llm_timeout,
+                    ollama_url: llm_config.ollama_url.clone(),
+                    openai_reasoning_effort: effective_openai_reasoning_effort,
+                    gemini_thinking_budget: effective_gemini_thinking_budget,
+                    gemini_thinking_level: effective_gemini_thinking_level,
+                    anthropic_thinking_budget: effective_anthropic_thinking_budget,
+                },
+            )
+            .map(|p| (Some(p), None))
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "Pipeline: LLM provider '{}' unavailable: {}",
+                    desired_llm_provider,
+                    e
+                );
+                if let Some(store) = ctx.request_log_store.as_ref() {
+                    store.with_current(|log| {
+                        log.warn(format!(
+                            "LLM rewrite enabled but provider '{}' was unavailable: {}",
+                            desired_llm_provider, e
+                        ));
+                    });
+                }
+                (
+                    None,
+                    Some(LlmNotAttemptedReason::ProviderUnavailable {
+                        provider: desired_llm_provider,
+                        error: e.to_string(),
+                    }),
+                )
+            })
+    } else {
+        (None, disabled_reason)
+    };
+
+    LlmResolution {
+        provider: llm_provider,
+        prompts: llm_prompts,
+        timeout: llm_timeout,
+        not_attempted_reason,
+    }
+}
+
+/// Run LLM rewrite on the transcript.
+pub(super) async fn run_llm_rewrite<C: TranscriptionCallbacks>(
+    ctx: &TranscriptionContext<'_>,
+    callbacks: &C,
+    stt_text: &str,
+    llm_resolution: LlmResolution,
+) -> (
+    String,
+    Option<u64>,
+    LlmOutcome,
+    Option<String>,
+    Option<String>,
+) {
+    let mut llm_duration_ms: Option<u64> = None;
+    let mut llm_outcome: LlmOutcome = LlmOutcome::NotAttempted(
+        llm_resolution
+            .not_attempted_reason
+            .unwrap_or(LlmNotAttemptedReason::Unknown),
+    );
+
+    let llm_provider_used: Option<String> = llm_resolution
+        .provider
+        .as_ref()
+        .map(|p| p.name().to_string());
+    let llm_model_used: Option<String> = llm_resolution
+        .provider
+        .as_ref()
+        .map(|p| p.model().to_string());
+
+    let final_text = if let Some(llm) = llm_resolution.provider {
+        // Expose the optional LLM step as a distinct phase for UI.
+        callbacks.transition_to_rewriting();
+
+        log::info!("Pipeline: Applying LLM formatting");
+
+        llm_outcome = LlmOutcome::Succeeded; // may be overwritten by fallback paths
+        let llm_start = std::time::Instant::now();
+
+        let rewrite_include_clipboard_context = ctx
+            .active_profile
+            .as_ref()
+            .and_then(|p| p.rewrite_include_clipboard_context)
+            .unwrap_or(ctx.default_rewrite_include_clipboard_context);
+
+        let clipboard_text = if rewrite_include_clipboard_context {
+            crate::clipboard_context::read_clipboard_text_best_effort_async(8000).await
+        } else {
+            None
+        };
+
+        let rewrite_user_message = crate::clipboard_context::build_rewrite_user_message(
+            stt_text,
+            clipboard_text.as_deref(),
+        );
+
+        // Apply LLM formatting with timeout
+        let llm_result = tokio::select! {
+            biased;
+
+            _ = ctx.cancel_token.cancelled() => {
+                log::info!("Pipeline: LLM formatting cancelled");
+                Err(PipelineError::Cancelled)
+            }
+
+            _ = tokio::time::sleep(llm_resolution.timeout) => {
+                log::warn!("Pipeline: LLM formatting timed out, using raw transcript");
+                llm_outcome = LlmOutcome::TimedOut;
+                Ok(stt_text.to_string())
+            }
+
+            result = format_text(llm.as_ref(), rewrite_user_message.as_str(), &llm_resolution.prompts) => {
+                match result {
+                    Ok(formatted) => {
+                        log::info!("Pipeline: LLM formatted {} -> {} chars", stt_text.len(), formatted.len());
+                        Ok(formatted)
+                    }
+                    Err(e) => {
+                        log::warn!("Pipeline: LLM formatting failed ({}), using raw transcript", e);
+                        llm_outcome = LlmOutcome::Failed(e.to_string());
+                        Ok(stt_text.to_string())
+                    }
+                }
+            }
+        };
+
+        llm_duration_ms = Some(llm_start.elapsed().as_millis() as u64);
+
+        // Persist the actual provider/model used into the request log.
+        if let Some(store) = ctx.request_log_store.as_ref() {
+            store.with_current(|log| {
+                log.llm_provider = llm_provider_used.clone();
+                log.llm_model = llm_model_used.clone();
+                log.rewrite_clipboard_context = clipboard_text.clone();
+            });
+        }
+
+        match llm_result {
+            Ok(text) => text,
+            Err(PipelineError::Cancelled) => {
+                return (
+                    stt_text.to_string(),
+                    llm_duration_ms,
+                    LlmOutcome::NotAttempted(LlmNotAttemptedReason::Unknown),
+                    llm_provider_used,
+                    llm_model_used,
+                );
+            }
+            Err(_) => stt_text.to_string(), // Fallback on other errors
+        }
+    } else {
+        stt_text.to_string()
+    };
+
+    (
+        final_text,
+        llm_duration_ms,
+        llm_outcome,
+        llm_provider_used,
+        llm_model_used,
+    )
+}
+
+/// Complete transcription flow after STT is done.
+///
+/// This orchestrates routing and LLM rewrite.
+pub(super) async fn complete_transcription_flow<C: TranscriptionCallbacks>(
+    ctx: &TranscriptionContext<'_>,
+    callbacks: &C,
+    stt_text: &str,
+    stt_duration_ms: u64,
+    llm_config: &crate::llm::LlmConfig,
+) -> TranscriptionResult {
+    // Phase 3a: Route preset
+    let routing_result = route_preset(ctx, callbacks, stt_text).await;
+    let routed_preset_id = routing_result.routed_preset_id;
+
+    // Log preset selection
+    log_preset_selection(ctx, &routed_preset_id);
+
+    // Phase 3b: Resolve LLM provider
+    let llm_resolution = resolve_llm_for_rewrite(ctx, callbacks, &routed_preset_id, llm_config);
+
+    // Phase 4: LLM rewrite
+    let (final_text, llm_duration_ms, llm_outcome, llm_provider_used, llm_model_used) =
+        run_llm_rewrite(ctx, callbacks, stt_text, llm_resolution).await;
+
+    TranscriptionResult {
+        stt_text: stt_text.to_string(),
+        final_text,
+        stt_duration_ms,
+        llm_duration_ms,
+        llm_provider_used,
+        llm_model_used,
+        llm_outcome,
+    }
+}

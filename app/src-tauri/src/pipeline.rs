@@ -36,6 +36,7 @@ mod state_machine;
 mod stt_provider;
 #[cfg(test)]
 mod tests;
+mod transcription_flow;
 mod types;
 mod utils;
 
