@@ -6,6 +6,10 @@ import {
 } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import {
+	updateHotkeyAndReregisterShortcuts,
+	type HotkeyKind,
+} from "./hotkeyMutations";
+import {
 	createAudioMuteSupportedQueryFn,
 	createAvailableProvidersQueryFn,
 	createCostByProviderQueryFn,
@@ -57,7 +61,6 @@ import {
 	type TestLlmRewriteResponse,
 	type TestRewriteWithPromptResponse,
 	tauriAPI,
-	validateHotkeyNotDuplicate,
 	type WhisperModelInfo,
 } from "./tauri";
 
@@ -258,311 +261,88 @@ export function useSetSettingsGuideState() {
 	});
 }
 
-export function useUpdateToggleHotkey() {
+function useUpdateHotkeyMutation(params: {
+	kind: HotkeyKind;
+	update: (hotkey: HotkeyConfig | null) => Promise<void>;
+	getPreviousHotkey: (settings: AppSettings) => HotkeyConfig | null;
+	restoreErrorLabel: string;
+}) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: async (hotkey: HotkeyConfig | null) => {
-			// Get current settings for validation
-			const settings = await tauriAPI.getSettings();
-			const previous = settings.toggle_hotkey;
-
-			// Validate no duplicate (unless unsetting)
-			if (hotkey) {
-				const error = validateHotkeyNotDuplicate(
-					hotkey,
-					{
-						toggle: settings.toggle_hotkey,
-						hold: settings.hold_hotkey,
-						paste_last: settings.paste_last_hotkey,
-						retry: settings.retry_hotkey,
-						quick_ask_hold: settings.quick_ask_hold_hotkey,
-						quick_ask_toggle: settings.quick_ask_toggle_hotkey,
-					},
-					"toggle",
-				);
-				if (error) throw new Error(error);
-			}
-
-			// Save and re-register
-			await tauriAPI.updateToggleHotkey(hotkey);
-			await tauriAPI.unregisterShortcuts();
-
-			try {
-				await tauriAPI.registerShortcuts();
-			} catch (error) {
-				// Defensive: don't leave the user with no registered shortcuts.
-				// Revert setting and restore previous registrations.
-				try {
-					await tauriAPI.updateToggleHotkey(previous);
-					await tauriAPI.unregisterShortcuts();
-					await tauriAPI.registerShortcuts();
-				} catch (restoreError) {
+			await updateHotkeyAndReregisterShortcuts({
+				kind: params.kind,
+				nextHotkey: hotkey,
+				getSettings: () => tauriAPI.getSettings(),
+				getPreviousHotkey: params.getPreviousHotkey,
+				updateHotkey: params.update,
+				unregisterShortcuts: () => tauriAPI.unregisterShortcuts(),
+				registerShortcuts: () => tauriAPI.registerShortcuts(),
+				logRestoreError: (restoreError) => {
 					console.error(
-						"Failed to restore previous toggle hotkey:",
+						`Failed to restore previous ${params.restoreErrorLabel} hotkey:`,
 						restoreError,
 					);
-				}
-				throw error;
-			}
+				},
+			});
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
+	});
+}
+
+export function useUpdateToggleHotkey() {
+	return useUpdateHotkeyMutation({
+		kind: "toggle",
+		update: (hotkey) => tauriAPI.updateToggleHotkey(hotkey),
+		getPreviousHotkey: (settings) => settings.toggle_hotkey,
+		restoreErrorLabel: "toggle",
 	});
 }
 
 export function useUpdateHoldHotkey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: async (hotkey: HotkeyConfig | null) => {
-			// Get current settings for validation
-			const settings = await tauriAPI.getSettings();
-			const previous = settings.hold_hotkey;
-
-			// Validate no duplicate (unless unsetting)
-			if (hotkey) {
-				const error = validateHotkeyNotDuplicate(
-					hotkey,
-					{
-						toggle: settings.toggle_hotkey,
-						hold: settings.hold_hotkey,
-						paste_last: settings.paste_last_hotkey,
-						retry: settings.retry_hotkey,
-						quick_ask_hold: settings.quick_ask_hold_hotkey,
-						quick_ask_toggle: settings.quick_ask_toggle_hotkey,
-					},
-					"hold",
-				);
-				if (error) throw new Error(error);
-			}
-
-			// Save and re-register
-			await tauriAPI.updateHoldHotkey(hotkey);
-			await tauriAPI.unregisterShortcuts();
-
-			try {
-				await tauriAPI.registerShortcuts();
-			} catch (error) {
-				try {
-					await tauriAPI.updateHoldHotkey(previous);
-					await tauriAPI.unregisterShortcuts();
-					await tauriAPI.registerShortcuts();
-				} catch (restoreError) {
-					console.error(
-						"Failed to restore previous hold hotkey:",
-						restoreError,
-					);
-				}
-				throw error;
-			}
-		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
+	return useUpdateHotkeyMutation({
+		kind: "hold",
+		update: (hotkey) => tauriAPI.updateHoldHotkey(hotkey),
+		getPreviousHotkey: (settings) => settings.hold_hotkey,
+		restoreErrorLabel: "hold",
 	});
 }
 
 export function useUpdatePasteLastHotkey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: async (hotkey: HotkeyConfig | null) => {
-			// Get current settings for validation
-			const settings = await tauriAPI.getSettings();
-			const previous = settings.paste_last_hotkey;
-
-			// Validate no duplicate (unless unsetting)
-			if (hotkey) {
-				const error = validateHotkeyNotDuplicate(
-					hotkey,
-					{
-						toggle: settings.toggle_hotkey,
-						hold: settings.hold_hotkey,
-						paste_last: settings.paste_last_hotkey,
-						retry: settings.retry_hotkey,
-						quick_ask_hold: settings.quick_ask_hold_hotkey,
-						quick_ask_toggle: settings.quick_ask_toggle_hotkey,
-					},
-					"paste_last",
-				);
-				if (error) throw new Error(error);
-			}
-
-			// Save and re-register
-			await tauriAPI.updatePasteLastHotkey(hotkey);
-			await tauriAPI.unregisterShortcuts();
-
-			try {
-				await tauriAPI.registerShortcuts();
-			} catch (error) {
-				try {
-					await tauriAPI.updatePasteLastHotkey(previous);
-					await tauriAPI.unregisterShortcuts();
-					await tauriAPI.registerShortcuts();
-				} catch (restoreError) {
-					console.error(
-						"Failed to restore previous paste-last hotkey:",
-						restoreError,
-					);
-				}
-				throw error;
-			}
-		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
+	return useUpdateHotkeyMutation({
+		kind: "paste_last",
+		update: (hotkey) => tauriAPI.updatePasteLastHotkey(hotkey),
+		getPreviousHotkey: (settings) => settings.paste_last_hotkey,
+		restoreErrorLabel: "paste-last",
 	});
 }
 
 export function useUpdateRetryHotkey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: async (hotkey: HotkeyConfig | null) => {
-			// Get current settings for validation
-			const settings = await tauriAPI.getSettings();
-			const previous = settings.retry_hotkey;
-
-			// Validate no duplicate (unless unsetting)
-			if (hotkey) {
-				const error = validateHotkeyNotDuplicate(
-					hotkey,
-					{
-						toggle: settings.toggle_hotkey,
-						hold: settings.hold_hotkey,
-						paste_last: settings.paste_last_hotkey,
-						retry: settings.retry_hotkey,
-						quick_ask_hold: settings.quick_ask_hold_hotkey,
-						quick_ask_toggle: settings.quick_ask_toggle_hotkey,
-					},
-					"retry",
-				);
-				if (error) throw new Error(error);
-			}
-
-			// Save and re-register
-			await tauriAPI.updateRetryHotkey(hotkey);
-			await tauriAPI.unregisterShortcuts();
-
-			try {
-				await tauriAPI.registerShortcuts();
-			} catch (error) {
-				try {
-					await tauriAPI.updateRetryHotkey(previous);
-					await tauriAPI.unregisterShortcuts();
-					await tauriAPI.registerShortcuts();
-				} catch (restoreError) {
-					console.error(
-						"Failed to restore previous retry hotkey:",
-						restoreError,
-					);
-				}
-				throw error;
-			}
-		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
+	return useUpdateHotkeyMutation({
+		kind: "retry",
+		update: (hotkey) => tauriAPI.updateRetryHotkey(hotkey),
+		getPreviousHotkey: (settings) => settings.retry_hotkey,
+		restoreErrorLabel: "retry",
 	});
 }
 
 export function useUpdateQuickAskHoldHotkey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: async (hotkey: HotkeyConfig | null) => {
-			// Get current settings for validation
-			const settings = await tauriAPI.getSettings();
-			const previous = settings.quick_ask_hold_hotkey;
-
-			// Validate no duplicate (unless unsetting)
-			if (hotkey) {
-				const error = validateHotkeyNotDuplicate(
-					hotkey,
-					{
-						toggle: settings.toggle_hotkey,
-						hold: settings.hold_hotkey,
-						paste_last: settings.paste_last_hotkey,
-						retry: settings.retry_hotkey,
-						quick_ask_hold: settings.quick_ask_hold_hotkey,
-						quick_ask_toggle: settings.quick_ask_toggle_hotkey,
-					},
-					"quick_ask_hold",
-				);
-				if (error) throw new Error(error);
-			}
-
-			// Save and re-register
-			await tauriAPI.updateQuickAskHoldHotkey(hotkey);
-			await tauriAPI.unregisterShortcuts();
-
-			try {
-				await tauriAPI.registerShortcuts();
-			} catch (error) {
-				try {
-					await tauriAPI.updateQuickAskHoldHotkey(previous);
-					await tauriAPI.unregisterShortcuts();
-					await tauriAPI.registerShortcuts();
-				} catch (restoreError) {
-					console.error(
-						"Failed to restore previous quick ask hold hotkey:",
-						restoreError,
-					);
-				}
-				throw error;
-			}
-		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
+	return useUpdateHotkeyMutation({
+		kind: "quick_ask_hold",
+		update: (hotkey) => tauriAPI.updateQuickAskHoldHotkey(hotkey),
+		getPreviousHotkey: (settings) => settings.quick_ask_hold_hotkey,
+		restoreErrorLabel: "quick ask hold",
 	});
 }
 
 export function useUpdateQuickAskToggleHotkey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: async (hotkey: HotkeyConfig | null) => {
-			// Get current settings for validation
-			const settings = await tauriAPI.getSettings();
-			const previous = settings.quick_ask_toggle_hotkey;
-
-			// Validate no duplicate (unless unsetting)
-			if (hotkey) {
-				const error = validateHotkeyNotDuplicate(
-					hotkey,
-					{
-						toggle: settings.toggle_hotkey,
-						hold: settings.hold_hotkey,
-						paste_last: settings.paste_last_hotkey,
-						retry: settings.retry_hotkey,
-						quick_ask_hold: settings.quick_ask_hold_hotkey,
-						quick_ask_toggle: settings.quick_ask_toggle_hotkey,
-					},
-					"quick_ask_toggle",
-				);
-				if (error) throw new Error(error);
-			}
-
-			// Save and re-register
-			await tauriAPI.updateQuickAskToggleHotkey(hotkey);
-			await tauriAPI.unregisterShortcuts();
-
-			try {
-				await tauriAPI.registerShortcuts();
-			} catch (error) {
-				try {
-					await tauriAPI.updateQuickAskToggleHotkey(previous);
-					await tauriAPI.unregisterShortcuts();
-					await tauriAPI.registerShortcuts();
-				} catch (restoreError) {
-					console.error(
-						"Failed to restore previous quick ask toggle hotkey:",
-						restoreError,
-					);
-				}
-				throw error;
-			}
-		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
+	return useUpdateHotkeyMutation({
+		kind: "quick_ask_toggle",
+		update: (hotkey) => tauriAPI.updateQuickAskToggleHotkey(hotkey),
+		getPreviousHotkey: (settings) => settings.quick_ask_toggle_hotkey,
+		restoreErrorLabel: "quick ask toggle",
 	});
 }
 

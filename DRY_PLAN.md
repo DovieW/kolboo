@@ -6,9 +6,9 @@ Hi Dovie — this is the *repo-specific* version of the DRY plan. It’s designe
 
 - Find **repeated logic** (not just repeated text).
 - Prioritize duplication that creates **bug risk** or **high-churn editing pain**.
-- Produce actionable outputs:
-  - `dry_clusters.json` (machine readable)
-  - `DRY_REPORT.md` (human readable)
+- Produce actionable outputs (that are actually reproducible in this repo today):
+	- a `jscpd` JSON report under `docs/Refactors/.dry-scan/`
+	- a short, human-readable write-up (update `DRY_REPORT.md`)
 
 ## Repo inventory (Stage 0)
 
@@ -55,19 +55,17 @@ These are the areas where DRY wins are usually worth it in Kolboo:
 
 - `pnpm dlx jscpd --silent --min-tokens 70 --reporters json --output docs/Refactors/.dry-scan --ignore "**/node_modules/**,**/dist/**,**/build/**,**/target/**,**/coverage/**,**/tmp/**" app/src app/src-tauri/src`
 
-2) Convert + enrich into `dry_clusters.json`:
+2) Optional: open the generated JSON and cherry-pick a handful of the highest-signal clusters into `DRY_REPORT.md`.
 
-- `node scripts/dry-scan.mjs`
+## Stage 2 — Structure-aware similarity (optional, future)
 
-## Stage 2 — Structure-aware similarity (AST-ish)
+Because “same logic, different variable names” is common in TS UI code, a lightweight AST normalization pass for TypeScript *can* help.
 
-Because “same logic, different variable names” is common in TS UI code, we do a lightweight AST normalization pass for TypeScript:
+This is **not implemented in this repo yet**. If we add it later, the rough shape would be:
 
 - Parse TS/TSX files with the TypeScript compiler.
 - Normalize identifier/literal nodes to `<ID>`/`<LIT>`.
 - Compute fingerprints and a coarse SimHash for near-duplicates.
-
-This is currently implemented in `scripts/dry-scan.mjs` and included in `dry_clusters.json` as `stage2`.
 
 ## Stage 3 — Semantic validation + DRY worthiness
 
