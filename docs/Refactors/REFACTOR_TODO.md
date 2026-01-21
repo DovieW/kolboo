@@ -4,12 +4,9 @@ These are small/medium follow-ups discovered while doing other work.
 
 ## Pipeline module cleanup
 
-- Continue extraction of remaining "god file" areas from `app/src-tauri/src/pipeline.rs`:
-  - `pipeline/audio_loop.rs` (CPAL/VAD orchestration)
-  - `pipeline/stt.rs` (STT provider selection + retry/timeout + request logging)
-
-- ✅ ~~Consider moving the large `pipeline.rs` test module into `app/src-tauri/src/pipeline/tests.rs`.~~
-  - Done: Tests now live in `pipeline/tests.rs`.
+- Continue extraction of remaining "god file" areas from `app/src-tauri/src/pipeline.rs` (~3000 lines):
+  - `pipeline/audio_loop.rs` (CPAL/VAD orchestration) — audio capture is already behind `AudioCaptureBackend` trait, but orchestration code remains in main file
+  - Consider extracting transcription flow logic (currently spread across multiple large `pub async fn` methods)
 
 ## Supply chain follow-ups
 
