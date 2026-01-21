@@ -16,19 +16,12 @@
 //! - Configurable prompts for dictation cleanup
 
 use crate::audio_capture::{
-    AudioCapture, AudioCaptureBackend, AudioCaptureDiagnostics, AudioCaptureError,
-    AudioCaptureEvent, AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats,
+    AudioCapture, AudioCaptureBackend, AudioCaptureDiagnostics, AudioCaptureEvent,
+    AudioEncodeConfig, AudioLevelSnapshot,
 };
-use crate::embeddings;
-use crate::llm::{
-    format_text, AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider,
-    FireworksLlmProvider, GeminiLlmProvider, GroqLlmProvider, LlmConfig, LlmError, LlmProvider,
-    OllamaLlmProvider, OpenAiLlmProvider,
-};
-use crate::request_log::RequestLogStore;
-use crate::settings::{IntentRouterStrategy, ProxySettings};
-use crate::stt::{with_retry, AudioFormat, SttError, SttProvider, SttRegistry};
-use serde_json::Value as JsonValue;
+use crate::llm::{format_text, LlmProvider};
+use crate::settings::IntentRouterStrategy;
+use crate::stt::{with_retry, AudioFormat, SttProvider, SttRegistry};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -36,50 +29,29 @@ use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 mod config;
+mod llm_provider;
 mod program_profiles;
+mod routing;
+mod state_machine;
+mod types;
+mod utils;
 
 use config::canonicalize_stt_provider_id;
 pub use config::PipelineConfig;
+
+pub use state_machine::PipelineState;
+pub use types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionResult};
 
 pub(crate) use program_profiles::select_profile_for_foreground_app;
 use program_profiles::{
     find_preset_by_id, router_enabled, select_default_profile, select_effective_preset,
 };
 
-fn preview_for_log(s: &str, max_chars: usize) -> (String, bool, usize) {
-    let len = s.chars().count();
-    let mut preview: String = s.chars().take(max_chars).collect();
-    let truncated = len > max_chars;
-    if truncated {
-        preview.push('…');
-    }
-    (preview, truncated, len)
-}
+use llm_provider::{create_llm_provider, LlmProviderParams};
+use routing::{route_preset_id_with_embeddings, route_preset_id_with_llm};
+use utils::{amp_to_dbfs, is_effectively_quiet, normalize_stt_text, seconds_to_duration_or};
 
-struct RouterContext<'a> {
-    embedding_provider: &'a str,
-    embedding_model: &'a str,
-    pick_highest_score: bool,
-    threshold: f32,
-    margin: f32,
-}
-
-struct RouterCallState {
-    call_id: u64,
-    calls_request: Vec<JsonValue>,
-    calls_response: Vec<JsonValue>,
-}
-
-impl RouterCallState {
-    fn new() -> Self {
-        Self {
-            call_id: 0,
-            calls_request: Vec::new(),
-            calls_response: Vec::new(),
-        }
-    }
-}
-
+#[cfg(any())]
 async fn route_preset_id_with_embeddings(
     profile: &crate::llm::ProgramPromptProfile,
     transcript: &str,
@@ -564,6 +536,7 @@ async fn route_preset_id_with_embeddings(
     Some((selected, scores, threshold, margin, router_req, router_resp))
 }
 
+#[cfg(any())]
 async fn route_preset_id_with_llm(
     profile: &crate::llm::ProgramPromptProfile,
     transcript: &str,
@@ -712,324 +685,6 @@ async fn route_preset_id_with_llm(
 
 /// Normalize STT output text.
 ///
-/// Some providers (notably Whisper-based APIs) may include a leading space as a
-/// tokenization artifact (many vocabularies encode " space+word" as a single token).
-/// We trim only *leading* whitespace to avoid changing internal formatting.
-fn normalize_stt_text(text: String) -> String {
-    match text.chars().next() {
-        Some(c) if c.is_whitespace() => text.trim_start().to_string(),
-        _ => text,
-    }
-}
-
-fn seconds_to_duration_or(seconds: f64, fallback: Duration) -> Duration {
-    // Guard against invalid values.
-    if !seconds.is_finite() || seconds <= 0.0 {
-        return fallback;
-    }
-    Duration::from_secs_f64(seconds)
-}
-
-fn amp_to_dbfs(amp: f32) -> f32 {
-    if !amp.is_finite() || amp <= 0.0 {
-        f32::NEG_INFINITY
-    } else {
-        20.0 * amp.log10()
-    }
-}
-
-fn is_effectively_quiet(
-    stats: AudioLevelStats,
-    min_duration_secs: f32,
-    rms_dbfs_threshold: f32,
-    peak_dbfs_threshold: f32,
-) -> bool {
-    // Very short recordings are usually accidental taps; treat as quiet.
-    if stats.duration_secs < min_duration_secs {
-        return true;
-    }
-
-    let rms_dbfs = amp_to_dbfs(stats.rms);
-    let peak_dbfs = amp_to_dbfs(stats.peak);
-
-    rms_dbfs < rms_dbfs_threshold && peak_dbfs < peak_dbfs_threshold
-}
-
-/// Errors that can occur in the recording pipeline
-#[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
-pub enum PipelineError {
-    #[error("Audio capture error: {0}")]
-    AudioCapture(#[from] AudioCaptureError),
-
-    #[error("STT error: {0}")]
-    Stt(#[from] SttError),
-
-    #[error("LLM error: {0}")]
-    Llm(#[from] LlmError),
-
-    #[error("No STT provider configured")]
-    NoProvider,
-
-    #[error("Pipeline is already recording")]
-    AlreadyRecording,
-
-    #[error("Pipeline is not recording")]
-    NotRecording,
-
-    #[error("Configuration error: {0}")]
-    Config(String),
-
-    #[error("Lock error: {0}")]
-    Lock(String),
-
-    #[error("Operation cancelled")]
-    Cancelled,
-
-    #[error("Transcription timeout after {0:?}")]
-    Timeout(Duration),
-
-    #[error("Recording too large: {0} bytes exceeds limit of {1} bytes")]
-    RecordingTooLarge(usize, usize),
-}
-
-// Backwards-compatibility: `PipelineError::NoProvider` is still part of the public API.
-
-/// Pipeline state machine
-///
-/// State transition contract (self -> next):
-/// - Idle -> Recording | Transcribing | Error
-/// - Recording -> Transcribing | Idle | Error
-/// - Transcribing -> Routing | Rewriting | Idle | Error
-/// - Routing -> Transcribing | Idle | Error
-/// - Rewriting -> Idle | Error
-/// - Error -> Idle | Recording | Transcribing
-/// - Self -> Self is allowed (idempotent updates)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PipelineState {
-    /// Pipeline is idle, ready to start recording
-    Idle,
-    /// Pipeline is actively recording audio
-    Recording,
-    /// Pipeline is transcribing recorded audio
-    Transcribing,
-    /// Pipeline is running the intent router (preset selection) after STT
-    Routing,
-    /// Pipeline is rewriting/formatting text via an LLM (optional step)
-    Rewriting,
-    /// Pipeline encountered an error (recoverable - can start new recording)
-    Error,
-}
-
-impl PipelineState {
-    /// Check if this state allows starting a new recording
-    pub fn can_start_recording(&self) -> bool {
-        matches!(self, PipelineState::Idle | PipelineState::Error)
-    }
-
-    /// Check if this state allows stopping a recording
-    pub fn can_stop_recording(&self) -> bool {
-        matches!(self, PipelineState::Recording)
-    }
-
-    /// Check if this state allows cancellation
-    pub fn can_cancel(&self) -> bool {
-        matches!(
-            self,
-            PipelineState::Recording
-                | PipelineState::Transcribing
-                | PipelineState::Rewriting
-                | PipelineState::Routing
-        )
-    }
-
-    pub fn can_transition_to(self, next: PipelineState) -> bool {
-        if self == next {
-            return true;
-        }
-
-        match self {
-            PipelineState::Idle => matches!(
-                next,
-                PipelineState::Recording | PipelineState::Transcribing | PipelineState::Error
-            ),
-            PipelineState::Recording => matches!(
-                next,
-                PipelineState::Transcribing | PipelineState::Idle | PipelineState::Error
-            ),
-            PipelineState::Transcribing => matches!(
-                next,
-                PipelineState::Routing
-                    | PipelineState::Rewriting
-                    | PipelineState::Idle
-                    | PipelineState::Error
-            ),
-            PipelineState::Routing => matches!(
-                next,
-                PipelineState::Transcribing | PipelineState::Idle | PipelineState::Error
-            ),
-            PipelineState::Rewriting => {
-                matches!(next, PipelineState::Idle | PipelineState::Error)
-            }
-            PipelineState::Error => matches!(
-                next,
-                PipelineState::Idle | PipelineState::Recording | PipelineState::Transcribing
-            ),
-        }
-    }
-}
-
-/// Events emitted by the pipeline
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum PipelineEvent {
-    /// Recording has started
-    RecordingStarted,
-    /// Recording has stopped
-    RecordingStopped,
-    /// Transcription is in progress
-    TranscriptionStarted,
-    /// Final transcript received
-    TranscriptReady(String),
-    /// An error occurred
-    Error(String),
-}
-
-/// Reason the optional LLM formatting step was not attempted.
-///
-/// This is used to make request logs unambiguous when the rewrite step does not run.
-#[derive(Debug, Clone)]
-pub enum LlmNotAttemptedReason {
-    /// Recording was gated as quiet (STT skipped), so LLM rewrite was never reached.
-    QuietAudioGate,
-    /// Offline VAD detected no speech (STT skipped), so LLM rewrite was never reached.
-    NoSpeechDetectedByVad,
-    /// Default/global rewrite toggle is disabled.
-    ///
-    /// Historically rewrite enablement lived in a global setting (`rewrite_llm_enabled`) and
-    /// the Default profile inherited it. We keep this reason so request logs stay explicit.
-    DisabledByDefaultProfile,
-    /// Per-profile toggle explicitly disabled rewrite.
-    DisabledByProfile,
-    /// Selected preset explicitly disabled rewrite.
-    DisabledByPreset,
-    /// Routed to the implicit "Default" target (no preset), which explicitly disabled rewrite.
-    DisabledByDefaultTarget,
-    /// Rewrite was enabled, but the provider couldn't be constructed/used.
-    ProviderUnavailable { provider: String, error: String },
-    /// Fallback for unexpected paths.
-    Unknown,
-}
-
-impl LlmNotAttemptedReason {
-    pub fn code(&self) -> &'static str {
-        match self {
-            LlmNotAttemptedReason::QuietAudioGate => "quiet_audio_gate",
-            LlmNotAttemptedReason::NoSpeechDetectedByVad => "no_speech_detected_by_vad",
-            LlmNotAttemptedReason::DisabledByDefaultProfile => "disabled_default_profile",
-            LlmNotAttemptedReason::DisabledByProfile => "disabled_profile",
-            LlmNotAttemptedReason::DisabledByPreset => "disabled_preset",
-            LlmNotAttemptedReason::DisabledByDefaultTarget => "disabled_default_target",
-            LlmNotAttemptedReason::ProviderUnavailable { .. } => "provider_unavailable",
-            LlmNotAttemptedReason::Unknown => "unknown",
-        }
-    }
-
-    pub fn to_log_details(&self) -> String {
-        match self {
-            LlmNotAttemptedReason::QuietAudioGate => {
-                "reason=stt_skipped_quiet_audio_gate".to_string()
-            }
-            LlmNotAttemptedReason::NoSpeechDetectedByVad => {
-                "reason=stt_skipped_no_speech_detected".to_string()
-            }
-            LlmNotAttemptedReason::DisabledByDefaultProfile => {
-                "reason=disabled_default_profile".to_string()
-            }
-            LlmNotAttemptedReason::DisabledByProfile => "reason=disabled_profile".to_string(),
-            LlmNotAttemptedReason::DisabledByPreset => "reason=disabled_preset".to_string(),
-            LlmNotAttemptedReason::DisabledByDefaultTarget => {
-                "reason=disabled_default_target".to_string()
-            }
-            LlmNotAttemptedReason::ProviderUnavailable { provider, error } => format!(
-                "reason=provider_unavailable\nprovider={}\nerror={}",
-                provider, error
-            ),
-            LlmNotAttemptedReason::Unknown => "reason=unknown".to_string(),
-        }
-    }
-}
-
-/// Outcome of the optional LLM formatting step.
-#[derive(Debug, Clone)]
-pub enum LlmOutcome {
-    /// LLM step was not attempted.
-    NotAttempted(LlmNotAttemptedReason),
-    /// LLM step completed successfully and returned formatted text.
-    Succeeded,
-    /// LLM step timed out and the pipeline fell back to the raw STT transcript.
-    TimedOut,
-    /// LLM step failed and the pipeline fell back to the raw STT transcript.
-    Failed(String),
-}
-
-impl LlmOutcome {
-    pub fn code(&self) -> &'static str {
-        match self {
-            LlmOutcome::NotAttempted(_) => "not_attempted",
-            LlmOutcome::Succeeded => "succeeded",
-            LlmOutcome::TimedOut => "timed_out",
-            LlmOutcome::Failed(_) => "failed",
-        }
-    }
-}
-
-/// Detailed result for a transcription request.
-///
-/// This separates the raw STT transcript from the final output (which may
-/// include LLM formatting and/or fallbacks).
-#[derive(Debug, Clone)]
-pub struct TranscriptionResult {
-    /// Raw transcript as returned from the STT provider (before any LLM formatting).
-    pub stt_text: String,
-    /// Final output text returned by the pipeline.
-    /// If LLM formatting was disabled, this will match `stt_text`.
-    /// If LLM formatting failed/timed out, this falls back to `stt_text`.
-    pub final_text: String,
-    /// Duration of the STT phase (including retries), in milliseconds.
-    pub stt_duration_ms: u64,
-    /// Duration of the LLM phase (including timeout/fallback), in milliseconds.
-    pub llm_duration_ms: Option<u64>,
-    /// LLM provider id actually used for this transcription (if the LLM step was attempted).
-    ///
-    /// This is sourced from the concrete provider instance (including any default/fallback
-    /// model selection performed by the provider implementation).
-    pub llm_provider_used: Option<String>,
-    /// LLM model actually used for this transcription (if the LLM step was attempted).
-    ///
-    /// This is sourced from the concrete provider instance. If the configured model is None,
-    /// this will still be populated with the provider's internal default model.
-    pub llm_model_used: Option<String>,
-    /// Outcome of the LLM phase.
-    pub llm_outcome: LlmOutcome,
-}
-
-impl TranscriptionResult {
-    pub fn llm_attempted(&self) -> bool {
-        !matches!(self.llm_outcome, LlmOutcome::NotAttempted(_))
-    }
-}
-
-struct LlmProviderParams {
-    model: Option<String>,
-    timeout: Duration,
-    ollama_url: Option<String>,
-    openai_reasoning_effort: Option<String>,
-    gemini_thinking_budget: Option<i64>,
-    gemini_thinking_level: Option<String>,
-    anthropic_thinking_budget: Option<i64>,
-}
-
 /// Internal state for the recording pipeline
 struct PipelineInner {
     audio_capture: Box<dyn AudioCaptureBackend>,
@@ -1464,101 +1119,6 @@ impl PipelineInner {
         self.state = PipelineState::Error;
         self.cancel_token = None;
     }
-}
-
-/// Create an LLM provider based on configuration
-fn create_llm_provider(
-    config: &LlmConfig,
-    request_log_store: Option<RequestLogStore>,
-    proxy_settings: &ProxySettings,
-) -> Result<Arc<dyn LlmProvider>, PipelineError> {
-    let client = crate::network::build_http_client(proxy_settings)
-        .map_err(|e| PipelineError::Config(format!("Failed to create HTTP client: {}", e)))?;
-
-    let provider: Arc<dyn LlmProvider> = match config.provider.as_str() {
-        "cerebras" => Arc::new(
-            CerebrasLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone())
-            .with_reasoning_effort(config.openai_reasoning_effort.clone()),
-        ),
-        "anthropic" => Arc::new(
-            AnthropicLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone())
-            .with_thinking_budget(config.anthropic_thinking_budget),
-        ),
-        "groq" => Arc::new(
-            GroqLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone()),
-        ),
-        "gemini" => Arc::new(
-            GeminiLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone())
-            .with_thinking_budget(config.gemini_thinking_budget)
-            .with_thinking_level(config.gemini_thinking_level.clone()),
-        ),
-        "ollama" => Arc::new(
-            OllamaLlmProvider::with_client(
-                client.clone(),
-                config.ollama_url.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone()),
-        ),
-        "cohere" => Arc::new(
-            CohereLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone()),
-        ),
-        "fireworks" => Arc::new(
-            FireworksLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone()),
-        ),
-        _ => {
-            // Default to OpenAI
-            Arc::new(
-                OpenAiLlmProvider::with_client(
-                    client,
-                    config.api_key.clone(),
-                    config.model.clone(),
-                )
-                .with_timeout(config.timeout)
-                .with_request_log_store(request_log_store.clone())
-                .with_reasoning_effort(config.openai_reasoning_effort.clone()),
-            )
-        }
-    };
-
-    Ok(provider)
 }
 
 /// Thread-safe wrapper for the recording pipeline
@@ -4778,7 +4338,7 @@ mod tests {
             &self,
             _audio: &[u8],
             _format: &AudioFormat,
-        ) -> Result<String, SttError> {
+        ) -> Result<String, crate::stt::SttError> {
             Ok(self.text.clone())
         }
 

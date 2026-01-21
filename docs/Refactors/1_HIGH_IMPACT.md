@@ -12,23 +12,23 @@ These are “bigger than a ticket” changes that would make the core easier to 
 - **Decompose `pipeline.rs` into modules while preserving the state machine.**
   - Motivation: reduce blast radius and make “routing”, “transcription”, and “audio loop” testable in isolation.
   - Target shape (example):
-    - `pipeline/state_machine.rs` (pure transitions + guards)
-    - `pipeline/audio_loop.rs` (cpal + buffering + VAD)
-    - `pipeline/stt.rs` (provider loop + retry/timeout)
-    - `pipeline/routing/*` (intent routing logic)
+    - ✅ `pipeline/state_machine.rs` (pure transitions + guards)
+    - ✅ `pipeline/routing.rs` (intent routing logic)
+    - ✅ `pipeline/types.rs` (pipeline errors + transcription result structs)
+    - ✅ `pipeline/utils.rs` (small pure helpers)
+    - ✅ `pipeline/llm_provider.rs` (LLM provider construction)
+    - ⏳ `pipeline/audio_loop.rs` (cpal + buffering + VAD)
+    - ⏳ `pipeline/stt.rs` (provider loop + retry/timeout)
   - Ideal outcome: `pipeline.rs` becomes a small facade and orchestration entrypoint.
 
-- **Add deterministic, headless pipeline integration tests (no network, no hardware).**
-  - Inject fakes for:
-    - audio capture
-    - STT provider
-    - LLM provider
-    - embeddings provider (if applicable)
-  - Cover critical flows:
-    - happy path (record → transcribe → output)
-    - cancellation (during recording and during provider requests)
-    - timeout/retry and recovery back to `Idle`
+- **Expand deterministic, headless pipeline integration tests (no network, no hardware).**
+  - Baseline exists (fake audio capture + injected STT provider).
+  - Remaining seams to add (if needed for coverage):
+    - LLM provider injection (rewrite step)
+    - embeddings routing injection (or a deterministic offline substitute)
+  - Additional flows worth covering:
     - routing/preset selection invariants
+    - rewrite-enabled vs rewrite-disabled behavior
 
 ## Rust deterministic testing seams (hard IO audit)
 
