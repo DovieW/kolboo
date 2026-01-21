@@ -9,6 +9,7 @@ use crate::audio_capture::{
     AudioEncodeConfig, AudioLevelSnapshot, AudioLevelStats, SharedAudioLevelMeter,
     SharedAudioWaveformMeter,
 };
+use crate::stt::AudioFormat;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 

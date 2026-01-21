@@ -20,7 +20,7 @@ use crate::audio_capture::{
     AudioEncodeConfig, AudioLevelSnapshot,
 };
 use crate::llm::LlmProvider;
-use crate::stt::{with_retry, AudioFormat, SttProvider, SttRegistry};
+use crate::stt::{SttProvider, SttRegistry};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -32,6 +32,7 @@ mod llm_provider;
 mod program_profiles;
 mod routing;
 mod state_machine;
+mod stt_flow;
 mod stt_provider;
 #[cfg(test)]
 mod tests;
@@ -49,7 +50,8 @@ pub(crate) use program_profiles::select_profile_for_foreground_app;
 use program_profiles::{select_default_profile, select_effective_preset};
 
 use llm_provider::{create_llm_provider, LlmProviderParams};
-use utils::{amp_to_dbfs, is_effectively_quiet, normalize_stt_text, seconds_to_duration_or};
+use stt_flow::run_stt_transcription;
+use utils::{amp_to_dbfs, is_effectively_quiet, seconds_to_duration_or};
 
 // Intent routing helpers live in `pipeline/routing.rs`.
 
@@ -1016,34 +1018,18 @@ impl SharedPipeline {
             )
         };
 
-        let wav = Arc::new(wav_bytes);
-        let format = AudioFormat::default();
+        // Test endpoint intentionally does NOT enforce timeout
+        let result = run_stt_transcription(
+            stt_provider,
+            &wav_bytes,
+            &retry_config,
+            None, // no timeout for test endpoint
+            &cancel_token,
+            "Pipeline (test)",
+        )
+        .await?;
 
-        let transcription_future = async {
-            with_retry(&retry_config, || {
-                let provider = stt_provider.clone();
-                let wav = wav.clone();
-                let format = format.clone();
-
-                async move { provider.transcribe(wav.as_slice(), &format).await }
-            })
-            .await
-        };
-
-        // Cancellation protection (test endpoint intentionally does NOT enforce timeout)
-        tokio::select! {
-            biased;
-
-            _ = cancel_token.cancelled() => {
-                Err(PipelineError::Cancelled)
-            }
-
-            result = transcription_future => {
-                result
-                    .map(normalize_stt_text)
-                    .map_err(PipelineError::from)
-            }
-        }
+        Ok(result.text)
     }
 
     /// Stop recording and transcribe the audio, returning a detailed result.
@@ -1331,45 +1317,18 @@ impl SharedPipeline {
         );
 
         // Phase 2: Transcribe with retry logic (async, outside the lock)
-        let format = AudioFormat::default();
-        let wav_bytes_for_retry = wav_bytes.clone();
+        let stt_result = run_stt_transcription(
+            stt_provider,
+            &wav_bytes,
+            &retry_config,
+            Some(timeout),
+            &cancel_token,
+            "Pipeline",
+        )
+        .await;
 
-        // Wrap the transcription in a timeout and cancellation
-        let transcription_future = async {
-            with_retry(&retry_config, || {
-                let provider = stt_provider.clone();
-                let wav_bytes = wav_bytes_for_retry.clone();
-                let format = format.clone();
-                async move { provider.transcribe(&wav_bytes, &format).await }
-            })
-            .await
-        };
-
-        // Race between transcription, timeout, and cancellation
-        let stt_start = std::time::Instant::now();
-        let stt_result = tokio::select! {
-            biased;
-
-            // Cancellation takes priority
-            _ = cancel_token.cancelled() => {
-                log::info!("Pipeline: Transcription cancelled");
-                Err(PipelineError::Cancelled)
-            }
-
-            // Timeout
-            _ = tokio::time::sleep(timeout) => {
-                log::warn!("Pipeline: Transcription timed out after {:?}", timeout);
-                Err(PipelineError::Timeout(timeout))
-            }
-
-            // Actual transcription
-            result = transcription_future => {
-                result.map_err(PipelineError::from)
-            }
-        };
-
-        let stt_text = match stt_result {
-            Ok(t) => normalize_stt_text(t),
+        let (stt_text, stt_duration_ms) = match stt_result {
+            Ok(result) => (result.text, result.duration_ms),
             Err(e) => {
                 let mut inner = self
                     .inner
@@ -1383,8 +1342,6 @@ impl SharedPipeline {
                 return Err(e);
             }
         };
-        let stt_duration_ms = stt_start.elapsed().as_millis() as u64;
-        log::info!("Pipeline: STT complete, {} chars", stt_text.len());
 
         // Phase 3-4: Routing and LLM rewrite via transcription_flow module
         let (proxy_settings, llm_api_keys, request_log_store, llm_enabled_global, llm_config) = {
@@ -1658,40 +1615,18 @@ impl SharedPipeline {
         );
 
         // Phase 2: STT transcription
-        let format = AudioFormat::default();
-        let wav = Arc::new(wav_bytes);
+        let stt_result = run_stt_transcription(
+            stt_provider,
+            &wav_bytes,
+            &retry_config,
+            Some(timeout),
+            &cancel_token,
+            "Pipeline (retry)",
+        )
+        .await;
 
-        let transcription_future = async {
-            with_retry(&retry_config, || {
-                let provider = stt_provider.clone();
-                let wav = wav.clone();
-                let format = format.clone();
-                async move { provider.transcribe(wav.as_slice(), &format).await }
-            })
-            .await
-        };
-
-        let stt_start = std::time::Instant::now();
-        let stt_result = tokio::select! {
-            biased;
-
-            _ = cancel_token.cancelled() => {
-                log::info!("Pipeline: Retry transcription cancelled");
-                Err(PipelineError::Cancelled)
-            }
-
-            _ = tokio::time::sleep(timeout) => {
-                log::warn!("Pipeline: Retry transcription timed out after {:?}", timeout);
-                Err(PipelineError::Timeout(timeout))
-            }
-
-            result = transcription_future => {
-                result.map_err(PipelineError::from)
-            }
-        };
-
-        let stt_text = match stt_result {
-            Ok(t) => normalize_stt_text(t),
+        let (stt_text, stt_duration_ms) = match stt_result {
+            Ok(result) => (result.text, result.duration_ms),
             Err(e) => {
                 let mut inner = self
                     .inner
@@ -1705,9 +1640,6 @@ impl SharedPipeline {
                 return Err(e);
             }
         };
-
-        let stt_duration_ms = stt_start.elapsed().as_millis() as u64;
-        log::info!("Pipeline: Retry STT complete, {} chars", stt_text.len());
 
         // Phase 3-4: Routing and LLM rewrite via transcription_flow module
         let (proxy_settings, llm_api_keys, request_log_store, llm_enabled_global, llm_config) = {
