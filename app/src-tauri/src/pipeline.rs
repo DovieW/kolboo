@@ -33,6 +33,7 @@ mod llm_provider;
 mod program_profiles;
 mod routing;
 mod state_machine;
+mod stt_provider;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -260,6 +261,7 @@ impl PipelineInner {
             return Ok(provider);
         }
 
+        // Cloud providers use the common factory
         let api_key = self
             .config
             .stt_api_keys
@@ -267,85 +269,19 @@ impl PipelineInner {
             .cloned()
             .unwrap_or_default();
 
-        if api_key.is_empty() {
-            return Err(PipelineError::Config(format!(
-                "STT provider '{}' requires an API key",
-                provider_id
-            )));
-        }
+        let timeout = stt_provider::default_timeout_for_provider(&provider_id);
+        let client = stt_provider::build_stt_client(&self.config.proxy_settings, timeout)?;
 
-        let provider: Arc<dyn SttProvider> = match provider_id.as_str() {
-            "openai" => Arc::new(
-                crate::stt::OpenAiSttProvider::with_client(
-                    self.build_http_client_with_timeout(Duration::from_secs(120))?,
-                    api_key,
-                    model,
-                    self.config.stt_transcription_prompt.clone(),
-                )
-                .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            "fireworks" => Arc::new(
-                crate::stt::FireworksSttProvider::with_client(
-                    self.build_http_client_with_timeout(Duration::from_secs(120))?,
-                    api_key,
-                    model,
-                    self.config.stt_transcription_prompt.clone(),
-                )
-                .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            "aquavoice" => Arc::new(
-                crate::stt::AquavoiceSttProvider::with_client(
-                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
-                    api_key,
-                    model,
-                    self.config.stt_transcription_prompt.clone(),
-                )
-                .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            "groq" => Arc::new(
-                crate::stt::GroqSttProvider::with_client(
-                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
-                    api_key,
-                    model,
-                    self.config.stt_transcription_prompt.clone(),
-                )
-                .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            "elevenlabs" => Arc::new(
-                crate::stt::ElevenLabsSttProvider::with_client(
-                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
-                    api_key,
-                    model,
-                )
-                .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            "assemblyai" => Arc::new(
-                crate::stt::AssemblyAiSttProvider::with_client(
-                    self.build_http_client_with_timeout(Duration::from_secs(120))?,
-                    api_key,
-                    model,
-                )
-                .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            "speechmatics" => Arc::new(
-                crate::stt::SpeechmaticsSttProvider::new(api_key, model)
-                    .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            "deepgram" => Arc::new(
-                crate::stt::DeepgramSttProvider::with_client(
-                    self.build_http_client_with_timeout(Duration::from_secs(60))?,
-                    api_key,
-                    model,
-                )
-                .with_request_log_store(self.config.request_log_store.clone()),
-            ),
-            other => {
-                return Err(PipelineError::Config(format!(
-                    "Unknown STT provider: {}",
-                    other
-                )))
-            }
-        };
+        let provider = stt_provider::create_cloud_stt_provider(
+            client,
+            stt_provider::SttProviderParams {
+                provider_id,
+                model,
+                api_key,
+                transcription_prompt: self.config.stt_transcription_prompt.clone(),
+                request_log_store: self.config.request_log_store.clone(),
+            },
+        )?;
 
         self.stt_provider_cache.insert(cache_key, provider.clone());
         Ok(provider)

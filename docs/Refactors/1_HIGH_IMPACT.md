@@ -17,8 +17,8 @@ These are “bigger than a ticket” changes that would make the core easier to 
     - ✅ `pipeline/types.rs` (pipeline errors + transcription result structs)
     - ✅ `pipeline/utils.rs` (small pure helpers)
     - ✅ `pipeline/llm_provider.rs` (LLM provider construction)
-    - ⏳ `pipeline/audio_loop.rs` (cpal + buffering + VAD)
-    - ⏳ `pipeline/stt.rs` (provider loop + retry/timeout)
+    - ✅ `audio_capture.rs` (cpal + buffering + VAD) - already a separate module
+    - ✅ `pipeline/stt_provider.rs` (STT provider factory)
   - Ideal outcome: `pipeline.rs` becomes a small facade and orchestration entrypoint.
 
 - **Expand deterministic, headless pipeline integration tests (no network, no hardware).**
