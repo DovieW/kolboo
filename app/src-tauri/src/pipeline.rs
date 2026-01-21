@@ -17,7 +17,7 @@
 
 use crate::audio_capture::{
     AudioCapture, AudioCaptureBackend, AudioCaptureDiagnostics, AudioCaptureEvent,
-    AudioEncodeConfig, AudioLevelSnapshot,
+    AudioLevelSnapshot,
 };
 use crate::llm::LlmProvider;
 use crate::stt::{SttProvider, SttRegistry};
@@ -795,17 +795,11 @@ impl SharedPipeline {
             return Err(PipelineError::NotRecording);
         }
 
-        let cfg = AudioEncodeConfig {
-            noise_gate_threshold_dbfs: inner.config.noise_gate_threshold_dbfs,
-            downmix_to_mono: inner.config.audio_downmix_to_mono,
-            resample_to_16khz: inner.config.audio_resample_to_16khz,
-            highpass_enabled: inner.config.audio_highpass_enabled,
-            agc_enabled: inner.config.audio_agc_enabled,
-            noise_suppression_enabled: inner.config.audio_noise_suppression_enabled,
-            detect_speech_presence: inner.config.quiet_audio_require_speech,
-        };
-
-        match inner.audio_capture.stop_and_get_wav_with_diagnostics(cfg) {
+        let encode_cfg = inner.config.audio_encode_config();
+        match inner
+            .audio_capture
+            .stop_and_get_wav_with_diagnostics(encode_cfg)
+        {
             Ok((wav_bytes, diagnostics)) => {
                 // Keep a copy for STT testing/debugging UI.
                 inner.last_wav_bytes = Some(wav_bytes.clone());
@@ -849,17 +843,11 @@ impl SharedPipeline {
             return Err(PipelineError::NotRecording);
         }
 
-        let after_cfg = AudioEncodeConfig {
-            noise_gate_threshold_dbfs: inner.config.noise_gate_threshold_dbfs,
-            downmix_to_mono: inner.config.audio_downmix_to_mono,
-            resample_to_16khz: inner.config.audio_resample_to_16khz,
-            highpass_enabled: inner.config.audio_highpass_enabled,
-            agc_enabled: inner.config.audio_agc_enabled,
-            noise_suppression_enabled: inner.config.audio_noise_suppression_enabled,
-            detect_speech_presence: inner.config.quiet_audio_require_speech,
-        };
-
-        match inner.audio_capture.stop_and_get_wav_before_after(after_cfg) {
+        let encode_cfg = inner.config.audio_encode_config();
+        match inner
+            .audio_capture
+            .stop_and_get_wav_before_after(encode_cfg)
+        {
             Ok((before_wav, after_wav, diagnostics)) => {
                 // Keep a copy of the processed output for STT test + debugging.
                 inner.last_wav_bytes = Some(after_wav.clone());
@@ -1065,16 +1053,7 @@ impl SharedPipeline {
                 return Err(PipelineError::NotRecording);
             }
 
-            let encode_cfg = AudioEncodeConfig {
-                noise_gate_threshold_dbfs: inner.config.noise_gate_threshold_dbfs,
-                downmix_to_mono: inner.config.audio_downmix_to_mono,
-                resample_to_16khz: inner.config.audio_resample_to_16khz,
-                highpass_enabled: inner.config.audio_highpass_enabled,
-                agc_enabled: inner.config.audio_agc_enabled,
-                noise_suppression_enabled: inner.config.audio_noise_suppression_enabled,
-                detect_speech_presence: inner.config.quiet_audio_require_speech,
-            };
-
+            let encode_cfg = inner.config.audio_encode_config();
             let (wav_bytes, diagnostics) = match inner
                 .audio_capture
                 .stop_and_get_wav_with_diagnostics(encode_cfg)

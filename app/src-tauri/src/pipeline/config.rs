@@ -1,4 +1,4 @@
-use crate::audio_capture::VadAutoStopConfig;
+use crate::audio_capture::{AudioEncodeConfig, VadAutoStopConfig};
 use crate::llm::LlmConfig;
 use crate::request_log::RequestLogStore;
 use crate::settings::ProxySettings;
@@ -169,6 +169,24 @@ impl Default for PipelineConfig {
             whisper_model_path: None,
 
             local_whisper_load_mode: "manual".to_string(),
+        }
+    }
+}
+
+impl PipelineConfig {
+    /// Build the audio encoding config from the current pipeline settings.
+    ///
+    /// This is used when stopping recording to apply noise gate, resampling,
+    /// and other preprocessing options.
+    pub fn audio_encode_config(&self) -> AudioEncodeConfig {
+        AudioEncodeConfig {
+            noise_gate_threshold_dbfs: self.noise_gate_threshold_dbfs,
+            downmix_to_mono: self.audio_downmix_to_mono,
+            resample_to_16khz: self.audio_resample_to_16khz,
+            highpass_enabled: self.audio_highpass_enabled,
+            agc_enabled: self.audio_agc_enabled,
+            noise_suppression_enabled: self.audio_noise_suppression_enabled,
+            detect_speech_presence: self.quiet_audio_require_speech,
         }
     }
 }
