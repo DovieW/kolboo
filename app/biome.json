@@ -9,6 +9,18 @@
 		"ignoreUnknown": true,
 		"includes": ["**/*", "!!**/coverage"]
 	},
+	"overrides": [
+		{
+			"includes": ["src/lib/tauri/types.generated.ts"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off"
+					}
+				}
+			}
+		}
+	],
 	"formatter": {
 		"enabled": true,
 		"indentStyle": "tab"

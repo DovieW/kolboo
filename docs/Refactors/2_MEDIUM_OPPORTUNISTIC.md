@@ -5,9 +5,10 @@ They tend to improve maintainability and reduce future friction, but they're not
 - ✅ ~~**Run Rust tests in CI.**~~
 	- Added `cargo test --lib` step to `.github/workflows/check.yml` (runs when Rust files change).
 
-- **Generate TypeScript types from Rust-exported JSON schemas.**
-	- You already export schemas; generating TS types from them reduces manual sync work.
-	- Keep the generated file isolated (e.g., `generated-types.ts`) so it’s clear what is safe to edit.
+- ✅ ~~**Generate TypeScript types from Rust-exported JSON schemas.**~~
+	- Added `scripts/generate-types-from-schemas.mjs` that uses `json-schema-to-typescript`.
+	- Output: `src/lib/tauri/types.generated.ts` (isolated, auto-generated).
+	- CI checks: `types:check` added to `check:ci`.
 
 - **Mock providers for deterministic testing (STT/LLM/Embeddings).**
 	- Many providers already support client injection.
