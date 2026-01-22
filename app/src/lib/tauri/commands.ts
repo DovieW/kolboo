@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { buildCostInvokeParams } from "../costParams";
 import { emitTyped, listenTyped } from "./events";
 import type {
 	AudioCaptureDiagnostics,
@@ -67,14 +68,14 @@ export const tauriAPI = {
 		llmModelKeys?: string[];
 		excludeFreeTier?: boolean;
 	}): Promise<CostSummary> {
-		const kind = params.kind === "all" ? undefined : params.kind;
+		const costParams = buildCostInvokeParams(params);
 		return invoke("get_cost_summary_v2", {
 			params: {
-				timeframe: params.timeframe,
-				kind,
-				sttModelKeys: params.sttModelKeys,
-				llmModelKeys: params.llmModelKeys,
-				excludeFreeTier: params.excludeFreeTier,
+				timeframe: costParams.timeframe,
+				kind: costParams.kind,
+				sttModelKeys: costParams.sttModelKeys,
+				llmModelKeys: costParams.llmModelKeys,
+				excludeFreeTier: costParams.excludeFreeTier,
 			},
 		});
 	},
@@ -86,14 +87,14 @@ export const tauriAPI = {
 		llmModelKeys?: string[];
 		excludeFreeTier?: boolean;
 	}): Promise<CostByProvider> {
-		const kind = params.kind === "all" ? undefined : params.kind;
+		const costParams = buildCostInvokeParams(params);
 		return invoke("get_cost_by_provider_v2", {
 			params: {
-				timeframe: params.timeframe,
-				kind,
-				sttModelKeys: params.sttModelKeys,
-				llmModelKeys: params.llmModelKeys,
-				excludeFreeTier: params.excludeFreeTier,
+				timeframe: costParams.timeframe,
+				kind: costParams.kind,
+				sttModelKeys: costParams.sttModelKeys,
+				llmModelKeys: costParams.llmModelKeys,
+				excludeFreeTier: costParams.excludeFreeTier,
 			},
 		});
 	},

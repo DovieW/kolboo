@@ -4,6 +4,8 @@ import type {
 	ModelPricingKind,
 } from "../tauri";
 
+import type { CostKind } from "../costParams";
+
 type TauriAPI = typeof import("../tauri").tauriAPI;
 type SttAPI = typeof import("../tauri").sttAPI;
 type RecordingsAPI = typeof import("../tauri").recordingsAPI;
@@ -39,14 +41,14 @@ export type QueryFnDeps = {
 };
 
 type CostFilters = {
-	kind?: "all" | "stt" | "llm";
+	kind?: CostKind;
 	sttModelKeys?: string[];
 	llmModelKeys?: string[];
 	excludeFreeTier?: boolean;
 };
 
 type NormalizedCostFilters = {
-	kind?: "all" | "stt" | "llm";
+	kind?: CostKind;
 	sttModelKeys: string[];
 	llmModelKeys: string[];
 	excludeFreeTier: boolean;
@@ -126,18 +128,9 @@ export const createCostSummaryQueryFn = (
 	timeframe: CostTimeframe,
 	filters?: CostFilters,
 ) => {
-	const normalized = normalizeCostFilters(filters);
-	return {
-		normalized,
-		queryFn: () =>
-			deps.tauriAPI.getCostSummary({
-				timeframe,
-				kind: normalized.kind,
-				sttModelKeys: normalized.sttModelKeys,
-				llmModelKeys: normalized.llmModelKeys,
-				excludeFreeTier: normalized.excludeFreeTier,
-			}),
-	};
+	return createCostQueryFn(timeframe, filters, (params) =>
+		deps.tauriAPI.getCostSummary(params),
+	);
 };
 
 export const createCostByProviderQueryFn = (
@@ -145,11 +138,29 @@ export const createCostByProviderQueryFn = (
 	timeframe: CostTimeframe,
 	filters?: CostFilters,
 ) => {
+	return createCostQueryFn(timeframe, filters, (params) =>
+		deps.tauriAPI.getCostByProvider(params),
+	);
+};
+
+function createCostQueryFn<TResult>(
+	timeframe: CostTimeframe,
+	filters: CostFilters | undefined,
+	get: (
+		params: {
+			timeframe: CostTimeframe;
+			kind?: CostKind;
+			sttModelKeys?: string[];
+			llmModelKeys?: string[];
+			excludeFreeTier?: boolean;
+		},
+	) => Promise<TResult>,
+) {
 	const normalized = normalizeCostFilters(filters);
 	return {
 		normalized,
 		queryFn: () =>
-			deps.tauriAPI.getCostByProvider({
+			get({
 				timeframe,
 				kind: normalized.kind,
 				sttModelKeys: normalized.sttModelKeys,
@@ -157,7 +168,7 @@ export const createCostByProviderQueryFn = (
 				excludeFreeTier: normalized.excludeFreeTier,
 			}),
 	};
-};
+}
 
 export const createHasLastAudioQueryFn = (deps: QueryFnDeps) => () =>
 	deps.sttAPI.hasLastAudio();

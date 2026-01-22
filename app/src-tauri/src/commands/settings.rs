@@ -1,7 +1,5 @@
-use crate::events;
 use crate::settings::HotkeyConfig;
-use crate::SystemEvent;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
 use crate::commands::CommandError;
@@ -36,14 +34,12 @@ pub async fn set_hotkey_debug_enabled_runtime(app: AppHandle, enabled: bool) -> 
         crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(enabled);
     }
 
-    let event = SystemEvent {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        event_type: "debug".to_string(),
-        message: format!("Hotkey debug runtime enabled={}", enabled),
-        details: Some("(confirmation event from backend)".to_string()),
-    };
-
-    let _ = app.emit(events::EVENT_SYSTEM_EVENT, event);
+    crate::app_shared::emit_system_event(
+        &app,
+        "debug",
+        &format!("Hotkey debug runtime enabled={}", enabled),
+        Some("(confirmation event from backend)"),
+    );
     Ok(())
 }
 

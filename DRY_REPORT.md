@@ -10,9 +10,8 @@ Top duplication hotspots:
 
 1. **Rust STT providers** (`app/src-tauri/src/stt/**`): repeated constructor + base URL + request-log plumbing.
 2. **Rust settings parsing**: repeated “read JSON from store → coerce type → clamp → default” patterns.
-3. **A few TS helper functions that are almost identical** (cost query wrappers).
 
-## Ranked duplicate groups (top 6)
+## Ranked duplicate groups (top 4)
 
 Ranking criteria: (a) repeats, then (b) block size, then (c) proximity to core logic.
 
@@ -134,56 +133,6 @@ let raw = get_settings_store(app, SettingsReadMode::Fresh)
 - `get_u64_clamped(key, default, min, max) -> u64`
 
 **Risks:** medium. Settings semantics are subtle (missing vs `null` vs invalid); helpers must preserve current behavior.
-
----
-
-### 5) Backend “system event” construction duplicated (Rust)
-
-**What it does:** constructs a `SystemEvent` with timestamp/type/message/details and emits it.
-
-**Evidence:**
-
-- `app/src-tauri/src/app_shared.rs` [17:–44:] has `emit_system_event(...)`
-- `app/src-tauri/src/commands/settings.rs` [33:–55:] constructs a `SystemEvent { ... }` manually
-
-**Recommendation:** replace manual constructions with the existing `emit_system_event` helper.
-
-**Risks:** low.
-
-
----
-
-### 6) Cost query wrappers repeated (TS)
-
-There are two layers that repeat the same cost-filter normalization pattern:
-
-1) query-fn creation
-2) invoke wrapper layer
-
-**Evidence:**
-
-- `app/src/lib/queries/queryFns.ts` [124:–170:]
-- `app/src/lib/tauri/commands.ts` [63:–111:]
-
-Representative snippet (queryFns):
-
-```ts
-const normalized = normalizeCostFilters(filters);
-return {
-  normalized,
-  queryFn: () => deps.tauriAPI.getCostSummary({ timeframe, /* normalized fields */ }),
-};
-```
-
-**Recommendation:**
-
-- Extract a shared helper that builds the common param object once:
-  - `buildNormalizedCostParams(timeframe, filters)`
-- Or keep `normalizeCostFilters` and extract a `createCostQueryFn(kind)` factory.
-
-**Risks:** low.
-
-
 ## “Do not refactor” list (duplication that’s OK)
 
 - The long list of explicit Tauri `invoke(...)` wrappers in `app/src/lib/tauri/commands.ts` is repetitive, but it also serves as a clear UI↔backend contract. DRY-ing it too much can hide argument shapes and make refactors harder.
