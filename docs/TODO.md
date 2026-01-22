@@ -29,8 +29,6 @@ Legend:
   - Introduce a ring buffer + worker thread so the CPAL callback only enqueues samples.
   - Do buffer append / pre-roll maintenance / VAD feeding on the worker thread.
 
-### Unify overlay pipeline state sources (hotkey + events + polling)
-
 ### Improve stats aggregation performance
 
 - **Where:** `app/src-tauri/src/commands/stats.rs`
