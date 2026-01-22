@@ -15,8 +15,6 @@ The most meaningful duplication is in:
 
 2. **Settings UI patterns (TS/TSX)** — repeated “select with Default + hint” rendering blocks across settings screens.
 
-3. **Small math helpers in cost code (Rust)** — token-to-cost conversion helpers are duplicated.
-
 ## Ranked duplicate groups (top 10)
 
 Ranking criteria: (a) repeat count, then (b) size of block, then (c) importance/core runtime impact.
@@ -87,59 +85,7 @@ From `app/src-tauri/src/llm/groq.rs` (approx lines ~80-170):
 
 ---
 
-### 4) Windows key chord injection logic repeated (clipboard/paste + selection probe)
-
-**What it does:** On Windows, inject key chords using Enigo with scancodes, delays, and a “always release modifiers” safety pattern.
-
-**Where (evidence):**
-
-- `app/src-tauri/src/text/inject.rs` (paste via Ctrl+V scancode path)
-- `app/src-tauri/src/text/selection_probe.rs` (copy via Ctrl+C / Ctrl+Shift+C / Ctrl+Insert)
-
-**Representative snippet:**
-
-From `selection_probe.rs` (approx lines ~190-280):
-
-> `with_pressed_key(..., Key::Control, |enigo| { enigo.raw(SCANCODE_C, Press); sleep; enigo.raw(SCANCODE_C, Release); sleep; Ok(()) })` + safety release
-
-**How many times it appears:** at least **2** modules share the same “press modifiers → raw scancode click → release → sleep → best-effort modifier release” structure.
-
-**Recommendation:** Extract a small helper for “Windows chord injection with safety”.
-
-- Proposed module: `app/src-tauri/src/text/key_inject.rs`
-- Proposed helper: `fn windows_press_scancode_with_modifier(enigo: &mut Enigo, modifier: Key, scancode: u16) -> Result<(), String>`
-
-**Risks / gotchas:**
-
-- Key injection is finicky; keep the helper tiny and well-commented, and don’t change timings in the process.
-
----
-
-### 6) Rewrite settings section: repeated SettingsRow scaffolding for “Thinking” variants
-
-**What it does:** Multiple settings rows share the same structure:
-
-> `SettingsRow` label/description → optional inheritance indicator → `HintSelect` with identical styling and default-handling
-
-**Where (evidence):**
-
-- `app/src/components/settings/prompt/RewriteSettingsSection.tsx` (OpenAI thinking, Gemini thinking level, Gemini thinking budget, Anthropic thinking, etc.)
-
-**How many times it appears:** multiple times in one file (jscpd found large intra-file clones).
-
-**Recommendation:** Extract a “row + select” component.
-
-- Proposed component: `SettingsHintSelectRow`
-- Signature idea:
-	- props: `label`, `description`, `data`, `value`, `onChange`, `defaultHint`, `inheritance?: { ... }`
-
-**Risks / gotchas:**
-
-- This is UI-only refactor; ensure it doesn’t accidentally change default value semantics (especially where `null` has meaning).
-
----
-
-### 7) Settings editor/test UI: repeated “textarea + ctrl/cmd+enter to run + duration display”
+### 3) Settings editor/test UI: repeated “textarea + ctrl/cmd+enter to run + duration display”
 
 **What it does:** A common UI pattern for test inputs:
 
@@ -155,7 +101,7 @@ From `selection_probe.rs` (approx lines ~190-280):
 
 ---
 
-### 8) Tests: repeated scaffolding (low priority)
+### 4) Tests: repeated scaffolding (low priority)
 
 **What it does:** repeated test setup/fixtures.
 

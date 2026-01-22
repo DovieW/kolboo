@@ -3,6 +3,7 @@ import type { ModelOption } from "../../../lib/modelOptions";
 import type { AppSettings } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
 import { HintSelectWithDefaultHint } from "../../HintSelectWithDefaultHint";
+import { SettingsHintSelectRow } from "../SettingsHintSelectRow";
 import { SettingsInheritanceIndicator } from "../SettingsInheritance";
 import { SettingsRow } from "../SettingsRow";
 
@@ -290,155 +291,133 @@ export function RewriteSettingsSection({
 
 			{/* OpenAI Thinking */}
 			{supportsOpenAiThinking && (
-				<SettingsRow
+				<SettingsHintSelectRow
 					label="Thinking"
 					description="Set the reasoning effort for this model."
-					right={
-						<>
-							<SettingsInheritanceIndicator
-								isDefaultScope={isDefaultScope}
-								inheriting={openAiReasoningEffortInheriting}
-								inheritTooltip={inheritTooltip}
-								onDisableOverride={onDisableOpenAiThinkingOverride}
-							/>
-							<HintSelectWithDefaultHint
-								data={openAiThinkingOptions}
-								value={
-									isDefaultScope
-										? (settings?.openai_reasoning_effort ?? SELECT_DEFAULT)
-									: localProfileOpenAiReasoningEffort
-								}
-								onChange={onOpenAiThinkingChange}
-								placeholder="Default"
-								defaultValue={SELECT_DEFAULT}
-								defaultHint={
-									isDefaultScope
-										? effectiveLlmModel
-											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-											: "medium"
-										: (settings?.openai_reasoning_effort ??
-											(effectiveLlmModel
-												? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-												: "medium"))
-								}
-								inputStyle={{
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								}}
-							/>
-						</>
-					}
-				/>
+					isDefaultScope={isDefaultScope}
+					inheriting={openAiReasoningEffortInheriting}
+					inheritTooltip={inheritTooltip}
+					onDisableOverride={onDisableOpenAiThinkingOverride}
+				>
+					<HintSelectWithDefaultHint
+						data={openAiThinkingOptions}
+						value={
+							isDefaultScope
+								? (settings?.openai_reasoning_effort ?? SELECT_DEFAULT)
+								: localProfileOpenAiReasoningEffort
+						}
+						onChange={onOpenAiThinkingChange}
+						placeholder="Default"
+						defaultValue={SELECT_DEFAULT}
+						defaultHint={
+							isDefaultScope
+								? effectiveLlmModel
+									? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+									: "medium"
+								: (settings?.openai_reasoning_effort ??
+									(effectiveLlmModel
+										? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+										: "medium"))
+						}
+						inputStyle={{
+							backgroundColor: "var(--bg-elevated)",
+							borderColor: "var(--border-default)",
+							color: "var(--text-primary)",
+							minWidth: 200,
+						}}
+					/>
+				</SettingsHintSelectRow>
 			)}
 
 			{/* Gemini Thinking Level */}
 			{supportsGeminiThinkingLevel && (
-				<SettingsRow
+				<SettingsHintSelectRow
 					label="Thinking Level"
 					description={
 						isGemini3Pro
 							? "Gemini 3 Pro supports low/high (default high)."
 							: "Gemini 3 Flash supports minimal/low/medium/high (default high)."
 					}
-					right={
-						<>
-							<SettingsInheritanceIndicator
-								isDefaultScope={isDefaultScope}
-								inheriting={geminiThinkingLevelInheriting}
-								inheritTooltip={inheritTooltip}
-								onDisableOverride={onDisableGeminiThinkingLevelOverride}
-							/>
-							<HintSelectWithDefaultHint
-								data={geminiThinkingLevelOptions}
-								value={
-									isDefaultScope
-										? (settings?.gemini_thinking_level ?? SELECT_DEFAULT)
-									: localProfileGeminiThinkingLevel
-								}
-								onChange={onGeminiThinkingLevelChange}
-								placeholder="Default"
-								defaultValue={SELECT_DEFAULT}
-								defaultHint={
-									isDefaultScope
-										? "high"
-										: (settings?.gemini_thinking_level ?? "high")
-								}
-								inputStyle={{
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								}}
-							/>
-						</>
-					}
-				/>
+					isDefaultScope={isDefaultScope}
+					inheriting={geminiThinkingLevelInheriting}
+					inheritTooltip={inheritTooltip}
+					onDisableOverride={onDisableGeminiThinkingLevelOverride}
+				>
+					<HintSelectWithDefaultHint
+						data={geminiThinkingLevelOptions}
+						value={
+							isDefaultScope
+								? (settings?.gemini_thinking_level ?? SELECT_DEFAULT)
+								: localProfileGeminiThinkingLevel
+						}
+						onChange={onGeminiThinkingLevelChange}
+						placeholder="Default"
+						defaultValue={SELECT_DEFAULT}
+						defaultHint={
+							isDefaultScope ? "high" : (settings?.gemini_thinking_level ?? "high")
+						}
+						inputStyle={{
+							backgroundColor: "var(--bg-elevated)",
+							borderColor: "var(--border-default)",
+							color: "var(--text-primary)",
+							minWidth: 200,
+						}}
+					/>
+				</SettingsHintSelectRow>
 			)}
 
 			{/* Gemini Thinking Budget */}
 			{supportsGeminiThinkingBudget && (
-				<SettingsRow
+				<SettingsHintSelectRow
 					label="Thinking Budget"
 					description="Token budget for Gemini 2.5 thinking."
-					right={
-						<>
-							<SettingsInheritanceIndicator
-								isDefaultScope={isDefaultScope}
-								inheriting={geminiThinkingBudgetInheriting}
-								inheritTooltip={inheritTooltip}
-								onDisableOverride={onDisableGeminiThinkingBudgetOverride}
-							/>
-							<HintSelectWithDefaultHint
-								data={geminiThinkingBudgetOptions}
-								value={
-									isDefaultScope
-										? settings?.gemini_thinking_budget == null
-											? SELECT_DEFAULT
-											: String(settings.gemini_thinking_budget)
-									: localProfileGeminiThinkingBudget
-								}
-								onChange={onGeminiThinkingBudgetChange}
-								placeholder="Default"
-								defaultValue={SELECT_DEFAULT}
-								defaultHint={(() => {
-									const inherited = settings?.gemini_thinking_budget;
-									if (isDefaultScope) return "dynamic";
+					isDefaultScope={isDefaultScope}
+					inheriting={geminiThinkingBudgetInheriting}
+					inheritTooltip={inheritTooltip}
+					onDisableOverride={onDisableGeminiThinkingBudgetOverride}
+				>
+					<HintSelectWithDefaultHint
+						data={geminiThinkingBudgetOptions}
+						value={
+							isDefaultScope
+								? settings?.gemini_thinking_budget == null
+									? SELECT_DEFAULT
+									: String(settings.gemini_thinking_budget)
+								: localProfileGeminiThinkingBudget
+						}
+						onChange={onGeminiThinkingBudgetChange}
+						placeholder="Default"
+						defaultValue={SELECT_DEFAULT}
+						defaultHint={(() => {
+							const inherited = settings?.gemini_thinking_budget;
+							if (isDefaultScope) return "dynamic";
 
-									if (inherited == null) return "dynamic";
-									if (inherited === 0) return "off";
-									if (inherited === -1) return "dynamic";
-									return String(inherited);
-								})()}
-								inputStyle={{
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								}}
-							/>
-						</>
-					}
-				/>
+							if (inherited == null) return "dynamic";
+							if (inherited === 0) return "off";
+							if (inherited === -1) return "dynamic";
+							return String(inherited);
+						})()}
+						inputStyle={{
+							backgroundColor: "var(--bg-elevated)",
+							borderColor: "var(--border-default)",
+							color: "var(--text-primary)",
+							minWidth: 200,
+						}}
+					/>
+				</SettingsHintSelectRow>
 			)}
 
 			{/* Anthropic Thinking Budget */}
 			{supportsAnthropicThinkingBudget && (
-				<SettingsRow
+				<SettingsHintSelectRow
 					label="Thinking"
 					description="Extended thinking level for Claude models."
-					right={
-						<>
-							<SettingsInheritanceIndicator
-								isDefaultScope={isDefaultScope}
-								inheriting={anthropicThinkingBudgetInheriting}
-								inheritTooltip={inheritTooltip}
-								onDisableOverride={
-								onDisableAnthropicThinkingBudgetOverride
-							}
-							/>
-							<HintSelect
+					isDefaultScope={isDefaultScope}
+					inheriting={anthropicThinkingBudgetInheriting}
+					inheritTooltip={inheritTooltip}
+					onDisableOverride={onDisableAnthropicThinkingBudgetOverride}
+				>
+					<HintSelect
 								data={anthropicThinkingLevelOptionsWithCustom}
 								value={
 									isDefaultScope
@@ -519,7 +498,7 @@ export function RewriteSettingsSection({
 									);
 								}
 
-								return <Text size="sm">{option.label}</Text>;
+									return <Text size="sm">{option.label}</Text>;
 							}}
 							renderOption={({ option }) => {
 								if (option.value === SELECT_DEFAULT) {
@@ -575,10 +554,8 @@ export function RewriteSettingsSection({
 									</div>
 								);
 							}}
-							/>
-						</>
-					}
-				/>
+					/>
+				</SettingsHintSelectRow>
 			)}
 		</>
 	);

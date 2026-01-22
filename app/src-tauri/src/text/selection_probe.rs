@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::app_shared::basename_for_log;
 use crate::text::clipboard::{clipboard_only_last_text_lock, set_clipboard_text_platform};
 use crate::text::inject::run_with_output_injection_lock;
+use crate::text::key_inject::{release_common_modifiers_best_effort, with_pressed_key};
 
 /// How long we wait for the *target application* to update the clipboard after we inject a copy
 /// shortcut during highlighted-selection probing.
@@ -51,30 +52,6 @@ pub enum ContextGrabMethod {
     ///
     /// Intended for apps/terminals that support "copy on select".
     ClipboardOnly,
-}
-
-fn with_pressed_key<T>(
-    enigo: &mut Enigo,
-    key: Key,
-    work: impl FnOnce(&mut Enigo) -> Result<T, String>,
-) -> Result<T, String> {
-    enigo
-        .key(key, Direction::Press)
-        .map_err(|e| e.to_string())?;
-
-    // Ensure we always release, even if `work` fails.
-    let result = work(enigo);
-    let _ = enigo.key(key, Direction::Release);
-    result
-}
-
-fn release_common_modifiers_best_effort(enigo: &mut Enigo) {
-    // If we ever miss a key-up (or a release fails), users can experience "stuck" modifiers.
-    // Best-effort attempt to reset common modifiers.
-    let _ = enigo.key(Key::Shift, Direction::Release);
-    let _ = enigo.key(Key::Control, Direction::Release);
-    let _ = enigo.key(Key::Alt, Direction::Release);
-    let _ = enigo.key(Key::Meta, Direction::Release);
 }
 
 #[cfg(desktop)]
