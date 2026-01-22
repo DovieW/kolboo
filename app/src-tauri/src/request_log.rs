@@ -13,8 +13,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::VecDeque;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
+
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn should_redact_key(key: &str) -> bool {
     let k = key.trim().to_lowercase();
@@ -623,14 +627,14 @@ impl RequestLogStore {
 
     pub fn set_retention(&self, retention: RequestLogsRetentionConfig) {
         {
-            let mut cfg = self.retention.lock().unwrap();
+            let mut cfg = lock_or_recover(&self.retention);
             *cfg = retention;
         }
         self.prune();
     }
 
     pub fn retention(&self) -> RequestLogsRetentionConfig {
-        *self.retention.lock().unwrap()
+        *lock_or_recover(&self.retention)
     }
 
     fn prune_locked(logs: &mut VecDeque<RequestLog>, cfg: RequestLogsRetentionConfig) {
@@ -658,13 +662,13 @@ impl RequestLogStore {
 
     pub fn prune(&self) {
         let cfg = self.retention();
-        let mut logs = self.logs.lock().unwrap();
+        let mut logs = lock_or_recover(&self.logs);
         Self::prune_locked(&mut logs, cfg);
     }
 
     /// Start a new request log
     pub fn start_request(&self, stt_provider: String, stt_model: Option<String>) -> String {
-        let mut current = self.current.lock().unwrap();
+        let mut current = lock_or_recover(&self.current);
 
         // If there's an existing request, finalize it first
         if let Some(mut existing) = current.take() {
@@ -685,13 +689,13 @@ impl RequestLogStore {
     where
         F: FnOnce(&mut RequestLog) -> R,
     {
-        let mut current = self.current.lock().unwrap();
+        let mut current = lock_or_recover(&self.current);
         current.as_mut().map(f)
     }
 
     /// Complete the current request and store it
     pub fn complete_current(&self) {
-        let mut current = self.current.lock().unwrap();
+        let mut current = lock_or_recover(&self.current);
         if let Some(log) = current.take() {
             self.store_log(log);
         }
@@ -703,7 +707,7 @@ impl RequestLogStore {
         // Providers should also avoid logging secrets, but this is a last line of defense.
         let log = redact_request_log_json_fields(log);
 
-        let mut logs = self.logs.lock().unwrap();
+        let mut logs = lock_or_recover(&self.logs);
         logs.push_back(log);
 
         let cfg = self.retention();
@@ -714,8 +718,8 @@ impl RequestLogStore {
     pub fn get_logs(&self, limit: Option<usize>) -> Vec<RequestLog> {
         self.prune();
 
-        let logs = self.logs.lock().unwrap();
-        let current = self.current.lock().unwrap();
+        let logs = lock_or_recover(&self.logs);
+        let current = lock_or_recover(&self.current);
 
         let mut result: Vec<RequestLog> = logs
             .iter()
@@ -742,14 +746,14 @@ impl RequestLogStore {
     pub fn count(&self) -> usize {
         self.prune();
 
-        let logs = self.logs.lock().unwrap();
-        let current = self.current.lock().unwrap();
+        let logs = lock_or_recover(&self.logs);
+        let current = lock_or_recover(&self.current);
         logs.len() + if current.is_some() { 1 } else { 0 }
     }
 
     /// Clear all logs
     pub fn clear(&self) {
-        let mut logs = self.logs.lock().unwrap();
+        let mut logs = lock_or_recover(&self.logs);
         logs.clear();
     }
 }
@@ -842,5 +846,23 @@ mod tests {
         assert_eq!(redacted["freeform"], "<redacted>");
         assert_eq!(redacted["openai"], "<redacted>");
         assert_eq!(redacted["other"], "hello");
+    }
+
+    #[test]
+    fn test_store_recovers_from_poisoned_mutex() {
+        let store = RequestLogStore::new();
+
+        let _ = std::panic::catch_unwind({
+            let store = store.clone();
+            move || {
+                let _guard = store.retention.lock().unwrap();
+                panic!("poison retention");
+            }
+        });
+
+        // Prior behavior would panic due to PoisonError.
+        let cfg = store.retention();
+        assert_eq!(cfg.mode, RequestLogsRetentionMode::Amount);
+        assert_eq!(cfg.amount, DEFAULT_MAX_LOGS);
     }
 }
