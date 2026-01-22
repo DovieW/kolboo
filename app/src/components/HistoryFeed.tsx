@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
+import { getRetryLastFailedCandidate } from "../lib/historyRetry";
 import { listAllLlmModelKeys, listAllSttModelKeys } from "../lib/modelOptions";
 import {
 	useHistoryAll,
@@ -539,6 +540,25 @@ export function HistoryFeed({
 		includeUsageCounts: true,
 	});
 
+	// Lightweight query used only to power the "Retry last failed" quick action.
+	// We intentionally *don't* use the current filter state here so the action can
+	// work even if the user is filtering the list.
+	const retryActionHistoryQuery = useHistoryPage({
+		filterText: "",
+		showFailed: true,
+		showEmptyTranscript: true,
+		selectedSttModelKeys: [],
+		selectedLlmModelKeys: [],
+		page: 1,
+		pageSize: 200,
+		includeUsageCounts: false,
+	});
+
+	const retryLastFailedCandidate = useMemo(() => {
+		const items = retryActionHistoryQuery.data?.items ?? [];
+		return getRetryLastFailedCandidate(items);
+	}, [retryActionHistoryQuery.data?.items]);
+
 	// Optional: fetch full history only when the analysis modal is opened.
 	const allHistoryQuery = useHistoryAll({ enabled: analysisOpened });
 
@@ -1021,12 +1041,67 @@ export function HistoryFeed({
 	}, [groupedHistory, recordingExistsById, recordingsProbeTick]);
 
 	const isFiltering = filterText.trim().length > 0 || hasActiveFilters;
+	const canRetryLastFailed = Boolean(retryLastFailedCandidate);
+	const retryLastFailedTooltip = canRetryLastFailed
+		? "Retry the most recent failed request (copies result)"
+		: "No failed requests with saved audio found";
+
+	const handleRetryLastFailed = () => {
+		void (async () => {
+			const candidate = retryLastFailedCandidate;
+			if (!candidate) return;
+
+			try {
+				// Quick guard so we don't kick off an expensive retry if the WAV isn't there.
+				const url = await recordingsAPI.getRecordingAssetUrl({
+					requestId: candidate.recordingRequestId,
+				});
+				if (!url) {
+					notifications.show({
+						title: "Retry",
+						message:
+							"No saved audio found for the most recent failed request.",
+						color: "yellow",
+					});
+					return;
+				}
+
+				const transcript = await retryMutation.mutateAsync(candidate.entryId);
+				clipboard.copy(transcript);
+				notifications.show({
+					title: "Retry",
+					message: "Retried the most recent failed request and copied the result.",
+					color: "green",
+				});
+			} catch (e) {
+				notifications.show({
+					title: "Retry failed",
+					message: formatErrorMessage(e),
+					color: "red",
+				});
+			}
+		})();
+	};
 
 	return (
 		<div className="animate-in animate-in-delay-2">
 			<div className="section-header">
 				<span className="section-title section-title--no-accent">History</span>
 				<Group gap={6}>
+					<Tooltip label={retryLastFailedTooltip} withArrow>
+						<Button
+							variant="subtle"
+							size="compact-sm"
+							color="gray"
+							px={6}
+							onClick={handleRetryLastFailed}
+							disabled={!canRetryLastFailed || retryMutation.isPending}
+							aria-label="Retry last failed request"
+						>
+							<RotateCcw size={14} />
+						</Button>
+					</Tooltip>
+
 					<Tooltip
 						label={
 							recordingsStats.isLoading || recordingsGbForTooltip === null

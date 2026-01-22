@@ -50,13 +50,6 @@ Legend:
   - Present one coherent UI: what is stored, where, and how long.
   - Show estimated impact (counts/bytes) via `get_data_storage_summary`.
 
-### Improve “retry” UX
-
-- **Where:** retry path exists (`pipeline_retry_transcription` in `commands/recording.rs`).
-- **Todo:**
-  - Add “Retry last failed request” as a hotkey/menu action.
-  - Persist enough context to make retry reliable and visible across restarts.
-
 ### Expand output-mode options
 
 ---

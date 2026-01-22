@@ -2129,7 +2129,9 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                             let mut tmp = scratch.borrow_mut();
                             tmp.clear();
                             for &s in data {
-                                tmp.push(cpal::Sample::to_float_sample(&s));
+                                // Normalize PCM i16 to [-1.0, 1.0]
+                                let v = (s as f32) / (i16::MAX as f32);
+                                tmp.push(v.clamp(-1.0, 1.0));
                             }
                             out.extend_from_slice(tmp.as_slice());
 
@@ -2185,7 +2187,9 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                             let mut tmp = scratch.borrow_mut();
                             tmp.clear();
                             for &s in data {
-                                tmp.push(cpal::Sample::to_float_sample(&s));
+                                // Normalize PCM u16 (0..=65535) to [-1.0, 1.0]
+                                let v = (s as f32) / (u16::MAX as f32);
+                                tmp.push((v * 2.0 - 1.0).clamp(-1.0, 1.0));
                             }
                             out.extend_from_slice(tmp.as_slice());
 

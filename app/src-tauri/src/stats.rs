@@ -677,7 +677,6 @@ impl StatsStore {
             day.sum_into(
                 &mut out,
                 cost_index::CostAggFilters {
-                    cutoff,
                     kind_filter,
                     selected_stt_model_keys,
                     selected_llm_model_keys,
@@ -773,7 +772,6 @@ mod cost_index {
 
     #[derive(Debug, Clone, Copy)]
     pub struct CostAggFilters<'a> {
-        pub cutoff: Option<DateTime<Utc>>,
         pub kind_filter: Option<CostKind>,
         pub selected_stt_model_keys: Option<&'a std::collections::HashSet<String>>,
         pub selected_llm_model_keys: Option<&'a std::collections::HashSet<String>>,
