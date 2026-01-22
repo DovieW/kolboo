@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUpdateRewriteProgramPromptProfiles } from "../../../lib/queries";
-import { tauriAPI } from "../../../lib/tauri";
 import type {
 	RewritePreset,
 	RewriteProgramPromptProfile,
@@ -245,11 +244,7 @@ export function usePresetManagement({
 					};
 				});
 
-				updateRewriteProgramPromptProfiles.mutate(updated, {
-					onSuccess: () => {
-						tauriAPI.emitSettingsChanged();
-					},
-				});
+				updateRewriteProgramPromptProfiles.mutate(updated);
 				return;
 			}
 

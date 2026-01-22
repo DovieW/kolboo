@@ -3,7 +3,6 @@ import type {
 	AppSettings,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
-import { tauriAPI } from "../../../lib/tauri";
 
 type UpdateMutation = {
 	mutate: (
@@ -84,11 +83,7 @@ export function useProfileMigrations({
 		};
 
 		// Insert Default first so it doesn't show up as a "program profile" elsewhere.
-		updateRewriteProgramPromptProfiles.mutate([defaultProfile, ...profiles], {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateRewriteProgramPromptProfiles.mutate([defaultProfile, ...profiles]);
 	}, [profiles, settings, updateRewriteProgramPromptProfiles]);
 
 	const didMigrateProfileRewriteEnabled = useRef(false);
@@ -114,11 +109,7 @@ export function useProfileMigrations({
 			return { ...p, rewrite_llm_enabled: defaultRewriteEnabled };
 		});
 
-		updateRewriteProgramPromptProfiles.mutate(migrated, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateRewriteProgramPromptProfiles.mutate(migrated);
 	}, [
 		settings,
 		profiles,

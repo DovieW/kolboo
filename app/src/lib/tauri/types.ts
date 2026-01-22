@@ -315,7 +315,9 @@ export type PipelineTranscriptReadyPayload = string;
 
 export type EmptyEventPayload = null;
 
-export type SettingsChangedPayload = Record<string, unknown>;
+export type SettingsChangedPayload =
+	| ({ settings_revision?: number } & Record<string, unknown>)
+	| Record<string, unknown>;
 
 export interface ConnectionStateChangedPayload {
 	state: ConnectionState;

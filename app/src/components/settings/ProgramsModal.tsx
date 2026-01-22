@@ -76,7 +76,6 @@ export function ProfileConfigModal({
 		const next = [...profiles, newProfile];
 		updateRewriteProgramPromptProfiles.mutate(next, {
 			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
 				onEditingProfileChange(newProfile.id);
 			},
 		});
@@ -150,7 +149,6 @@ export function ProfileConfigModal({
 
 		updateRewriteProgramPromptProfiles.mutate(next, {
 			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
 			},
 		});
 	};
@@ -173,7 +171,6 @@ export function ProfileConfigModal({
 				const next = profiles.filter((p) => p.id !== selectedProfile.id);
 				updateRewriteProgramPromptProfiles.mutate(next, {
 					onSuccess: () => {
-						tauriAPI.emitSettingsChanged();
 						// If we just deleted the currently selected profile, close the modal
 						// and return to Default scope.
 						if (editingProfileId === selectedProfile.id) {

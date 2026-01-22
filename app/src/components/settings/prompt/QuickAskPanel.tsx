@@ -16,7 +16,7 @@ import type {
 	OpenAiReasoningEffort,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
-import { llmAPI, tauriAPI } from "../../../lib/tauri";
+import { llmAPI } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
 import { PromptSectionEditor } from "../PromptSectionEditor";
 
@@ -244,11 +244,7 @@ export function QuickAskPanel({
 						onChange={(e) => {
 							if (!isDefaultScope) return;
 							const enabled = e.currentTarget.checked;
-							updateQuickAskIncludeSelectedText.mutate(enabled, {
-								onSuccess: () => {
-									tauriAPI.emitSettingsChanged();
-								},
-							});
+							updateQuickAskIncludeSelectedText.mutate(enabled);
 						}}
 						color="gray"
 						size="md"
@@ -336,11 +332,7 @@ export function QuickAskPanel({
 							onChange={(v) => {
 								if (!isDefaultScope) return;
 								const n = typeof v === "number" && Number.isFinite(v) ? v : 3;
-								updateQuickAskConversationHistoryCount.mutate(n, {
-									onSuccess: () => {
-										tauriAPI.emitSettingsChanged();
-									},
-								});
+								updateQuickAskConversationHistoryCount.mutate(n);
 							}}
 							min={1}
 							max={20}
@@ -365,16 +357,11 @@ export function QuickAskPanel({
 							const enabled = e.currentTarget.checked;
 							updateQuickAskConversationHistoryEnabled.mutate(enabled, {
 								onSuccess: () => {
-									tauriAPI.emitSettingsChanged();
 									// If enabling and count is missing/invalid, nudge it to default 3.
 									if (enabled) {
 										updateQuickAskConversationHistoryCount.mutate(
 											quickAskConversationHistoryCount,
-											{
-												onSuccess: () => {
-													tauriAPI.emitSettingsChanged();
-												},
-											},
+											undefined,
 										);
 									}
 								},
@@ -595,21 +582,13 @@ export function QuickAskPanel({
 							onChange={(value) => {
 								if (isDefaultScope) {
 									if (value == null || value === selectDefault) {
-										updateQuickAskOpenAiReasoningEffort.mutate(null, {
-											onSuccess: () => {
-												tauriAPI.emitSettingsChanged();
-											},
-										});
+										updateQuickAskOpenAiReasoningEffort.mutate(null);
 										return;
 									}
 
 									const effort = isOpenAiReasoningEffort(value) ? value : null;
 									if (!effort) return;
-									updateQuickAskOpenAiReasoningEffort.mutate(effort, {
-										onSuccess: () => {
-											tauriAPI.emitSettingsChanged();
-										},
-									});
+									updateQuickAskOpenAiReasoningEffort.mutate(effort);
 									return;
 								}
 
@@ -786,11 +765,7 @@ export function QuickAskPanel({
 										: null;
 
 								if (isDefaultScope) {
-									updateQuickAskGeminiThinkingLevel.mutate(v, {
-										onSuccess: () => {
-											tauriAPI.emitSettingsChanged();
-										},
-									});
+										updateQuickAskGeminiThinkingLevel.mutate(v);
 									return;
 								}
 
@@ -944,24 +919,13 @@ export function QuickAskPanel({
 							onChange={(value) => {
 								if (isDefaultScope) {
 									if (value == null || value === selectDefault) {
-										updateQuickAskGeminiThinkingBudget.mutate(null, {
-											onSuccess: () => {
-												tauriAPI.emitSettingsChanged();
-											},
-										});
+										updateQuickAskGeminiThinkingBudget.mutate(null);
 										return;
 									}
 
 									const parsed = Number(value);
 									if (!Number.isFinite(parsed)) return;
-									updateQuickAskGeminiThinkingBudget.mutate(
-										Math.trunc(parsed),
-										{
-											onSuccess: () => {
-												tauriAPI.emitSettingsChanged();
-											},
-										},
-									);
+									updateQuickAskGeminiThinkingBudget.mutate(Math.trunc(parsed));
 									return;
 								}
 
@@ -1131,24 +1095,13 @@ export function QuickAskPanel({
 							onChange={(value) => {
 								if (isDefaultScope) {
 									if (value == null || value === selectDefault) {
-										updateQuickAskAnthropicThinkingBudget.mutate(null, {
-											onSuccess: () => {
-												tauriAPI.emitSettingsChanged();
-											},
-										});
+										updateQuickAskAnthropicThinkingBudget.mutate(null);
 										return;
 									}
 
 									const parsed = Number(value);
 									if (!Number.isFinite(parsed)) return;
-									updateQuickAskAnthropicThinkingBudget.mutate(
-										Math.trunc(parsed),
-										{
-											onSuccess: () => {
-												tauriAPI.emitSettingsChanged();
-											},
-										},
-									);
+									updateQuickAskAnthropicThinkingBudget.mutate(Math.trunc(parsed));
 									return;
 								}
 
@@ -1373,11 +1326,7 @@ export function QuickAskPanel({
 								// Keep the outer state in sync so the editor doesn't snap back.
 								setLocalQuickAskSystemPrompt(content);
 
-								updateQuickAskSystemPrompt.mutate(toStore, {
-									onSuccess: () => {
-										tauriAPI.emitSettingsChanged();
-									},
-								});
+								updateQuickAskSystemPrompt.mutate(toStore);
 								return;
 							}
 
@@ -1394,11 +1343,7 @@ export function QuickAskPanel({
 						onReset={() => {
 							if (isDefaultScope) {
 								setLocalQuickAskSystemPrompt(defaultSystemPrompt);
-								updateQuickAskSystemPrompt.mutate(defaultSystemPrompt, {
-									onSuccess: () => {
-										tauriAPI.emitSettingsChanged();
-									},
-								});
+								updateQuickAskSystemPrompt.mutate(defaultSystemPrompt);
 								return;
 							}
 

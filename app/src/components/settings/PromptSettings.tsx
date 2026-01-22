@@ -514,11 +514,7 @@ export function PromptSettings({
 		if (toStore === storedNormalized) return;
 
 		const handle = window.setTimeout(() => {
-			updateSTTTranscriptionPrompt.mutate(toStore, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateSTTTranscriptionPrompt.mutate(toStore);
 		}, 500);
 
 		return () => {
@@ -550,11 +546,7 @@ export function PromptSettings({
 		const first = models[0]?.value ?? null;
 		if (!first) return;
 
-		updateLLMModel.mutate(first, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateLLMModel.mutate(first);
 	}, [
 		isDefaultScope,
 		effectiveLlmProvider,
@@ -699,11 +691,7 @@ export function PromptSettings({
 			};
 
 			const updated = [...profiles, { ...defaultProfile, ...next }];
-			updateRewriteProgramPromptProfiles.mutate(updated, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateRewriteProgramPromptProfiles.mutate(updated);
 			return;
 		}
 
@@ -711,11 +699,7 @@ export function PromptSettings({
 			p.id === activeProfileId ? { ...p, ...next } : p,
 		);
 
-		updateRewriteProgramPromptProfiles.mutate(updated, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateRewriteProgramPromptProfiles.mutate(updated);
 	};
 
 	// Section management (local section state, save/reset handlers)
@@ -885,18 +869,13 @@ export function PromptSettings({
 				if (firstModel) {
 					updateQuickAskModel.mutate(firstModel.value);
 				}
-				tauriAPI.emitSettingsChanged();
 			},
 		});
 	};
 
 	const handleDefaultQuickAskModelChange = (value: string | null) => {
 		if (!value) return;
-		updateQuickAskModel.mutate(value, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateQuickAskModel.mutate(value);
 	};
 
 	if (isLoading) {

@@ -13,7 +13,7 @@ import {
 	useUpdateSTTProvider,
 	useUpdateSTTTimeout,
 } from "../../lib/queries";
-import { type OpenAiReasoningEffort, tauriAPI } from "../../lib/tauri";
+import type { OpenAiReasoningEffort } from "../../lib/tauri";
 import { HintSelect } from "../HintSelect";
 import { SettingsRow } from "./SettingsRow";
 
@@ -49,7 +49,6 @@ export function ProvidersSettings() {
 				if (firstModel) {
 					updateSTTModel.mutate(firstModel.value);
 				}
-				tauriAPI.emitSettingsChanged();
 			},
 		});
 	};
@@ -58,7 +57,6 @@ export function ProvidersSettings() {
 		if (!value) return;
 		updateSTTModel.mutate(value, {
 			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
 			},
 		});
 	};
@@ -74,7 +72,6 @@ export function ProvidersSettings() {
 				if (firstModel) {
 					updateLLMModel.mutate(firstModel.value);
 				}
-				tauriAPI.emitSettingsChanged();
 			},
 		});
 	};
@@ -83,7 +80,6 @@ export function ProvidersSettings() {
 		if (!value) return;
 		updateLLMModel.mutate(value, {
 			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
 			},
 		});
 	};
@@ -92,7 +88,6 @@ export function ProvidersSettings() {
 		// Save to local settings (Tauri) then notify overlay window to sync to server
 		updateSTTTimeout.mutate(value, {
 			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
 			},
 		});
 	};
@@ -270,11 +265,7 @@ export function ProvidersSettings() {
 
 	const handleOpenAiReasoningEffortChange = (value: string | null) => {
 		if (value == null || value === SELECT_DEFAULT) {
-			updateOpenAiReasoningEffort.mutate(null, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateOpenAiReasoningEffort.mutate(null);
 			return;
 		}
 
@@ -290,11 +281,7 @@ export function ProvidersSettings() {
 				: null;
 		if (!v) return;
 
-		updateOpenAiReasoningEffort.mutate(v, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateOpenAiReasoningEffort.mutate(v);
 	};
 
 	const handleGeminiThinkingLevelChange = (value: string | null) => {
@@ -305,30 +292,18 @@ export function ProvidersSettings() {
 			value === "high"
 				? value
 				: null;
-		updateGeminiThinkingLevel.mutate(v, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateGeminiThinkingLevel.mutate(v);
 	};
 
 	const handleGeminiThinkingBudgetChange = (value: string | null) => {
 		if (value == null || value === SELECT_DEFAULT) {
-			updateGeminiThinkingBudget.mutate(null, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateGeminiThinkingBudget.mutate(null);
 			return;
 		}
 
 		const parsed = Number(value);
 		if (!Number.isFinite(parsed)) return;
-		updateGeminiThinkingBudget.mutate(parsed, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		updateGeminiThinkingBudget.mutate(parsed);
 	};
 
 	return (

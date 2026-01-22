@@ -68,15 +68,6 @@ Legend:
   - Add explicit settings versioning + migrations.
   - Add a startup “settings doctor” command: validate + normalize.
 
-### Don’t rely on “remember to emit settings-changed”
-
-- **Where:** `app/src/lib/tauri.ts`, multiple settings UIs
-- **Problem:** some settings update APIs emit `settings-changed`, but many do not; callers often manually call `tauriAPI.emitSettingsChanged()` after mutations.
-- **Todo:**
-  - Create a single settings write helper that always: set → save → emit a structured payload (changed keys, optional revision).
-  - Have overlay apply payload immediately for UX-critical fields (accent), then optionally reload from disk for full sync.
-  - Add a monotonically increasing `settings_revision` to prevent stale reloads from winning.
-
 ### Make store reads consistent (reload vs cached)
 
 - **Where:** some code reloads the store before reading (e.g., transcription retention), other reads use the cached store directly.

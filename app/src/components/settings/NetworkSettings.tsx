@@ -119,18 +119,13 @@ export function NetworkSettings({
 	) => {
 		applyProxySettings.mutate(next, {
 			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
 				opts?.onSuccess?.();
 			},
 		});
 	};
 
 	const saveProxySettingsDraft = (next: ProxySettings) => {
-		saveProxySettings.mutate(next, {
-			onSuccess: () => {
-				tauriAPI.emitSettingsChanged();
-			},
-		});
+		saveProxySettings.mutate(next);
 	};
 
 	// Save manual edits; if Manual can be enabled (proxy URL provided), apply it.

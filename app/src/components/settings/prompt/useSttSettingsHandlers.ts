@@ -4,7 +4,6 @@ import type {
 	AppSettings,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
-import { tauriAPI } from "../../../lib/tauri";
 
 const DEFAULT_STT_TIMEOUT = 10;
 
@@ -86,7 +85,6 @@ export function useSttSettingsHandlers({
 					if (firstModel) {
 						updateSTTModel.mutate(firstModel.value);
 					}
-					tauriAPI.emitSettingsChanged();
 				},
 			});
 		},
@@ -96,22 +94,14 @@ export function useSttSettingsHandlers({
 	const handleDefaultSTTModelChange = useCallback(
 		(value: string | null) => {
 			if (!value) return;
-			updateSTTModel.mutate(value, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateSTTModel.mutate(value);
 		},
 		[updateSTTModel],
 	);
 
 	const handleDefaultSTTTimeoutChange = useCallback(
 		(value: number) => {
-			updateSTTTimeout.mutate(value, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateSTTTimeout.mutate(value);
 		},
 		[updateSTTTimeout],
 	);
@@ -127,11 +117,7 @@ export function useSttSettingsHandlers({
 		if (isDefaultScope) {
 			const stored = settings?.stt_model?.trim() || null;
 			if (toStore === stored) return;
-			updateSTTModel.mutate(toStore, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateSTTModel.mutate(toStore);
 			return;
 		}
 

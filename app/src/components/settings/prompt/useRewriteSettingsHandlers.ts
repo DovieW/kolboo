@@ -5,7 +5,6 @@ import type {
 	OpenAiReasoningEffort,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
-import { tauriAPI } from "../../../lib/tauri";
 import { SELECT_DEFAULT } from "./useThinkingOptions";
 
 type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high";
@@ -145,7 +144,6 @@ export function useRewriteSettingsHandlers({
 					if (firstModel) {
 						updateLLMModel.mutate(firstModel.value);
 					}
-					tauriAPI.emitSettingsChanged();
 				},
 			});
 		},
@@ -155,11 +153,7 @@ export function useRewriteSettingsHandlers({
 	const handleDefaultLLMModelChange = useCallback(
 		(value: string | null) => {
 			if (!value) return;
-			updateLLMModel.mutate(value, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateLLMModel.mutate(value);
 		},
 		[updateLLMModel],
 	);
@@ -167,11 +161,7 @@ export function useRewriteSettingsHandlers({
 	const handleOpenAiThinkingChange = useCallback(
 		(value: string | null) => {
 			if (value == null || value === SELECT_DEFAULT) {
-				updateOpenAiReasoningEffort.mutate(null, {
-					onSuccess: () => {
-						tauriAPI.emitSettingsChanged();
-					},
-				});
+				updateOpenAiReasoningEffort.mutate(null);
 				return;
 			}
 
@@ -184,11 +174,7 @@ export function useRewriteSettingsHandlers({
 					: null;
 			if (v == null) return;
 
-			updateOpenAiReasoningEffort.mutate(v, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateOpenAiReasoningEffort.mutate(v);
 		},
 		[updateOpenAiReasoningEffort],
 	);
@@ -202,11 +188,7 @@ export function useRewriteSettingsHandlers({
 				value === "high"
 					? value
 					: null;
-			updateGeminiThinkingLevel.mutate(v, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+				updateGeminiThinkingLevel.mutate(v);
 		},
 		[updateGeminiThinkingLevel],
 	);
@@ -214,21 +196,13 @@ export function useRewriteSettingsHandlers({
 	const handleGeminiThinkingBudgetChange = useCallback(
 		(value: string | null) => {
 			if (value == null || value === SELECT_DEFAULT) {
-				updateGeminiThinkingBudget.mutate(null, {
-					onSuccess: () => {
-						tauriAPI.emitSettingsChanged();
-					},
-				});
+				updateGeminiThinkingBudget.mutate(null);
 				return;
 			}
 
 			const parsed = Number(value);
 			if (!Number.isFinite(parsed)) return;
-			updateGeminiThinkingBudget.mutate(parsed, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateGeminiThinkingBudget.mutate(parsed);
 		},
 		[updateGeminiThinkingBudget],
 	);
@@ -236,21 +210,13 @@ export function useRewriteSettingsHandlers({
 	const handleAnthropicThinkingBudgetChange = useCallback(
 		(value: string | null) => {
 			if (value == null || value === SELECT_DEFAULT) {
-				updateAnthropicThinkingBudget.mutate(null, {
-					onSuccess: () => {
-						tauriAPI.emitSettingsChanged();
-					},
-				});
+				updateAnthropicThinkingBudget.mutate(null);
 				return;
 			}
 
 			const parsed = Number(value);
 			if (!Number.isFinite(parsed)) return;
-			updateAnthropicThinkingBudget.mutate(parsed, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateAnthropicThinkingBudget.mutate(parsed);
 		},
 		[updateAnthropicThinkingBudget],
 	);
@@ -262,11 +228,7 @@ export function useRewriteSettingsHandlers({
 	const handleRewriteEnabledChange = useCallback(
 		(enabled: boolean) => {
 			if (isDefaultScope) {
-				updateRewriteLlmEnabled.mutate(enabled, {
-					onSuccess: () => {
-						tauriAPI.emitSettingsChanged();
-					},
-				});
+				updateRewriteLlmEnabled.mutate(enabled);
 				return;
 			}
 			setRewriteEnabledInheriting(false);

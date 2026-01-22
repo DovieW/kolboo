@@ -724,11 +724,7 @@ function LocalWhisperModelsCard() {
 								if (!value) return;
 
 								const update = () => {
-									updateLocalWhisperModelId.mutate(value, {
-										onSuccess: () => {
-											tauriAPI.emitSettingsChanged();
-										},
-									});
+									updateLocalWhisperModelId.mutate(value);
 								};
 
 								// Model selection should NOT auto-load the new model.
@@ -785,11 +781,7 @@ function LocalWhisperModelsCard() {
 
 									if (!nextMode) return;
 
-									updateLocalWhisperLoadMode.mutate(nextMode, {
-										onSuccess: () => {
-											tauriAPI.emitSettingsChanged();
-										},
-									});
+									updateLocalWhisperLoadMode.mutate(nextMode);
 								}}
 							/>
 
@@ -1233,11 +1225,7 @@ export function ApiKeysSettings({
 					onBlur={() => {
 						const trimmed = ollamaUrlDraft.trim();
 						const normalized = trimmed ? trimmed : null;
-						updateOllamaUrl.mutate(normalized, {
-							onSuccess: () => {
-								tauriAPI.emitSettingsChanged();
-							},
-						});
+						updateOllamaUrl.mutate(normalized);
 					}}
 					placeholder="http://localhost:11434"
 					styles={{
@@ -1264,11 +1252,7 @@ export function ApiKeysSettings({
 					onBlur={() => {
 						const trimmed = whisperServerBaseUrlDraft.trim();
 						const normalized = trimmed ? trimmed : null;
-						updateWhisperServerBaseUrl.mutate(normalized, {
-							onSuccess: () => {
-								tauriAPI.emitSettingsChanged();
-							},
-						});
+						updateWhisperServerBaseUrl.mutate(normalized);
 					}}
 					placeholder="http://localhost:8000/v1"
 					styles={{

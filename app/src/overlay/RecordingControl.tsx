@@ -404,7 +404,6 @@ export default function RecordingControl() {
 
 		try {
 			await tauriAPI.updateRewriteProgramPromptProfiles(nextProfiles);
-			await tauriAPI.emitSettingsChanged({});
 		} catch (error) {
 			console.error("[Overlay] Failed to toggle router:", error);
 		}

@@ -10,12 +10,17 @@ use tauri_plugin_store::Store;
 ///
 /// We keep this as a small trait so we can unit test patch behavior without a real Tauri runtime.
 pub trait SettingsPatchStore {
+    fn get(&self, key: &str) -> Option<Value>;
     fn set(&self, key: &str, value: Value);
     fn delete(&self, key: &str);
 }
 
 #[cfg(desktop)]
 impl<R: Runtime> SettingsPatchStore for Store<R> {
+    fn get(&self, key: &str) -> Option<Value> {
+        Store::get(self, key)
+    }
+
     fn set(&self, key: &str, value: Value) {
         Store::set(self, key, value);
     }
@@ -27,6 +32,10 @@ impl<R: Runtime> SettingsPatchStore for Store<R> {
 
 #[cfg(desktop)]
 impl<R: Runtime> SettingsPatchStore for std::sync::Arc<Store<R>> {
+    fn get(&self, key: &str) -> Option<Value> {
+        Store::get(self.as_ref(), key)
+    }
+
     fn set(&self, key: &str, value: Value) {
         Store::set(self.as_ref(), key, value);
     }
@@ -48,6 +57,8 @@ pub fn apply_settings_patch(
     patch: Map<String, Value>,
     delete_keys: Vec<String>,
 ) -> Result<Map<String, Value>, CommandError> {
+    const SETTINGS_REVISION_KEY: &str = "settings_revision";
+
     let mut payload: Map<String, Value> = Map::new();
 
     for (k, v) in patch {
@@ -59,6 +70,19 @@ pub fn apply_settings_patch(
         store.delete(&k);
         payload.insert(k, Value::Null);
     }
+
+    // Monotonically increasing revision to help secondary windows ignore stale updates.
+    // If the stored value is missing/invalid, treat it as 0.
+    let current_revision = store
+        .get(SETTINGS_REVISION_KEY)
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let next_revision = current_revision.saturating_add(1);
+    store.set(SETTINGS_REVISION_KEY, Value::Number(next_revision.into()));
+    payload.insert(
+        SETTINGS_REVISION_KEY.to_string(),
+        Value::Number(next_revision.into()),
+    );
 
     Ok(payload)
 }
@@ -75,6 +99,10 @@ mod tests {
     }
 
     impl SettingsPatchStore for FakeStore {
+        fn get(&self, key: &str) -> Option<Value> {
+            self.data.borrow().get(key).cloned()
+        }
+
         fn set(&self, key: &str, value: Value) {
             self.data.borrow_mut().insert(key.to_string(), value);
         }
@@ -102,5 +130,11 @@ mod tests {
         assert_eq!(payload.get("a"), Some(&Value::String("x".to_string())));
         assert_eq!(payload.get("b"), Some(&Value::Number(123.into())));
         assert_eq!(payload.get("c"), Some(&Value::Null));
+
+        let rev = payload
+            .get("settings_revision")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        assert!(rev >= 1);
     }
 }

@@ -3,7 +3,6 @@ import type {
 	CleanupPromptSections,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
-import { tauriAPI } from "../../../lib/tauri";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -173,11 +172,7 @@ export function useSectionManagement({
 	const saveAllSections = useCallback(
 		(sections: CleanupPromptSections) => {
 			// Only used for Default scope. Per-profile prompt changes are stored as per-section overrides.
-			updateCleanupPromptSections.mutate(sections, {
-				onSuccess: () => {
-					tauriAPI.emitSettingsChanged();
-				},
-			});
+			updateCleanupPromptSections.mutate(sections);
 		},
 		[updateCleanupPromptSections],
 	);

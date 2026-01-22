@@ -200,10 +200,13 @@ export const tauriAPI = {
 
 	async setApiKey(storeKey: string, apiKey: string): Promise<void> {
 		await invoke("secrets_set_api_key", { storeKey, apiKey });
+		// API keys affect available provider lists and runtime behavior; notify other windows.
+		await emitTyped("settings-changed", { api_keys_changed: true });
 	},
 
 	async clearApiKey(storeKey: string): Promise<void> {
 		await invoke("secrets_clear_api_key", { storeKey });
+		await emitTyped("settings-changed", { api_keys_changed: true });
 	},
 
 	async registerShortcuts(): Promise<void> {
@@ -505,7 +508,10 @@ export const dataAPI = {
 
 	deleteAllRecordings: () => invoke<number>("recordings_delete_all"),
 
-	deleteAllApiKeys: () => invoke<void>("delete_all_api_keys"),
+	deleteAllApiKeys: async () => {
+		await invoke<void>("delete_all_api_keys");
+		await emitTyped("settings-changed", { api_keys_changed: true });
+	},
 
 	deleteAllSettings: () => invoke<void>("delete_all_settings"),
 
