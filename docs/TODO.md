@@ -87,23 +87,6 @@ Legend:
 
 ## Transparency & in-app disclosures (derived from code behavior)
 
-### Add an in-app “Privacy & Data” page
-
-- **Based on code:** the app can record mic audio, send audio/transcripts to third-party STT/LLM providers, and persist local artifacts:
-  - `history.json` (history)
-  - `recordings/*.wav` (recordings)
-  - `stats/cost-events-*.jsonl` (usage/cost ledger)
-  - request logs in memory (debugging)
-- **Todo:**
-  - Provide a plain-language page describing what is stored/sent.
-  - Link directly to existing delete/retention controls.
-
-### Add an in-app licensing + third-party services disclaimer
-
-- **Todo:**
-  - Show AGPL summary + link to full license.
-  - Clearly state that third-party APIs may incur costs and may have their own data retention.
-
 ---
 
 ## Provider-specific enhancements

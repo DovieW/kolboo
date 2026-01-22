@@ -41,6 +41,7 @@ import {
 	DataSettings,
 	HotkeySettings,
 	NetworkSettings,
+	PrivacySettings,
 	ProfileConfigModal,
 	PromptSettings,
 	UiSettings,
@@ -822,6 +823,7 @@ function _SettingsView() {
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
 						<Tabs.Tab value="api-keys">Providers</Tabs.Tab>
 						<Tabs.Tab value="data">Data</Tabs.Tab>
+						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
 					</Tabs.List>
 
@@ -858,6 +860,17 @@ function _SettingsView() {
 					<Tabs.Panel value="data" pt="md">
 						<div className="settings-card">
 							<DataSettings editingProfileId={editingProfileId} />
+						</div>
+					</Tabs.Panel>
+
+					<Tabs.Panel value="privacy" pt="md">
+						<div className="settings-card">
+							<PrivacySettings
+								onNavigateToTab={(tab) => {
+									setHasUserSelectedTab(true);
+									setActiveSettingsTab(tab);
+								}}
+							/>
 						</div>
 					</Tabs.Panel>
 
@@ -1071,6 +1084,7 @@ function SettingsViewWithGuideLauncher({
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
 						<Tabs.Tab value="api-keys">Providers</Tabs.Tab>
 						<Tabs.Tab value="data">Data</Tabs.Tab>
+						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
 					</Tabs.List>
 
@@ -1107,6 +1121,17 @@ function SettingsViewWithGuideLauncher({
 					<Tabs.Panel value="data" pt="md">
 						<div className="settings-card">
 							<DataSettings editingProfileId={editingProfileId} />
+						</div>
+					</Tabs.Panel>
+
+					<Tabs.Panel value="privacy" pt="md">
+						<div className="settings-card">
+							<PrivacySettings
+								onNavigateToTab={(tab) => {
+									setHasUserSelectedTab(true);
+									setActiveSettingsTab(tab);
+								}}
+							/>
 						</div>
 					</Tabs.Panel>
 

@@ -3,6 +3,7 @@ export { AudioSettings } from "./AudioSettings";
 export { DataSettings } from "./DataSettings";
 export { HotkeySettings } from "./HotkeySettings";
 export { NetworkSettings } from "./NetworkSettings";
+export { PrivacySettings } from "./PrivacySettings";
 export { ProfileConfigModal } from "./ProgramsModal";
 export type { PromptSectionEditorProps } from "./PromptSectionEditor";
 export { PromptSectionEditor } from "./PromptSectionEditor";
