@@ -59,14 +59,6 @@ Legend:
 
 ## P1 — UX & product improvements
 
-### Make destructive actions safer and more transparent
-
-- **Where:** `app/src-tauri/src/commands/data.rs` (+ UI uses `get_data_storage_summary`)
-- **Todo:**
-  - Require typed confirmation for “delete all data”.
-  - Emit events after each delete so UI refreshes (history/stats/settings).
-  - Add “delete only transcripts but keep recordings” and the reverse.
-
 ### Add a unified “Data retention” settings page
 
 - **Where:** retention exists for history (time-based transcription retention), request logs retention, and stats retention.

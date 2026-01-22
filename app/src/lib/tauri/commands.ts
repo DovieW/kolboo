@@ -508,10 +508,10 @@ export const dataAPI = {
 
 	deleteAllRecordings: () => invoke<number>("recordings_delete_all"),
 
-	deleteAllApiKeys: async () => {
-		await invoke<void>("delete_all_api_keys");
-		await emitTyped("settings-changed", { api_keys_changed: true });
-	},
+	deleteAllTranscriptsKeepRecordings: () =>
+		invoke<number>("delete_all_transcripts_keep_recordings"),
+
+	deleteAllApiKeys: () => invoke<void>("delete_all_api_keys"),
 
 	deleteAllSettings: () => invoke<void>("delete_all_settings"),
 

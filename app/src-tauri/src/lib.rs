@@ -2149,6 +2149,7 @@ pub fn run() {
             commands::data::delete_all_settings,
             commands::data::delete_all_stats,
             commands::data::get_data_storage_summary,
+            commands::data::delete_all_transcripts_keep_recordings,
             commands::data::delete_all_data,
             // Backups (export/import settings; exclude secrets)
             commands::backup::export_settings_backup_json,

@@ -778,6 +778,36 @@ impl HistoryStorage {
         Ok(updated)
     }
 
+    /// Clear all stored transcript text while keeping history rows and recording links.
+    ///
+    /// This is useful for privacy: users may want to keep the audio (recordings)
+    /// but remove the transcribed text from `history.json`.
+    ///
+    /// Returns the number of entries whose `text` was changed.
+    pub fn clear_all_transcript_text_keep_recordings(&self) -> Result<usize, String> {
+        let mut updated = 0usize;
+
+        {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| format!("Failed to write history: {}", e))?;
+
+            for entry in data.entries.iter_mut() {
+                if !entry.text.is_empty() {
+                    entry.text.clear();
+                    updated += 1;
+                }
+            }
+        }
+
+        if updated > 0 {
+            self.save()?;
+        }
+
+        Ok(updated)
+    }
+
     /// Clear all history
     pub fn clear(&self) -> Result<(), String> {
         {
@@ -995,5 +1025,37 @@ mod tests {
             .read_to_string(&dir.join("history.json"))
             .expect("read_to_string failed");
         assert!(contents.contains("hello"));
+    }
+
+    #[test]
+    fn clear_all_transcript_text_keeps_recording_links() {
+        let dir = make_temp_app_dir();
+        let history = HistoryStorage::new(dir.clone());
+
+        let req_id = "req-1".to_string();
+        history
+            .add_request_entry(req_id.clone(), RequestModelInfo::default(), None)
+            .expect("add_request_entry failed");
+        history
+            .complete_request_success(&req_id, "hello world".to_string())
+            .expect("complete_request_success failed");
+        history
+            .set_request_recording_id(&req_id, Some("rec-1".to_string()))
+            .expect("set_request_recording_id failed");
+
+        let updated = history
+            .clear_all_transcript_text_keep_recordings()
+            .expect("clear_all_transcript_text_keep_recordings failed");
+        assert_eq!(updated, 1);
+
+        // Reload to ensure persistence.
+        let history2 = HistoryStorage::new(dir);
+        let entry = history2
+            .get_by_id(&req_id)
+            .expect("get_by_id failed")
+            .expect("missing entry");
+        assert_eq!(entry.text, "");
+        assert_eq!(entry.recording_request_id.as_deref(), Some("rec-1"));
+        assert_eq!(entry.status, HistoryStatus::Success);
     }
 }

@@ -494,10 +494,16 @@ export function DataSettings({
 		title: string;
 		message: string;
 		confirmLabel: string;
+		typedConfirm?: {
+			requiredText: string;
+			label?: string;
+			placeholder?: string;
+		};
 		action: () => Promise<void>;
 	}>(null);
 
 	const [dangerRunning, setDangerRunning] = useState(false);
+	const [dangerTypedDraft, setDangerTypedDraft] = useState("");
 
 	const runDangerAction = async (action: () => Promise<void>) => {
 		await action();
@@ -516,8 +522,16 @@ export function DataSettings({
 		title: string;
 		message: string;
 		confirmLabel: string;
+		typedConfirm?: {
+			requiredText: string;
+			label?: string;
+			placeholder?: string;
+		};
 		action: () => Promise<void>;
-	}) => setDangerDialog(args);
+	}) => {
+		setDangerTypedDraft("");
+		setDangerDialog(args);
+	};
 
 	// ---------------------------------------------------------------------------
 	// Transcription retention (amount | time)
@@ -1429,6 +1443,26 @@ export function DataSettings({
 								leftSection={<FileText size={14} />}
 								onClick={() => {
 									openDangerDialog({
+										title: "Delete transcripts (keep recordings)",
+										message:
+											"This will delete all transcript text from history, but keep your saved .wav recordings.",
+										confirmLabel: "Delete transcripts",
+										action: async () => {
+											await dataAPI.deleteAllTranscriptsKeepRecordings();
+										},
+									});
+								}}
+							>
+								Delete transcripts
+							</Button>
+
+							<Button
+								color="red"
+								variant="outline"
+								size="xs"
+								leftSection={<FileText size={14} />}
+								onClick={() => {
+									openDangerDialog({
 										title: "Clear request logs",
 										message:
 											"This will clear in-memory request logs shown in the Logs tab.",
@@ -1517,6 +1551,11 @@ export function DataSettings({
 										title: "Delete all data",
 										message:
 											"This will delete ALL app data: history, recordings, request logs, persisted stats, and settings (including API keys).",
+										typedConfirm: {
+											requiredText: "DELETE",
+											label: "Type DELETE to confirm",
+											placeholder: "DELETE",
+										},
 										confirmLabel: "Delete everything",
 										action: async () => {
 											await dataAPI.deleteAllData();
@@ -1624,6 +1663,7 @@ export function DataSettings({
 				opened={dangerDialog !== null}
 				onClose={() => {
 					if (dangerRunning) return;
+					setDangerTypedDraft("");
 					setDangerDialog(null);
 				}}
 				title={dangerDialog?.title ?? ""}
@@ -1634,6 +1674,22 @@ export function DataSettings({
 					{dangerDialog?.message ?? ""}
 				</Text>
 
+				{dangerDialog?.typedConfirm ? (
+					<TextInput
+						label={
+							dangerDialog.typedConfirm.label ??
+							`Type ${dangerDialog.typedConfirm.requiredText} to confirm`
+						}
+						placeholder={
+							dangerDialog.typedConfirm.placeholder ??
+							dangerDialog.typedConfirm.requiredText
+						}
+						value={dangerTypedDraft}
+						onChange={(e) => setDangerTypedDraft(e.currentTarget.value)}
+						mb="md"
+					/>
+				) : null}
+
 				<Text size="xs" c="dimmed" mb="md">
 					Tip: if you only want to free up disk space, delete recordings — it's
 					the least destructive option.
@@ -1643,13 +1699,22 @@ export function DataSettings({
 					<Button
 						variant="default"
 						disabled={dangerRunning}
-						onClick={() => setDangerDialog(null)}
+						onClick={() => {
+							setDangerTypedDraft("");
+							setDangerDialog(null);
+						}}
 					>
 						Cancel
 					</Button>
 					<Button
 						color="red"
 						loading={dangerRunning}
+						disabled={(() => {
+							if (dangerRunning) return true;
+							const tc = dangerDialog?.typedConfirm;
+							if (!tc) return false;
+							return dangerTypedDraft.trim() !== tc.requiredText;
+						})()}
 						onClick={async () => {
 							const action = dangerDialog?.action;
 							if (!action) return;

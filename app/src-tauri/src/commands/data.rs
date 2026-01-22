@@ -20,6 +20,11 @@ use crate::settings::store::{get_settings_store_or_err, SettingsReadMode};
 #[cfg(desktop)]
 use crate::secrets::API_KEY_SETTING_KEYS;
 
+#[cfg(desktop)]
+fn emit_settings_changed(app: &AppHandle, payload: crate::SettingsChangedPayload) {
+    let _ = app.emit(events::EVENT_SETTINGS_CHANGED, payload);
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DataStorageSummary {
     pub recordings_count: u64,
@@ -177,6 +182,14 @@ pub fn delete_all_api_keys(app: AppHandle) -> CommandResult<()> {
         let _ = crate::secrets::clear_api_key(&app, key);
     }
 
+    // Notify other windows/UI to refresh derived provider availability.
+    let mut payload = crate::SettingsChangedPayload::new();
+    payload.insert(
+        "api_keys_changed".to_string(),
+        serde_json::Value::Bool(true),
+    );
+    emit_settings_changed(&app, payload);
+
     // Best-effort: sync pipeline so provider availability updates immediately.
     let _ = crate::commands::config::sync_pipeline_config(app);
 
@@ -195,6 +208,10 @@ pub fn delete_all_api_keys(_app: AppHandle) -> CommandResult<()> {
 #[cfg(desktop)]
 #[tauri::command]
 pub fn delete_all_settings(app: AppHandle) -> CommandResult<()> {
+    // Settings reset should also clear secrets so the UI message "including API keys"
+    // is actually true even when secure storage is enabled.
+    let _ = delete_all_api_keys(app.clone());
+
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -215,6 +232,11 @@ pub fn delete_all_settings(app: AppHandle) -> CommandResult<()> {
     crate::settings::defaults::ensure_default_settings(&app)
         .map_err(|e: Box<dyn std::error::Error>| e.to_string())?;
 
+    // Let UI/other windows know settings were reset (best-effort).
+    let mut payload = crate::SettingsChangedPayload::new();
+    payload.insert("settings_reset".to_string(), serde_json::Value::Bool(true));
+    emit_settings_changed(&app, payload);
+
     // Best-effort: sync pipeline so it uses the new defaults.
     let _ = crate::commands::config::sync_pipeline_config(app);
 
@@ -233,15 +255,44 @@ pub fn delete_all_settings(_app: AppHandle) -> CommandResult<()> {
 pub fn delete_all_stats(app: AppHandle) -> CommandResult<()> {
     if let Some(stats) = app.try_state::<StatsStore>() {
         let dir = stats.dir().to_path_buf();
+        let mut did_delete_any = false;
         if dir.exists() {
             fs::remove_dir_all(&dir)
                 .map_err(|e| format!("Failed to delete stats dir {}: {}", dir.display(), e))?;
+            did_delete_any = true;
         }
         fs::create_dir_all(&dir)
             .map_err(|e| format!("Failed to recreate stats dir {}: {}", dir.display(), e))?;
+
+        if did_delete_any {
+            let _ = app.emit(events::EVENT_STATS_CHANGED, ());
+        }
     }
 
     Ok(())
+}
+
+/// Delete all transcript text from history while keeping recording links.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn delete_all_transcripts_keep_recordings(app: AppHandle) -> CommandResult<u64> {
+    let mut updated: u64 = 0;
+    if let Some(history) = app.try_state::<HistoryStorage>() {
+        updated = history
+            .clear_all_transcript_text_keep_recordings()
+            .unwrap_or(0) as u64;
+        if updated > 0 {
+            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
+        }
+    }
+
+    Ok(updated)
+}
+
+#[cfg(not(desktop))]
+#[tauri::command]
+pub fn delete_all_transcripts_keep_recordings(_app: AppHandle) -> CommandResult<u64> {
+    Ok(0)
 }
 
 #[cfg(not(desktop))]
@@ -277,6 +328,7 @@ pub fn delete_all_data(app: AppHandle) -> CommandResult<()> {
             let _ = fs::remove_dir_all(&dir);
         }
         let _ = fs::create_dir_all(&dir);
+        let _ = app.emit(events::EVENT_STATS_CHANGED, ());
     }
 
     // 5) Settings (includes API keys)
