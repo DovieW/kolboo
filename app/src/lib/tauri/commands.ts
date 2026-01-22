@@ -508,10 +508,15 @@ export const dataAPI = {
 
 	deleteAllRecordings: () => invoke<number>("recordings_delete_all"),
 
+	// Deletes transcript text for all history entries but keeps any linked recordings.
+	// Returns the number of entries updated.
 	deleteAllTranscriptsKeepRecordings: () =>
 		invoke<number>("delete_all_transcripts_keep_recordings"),
 
-	deleteAllApiKeys: () => invoke<void>("delete_all_api_keys"),
+	deleteAllApiKeys: async () => {
+		await invoke<void>("delete_all_api_keys");
+		await emitTyped("settings-changed", { api_keys_changed: true });
+	},
 
 	deleteAllSettings: () => invoke<void>("delete_all_settings"),
 

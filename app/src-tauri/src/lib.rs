@@ -330,6 +330,30 @@ pub(crate) fn stop_recording(
         .ok()
         .and_then(|mut g| g.take());
 
+    // Apply per-program output overrides (if configured in settings UI).
+    // IMPORTANT: We only apply these when we have a real matched program profile id.
+    // The explicit "default" marker is for UI/log semantics and should not change runtime behavior.
+    let (output_mode, output_hit_enter) = {
+        let (mut profile_output_mode, mut profile_output_hit_enter) = (None, None);
+        if let Some(pid) = session_profile_id.as_deref() {
+            if pid != "default" {
+                let profiles: Vec<crate::settings::RewriteProgramPromptProfile> =
+                    get_setting_from_store(app, "rewrite_program_prompt_profiles", Vec::new());
+                if let Some(p) = profiles.iter().find(|p| p.id == pid) {
+                    profile_output_mode = p.output_mode.as_deref();
+                    profile_output_hit_enter = p.output_hit_enter;
+                }
+            }
+        }
+
+        crate::core::output_settings::resolve_effective_output_settings(
+            output_mode,
+            output_hit_enter,
+            profile_output_mode,
+            profile_output_hit_enter,
+        )
+    };
+
     // Stop pipeline and trigger transcription in background
     if let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() {
         let pipeline_clone = (*pipeline).clone();

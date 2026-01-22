@@ -75,10 +75,6 @@ Legend:
 
 ### Expand output-mode options
 
-- **Where:** `app/src-tauri/src/commands/text.rs`
-- **Todo:**
-  - Add per-program output-mode overrides (e.g., clipboard-only for terminals).
-
 ---
 
 ## P2 — Observability & debugging
