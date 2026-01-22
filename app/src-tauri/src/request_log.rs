@@ -93,6 +93,47 @@ fn redact_request_log_json_fields(mut log: RequestLog) -> RequestLog {
     log
 }
 
+/// Removes user-content text and provider payloads from a request log.
+///
+/// This is useful for exporting logs for debugging while reducing the chance of
+/// leaking transcript text, clipboard context, or prompt content.
+///
+/// Notes:
+/// - This does NOT change high-level metadata (durations, providers, status).
+/// - JSON payloads are dropped entirely because they commonly contain user text.
+pub fn strip_request_log_text_and_payloads(mut log: RequestLog) -> RequestLog {
+    // Transcript / rewrite text
+    log.raw_transcript = None;
+    log.formatted_transcript = None;
+    log.rewrite_clipboard_context = None;
+
+    // Quick Ask text
+    log.quick_ask_question = None;
+    log.quick_ask_context_text = None;
+    log.quick_ask_clipboard_context = None;
+    log.quick_ask_answer = None;
+
+    // Quick Replace text
+    log.quick_replace_instructions = None;
+    log.quick_replace_selected_text = None;
+    log.quick_replace_output_text = None;
+    log.quick_replace_clipboard_context = None;
+
+    // Provider payloads (often contain user text/prompt content)
+    log.stt_request_json = None;
+    log.stt_response_json = None;
+    log.llm_request_json = None;
+    log.llm_response_json = None;
+    log.router_request_json = None;
+    log.router_response_json = None;
+    log.quick_ask_request_json = None;
+    log.quick_ask_response_json = None;
+    log.quick_replace_request_json = None;
+    log.quick_replace_response_json = None;
+
+    log
+}
+
 /// Default number of request logs to keep (matches UI default)
 const DEFAULT_MAX_LOGS: usize = 50;
 
@@ -864,5 +905,47 @@ mod tests {
         let cfg = store.retention();
         assert_eq!(cfg.mode, RequestLogsRetentionMode::Amount);
         assert_eq!(cfg.amount, DEFAULT_MAX_LOGS);
+    }
+
+    #[test]
+    fn test_strip_request_log_text_and_payloads_removes_user_content() {
+        let mut log = RequestLog::new("groq".to_string(), Some("whisper".to_string()));
+        log.raw_transcript = Some("hello".to_string());
+        log.formatted_transcript = Some("hello!".to_string());
+        log.rewrite_clipboard_context = Some("secret".to_string());
+
+        log.quick_ask_question = Some("what time is it".to_string());
+        log.quick_ask_context_text = Some("context".to_string());
+        log.quick_ask_clipboard_context = Some("clip".to_string());
+        log.quick_ask_answer = Some("noon".to_string());
+
+        log.quick_replace_instructions = Some("fix".to_string());
+        log.quick_replace_selected_text = Some("selected".to_string());
+        log.quick_replace_output_text = Some("output".to_string());
+        log.quick_replace_clipboard_context = Some("clip2".to_string());
+
+        log.stt_request_json = Some(json!({ "text": "hi" }));
+        log.llm_response_json = Some(json!({ "choices": [{ "message": { "content": "yo" } }] }));
+        log.router_request_json = Some(json!(["a", "b"]));
+
+        let stripped = strip_request_log_text_and_payloads(log);
+
+        assert_eq!(stripped.raw_transcript, None);
+        assert_eq!(stripped.formatted_transcript, None);
+        assert_eq!(stripped.rewrite_clipboard_context, None);
+
+        assert_eq!(stripped.quick_ask_question, None);
+        assert_eq!(stripped.quick_ask_context_text, None);
+        assert_eq!(stripped.quick_ask_clipboard_context, None);
+        assert_eq!(stripped.quick_ask_answer, None);
+
+        assert_eq!(stripped.quick_replace_instructions, None);
+        assert_eq!(stripped.quick_replace_selected_text, None);
+        assert_eq!(stripped.quick_replace_output_text, None);
+        assert_eq!(stripped.quick_replace_clipboard_context, None);
+
+        assert_eq!(stripped.stt_request_json, None);
+        assert_eq!(stripped.llm_response_json, None);
+        assert_eq!(stripped.router_request_json, None);
     }
 }

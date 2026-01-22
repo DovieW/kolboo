@@ -2205,6 +2205,7 @@ pub fn run() {
             // Request logging commands
             commands::logs::get_request_logs,
             commands::logs::clear_request_logs,
+            commands::logs::export_request_logs_to_file,
             // Fireworks helpers
             commands::fireworks::fireworks_list_models,
             // Ollama helpers

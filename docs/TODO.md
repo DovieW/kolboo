@@ -121,13 +121,6 @@ Legend:
 
 ## P2 — Observability & debugging
 
-### Make request logs exportable (sanitized)
-
-- **Where:** request logs are in-memory (`app/src-tauri/src/request_log.rs`) and surfaced via commands.
-- **Todo:**
-  - Add “Export logs” to JSON file and “Copy sanitized log” buttons.
-  - Optional redaction mode: strip transcript text while keeping timings and error info.
-
 ---
 
 ## P2 — Tooling, CI/CD, and repo hygiene

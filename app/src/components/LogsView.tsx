@@ -24,6 +24,7 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
 	AlertCircle,
 	AlertTriangle,
@@ -36,6 +37,7 @@ import {
 	ChevronsRight,
 	Clock,
 	Copy,
+	Download,
 	Filter,
 	Info,
 	Loader,
@@ -61,7 +63,7 @@ import type {
 	RequestStatus,
 	SystemEvent,
 } from "../lib/tauri";
-import { tauriAPI } from "../lib/tauri";
+import { logsAPI, tauriAPI } from "../lib/tauri";
 import { diffTextInline } from "../lib/textDiff";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
 import { InlineTextDiff } from "./InlineTextDiff";
@@ -1061,6 +1063,7 @@ export function LogsView(
 	const { data: settings } = useSettings();
 	const updateHotkeyDebugEnabled = useUpdateHotkeyDebugEnabled();
 	const clearLogsMutation = useClearRequestLogs();
+	const [exportOpened, exportPopover] = useDisclosure(false);
 	const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([]);
 	const [systemEventsAccordionValue, setSystemEventsAccordionValue] = useState<
 		string | null
@@ -1282,6 +1285,106 @@ export function LogsView(
 				<Group justify="space-between" align="center">
 					<Title order={3}>Request Logs</Title>
 					<Group gap="xs">
+						<Popover
+							opened={exportOpened}
+							onChange={exportPopover.toggle}
+							position="bottom-end"
+							shadow="lg"
+							radius="md"
+						>
+							<Popover.Target>
+								<Button
+									variant="subtle"
+									color="gray"
+									size="xs"
+									leftSection={<Download size={14} />}
+									onClick={() => exportPopover.toggle()}
+									disabled={!logs || logs.length === 0}
+								>
+									Export…
+								</Button>
+							</Popover.Target>
+							<Popover.Dropdown>
+								<Stack gap="xs">
+									<Text size="xs" c="dimmed">
+										Export request logs to a JSON file. “Privacy-safe” removes
+										transcript/clipboard text and provider payloads.
+									</Text>
+									<Group gap="xs" justify="flex-end">
+										<Button
+											variant="light"
+											color="orange"
+											size="xs"
+											onClick={async () => {
+												try {
+													const path = await save({
+														defaultPath: "kolboo-request-logs.json",
+														filters: [
+															{ name: "JSON", extensions: ["json"] },
+														],
+												});
+													if (!path) return;
+
+													await logsAPI.exportRequestLogsToFile({
+														path,
+														stripTextAndPayloads: true,
+													});
+													exportPopover.close();
+													notifications.show({
+														title: "Export",
+														message: "Exported privacy-safe request logs.",
+														color: "teal",
+													});
+												} catch (error) {
+													notifications.show({
+														title: "Export failed",
+														message: String(error),
+														color: "red",
+													});
+												}
+											}}
+										>
+											Export (privacy-safe)
+										</Button>
+										<Button
+											variant="subtle"
+											color="gray"
+											size="xs"
+											onClick={async () => {
+												try {
+													const path = await save({
+														defaultPath: "kolboo-request-logs-full.json",
+														filters: [
+															{ name: "JSON", extensions: ["json"] },
+														],
+												});
+													if (!path) return;
+
+													await logsAPI.exportRequestLogsToFile({
+														path,
+														stripTextAndPayloads: false,
+													});
+													exportPopover.close();
+													notifications.show({
+														title: "Export",
+														message: "Exported full request logs.",
+														color: "teal",
+													});
+												} catch (error) {
+													notifications.show({
+														title: "Export failed",
+														message: String(error),
+														color: "red",
+													});
+												}
+											}}
+										>
+											Export (full)
+										</Button>
+									</Group>
+								</Stack>
+							</Popover.Dropdown>
+						</Popover>
 						<Button
 							variant="subtle"
 							color="red"

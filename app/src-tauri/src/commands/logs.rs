@@ -1,9 +1,11 @@
 //! Tauri commands for request logging.
 
 use crate::request_log::{
-    RequestLog, RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode,
+    strip_request_log_text_and_payloads, RequestLog, RequestLogStore, RequestLogsRetentionConfig,
+    RequestLogsRetentionMode,
 };
 use chrono::Duration as ChronoDuration;
+use std::path::Path;
 use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
@@ -67,4 +69,43 @@ pub fn clear_request_logs(app: AppHandle) {
     if let Some(store) = app.try_state::<RequestLogStore>() {
         store.clear();
     }
+}
+
+/// Export request logs to a JSON file.
+///
+/// The store is in-memory; this is intended for debugging and bug reports.
+#[tauri::command]
+pub fn export_request_logs_to_file(
+    app: AppHandle,
+    path: String,
+    limit: Option<usize>,
+    strip_text_and_payloads: bool,
+) -> Result<(), String> {
+    let Some(store) = app.try_state::<RequestLogStore>() else {
+        return Err("Request log store not available".to_string());
+    };
+
+    store.set_retention(read_request_logs_retention(&app));
+
+    let mut logs = store.get_logs(limit);
+    if strip_text_and_payloads {
+        logs = logs
+            .into_iter()
+            .map(strip_request_log_text_and_payloads)
+            .collect();
+    }
+
+    let json = serde_json::to_string_pretty(&logs)
+        .map_err(|e| format!("Failed to serialize logs: {e}"))?;
+
+    let p = Path::new(&path);
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create export directory: {e}"))?;
+        }
+    }
+
+    std::fs::write(p, json).map_err(|e| format!("Failed to write export file: {e}"))?;
+    Ok(())
 }

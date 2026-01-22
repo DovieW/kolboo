@@ -486,6 +486,17 @@ export const logsAPI = {
 		invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 50 }),
 
 	clearRequestLogs: () => invoke<void>("clear_request_logs"),
+
+	exportRequestLogsToFile: (params: {
+		path: string;
+		limit?: number;
+		stripTextAndPayloads?: boolean;
+	}) =>
+		invoke<void>("export_request_logs_to_file", {
+			path: params.path,
+			limit: params.limit,
+			stripTextAndPayloads: params.stripTextAndPayloads ?? true,
+		}),
 };
 
 export const dataAPI = {
