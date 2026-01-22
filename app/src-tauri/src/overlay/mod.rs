@@ -8,6 +8,54 @@ use crate::events;
 use crate::pipeline;
 use crate::{get_setting_from_store, OverlayAudioLevelPayload};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OverlayWindowPreset {
+    Overlay,
+    Hover,
+    QuickAsk,
+}
+
+impl OverlayWindowPreset {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Overlay => "overlay",
+            Self::Hover => "overlay_hover",
+            Self::QuickAsk => "quick_ask",
+        }
+    }
+
+    fn html_path(self) -> &'static str {
+        match self {
+            Self::Overlay => "overlay.html",
+            Self::Hover => "overlay-hover.html",
+            Self::QuickAsk => "quick-ask.html",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Overlay => "Kolboo Overlay",
+            Self::Hover => "Kolboo Presets",
+            Self::QuickAsk => "Kolboo Quick Ask",
+        }
+    }
+
+    fn size(self) -> (f64, f64) {
+        match self {
+            Self::Overlay => (48.0, 48.0),
+            Self::Hover => (320.0, 220.0),
+            Self::QuickAsk => (520.0, 340.0),
+        }
+    }
+
+    fn visible(self) -> bool {
+        match self {
+            Self::Overlay => true,
+            Self::Hover | Self::QuickAsk => false,
+        }
+    }
+}
+
 fn overlay_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     app: &'a M,
     label: &str,
@@ -31,6 +79,20 @@ fn overlay_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
         .visible(visible)
         .visible_on_all_workspaces(true)
         .background_throttling(BackgroundThrottlingPolicy::Disabled)
+}
+
+fn overlay_window_builder_preset<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    app: &'a M,
+    preset: OverlayWindowPreset,
+) -> tauri::webview::WebviewWindowBuilder<'a, R, M> {
+    overlay_window_builder(
+        app,
+        preset.label(),
+        preset.html_path(),
+        preset.title(),
+        preset.size(),
+        preset.visible(),
+    )
 }
 
 /// Backend-driven overlay waveform publisher.
@@ -137,40 +199,16 @@ pub(crate) fn spawn_overlay_waveform_publisher(app: &AppHandle) {
 /// Create overlay, hover, and quick-ask windows, and apply startup positioning/visibility.
 pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // Create overlay window
-    let overlay = overlay_window_builder(
-        app,
-        "overlay",
-        "overlay.html",
-        "Kolboo Overlay",
-        (48.0, 48.0),
-        true,
-    )
-    .build()?;
+    let overlay = overlay_window_builder_preset(app, OverlayWindowPreset::Overlay).build()?;
 
     // Create hover panel window (hidden by default).
     // This avoids resizing the main overlay window on hover, which can cause
     // cursor flicker and position drift on Windows.
-    let _overlay_hover = overlay_window_builder(
-        app,
-        "overlay_hover",
-        "overlay-hover.html",
-        "Kolboo Presets",
-        (320.0, 220.0),
-        false,
-    )
-    .build()?;
+    let _overlay_hover = overlay_window_builder_preset(app, OverlayWindowPreset::Hover).build()?;
 
     // Create Quick Ask answer window (hidden by default).
     // This is a separate transparent webview that renders an answer + copy button.
-    let _quick_ask = overlay_window_builder(
-        app,
-        "quick_ask",
-        "quick-ask.html",
-        "Kolboo Quick Ask",
-        (520.0, 340.0),
-        false,
-    )
-    .build()?;
+    let _quick_ask = overlay_window_builder_preset(app, OverlayWindowPreset::QuickAsk).build()?;
 
     // On macOS, convert to NSPanel for better fullscreen app behavior
     #[cfg(target_os = "macos")]
@@ -220,4 +258,33 @@ pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OverlayWindowPreset;
+
+    #[test]
+    fn overlay_window_presets_are_stable() {
+        let overlay = OverlayWindowPreset::Overlay;
+        assert_eq!(overlay.label(), "overlay");
+        assert_eq!(overlay.html_path(), "overlay.html");
+        assert_eq!(overlay.title(), "Kolboo Overlay");
+        assert_eq!(overlay.size(), (48.0, 48.0));
+        assert!(overlay.visible());
+
+        let hover = OverlayWindowPreset::Hover;
+        assert_eq!(hover.label(), "overlay_hover");
+        assert_eq!(hover.html_path(), "overlay-hover.html");
+        assert_eq!(hover.title(), "Kolboo Presets");
+        assert_eq!(hover.size(), (320.0, 220.0));
+        assert!(!hover.visible());
+
+        let quick_ask = OverlayWindowPreset::QuickAsk;
+        assert_eq!(quick_ask.label(), "quick_ask");
+        assert_eq!(quick_ask.html_path(), "quick-ask.html");
+        assert_eq!(quick_ask.title(), "Kolboo Quick Ask");
+        assert_eq!(quick_ask.size(), (520.0, 340.0));
+        assert!(!quick_ask.visible());
+    }
 }
