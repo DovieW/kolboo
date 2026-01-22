@@ -10,15 +10,8 @@
 //! - `model=nova-3` is described in the docs as a multilingual model option, so we
 //!   map it to the Nova-3 (Multilingual) pricing tier.
 
+use crate::cost::math::mul_div_round_u128;
 use crate::cost::openai::UsdMicros;
-
-fn mul_div_round(n: u128, mul: u128, div: u128) -> u128 {
-    if div == 0 {
-        return 0;
-    }
-    // Round half up.
-    (n.saturating_mul(mul).saturating_add(div / 2)) / div
-}
 
 /// Returns Deepgram STT pricing in USD micros per minute.
 ///
@@ -68,7 +61,7 @@ pub fn estimate_stt_cost_from_audio_secs(model: &str, audio_secs: f64) -> Option
     }
 
     let audio_millis = (audio_secs * 1000.0).round().max(0.0) as u128;
-    let micros = mul_div_round(rate_per_min, audio_millis, 60_000);
+    let micros = mul_div_round_u128(rate_per_min, audio_millis, 60_000);
     Some(micros.min(u128::from(u64::MAX)) as u64)
 }
 

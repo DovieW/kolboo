@@ -11,20 +11,8 @@
 //! - Groq responses use an OpenAI-compatible schema; for chat completions we typically get
 //!   `usage.prompt_tokens` and `usage.completion_tokens`.
 
+use crate::cost::math::{cost_from_tokens_micros, mul_div_round_u128};
 use crate::cost::openai::{OpenAiUsage, TokenRates, UsdMicros};
-
-fn mul_div_round(n: u128, mul: u128, div: u128) -> u128 {
-    if div == 0 {
-        return 0;
-    }
-    // Round half up.
-    (n.saturating_mul(mul).saturating_add(div / 2)) / div
-}
-
-fn cost_from_tokens_micros(rate_per_1m: UsdMicros, tokens: u64) -> UsdMicros {
-    let micros = mul_div_round(rate_per_1m as u128, tokens as u128, 1_000_000);
-    micros.min(u128::from(u64::MAX)) as u64
-}
 
 /// Returns Groq LLM token rates for the given model.
 ///
@@ -137,7 +125,7 @@ pub fn estimate_stt_cost_from_audio_secs(model: &str, audio_secs: f64) -> Option
     let audio_millis = (audio_secs * 1000.0).round().max(0.0) as u128;
     let billed_millis = audio_millis.max(10_000);
 
-    let micros = mul_div_round(rate_per_hour, billed_millis, 3_600_000);
+    let micros = mul_div_round_u128(rate_per_hour, billed_millis, 3_600_000);
     Some(micros.min(u128::from(u64::MAX)) as u64)
 }
 

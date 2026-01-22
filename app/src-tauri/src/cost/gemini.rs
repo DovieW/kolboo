@@ -9,20 +9,8 @@
 //!   We approximate this by checking `usage.input_tokens`.
 //! - The app currently uses Gemini primarily for text rewrite, so we only model text token pricing.
 
+use crate::cost::math::cost_from_tokens_micros;
 use crate::cost::openai::{OpenAiUsage, TokenRates, UsdMicros};
-
-fn mul_div_round(n: u128, mul: u128, div: u128) -> u128 {
-    if div == 0 {
-        return 0;
-    }
-    // Round half up.
-    (n.saturating_mul(mul).saturating_add(div / 2)) / div
-}
-
-fn cost_from_tokens_micros(rate_per_1m: UsdMicros, tokens: u64) -> UsdMicros {
-    let micros = mul_div_round(rate_per_1m as u128, tokens as u128, 1_000_000);
-    micros.min(u128::from(u64::MAX)) as u64
-}
 
 fn normalize_model(model: &str) -> &str {
     let m = model.trim();

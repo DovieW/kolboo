@@ -5,5 +5,6 @@ pub mod deepgram;
 pub mod fireworks;
 pub mod gemini;
 pub mod groq;
+pub mod math;
 pub mod openai;
 pub mod speechmatics;

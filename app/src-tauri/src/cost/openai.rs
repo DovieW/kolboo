@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::cost::math::{cost_from_tokens_micros, mul_div_round_u128};
+
 /// USD microdollars (1 USD = 1_000_000 micros).
 pub type UsdMicros = u64;
 
@@ -318,19 +320,6 @@ pub struct OpenAiCostBreakdown {
     pub audio_output_usd_micros: UsdMicros,
 }
 
-fn mul_div_round(n: u128, mul: u128, div: u128) -> u128 {
-    if div == 0 {
-        return 0;
-    }
-    // Round half up.
-    (n.saturating_mul(mul).saturating_add(div / 2)) / div
-}
-
-fn cost_from_tokens_micros(rate_per_1m: UsdMicros, tokens: u64) -> UsdMicros {
-    let micros = mul_div_round(rate_per_1m as u128, tokens as u128, 1_000_000);
-    micros.min(u128::from(u64::MAX)) as u64
-}
-
 pub fn estimate_cost_from_usage(model: &str, usage: OpenAiUsage) -> Option<OpenAiCostBreakdown> {
     let text_rates = text_token_rates(model)?;
 
@@ -389,6 +378,6 @@ pub fn estimate_transcription_cost_from_audio_secs(
     }
 
     let audio_millis = (audio_secs * 1000.0).round().max(0.0) as u128;
-    let micros = mul_div_round(rate_per_min, audio_millis, 60_000);
+    let micros = mul_div_round_u128(rate_per_min, audio_millis, 60_000);
     Some(micros.min(u128::from(u64::MAX)) as u64)
 }

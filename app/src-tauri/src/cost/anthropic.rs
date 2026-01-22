@@ -17,6 +17,7 @@
 //!     rule is deterministic from the returned `usage` object, so we apply it when we
 //!     see `total_input_tokens > 200_000`.
 
+use crate::cost::math::{cost_from_tokens_micros, mul_div_round_u128};
 use crate::cost::openai::{TokenRates, UsdMicros};
 
 #[derive(Debug, Clone, Copy)]
@@ -43,19 +44,6 @@ impl AnthropicUsage {
             .saturating_add(self.cache_creation_input_tokens())
             .saturating_add(self.cache_read_input_tokens)
     }
-}
-
-fn mul_div_round(n: u128, mul: u128, div: u128) -> u128 {
-    if div == 0 {
-        return 0;
-    }
-    // Round half up.
-    (n.saturating_mul(mul).saturating_add(div / 2)) / div
-}
-
-fn cost_from_tokens_micros(rate_per_1m: UsdMicros, tokens: u64) -> UsdMicros {
-    let micros = mul_div_round(rate_per_1m as u128, tokens as u128, 1_000_000);
-    micros.min(u128::from(u64::MAX)) as u64
 }
 
 fn normalize_model(model: &str) -> String {
@@ -101,7 +89,7 @@ pub fn text_token_rates_for_total_input_tokens(
     // Cache read tokens are always 0.1x base input rate per docs.
     fn cache_hit_rate(base_input_rate: UsdMicros) -> UsdMicros {
         // 0.1x
-        mul_div_round(base_input_rate as u128, 1, 10) as u64
+        mul_div_round_u128(base_input_rate as u128, 1, 10) as u64
     }
 
     Some(match m.as_str() {
@@ -201,8 +189,10 @@ pub fn estimate_llm_cost_from_usage(model: &str, usage: AnthropicUsage) -> Optio
     let cache_read_micros = cost_from_tokens_micros(cache_read_rate, usage.cache_read_input_tokens);
 
     // Cache writes use multipliers on the base input rate.
-    let cache_write_5m_rate = mul_div_round(rates.input_usd_micros_per_1m as u128, 125, 100) as u64;
-    let cache_write_1h_rate = mul_div_round(rates.input_usd_micros_per_1m as u128, 2, 1) as u64;
+    let cache_write_5m_rate =
+        mul_div_round_u128(rates.input_usd_micros_per_1m as u128, 125, 100) as u64;
+    let cache_write_1h_rate =
+        mul_div_round_u128(rates.input_usd_micros_per_1m as u128, 2, 1) as u64;
 
     let cache_write_5m_micros =
         cost_from_tokens_micros(cache_write_5m_rate, usage.cache_creation_5m_input_tokens);

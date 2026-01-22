@@ -9,20 +9,8 @@
 //!   - cached input tokens are billed at 50% of the input token rate
 //! - Speech-to-text is priced per second of audio input.
 
+use crate::cost::math::{cost_from_tokens_micros, mul_div_round_u128};
 use crate::cost::openai::{OpenAiUsage, TokenRates, UsdMicros};
-
-fn mul_div_round(n: u128, mul: u128, div: u128) -> u128 {
-    if div == 0 {
-        return 0;
-    }
-    // Round half up.
-    (n.saturating_mul(mul).saturating_add(div / 2)) / div
-}
-
-fn cost_from_tokens_micros(rate_per_1m: UsdMicros, tokens: u64) -> UsdMicros {
-    let micros = mul_div_round(rate_per_1m as u128, tokens as u128, 1_000_000);
-    micros.min(u128::from(u64::MAX)) as u64
-}
 
 fn normalize_model_id(model: &str) -> String {
     let m = model.trim();
@@ -187,7 +175,7 @@ pub fn estimate_stt_cost_from_audio_secs(model: &str, audio_secs: f64) -> Option
 
     // Bill by milliseconds (best-effort). Pricing is per second.
     let audio_millis = (audio_secs * 1000.0).round().max(0.0) as u128;
-    let micros = mul_div_round(rate_per_sec, audio_millis, 1000);
+    let micros = mul_div_round_u128(rate_per_sec, audio_millis, 1000);
     Some(micros.min(u128::from(u64::MAX)) as u64)
 }
 
