@@ -26,6 +26,7 @@ mod embeddings;
 pub mod events;
 mod fs;
 mod history;
+mod http;
 mod llm;
 mod network;
 mod overlay;

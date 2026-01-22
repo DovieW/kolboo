@@ -1,0 +1,49 @@
+/// Small helpers for building HTTP endpoint URLs consistently across providers.
+///
+/// We intentionally keep this string-based (instead of `url::Url`) because:
+/// - many provider base URLs include their own path segments (e.g. `/v1beta`)
+/// - most provider code already stores endpoint URLs as strings
+/// - we only need predictable joining/normalization for simple path appends
+
+/// Trim trailing slashes from a base URL.
+pub fn trim_base_url(base_url: &str) -> &str {
+    // rustfmt will normalize indentation; keep logic tiny and predictable.
+    base_url.trim_end_matches('/')
+}
+
+/// Build a URL by joining a base URL with a path.
+///
+/// - `base_url` may have trailing slashes.
+/// - `path` may be prefixed with `/`.
+pub fn join_base_url(base_url: &str, path: &str) -> String {
+    let base = trim_base_url(base_url);
+    let path = path.trim_start_matches('/');
+    format!("{}/{}", base, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trims_trailing_slashes() {
+        assert_eq!(trim_base_url("https://example.com"), "https://example.com");
+        assert_eq!(trim_base_url("https://example.com/"), "https://example.com");
+        assert_eq!(
+            trim_base_url("https://example.com///"),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn joins_base_url_and_path() {
+        assert_eq!(
+            join_base_url("https://example.com", "v1/audio/transcriptions"),
+            "https://example.com/v1/audio/transcriptions"
+        );
+        assert_eq!(
+            join_base_url("https://example.com/", "/v1/audio/transcriptions"),
+            "https://example.com/v1/audio/transcriptions"
+        );
+    }
+}

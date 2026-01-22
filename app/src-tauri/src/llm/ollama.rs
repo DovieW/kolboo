@@ -91,7 +91,7 @@ impl OllamaLlmProvider {
     /// Check if Ollama is available at the configured URL
     #[allow(dead_code)]
     pub async fn is_available(&self) -> bool {
-        let url = format!("{}/api/tags", self.base_url);
+        let url = crate::http::join_base_url(&self.base_url, "/api/tags");
         self.client
             .get(&url)
             .timeout(Duration::from_secs(5))
@@ -103,7 +103,7 @@ impl OllamaLlmProvider {
     /// List available models
     #[allow(dead_code)]
     pub async fn list_models(&self) -> Result<Vec<String>, LlmError> {
-        let url = format!("{}/api/tags", self.base_url);
+        let url = crate::http::join_base_url(&self.base_url, "/api/tags");
         let response = self
             .client
             .get(&url)
@@ -172,7 +172,7 @@ struct ErrorResponse {
 #[async_trait]
 impl LlmProvider for OllamaLlmProvider {
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
-        let url = format!("{}/api/chat", self.base_url);
+        let url = crate::http::join_base_url(&self.base_url, "/api/chat");
 
         let request = ChatRequest {
             model: self.model.clone(),

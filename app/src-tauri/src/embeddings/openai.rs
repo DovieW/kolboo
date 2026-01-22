@@ -5,7 +5,7 @@ use serde_json::Value as JsonValue;
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
 
 fn embeddings_url_for_base_url(base_url: &str) -> String {
-    format!("{}/v1/embeddings", base_url.trim_end_matches('/'))
+    crate::http::join_base_url(base_url, "/v1/embeddings")
 }
 
 #[derive(Debug, thiserror::Error)]

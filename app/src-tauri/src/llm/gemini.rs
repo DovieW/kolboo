@@ -353,7 +353,8 @@ impl LlmProvider for GeminiLlmProvider {
         }
 
         let model = Self::normalize_model_name(&self.model);
-        let url = format!("{}/{model}:generateContent", self.api_base_url);
+        let url =
+            crate::http::join_base_url(&self.api_base_url, &format!("{model}:generateContent"));
 
         // For deterministic formatting/rewrite.
         // Gemini docs note that for Gemini 3 models it's recommended to keep temperature at the
@@ -503,7 +504,8 @@ impl LlmProvider for GeminiLlmProvider {
         }
 
         let model = Self::normalize_model_name(&self.model);
-        let url = format!("{}/{model}:generateContent", self.api_base_url);
+        let url =
+            crate::http::join_base_url(&self.api_base_url, &format!("{model}:generateContent"));
 
         let temperature = if self.model.contains("gemini-3") {
             None

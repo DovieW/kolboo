@@ -7,7 +7,7 @@ use serde_json::Value as JsonValue;
 const DEFAULT_FIREWORKS_BASE_URL: &str = "https://api.fireworks.ai/inference/v1";
 
 fn embeddings_url_for_base_url(base_url: &str) -> String {
-    format!("{}/embeddings", base_url.trim_end_matches('/'))
+    crate::http::join_base_url(base_url, "/embeddings")
 }
 
 #[derive(Debug, thiserror::Error)]

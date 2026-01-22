@@ -76,12 +76,8 @@ impl OpenAiLlmProvider {
         self
     }
 
-    fn api_base_url_trimmed(&self) -> &str {
-        self.api_base_url.trim_end_matches('/')
-    }
-
     fn responses_url(&self) -> String {
-        format!("{}/v1/responses", self.api_base_url_trimmed())
+        crate::http::join_base_url(&self.api_base_url, "/v1/responses")
     }
 
     /// Enable/disable Structured Outputs (JSON schema mode).
