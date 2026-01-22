@@ -78,8 +78,7 @@ fn resolve_profile_by_id(
 }
 
 fn program_basename_for_log(path: &str) -> String {
-    let trimmed = path.trim().trim_matches('"');
-    let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed).trim();
+    let base = crate::app_shared::basename_for_log(path).trim();
     if base.is_empty() {
         "<unknown>".to_string()
     } else {

@@ -20,11 +20,6 @@ use crate::settings::store::{get_settings_store_or_err, SettingsReadMode};
 #[cfg(desktop)]
 use crate::secrets::API_KEY_SETTING_KEYS;
 
-#[cfg(desktop)]
-fn emit_settings_changed(app: &AppHandle, payload: crate::SettingsChangedPayload) {
-    let _ = app.emit(events::EVENT_SETTINGS_CHANGED, payload);
-}
-
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DataStorageSummary {
     pub recordings_count: u64,
@@ -188,7 +183,7 @@ pub fn delete_all_api_keys(app: AppHandle) -> CommandResult<()> {
         "api_keys_changed".to_string(),
         serde_json::Value::Bool(true),
     );
-    emit_settings_changed(&app, payload);
+    crate::app_shared::emit_settings_changed(&app, payload);
 
     // Best-effort: sync pipeline so provider availability updates immediately.
     let _ = crate::commands::config::sync_pipeline_config(app);
@@ -235,7 +230,7 @@ pub fn delete_all_settings(app: AppHandle) -> CommandResult<()> {
     // Let UI/other windows know settings were reset (best-effort).
     let mut payload = crate::SettingsChangedPayload::new();
     payload.insert("settings_reset".to_string(), serde_json::Value::Bool(true));
-    emit_settings_changed(&app, payload);
+    crate::app_shared::emit_settings_changed(&app, payload);
 
     // Best-effort: sync pipeline so it uses the new defaults.
     let _ = crate::commands::config::sync_pipeline_config(app);

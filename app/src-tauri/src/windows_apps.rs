@@ -19,11 +19,6 @@ mod imp {
         GetWindowThreadProcessId, IsWindowVisible,
     };
 
-    fn basename_for_log(path: &str) -> &str {
-        let trimmed = path.trim().trim_matches('"');
-        trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
-    }
-
     #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
     pub struct OpenWindowInfo {
         pub title: String,
@@ -158,7 +153,7 @@ mod imp {
                     log::debug!(
                         "[windows_apps] Foreground is Kolboo pid {}; using recent external foreground: {}",
                         current_pid,
-                        basename_for_log(&path)
+                        crate::app_shared::basename_for_log(&path)
                     );
                     return Some(path);
                 }
@@ -169,7 +164,7 @@ mod imp {
                 log::debug!(
                     "[windows_apps] Foreground is Kolboo pid {}; recovered external foreground from z-order: {}",
                     current_pid,
-                    basename_for_log(&path)
+                    crate::app_shared::basename_for_log(&path)
                 );
                 record_external_foreground(&path);
                 return Some(path);

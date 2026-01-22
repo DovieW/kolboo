@@ -7,6 +7,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use uuid::Uuid;
 
+use crate::app_shared::basename_for_log;
 use crate::text::clipboard::{clipboard_only_last_text_lock, set_clipboard_text_platform};
 use crate::text::inject::run_with_output_injection_lock;
 
@@ -50,11 +51,6 @@ pub enum ContextGrabMethod {
     ///
     /// Intended for apps/terminals that support "copy on select".
     ClipboardOnly,
-}
-
-fn basename_for_log(path: &str) -> &str {
-    let trimmed = path.trim().trim_matches('"');
-    trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
 }
 
 fn with_pressed_key<T>(

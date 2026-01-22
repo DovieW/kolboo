@@ -37,6 +37,23 @@ pub(crate) fn emit_system_event(
     let _ = app.emit(events::EVENT_SYSTEM_EVENT, event);
 }
 
+/// Emit `settings-changed` so other windows (and the UI) can refresh cached settings.
+#[cfg(desktop)]
+pub(crate) fn emit_settings_changed<T>(app: &AppHandle, payload: T)
+where
+    T: serde::Serialize + Clone,
+{
+    let _ = app.emit(events::EVENT_SETTINGS_CHANGED, payload);
+}
+
+/// Extract a filesystem-path basename for logs.
+///
+/// This avoids logging full paths (usernames, install locations) while keeping logs useful.
+pub(crate) fn basename_for_log(path: &str) -> &str {
+    let trimmed = path.trim().trim_matches('"');
+    trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
+}
+
 /// Normalize transcript text for output.
 ///
 /// We intentionally keep this conservative: the pipeline now performs a

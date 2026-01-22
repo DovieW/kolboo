@@ -12,7 +12,7 @@ Top duplication hotspots:
 2. **Rust settings parsing**: repeated “read JSON from store → coerce type → clamp → default” patterns.
 3. **A few TS helper functions that are almost identical** (cost query wrappers).
 
-## Ranked duplicate groups (top 8)
+## Ranked duplicate groups (top 6)
 
 Ranking criteria: (a) repeats, then (b) block size, then (c) proximity to core logic.
 
@@ -137,30 +137,7 @@ let raw = get_settings_store(app, SettingsReadMode::Fresh)
 
 ---
 
-### 5) Path “basename for log” helper duplicated (Rust)
-
-**What it does:** trims quotes/whitespace and extracts the last path segment.
-
-**Evidence:**
-
-- `app/src-tauri/src/windows_apps.rs` [20:–24:] (`basename_for_log`)
-- `app/src-tauri/src/text/selection_probe.rs` [55:–59:] (`basename_for_log`)
-- `app/src-tauri/src/commands/recording.rs` [77:–90:] (`program_basename_for_log`)
-
-Representative snippet:
-
-```rust
-let trimmed = path.trim().trim_matches('"');
-trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
-```
-
-**Recommendation:** move to a shared utility module (e.g. `app_shared.rs` or `text/path_utils.rs`) and reuse.
-
-**Risks:** low.
-
----
-
-### 6) Backend “system event” construction duplicated (Rust)
+### 5) Backend “system event” construction duplicated (Rust)
 
 **What it does:** constructs a `SystemEvent` with timestamp/type/message/details and emits it.
 
@@ -173,29 +150,10 @@ trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
 
 **Risks:** low.
 
----
-
-### 7) `settings-changed` event emission helper is inconsistent (Rust)
-
-**What it does:** some modules use a local helper, others emit directly.
-
-**Evidence:**
-
-- `app/src-tauri/src/commands/data.rs` [24:–27:] defines `emit_settings_changed(...)`
-- `app/src-tauri/src/commands/settings.rs` [447:–472:] emits directly in patch logic
-- `app/src-tauri/src/commands/backup.rs` [162:–163:] references `EVENT_SETTINGS_CHANGED`
-
-**Recommendation:** create one shared helper:
-
-- `fn emit_settings_changed(app: &AppHandle, payload: SettingsChangedPayload)`
-
-…and reuse it everywhere.
-
-**Risks:** low.
 
 ---
 
-### 8) Cost query wrappers repeated (TS)
+### 6) Cost query wrappers repeated (TS)
 
 There are two layers that repeat the same cost-filter normalization pattern:
 
@@ -225,12 +183,6 @@ return {
 
 **Risks:** low.
 
----
-
-## Quick-win refactor checklist (small, safe first)
-
-1. Extract a shared Rust `basename_for_log(path: &str) -> &str` helper and reuse it.
-2. Add a Rust helper for `emit_settings_changed(...)` and use it consistently.
 
 ## “Do not refactor” list (duplication that’s OK)
 

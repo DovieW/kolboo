@@ -466,7 +466,7 @@ pub async fn settings_apply_patch(
         .save()
         .map_err(|e| CommandError::unknown(format!("Failed to save settings store: {}", e)))?;
 
-    let _ = app.emit(events::EVENT_SETTINGS_CHANGED, payload);
+    crate::app_shared::emit_settings_changed(&app, payload);
     Ok(())
 }
 
