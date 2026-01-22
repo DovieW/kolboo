@@ -10,6 +10,12 @@ There are currently **no high-impact DRY hotspots** worth tackling without chang
 
 Recent refactors extracted the common “safe” pieces (HTTP client builders, base URL trimming/joining, and tolerant numeric settings reads) into shared helpers, so new duplication should be rare.
 
+## Low-risk DRY TODOs (small, safe extractions)
+
+- Standardize STT provider endpoint builders to use a single join helper (avoid ad-hoc `format!("{}/...", base)` URL building).
+- Centralize “optional base URL” normalization used for settings-derived URLs (trim whitespace, trim trailing slashes, treat empty as `None`).
+- (Later) Consider a tiny crate-level URL join helper for non-STT providers too (LLM/embeddings), if we see more repeats.
+
 ## “Do not refactor” list (duplication that’s OK)
 
 - The long list of explicit Tauri `invoke(...)` wrappers in `app/src/lib/tauri/commands.ts` is repetitive, but it also serves as a clear UI↔backend contract. DRY-ing it too much can hide argument shapes and make refactors harder.

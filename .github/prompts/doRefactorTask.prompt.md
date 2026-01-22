@@ -13,3 +13,5 @@
 6. Commit (don't run tests, just rely on pre-commit hook runs) and push.
 
 7. After you're done, as part of the summary, explain why this is a good change (if it even is).
+
+8. And also give a examples of where this code is used (either programatically or by a user) and a scenario of what this change prevents.
