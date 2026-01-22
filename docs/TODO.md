@@ -37,7 +37,9 @@ Legend:
 - **Where:** `app/src-tauri/src/lib.rs`
 - **Current state:** event payload types + a couple of shared helpers are now in dedicated modules.
 - **Todo:**
-  - Move the giant `stop_recording` flow into its own module (keep a small wrapper/re-export in `lib.rs`).
+  - Optional: if/when we need to touch the recording-stop flow again, consider moving `stop_recording` into its own module (keep a small wrapper/re-export in `lib.rs`).
+    - This is purely for maintainability (not required for correctness).
+    - See `docs/Refactors/2_MEDIUM.md` for notes on a low-risk way to do it.
   - Split remaining responsibilities into focused modules (tray, shortcuts lifecycle, window mgmt, pipeline session, retention, etc.).
 
 ### Overlay maintainability follow-ups
