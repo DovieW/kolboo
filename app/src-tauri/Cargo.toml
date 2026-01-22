@@ -46,6 +46,12 @@ serde_json = "1.0.145"
 log = "0.4.29"
 schemars = { version = "0.8.22", features = ["derive", "chrono"] }
 
+# Structured tracing (spans + JSON logs). We keep `log` for third-party crates,
+# but route it into `tracing` so spans/fields can correlate everything.
+tracing = "0.1"
+tracing-log = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
 # Keyboard automation
 enigo = "0.6.1"
 arboard = "3.6.1"
@@ -63,7 +69,6 @@ rodio = { version = "0.21.1", default-features = false, features = [
     "mp3",
     "playback",
 ] }
-env_logger = "0.11.8"
 
 # Audio capture
 cpal = "0.17"

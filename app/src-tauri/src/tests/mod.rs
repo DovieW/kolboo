@@ -21,3 +21,4 @@ mod rewrite_program_profile_schema_tests;
 mod settings_commands_tests;
 mod shortcut_tests;
 mod stt_integration_tests;
+mod tracing_tests;

@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tracing::Instrument;
 
 // Extraction buckets: settings defaults, overlay wiring, shortcuts lifecycle, bootstrap wiring.
 
@@ -44,6 +45,7 @@ mod state;
 mod stats;
 mod stt;
 mod text;
+mod tracing_init;
 mod vad;
 mod windows_apps;
 
@@ -555,76 +557,82 @@ pub(crate) fn stop_recording(
                 let pipeline_for_evt = pipeline_clone.clone();
                 let audio_cue_for_stop = audio_cue;
                 let should_play_stop_sound = play_stop_sound_when_transcribing;
-                tauri::async_runtime::spawn(async move {
-                    let start = std::time::Instant::now();
-                    loop {
-                        match pipeline_for_evt.state() {
-                            pipeline::PipelineState::Transcribing
-                            | pipeline::PipelineState::Rewriting => {
-                                let _ = app_for_evt
-                                    .emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
-                                let _ = app_for_evt.emit(
-                                    events::EVENT_PIPELINE_STATE_CHANGED,
-                                    PipelineStateEvent::Transcribing,
-                                );
-
-                                if should_play_stop_sound {
-                                    crate::audio::play_sound(
-                                        crate::audio::SoundType::RecordingStop,
-                                        audio_cue_for_stop,
+                tauri::async_runtime::spawn(
+                    async move {
+                        let start = std::time::Instant::now();
+                        loop {
+                            match pipeline_for_evt.state() {
+                                pipeline::PipelineState::Transcribing
+                                | pipeline::PipelineState::Rewriting => {
+                                    let _ = app_for_evt
+                                        .emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
+                                    let _ = app_for_evt.emit(
+                                        events::EVENT_PIPELINE_STATE_CHANGED,
+                                        PipelineStateEvent::Transcribing,
                                     );
+
+                                    if should_play_stop_sound {
+                                        crate::audio::play_sound(
+                                            crate::audio::SoundType::RecordingStop,
+                                            audio_cue_for_stop,
+                                        );
+                                    }
+                                    break;
                                 }
+                                pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
+                                    // Idle can happen immediately due to quiet-audio skip.
+                                    break;
+                                }
+                                pipeline::PipelineState::Recording
+                                | pipeline::PipelineState::Routing => {}
+                            }
+
+                            if start.elapsed() > std::time::Duration::from_secs(2) {
                                 break;
                             }
-                            pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
-                                // Idle can happen immediately due to quiet-audio skip.
-                                break;
-                            }
-                            pipeline::PipelineState::Recording
-                            | pipeline::PipelineState::Routing => {}
-                        }
 
-                        if start.elapsed() > std::time::Duration::from_secs(2) {
-                            break;
+                            tokio::time::sleep(std::time::Duration::from_millis(15)).await;
                         }
-
-                        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
                     }
-                });
+                    .in_current_span(),
+                );
             }
 
             // Emit routing started once the pipeline transitions into the Routing phase.
             {
                 let app_for_evt = app_clone.clone();
                 let pipeline_for_evt = pipeline_clone.clone();
-                tauri::async_runtime::spawn(async move {
-                    let start = std::time::Instant::now();
-                    loop {
-                        match pipeline_for_evt.state() {
-                            pipeline::PipelineState::Routing => {
-                                let _ =
-                                    app_for_evt.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
-                                let _ = app_for_evt.emit(
-                                    events::EVENT_PIPELINE_STATE_CHANGED,
-                                    PipelineStateEvent::Routing,
-                                );
+                tauri::async_runtime::spawn(
+                    async move {
+                        let start = std::time::Instant::now();
+                        loop {
+                            match pipeline_for_evt.state() {
+                                pipeline::PipelineState::Routing => {
+                                    let _ = app_for_evt
+                                        .emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
+                                    let _ = app_for_evt.emit(
+                                        events::EVENT_PIPELINE_STATE_CHANGED,
+                                        PipelineStateEvent::Routing,
+                                    );
+                                    break;
+                                }
+                                pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
+                                    break;
+                                }
+                                pipeline::PipelineState::Recording
+                                | pipeline::PipelineState::Transcribing
+                                | pipeline::PipelineState::Rewriting => {}
+                            }
+
+                            if start.elapsed() > std::time::Duration::from_secs(15 * 60) {
                                 break;
                             }
-                            pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
-                                break;
-                            }
-                            pipeline::PipelineState::Recording
-                            | pipeline::PipelineState::Transcribing
-                            | pipeline::PipelineState::Rewriting => {}
-                        }
 
-                        if start.elapsed() > std::time::Duration::from_secs(15 * 60) {
-                            break;
+                            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                         }
-
-                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     }
-                });
+                    .in_current_span(),
+                );
             }
 
             // Emit rewriting started once the pipeline actually enters the optional LLM phase.
@@ -633,35 +641,38 @@ pub(crate) fn stop_recording(
             {
                 let app_for_evt = app_clone.clone();
                 let pipeline_for_evt = pipeline_clone.clone();
-                tauri::async_runtime::spawn(async move {
-                    let start = std::time::Instant::now();
-                    loop {
-                        match pipeline_for_evt.state() {
-                            pipeline::PipelineState::Rewriting => {
-                                let _ =
-                                    app_for_evt.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
-                                let _ = app_for_evt.emit(
-                                    events::EVENT_PIPELINE_STATE_CHANGED,
-                                    PipelineStateEvent::Rewriting,
-                                );
+                tauri::async_runtime::spawn(
+                    async move {
+                        let start = std::time::Instant::now();
+                        loop {
+                            match pipeline_for_evt.state() {
+                                pipeline::PipelineState::Rewriting => {
+                                    let _ = app_for_evt
+                                        .emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
+                                    let _ = app_for_evt.emit(
+                                        events::EVENT_PIPELINE_STATE_CHANGED,
+                                        PipelineStateEvent::Rewriting,
+                                    );
+                                    break;
+                                }
+                                pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
+                                    // No rewrite (disabled/failed early) or pipeline exited.
+                                    break;
+                                }
+                                pipeline::PipelineState::Recording
+                                | pipeline::PipelineState::Transcribing
+                                | pipeline::PipelineState::Routing => {}
+                            }
+
+                            if start.elapsed() > std::time::Duration::from_secs(15 * 60) {
                                 break;
                             }
-                            pipeline::PipelineState::Idle | pipeline::PipelineState::Error => {
-                                // No rewrite (disabled/failed early) or pipeline exited.
-                                break;
-                            }
-                            pipeline::PipelineState::Recording
-                            | pipeline::PipelineState::Transcribing
-                            | pipeline::PipelineState::Routing => {}
-                        }
 
-                        if start.elapsed() > std::time::Duration::from_secs(15 * 60) {
-                            break;
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         }
-
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     }
-                });
+                    .in_current_span(),
+                );
             }
 
             // Create an in-progress history entry while we transcribe.
@@ -2051,8 +2062,8 @@ fn is_audio_mute_supported() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize logger
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Initialize structured tracing (JSON logs + request spans).
+    tracing_init::init();
 
     let mut builder = tauri::Builder::default();
 

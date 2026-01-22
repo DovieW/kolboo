@@ -18,6 +18,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use schemars::JsonSchema;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tracing::Instrument;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -412,6 +413,12 @@ pub fn pipeline_start_recording(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<(), CommandError> {
+    let span = tracing::info_span!(
+        "pipeline_start_recording",
+        request_id = tracing::field::Empty
+    );
+    let _span_guard = span.enter();
+
     // Resolve the profile immediately (best-effort) while the user is likely still
     // in the target app, then pin it for this recording session so stop/transcribe
     // isn't impacted by focus stealing from our always-on-top windows.
@@ -459,7 +466,10 @@ pub fn pipeline_start_recording(
 
     // Start request logging
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+        let request_id =
+            log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+        tracing::Span::current().record("request_id", tracing::field::display(&request_id));
+
         log_store.with_current(|log| {
             log.profile_id = profile_id;
             log.profile_name = profile_name;
@@ -499,6 +509,19 @@ pub fn pipeline_start_recording(
 /// Stop recording and transcribe the audio
 #[tauri::command]
 pub async fn pipeline_stop_and_transcribe(
+    app: AppHandle,
+    pipeline: State<'_, SharedPipeline>,
+) -> Result<String, CommandError> {
+    let span = tracing::info_span!(
+        "pipeline_stop_and_transcribe",
+        request_id = tracing::field::Empty
+    );
+    pipeline_stop_and_transcribe_inner(app, pipeline)
+        .instrument(span)
+        .await
+}
+
+async fn pipeline_stop_and_transcribe_inner(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<String, CommandError> {
@@ -543,6 +566,10 @@ pub async fn pipeline_stop_and_transcribe(
         }
     }
 
+    if let Some(req_id) = active_request_id.as_deref() {
+        tracing::Span::current().record("request_id", tracing::field::display(req_id));
+    }
+
     // Capture model info for persistence in history.
     // Note: we intentionally start with no profile metadata in history.
     // The overlay window can steal focus during stop, which can cause an incorrect
@@ -580,98 +607,105 @@ pub async fn pipeline_stop_and_transcribe(
         let app_clone = app.clone();
         let pipeline_clone = pipeline.inner().clone();
         let request_id_for_history = active_request_id.clone();
-        tauri::async_runtime::spawn(async move {
-            let start = Instant::now();
-            loop {
-                match pipeline_clone.state() {
-                    PipelineState::Transcribing
-                    | PipelineState::Routing
-                    | PipelineState::Rewriting => {
-                        // Now that transcription has begun, copy the *actual* profile metadata
-                        // from the request log into History.
-                        //
-                        // Why not resolve from the foreground app here?
-                        // On Windows, our always-on-top overlay windows can briefly become the
-                        // foreground window during stop/transcribe, which can incorrectly record
-                        // the profile as Default. The pipeline writes the chosen profile into the
-                        // request log as part of starting transcription.
-                        if let Some(req_id) = request_id_for_history.as_deref() {
-                            let profile_meta =
-                                app_clone.try_state::<RequestLogStore>().and_then(|store| {
-                                    store.with_current(|log| {
-                                        (log.profile_id.clone(), log.profile_name.clone())
-                                    })
+        tauri::async_runtime::spawn(
+            async move {
+                let start = Instant::now();
+                loop {
+                    match pipeline_clone.state() {
+                        PipelineState::Transcribing
+                        | PipelineState::Routing
+                        | PipelineState::Rewriting => {
+                            // Now that transcription has begun, copy the *actual* profile metadata
+                            // from the request log into History.
+                            //
+                            // Why not resolve from the foreground app here?
+                            // On Windows, our always-on-top overlay windows can briefly become the
+                            // foreground window during stop/transcribe, which can incorrectly record
+                            // the profile as Default. The pipeline writes the chosen profile into the
+                            // request log as part of starting transcription.
+                            if let Some(req_id) = request_id_for_history.as_deref() {
+                                let profile_meta =
+                                    app_clone.try_state::<RequestLogStore>().and_then(|store| {
+                                        store.with_current(|log| {
+                                            (log.profile_id.clone(), log.profile_name.clone())
+                                        })
+                                    });
+
+                                let (pid, pname) = profile_meta.unwrap_or_else(|| {
+                                    let cfg = pipeline_clone.config();
+                                    resolve_profile_for_foreground_app(&cfg)
                                 });
 
-                            let (pid, pname) = profile_meta.unwrap_or_else(|| {
-                                let cfg = pipeline_clone.config();
-                                resolve_profile_for_foreground_app(&cfg)
-                            });
-
-                            if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                let _ = history.set_request_profile(req_id, pid, pname);
-                                let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
+                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
+                                    let _ = history.set_request_profile(req_id, pid, pname);
+                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
+                                }
                             }
+
+                            let _ =
+                                app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
+                            let _ = app_clone.emit(
+                                events::EVENT_PIPELINE_STATE_CHANGED,
+                                PipelineStateEvent::Transcribing,
+                            );
+                            break;
                         }
+                        PipelineState::Idle | PipelineState::Error => {
+                            // Quiet-audio skip resets to Idle; errors also shouldn't show
+                            // a "transcribing" phase.
+                            break;
+                        }
+                        PipelineState::Recording => {
+                            // Still finalizing stop.
+                        }
+                    }
 
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Transcribing,
-                        );
+                    if start.elapsed() > Duration::from_secs(2) {
                         break;
                     }
-                    PipelineState::Idle | PipelineState::Error => {
-                        // Quiet-audio skip resets to Idle; errors also shouldn't show
-                        // a "transcribing" phase.
-                        break;
-                    }
-                    PipelineState::Recording => {
-                        // Still finalizing stop.
-                    }
-                }
 
-                if start.elapsed() > Duration::from_secs(2) {
-                    break;
+                    tokio::time::sleep(Duration::from_millis(15)).await;
                 }
-
-                tokio::time::sleep(Duration::from_millis(15)).await;
             }
-        });
+            .in_current_span(),
+        );
     }
 
     // Emit routing started once the pipeline actually enters the Routing phase.
     {
         let app_clone = app.clone();
         let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(async move {
-            let start = Instant::now();
-            loop {
-                match pipeline_clone.state() {
-                    PipelineState::Routing => {
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Routing,
-                        );
+        tauri::async_runtime::spawn(
+            async move {
+                let start = Instant::now();
+                loop {
+                    match pipeline_clone.state() {
+                        PipelineState::Routing => {
+                            let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
+                            let _ = app_clone.emit(
+                                events::EVENT_PIPELINE_STATE_CHANGED,
+                                PipelineStateEvent::Routing,
+                            );
+                            break;
+                        }
+                        PipelineState::Idle | PipelineState::Error => {
+                            break;
+                        }
+                        PipelineState::Recording
+                        | PipelineState::Transcribing
+                        | PipelineState::Rewriting => {}
+                    }
+
+                    // Hard stop to avoid a runaway task in pathological cases.
+                    if start.elapsed() > Duration::from_secs(15 * 60) {
                         break;
                     }
-                    PipelineState::Idle | PipelineState::Error => {
-                        break;
-                    }
-                    PipelineState::Recording
-                    | PipelineState::Transcribing
-                    | PipelineState::Rewriting => {}
-                }
 
-                // Hard stop to avoid a runaway task in pathological cases.
-                if start.elapsed() > Duration::from_secs(15 * 60) {
-                    break;
+                    tokio::time::sleep(Duration::from_millis(25)).await;
                 }
-
-                tokio::time::sleep(Duration::from_millis(25)).await;
             }
-        });
+            .in_current_span(),
+        );
     }
 
     // Emit rewriting started once the pipeline actually enters the optional LLM phase.
@@ -683,37 +717,40 @@ pub async fn pipeline_stop_and_transcribe(
     {
         let app_clone = app.clone();
         let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(async move {
-            let start = Instant::now();
-            loop {
-                match pipeline_clone.state() {
-                    PipelineState::Rewriting => {
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Rewriting,
-                        );
+        tauri::async_runtime::spawn(
+            async move {
+                let start = Instant::now();
+                loop {
+                    match pipeline_clone.state() {
+                        PipelineState::Rewriting => {
+                            let _ = app_clone.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
+                            let _ = app_clone.emit(
+                                events::EVENT_PIPELINE_STATE_CHANGED,
+                                PipelineStateEvent::Rewriting,
+                            );
+                            break;
+                        }
+                        PipelineState::Idle | PipelineState::Error => {
+                            // No rewrite (disabled/failed early) or pipeline exited.
+                            break;
+                        }
+                        PipelineState::Recording
+                        | PipelineState::Transcribing
+                        | PipelineState::Routing => {
+                            // Not yet.
+                        }
+                    }
+
+                    // Hard stop to avoid a runaway task in pathological cases.
+                    if start.elapsed() > Duration::from_secs(15 * 60) {
                         break;
                     }
-                    PipelineState::Idle | PipelineState::Error => {
-                        // No rewrite (disabled/failed early) or pipeline exited.
-                        break;
-                    }
-                    PipelineState::Recording
-                    | PipelineState::Transcribing
-                    | PipelineState::Routing => {
-                        // Not yet.
-                    }
-                }
 
-                // Hard stop to avoid a runaway task in pathological cases.
-                if start.elapsed() > Duration::from_secs(15 * 60) {
-                    break;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-
-                tokio::time::sleep(Duration::from_millis(50)).await;
             }
-        });
+            .in_current_span(),
+        );
     }
 
     // Log transcription start
@@ -1024,7 +1061,14 @@ pub async fn pipeline_retry_transcription(
     pipeline: State<'_, SharedPipeline>,
     request_id: String,
 ) -> Result<String, CommandError> {
-    pipeline_retry_transcription_impl(app, pipeline.inner().clone(), request_id).await
+    let span = tracing::info_span!(
+        "pipeline_retry_transcription",
+        retry_from_request_id = %request_id,
+        request_id = tracing::field::Empty
+    );
+    pipeline_retry_transcription_impl(app, pipeline.inner().clone(), request_id)
+        .instrument(span)
+        .await
 }
 
 /// Implementation for retry transcription that can be called both from the Tauri command
@@ -1086,6 +1130,10 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     let new_request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
         log_store.start_request(config.stt_provider.clone(), config.stt_model.clone())
     });
+
+    if let Some(req_id) = new_request_id.as_deref() {
+        tracing::Span::current().record("request_id", tracing::field::display(req_id));
+    }
 
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
@@ -1510,6 +1558,14 @@ pub async fn pipeline_dictate(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<String, CommandError> {
+    let span = tracing::info_span!("pipeline_dictate", request_id = tracing::field::Empty);
+    pipeline_dictate_inner(app, pipeline).instrument(span).await
+}
+
+async fn pipeline_dictate_inner(
+    app: AppHandle,
+    pipeline: State<'_, SharedPipeline>,
+) -> Result<String, CommandError> {
     let max_saved_recordings = get_max_saved_recordings(&app);
     let max_history_entries = get_history_max_entries(&app);
 
@@ -1546,6 +1602,10 @@ pub async fn pipeline_dictate(
             });
             active_request_id = Some(id);
         }
+    }
+
+    if let Some(req_id) = active_request_id.as_deref() {
+        tracing::Span::current().record("request_id", tracing::field::display(req_id));
     }
 
     // Capture model info for persistence in history.
@@ -1588,64 +1648,71 @@ pub async fn pipeline_dictate(
     {
         let app_clone = app.clone();
         let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(async move {
-            let start = Instant::now();
-            loop {
-                match pipeline_clone.state() {
-                    PipelineState::Transcribing
-                    | PipelineState::Routing
-                    | PipelineState::Rewriting => {
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Transcribing,
-                        );
-                        break;
+        tauri::async_runtime::spawn(
+            async move {
+                let start = Instant::now();
+                loop {
+                    match pipeline_clone.state() {
+                        PipelineState::Transcribing
+                        | PipelineState::Routing
+                        | PipelineState::Rewriting => {
+                            let _ =
+                                app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
+                            let _ = app_clone.emit(
+                                events::EVENT_PIPELINE_STATE_CHANGED,
+                                PipelineStateEvent::Transcribing,
+                            );
+                            break;
+                        }
+                        PipelineState::Idle | PipelineState::Error => {
+                            break;
+                        }
+                        PipelineState::Recording => {}
                     }
-                    PipelineState::Idle | PipelineState::Error => {
-                        break;
-                    }
-                    PipelineState::Recording => {}
-                }
 
-                if start.elapsed() > Duration::from_secs(2) {
-                    break;
+                    if start.elapsed() > Duration::from_secs(2) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(15)).await;
             }
-        });
+            .in_current_span(),
+        );
     }
 
     // Emit routing started once we enter the Routing phase.
     {
         let app_clone = app.clone();
         let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(async move {
-            let start = Instant::now();
-            loop {
-                match pipeline_clone.state() {
-                    PipelineState::Routing => {
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Routing,
-                        );
-                        break;
+        tauri::async_runtime::spawn(
+            async move {
+                let start = Instant::now();
+                loop {
+                    match pipeline_clone.state() {
+                        PipelineState::Routing => {
+                            let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
+                            let _ = app_clone.emit(
+                                events::EVENT_PIPELINE_STATE_CHANGED,
+                                PipelineStateEvent::Routing,
+                            );
+                            break;
+                        }
+                        PipelineState::Idle | PipelineState::Error => {
+                            break;
+                        }
+                        PipelineState::Recording
+                        | PipelineState::Transcribing
+                        | PipelineState::Rewriting => {}
                     }
-                    PipelineState::Idle | PipelineState::Error => {
-                        break;
-                    }
-                    PipelineState::Recording
-                    | PipelineState::Transcribing
-                    | PipelineState::Rewriting => {}
-                }
 
-                if start.elapsed() > Duration::from_secs(15 * 60) {
-                    break;
+                    if start.elapsed() > Duration::from_secs(15 * 60) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(25)).await;
             }
-        });
+            .in_current_span(),
+        );
     }
 
     let result = match pipeline.stop_and_transcribe_detailed().await {
@@ -1922,6 +1989,20 @@ pub async fn pipeline_test_transcribe_last_audio(
     pipeline: State<'_, SharedPipeline>,
     profile_id: Option<String>,
 ) -> Result<String, CommandError> {
+    let span = tracing::info_span!(
+        "pipeline_test_transcribe_last_audio",
+        request_id = tracing::field::Empty
+    );
+    pipeline_test_transcribe_last_audio_inner(app, pipeline, profile_id)
+        .instrument(span)
+        .await
+}
+
+async fn pipeline_test_transcribe_last_audio_inner(
+    app: AppHandle,
+    pipeline: State<'_, SharedPipeline>,
+    profile_id: Option<String>,
+) -> Result<String, CommandError> {
     // Create a dedicated request-log entry for this test action.
     // This is important because it is a standalone STT call (no recording/start step).
     let stt_started_at = Instant::now();
@@ -1956,7 +2037,9 @@ pub async fn pipeline_test_transcribe_last_audio(
             })
             .unwrap_or_else(|| (cfg.stt_provider.clone(), cfg.stt_model.clone()));
 
-        log_store.start_request(desired_provider, desired_model);
+        let request_id = log_store.start_request(desired_provider, desired_model);
+        tracing::Span::current().record("request_id", tracing::field::display(&request_id));
+
         log_store.with_current(|log| {
             log.profile_id = profile_id_used;
             log.profile_name = profile_name_used;
