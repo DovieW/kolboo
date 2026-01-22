@@ -10,6 +10,6 @@
 
 5. Remove the item completely from the refactor doc (do not mark done).
 
-6. Commit and push.
+6. Commit (don't run tests, just rely on pre-commit hook runs) and push.
 
 7. After you're done, as part of the summary, explain why this is a good change (if it even is).
