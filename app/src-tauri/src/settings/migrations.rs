@@ -6,11 +6,12 @@ use tauri::Runtime;
 use tauri_plugin_store::Store;
 
 #[cfg(desktop)]
-pub(crate) const SETTINGS_VERSION_LATEST: u32 = 3;
+pub(crate) const SETTINGS_VERSION_LATEST: u32 = 4;
 
 // Version history:
 // 1 -> 2: quick ask hotkey key rename, retention key split, enum typo fixes, auto_mute_audio -> playing_audio_handling
 // 2 -> 3: cleanup_prompt_sections schema normalization (global + per-profile)
+// 3 -> 4: rewrite profile rewrite_llm_enabled normalization (ensure explicit boolean for non-default profiles)
 
 #[cfg(desktop)]
 pub(crate) trait SettingsStore {
@@ -207,6 +208,54 @@ fn migrate_v2_to_v3(store: &impl SettingsStore) -> bool {
 }
 
 #[cfg(desktop)]
+fn migrate_v3_to_v4(store: &impl SettingsStore) -> bool {
+    let mut dirty = false;
+
+    let default_rewrite_enabled = match store.get("rewrite_llm_enabled") {
+        Some(Value::Bool(b)) => b,
+        _ => false,
+    };
+
+    if let Some(Value::Array(arr)) = store.get("rewrite_program_prompt_profiles") {
+        let mut changed = false;
+        let mut out = Vec::with_capacity(arr.len());
+
+        for profile in arr {
+            match profile {
+                Value::Object(mut obj) => {
+                    let profile_id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if profile_id != "default" {
+                        let needs_fix = match obj.get("rewrite_llm_enabled") {
+                            Some(Value::Bool(_)) => false,
+                            _ => true,
+                        };
+
+                        if needs_fix {
+                            obj.insert(
+                                "rewrite_llm_enabled".to_string(),
+                                json!(default_rewrite_enabled),
+                            );
+                            changed = true;
+                        }
+                    }
+
+                    out.push(Value::Object(obj));
+                }
+                other => out.push(other),
+            }
+        }
+
+        if changed {
+            store.set("rewrite_program_prompt_profiles", Value::Array(out));
+            dirty = true;
+        }
+    }
+
+    dirty
+}
+
+#[cfg(desktop)]
 pub(crate) fn run_settings_migrations(
     store: &impl SettingsStore,
 ) -> Result<bool, Box<dyn std::error::Error>> {
@@ -227,6 +276,11 @@ pub(crate) fn run_settings_migrations(
     if version < 3 {
         dirty |= migrate_v2_to_v3(store);
         version = 3;
+    }
+
+    if version < 4 {
+        dirty |= migrate_v3_to_v4(store);
+        version = 4;
     }
 
     if version != current_version {
@@ -282,7 +336,7 @@ mod tests {
 
         assert!(dirty);
         assert!(store.get("quick_ask_hold_hotkey").is_some());
-        assert_eq!(store.get("settings_version"), Some(json!(3)));
+        assert_eq!(store.get("settings_version"), Some(json!(4)));
     }
 
     #[test]
@@ -317,7 +371,45 @@ mod tests {
             Some(&json!({"system": {"content": "P1"}}))
         );
 
-        assert_eq!(store.get("settings_version"), Some(json!(3)));
+        assert_eq!(store.get("settings_version"), Some(json!(4)));
+    }
+
+    #[test]
+    fn migrates_profile_rewrite_llm_enabled_to_explicit_bool() {
+        let store = TestStore::with_entries(vec![
+            ("settings_version", json!(3)),
+            ("rewrite_llm_enabled", json!(true)),
+            (
+                "rewrite_program_prompt_profiles",
+                json!([
+                    {"id": "default", "rewrite_llm_enabled": null},
+                    {"id": "chrome.exe"},
+                    {"id": "code.exe", "rewrite_llm_enabled": false}
+                ]),
+            ),
+        ]);
+
+        let dirty = run_settings_migrations(&store).expect("migration failed");
+        assert!(dirty);
+        assert_eq!(store.get("settings_version"), Some(json!(4)));
+
+        let profiles = store.get("rewrite_program_prompt_profiles").unwrap();
+        let arr = profiles.as_array().unwrap();
+
+        let default_profile = arr[0].as_object().unwrap();
+        assert_eq!(
+            default_profile.get("rewrite_llm_enabled"),
+            Some(&Value::Null)
+        );
+
+        let chrome_profile = arr[1].as_object().unwrap();
+        assert_eq!(
+            chrome_profile.get("rewrite_llm_enabled"),
+            Some(&json!(true))
+        );
+
+        let code_profile = arr[2].as_object().unwrap();
+        assert_eq!(code_profile.get("rewrite_llm_enabled"), Some(&json!(false)));
     }
 
     #[test]

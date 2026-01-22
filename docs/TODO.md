@@ -77,14 +77,6 @@ Legend:
   - Have overlay apply payload immediately for UX-critical fields (accent), then optionally reload from disk for full sync.
   - Add a monotonically increasing `settings_revision` to prevent stale reloads from winning.
 
-### Move settings migrations out of UI components
-
-- **Where:** `app/src/components/settings/PromptSettings.tsx`
-- **Problem:** migrations triggered by visiting a screen can leave installs in partially-migrated states.
-- **Todo:**
-  - Relocate all migrations into centralized settings load/normalize code (TS or Rust) so they run deterministically at startup.
-  - Keep UI components migration-free (or at least idempotent and telemetry/logged).
-
 ### Make store reads consistent (reload vs cached)
 
 - **Where:** some code reloads the store before reading (e.g., transcription retention), other reads use the cached store directly.

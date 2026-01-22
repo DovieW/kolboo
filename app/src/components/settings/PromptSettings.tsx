@@ -61,7 +61,6 @@ import {
 	EDIT_DEFAULT_PRESET,
 	usePresetManagement,
 } from "./prompt/usePresetManagement";
-import { useProfileMigrations } from "./prompt/useProfileMigrations";
 import { usePromptLabState } from "./prompt/usePromptLabState";
 import { usePromptProviderOptions } from "./prompt/usePromptProviderOptions";
 import { usePromptSettingsProfileState } from "./prompt/usePromptSettingsProfileState";
@@ -445,14 +444,6 @@ export function PromptSettings({
 	}) => {
 		setResetDialog(args);
 	};
-
-	// One-time profile migrations (default profile creation, rewrite flag migration)
-	useProfileMigrations({
-		settings,
-		profiles,
-		defaultRewriteEnabled,
-		updateRewriteProgramPromptProfiles,
-	});
 
 	const isOpenAiStt = effectiveSttProvider === "openai";
 	const isAquavoiceStt = effectiveSttProvider === "aquavoice";

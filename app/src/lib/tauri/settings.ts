@@ -570,7 +570,7 @@ let storeInstance: Store | null = null;
 const SETTINGS_GUIDE_STATE_KEY = "settings_guide_state";
 const SETTINGS_VERSION_KEY = "settings_version";
 // Bump when adding settings migrations; keep TS/Rust/tests in sync.
-const SETTINGS_VERSION_DEFAULT = 3;
+const SETTINGS_VERSION_DEFAULT = 4;
 
 function normalizeSettingsGuideState(value: unknown): SettingsGuideState {
 	if (value === "pending" || value === "skipped" || value === "completed") {
