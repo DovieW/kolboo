@@ -50,6 +50,11 @@ import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
 import { applyAccentColor } from "./lib/accentColor";
 import { API_KEY_STORE_KEYS } from "./lib/apiKeys";
 import {
+	readBootAccentColor,
+	readBootGuideState,
+	setBootGuideState,
+} from "./lib/bootStorage";
+import {
 	DEFAULT_HOLD_HOTKEY,
 	DEFAULT_PASTE_LAST_HOTKEY,
 	DEFAULT_TOGGLE_HOTKEY,
@@ -65,30 +70,6 @@ import { compareSemver, fetchLatestGithubReleaseVersion } from "./lib/updates";
 import "./styles.css";
 
 type View = "home" | "settings" | "logs" | "usage-stats";
-
-function readBootGuideState(): "pending" | "skipped" | "completed" | null {
-	try {
-		if (typeof window === "undefined" || !window.localStorage) return null;
-		const raw = window.localStorage.getItem("tv_settings_guide_state");
-		if (raw === "pending" || raw === "skipped" || raw === "completed")
-			return raw;
-		return null;
-	} catch {
-		return null;
-	}
-}
-
-function readBootAccentColor(): string | null {
-	try {
-		if (typeof window === "undefined" || !window.localStorage) return null;
-		const raw = window.localStorage.getItem("tv_accent_color");
-		if (typeof raw !== "string") return null;
-		if (/^#([0-9a-fA-F]{6})$/.test(raw)) return raw;
-		return null;
-	} catch {
-		return null;
-	}
-}
 
 function Sidebar({
 	activeView,
@@ -1217,11 +1198,7 @@ export default function App() {
 			setBootGuideFallbackActivated(true);
 			// Also seed localStorage so subsequent reloads / first-paint logic can
 			// immediately decide to open the guide.
-			try {
-				window.localStorage?.setItem("tv_settings_guide_state", "pending");
-			} catch {
-				// ignore
-			}
+			setBootGuideState("pending");
 		}, 1200);
 
 		return () => {

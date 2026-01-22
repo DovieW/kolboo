@@ -10,6 +10,7 @@ import {
 	useRef,
 } from "react";
 import { applyAccentColor } from "../lib/accentColor";
+import { readBootAccentColor } from "../lib/bootStorage";
 import { createOverlaySettingsChangedHandler } from "../lib/overlay/overlaySettings";
 import {
 	type ErrorInfo,
@@ -32,18 +33,6 @@ import {
 	useOverlayController,
 } from "./useOverlayController";
 import { useOverlayHoverGating } from "./useOverlayHoverGating";
-
-function readBootAccentColor(): string | null {
-	try {
-		if (typeof window === "undefined" || !window.localStorage) return null;
-		const raw = window.localStorage.getItem("tv_accent_color");
-		if (typeof raw !== "string") return null;
-		if (/^#([0-9a-fA-F]{6})$/.test(raw)) return raw;
-		return null;
-	} catch {
-		return null;
-	}
-}
 
 type CommandErrorExtract = {
 	message: string;

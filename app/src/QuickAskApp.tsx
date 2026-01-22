@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { applyAccentColor } from "./lib/accentColor";
+import { readBootAccentColor } from "./lib/bootStorage";
 import type {
 	QuickAskAnswerPayload,
 	QuickAskStartedPayload,
@@ -135,18 +136,6 @@ function QuickAskCodeBlock({
 			</pre>
 		</div>
 	);
-}
-
-function readBootAccentColor(): string | null {
-	try {
-		if (typeof window === "undefined" || !window.localStorage) return null;
-		const raw = window.localStorage.getItem("tv_accent_color");
-		if (typeof raw !== "string") return null;
-		if (/^#([0-9a-fA-F]{6})$/.test(raw)) return raw;
-		return null;
-	} catch {
-		return null;
-	}
 }
 
 export default function QuickAskApp() {
