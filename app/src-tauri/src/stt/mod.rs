@@ -10,6 +10,7 @@ mod elevenlabs;
 mod fireworks;
 mod groq;
 mod openai;
+mod openai_compat;
 mod retry;
 mod speechmatics;
 mod whisper_server;

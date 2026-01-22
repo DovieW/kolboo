@@ -4,10 +4,10 @@
 //! - Legacy Whisper API (whisper-1) - uses /v1/audio/transcriptions
 //! - Audio chat models (e.g., gpt-4o-audio-preview) - uses /v1/responses with audio input
 
+use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
-use reqwest::multipart;
 use serde_json::json;
 use std::time::Duration;
 
@@ -167,18 +167,9 @@ impl OpenAiSttProvider {
             });
         }
 
-        let part = multipart::Part::bytes(audio.to_vec())
-            .file_name("audio.wav")
-            .mime_str("audio/wav")
-            .map_err(|e| SttError::Audio(format!("Failed to create multipart: {}", e)))?;
-
-        let mut form = multipart::Form::new()
-            .part("file", part)
-            .text("model", self.model.clone());
-
-        if let Some(prompt) = self.clamp_prompt_for_model(prompt) {
-            form = form.text("prompt", prompt);
-        }
+        let clamped_prompt = self.clamp_prompt_for_model(prompt);
+        let form =
+            openai_compat::wav_transcription_form(audio, &self.model, clamped_prompt.as_deref())?;
 
         let response = self
             .client

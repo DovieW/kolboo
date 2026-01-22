@@ -4,10 +4,10 @@
 //! - whisper-v3:       https://audio-prod.api.fireworks.ai/v1/audio/transcriptions
 //! - whisper-v3-turbo: https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions
 
+use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
-use reqwest::multipart;
 use serde_json::json;
 
 /// Fireworks STT provider for speech-to-text (Whisper v3 / v3-turbo).
@@ -115,18 +115,8 @@ impl SttProvider for FireworksSttProvider {
             });
         }
 
-        let part = multipart::Part::bytes(audio.to_vec())
-            .file_name("audio.wav")
-            .mime_str("audio/wav")
-            .map_err(|e| SttError::Audio(format!("Failed to create multipart: {}", e)))?;
-
-        let mut form = multipart::Form::new()
-            .part("file", part)
-            .text("model", self.model.clone());
-
-        if let Some(prompt) = self.prompt() {
-            form = form.text("prompt", prompt);
-        }
+        let prompt = self.prompt();
+        let form = openai_compat::wav_transcription_form(audio, &self.model, prompt.as_deref())?;
 
         // Fireworks docs show `Authorization: <API_KEY>` for audio endpoints.
         // We pass the stored value through as-is to avoid double-prefixing.

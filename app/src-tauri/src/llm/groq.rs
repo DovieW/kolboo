@@ -4,11 +4,11 @@
 //! This provider uses the same request/response shape as OpenAI, but targets
 //! Groq's base URL.
 
+use super::openai_compat;
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 
@@ -92,30 +92,6 @@ impl GroqLlmProvider {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    max_tokens: u32,
-    temperature: f32,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: ErrorDetail,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorDetail {
-    message: String,
-}
-
 #[async_trait]
 impl LlmProvider for GroqLlmProvider {
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
@@ -123,21 +99,13 @@ impl LlmProvider for GroqLlmProvider {
             return Err(LlmError::NoApiKey("groq".to_string()));
         }
 
-        let request = ChatRequest {
-            model: self.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_message.to_string(),
-                },
-            ],
-            max_tokens: 4096,
-            temperature: 0.3,
-        };
+        let request = openai_compat::ChatRequest::new(
+            self.model.clone(),
+            system_prompt,
+            user_message,
+            4096,
+            0.3,
+        );
 
         if let Some(store) = &self.request_log_store {
             let request_json = serde_json::to_value(&request).unwrap_or_else(|_| {
@@ -176,7 +144,9 @@ impl LlmProvider for GroqLlmProvider {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
+            if let Ok(error_response) =
+                serde_json::from_str::<openai_compat::ErrorResponse>(&error_text)
+            {
                 return Err(LlmError::Api(format!(
                     "Groq API error ({}): {}",
                     status, error_response.error.message
@@ -200,14 +170,7 @@ impl LlmProvider for GroqLlmProvider {
             });
         }
 
-        response_json
-            .get("choices")
-            .and_then(|v| v.as_array())
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
-            .and_then(|msg| msg.get("content"))
-            .and_then(|c| c.as_str())
-            .map(|s| s.to_string())
+        openai_compat::extract_first_choice_text(&response_json)
             .ok_or_else(|| LlmError::InvalidResponse("No response choices returned".to_string()))
     }
 

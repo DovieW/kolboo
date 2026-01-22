@@ -1,9 +1,9 @@
 //! Groq Whisper API STT provider implementation.
 
+use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
-use reqwest::multipart;
 use serde_json::json;
 use std::time::Duration;
 
@@ -126,18 +126,8 @@ impl SttProvider for GroqSttProvider {
             });
         }
 
-        let part = multipart::Part::bytes(audio.to_vec())
-            .file_name("audio.wav")
-            .mime_str("audio/wav")
-            .map_err(|e| SttError::Audio(format!("Failed to create multipart: {}", e)))?;
-
-        let mut form = multipart::Form::new()
-            .part("file", part)
-            .text("model", self.model.clone());
-
-        if let Some(prompt) = self.default_prompt.as_deref().and_then(Self::clamp_prompt) {
-            form = form.text("prompt", prompt);
-        }
+        let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
+        let form = openai_compat::wav_transcription_form(audio, &self.model, prompt.as_deref())?;
 
         let response = self
             .client

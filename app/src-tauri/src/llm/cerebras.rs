@@ -7,11 +7,12 @@
 //! - Supported models: https://inference-docs.cerebras.ai/models/overview
 //! - OpenAI compatibility: https://inference-docs.cerebras.ai/resources/openai
 
+use super::openai_compat;
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use std::time::Duration;
 
@@ -95,30 +96,12 @@ impl CerebrasLlmProvider {
 }
 
 #[derive(Debug, Serialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Serialize)]
 struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    max_tokens: u32,
-    temperature: f32,
+    #[serde(flatten)]
+    base: openai_compat::ChatRequest,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: ErrorDetail,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorDetail {
-    message: String,
 }
 
 #[async_trait]
@@ -129,19 +112,13 @@ impl LlmProvider for CerebrasLlmProvider {
         }
 
         let request = ChatRequest {
-            model: self.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_message.to_string(),
-                },
-            ],
-            max_tokens: 4096,
-            temperature: 0.3,
+            base: openai_compat::ChatRequest::new(
+                self.model.clone(),
+                system_prompt,
+                user_message,
+                4096,
+                0.3,
+            ),
             reasoning_effort: self.reasoning_effort.clone(),
         };
 
@@ -181,7 +158,9 @@ impl LlmProvider for CerebrasLlmProvider {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
+            if let Ok(error_response) =
+                serde_json::from_str::<openai_compat::ErrorResponse>(&error_text)
+            {
                 return Err(LlmError::Api(format!(
                     "Cerebras API error ({}): {}",
                     status, error_response.error.message
@@ -215,49 +194,6 @@ impl LlmProvider for CerebrasLlmProvider {
             return Err(LlmError::Api(format!("Cerebras API error: {}", message)));
         }
 
-        fn extract_content_from_choice(choice: &serde_json::Value) -> Option<String> {
-            // OpenAI Chat Completions: choices[0].message.content is typically a string.
-            if let Some(s) = choice
-                .get("message")
-                .and_then(|msg| msg.get("content"))
-                .and_then(|c| c.as_str())
-            {
-                return Some(s.to_string());
-            }
-
-            // Some OpenAI-compatible implementations may return content as an array of parts,
-            // e.g. [{"type":"text","text":"..."}, ...]. Join text parts.
-            if let Some(parts) = choice
-                .get("message")
-                .and_then(|msg| msg.get("content"))
-                .and_then(|c| c.as_array())
-            {
-                let mut out = String::new();
-                for part in parts {
-                    if let Some(text) = part
-                        .get("text")
-                        .and_then(|t| t.as_str())
-                        .or_else(|| part.get("content").and_then(|t| t.as_str()))
-                    {
-                        if !out.is_empty() {
-                            out.push('\n');
-                        }
-                        out.push_str(text);
-                    }
-                }
-                if !out.trim().is_empty() {
-                    return Some(out);
-                }
-            }
-
-            // Legacy completions-style: choices[0].text
-            if let Some(s) = choice.get("text").and_then(|t| t.as_str()) {
-                return Some(s.to_string());
-            }
-
-            None
-        }
-
         let choices = response_json
             .get("choices")
             .and_then(|v| v.as_array())
@@ -268,14 +204,14 @@ impl LlmProvider for CerebrasLlmProvider {
                 )
             })?;
 
-        let first = choices.first().ok_or_else(|| {
-            LlmError::InvalidResponse(
+        if choices.first().is_none() {
+            return Err(LlmError::InvalidResponse(
                 "Cerebras response had an empty `choices` array (see Request Logs for llm_response_json)"
                     .to_string(),
-            )
-        })?;
+            ));
+        }
 
-        extract_content_from_choice(first).ok_or_else(|| {
+        openai_compat::extract_first_choice_text(&response_json).ok_or_else(|| {
             LlmError::InvalidResponse(
                 "Cerebras response missing message content (see Request Logs for llm_response_json)"
                     .to_string(),

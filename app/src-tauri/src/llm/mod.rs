@@ -13,6 +13,7 @@ mod gemini;
 mod groq;
 mod ollama;
 mod openai;
+mod openai_compat;
 mod prompts;
 
 pub use anthropic::AnthropicLlmProvider;
