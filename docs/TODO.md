@@ -12,14 +12,6 @@ Legend:
 
 ## P1 — Performance & responsiveness
 
-### Move audio processing off the realtime callback
-
-- **Where:** `app/src-tauri/src/audio_capture.rs`
-- **Problem:** callback still does non-trivial work (format conversion/downmix) and takes mutex locks (`buffer`, `pre_roll`).
-- **Todo:**
-  - Introduce a ring buffer + worker thread so the CPAL callback only enqueues samples.
-  - Do buffer append / pre-roll maintenance / VAD feeding on the worker thread.
-
 ### Improve stats aggregation performance
 
 - **Where:** `app/src-tauri/src/commands/stats.rs`

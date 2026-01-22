@@ -1798,8 +1798,6 @@ struct CaptureThreadArgs {
 
 /// Run the audio capture in a dedicated thread
 fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> {
-    use cpal::Sample;
-
     use std::time::{Duration, Instant};
 
     let CaptureThreadArgs {
@@ -1824,9 +1822,15 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
     let start = Instant::now();
     let last_callback_ms = Arc::new(AtomicU64::new(0));
 
-    let err_fn = |err| {
+    fn stream_err(err: cpal::StreamError) {
         log::error!("Audio stream error: {}", err);
-    };
+    }
+
+    #[derive(Debug)]
+    struct CapturedChunk {
+        samples: Vec<f32>,
+        was_recording: bool,
+    }
 
     // Channel + pool for passing samples to the VAD processing thread.
     // The pool avoids per-callback allocations; the callback takes a Vec from the pool,
@@ -1847,6 +1851,145 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         Some(pool)
     } else {
         None
+    };
+
+    // Queue + pool for passing *interleaved f32* samples from the realtime callback
+    // to a non-realtime worker thread.
+    //
+    // Goal: keep the CPAL callback fast (no mutex locks, no VAD work, no waveform binning).
+    const CAPTURE_CHUNK_QUEUE_CAPACITY: usize = 48;
+    const CAPTURE_CHUNK_POOL_SIZE: usize = 48;
+    let callback_capacity =
+        estimate_callback_interleaved_capacity(&config, config.channels.max(1) as usize);
+
+    let chunk_queue: Arc<ArrayQueue<CapturedChunk>> =
+        Arc::new(ArrayQueue::new(CAPTURE_CHUNK_QUEUE_CAPACITY));
+    let chunk_pool: Arc<ArrayQueue<Vec<f32>>> = Arc::new(ArrayQueue::new(CAPTURE_CHUNK_POOL_SIZE));
+    for _ in 0..CAPTURE_CHUNK_POOL_SIZE {
+        // Preallocate buffers; actual length is set by the callback.
+        let _ = chunk_pool.push(Vec::with_capacity(callback_capacity));
+    }
+
+    let worker_stop = Arc::new(AtomicBool::new(false));
+    let worker_handle = {
+        let buffer = buffer.clone();
+        let pre_roll = pre_roll.clone();
+        let recording_active = recording_active.clone();
+        let pre_roll_ms = pre_roll_ms.clone();
+        let meter = meter.clone();
+        let waveform_meter = waveform_meter.clone();
+        let queue = chunk_queue.clone();
+        let pool = chunk_pool.clone();
+        let stop = worker_stop.clone();
+        let vad_tx = if vad_config.enabled {
+            Some(vad_samples_tx.clone())
+        } else {
+            None
+        };
+        let vad_pool = vad_pool.clone();
+        let channels = config.channels.max(1) as usize;
+        let sample_rate = config.sample_rate;
+
+        thread::spawn(move || {
+            fn compute_rms_peak(data: &[f32]) -> (f32, f32) {
+                let mut peak: f32 = 0.0;
+                let mut sum_sq: f64 = 0.0;
+                for &s in data {
+                    let a = s.abs();
+                    if a > peak {
+                        peak = a;
+                    }
+                    sum_sq += (s as f64) * (s as f64);
+                }
+                let n = data.len() as u64;
+                let rms = if n == 0 {
+                    0.0
+                } else {
+                    (sum_sq / n as f64).sqrt() as f32
+                };
+                (rms, peak)
+            }
+
+            let mut last_pre_roll_capacity: usize = 0;
+
+            let mut process_one = |chunk: CapturedChunk| {
+                // Keep level/waveform meters up-to-date even when not recording.
+                let (rms, peak) = compute_rms_peak(&chunk.samples);
+                meter.update(rms, peak);
+                waveform_meter.update_from_f32_interleaved(chunk.samples.as_slice(), channels);
+
+                // Ensure pre-roll capacity matches the current setting (best effort).
+                // This is safe to do here because we're off the realtime callback.
+                let pre_ms = pre_roll_ms.load(Ordering::Relaxed).min(5000) as f32;
+                let desired_cap = ((sample_rate as f32 * (pre_ms / 1000.0) * channels as f32)
+                    as usize)
+                    .min(10_000_000);
+                if desired_cap != last_pre_roll_capacity {
+                    if let Ok(mut pr) = pre_roll.lock() {
+                        pr.set_capacity(desired_cap);
+                    }
+                    last_pre_roll_capacity = desired_cap;
+                }
+
+                // Always maintain rolling pre-roll.
+                if let Ok(mut pr) = pre_roll.lock() {
+                    pr.push(chunk.samples.as_slice());
+                }
+
+                // Recording buffer + VAD should reflect the state at callback-time,
+                // not "now" (avoids dropping the tail when recording_active flips).
+                if chunk.was_recording {
+                    if let Ok(mut buf) = buffer.lock() {
+                        buf.append(chunk.samples.as_slice());
+                    }
+
+                    if let Some(ref tx) = vad_tx {
+                        if let Some(ref pool) = vad_pool {
+                            if let Some(mut mono) = pool.pop() {
+                                downmix_interleaved_chunk_to_mono_into(
+                                    chunk.samples.as_slice(),
+                                    channels,
+                                    &mut mono,
+                                );
+                                if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
+                                    mono.clear();
+                                    let _ = pool.push(mono);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Return the backing buffer to the pool.
+                let mut samples = chunk.samples;
+                samples.clear();
+                let _ = pool.push(samples);
+            };
+
+            loop {
+                // Drain the queue quickly when there is work.
+                if let Some(chunk) = queue.pop() {
+                    process_one(chunk);
+                    continue;
+                }
+
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                // Idle: avoid a tight spin.
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+
+            // Best-effort flush on stop.
+            while let Some(chunk) = queue.pop() {
+                process_one(chunk);
+            }
+
+            // Keep the compiler honest: this worker intentionally does not read
+            // recording_active (state is captured per-chunk).
+            let _ = recording_active;
+        })
     };
 
     // Spawn a separate thread for VAD processing (since webrtc-vad is not Send)
@@ -1888,226 +2031,208 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         None
     };
 
-    let build_stream = |device: &cpal::Device| -> Result<cpal::Stream, AudioCaptureError> {
+    fn build_stream(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        sample_format: SampleFormat,
+        start: Instant,
+        last_callback_ms: Arc<AtomicU64>,
+        recording_active: Arc<AtomicBool>,
+        pre_roll_ms: Arc<AtomicU32>,
+        chunk_queue: Arc<ArrayQueue<CapturedChunk>>,
+        chunk_pool: Arc<ArrayQueue<Vec<f32>>>,
+    ) -> Result<cpal::Stream, AudioCaptureError> {
         use std::cell::RefCell;
 
-        let buffer = buffer.clone();
-        let pre_roll = pre_roll.clone();
-        let recording_active = recording_active.clone();
-        let pre_roll_ms = pre_roll_ms.clone();
-        let meter = meter.clone();
-        let waveform_meter = waveform_meter.clone();
-        let last_callback_ms = last_callback_ms.clone();
-        let vad_tx = if vad_config.enabled {
-            Some(vad_samples_tx.clone())
-        } else {
-            None
-        };
-        let vad_pool = vad_pool.clone();
-        let channels = config.channels as usize;
-        let start_cb = start;
-
-        let scratch_capacity = estimate_callback_interleaved_capacity(&config, channels);
+        let channels = config.channels.max(1) as usize;
+        let scratch_capacity = estimate_callback_interleaved_capacity(config, channels);
 
         match sample_format {
-            SampleFormat::F32 => device.build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    last_callback_ms
-                        .store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+            SampleFormat::F32 => {
+                let queue = chunk_queue.clone();
+                let pool = chunk_pool.clone();
+                let last_callback_ms = last_callback_ms.clone();
+                let recording_active = recording_active.clone();
+                let pre_roll_ms = pre_roll_ms.clone();
 
-                    // Realtime meter (cheap math, no allocations).
-                    let mut peak: f32 = 0.0;
-                    let mut sum_sq: f64 = 0.0;
-                    let mut n: u64 = 0;
-                    for &s in data {
-                        let a = s.abs();
-                        if a > peak {
-                            peak = a;
-                        }
-                        sum_sq += (s as f64) * (s as f64);
-                        n += 1;
-                    }
-                    let rms = if n == 0 {
-                        0.0
-                    } else {
-                        (sum_sq / n as f64).sqrt() as f32
-                    };
-                    meter.update(rms, peak);
-                    waveform_meter.update_from_f32_interleaved(data, channels);
+                device
+                    .build_input_stream(
+                        config,
+                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                            last_callback_ms
+                                .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                    // Always maintain the rolling pre-roll buffer.
-                    if let Ok(mut pr) = pre_roll.lock() {
-                        pr.push(data);
-                    }
+                            let was_recording = recording_active.load(Ordering::Relaxed);
 
-                    // Record only when active.
-                    if recording_active.load(Ordering::Relaxed) {
-                        if let Ok(mut buf) = buffer.lock() {
-                            buf.append(data);
-                        }
+                            // Fast path: try to reuse a preallocated Vec.
+                            let mut samples = match pool.pop() {
+                                Some(v) => v,
+                                None => return,
+                            };
 
-                        if let Some(ref tx) = vad_tx {
-                            if let Some(ref pool) = vad_pool {
-                                if let Some(mut mono) = pool.pop() {
-                                    downmix_interleaved_chunk_to_mono_into(
-                                        data, channels, &mut mono,
-                                    );
-                                    if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
-                                        mono.clear();
-                                        let _ = pool.push(mono);
-                                    }
+                            samples.clear();
+                            samples.extend_from_slice(data);
+
+                            let mut chunk = CapturedChunk {
+                                samples,
+                                was_recording,
+                            };
+
+                            // If the queue is full, drop the oldest chunk to make space, then retry.
+                            if let Err(returned) = queue.push(chunk) {
+                                chunk = returned;
+
+                                if let Some(oldest) = queue.pop() {
+                                    let mut old = oldest.samples;
+                                    old.clear();
+                                    let _ = pool.push(old);
+                                }
+
+                                if let Err(returned_again) = queue.push(chunk) {
+                                    let mut samples = returned_again.samples;
+                                    samples.clear();
+                                    let _ = pool.push(samples);
                                 }
                             }
-                        }
-                    }
 
-                    // Keep capacity in sync if pre-roll ms changes drastically.
-                    // (Avoids waiting for a config sync while stream is running.)
-                    let _ = pre_roll_ms.load(Ordering::Relaxed);
-                },
-                err_fn,
-                None,
-            ),
+                            // Keep capacity in sync if pre-roll ms changes drastically.
+                            let _ = pre_roll_ms.load(Ordering::Relaxed);
+                        },
+                        stream_err,
+                        None,
+                    )
+                    .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
+            }
             SampleFormat::I16 => {
                 let scratch = RefCell::new(Vec::<f32>::with_capacity(scratch_capacity));
-                device.build_input_stream(
-                    &config,
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        last_callback_ms
-                            .store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+                let queue = chunk_queue.clone();
+                let pool = chunk_pool.clone();
+                let last_callback_ms = last_callback_ms.clone();
+                let recording_active = recording_active.clone();
+                let pre_roll_ms = pre_roll_ms.clone();
 
-                        let mut peak: f32 = 0.0;
-                        let mut sum_sq: f64 = 0.0;
+                device
+                    .build_input_stream(
+                        config,
+                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            last_callback_ms
+                                .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                        let mut samples = scratch.borrow_mut();
-                        samples.clear();
-                        for &s in data {
-                            let f = s.to_float_sample();
-                            let a = f.abs();
-                            if a > peak {
-                                peak = a;
+                            let was_recording = recording_active.load(Ordering::Relaxed);
+
+                            let mut out = match pool.pop() {
+                                Some(v) => v,
+                                None => return,
+                            };
+                            out.clear();
+
+                            let mut tmp = scratch.borrow_mut();
+                            tmp.clear();
+                            for &s in data {
+                                tmp.push(cpal::Sample::to_float_sample(&s));
                             }
-                            sum_sq += (f as f64) * (f as f64);
-                            samples.push(f);
-                        }
+                            out.extend_from_slice(tmp.as_slice());
 
-                        let n = samples.len() as u64;
-                        let rms = if n == 0 {
-                            0.0
-                        } else {
-                            (sum_sq / n as f64).sqrt() as f32
-                        };
-                        meter.update(rms, peak);
-                        waveform_meter.update_from_f32_interleaved(samples.as_slice(), channels);
+                            let mut chunk = CapturedChunk {
+                                samples: out,
+                                was_recording,
+                            };
 
-                        if let Ok(mut pr) = pre_roll.lock() {
-                            pr.push(samples.as_slice());
-                        }
-
-                        if recording_active.load(Ordering::Relaxed) {
-                            if let Ok(mut buf) = buffer.lock() {
-                                buf.append(samples.as_slice());
-                            }
-
-                            if let Some(ref tx) = vad_tx {
-                                if let Some(ref pool) = vad_pool {
-                                    if let Some(mut mono) = pool.pop() {
-                                        downmix_interleaved_chunk_to_mono_into(
-                                            samples.as_slice(),
-                                            channels,
-                                            &mut mono,
-                                        );
-                                        if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
-                                            mono.clear();
-                                            let _ = pool.push(mono);
-                                        }
-                                    }
+                            if let Err(returned) = queue.push(chunk) {
+                                chunk = returned;
+                                if let Some(oldest) = queue.pop() {
+                                    let mut old = oldest.samples;
+                                    old.clear();
+                                    let _ = pool.push(old);
+                                }
+                                if let Err(returned_again) = queue.push(chunk) {
+                                    let mut samples = returned_again.samples;
+                                    samples.clear();
+                                    let _ = pool.push(samples);
                                 }
                             }
-                        }
 
-                        let _ = pre_roll_ms.load(Ordering::Relaxed);
-                    },
-                    err_fn,
-                    None,
-                )
+                            let _ = pre_roll_ms.load(Ordering::Relaxed);
+                        },
+                        stream_err,
+                        None,
+                    )
+                    .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
             }
             SampleFormat::U16 => {
                 let scratch = RefCell::new(Vec::<f32>::with_capacity(scratch_capacity));
-                device.build_input_stream(
-                    &config,
-                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                        last_callback_ms
-                            .store(start_cb.elapsed().as_millis() as u64, Ordering::Relaxed);
+                let queue = chunk_queue.clone();
+                let pool = chunk_pool.clone();
+                let last_callback_ms = last_callback_ms.clone();
+                let recording_active = recording_active.clone();
+                let pre_roll_ms = pre_roll_ms.clone();
 
-                        let mut peak: f32 = 0.0;
-                        let mut sum_sq: f64 = 0.0;
+                device
+                    .build_input_stream(
+                        config,
+                        move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                            last_callback_ms
+                                .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                        let mut samples = scratch.borrow_mut();
-                        samples.clear();
-                        for &s in data {
-                            let f = s.to_float_sample();
-                            let a = f.abs();
-                            if a > peak {
-                                peak = a;
+                            let was_recording = recording_active.load(Ordering::Relaxed);
+
+                            let mut out = match pool.pop() {
+                                Some(v) => v,
+                                None => return,
+                            };
+                            out.clear();
+
+                            let mut tmp = scratch.borrow_mut();
+                            tmp.clear();
+                            for &s in data {
+                                tmp.push(cpal::Sample::to_float_sample(&s));
                             }
-                            sum_sq += (f as f64) * (f as f64);
-                            samples.push(f);
-                        }
+                            out.extend_from_slice(tmp.as_slice());
 
-                        let n = samples.len() as u64;
-                        let rms = if n == 0 {
-                            0.0
-                        } else {
-                            (sum_sq / n as f64).sqrt() as f32
-                        };
-                        meter.update(rms, peak);
-                        waveform_meter.update_from_f32_interleaved(samples.as_slice(), channels);
+                            let mut chunk = CapturedChunk {
+                                samples: out,
+                                was_recording,
+                            };
 
-                        if let Ok(mut pr) = pre_roll.lock() {
-                            pr.push(samples.as_slice());
-                        }
-
-                        if recording_active.load(Ordering::Relaxed) {
-                            if let Ok(mut buf) = buffer.lock() {
-                                buf.append(samples.as_slice());
-                            }
-
-                            if let Some(ref tx) = vad_tx {
-                                if let Some(ref pool) = vad_pool {
-                                    if let Some(mut mono) = pool.pop() {
-                                        downmix_interleaved_chunk_to_mono_into(
-                                            samples.as_slice(),
-                                            channels,
-                                            &mut mono,
-                                        );
-                                        if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
-                                            mono.clear();
-                                            let _ = pool.push(mono);
-                                        }
-                                    }
+                            if let Err(returned) = queue.push(chunk) {
+                                chunk = returned;
+                                if let Some(oldest) = queue.pop() {
+                                    let mut old = oldest.samples;
+                                    old.clear();
+                                    let _ = pool.push(old);
+                                }
+                                if let Err(returned_again) = queue.push(chunk) {
+                                    let mut samples = returned_again.samples;
+                                    samples.clear();
+                                    let _ = pool.push(samples);
                                 }
                             }
-                        }
 
-                        let _ = pre_roll_ms.load(Ordering::Relaxed);
-                    },
-                    err_fn,
-                    None,
-                )
+                            let _ = pre_roll_ms.load(Ordering::Relaxed);
+                        },
+                        stream_err,
+                        None,
+                    )
+                    .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
             }
-            _ => {
-                return Err(AudioCaptureError::DeviceConfig(format!(
-                    "Unsupported sample format: {:?}",
-                    sample_format
-                )));
-            }
+            _ => Err(AudioCaptureError::DeviceConfig(format!(
+                "Unsupported sample format: {:?}",
+                sample_format
+            ))),
         }
-        .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
-    };
+    }
 
-    let mut stream = build_stream(&device)?;
+    let mut stream = build_stream(
+        &device,
+        &config,
+        sample_format,
+        start,
+        last_callback_ms.clone(),
+        recording_active.clone(),
+        pre_roll_ms.clone(),
+        chunk_queue.clone(),
+        chunk_pool.clone(),
+    )?;
 
     stream
         .play()
@@ -2153,7 +2278,18 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                 }
 
                 // Try rebuilding the stream on the current device.
-                match build_stream(&device).and_then(|s| {
+                match build_stream(
+                    &device,
+                    &config,
+                    sample_format,
+                    start,
+                    last_callback_ms.clone(),
+                    recording_active.clone(),
+                    pre_roll_ms.clone(),
+                    chunk_queue.clone(),
+                    chunk_pool.clone(),
+                )
+                .and_then(|s| {
                     s.play()
                         .map_err(|e| AudioCaptureError::StreamStart(e.to_string()))
                         .map(|_| s)
@@ -2191,7 +2327,18 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                         pr.set_capacity(cap_samples);
                     }
 
-                    match build_stream(&device).and_then(|s| {
+                    match build_stream(
+                        &device,
+                        &config,
+                        sample_format,
+                        start,
+                        last_callback_ms.clone(),
+                        recording_active.clone(),
+                        pre_roll_ms.clone(),
+                        chunk_queue.clone(),
+                        chunk_pool.clone(),
+                    )
+                    .and_then(|s| {
                         s.play()
                             .map_err(|e| AudioCaptureError::StreamStart(e.to_string()))
                             .map(|_| s)
@@ -2221,6 +2368,10 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
             }
         }
     }
+
+    // Stop the worker and flush any pending chunks into the buffers before we shut down.
+    worker_stop.store(true, Ordering::Relaxed);
+    let _ = worker_handle.join();
 
     // Drop the VAD sender to signal the VAD thread to stop
     drop(vad_samples_tx);
