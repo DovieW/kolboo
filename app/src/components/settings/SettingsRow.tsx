@@ -1,19 +1,32 @@
 import { ActionIcon, Tooltip } from "@mantine/core";
 import type { ReactNode } from "react";
 
+type SettingsRowProps =
+	| {
+			left: ReactNode;
+			right: ReactNode;
+			className?: string;
+			noDivider?: boolean;
+			label?: never;
+			description?: never;
+	}
+	| {
+			label: ReactNode;
+			description?: ReactNode;
+			right: ReactNode;
+			className?: string;
+			noDivider?: boolean;
+			left?: never;
+	};
+
 export function SettingsRow({
+	left,
 	label,
 	description,
 	right,
 	className,
 	noDivider,
-}: {
-	label: ReactNode;
-	description?: ReactNode;
-	right: ReactNode;
-	className?: string;
-	noDivider?: boolean;
-}) {
+}: SettingsRowProps) {
 	return (
 		<div
 			className={[
@@ -25,10 +38,14 @@ export function SettingsRow({
 				.join(" ")}
 		>
 			<div>
-				<p className="settings-label">{label}</p>
-				{description ? (
-					<p className="settings-description">{description}</p>
-				) : null}
+				{left ?? (
+					<>
+						<div className="settings-label">{label}</div>
+						{description ? (
+							<div className="settings-description">{description}</div>
+						) : null}
+					</>
+				)}
 			</div>
 			<div className="settings-row-actions">{right}</div>
 		</div>

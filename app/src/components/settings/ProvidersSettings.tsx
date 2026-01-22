@@ -15,6 +15,7 @@ import {
 } from "../../lib/queries";
 import { type OpenAiReasoningEffort, tauriAPI } from "../../lib/tauri";
 import { HintSelect } from "../HintSelect";
+import { SettingsRow } from "./SettingsRow";
 
 // NOTE: This timeout is used by the Rust pipeline as a transcription request timeout.
 // Keep this default aligned with backend fallbacks so "unset" settings don't lie.
@@ -333,13 +334,11 @@ export function ProvidersSettings() {
 	return (
 		<>
 			{/* STT Provider */}
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Speech-to-Text Provider</p>
-					<p className="settings-description">Service for transcribing audio</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{isLoadingProviderData ? (
+			<SettingsRow
+				label="Speech-to-Text Provider"
+				description="Service for transcribing audio"
+				right={
+					isLoadingProviderData ? (
 						<Loader size="sm" color="orange" />
 					) : (
 						<Select
@@ -360,45 +359,41 @@ export function ProvidersSettings() {
 								},
 							}}
 						/>
-					)}
-				</div>
-			</div>
+					)
+				}
+			/>
 
 			{/* STT Model - only show if provider has models */}
 			{sttModelOptions.length > 0 && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">STT Model</p>
-						<p className="settings-description">
-							Model to use for transcription
-						</p>
-					</div>
-					<Select
-						data={sttModelOptions}
-						value={settings?.stt_model ?? sttModelOptions[0]?.value ?? null}
-						onChange={handleSTTModelChange}
-						placeholder="Select model"
-						withCheckIcon={false}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
+				<SettingsRow
+					label="STT Model"
+					description="Model to use for transcription"
+					right={
+						<Select
+							data={sttModelOptions}
+							value={settings?.stt_model ?? sttModelOptions[0]?.value ?? null}
+							onChange={handleSTTModelChange}
+							placeholder="Select model"
+							withCheckIcon={false}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								},
+							}}
+						/>
+					}
+				/>
 			)}
 
 			{/* LLM Provider */}
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Language Model Provider</p>
-					<p className="settings-description">AI service for text formatting</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{isLoadingProviderData ? (
+			<SettingsRow
+				label="Language Model Provider"
+				description="AI service for text formatting"
+				right={
+					isLoadingProviderData ? (
 						<Loader size="sm" color="orange" />
 					) : (
 						<Select
@@ -419,47 +414,42 @@ export function ProvidersSettings() {
 								},
 							}}
 						/>
-					)}
-				</div>
-			</div>
+					)
+				}
+			/>
 
 			{/* LLM Model - only show if provider has models */}
 			{llmModelOptions.length > 0 && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Rewrite LLM Model</p>
-						<p className="settings-description">
-							LLM Model used to rewrite the transcription.
-						</p>
-					</div>
-					<Select
-						data={llmModelOptions}
-						value={settings?.llm_model ?? llmModelOptions[0]?.value ?? null}
-						onChange={handleLLMModelChange}
-						placeholder="Select model"
-						withCheckIcon={false}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
+				<SettingsRow
+					label="Rewrite LLM Model"
+					description="LLM Model used to rewrite the transcription."
+					right={
+						<Select
+							data={llmModelOptions}
+							value={settings?.llm_model ?? llmModelOptions[0]?.value ?? null}
+							onChange={handleLLMModelChange}
+							placeholder="Select model"
+							withCheckIcon={false}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								},
+							}}
+						/>
+					}
+				/>
 			)}
 
 			{/* OpenAI thinking (gpt-5 / o-series) */}
 			{supportsOpenAiReasoningEffort && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking</p>
-						<p className="settings-description">
-							Set the reasoning effort for this model.
-						</p>
-					</div>
-					<HintSelect
+				<SettingsRow
+					label="Thinking"
+					description="Set the reasoning effort for this model."
+					right={
+						<HintSelect
 						data={openAiThinkingOptions}
 						value={settings?.openai_reasoning_effort ?? SELECT_DEFAULT}
 						onChange={handleOpenAiReasoningEffortChange}
@@ -532,22 +522,22 @@ export function ProvidersSettings() {
 								</div>
 							);
 						}}
-					/>
-				</div>
+						/>
+					}
+				/>
 			)}
 
 			{/* Gemini thinking level (Gemini 3) */}
 			{supportsGeminiThinkingLevel && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking Level</p>
-						<p className="settings-description">
-							{isGemini3Pro
-								? "Gemini 3 Pro supports low/high (default high)."
-								: "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
-						</p>
-					</div>
-					<HintSelect
+				<SettingsRow
+					label="Thinking Level"
+					description={
+						isGemini3Pro
+							? "Gemini 3 Pro supports low/high (default high)."
+							: "Gemini 3 Flash supports minimal/low/medium/high (default high)."
+					}
+					right={
+						<HintSelect
 						data={geminiThinkingLevelOptions}
 						value={settings?.gemini_thinking_level ?? SELECT_DEFAULT}
 						onChange={handleGeminiThinkingLevelChange}
@@ -611,20 +601,18 @@ export function ProvidersSettings() {
 								</div>
 							);
 						}}
-					/>
-				</div>
+						/>
+					}
+				/>
 			)}
 
 			{/* Gemini thinking budget (Gemini 2.5) */}
 			{supportsGeminiThinkingBudget && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking Budget</p>
-						<p className="settings-description">
-							Token budget for Gemini 2.5 thinking.
-						</p>
-					</div>
-					<HintSelect
+				<SettingsRow
+					label="Thinking Budget"
+					description="Token budget for Gemini 2.5 thinking."
+					right={
+						<HintSelect
 						data={geminiThinkingBudgetOptions}
 						value={
 							settings?.gemini_thinking_budget == null
@@ -692,52 +680,53 @@ export function ProvidersSettings() {
 								</div>
 							);
 						}}
-					/>
-				</div>
+						/>
+					}
+				/>
 			)}
 
 			{/* STT Timeout */}
-			<div className="settings-row">
-				<div style={{ flex: 1 }}>
-					<p className="settings-label">STT Timeout</p>
-					<p className="settings-description">
-						Increase if nothing is getting transcribed
-					</p>
-					<div
-						style={{
-							marginTop: 12,
-							display: "flex",
-							alignItems: "center",
-							gap: 12,
-						}}
-					>
-						<Slider
-							value={sliderValue}
-							onChange={setSliderValue}
-							onChangeEnd={handleSTTTimeoutChange}
-							min={5}
-							max={120}
-							step={5}
-							marks={[
-								{ value: 5, label: "5s" },
-								{ value: 30, label: "30s" },
-								{ value: 60, label: "60s" },
-								{ value: 120, label: "120s" },
-							]}
-							styles={{
-								root: { flex: 1 },
-								track: { backgroundColor: "var(--bg-elevated)" },
-								bar: { backgroundColor: "var(--accent-primary)" },
-								thumb: { borderColor: "var(--accent-primary)" },
-								markLabel: { color: "var(--text-secondary)", fontSize: 10 },
+			<SettingsRow
+				label="STT Timeout"
+				description="Increase if nothing is getting transcribed"
+				right={
+					<div style={{ minWidth: 320 }}>
+						<div
+							style={{
+								marginTop: 12,
+								display: "flex",
+								alignItems: "center",
+								gap: 12,
 							}}
-						/>
-						<Text size="xs" c="dimmed" style={{ minWidth: 32 }}>
-							{Math.round(sliderValue)}s
-						</Text>
+						>
+							<Slider
+								value={sliderValue}
+								onChange={setSliderValue}
+								onChangeEnd={handleSTTTimeoutChange}
+								min={5}
+								max={120}
+								step={5}
+								marks={[
+									{ value: 5, label: "5s" },
+									{ value: 30, label: "30s" },
+									{ value: 60, label: "60s" },
+									{ value: 120, label: "120s" },
+								]}
+								styles={{
+									root: { flex: 1 },
+									track: { backgroundColor: "var(--bg-elevated)" },
+									bar: { backgroundColor: "var(--accent-primary)" },
+									thumb: { borderColor: "var(--accent-primary)" },
+									markLabel: { color: "var(--text-secondary)", fontSize: 10 },
+								}}
+							/>
+							<Text size="xs" c="dimmed" style={{ minWidth: 32 }}>
+								{Math.round(sliderValue)}s
+							</Text>
+						</div>
 					</div>
-				</div>
-			</div>
+				}
+			/>
 		</>
 	);
 }
