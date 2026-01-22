@@ -7,8 +7,7 @@ use tauri::Manager;
 use tauri::{AppHandle, State};
 
 use crate::commands::{CommandError, CommandResult};
-#[cfg(desktop)]
-use tauri_plugin_store::StoreExt;
+use crate::settings::store::{get_settings_store, SettingsReadMode};
 
 fn history_error(message: impl Into<String>) -> CommandError {
     CommandError::new(message, "history")
@@ -18,9 +17,7 @@ pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
     #[cfg(desktop)]
     {
         let default: u64 = 1000;
-        let raw = app
-            .store("settings.json")
-            .ok()
+        let raw = get_settings_store(app, SettingsReadMode::Fresh)
             .and_then(|store| store.get("max_saved_recordings"))
             .and_then(|v| v.as_u64())
             .unwrap_or(default);
@@ -44,12 +41,7 @@ pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
 pub(crate) fn get_history_max_entries(app: &AppHandle) -> Option<usize> {
     #[cfg(desktop)]
     {
-        let store = app.store("settings.json").ok();
-
-        // Ensure we see the latest persisted settings (the store is cached across calls).
-        if let Some(s) = store.as_ref() {
-            let _ = s.reload();
-        }
+        let store = get_settings_store(app, SettingsReadMode::Fresh);
 
         let mode: String = store
             .as_ref()

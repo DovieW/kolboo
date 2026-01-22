@@ -12,6 +12,8 @@ pub mod doctor;
 pub mod migrations;
 #[path = "settings/patch.rs"]
 pub mod patch;
+#[path = "settings/store.rs"]
+pub mod store;
 
 // ============================================================================
 // Network / proxy settings (stored in settings.json)

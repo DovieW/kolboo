@@ -9,14 +9,15 @@ use std::path::Path;
 use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
+use crate::settings::store::{get_settings_store, SettingsReadMode};
+
+#[cfg(desktop)]
 fn get_setting_from_store<T: serde::de::DeserializeOwned>(
     app: &AppHandle,
     key: &str,
     default: T,
 ) -> T {
-    use tauri_plugin_store::StoreExt;
-    app.store("settings.json")
-        .ok()
+    get_settings_store(app, SettingsReadMode::Fresh)
         .and_then(|store| store.get(key))
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or(default)

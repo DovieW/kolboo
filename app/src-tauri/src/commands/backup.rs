@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(desktop)]
-use tauri_plugin_store::StoreExt;
+use crate::settings::store::{get_settings_store_or_err, SettingsReadMode};
 
 use crate::commands::{CommandError, CommandResult};
 use crate::events;
@@ -140,7 +140,7 @@ fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> Comm
         _ => return Err("Backup settings must be an object".to_string().into()),
     };
 
-    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    let store = get_settings_store_or_err(app, SettingsReadMode::Cached)?;
 
     for (k, v) in settings_obj {
         if should_exclude_setting_key_from_backup(k.as_str()) {

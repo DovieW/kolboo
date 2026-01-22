@@ -57,15 +57,6 @@ Legend:
   - Add explicit settings versioning + migrations.
   - Add a startup “settings doctor” command: validate + normalize.
 
-### Make store reads consistent (reload vs cached)
-
-- **Where:** some code reloads the store before reading (e.g., transcription retention), other reads use the cached store directly.
-- **Todo:**
-  - Introduce a single helper for settings reads that supports “fresh read” semantics.
-  - Audit commands that depend on immediately-updated values (retention settings, API key presence).
-
----
-
 ## P1 — UX & product improvements
 
 ### Make destructive actions safer and more transparent

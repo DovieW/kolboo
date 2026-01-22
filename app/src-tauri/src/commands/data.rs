@@ -15,7 +15,7 @@ use crate::request_log::RequestLogStore;
 use crate::stats::StatsStore;
 
 #[cfg(desktop)]
-use tauri_plugin_store::StoreExt;
+use crate::settings::store::{get_settings_store_or_err, SettingsReadMode};
 
 #[cfg(desktop)]
 use crate::secrets::API_KEY_SETTING_KEYS;
@@ -108,7 +108,7 @@ pub fn get_data_storage_summary(app: AppHandle) -> CommandResult<DataStorageSumm
     let settings_path = app_data_dir.join("settings.json");
     let settings_bytes = file_size_bytes(&settings_path);
 
-    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    let store = get_settings_store_or_err(&app, SettingsReadMode::Fresh)?;
     let mut api_keys_set_count: u64 = 0;
     let mut unique_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for key in API_KEY_SETTING_KEYS {

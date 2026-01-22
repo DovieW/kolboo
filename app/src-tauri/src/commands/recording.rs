@@ -20,8 +20,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::Instrument;
 
-#[cfg(desktop)]
-use tauri_plugin_store::StoreExt;
+use crate::settings::store::{get_settings_store, SettingsReadMode};
 
 #[derive(Debug, Clone, Copy)]
 enum TranscriptionRetentionUnit {
@@ -91,13 +90,7 @@ fn program_basename_for_log(path: &str) -> String {
 fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuration> {
     #[cfg(desktop)]
     {
-        let store = app.store("settings.json").ok();
-
-        // Ensure we see the latest persisted settings (the store is cached across calls).
-        // Best-effort: if load fails, continue with whatever is already in memory.
-        if let Some(s) = store.as_ref() {
-            let _ = s.reload();
-        }
+        let store = get_settings_store(app, SettingsReadMode::Fresh);
 
         // New keys: unit + value
         let unit = store
@@ -167,8 +160,7 @@ fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuratio
 fn get_transcription_retention_delete_recordings(app: &AppHandle) -> bool {
     #[cfg(desktop)]
     {
-        app.store("settings.json")
-            .ok()
+        get_settings_store(app, SettingsReadMode::Fresh)
             .and_then(|store| store.get("transcription_retention_delete_recordings"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
@@ -183,8 +175,7 @@ fn get_transcription_retention_delete_recordings(app: &AppHandle) -> bool {
 fn get_transcription_retention_days(app: &AppHandle) -> u64 {
     #[cfg(desktop)]
     {
-        app.store("settings.json")
-            .ok()
+        get_settings_store(app, SettingsReadMode::Fresh)
             .and_then(|store| store.get("transcription_retention_days"))
             .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
             .unwrap_or(0u64)
