@@ -32,12 +32,19 @@ Legend:
 
 ## P1 — Architecture & maintainability
 
-### Break up oversized files (“god modules”)
+### Continue splitting `app/src-tauri/src/lib.rs`
 
-- **Where:** `app/src/OverlayApp.tsx`, `app/src-tauri/src/lib.rs`
+- **Where:** `app/src-tauri/src/lib.rs`
+- **Current state:** event payload types + a couple of shared helpers are now in dedicated modules.
 - **Todo:**
-  - Split overlay into smaller components + a dedicated overlay state machine/hook.
-  - Split Rust `lib.rs` into focused modules (tray, shortcuts, window mgmt, pipeline session, retention, etc.).
+  - Move the giant `stop_recording` flow into its own module (keep a small wrapper/re-export in `lib.rs`).
+  - Split remaining responsibilities into focused modules (tray, shortcuts lifecycle, window mgmt, pipeline session, retention, etc.).
+
+### Overlay maintainability follow-ups
+
+- **Where:** `app/src/OverlayApp.tsx` and related overlay UI files
+- **Todo:**
+  - If/when the overlay grows again, extract a dedicated overlay state machine/hook and keep the entry component thin.
 
 ### Centralize settings schema + migrations
 

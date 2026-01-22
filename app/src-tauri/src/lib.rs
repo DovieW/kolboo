@@ -1,7 +1,6 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tracing::Instrument;
 
@@ -52,88 +51,15 @@ mod windows_apps;
 mod adapters;
 mod core;
 
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-pub struct SystemEvent {
-    pub timestamp: String,
-    pub event_type: String,
-    pub message: String,
-    pub details: Option<String>,
-}
+mod app_shared;
+mod event_payloads;
 
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-pub struct PipelineErrorPayload {
-    pub message: String,
-    pub request_id: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-pub struct OverlayAudioLevelPayload {
-    pub seq: u64,
-    pub rms: f32,
-    pub peak: f32,
-    pub wave_seq: Option<u64>,
-    pub mins: Option<Vec<f32>>,
-    pub maxes: Option<Vec<f32>>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-pub struct QuickAskStartedPayload {
-    pub question: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-pub struct QuickAskAnswerOkPayload {
-    pub ok: bool,
-    pub answer: String,
-    pub provider_used: Option<String>,
-    pub model_used: Option<String>,
-    pub duration_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-pub struct QuickAskAnswerErrorPayload {
-    pub ok: bool,
-    pub error: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-#[serde(untagged)]
-pub enum QuickAskAnswerPayload {
-    Ok(QuickAskAnswerOkPayload),
-    Err(QuickAskAnswerErrorPayload),
-}
-
-#[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PipelineStateEvent {
-    Idle,
-    Recording,
-    Transcribing,
-    Routing,
-    Rewriting,
-    Error,
-}
-
-pub type PipelineTranscriptReadyPayload = String;
-pub type EmptyEventPayload = ();
-pub type SettingsChangedPayload = std::collections::BTreeMap<String, serde_json::Value>;
-
-#[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionStateEvent {
-    Disconnected,
-    Connecting,
-    Idle,
-    Recording,
-    Processing,
-}
-
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
-pub struct ConnectionStateChangedPayload {
-    pub state: ConnectionStateEvent,
-}
+pub use event_payloads::{
+    ConnectionStateChangedPayload, ConnectionStateEvent, EmptyEventPayload,
+    OverlayAudioLevelPayload, PipelineErrorPayload, PipelineStateEvent,
+    PipelineTranscriptReadyPayload, QuickAskAnswerErrorPayload, QuickAskAnswerOkPayload,
+    QuickAskAnswerPayload, QuickAskStartedPayload, SettingsChangedPayload, SystemEvent,
+};
 
 pub use audio_capture::AudioCaptureDiagnostics;
 pub use audio_capture::AudioLevelStats;
@@ -197,7 +123,9 @@ pub(crate) use shortcuts::{
 };
 
 #[cfg(desktop)]
-use tauri_plugin_store::StoreExt;
+pub(crate) use app_shared::{emit_system_event, get_setting_from_store};
+
+pub(crate) use app_shared::sanitize_transcript;
 
 // Define NSPanel type for overlay on macOS
 #[cfg(target_os = "macos")]
@@ -208,50 +136,6 @@ tauri_nspanel::tauri_panel! {
             is_floating_panel: true
         }
     })
-}
-
-/// Helper to read a setting from the store with a default fallback
-#[cfg(desktop)]
-pub(crate) fn get_setting_from_store<T: serde::de::DeserializeOwned>(
-    app: &AppHandle,
-    key: &str,
-    default: T,
-) -> T {
-    app.store("settings.json")
-        .ok()
-        .and_then(|store| store.get(key))
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or(default)
-}
-/// Emit a system event to the frontend for debugging
-#[cfg(desktop)]
-pub(crate) fn emit_system_event(
-    app: &AppHandle,
-    event_type: &str,
-    message: &str,
-    details: Option<&str>,
-) {
-    let event = SystemEvent {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        event_type: event_type.to_string(),
-        message: message.to_string(),
-        details: details.map(|s| s.to_string()),
-    };
-
-    let _ = app.emit(events::EVENT_SYSTEM_EVENT, event);
-}
-
-/// Normalize transcript text for output.
-///
-/// We intentionally keep this conservative: the pipeline now performs a
-/// quiet-audio gate before STT to avoid "silent audio" hallucinations.
-pub(crate) fn sanitize_transcript(transcript: &str) -> Option<String> {
-    let trimmed = transcript.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
 }
 
 /// Stop recording with sound and audio unmute handling
@@ -334,13 +218,13 @@ pub(crate) fn stop_recording(
     // IMPORTANT: We only apply these when we have a real matched program profile id.
     // The explicit "default" marker is for UI/log semantics and should not change runtime behavior.
     let (output_mode, output_hit_enter) = {
-        let (mut profile_output_mode, mut profile_output_hit_enter) = (None, None);
+        let (mut profile_output_mode, mut profile_output_hit_enter) = (None::<String>, None);
         if let Some(pid) = session_profile_id.as_deref() {
             if pid != "default" {
                 let profiles: Vec<crate::settings::RewriteProgramPromptProfile> =
                     get_setting_from_store(app, "rewrite_program_prompt_profiles", Vec::new());
                 if let Some(p) = profiles.iter().find(|p| p.id == pid) {
-                    profile_output_mode = p.output_mode.as_deref();
+                    profile_output_mode = p.output_mode.clone();
                     profile_output_hit_enter = p.output_hit_enter;
                 }
             }
@@ -349,7 +233,7 @@ pub(crate) fn stop_recording(
         crate::core::output_settings::resolve_effective_output_settings(
             output_mode,
             output_hit_enter,
-            profile_output_mode,
+            profile_output_mode.as_deref(),
             profile_output_hit_enter,
         )
     };
