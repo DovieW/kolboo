@@ -8,6 +8,31 @@ use crate::events;
 use crate::pipeline;
 use crate::{get_setting_from_store, OverlayAudioLevelPayload};
 
+fn overlay_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    app: &'a M,
+    label: &str,
+    html_path: &str,
+    title: &str,
+    (width, height): (f64, f64),
+    visible: bool,
+) -> tauri::webview::WebviewWindowBuilder<'a, R, M> {
+    tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(html_path.into()))
+        .title(title)
+        .inner_size(width, height)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .focusable(false)
+        .accept_first_mouse(true)
+        .visible(visible)
+        .visible_on_all_workspaces(true)
+        .background_throttling(BackgroundThrottlingPolicy::Disabled)
+}
+
 /// Backend-driven overlay waveform publisher.
 ///
 /// This avoids browser getUserMedia startup latency and stays aligned with the
@@ -112,72 +137,39 @@ pub(crate) fn spawn_overlay_waveform_publisher(app: &AppHandle) {
 /// Create overlay, hover, and quick-ask windows, and apply startup positioning/visibility.
 pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // Create overlay window
-    let overlay = tauri::WebviewWindowBuilder::new(
+    let overlay = overlay_window_builder(
         app,
         "overlay",
-        tauri::WebviewUrl::App("overlay.html".into()),
+        "overlay.html",
+        "Kolboo Overlay",
+        (48.0, 48.0),
+        true,
     )
-    .title("Kolboo Overlay")
-    .inner_size(48.0, 48.0)
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .focused(false)
-    .focusable(false)
-    .accept_first_mouse(true)
-    .visible(true)
-    .visible_on_all_workspaces(true)
-    .background_throttling(BackgroundThrottlingPolicy::Disabled)
     .build()?;
 
     // Create hover panel window (hidden by default).
     // This avoids resizing the main overlay window on hover, which can cause
     // cursor flicker and position drift on Windows.
-    let _overlay_hover = tauri::WebviewWindowBuilder::new(
+    let _overlay_hover = overlay_window_builder(
         app,
         "overlay_hover",
-        tauri::WebviewUrl::App("overlay-hover.html".into()),
+        "overlay-hover.html",
+        "Kolboo Presets",
+        (320.0, 220.0),
+        false,
     )
-    .title("Kolboo Presets")
-    .inner_size(320.0, 220.0)
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .focused(false)
-    .focusable(false)
-    .accept_first_mouse(true)
-    .visible(false)
-    .visible_on_all_workspaces(true)
-    .background_throttling(BackgroundThrottlingPolicy::Disabled)
     .build()?;
 
     // Create Quick Ask answer window (hidden by default).
     // This is a separate transparent webview that renders an answer + copy button.
-    let _quick_ask = tauri::WebviewWindowBuilder::new(
+    let _quick_ask = overlay_window_builder(
         app,
         "quick_ask",
-        tauri::WebviewUrl::App("quick-ask.html".into()),
+        "quick-ask.html",
+        "Kolboo Quick Ask",
+        (520.0, 340.0),
+        false,
     )
-    .title("Kolboo Quick Ask")
-    .inner_size(520.0, 340.0)
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .focused(false)
-    .focusable(false)
-    .accept_first_mouse(true)
-    .visible(false)
-    .visible_on_all_workspaces(true)
-    .background_throttling(BackgroundThrottlingPolicy::Disabled)
     .build()?;
 
     // On macOS, convert to NSPanel for better fullscreen app behavior
