@@ -31,15 +31,6 @@ Legend:
 
 ### Unify overlay pipeline state sources (hotkey + events + polling)
 
-- **Where:** `app/src/OverlayApp.tsx`
-- **Problem:** `pipelineState` is set via 3 channels:
-  - interval polling (`pipeline_get_state`)
-  - hotkey events (`recording-start` / `recording-stop`)
-  - pipeline events (`pipeline-*`)
-- **Current state:** overlay now routes pipeline state + animation state through a small reducer, and treats polling as a backstop with a short suppression window after event/hotkey/UI updates (reduces flicker/races).
-- **Todo (optional follow-up):**
-  - Extract the reducer into a dedicated hook (`useOverlayUiReducer`) and add a transition table comment/tests for tricky cases.
-
 ### Improve stats aggregation performance
 
 - **Where:** `app/src-tauri/src/commands/stats.rs`
@@ -105,7 +96,6 @@ Legend:
 
 - **Where:** `app/src-tauri/src/commands/text.rs`
 - **Todo:**
-  - Expose “hit enter” option in UI (backend supports it).
   - Add per-program output-mode overrides (e.g., clipboard-only for terminals).
 
 ---
@@ -115,19 +105,6 @@ Legend:
 ---
 
 ## P2 — Tooling, CI/CD, and repo hygiene
-
-### Turn CI tests back on and broaden the matrix
-
-- **Where:** `.github/workflows/windows-build.yml` has a disabled test job (`if: ${{ false }}`).
-- **Todo:**
-  - Re-enable tests for PRs/tags.
-  - Add macOS + Linux workflows for build/test parity.
-
-### Add lightweight PR checks
-
-- **Todo:**
-  - Run TypeScript typecheck and Rust unit tests.
-  - Keep full release bundling on tags only.
 
 ---
 
