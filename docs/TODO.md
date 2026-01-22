@@ -10,15 +10,6 @@ Legend:
 
 ## P1 — Security & privacy hardening
 
-### Consider tightening CSP directives further
-
-- **Where:** `app/src-tauri/tauri.conf.json`, release guardrail in `app/src-tauri/build.rs`
-- **Current state:** CSP is enabled; `build.rs` fails release builds if `security.csp` is missing/empty.
-- **Todo:**
-  - Review whether any directives can be tightened further (e.g. reduce `connect-src` surface) without breaking Tauri/Vite.
-
----
-
 ## P1 — Performance & responsiveness
 
 ### Move audio processing off the realtime callback
