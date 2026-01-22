@@ -154,8 +154,3 @@ Legend:
 
 ## Provider-specific enhancements
 
-### Improve provider error mapping
-
-- **Todo:**
-  - Map common HTTP/auth/rate-limit errors into actionable UI messages.
-  - Ensure request logs include sanitized error payloads for debugging.

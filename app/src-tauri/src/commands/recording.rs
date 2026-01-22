@@ -242,10 +242,76 @@ pub(crate) fn emit_pipeline_recording_started<S: EventSink>(sink: &S) {
 
 impl From<PipelineError> for CommandError {
     fn from(err: PipelineError) -> Self {
+        use crate::llm::LlmError;
+        use crate::stt::SttError;
+
+        fn looks_like_auth_error(s: &str) -> bool {
+            let lower = s.to_lowercase();
+            lower.contains("401")
+                || lower.contains("403")
+                || lower.contains("unauthorized")
+                || lower.contains("forbidden")
+                || lower.contains("invalid api key")
+                || lower.contains("invalid_api_key")
+        }
+
+        fn looks_like_rate_limit(s: &str) -> bool {
+            let lower = s.to_lowercase();
+            lower.contains("429")
+                || lower.contains("rate limit")
+                || lower.contains("rate_limit")
+                || lower.contains("too many requests")
+        }
+
         let (error_type, code, retryable) = match &err {
             PipelineError::AudioCapture(_) => ("audio", "audio_capture", true),
-            PipelineError::Stt(_) => ("stt", "stt_error", true),
-            PipelineError::Llm(_) => ("llm", "llm_error", true),
+
+            PipelineError::Stt(e) => match e {
+                SttError::Timeout => ("stt", "stt_timeout", true),
+                SttError::Network(re) => {
+                    if re.is_timeout() {
+                        ("stt", "stt_timeout", true)
+                    } else {
+                        ("stt", "stt_network", true)
+                    }
+                }
+                SttError::NetworkMessage(_) => ("stt", "stt_network", true),
+                SttError::Config(_) => ("stt", "stt_config", false),
+                SttError::Audio(_) => ("stt", "stt_audio", false),
+                SttError::Api(msg) => {
+                    if looks_like_auth_error(msg) {
+                        ("stt", "stt_auth", false)
+                    } else if looks_like_rate_limit(msg) {
+                        ("stt", "stt_rate_limited", true)
+                    } else {
+                        ("stt", "stt_api", true)
+                    }
+                }
+            },
+
+            PipelineError::Llm(e) => match e {
+                LlmError::Timeout(_) => ("llm", "llm_timeout", true),
+                LlmError::Network(re) => {
+                    if re.is_timeout() {
+                        ("llm", "llm_timeout", true)
+                    } else {
+                        ("llm", "llm_network", true)
+                    }
+                }
+                LlmError::NoApiKey(_) => ("llm", "llm_no_api_key", false),
+                LlmError::ProviderNotAvailable(_) => ("llm", "llm_provider_unavailable", false),
+                LlmError::InvalidResponse(_) => ("llm", "llm_invalid_response", false),
+                LlmError::Api(msg) => {
+                    if looks_like_auth_error(msg) {
+                        ("llm", "llm_auth", false)
+                    } else if looks_like_rate_limit(msg) {
+                        ("llm", "llm_rate_limited", true)
+                    } else {
+                        ("llm", "llm_api", true)
+                    }
+                }
+            },
+
             PipelineError::NoProvider => ("config", "no_provider", false),
             PipelineError::AlreadyRecording => ("state", "already_recording", false),
             PipelineError::NotRecording => ("state", "not_recording", false),

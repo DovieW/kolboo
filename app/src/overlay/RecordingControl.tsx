@@ -36,6 +36,7 @@ import { useOverlayHoverGating } from "./useOverlayHoverGating";
 
 type CommandErrorExtract = {
 	message: string;
+	errorType: string | null;
 	details: string | null;
 	code: string | null;
 	retryable: boolean | null;
@@ -46,6 +47,7 @@ function extractCommandError(error: unknown): CommandErrorExtract {
 	if (!error || typeof error !== "object") {
 		return {
 			message: String(error),
+			errorType: null,
 			details: null,
 			code: null,
 			retryable: null,
@@ -56,6 +58,8 @@ function extractCommandError(error: unknown): CommandErrorExtract {
 	const payload = error as CommandErrorPayload;
 	const message =
 		typeof payload.message === "string" ? payload.message : String(error);
+	const errorType =
+		typeof payload.error_type === "string" ? payload.error_type : null;
 	const details = typeof payload.details === "string" ? payload.details : null;
 	const code = typeof payload.code === "string" ? payload.code : null;
 	const retryable =
@@ -65,6 +69,7 @@ function extractCommandError(error: unknown): CommandErrorExtract {
 
 	return {
 		message,
+		errorType,
 		details,
 		code,
 		retryable,
@@ -76,11 +81,54 @@ function extractCommandError(error: unknown): CommandErrorExtract {
  * Parse error message to user-friendly format
  */
 function parseErrorMessage(
-	message: string,
-	retryable: boolean | null,
+	inputs: {
+		message: string;
+		retryable: boolean | null;
+		errorType: string | null;
+		code: string | null;
+		details: string | null;
+	},
 ): ErrorInfo {
-	const errorStr = message;
-	const recoverable = retryable ?? true;
+	const errorStr = inputs.message;
+	const recoverable = inputs.retryable ?? true;
+	const code = inputs.code;
+
+	// Prefer structured codes from the backend.
+	switch (code) {
+		case "no_provider":
+			return { message: "No STT provider configured", recoverable: false };
+		case "already_recording":
+			return { message: "Already recording", recoverable: false };
+		case "not_recording":
+			return { message: "Not recording", recoverable: false };
+		case "recording_too_large":
+			return { message: "Recording too long", recoverable: false };
+		case "cancelled":
+			return { message: "Cancelled", recoverable: false };
+
+		case "audio_capture":
+			return { message: "Audio capture error", recoverable };
+
+		case "stt_timeout":
+		case "llm_timeout":
+		case "timeout":
+			return { message: "Timed out", recoverable };
+		case "stt_network":
+		case "llm_network":
+			return { message: "Network error", recoverable };
+		case "stt_rate_limited":
+		case "llm_rate_limited":
+			return { message: "Rate limited", recoverable };
+		case "stt_auth":
+		case "llm_auth":
+			return { message: "API key/auth error", recoverable: false };
+		case "llm_no_api_key":
+			return { message: "Missing API key", recoverable: false };
+		case "llm_provider_unavailable":
+			return { message: "Provider unavailable", recoverable: false };
+		case "llm_invalid_response":
+			return { message: "Bad response from provider", recoverable };
+	}
 
 	// Missing persisted audio (retry can't run)
 	if (
@@ -861,7 +909,13 @@ export default function RecordingControl() {
 		} catch (error) {
 			console.error("[Pipeline] Failed to start recording:", error);
 			const payload = extractCommandError(error);
-			const errorInfo = parseErrorMessage(payload.message, payload.retryable);
+			const errorInfo = parseErrorMessage({
+				message: payload.message,
+				retryable: payload.retryable,
+				errorType: payload.errorType,
+				code: payload.code,
+				details: payload.details,
+			});
 			const detail = payload.details ?? payload.code ?? null;
 			setError(errorInfo, detail, payload.requestId);
 			setPipelineState("ui", "error");
@@ -901,10 +955,13 @@ export default function RecordingControl() {
 				} catch (error) {
 					console.error("[Pipeline] Failed to type text:", error);
 					const payload = extractCommandError(error);
-					const errorInfo = parseErrorMessage(
-						payload.message,
-						payload.retryable,
-					);
+					const errorInfo = parseErrorMessage({
+						message: payload.message,
+						retryable: payload.retryable,
+						errorType: payload.errorType,
+						code: payload.code,
+						details: payload.details,
+					});
 					const detail = payload.details ?? payload.code ?? null;
 					setError(errorInfo, detail, payload.requestId);
 				}
@@ -919,7 +976,13 @@ export default function RecordingControl() {
 
 			// Show error to user
 			const payload = extractCommandError(error);
-			const errorInfo = parseErrorMessage(payload.message, payload.retryable);
+			const errorInfo = parseErrorMessage({
+				message: payload.message,
+				retryable: payload.retryable,
+				errorType: payload.errorType,
+				code: payload.code,
+				details: payload.details,
+			});
 			const detail = payload.details ?? payload.code ?? null;
 			setError(errorInfo, detail, payload.requestId);
 		}
@@ -963,10 +1026,13 @@ export default function RecordingControl() {
 				} catch (error) {
 					console.error("[Pipeline] Failed to type retry transcript:", error);
 					const payload = extractCommandError(error);
-					const errorInfo = parseErrorMessage(
-						payload.message,
-						payload.retryable,
-					);
+					const errorInfo = parseErrorMessage({
+						message: payload.message,
+						retryable: payload.retryable,
+						errorType: payload.errorType,
+						code: payload.code,
+						details: payload.details,
+					});
 					const detail = payload.details ?? payload.code ?? null;
 					setError(errorInfo, detail, payload.requestId);
 				}
@@ -979,7 +1045,13 @@ export default function RecordingControl() {
 			console.error("[Pipeline] Retry failed:", error);
 			setPipelineState("ui", "error");
 			const payload = extractCommandError(error);
-			const errorInfo = parseErrorMessage(payload.message, payload.retryable);
+			const errorInfo = parseErrorMessage({
+				message: payload.message,
+				retryable: payload.retryable,
+				errorType: payload.errorType,
+				code: payload.code,
+				details: payload.details,
+			});
 			const detail = payload.details ?? payload.code ?? null;
 			setError(errorInfo, detail, payload.requestId);
 		}
@@ -1072,10 +1144,13 @@ export default function RecordingControl() {
 					setPipelineState("event", "error");
 
 					const errorPayload = extractCommandError(payload);
-					const errorInfo = parseErrorMessage(
-						errorPayload.message,
-						errorPayload.retryable,
-					);
+					const errorInfo = parseErrorMessage({
+						message: errorPayload.message,
+						retryable: errorPayload.retryable,
+						errorType: errorPayload.errorType,
+						code: errorPayload.code,
+						details: errorPayload.details,
+					});
 					const detail = errorPayload.details ?? errorPayload.code ?? null;
 					setError(errorInfo, detail, errorPayload.requestId);
 				}),
