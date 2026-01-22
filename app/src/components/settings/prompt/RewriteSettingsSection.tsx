@@ -2,6 +2,7 @@ import { Select, Switch, Text } from "@mantine/core";
 import type { ModelOption } from "../../../lib/modelOptions";
 import type { AppSettings } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
+import { HintSelectWithDefaultHint } from "../../HintSelectWithDefaultHint";
 import { SettingsInheritanceIndicator } from "../SettingsInheritance";
 import { SettingsRow } from "../SettingsRow";
 
@@ -300,7 +301,7 @@ export function RewriteSettingsSection({
 								inheritTooltip={inheritTooltip}
 								onDisableOverride={onDisableOpenAiThinkingOverride}
 							/>
-							<HintSelect
+							<HintSelectWithDefaultHint
 								data={openAiThinkingOptions}
 								value={
 									isDefaultScope
@@ -309,92 +310,23 @@ export function RewriteSettingsSection({
 								}
 								onChange={onOpenAiThinkingChange}
 								placeholder="Default"
+								defaultValue={SELECT_DEFAULT}
+								defaultHint={
+									isDefaultScope
+										? effectiveLlmModel
+											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+											: "medium"
+										: (settings?.openai_reasoning_effort ??
+											(effectiveLlmModel
+												? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+												: "medium"))
+								}
 								inputStyle={{
 									backgroundColor: "var(--bg-elevated)",
 									borderColor: "var(--border-default)",
 									color: "var(--text-primary)",
 									minWidth: 200,
 								}}
-								renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? effectiveLlmModel
-										? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-										: "medium"
-									: (settings?.openai_reasoning_effort ??
-										(effectiveLlmModel
-											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-											: "medium"));
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? effectiveLlmModel
-										? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-										: "medium"
-									: (settings?.openai_reasoning_effort ??
-										(effectiveLlmModel
-											? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-											: "medium"));
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
 							/>
 						</>
 					}
@@ -418,7 +350,7 @@ export function RewriteSettingsSection({
 								inheritTooltip={inheritTooltip}
 								onDisableOverride={onDisableGeminiThinkingLevelOverride}
 							/>
-							<HintSelect
+							<HintSelectWithDefaultHint
 								data={geminiThinkingLevelOptions}
 								value={
 									isDefaultScope
@@ -427,81 +359,18 @@ export function RewriteSettingsSection({
 								}
 								onChange={onGeminiThinkingLevelChange}
 								placeholder="Default"
+								defaultValue={SELECT_DEFAULT}
+								defaultHint={
+									isDefaultScope
+										? "high"
+										: (settings?.gemini_thinking_level ?? "high")
+								}
 								inputStyle={{
 									backgroundColor: "var(--bg-elevated)",
 									borderColor: "var(--border-default)",
 									color: "var(--text-primary)",
 									minWidth: 200,
 								}}
-								renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? "high"
-									: (settings?.gemini_thinking_level ?? "high");
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? "high"
-									: (settings?.gemini_thinking_level ?? "high");
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
 							/>
 						</>
 					}
@@ -521,7 +390,7 @@ export function RewriteSettingsSection({
 								inheritTooltip={inheritTooltip}
 								onDisableOverride={onDisableGeminiThinkingBudgetOverride}
 							/>
-							<HintSelect
+							<HintSelectWithDefaultHint
 								data={geminiThinkingBudgetOptions}
 								value={
 									isDefaultScope
@@ -532,94 +401,22 @@ export function RewriteSettingsSection({
 								}
 								onChange={onGeminiThinkingBudgetChange}
 								placeholder="Default"
+								defaultValue={SELECT_DEFAULT}
+								defaultHint={(() => {
+									const inherited = settings?.gemini_thinking_budget;
+									if (isDefaultScope) return "dynamic";
+
+									if (inherited == null) return "dynamic";
+									if (inherited === 0) return "off";
+									if (inherited === -1) return "dynamic";
+									return String(inherited);
+								})()}
 								inputStyle={{
 									backgroundColor: "var(--bg-elevated)",
 									borderColor: "var(--border-default)",
 									color: "var(--text-primary)",
 									minWidth: 200,
 								}}
-								renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-								if (option.value !== SELECT_DEFAULT)
-									return <Text size="sm">{option.label}</Text>;
-
-								const inherited = settings?.gemini_thinking_budget;
-								const hint = isDefaultScope
-									? "dynamic"
-									: inherited == null
-										? "dynamic"
-										: inherited === 0
-											? "off"
-											: inherited === -1
-												? "dynamic"
-												: String(inherited);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== SELECT_DEFAULT) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const inherited = settings?.gemini_thinking_budget;
-								const hint = isDefaultScope
-									? "dynamic"
-									: inherited == null
-										? "dynamic"
-										: inherited === 0
-											? "off"
-											: inherited === -1
-												? "dynamic"
-												: String(inherited);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
 							/>
 						</>
 					}

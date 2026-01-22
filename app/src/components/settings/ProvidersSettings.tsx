@@ -14,7 +14,7 @@ import {
 	useUpdateSTTTimeout,
 } from "../../lib/queries";
 import type { OpenAiReasoningEffort } from "../../lib/tauri";
-import { HintSelect } from "../HintSelect";
+import { HintSelectWithDefaultHint } from "../HintSelectWithDefaultHint";
 import { SettingsRow } from "./SettingsRow";
 
 // NOTE: This timeout is used by the Rust pipeline as a transcription request timeout.
@@ -424,79 +424,23 @@ export function ProvidersSettings() {
 					label="Thinking"
 					description="Set the reasoning effort for this model."
 					right={
-						<HintSelect
-						data={openAiThinkingOptions}
-						value={settings?.openai_reasoning_effort ?? SELECT_DEFAULT}
-						onChange={handleOpenAiReasoningEffortChange}
-						placeholder="Default"
-						inputStyle={{
-							backgroundColor: "var(--bg-elevated)",
-							borderColor: "var(--border-default)",
-							color: "var(--text-primary)",
-							minWidth: 200,
-						}}
-						renderSelected={({ option, placeholder }) => {
-							if (!option) {
-								return (
-									<Text size="sm" c="dimmed">
-										{placeholder}
-									</Text>
-								);
+						<HintSelectWithDefaultHint
+							data={openAiThinkingOptions}
+							value={settings?.openai_reasoning_effort ?? SELECT_DEFAULT}
+							onChange={handleOpenAiReasoningEffortChange}
+							placeholder="Default"
+							defaultValue={SELECT_DEFAULT}
+							defaultHint={
+								effectiveLlmModel
+									? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
+									: "medium"
 							}
-
-							if (option.value !== SELECT_DEFAULT) {
-								return <Text size="sm">{option.label}</Text>;
-							}
-
-							const hint = effectiveLlmModel
-								? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-								: "medium";
-
-							return (
-								<div
-									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-								>
-									<span style={{ fontSize: 14 }}>{option.label}</span>
-									<span
-										style={{
-											fontSize: 11,
-											color: "var(--text-muted)",
-											opacity: 0.9,
-											lineHeight: 1,
-										}}
-									>
-										· {hint}
-									</span>
-								</div>
-							);
-						}}
-						renderOption={({ option }) => {
-							if (option.value !== SELECT_DEFAULT) {
-								return <Text size="sm">{option.label}</Text>;
-							}
-
-							const hint = effectiveLlmModel
-								? openAiDefaultReasoningEffortForModel(effectiveLlmModel)
-								: "medium";
-
-							return (
-								<div
-									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-								>
-									<span style={{ fontSize: 14 }}>{option.label}</span>
-									<span
-										style={{
-											fontSize: 11,
-											color: "var(--text-muted)",
-											opacity: 0.9,
-											lineHeight: 1,
-										}}
-									>
-										· {hint}
-									</span>
-								</div>
-							);
-						}}
+							inputStyle={{
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 200,
+							}}
 						/>
 					}
 				/>
@@ -512,70 +456,19 @@ export function ProvidersSettings() {
 							: "Gemini 3 Flash supports minimal/low/medium/high (default high)."
 					}
 					right={
-						<HintSelect
-						data={geminiThinkingLevelOptions}
-						value={settings?.gemini_thinking_level ?? SELECT_DEFAULT}
-						onChange={handleGeminiThinkingLevelChange}
-						placeholder="Default"
-						inputStyle={{
-							backgroundColor: "var(--bg-elevated)",
-							borderColor: "var(--border-default)",
-							color: "var(--text-primary)",
-							minWidth: 200,
-						}}
-						renderSelected={({ option, placeholder }) => {
-							if (!option) {
-								return (
-									<Text size="sm" c="dimmed">
-										{placeholder}
-									</Text>
-								);
-							}
-							if (option.value !== SELECT_DEFAULT) {
-								return <Text size="sm">{option.label}</Text>;
-							}
-
-							return (
-								<div
-									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-								>
-									<span style={{ fontSize: 14 }}>{option.label}</span>
-									<span
-										style={{
-											fontSize: 11,
-											color: "var(--text-muted)",
-											opacity: 0.9,
-											lineHeight: 1,
-										}}
-									>
-										· high
-									</span>
-								</div>
-							);
-						}}
-						renderOption={({ option }) => {
-							if (option.value !== SELECT_DEFAULT) {
-								return <Text size="sm">{option.label}</Text>;
-							}
-
-							return (
-								<div
-									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-								>
-									<span style={{ fontSize: 14 }}>{option.label}</span>
-									<span
-										style={{
-											fontSize: 11,
-											color: "var(--text-muted)",
-											opacity: 0.9,
-											lineHeight: 1,
-										}}
-									>
-										· high
-									</span>
-								</div>
-							);
-						}}
+						<HintSelectWithDefaultHint
+							data={geminiThinkingLevelOptions}
+							value={settings?.gemini_thinking_level ?? SELECT_DEFAULT}
+							onChange={handleGeminiThinkingLevelChange}
+							placeholder="Default"
+							defaultValue={SELECT_DEFAULT}
+							defaultHint="high"
+							inputStyle={{
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 200,
+							}}
 						/>
 					}
 				/>
@@ -587,74 +480,23 @@ export function ProvidersSettings() {
 					label="Thinking Budget"
 					description="Token budget for Gemini 2.5 thinking."
 					right={
-						<HintSelect
-						data={geminiThinkingBudgetOptions}
-						value={
-							settings?.gemini_thinking_budget == null
-								? SELECT_DEFAULT
-								: String(settings.gemini_thinking_budget)
-						}
-						onChange={handleGeminiThinkingBudgetChange}
-						placeholder="Default"
-						inputStyle={{
-							backgroundColor: "var(--bg-elevated)",
-							borderColor: "var(--border-default)",
-							color: "var(--text-primary)",
-							minWidth: 200,
-						}}
-						renderSelected={({ option, placeholder }) => {
-							if (!option) {
-								return (
-									<Text size="sm" c="dimmed">
-										{placeholder}
-									</Text>
-								);
+						<HintSelectWithDefaultHint
+							data={geminiThinkingBudgetOptions}
+							value={
+								settings?.gemini_thinking_budget == null
+									? SELECT_DEFAULT
+									: String(settings.gemini_thinking_budget)
 							}
-							if (option.value !== SELECT_DEFAULT) {
-								return <Text size="sm">{option.label}</Text>;
-							}
-
-							return (
-								<div
-									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-								>
-									<span style={{ fontSize: 14 }}>{option.label}</span>
-									<span
-										style={{
-											fontSize: 11,
-											color: "var(--text-muted)",
-											opacity: 0.9,
-											lineHeight: 1,
-										}}
-									>
-										· dynamic
-									</span>
-								</div>
-							);
-						}}
-						renderOption={({ option }) => {
-							if (option.value !== SELECT_DEFAULT) {
-								return <Text size="sm">{option.label}</Text>;
-							}
-
-							return (
-								<div
-									style={{ display: "flex", alignItems: "baseline", gap: 8 }}
-								>
-									<span style={{ fontSize: 14 }}>{option.label}</span>
-									<span
-										style={{
-											fontSize: 11,
-											color: "var(--text-muted)",
-											opacity: 0.9,
-											lineHeight: 1,
-										}}
-									>
-										· dynamic
-									</span>
-								</div>
-							);
-						}}
+							onChange={handleGeminiThinkingBudgetChange}
+							placeholder="Default"
+							defaultValue={SELECT_DEFAULT}
+							defaultHint="dynamic"
+							inputStyle={{
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 200,
+							}}
 						/>
 					}
 				/>

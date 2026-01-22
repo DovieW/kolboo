@@ -87,36 +87,6 @@ From `app/src-tauri/src/llm/groq.rs` (approx lines ~80-170):
 
 ---
 
-### 3) Embeddings providers: identical OpenAI-compatible embeddings request/parse
-
-**What it does:** POST JSON `{ model, input }` to `/embeddings`, parse OpenAI-style error response, parse embeddings response, return first embedding vector; also has “debug” mode building redacted request/response JSON.
-
-**Where (evidence):**
-
-- `app/src-tauri/src/embeddings/openai.rs` (see `embed_text_with_url` + `embed_text_with_debug`)
-- `app/src-tauri/src/embeddings/fireworks.rs` (nearly identical functions and flow)
-
-**Representative snippet:**
-
-Both files contain the same pattern:
-
-> `.post(url).bearer_auth(api_key).json({model,input}).send()` → `!status.is_success()` parse error → parse `EmbeddingsResponse` → return first `.embedding` → validate non-empty
-
-**How many times it appears:** at least **2** (OpenAI + Fireworks), and it’s the kind of logic that will likely grow as more OpenAI-compatible embedding providers are added.
-
-**Recommendation:** Extract shared code into a single “OpenAI-compatible embeddings” helper.
-
-- Proposed module: `app/src-tauri/src/embeddings/openai_compat.rs`
-- Suggested split:
-	- one shared “happy path” parser + request builder
-	- provider modules only define base URL + error type wrapper
-
-**Risks / gotchas:**
-
-- Error response types differ slightly (`OpenAiErrorResponse` vs `OpenAiCompatErrorResponse`). Consider normalizing the parsed shape in the shared helper, or parse into `serde_json::Value` and pull `error.message` defensively.
-
----
-
 ### 4) Windows key chord injection logic repeated (clipboard/paste + selection probe)
 
 **What it does:** On Windows, inject key chords using Enigo with scancodes, delays, and a “always release modifiers” safety pattern.
@@ -142,36 +112,6 @@ From `selection_probe.rs` (approx lines ~190-280):
 **Risks / gotchas:**
 
 - Key injection is finicky; keep the helper tiny and well-commented, and don’t change timings in the process.
-
----
-
-### 5) UI settings: repeated HintSelect “Default + hint” rendering blocks
-
-**What it does:** Render a select where “Default” shows a secondary hint (effective value), and non-default shows just the option label.
-
-**Where (evidence):**
-
-- `app/src/components/settings/ProvidersSettings.tsx` (OpenAI thinking, Gemini thinking level, Gemini thinking budget)
-- `app/src/components/settings/prompt/RewriteSettingsSection.tsx` (same patterns, plus inheritance handling)
-
-**Representative snippet:**
-
-Both files contain very similar `renderSelected` / `renderOption` blocks:
-
-> if option is Default → show `option.label` plus `· {hint}`; else show label only
-
-**How many times it appears:** at least **5+** occurrences across these settings screens.
-
-**Recommendation:** Extract a small reusable component or helper.
-
-- Proposed component: `HintSelectWithDefaultHint`
-- Suggested props:
-	- `data`, `value`, `onChange`, `placeholder`, `defaultHint: string`, plus styling props
-- For the rewrite/profile case, add optional `inheritIndicator` slot rather than duplicating the `SettingsInheritanceIndicator` wrapping.
-
-**Risks / gotchas:**
-
-- Be careful not to over-generalize; keep it focused on the “Default-with-hint” rendering only.
 
 ---
 
@@ -227,13 +167,6 @@ Both files contain very similar `renderSelected` / `renderOption` blocks:
 **How many times it appears:** many occurrences, but mostly in tests.
 
 **Recommendation:** Optional. Only refactor test duplication if it improves readability without making the tests “too clever”.
-
----
-
-## Quick-win checklist (lowest-risk refactors first)
-
-1. **Extract OpenAI-compatible embeddings helper** (OpenAI + Fireworks).
-2. **Extract a tiny UI helper/component** for “Default-with-hint” select rendering.
 
 ## “Do not refactor” list (duplication that’s OK / risky)
 

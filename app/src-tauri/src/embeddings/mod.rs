@@ -6,6 +6,8 @@ pub mod cohere;
 pub mod fireworks;
 pub mod openai;
 
+mod openai_compat;
+
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
