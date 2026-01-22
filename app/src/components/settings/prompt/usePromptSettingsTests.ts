@@ -1,4 +1,10 @@
-import { type Dispatch, type SetStateAction, useRef, useState } from "react";
+import {
+	type Dispatch,
+	type MutableRefObject,
+	type SetStateAction,
+	useRef,
+	useState,
+} from "react";
 
 type Mutation<TArgs, TResult> = {
 	mutate: (
@@ -56,6 +62,17 @@ export function usePromptSettingsTests({
 	testRewriteWithPrompt,
 	testSttLastAudio,
 }: UsePromptSettingsTestsOptions): PromptSettingsTestsState {
+	const finishTimer = (
+		startRef: MutableRefObject<number | null>,
+		setDurationMs: Dispatch<SetStateAction<number | null>>,
+	) => {
+		const startedAt = startRef.current;
+		startRef.current = null;
+		if (typeof startedAt === "number") {
+			setDurationMs(performance.now() - startedAt);
+		}
+	};
+
 	const [rewriteTestInput, setRewriteTestInput] = useState<string>("");
 	const [rewriteTestOutput, setRewriteTestOutput] = useState<string>("");
 	const [rewriteTestError, setRewriteTestError] = useState<string>("");
@@ -79,19 +96,11 @@ export function usePromptSettingsTests({
 				},
 				{
 					onSuccess: (res) => {
-						const startedAt = rewriteTestStartRef.current;
-						rewriteTestStartRef.current = null;
-						if (typeof startedAt === "number") {
-							setRewriteTestDurationMs(performance.now() - startedAt);
-						}
+						finishTimer(rewriteTestStartRef, setRewriteTestDurationMs);
 						setRewriteTestOutput(res.output);
 					},
 					onError: (err) => {
-						const startedAt = rewriteTestStartRef.current;
-						rewriteTestStartRef.current = null;
-						if (typeof startedAt === "number") {
-							setRewriteTestDurationMs(performance.now() - startedAt);
-						}
+						finishTimer(rewriteTestStartRef, setRewriteTestDurationMs);
 						setRewriteTestError(errorToMessage(err));
 					},
 				},
@@ -106,19 +115,11 @@ export function usePromptSettingsTests({
 			},
 			{
 				onSuccess: (res) => {
-					const startedAt = rewriteTestStartRef.current;
-					rewriteTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setRewriteTestDurationMs(performance.now() - startedAt);
-					}
+					finishTimer(rewriteTestStartRef, setRewriteTestDurationMs);
 					setRewriteTestOutput(res.output);
 				},
 				onError: (err) => {
-					const startedAt = rewriteTestStartRef.current;
-					rewriteTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setRewriteTestDurationMs(performance.now() - startedAt);
-					}
+					finishTimer(rewriteTestStartRef, setRewriteTestDurationMs);
 					setRewriteTestError(errorToMessage(err));
 				},
 			},
@@ -144,20 +145,12 @@ export function usePromptSettingsTests({
 			},
 			{
 				onSuccess: (res) => {
-					const startedAt = sttTestStartRef.current;
-					sttTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setSttTestDurationMs(performance.now() - startedAt);
-					}
+					finishTimer(sttTestStartRef, setSttTestDurationMs);
 
 					setSttTestOutput(res);
 				},
 				onError: (err) => {
-					const startedAt = sttTestStartRef.current;
-					sttTestStartRef.current = null;
-					if (typeof startedAt === "number") {
-						setSttTestDurationMs(performance.now() - startedAt);
-					}
+					finishTimer(sttTestStartRef, setSttTestDurationMs);
 
 					setSttTestError(errorToMessage(err));
 				},

@@ -14,7 +14,7 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 #[cfg(desktop)]
-use crate::settings::store::{get_settings_store, SettingsReadMode};
+use crate::settings::store::get_fresh_settings_store;
 
 #[cfg(desktop)]
 use keyring::Entry;
@@ -141,7 +141,7 @@ pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
 /// This is only for backward compatibility during migration.
 #[cfg(desktop)]
 fn get_legacy_api_key_from_store(app: &AppHandle, store_key: &str) -> Option<String> {
-    let raw = get_settings_store(app, SettingsReadMode::Fresh)?.get(store_key)?;
+    let raw = get_fresh_settings_store(app)?.get(store_key)?;
 
     // Store values are JSON; accept either string values or stringified JSON.
     if let Some(s) = raw.as_str() {
@@ -204,7 +204,7 @@ pub fn set_api_key(app: &AppHandle, store_key: &str, api_key: &str) -> Result<()
     entry.set_password(trimmed).map_err(|e| e.to_string())?;
 
     // Ensure plaintext keys are removed from the settings store.
-    if let Some(store) = get_settings_store(app, SettingsReadMode::Fresh) {
+    if let Some(store) = get_fresh_settings_store(app) {
         store.delete(store_key);
         let _ = store.save();
     }
@@ -224,7 +224,7 @@ pub fn clear_api_key(app: &AppHandle, store_key: &str) -> Result<(), String> {
     }
 
     // Also clear any legacy value that may remain.
-    if let Some(store) = get_settings_store(app, SettingsReadMode::Fresh) {
+    if let Some(store) = get_fresh_settings_store(app) {
         store.delete(store_key);
         let _ = store.save();
     }

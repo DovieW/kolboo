@@ -7,7 +7,7 @@ use tauri::Manager;
 use tauri::{AppHandle, State};
 
 use crate::commands::{CommandError, CommandResult};
-use crate::settings::store::{get_settings_store, store_get_u64_clamped, SettingsReadMode};
+use crate::settings::store::{get_fresh_settings_store, store_get_u64_clamped};
 
 fn history_error(message: impl Into<String>) -> CommandError {
     CommandError::new(message, "history")
@@ -17,7 +17,7 @@ pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
     #[cfg(desktop)]
     {
         let default: u64 = 1000;
-        let store = get_settings_store(app, SettingsReadMode::Fresh);
+        let store = get_fresh_settings_store(app);
         let raw = store
             .as_ref()
             .map(|s| store_get_u64_clamped(s, "max_saved_recordings", default, 1, 100_000))
@@ -40,7 +40,7 @@ pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
 pub(crate) fn get_history_max_entries(app: &AppHandle) -> Option<usize> {
     #[cfg(desktop)]
     {
-        let store = get_settings_store(app, SettingsReadMode::Fresh);
+        let store = get_fresh_settings_store(app);
 
         let mode: String = store
             .as_ref()

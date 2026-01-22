@@ -45,6 +45,12 @@ pub fn get_settings_store(app: &AppHandle, mode: SettingsReadMode) -> Option<Arc
     Some(store)
 }
 
+/// Convenience helper for the most common mode: best-effort fresh read.
+#[cfg(desktop)]
+pub fn get_fresh_settings_store(app: &AppHandle) -> Option<Arc<SettingsStore>> {
+    get_settings_store(app, SettingsReadMode::Fresh)
+}
+
 /// Same as `get_settings_store`, but returns a string error (handy for commands).
 #[cfg(desktop)]
 pub fn get_settings_store_or_err(
@@ -139,6 +145,11 @@ pub enum SettingsReadMode {
 
 #[cfg(not(desktop))]
 pub fn get_settings_store(_app: &tauri::AppHandle, _mode: SettingsReadMode) -> Option<()> {
+    None
+}
+
+#[cfg(not(desktop))]
+pub fn get_fresh_settings_store(_app: &tauri::AppHandle) -> Option<()> {
     None
 }
 
