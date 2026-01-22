@@ -12,17 +12,8 @@ import {
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatErrorMessage } from "../../lib/formatError";
 import { llmAPI } from "../../lib/tauri";
-
-function errorToMessage(err: unknown): string {
-	if (err instanceof Error) return err.message;
-	if (typeof err === "string") return err;
-	try {
-		return JSON.stringify(err);
-	} catch {
-		return String(err);
-	}
-}
 
 type OpenAiThinkingEffort = "none" | "low" | "medium" | "high";
 
@@ -612,7 +603,7 @@ export function RewritePromptLabModal(props: {
 									}`,
 								);
 							} catch (e) {
-								setImproveError(errorToMessage(e));
+								setImproveError(formatErrorMessage(e));
 							} finally {
 								setIsImproving(false);
 							}
@@ -644,7 +635,7 @@ export function RewritePromptLabModal(props: {
 									}`,
 								);
 							} catch (e) {
-								setTestError(errorToMessage(e));
+								setTestError(formatErrorMessage(e));
 							} finally {
 								setIsTesting(false);
 							}

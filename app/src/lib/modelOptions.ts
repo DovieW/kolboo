@@ -160,9 +160,15 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
 	ollama: [], // Ollama models are dynamic based on what's installed
 };
 
-export function listAllSttModelKeys(): Array<{ key: string; label: string }> {
+/**
+ * Build a flat list of `{key, label}` entries from a provider→models map.
+ * Each key is formatted as `provider::model.value`, label as `provider / model.label`.
+ */
+function listAllModelKeys(
+	modelsByProvider: Record<string, ModelOption[]>,
+): Array<{ key: string; label: string }> {
 	const options: Array<{ key: string; label: string }> = [];
-	for (const [provider, models] of Object.entries(STT_MODELS)) {
+	for (const [provider, models] of Object.entries(modelsByProvider)) {
 		for (const model of models) {
 			options.push({
 				key: `${provider}::${model.value}`,
@@ -174,16 +180,10 @@ export function listAllSttModelKeys(): Array<{ key: string; label: string }> {
 	return options;
 }
 
+export function listAllSttModelKeys(): Array<{ key: string; label: string }> {
+	return listAllModelKeys(STT_MODELS);
+}
+
 export function listAllLlmModelKeys(): Array<{ key: string; label: string }> {
-	const options: Array<{ key: string; label: string }> = [];
-	for (const [provider, models] of Object.entries(LLM_MODELS)) {
-		for (const model of models) {
-			options.push({
-				key: `${provider}::${model.value}`,
-				label: `${provider} / ${model.label}`,
-			});
-		}
-	}
-	options.sort((a, b) => a.label.localeCompare(b.label));
-	return options;
+	return listAllModelKeys(LLM_MODELS);
 }

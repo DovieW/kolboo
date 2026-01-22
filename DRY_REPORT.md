@@ -1,52 +1,239 @@
-# DRY_REPORT.md — Duplicate / Repeated Logic Report (Kolboo)
+# DRY_REPORT.md — DRY findings (Kolboo)
 
-This file is intentionally **a living report**, not a one-off “generated dump”.
+This is a practical “what should we extract?” report.
 
-If you (Dovie) want fresh numbers, run the scan described in `DRY_PLAN.md` and then paste the _few_ highest-signal findings here.
+Key note: **exact copy/paste in production code is fairly low** in this repo. The main DRY opportunities are “same structure, different provider/settings keys”.
 
-## What counts as a good DRY finding (for Kolboo)
+## Summary (where duplication clusters)
 
-We care about repeated logic that causes:
+Top duplication hotspots:
 
-- **bug drift** (“fix it in 3 places”)
-- **high-churn editing pain**
-- **subtle platform behavior** (especially overlay/window code)
+1. **Rust STT providers** (`app/src-tauri/src/stt/**`): repeated constructor + base URL + request-log plumbing.
+2. **Rust settings parsing**: repeated “read JSON from store → coerce type → clamp → default” patterns.
+3. **A few TS helper functions that are almost identical** (cost query wrappers).
 
-We do _not_ care about repetitive-but-clear UI markup or tests that intentionally mirror scenarios.
+## Ranked duplicate groups (top 8)
 
-## How to gather evidence
+Ranking criteria: (a) repeats, then (b) block size, then (c) proximity to core logic.
 
-Use Stage 1 in `DRY_PLAN.md` (jscpd token clone detection) to produce JSON under `docs/Refactors/.dry-scan/`.
+### 1) Rust STT provider constructor + config boilerplate (highest impact)
 
-When you add an entry below, include:
+**What it does:** each provider repeats the same scaffolding:
 
-- which files
-- why it’s risky / annoying
-- the smallest safe extraction you can imagine
+- store `reqwest::Client` + `api_key` + `model`
+- `new(...)` builds a client with timeout
+- `with_client(...)` for tests/overrides
+- `with_api_base_url(...)` + `api_base_url_trimmed()`
+- optional request logging store
 
-## High-signal candidates (starter checklist)
+**Evidence (examples):**
 
-These are areas that have historically been DRY-heavy in Kolboo:
+- `app/src-tauri/src/stt/openai.rs` [37:–80:]
+- `app/src-tauri/src/stt/deepgram.rs` [47:–75:]
+- `app/src-tauri/src/stt/assemblyai.rs` [67:–114:]
+- `app/src-tauri/src/stt/groq.rs` [31:–79:]
 
-- `app/src/lib/**` (settings + Tauri wrappers)
-- `app/src/components/settings/**` (form rows, tooltips, reset buttons)
-- `app/src/overlay/**` (consistency across windows/entries)
-- `app/src-tauri/src/**` (window builder chains; provider request builders)
+Representative snippet (OpenAI provider):
 
-## Findings
+```rust
+pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .expect("Failed to create HTTP client");
 
-Add entries in this format:
+    Self { /* client/api_key/model/base_url/request_log_store */ }
+}
+```
 
-### <short title>
+**Appears:** ~8–9 providers/files.
 
-- Files:
-  - `...`
-- Why it matters:
-- Suggested refactor:
-- Test plan:
+**Recommendation:**
 
-## “Do not DRY” reminders
+- Extract a small helper in a shared module, e.g. `stt/http.rs`:
+  - `fn default_http_client(timeout: Duration) -> reqwest::Client`
+  - `fn trim_base_url(base: &str) -> &str`
+- Optionally extract a reusable struct for common fields:
+  - `struct ProviderHttpContext { client, api_base_url, request_log_store }`
 
-- Generated files (`*.generated.*`)
-- Tests that mirror similar scenarios on purpose
-- Tiny UI snippets where extraction would hide intent
+**Variation points to parameterize:** default model, timeout, auth header format, default prompt semantics.
+
+**Risks:** low-to-medium. Refactor touches provider initialization; safest to do in small steps and keep the public constructors.
+
+---
+
+### 2) Repeated `reqwest::Client::builder()` setup (cross-provider)
+
+**What it does:** many modules build a client in the same way (timeout/build/expect or fallback).
+
+**Evidence:**
+
+- `app/src-tauri/src/stt/openai.rs` [37:–52:]
+- `app/src-tauri/src/stt/deepgram.rs` [47:–60:]
+- `app/src-tauri/src/stt/assemblyai.rs` [67:–82:]
+- `app/src-tauri/src/commands/backup.rs` [223:–229:] (`github_client()`)
+
+Snippet (backup GitHub client):
+
+```rust
+reqwest::Client::builder()
+    .user_agent("kolboo")
+    .build()
+    .unwrap_or_else(|_| reqwest::Client::new())
+```
+
+**Recommendation:** extract a single helper that centralizes timeouts + user-agent + TLS tweaks (if any). This reduces “fix it in 7 places” when HTTP behavior needs to change.
+
+**Risks:** low, as long as timeouts remain provider-specific.
+
+---
+
+### 3) Base URL trimming + endpoint URL builders repeated across providers
+
+**What it does:** repeated `api_base_url_trimmed()` + `format!("{}/vX/...", ...)` helpers.
+
+**Evidence (examples):**
+
+- `app/src-tauri/src/stt/openai.rs` [74:–90:] (`api_base_url_trimmed`, `transcriptions_url`, `responses_url`)
+- `app/src-tauri/src/stt/assemblyai.rs` [98:–125:] (`api_base_url_trimmed`, `upload_url`, `transcript_url`, ...)
+
+**Recommendation:** a tiny helper type, e.g.:
+
+- `struct ApiBaseUrl(String)`
+- `impl ApiBaseUrl { fn trimmed(&self) -> &str; fn join(&self, path: &str) -> String; }`
+
+**Risks:** low.
+
+---
+
+### 4) Rust settings parsing + defensive clamping patterns
+
+**What it does:** repeated “read value → coerce number/string → default → clamp(1..100_000)” logic.
+
+**Evidence:**
+
+- `app/src-tauri/src/commands/history.rs` [17:–33:] (`max_saved_recordings`)
+- `app/src-tauri/src/commands/history.rs` [52:–74:] (`transcription_retention_amount` parsing)
+- `app/src-tauri/src/lib.rs` [753:–763:] (clamp max saved recordings via `get_setting_from_store`)
+
+Representative snippet (history):
+
+```rust
+let raw = get_settings_store(app, SettingsReadMode::Fresh)
+    .and_then(|store| store.get("max_saved_recordings"))
+    .and_then(|v| v.as_u64())
+    .unwrap_or(default);
+
+(raw.clamp(1, 100_000)) as usize
+```
+
+**Recommendation:** create a small set of typed helpers in the settings store layer:
+
+- `get_u64(key) -> Option<u64>`
+- `get_u64_coerce(key) -> Option<u64>` (accept string/float)
+- `get_u64_clamped(key, default, min, max) -> u64`
+
+**Risks:** medium. Settings semantics are subtle (missing vs `null` vs invalid); helpers must preserve current behavior.
+
+---
+
+### 5) Path “basename for log” helper duplicated (Rust)
+
+**What it does:** trims quotes/whitespace and extracts the last path segment.
+
+**Evidence:**
+
+- `app/src-tauri/src/windows_apps.rs` [20:–24:] (`basename_for_log`)
+- `app/src-tauri/src/text/selection_probe.rs` [55:–59:] (`basename_for_log`)
+- `app/src-tauri/src/commands/recording.rs` [77:–90:] (`program_basename_for_log`)
+
+Representative snippet:
+
+```rust
+let trimmed = path.trim().trim_matches('"');
+trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed)
+```
+
+**Recommendation:** move to a shared utility module (e.g. `app_shared.rs` or `text/path_utils.rs`) and reuse.
+
+**Risks:** low.
+
+---
+
+### 6) Backend “system event” construction duplicated (Rust)
+
+**What it does:** constructs a `SystemEvent` with timestamp/type/message/details and emits it.
+
+**Evidence:**
+
+- `app/src-tauri/src/app_shared.rs` [17:–44:] has `emit_system_event(...)`
+- `app/src-tauri/src/commands/settings.rs` [33:–55:] constructs a `SystemEvent { ... }` manually
+
+**Recommendation:** replace manual constructions with the existing `emit_system_event` helper.
+
+**Risks:** low.
+
+---
+
+### 7) `settings-changed` event emission helper is inconsistent (Rust)
+
+**What it does:** some modules use a local helper, others emit directly.
+
+**Evidence:**
+
+- `app/src-tauri/src/commands/data.rs` [24:–27:] defines `emit_settings_changed(...)`
+- `app/src-tauri/src/commands/settings.rs` [447:–472:] emits directly in patch logic
+- `app/src-tauri/src/commands/backup.rs` [162:–163:] references `EVENT_SETTINGS_CHANGED`
+
+**Recommendation:** create one shared helper:
+
+- `fn emit_settings_changed(app: &AppHandle, payload: SettingsChangedPayload)`
+
+…and reuse it everywhere.
+
+**Risks:** low.
+
+---
+
+### 8) Cost query wrappers repeated (TS)
+
+There are two layers that repeat the same cost-filter normalization pattern:
+
+1) query-fn creation
+2) invoke wrapper layer
+
+**Evidence:**
+
+- `app/src/lib/queries/queryFns.ts` [124:–170:]
+- `app/src/lib/tauri/commands.ts` [63:–111:]
+
+Representative snippet (queryFns):
+
+```ts
+const normalized = normalizeCostFilters(filters);
+return {
+  normalized,
+  queryFn: () => deps.tauriAPI.getCostSummary({ timeframe, /* normalized fields */ }),
+};
+```
+
+**Recommendation:**
+
+- Extract a shared helper that builds the common param object once:
+  - `buildNormalizedCostParams(timeframe, filters)`
+- Or keep `normalizeCostFilters` and extract a `createCostQueryFn(kind)` factory.
+
+**Risks:** low.
+
+---
+
+## Quick-win refactor checklist (small, safe first)
+
+1. Extract a shared Rust `basename_for_log(path: &str) -> &str` helper and reuse it.
+2. Add a Rust helper for `emit_settings_changed(...)` and use it consistently.
+
+## “Do not refactor” list (duplication that’s OK)
+
+- The long list of explicit Tauri `invoke(...)` wrappers in `app/src/lib/tauri/commands.ts` is repetitive, but it also serves as a clear UI↔backend contract. DRY-ing it too much can hide argument shapes and make refactors harder.
+- Provider implementations often *look* similar but have important differences (timeouts, auth headers, endpoints, retries, error mapping). Prefer extracting only the truly shared pieces (client creation, base URL joining) rather than forcing full inheritance.
+- Test duplication is sometimes intentional and can keep scenarios readable.

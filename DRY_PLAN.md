@@ -1,101 +1,95 @@
-# DRY_PLAN.md — Plan to Detect and Triage DRY Violations (Kolboo)
+# DRY_PLAN.md — Simple DRY scan plan (Kolboo)
 
-Hi Dovie — this is the _repo-specific_ version of the DRY plan. It’s designed to be reproducible, so future “why is this duplicated?” investigations can be re-run.
+This repo already has a pretty good DRY posture. The goal of this plan is to find the *few* copy/paste (and “almost copy/paste”) areas that still create bug risk or slow edits.
 
-## Goals
+This plan is intentionally **simple and reproducible**:
 
-- Find **repeated logic** (not just repeated text).
-- Prioritize duplication that creates **bug risk** or **high-churn editing pain**.
-- Produce actionable outputs (that are actually reproducible in this repo today):
-  - a `jscpd` JSON report under `docs/Refactors/.dry-scan/`
-  - a short, human-readable write-up (update `DRY_REPORT.md`)
+- No embeddings
+- No AST parsing
+- No “smart similarity” tooling
 
-## Repo inventory (Stage 0)
+## 1) Repo prep (what I looked at)
 
-### Languages/frameworks
+### Main languages
 
-- UI: TypeScript + React + Vite (`app/src/**`)
-- Backend: Rust + Tauri (`app/src-tauri/src/**`)
+- Rust (`.rs`) — Tauri backend
+- TypeScript (`.ts`) / TSX (`.tsx`) — React/Vite frontend
 
-### High-signal areas (priority modules)
+### Top 5 largest source directories (application code)
 
-These are the areas where DRY wins are usually worth it in Kolboo:
+(Measured by file size, excluding build artifacts like `node_modules`, `target*`, `coverage`.)
 
-- `app/src/lib/**`
-  - Settings normalization, Tauri wrappers, shared utilities
-- `app/src/components/**`
-  - Settings screens contain repeated UI/validation logic
-- `app/src/overlay/**`
-  - Overlay behavior needs consistency across windows; drift is bug-prone
-- `app/src-tauri/src/**`
-  - Overlay window construction and payload emission
-  - Provider request construction (LLM/STT)
+1. `app/src/components/` (TSX UI)
+2. `app/src/lib/` (shared UI logic + Tauri wrapper layer)
+3. `app/src-tauri/src/commands/` (Tauri command layer)
+4. `app/src-tauri/src/pipeline/` (core pipeline state machine / glue)
+5. `app/src-tauri/src/stt/` (STT providers)
 
-### Ignore list (noise reduction)
+### Ignore list
+
+I ignored (or treated as “noise”) these areas:
 
 - `**/node_modules/**`
-- `**/dist/**`
-- `**/build/**`
-- `**/target/**`
+- `**/target/**`, `**/target-*/**`, `**/target-rust-analyzer/**`, `**/target-ci/**`
+- `**/dist/**`, `**/build/**`
 - `**/coverage/**`
-- `**/tmp/**`
 - `**/.git/**`
-- `**/*.generated.*` (generated TS/Rust and event/type outputs)
+- lockfiles
+- generated files like `**/*.generated.*`
+- minified blobs
 
-## Stage 1 — Fast duplicate signal (token/text)
+And I focused on **application code first** (tests were only checked when they helped explain a pattern).
 
-### Tooling
+## 2) Find duplicates (simple methods)
 
-- Use `jscpd` for token-based clone detection.
-- Start with **min 70 tokens** (works well for TS and Rust in this repo).
+I used two simple approaches:
 
-### How to run (reproducible)
+### A) Exact duplicate blocks (token/text clones)
 
-1. Generate jscpd report (writes into `docs/Refactors/.dry-scan/`):
+I ran `jscpd` (clone detector) over the app code and excluded tests to keep results high-signal.
 
-- `pnpm dlx jscpd --silent --min-tokens 70 --reporters json --output docs/Refactors/.dry-scan --ignore "**/node_modules/**,**/dist/**,**/build/**,**/target/**,**/coverage/**,**/tmp/**" app/src app/src-tauri/src`
+Notes:
 
-2. Optional: open the generated JSON and cherry-pick a handful of the highest-signal clusters into `DRY_REPORT.md`.
+- This is *not* an AST parser; it’s a straightforward clone detector.
+- In this repo it found only a handful of exact clones in non-test code, which is a good sign.
 
-## Stage 2 — Structure-aware similarity (optional, future)
+### B) “Almost duplicates” (manual grep + review)
 
-Because “same logic, different variable names” is common in TS UI code, a lightweight AST normalization pass for TypeScript _can_ help.
+Because the most important duplication here is often “same structure, different values” (especially provider code and settings parsing), I used simple searches to find repeated patterns:
 
-This is **not implemented in this repo yet**. If we add it later, the rough shape would be:
+- repeated constructor patterns (e.g., `reqwest::Client::builder()`)
+- repeated settings parsing / clamping patterns
+- repeated string/path formatting patterns
+- repeated event emission patterns
 
-- Parse TS/TSX files with the TypeScript compiler.
-- Normalize identifier/literal nodes to `<ID>`/`<LIT>`.
-- Compute fingerprints and a coarse SimHash for near-duplicates.
+## 3) Group and rank
 
-## Stage 3 — Semantic validation + DRY worthiness
+I grouped findings into “duplicate groups” and ranked by:
 
-For each high-impact cluster:
+1) number of repeats, then
+2) size of the repeated block, then
+3) closeness to core/business logic (pipeline/providers/settings)
 
-1. Confirm the behavior is actually the same (inputs/outputs/side effects).
-2. Identify variation points (constants, optional branches, UI labels, etc.).
-3. Score the refactor using this rubric:
+## 4) What I did NOT do
 
-| Dimension                           | Score   |
-| ----------------------------------- | ------- |
-| Frequency (occurrences)             | 0–5     |
-| Complexity (branches/length)        | 0–5     |
-| Churn risk (how often files change) | 0–5     |
-| Refactor safety (purity/tests)      | 0–5     |
-| Side-effect/coupling penalty        | 0 to −5 |
+- No AST parsing
+- No embeddings / semantic similarity
+- No automatic refactor commits
+- No changes to CI/gating
 
-## Stage 4 — Refactor proposals (patch-ready, not auto-merged)
+## 5) How to re-run the same process
 
-For top candidates:
+### A) Re-run exact clone scan (recommended)
 
-- Propose an abstraction type:
-  - Extract function
-  - Extract helper + parameterize
-  - Strategy/policy object
-  - Template/pipeline stages
-- Specify file location + signature.
-- Include a small, deterministic test plan.
+From `app/`:
 
-## Stage 5 — Continuous enforcement (optional)
+- Run `pnpm -s dlx jscpd src "src-tauri\\src" --min-lines 8 --min-tokens 70 --format "typescript,rust" --ignore "**/node_modules/**,**/target/**,**/target-*/**,**/dist/**,**/build/**,**/coverage/**,**/*.generated.*,**/*.test.*,**/__tests__/**,**/tests/**" --reporters "consoleFull"`
 
-- Consider running `jscpd` (or this script) in CI but gating only **new duplication**.
-- Prefer reporting + trend charts over hard blocking until the baseline is cleaned up.
+### B) Re-run the “almost duplicate” searches
+
+- `rg -n "reqwest::Client::builder\(" app/src-tauri/src`
+- `rg -n "get_settings_store\(" app/src-tauri/src`
+- `rg -n -F "trimmed.rsplit(['\\\\', '/'])" app/src-tauri/src`
+- `rg -n "errorToMessage\(" app/src`
+
+Then spot-check the hits and update `DRY_REPORT.md`.

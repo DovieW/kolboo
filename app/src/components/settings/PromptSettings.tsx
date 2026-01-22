@@ -1,6 +1,7 @@
 import { Accordion, Button, Group, Loader, Select, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatErrorMessage } from "../../lib/formatError";
 import { EMBEDDING_MODELS, type ModelOption } from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
@@ -53,7 +54,6 @@ import {
 	formatUsdRateFromMicros,
 	isGeminiThinkingLevel,
 	isOpenAiReasoningEffort,
-	isRecord,
 	normalizeRouter,
 } from "./prompt/settingsUtils";
 import { TranscribeSettingsSection } from "./prompt/TranscribeSettingsSection";
@@ -100,21 +100,6 @@ const DEFAULT_QUICK_ASK_SYSTEM_PROMPT =
 // Keep this aligned with backend defaults (see Quick Replace config resolution in `src-tauri/src/lib.rs`).
 const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT =
 	"You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
-
-function errorToMessage(err: unknown): string {
-	if (err instanceof Error) return err.message;
-	if (typeof err === "string") return err;
-	if (isRecord(err)) {
-		if (typeof err.message === "string") return err.message;
-		if (typeof err.error === "string") return err.error;
-		try {
-			return JSON.stringify(err);
-		} catch {
-			return String(err);
-		}
-	}
-	return String(err);
-}
 
 function _createId(): string {
 	// `crypto.randomUUID()` is available in modern browsers; keep a fallback for safety.
@@ -345,7 +330,7 @@ export function PromptSettings({
 		handleRunSttTest,
 	} = usePromptSettingsTests({
 		activeProfileId,
-		errorToMessage,
+		errorToMessage: formatErrorMessage,
 		testLlmRewrite,
 		testRewriteWithPrompt,
 		testSttLastAudio,
@@ -958,7 +943,7 @@ export function PromptSettings({
 		} catch (e) {
 			notifications.show({
 				title: "Failed to store embeddings",
-				message: errorToMessage(e),
+				message: formatErrorMessage(e),
 				color: "red",
 			});
 		} finally {
@@ -1679,7 +1664,7 @@ export function PromptSettings({
 				}
 				formatThinkingBudgetShort={formatThinkingBudgetShort}
 				isSavingProfile={updateRewriteProgramPromptProfiles.isPending}
-				errorToMessage={errorToMessage}
+				errorToMessage={formatErrorMessage}
 				quickAskTestInput={quickAskTestInput}
 				quickAskTestOutput={quickAskTestOutput}
 				quickAskTestError={quickAskTestError}
