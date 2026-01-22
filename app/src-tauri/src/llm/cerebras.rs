@@ -7,6 +7,7 @@
 //! - Supported models: https://inference-docs.cerebras.ai/models/overview
 //! - OpenAI compatibility: https://inference-docs.cerebras.ai/resources/openai
 
+use super::http_json;
 use super::openai_compat;
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
 use crate::request_log::RequestLogStore;
@@ -134,48 +135,13 @@ impl LlmProvider for CerebrasLlmProvider {
             });
         }
 
-        let mut req = self
+        let req = self
             .client
             .post(CEREBRAS_API_URL)
             .bearer_auth(&self.api_key)
             .json(&request);
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
 
-        let response = req.send().await.map_err(|e| {
-            if e.is_timeout() {
-                if let Some(timeout) = self.timeout {
-                    LlmError::Timeout(timeout)
-                } else {
-                    LlmError::Network(e)
-                }
-            } else {
-                LlmError::Network(e)
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            if let Ok(error_response) =
-                serde_json::from_str::<openai_compat::ErrorResponse>(&error_text)
-            {
-                return Err(LlmError::Api(format!(
-                    "Cerebras API error ({}): {}",
-                    status, error_response.error.message
-                )));
-            }
-            return Err(LlmError::Api(format!(
-                "Cerebras API error ({}): {}",
-                status, error_text
-            )));
-        }
-
-        let response_json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+        let response_json = http_json::send_json_request("Cerebras", req, self.timeout).await?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();

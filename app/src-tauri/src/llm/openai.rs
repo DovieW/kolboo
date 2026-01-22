@@ -1,10 +1,11 @@
 //! OpenAI LLM provider for text formatting.
 
+use super::http_json;
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use std::time::Duration;
 
@@ -327,16 +328,6 @@ struct TextFormat {
     description: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: ErrorDetail,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorDetail {
-    message: String,
-}
-
 #[async_trait]
 impl LlmProvider for OpenAiLlmProvider {
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
@@ -414,48 +405,13 @@ impl LlmProvider for OpenAiLlmProvider {
             });
         }
 
-        let mut req = self
+        let req = self
             .client
             .post(self.responses_url())
             .bearer_auth(&self.api_key)
             .json(&request);
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
 
-        let response = req.send().await.map_err(|e| {
-            if e.is_timeout() {
-                if let Some(timeout) = self.timeout {
-                    LlmError::Timeout(timeout)
-                } else {
-                    // If we didn't configure a timeout, treat this as a generic network error.
-                    LlmError::Network(e)
-                }
-            } else {
-                LlmError::Network(e)
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            // Try to parse as error response
-            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                return Err(LlmError::Api(format!(
-                    "OpenAI API error ({}): {}",
-                    status, error_response.error.message
-                )));
-            }
-            return Err(LlmError::Api(format!(
-                "OpenAI API error ({}): {}",
-                status, error_text
-            )));
-        }
-
-        let response_json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+        let response_json = http_json::send_json_request("OpenAI", req, self.timeout).await?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();
@@ -543,46 +499,13 @@ impl LlmProvider for OpenAiLlmProvider {
             });
         }
 
-        let mut req = self
+        let req = self
             .client
             .post(self.responses_url())
             .bearer_auth(&self.api_key)
             .json(&request);
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
 
-        let response = req.send().await.map_err(|e| {
-            if e.is_timeout() {
-                if let Some(timeout) = self.timeout {
-                    LlmError::Timeout(timeout)
-                } else {
-                    LlmError::Network(e)
-                }
-            } else {
-                LlmError::Network(e)
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                return Err(LlmError::Api(format!(
-                    "OpenAI API error ({}): {}",
-                    status, error_response.error.message
-                )));
-            }
-            return Err(LlmError::Api(format!(
-                "OpenAI API error ({}): {}",
-                status, error_text
-            )));
-        }
-
-        let response_json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+        let response_json = http_json::send_json_request("OpenAI", req, self.timeout).await?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();

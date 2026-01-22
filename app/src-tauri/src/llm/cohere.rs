@@ -5,6 +5,7 @@
 //! - Free-form completions: POST https://api.cohere.com/v2/chat
 //! - Structured outputs: uses `response_format: { type: "json_object", schema: ... }`
 
+use super::http_json;
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -150,6 +151,12 @@ struct CohereErrorResponse {
     error: Option<String>,
 }
 
+fn parse_cohere_error_message(body: &str) -> Option<String> {
+    serde_json::from_str::<CohereErrorResponse>(body)
+        .ok()
+        .and_then(|p| p.message.or(p.error))
+}
+
 #[async_trait]
 impl LlmProvider for CohereLlmProvider {
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
@@ -188,50 +195,19 @@ impl LlmProvider for CohereLlmProvider {
             });
         }
 
-        let mut req = self
+        let req = self
             .client
             .post(&self.api_base_url)
             .bearer_auth(&self.api_key)
             .json(&request);
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
 
-        let response = req.send().await.map_err(|e| {
-            if e.is_timeout() {
-                if let Some(timeout) = self.timeout {
-                    LlmError::Timeout(timeout)
-                } else {
-                    LlmError::Network(e)
-                }
-            } else {
-                LlmError::Network(e)
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            if let Ok(parsed) = serde_json::from_str::<CohereErrorResponse>(&body) {
-                let msg = parsed
-                    .message
-                    .or(parsed.error)
-                    .unwrap_or_else(|| body.clone());
-                return Err(LlmError::Api(format!(
-                    "Cohere API error ({}): {}",
-                    status, msg
-                )));
-            }
-            return Err(LlmError::Api(format!(
-                "Cohere API error ({}): {}",
-                status, body
-            )));
-        }
-
-        let response_json: JsonValue = response
-            .json()
-            .await
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+        let response_json = http_json::send_json_request_with_error_parser(
+            "Cohere",
+            req,
+            self.timeout,
+            parse_cohere_error_message,
+        )
+        .await?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();
@@ -298,50 +274,19 @@ impl LlmProvider for CohereLlmProvider {
             });
         }
 
-        let mut req = self
+        let req = self
             .client
             .post(&self.api_base_url)
             .bearer_auth(&self.api_key)
             .json(&request);
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
 
-        let response = req.send().await.map_err(|e| {
-            if e.is_timeout() {
-                if let Some(timeout) = self.timeout {
-                    LlmError::Timeout(timeout)
-                } else {
-                    LlmError::Network(e)
-                }
-            } else {
-                LlmError::Network(e)
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            if let Ok(parsed) = serde_json::from_str::<CohereErrorResponse>(&body) {
-                let msg = parsed
-                    .message
-                    .or(parsed.error)
-                    .unwrap_or_else(|| body.clone());
-                return Err(LlmError::Api(format!(
-                    "Cohere API error ({}): {}",
-                    status, msg
-                )));
-            }
-            return Err(LlmError::Api(format!(
-                "Cohere API error ({}): {}",
-                status, body
-            )));
-        }
-
-        let response_json: JsonValue = response
-            .json()
-            .await
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+        let response_json = http_json::send_json_request_with_error_parser(
+            "Cohere",
+            req,
+            self.timeout,
+            parse_cohere_error_message,
+        )
+        .await?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();

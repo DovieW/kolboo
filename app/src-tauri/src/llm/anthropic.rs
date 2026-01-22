@@ -1,10 +1,11 @@
 //! Anthropic (Claude) LLM provider for text formatting.
 
+use super::http_json;
 use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use std::time::Duration;
 
@@ -193,16 +194,6 @@ struct ThinkingParam {
     budget_tokens: u32,
 }
 
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: ErrorDetail,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorDetail {
-    message: String,
-}
-
 #[async_trait]
 impl LlmProvider for AnthropicLlmProvider {
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
@@ -236,50 +227,15 @@ impl LlmProvider for AnthropicLlmProvider {
             });
         }
 
-        let mut req = self
+        let req = self
             .client
             .post(&self.api_base_url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", API_VERSION)
             .header("content-type", "application/json")
             .json(&request);
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
 
-        let response = req.send().await.map_err(|e| {
-            if e.is_timeout() {
-                if let Some(timeout) = self.timeout {
-                    LlmError::Timeout(timeout)
-                } else {
-                    // If we didn't configure a timeout, treat this as a generic network error.
-                    LlmError::Network(e)
-                }
-            } else {
-                LlmError::Network(e)
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            // Try to parse as error response
-            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                return Err(LlmError::Api(format!(
-                    "Anthropic API error ({}): {}",
-                    status, error_response.error.message
-                )));
-            }
-            return Err(LlmError::Api(format!(
-                "Anthropic API error ({}): {}",
-                status, error_text
-            )));
-        }
-
-        let response_json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+        let response_json = http_json::send_json_request("Anthropic", req, self.timeout).await?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();

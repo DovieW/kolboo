@@ -7,7 +7,7 @@
 //! - provider-specific optional parameters
 //! - provider-specific edge-case handling
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub(super) struct ChatMessage {
@@ -57,16 +57,6 @@ impl ChatRequest {
             temperature,
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct ErrorResponse {
-    pub error: ErrorDetail,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct ErrorDetail {
-    pub message: String,
 }
 
 fn extract_content_from_choice(choice: &serde_json::Value) -> Option<String> {

@@ -14,6 +14,7 @@ import { Trash2 } from "lucide-react";
 import type { CleanupPromptSections, RewritePreset } from "../../../lib/tauri";
 import { PromptSectionEditor } from "../PromptSectionEditor";
 import type { LinkableProfileOption } from "./PromptSettingsModals";
+import { TestRewritePanel } from "./TestRewritePanel";
 
 type SectionKey = "system";
 
@@ -432,99 +433,18 @@ export function PresetEditorModal({
 												isSavingRewriteEnabled;
 
 											return (
-												<div
-													style={{
-														display: "flex",
-														flexDirection: "column",
-														gap: 10,
-													}}
-												>
-													<Text size="xs" c="dimmed">
-														Testing: {activeProfileLabel} ·{" "}
-														{selectedPreset.name?.trim() || selectedPreset.id}
-													</Text>
-
-													<Textarea
-														value={rewriteTestInput}
-														onChange={(e) => {
-															onRewriteTestInputChange(e.currentTarget.value);
-														}}
-														onKeyDown={(e) => {
-															if (
-																(e.ctrlKey || e.metaKey) &&
-																e.key === "Enter"
-															) {
-																e.preventDefault();
-																if (!isDisabled) {
-																	onRunRewriteTest(promptForTest);
-																}
-															}
-														}}
-														placeholder="Raw transcript"
-														autosize
-														minRows={3}
-														styles={{
-															input: {
-																backgroundColor: "var(--bg-elevated)",
-																borderColor: "var(--border-default)",
-																color: "var(--text-primary)",
-																fontFamily: "monospace",
-																fontSize: "13px",
-															},
-														}}
-													/>
-
-													<div
-														style={{
-															display: "flex",
-															alignItems: "center",
-															gap: 12,
-														}}
-													>
-														<Button
-															color="gray"
-															loading={isTestingRewrite}
-															disabled={isDisabled}
-															onClick={() => onRunRewriteTest(promptForTest)}
-														>
-															Test
-														</Button>
-
-														<Text size="sm" c="dimmed">
-															{isTestingRewrite
-																? "Duration: running…"
-																: rewriteTestDurationMs === null
-																	? "Duration: —"
-																	: `Duration: ${(
-																			rewriteTestDurationMs / 1000
-																		).toFixed(2)}s`}
-														</Text>
-													</div>
-
-													{rewriteTestError ? (
-														<Text size="sm" c="red">
-															{rewriteTestError}
-														</Text>
-													) : null}
-
-													{rewriteTestOutput ? (
-														<Textarea
-															value={rewriteTestOutput}
-															readOnly
-															autosize
-															minRows={3}
-															styles={{
-																input: {
-																	backgroundColor: "var(--bg-elevated)",
-																	borderColor: "var(--border-default)",
-																	color: "var(--text-primary)",
-																	fontFamily: "monospace",
-																	fontSize: "13px",
-																},
-															}}
-														/>
-													) : null}
-												</div>
+												<TestRewritePanel
+													header={`Testing: ${activeProfileLabel} · ${selectedPreset.name?.trim() || selectedPreset.id}`}
+													inputValue={rewriteTestInput}
+													onInputChange={onRewriteTestInputChange}
+													onRun={() => onRunRewriteTest(promptForTest)}
+													isRunning={isTestingRewrite}
+													durationMs={rewriteTestDurationMs}
+													error={rewriteTestError}
+													output={rewriteTestOutput}
+													isDisabled={isDisabled}
+													inputPlaceholder="Raw transcript"
+												/>
 											);
 										})()}
 									</Accordion.Panel>
@@ -658,98 +578,18 @@ export function PresetEditorModal({
 												isSavingRewriteEnabled;
 
 											return (
-												<div
-													style={{
-														display: "flex",
-														flexDirection: "column",
-														gap: 10,
-													}}
-												>
-													<Text size="xs" c="dimmed">
-														Testing: {activeProfileLabel} · Default
-													</Text>
-
-													<Textarea
-														value={rewriteTestInput}
-														onChange={(e) => {
-															onRewriteTestInputChange(e.currentTarget.value);
-														}}
-														onKeyDown={(e) => {
-															if (
-																(e.ctrlKey || e.metaKey) &&
-																e.key === "Enter"
-															) {
-																e.preventDefault();
-																if (!isDisabled) {
-																	onRunRewriteTest(promptForTest);
-																}
-															}
-														}}
-														placeholder="Raw transcript"
-														autosize
-														minRows={3}
-														styles={{
-															input: {
-																backgroundColor: "var(--bg-elevated)",
-																borderColor: "var(--border-default)",
-																color: "var(--text-primary)",
-																fontFamily: "monospace",
-																fontSize: "13px",
-															},
-														}}
-													/>
-
-													<div
-														style={{
-															display: "flex",
-															alignItems: "center",
-															gap: 12,
-														}}
-													>
-														<Button
-															color="gray"
-															loading={isTestingRewrite}
-															disabled={isDisabled}
-															onClick={() => onRunRewriteTest(promptForTest)}
-														>
-															Test
-														</Button>
-
-														<Text size="sm" c="dimmed">
-															{isTestingRewrite
-																? "Duration: running…"
-																: rewriteTestDurationMs === null
-																	? "Duration: —"
-																	: `Duration: ${(
-																			rewriteTestDurationMs / 1000
-																		).toFixed(2)}s`}
-														</Text>
-													</div>
-
-													{rewriteTestError ? (
-														<Text size="sm" c="red">
-															{rewriteTestError}
-														</Text>
-													) : null}
-
-													{rewriteTestOutput ? (
-														<Textarea
-															value={rewriteTestOutput}
-															readOnly
-															autosize
-															minRows={3}
-															styles={{
-																input: {
-																	backgroundColor: "var(--bg-elevated)",
-																	borderColor: "var(--border-default)",
-																	color: "var(--text-primary)",
-																	fontFamily: "monospace",
-																	fontSize: "13px",
-																},
-															}}
-														/>
-													) : null}
-												</div>
+												<TestRewritePanel
+													header={`Testing: ${activeProfileLabel} · Default`}
+													inputValue={rewriteTestInput}
+													onInputChange={onRewriteTestInputChange}
+													onRun={() => onRunRewriteTest(promptForTest)}
+													isRunning={isTestingRewrite}
+													durationMs={rewriteTestDurationMs}
+													error={rewriteTestError}
+													output={rewriteTestOutput}
+													isDisabled={isDisabled}
+													inputPlaceholder="Raw transcript"
+												/>
 											);
 										})()}
 									</Accordion.Panel>

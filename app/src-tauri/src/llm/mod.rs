@@ -11,6 +11,7 @@ mod defaults;
 mod fireworks;
 mod gemini;
 mod groq;
+mod http_json;
 mod ollama;
 mod openai;
 mod openai_compat;

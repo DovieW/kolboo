@@ -9,7 +9,6 @@ It was generated using a **simple duplicate scan + manual review** (no AST parsi
 The most meaningful duplication is in:
 
 1. **Backend provider plumbing (Rust)** — repeated HTTP request setup, timeouts, error mapping, request/response logging, and response parsing across:
-	 - `app/src-tauri/src/llm/**`
 	 - `app/src-tauri/src/stt/**`
 	 - `app/src-tauri/src/embeddings/**`
 
@@ -19,43 +18,7 @@ The most meaningful duplication is in:
 
 Ranking criteria: (a) repeat count, then (b) size of block, then (c) importance/core runtime impact.
 
-### 1) LLM providers: OpenAI-style request/timeout/error/log/parse loop
-
-**What it does:** Send a JSON request to an LLM endpoint, apply optional timeout, map network/timeout errors, parse non-2xx errors into “provider API error”, log request/response JSON, extract text.
-
-**Where (examples / evidence):**
-
-- `app/src-tauri/src/llm/openai.rs` (e.g. around `[402:5 - 468:3]`, `[434:13 - 467:4]`)
-- `app/src-tauri/src/llm/groq.rs` (e.g. around `[67:5 - 151:26]`, `[156:26 - 173:14]`)
-- Additional similar blocks were detected across other providers (e.g. `anthropic.rs`, `fireworks.rs`, `ollama.rs`, `cohere.rs`, `cerebras.rs`, `gemini.rs`).
-
-**Representative snippet (shape):**
-
-From `app/src-tauri/src/llm/groq.rs` (approx lines ~80-170):
-
-> build request → log request_json → build req (`.post(...)`, `.bearer_auth(...)`, `.json(&request)`) → apply timeout → `send().await` with timeout mapping → `status` check → parse error body (OpenAI-compatible) → parse JSON → log response_json → extract first choice text
-
-**How many times it appears:** at least **6+** LLM provider modules contain the same “request lifecycle” structure.
-
-**Recommendation:** Extract a shared helper for the “send + timeout + error mapping + request/response logging” part.
-
-- Proposed helper module: `app/src-tauri/src/http/openai_style.rs` (or extend existing `openai_compat`)
-- Proposed helper signature (example):
-	- `async fn send_openai_style_json<Request: Serialize>(client: &Client, provider: &'static str, url: &str, api_key: Option<&str>, timeout: Option<Duration>, request: &Request, log: Option<&RequestLogStore>) -> Result<serde_json::Value, ProviderHttpError>`
-- Variable parameters:
-	- provider name (for error prefixes + logs)
-	- URL / base URL
-	- whether auth is bearer token vs none
-	- timeout semantics
-	- response “extract text” logic (keep provider-specific)
-
-**Risks / gotchas:**
-
-- Providers differ subtly (some are “OpenAI chat completions”, some are “Responses API”, some use slightly different error schema). Keep the helper focused on request lifecycle + generic error parsing; keep response extraction provider-specific.
-
----
-
-### 2) STT providers: multipart transcription request + consistent error/log handling
+### 1) STT providers: multipart transcription request + consistent error/log handling
 
 **What it does:** Build a multipart form (`wav_transcription_form`), send to a transcription endpoint, map timeout/network errors, parse non-2xx responses, log request/response JSON, extract `text` from JSON.
 
@@ -85,23 +48,7 @@ From `app/src-tauri/src/llm/groq.rs` (approx lines ~80-170):
 
 ---
 
-### 3) Settings editor/test UI: repeated “textarea + ctrl/cmd+enter to run + duration display”
-
-**What it does:** A common UI pattern for test inputs:
-
-> textarea input → keyboard shortcut handler → button that triggers async action → duration label → show error/output
-
-**Where (evidence):**
-
-- `app/src/components/settings/prompt/PresetEditorModal.tsx` contains this pattern (and likely similar patterns elsewhere in settings).
-
-**How many times it appears:** at least **2** (jscpd found large intra-file clones in similar modal code).
-
-**Recommendation:** Extract a small component like `AsyncTestRunnerPanel`.
-
----
-
-### 4) Tests: repeated scaffolding (low priority)
+### 2) Tests: repeated scaffolding (low priority)
 
 **What it does:** repeated test setup/fixtures.
 
