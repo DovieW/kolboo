@@ -12,14 +12,6 @@ Legend:
 
 ## P1 — Performance & responsiveness
 
-### Improve stats aggregation performance
-
-- **Where:** `app/src-tauri/src/commands/stats.rs`
-- **Previous problem:** cost summary endpoints scanned all JSONL lines on every query.
-- **Current state:** stats queries are cached in-memory and invalidated whenever a new cost event is appended, and they also use an on-disk hourly index for instant stats after restart (with best-effort rebuild if an index file is corrupted).
-
----
-
 ## P1 — Architecture & maintainability
 
 ### Continue splitting `app/src-tauri/src/lib.rs`
@@ -42,13 +34,6 @@ Legend:
   - Add a startup “settings doctor” command: validate + normalize.
 
 ## P1 — UX & product improvements
-
-### Add a unified “Data retention” settings page
-
-- **Where:** retention exists for history (time-based transcription retention), request logs retention, and stats retention.
-- **Todo:**
-  - Present one coherent UI: what is stored, where, and how long.
-  - Show estimated impact (counts/bytes) via `get_data_storage_summary`.
 
 ### Expand output-mode options
 
