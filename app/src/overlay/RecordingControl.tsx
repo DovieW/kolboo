@@ -25,13 +25,14 @@ import {
 	type RewriteProgramPromptProfile,
 	tauriAPI,
 } from "../lib/tauri";
-import { listenTyped } from "../lib/tauri/events";
 import { useOverlayUiReducer } from "../lib/useOverlayUiReducer";
 import { AudioWave, BackendAudioWave } from "./AudioWave";
-import {
-	type ActiveProfileInfo,
-	useOverlayController,
-} from "./useOverlayController";
+import { useOverlayController } from "./useOverlayController";
+import { useOverlayActiveProfilePolling } from "./useOverlayActiveProfilePolling";
+import { useOverlayHideRequested } from "./useOverlayHideRequested";
+import { useOverlayHotkeyEvents } from "./useOverlayHotkeyEvents";
+import { useOverlayPipelineEvents } from "./useOverlayPipelineEvents";
+import { useOverlayPipelineStatePolling } from "./useOverlayPipelineStatePolling";
 import { useOverlayHoverGating } from "./useOverlayHoverGating";
 
 type CommandErrorExtract = {
@@ -495,87 +496,15 @@ export default function RecordingControl() {
 	}, [pipelineState]);
 
 	// Poll pipeline state periodically to stay in sync.
-	//
-	// We prefer event-driven updates, but keep polling as a backstop.
-	// Avoid polling constantly while idle/hidden to reduce backend churn.
-	useEffect(() => {
-		let cancelled = false;
-		let inFlight = false;
-		let interval: number | null = null;
+	useOverlayPipelineStatePolling({
+		pipelineState,
+		animState,
+		overlayMode: settings?.overlay_mode,
+		setPipelineState,
+	});
 
-		const overlayIsVisible =
-			settings?.overlay_mode === "always" || animState !== "exit";
 
-		const pollMs = (() => {
-			if (pipelineState !== "idle") return 500;
-			if (overlayIsVisible) return 5000;
-			return 0;
-		})();
-
-		const syncState = async () => {
-			if (cancelled) return;
-			if (inFlight) return;
-			inFlight = true;
-			try {
-				const state = await invoke<string>("pipeline_get_state");
-				if (cancelled) return;
-				if (isPipelineState(state)) {
-					setPipelineState("poll", state);
-				} else {
-					setPipelineState("poll", "idle");
-				}
-			} catch (error) {
-				console.error("[Pipeline] Failed to get state:", error);
-			} finally {
-				inFlight = false;
-			}
-		};
-
-		// Sync on mount and whenever polling mode changes.
-		void syncState();
-
-		if (pollMs > 0) {
-			interval = window.setInterval(syncState, pollMs);
-		}
-
-		return () => {
-			cancelled = true;
-			if (interval) window.clearInterval(interval);
-		};
-	}, [animState, pipelineState, setPipelineState, settings?.overlay_mode]);
-
-	// Resolve the active program profile periodically while expanded so we can
-	// show profile-scoped preset info in the hover panel.
-	useEffect(() => {
-		const shouldSync = expanded;
-		if (!shouldSync) return;
-
-		let cancelled = false;
-		let interval: number | null = null;
-
-		const sync = async () => {
-			try {
-				const result = await invoke<ActiveProfileInfo>(
-					"pipeline_get_active_profile_for_foreground_app",
-				);
-				if (cancelled) return;
-				setActiveProfile({
-					profile_id: result?.profile_id ?? null,
-					profile_name: result?.profile_name ?? null,
-				});
-			} catch {
-				// Best-effort. Overlay can still function without this.
-			}
-		};
-
-		void sync();
-		interval = window.setInterval(sync, 1500);
-
-		return () => {
-			cancelled = true;
-			if (interval) window.clearInterval(interval);
-		};
-	}, [expanded, setActiveProfile]);
+	useOverlayActiveProfilePolling({ enabled: expanded, setActiveProfile });
 
 	// If presets change (e.g. user deleted one), avoid keeping an invalid selection.
 	useEffect(() => {
@@ -796,6 +725,8 @@ export default function RecordingControl() {
 		}, 210);
 	}, [controllerRef, setAnimState, setHoldPhaseText]);
 
+	useOverlayHideRequested({ requestAnimatedHide });
+
 	const dismissError = useCallback(() => {
 		// Reset pipeline state in backend so polling reflects reality.
 		invoke("pipeline_force_reset").catch(console.error);
@@ -843,21 +774,6 @@ export default function RecordingControl() {
 		setAnimState,
 	]);
 
-	// Backend can request a hide (so we can animate out before the window hides)
-	useEffect(() => {
-		let unlisten: (() => void) | undefined;
-
-		const setup = async () => {
-			unlisten = await listenTyped("overlay-hide-requested", () => {
-				requestAnimatedHide();
-			});
-		};
-
-		void setup();
-		return () => {
-			unlisten?.();
-		};
-	}, [requestAnimatedHide]);
 
 	// If the overlay itself was used to record (not hotkey path), honor recording-only by
 	// animating out when we return to idle.
@@ -1066,113 +982,31 @@ export default function RecordingControl() {
 		typeTextMutation,
 	]);
 
-	// Hotkey event listeners
-	// Listen for recording state changes from shortcuts (Rust handles the actual recording)
-	useEffect(() => {
-		let unlistenStart: (() => void) | undefined;
-		let unlistenStop: (() => void) | undefined;
 
-		const setup = async () => {
-			// When shortcut triggers recording, just update UI state (don't call command again)
-			unlistenStart = await tauriAPI.onStartRecording(() => {
-				// Hotkey events can arrive slightly before the overlay receives any other
-				// pipeline events; still show "REC" immediately to match actual capture.
-				clearError();
-				setPipelineState("hotkey", "recording");
-
-				// In recording_only mode the backend may have just shown the window while the
-				// overlay UI is still in the pre-show "enter" animation state (opacity 0)
-				// from the prior hide. Force visibility immediately so the window isn't
-				// effectively invisible on short recordings.
-				setAnimState("visible");
-
-				// Treat this as a "show" moment for hover gating too.
-				markOverlayShownForHoverGating();
-			});
-			unlistenStop = await tauriAPI.onStopRecording(() => {
-				// UX: once the user stops, always show "transcribing".
-				setPipelineState("hotkey", "transcribing");
-			});
-		};
-
-		void setup();
-
-		return () => {
-			unlistenStart?.();
-			unlistenStop?.();
-		};
-	}, [
+	useOverlayHotkeyEvents({
 		clearError,
-		markOverlayShownForHoverGating,
-		setAnimState,
 		setPipelineState,
-	]);
+		setAnimState,
+		markOverlayShownForHoverGating,
+	});
 
-	// Listen for pipeline events from Rust
-	useEffect(() => {
-		const unlisteners: (() => void)[] = [];
-
-		const setup = async () => {
-			// Canonical state update event (preferred): reduces event surface area.
-			unlisteners.push(
-				await listenTyped("pipeline-state-changed", (payload) => {
-					const next = (payload ?? "").toString();
-					if (isPipelineState(next)) {
-						setPipelineState("event", next);
-					}
-				}),
-			);
-
-			unlisteners.push(
-				await listenTyped("pipeline-cancelled", () => {
-					setPipelineState("event", "idle");
-					clearError();
-				}),
-			);
-
-			unlisteners.push(
-				await listenTyped("pipeline-reset", () => {
-					setPipelineState("event", "idle");
-					clearError();
-				}),
-			);
-
-			// Listen for pipeline errors (e.g., transcription failures from hotkey-triggered recordings)
-			unlisteners.push(
-				await listenTyped("pipeline-error", (payload) => {
-					console.error("[Pipeline] Error from Rust:", payload);
-					setPipelineState("event", "error");
-
-					const errorPayload = extractCommandError(payload);
-					const errorInfo = parseErrorMessage({
-						message: errorPayload.message,
-						retryable: errorPayload.retryable,
-						errorType: errorPayload.errorType,
-						code: errorPayload.code,
-						details: errorPayload.details,
-					});
-					const detail = errorPayload.details ?? errorPayload.code ?? null;
-					setError(errorInfo, detail, errorPayload.requestId);
-				}),
-			);
-
-			// Listen for successful transcription (from hotkey-triggered recordings)
-			unlisteners.push(
-				await listenTyped("pipeline-transcript-ready", () => {
-					setPipelineState("event", "idle");
-					clearError();
-				}),
-			);
-		};
-
-		void setup();
-
-		return () => {
-			for (const unlisten of unlisteners) {
-				unlisten();
-			}
-		};
-	}, [clearError, setError, setPipelineState]);
+	useOverlayPipelineEvents({
+		setPipelineState,
+		clearError,
+		onPipelineErrorPayload: (payload) => {
+			console.error("[Pipeline] Error from Rust:", payload);
+			const errorPayload = extractCommandError(payload);
+			const errorInfo = parseErrorMessage({
+				message: errorPayload.message,
+				retryable: errorPayload.retryable,
+				errorType: errorPayload.errorType,
+				code: errorPayload.code,
+				details: errorPayload.details,
+			});
+			const detail = errorPayload.details ?? errorPayload.code ?? null;
+			setError(errorInfo, detail, errorPayload.requestId);
+		},
+	});
 
 	// Listen for settings changes from main window
 	useEffect(() => {

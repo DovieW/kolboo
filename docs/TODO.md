@@ -34,12 +34,6 @@ Legend:
     - See `docs/Refactors/2_MEDIUM.md` for notes on a low-risk way to do it.
   - Split remaining responsibilities into focused modules (tray, shortcuts lifecycle, window mgmt, pipeline session, retention, etc.).
 
-### Overlay maintainability follow-ups
-
-- **Where:** `app/src/OverlayApp.tsx` and related overlay UI files
-- **Todo:**
-  - If/when the overlay grows again, extract a dedicated overlay state machine/hook and keep the entry component thin.
-
 ### Centralize settings schema + migrations
 
 - **Where:** frontend normalization/migration logic in `app/src/lib/tauri.ts` and backend default seeding logic.
