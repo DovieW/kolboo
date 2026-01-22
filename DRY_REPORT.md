@@ -2,7 +2,7 @@
 
 This file is intentionally **a living report**, not a one-off “generated dump”.
 
-If you (Dovie) want fresh numbers, run the scan described in `DRY_PLAN.md` and then paste the *few* highest-signal findings here.
+If you (Dovie) want fresh numbers, run the scan described in `DRY_PLAN.md` and then paste the _few_ highest-signal findings here.
 
 ## What counts as a good DRY finding (for Kolboo)
 
@@ -12,7 +12,7 @@ We care about repeated logic that causes:
 - **high-churn editing pain**
 - **subtle platform behavior** (especially overlay/window code)
 
-We do *not* care about repetitive-but-clear UI markup or tests that intentionally mirror scenarios.
+We do _not_ care about repetitive-but-clear UI markup or tests that intentionally mirror scenarios.
 
 ## How to gather evidence
 
@@ -40,7 +40,7 @@ Add entries in this format:
 ### <short title>
 
 - Files:
-	- `...`
+  - `...`
 - Why it matters:
 - Suggested refactor:
 - Test plan:
@@ -50,4 +50,3 @@ Add entries in this format:
 - Generated files (`*.generated.*`)
 - Tests that mirror similar scenarios on purpose
 - Tiny UI snippets where extraction would hide intent
-
