@@ -49,6 +49,7 @@ import {
 	type TranscriptionRetentionUnit,
 	tauriAPI,
 } from "../../lib/tauri";
+import { SettingsRow } from "./SettingsRow";
 
 type RequestLogsRetentionMode = "amount" | "time";
 type RetentionMode = "amount" | "time";
@@ -623,19 +624,12 @@ export function DataSettings({
 
 	const content = (
 		<>
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Logs retention</p>
-					<p
-						className="settings-description settings-description--single-line"
-						title="Keep request logs for debugging. Default: store last 10."
-					>
-						Keep request logs for debugging.
-					</p>
-				</div>
-
-				<Group gap={10} align="center" wrap="wrap">
-					{logsRetentionMode === "amount" ? (
+			<SettingsRow
+				label="Logs retention"
+				description="Keep request logs for debugging. Default: store last 10."
+				right={
+					<Group gap={10} align="center" wrap="wrap">
+						{logsRetentionMode === "amount" ? (
 						<NumberInput
 							value={logsRetentionAmount}
 							onChange={(value) => {
@@ -763,52 +757,38 @@ export function DataSettings({
 						}}
 					/>
 				</Group>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Max recordings to save</p>
-					<p
-						className="settings-description settings-description--single-line"
-						title={`Keep at most this many recordings on disk.${
-							recordingsStats.isLoading
-								? " (Calculating storage…)"
-								: recordingsSummary === null
-									? ""
-									: ` (Currently saved ${
-											recordingsSummary.count
-										} recordings at ${recordingsSummary.gb.toFixed(2)} GB)`
-						}`}
-					>
-						Keep at most this many recordings on disk.
-						{recordingsStats.isLoading
-							? " (Calculating storage…)"
-							: recordingsSummary === null
-								? ""
-								: ` (Currently saved ${
-										recordingsSummary.count
-									} recordings at ${recordingsSummary.gb.toFixed(2)} GB)`}
-					</p>
-				</div>
-				<Group gap={8} align="center">
-					<Tooltip label="Open recordings folder" withArrow position="top">
-						<span>
-							<ActionIcon
-								variant="default"
-								size={36}
-								onClick={() => {
-									handleOpenRecordingsFolder().catch(console.error);
-								}}
-								aria-label="Open recordings folder"
-								styles={{
-									root: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										height: 36,
-										width: 36,
-									},
-								}}
+			<SettingsRow
+				label="Max recordings to save"
+				description={`Keep at most this many recordings on disk.${
+					recordingsStats.isLoading
+						? " (Calculating storage…)"
+						: recordingsSummary === null
+							? ""
+							: ` (Currently saved ${recordingsSummary.count} recordings at ${recordingsSummary.gb.toFixed(2)} GB)`
+				}`}
+				right={
+					<Group gap={8} align="center">
+						<Tooltip label="Open recordings folder" withArrow position="top">
+							<span>
+								<ActionIcon
+									variant="default"
+									size={36}
+									onClick={() => {
+										handleOpenRecordingsFolder().catch(console.error);
+									}}
+									aria-label="Open recordings folder"
+									styles={{
+										root: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											height: 36,
+											width: 36,
+										},
+									}}
 							>
 								<FolderOpen size={14} style={{ opacity: 0.75 }} />
 							</ActionIcon>
@@ -944,20 +924,15 @@ export function DataSettings({
 						}}
 					/>
 				</Group>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Transcription retention</p>
-					<p
-						className="settings-description settings-description--single-line settings-description--tiny"
-						title="Delete transcriptions older than this. Set to 0 to keep forever."
-					>
-						Delete transcriptions older than this (0 = forever).
-					</p>
-				</div>
-				<Group gap={10} align="center" wrap="wrap">
-					{transcriptionRetentionMode === "amount" ? (
+			<SettingsRow
+				label="Transcription retention"
+				description="Delete transcriptions older than this (0 = forever)."
+				right={
+					<Group gap={10} align="center" wrap="wrap">
+						{transcriptionRetentionMode === "amount" ? (
 						<NumberInput
 							value={transcriptionRetentionAmount}
 							onChange={(value) => {
@@ -1106,43 +1081,38 @@ export function DataSettings({
 						color="gray"
 					/>
 				</Group>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Stats retention</p>
-					<p
-						className="settings-description settings-description--single-line settings-description--tiny"
-						title="Delete persisted usage/cost stats older than this. Set to 0 to keep forever."
-					>
-						Delete usage/cost stats older than this (0 = forever).
-					</p>
-				</div>
-				<Group gap={10} align="center" wrap="wrap">
-					<NumberInput
-						value={statsRetentionValue}
-						onChange={(value) => {
-							const next = typeof value === "number" ? value : 30;
-							commitStatsRetention({
-								unit: statsRetentionUnit,
-								value: next,
-							});
-						}}
-						min={0}
-						max={statsRetentionUnit === "hours" ? 36500 * 24 : 36500}
-						step={statsRetentionUnit === "hours" ? 0.5 : 1}
-						decimalScale={statsRetentionUnit === "hours" ? 2 : 0}
-						clampBehavior="strict"
-						disabled={isProfileScope}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								width: 140,
-							},
-						}}
-					/>
+			<SettingsRow
+				label="Stats retention"
+				description="Delete usage/cost stats older than this (0 = forever)."
+				right={
+					<Group gap={10} align="center" wrap="wrap">
+						<NumberInput
+							value={statsRetentionValue}
+							onChange={(value) => {
+								const next = typeof value === "number" ? value : 30;
+								commitStatsRetention({
+									unit: statsRetentionUnit,
+									value: next,
+								});
+							}}
+							min={0}
+							max={statsRetentionUnit === "hours" ? 36500 * 24 : 36500}
+							step={statsRetentionUnit === "hours" ? 0.5 : 1}
+							decimalScale={statsRetentionUnit === "hours" ? 2 : 0}
+							clampBehavior="strict"
+							disabled={isProfileScope}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									width: 140,
+								},
+							}}
+						/>
 
 					<SegmentedControl
 						value={statsRetentionUnit}
@@ -1182,21 +1152,13 @@ export function DataSettings({
 						}}
 					/>
 				</Group>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Settings backup</p>
-					<p className="settings-description">
-						Export/import settings as JSON. API keys and other secrets are not
-						included.
-					</p>
-				</div>
-
-				<div
-					className="settings-row-actions"
-					style={{ minWidth: 280, justifyContent: "flex-end" }}
-				>
+			<SettingsRow
+				label="Settings backup"
+				description="Export/import settings as JSON. API keys and other secrets are not included."
+				right={
 					<Group gap="xs" wrap="nowrap" justify="flex-end">
 						<Button
 							variant="default"
@@ -1217,22 +1179,18 @@ export function DataSettings({
 							Import
 						</Button>
 					</Group>
-				</div>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">GitHub Gist backup</p>
-					<p className="settings-description">
+			<SettingsRow
+				label="GitHub Gist backup"
+				description={
+					<>
 						Push/pull your settings to a private GitHub Gist. Requires a GitHub
 						token with the <code>gist</code> scope (stored securely).
-					</p>
-				</div>
-
-				<div
-					className="settings-row-actions"
-					style={{ minWidth: 520, justifyContent: "flex-end" }}
-				>
+					</>
+				}
+				right={
 					<Stack gap={8} style={{ width: "min(640px, 100%)" }}>
 						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
 							<Text size="xs" c="dimmed">
@@ -1318,8 +1276,8 @@ export function DataSettings({
 							</Button>
 						</Group>
 					</Stack>
-				</div>
-			</div>
+				}
+			/>
 
 			<div
 				style={{

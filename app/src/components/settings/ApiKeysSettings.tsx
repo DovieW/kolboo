@@ -61,6 +61,7 @@ import type {
 	WhisperModelInfo,
 } from "../../lib/tauri";
 import { configAPI, tauriAPI } from "../../lib/tauri";
+import { SettingsRow } from "./SettingsRow";
 
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
@@ -194,9 +195,11 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 	const modelsTooltip = formatProviderModelsTooltip(config.id);
 
 	return (
-		<div className="settings-row api-keys-row">
-			<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-				<p className="settings-label">{config.label}</p>
+		<SettingsRow
+			className="api-keys-row"
+			left={
+				<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+					<p className="settings-label">{config.label}</p>
 				{config.id === "groq" && (
 					<Group gap={10} align="center" wrap="nowrap" mt={2}>
 						<Switch
@@ -341,8 +344,10 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 						</Text>
 					</Group>
 				)}
-			</div>
-			<div className="settings-row-actions">
+				</div>
+			}
+			right={
+				<>
 				{modelCountsLabel && (
 					<Tooltip
 						label={modelsTooltip ?? ""}
@@ -415,8 +420,9 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 						Set
 					</Button>
 				</Tooltip>
-			</div>
-		</div>
+				</>
+			}
+		/>
 	);
 }
 
@@ -1211,15 +1217,17 @@ export function ApiKeysSettings({
 				<ApiKeyInput key={config.id} config={config} />
 			))}
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Ollama server URL</p>
-					<p className="settings-description">
+			<SettingsRow
+				label="Ollama server URL"
+				description={
+					<>
 						Base URL for your local Ollama server (e.g. http://localhost:11434).
+						<br />
 						Models are discovered automatically.
-					</p>
-				</div>
-				<TextInput
+					</>
+				}
+				right={
+					<TextInput
 					value={ollamaUrlDraft}
 					onChange={(e) => setOllamaUrlDraft(e.currentTarget.value)}
 					onBlur={() => {
@@ -1241,17 +1249,16 @@ export function ApiKeysSettings({
 						},
 					}}
 				/>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Whisper server URL</p>
-					<p className="settings-description">
-						Base URL for an OpenAI-compatible transcription API (e.g.
-						http://localhost:8000/v1)
-					</p>
-				</div>
-				<TextInput
+			<SettingsRow
+				label="Whisper server URL"
+				description={
+					"Base URL for an OpenAI-compatible transcription API (e.g. http://localhost:8000/v1)"
+				}
+				right={
+					<TextInput
 					value={whisperServerBaseUrlDraft}
 					onChange={(e) => setWhisperServerBaseUrlDraft(e.currentTarget.value)}
 					onBlur={() => {
@@ -1273,7 +1280,8 @@ export function ApiKeysSettings({
 						},
 					}}
 				/>
-			</div>
+				}
+			/>
 
 			<LocalWhisperModelsCard />
 		</>

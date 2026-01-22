@@ -29,6 +29,7 @@ import {
 	type TrustedCaCertificate,
 	tauriAPI,
 } from "../../lib/tauri";
+import { SettingsRow } from "./SettingsRow";
 
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
@@ -201,18 +202,10 @@ export function NetworkSettings({
 
 	const content = (
 		<>
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Add certificate</p>
-					<p className="settings-description">
-						Add a CA certificate to trust for HTTPS requests
-					</p>
-				</div>
-
-				<div
-					className="settings-row-actions"
-					style={{ minWidth: 280, justifyContent: "flex-end" }}
-				>
+			<SettingsRow
+				label="Add certificate"
+				description="Add a CA certificate to trust for HTTPS requests"
+				right={
 					<Group gap="xs" wrap="nowrap" justify="flex-end">
 						<Tooltip label="Remove all saved certificates" withArrow>
 							<ActionIcon
@@ -389,8 +382,8 @@ export function NetworkSettings({
 							Add certificate
 						</Button>
 					</Group>
-				</div>
-			</div>
+				}
+			/>
 
 			{(persisted.trusted_ca_certificates?.length ?? 0) > 0 && (
 				<div style={{ marginTop: 8, display: "grid", gap: 6 }}>
@@ -447,16 +440,10 @@ export function NetworkSettings({
 				</div>
 			)}
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Ignore invalid certifications</p>
-					<p className="settings-description">
-						Allow connections even when certificates are invalid (e.g.
-						self-signed)
-					</p>
-				</div>
-
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+			<SettingsRow
+				label="Ignore invalid certifications"
+				description="Allow connections even when certificates are invalid (e.g. self-signed)"
+				right={
 					<Switch
 						checked={persisted.danger_accept_invalid_certs}
 						onChange={(e) => {
@@ -478,8 +465,8 @@ export function NetworkSettings({
 						color="gray"
 						size="md"
 					/>
-				</div>
-			</div>
+				}
+			/>
 
 			<Modal
 				opened={clearCertsDialogOpen}
@@ -575,18 +562,17 @@ export function NetworkSettings({
 				</Stack>
 			</Modal>
 
-			<div className="settings-row no-divider">
-				<div>
-					<p className="settings-label">Proxy</p>
-					<Text size="xs" c="dimmed" mt={6}>
-						Effective mode: <strong>{effectiveModeLabel}</strong>
-					</Text>
-				</div>
-
-				<div
-					className="settings-row-actions"
-					style={{ minWidth: 280, justifyContent: "flex-end" }}
-				>
+			<SettingsRow
+				noDivider
+				left={
+					<div>
+						<p className="settings-label">Proxy</p>
+						<Text size="xs" c="dimmed" mt={6}>
+							Effective mode: <strong>{effectiveModeLabel}</strong>
+						</Text>
+					</div>
+				}
+				right={
 					<SegmentedControl
 						value={modeDraft}
 						onChange={handleModeChange}
@@ -597,8 +583,8 @@ export function NetworkSettings({
 						]}
 						disabled={isLoadingSettings || isProfileScope}
 					/>
-				</div>
-			</div>
+				}
+			/>
 
 			{modeDraft === "no_proxy" && (
 				<Text size="sm" c="dimmed" mt={10}>

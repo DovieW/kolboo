@@ -30,6 +30,7 @@ import {
 } from "../../lib/queries";
 import type { RewriteProgramPromptProfile } from "../../lib/tauri";
 import { DeviceSelector } from "../DeviceSelector";
+import { SettingsRow } from "./SettingsRow";
 
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
@@ -161,15 +162,13 @@ export function AudioSettings({
 		<>
 			<DeviceSelector />
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Hot Mic Mode</p>
-					<p className="settings-description">
-						Keep the microphone open (no transcription) and buffer a short
-						pre-roll so you don’t miss the first word
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+			<SettingsRow
+				label="Hot Mic Mode"
+				description={
+					"Keep the microphone open (no transcription) and buffer a short pre-roll so you don’t miss the first word"
+				}
+				right={
+					<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 					<Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
 						Pre-roll: {hotMicPreRollMs} ms
 					</Text>
@@ -202,18 +201,17 @@ export function AudioSettings({
 						color="gray"
 						size="md"
 					/>
-				</div>
-			</div>
+					</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Auto-recover microphone</p>
-					<p className="settings-description">
-						If the mic stream stops delivering audio (disconnects, sleep, device
-						changes), attempt to restart automatically
-					</p>
-				</div>
-				<Switch
+			<SettingsRow
+				label="Auto-recover microphone"
+				description={
+					"If the mic stream stops delivering audio (disconnects, sleep, device changes), attempt to restart automatically"
+				}
+				right={
+					<Switch
 					checked={micAutoRecoverEnabled}
 					onChange={(event) =>
 						updateMicAutoRecoverEnabled.mutate(event.currentTarget.checked)
@@ -222,18 +220,23 @@ export function AudioSettings({
 					color="gray"
 					size="md"
 				/>
-			</div>
+				}
+			/>
 
-			<div className="settings-row no-divider">
-				<div>
-					<p className="settings-label">Skip quiet recordings</p>
-					<p className="settings-description">
-						Skip transcription when the recording is basically quiet
-						(Sensitivity sets the RMS threshold in dBFS)
-					</p>
-					<p className="settings-description">{lastRecordingSummary}</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+			<SettingsRow
+				noDivider
+				left={
+					<div>
+						<p className="settings-label">Skip quiet recordings</p>
+						<p className="settings-description">
+							Skip transcription when the recording is basically quiet
+							(Sensitivity sets the RMS threshold in dBFS)
+						</p>
+						<p className="settings-description">{lastRecordingSummary}</p>
+					</div>
+				}
+				right={
+					<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 					<Switch
 						checked={quietAudioGateEnabled}
 						onChange={(event) =>
@@ -270,8 +273,9 @@ export function AudioSettings({
 							},
 						}}
 					/>
-				</div>
-			</div>
+					</div>
+				}
+			/>
 
 			<div style={{ marginTop: 0, marginBottom: 0 }}>
 				<Accordion variant="separated" radius="md">
@@ -376,14 +380,11 @@ export function AudioSettings({
 				</Accordion>
 			</div>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Skip quiet — Require speech</p>
-					<p className="settings-description">
-						Extra skip: don't transcribe if VAD finds no speech
-					</p>
-				</div>
-				<Switch
+			<SettingsRow
+				label="Skip quiet — Require speech"
+				description="Extra skip: don't transcribe if VAD finds no speech"
+				right={
+					<Switch
 					checked={quietAudioRequireSpeech}
 					onChange={(event) =>
 						updateQuietAudioRequireSpeech.mutate(event.currentTarget.checked)
@@ -392,16 +393,14 @@ export function AudioSettings({
 					color="gray"
 					size="md"
 				/>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Skip quiet — Minimum duration</p>
-					<p className="settings-description">
-						Treat very short recordings as quiet (seconds)
-					</p>
-				</div>
-				<Group gap={8} align="center">
+			<SettingsRow
+				label="Skip quiet — Minimum duration"
+				description="Treat very short recordings as quiet (seconds)"
+				right={
+					<Group gap={8} align="center">
 					<NumberInput
 						value={quietAudioMinDurationSecs}
 						onChange={(value) => {
@@ -422,17 +421,15 @@ export function AudioSettings({
 							},
 						}}
 					/>
-				</Group>
-			</div>
+					</Group>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Skip quiet — Peak threshold</p>
-					<p className="settings-description">
-						Peak level below this is considered quiet (dBFS)
-					</p>
-				</div>
-				<Group gap={8} align="center">
+			<SettingsRow
+				label="Skip quiet — Peak threshold"
+				description="Peak level below this is considered quiet (dBFS)"
+				right={
+					<Group gap={8} align="center">
 					<NumberInput
 						value={quietAudioPeakDbfsThreshold}
 						onChange={(value) => {
@@ -452,17 +449,15 @@ export function AudioSettings({
 							},
 						}}
 					/>
-				</Group>
-			</div>
+					</Group>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Noise gate threshold</p>
-					<p className="settings-description">
-						Set how quiet audio must be to be suppressed. Blank = Off.
-					</p>
-				</div>
-				<Group gap={8} align="center">
+			<SettingsRow
+				label="Noise gate threshold"
+				description="Set how quiet audio must be to be suppressed. Blank = Off."
+				right={
+					<Group gap={8} align="center">
 					<NumberInput
 						value={noiseGateThresholdDbfs}
 						onChange={(value) => {
@@ -500,35 +495,31 @@ export function AudioSettings({
 							},
 						}}
 					/>
-				</Group>
-			</div>
+					</Group>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Convert to mono</p>
-					<p className="settings-description">
-						Downmix stereo/multi-channel inputs for more reliable VAD and STT
-					</p>
-				</div>
-				<Switch
-					checked={audioDownmixToMono}
-					onChange={(event) =>
-						updateAudioDownmixToMono.mutate(event.currentTarget.checked)
-					}
-					disabled={isProfileScope}
-					color="gray"
-					size="md"
-				/>
-			</div>
+			<SettingsRow
+				label="Convert to mono"
+				description="Downmix stereo/multi-channel inputs for more reliable VAD and STT"
+				right={
+					<Switch
+						checked={audioDownmixToMono}
+						onChange={(event) =>
+							updateAudioDownmixToMono.mutate(event.currentTarget.checked)
+						}
+						disabled={isProfileScope}
+						color="gray"
+						size="md"
+					/>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">High-pass filter</p>
-					<p className="settings-description">
-						Removes DC/rumble to help voice clarity (very lightweight)
-					</p>
-				</div>
-				<Switch
+			<SettingsRow
+				label="High-pass filter"
+				description="Removes DC/rumble to help voice clarity (very lightweight)"
+				right={
+					<Switch
 					checked={audioHighpassEnabled}
 					onChange={(event) =>
 						updateAudioHighpassEnabled.mutate(event.currentTarget.checked)
@@ -537,16 +528,14 @@ export function AudioSettings({
 					color="gray"
 					size="md"
 				/>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Auto gain (AGC)</p>
-					<p className="settings-description">
-						Normalizes volume so quiet voices are easier to transcribe
-					</p>
-				</div>
-				<Switch
+			<SettingsRow
+				label="Auto gain (AGC)"
+				description="Normalizes volume so quiet voices are easier to transcribe"
+				right={
+					<Switch
 					checked={audioAgcEnabled}
 					onChange={(event) =>
 						updateAudioAgcEnabled.mutate(event.currentTarget.checked)
@@ -555,16 +544,14 @@ export function AudioSettings({
 					color="gray"
 					size="md"
 				/>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Noise suppression (light)</p>
-					<p className="settings-description">
-						Reduces steady background noise (best-effort, stop-time)
-					</p>
-				</div>
-				<Switch
+			<SettingsRow
+				label="Noise suppression (light)"
+				description="Reduces steady background noise (best-effort, stop-time)"
+				right={
+					<Switch
 					checked={audioNoiseSuppressionEnabled}
 					onChange={(event) =>
 						updateAudioNoiseSuppressionEnabled.mutate(
@@ -575,16 +562,14 @@ export function AudioSettings({
 					color="gray"
 					size="md"
 				/>
-			</div>
+				}
+			/>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Resample to 16 kHz</p>
-					<p className="settings-description">
-						Helpful for some STT engines; costs a bit of CPU at stop time
-					</p>
-				</div>
-				<Switch
+			<SettingsRow
+				label="Resample to 16 kHz"
+				description="Helpful for some STT engines; costs a bit of CPU at stop time"
+				right={
+					<Switch
 					checked={audioResampleTo16khz}
 					onChange={(event) =>
 						updateAudioResampleTo16khz.mutate(event.currentTarget.checked)
@@ -593,7 +578,8 @@ export function AudioSettings({
 					color="gray"
 					size="md"
 				/>
-			</div>
+				}
+			/>
 		</>
 	);
 
