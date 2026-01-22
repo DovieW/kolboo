@@ -1,11 +1,10 @@
-import { MantineProvider } from "@mantine/core";
+import { AppMantineProvider } from "./lib/bootstrap/AppMantineProvider";
+import { renderRoot } from "./lib/bootstrap/renderRoot";
 import "@mantine/core/styles.css";
 import "@fontsource/sora/index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Component, StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { Component } from "react";
 import OverlayApp from "./OverlayApp";
-import { darkTheme } from "./theme";
 
 // Styles are imported in OverlayApp.tsx via app.css
 
@@ -16,10 +15,6 @@ const queryClient = new QueryClient({
 	},
 });
 
-const rootElement = document.getElementById("root");
-if (!rootElement) {
-	throw new Error("Root element not found");
-}
 
 type ErrorBoundaryState = {
 	hasError: boolean;
@@ -85,14 +80,12 @@ class OverlayErrorBoundary extends Component<
 	}
 }
 
-createRoot(rootElement).render(
-	<StrictMode>
-		<QueryClientProvider client={queryClient}>
-			<MantineProvider theme={darkTheme} defaultColorScheme="dark">
-				<OverlayErrorBoundary>
-					<OverlayApp />
-				</OverlayErrorBoundary>
-			</MantineProvider>
-		</QueryClientProvider>
-	</StrictMode>,
+renderRoot(
+	<QueryClientProvider client={queryClient}>
+		<AppMantineProvider>
+			<OverlayErrorBoundary>
+				<OverlayApp />
+			</OverlayErrorBoundary>
+		</AppMantineProvider>
+	</QueryClientProvider>,
 );

@@ -1,4 +1,5 @@
-import { MantineProvider } from "@mantine/core";
+import { AppMantineProvider } from "./lib/bootstrap/AppMantineProvider";
+import { renderRoot } from "./lib/bootstrap/renderRoot";
 import "@mantine/core/styles.css";
 import "@mantine/code-highlight/styles.css";
 import {
@@ -16,24 +17,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
 	Component,
 	type ReactNode,
-	StrictMode,
 	useEffect,
 	useState,
 } from "react";
-import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
-import { darkTheme } from "./theme";
 
 const queryClient = new QueryClient();
 
 hljs.registerLanguage("json", json);
 const highlightAdapter = createHighlightJsAdapter(hljs);
-
-const rootElement = document.getElementById("root");
-if (!rootElement) {
-	throw new Error("Root element not found");
-}
 
 let panicHandlersInstalled = false;
 
@@ -364,19 +357,17 @@ function PanicGate({ children }: { children: ReactNode }) {
 
 installGlobalPanicHandlers();
 
-createRoot(rootElement).render(
-	<StrictMode>
-		<QueryClientProvider client={queryClient}>
-			<CodeHighlightAdapterProvider adapter={highlightAdapter}>
-				<MantineProvider theme={darkTheme} defaultColorScheme="dark">
-					<Notifications position="top-right" />
-					<PanicGate>
-						<AppErrorBoundary>
-							<App />
-						</AppErrorBoundary>
-					</PanicGate>
-				</MantineProvider>
-			</CodeHighlightAdapterProvider>
-		</QueryClientProvider>
-	</StrictMode>,
+renderRoot(
+	<QueryClientProvider client={queryClient}>
+		<CodeHighlightAdapterProvider adapter={highlightAdapter}>
+			<AppMantineProvider>
+				<Notifications position="top-right" />
+				<PanicGate>
+					<AppErrorBoundary>
+						<App />
+					</AppErrorBoundary>
+				</PanicGate>
+			</AppMantineProvider>
+		</CodeHighlightAdapterProvider>
+	</QueryClientProvider>,
 );

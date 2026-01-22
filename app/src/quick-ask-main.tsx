@@ -1,4 +1,5 @@
-import { MantineProvider } from "@mantine/core";
+import { AppMantineProvider } from "./lib/bootstrap/AppMantineProvider";
+import { renderRoot } from "./lib/bootstrap/renderRoot";
 import "@mantine/core/styles.css";
 import "@mantine/code-highlight/styles.css";
 import {
@@ -14,11 +15,8 @@ import rust from "highlight.js/lib/languages/rust";
 import typescript from "highlight.js/lib/languages/typescript";
 import "highlight.js/styles/github-dark.css";
 import "@fontsource/sora/index.css";
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
 
 import QuickAskApp from "./QuickAskApp";
-import { darkTheme } from "./theme";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("javascript", javascript);
@@ -28,17 +26,10 @@ hljs.registerLanguage("rust", rust);
 hljs.registerLanguage("typescript", typescript);
 const highlightAdapter = createHighlightJsAdapter(hljs);
 
-const rootElement = document.getElementById("root");
-if (!rootElement) {
-	throw new Error("Root element not found");
-}
-
-createRoot(rootElement).render(
-	<StrictMode>
-		<CodeHighlightAdapterProvider adapter={highlightAdapter}>
-			<MantineProvider theme={darkTheme} defaultColorScheme="dark">
-				<QuickAskApp />
-			</MantineProvider>
-		</CodeHighlightAdapterProvider>
-	</StrictMode>,
+renderRoot(
+	<CodeHighlightAdapterProvider adapter={highlightAdapter}>
+		<AppMantineProvider>
+			<QuickAskApp />
+		</AppMantineProvider>
+	</CodeHighlightAdapterProvider>,
 );
