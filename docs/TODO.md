@@ -136,12 +136,6 @@ Legend:
   - Add “Export logs” to JSON file and “Copy sanitized log” buttons.
   - Optional redaction mode: strip transcript text while keeping timings and error info.
 
-### Handle mutex poisoning more gracefully
-
-- **Where:** `RequestLogStore` uses `Mutex::lock().unwrap()`.
-- **Todo:**
-  - Switch to poison-aware locking (or `parking_lot`) so one panic doesn’t cascade into a permanent crash.
-
 ---
 
 ## P2 — Tooling, CI/CD, and repo hygiene
