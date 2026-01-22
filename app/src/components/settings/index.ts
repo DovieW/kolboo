@@ -8,4 +8,5 @@ export type { PromptSectionEditorProps } from "./PromptSectionEditor";
 export { PromptSectionEditor } from "./PromptSectionEditor";
 export { PromptSettings } from "./PromptSettings";
 export { ProvidersSettings } from "./ProvidersSettings";
+export { SettingsIconButton, SettingsRow, SettingsTooltipIcon } from "./SettingsRow";
 export { UiSettings } from "./UiSettings";
