@@ -5,22 +5,11 @@
 
 use tauri::AppHandle;
 
+use crate::app_shared;
 use crate::commands::fireworks::ModelOption;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
-
-#[cfg(desktop)]
-fn normalize_base_url(raw: Option<String>) -> Option<String> {
-    raw.and_then(|s| {
-        let t = s.trim().trim_end_matches('/').to_string();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t)
-        }
-    })
-}
 
 #[cfg(desktop)]
 #[tauri::command]
@@ -30,7 +19,7 @@ pub async fn ollama_list_models(app: AppHandle) -> Result<Vec<ModelOption>, Stri
         .ok()
         .and_then(|store| store.get("ollama_url"))
         .and_then(|v| serde_json::from_value::<Option<String>>(v).ok())
-        .and_then(normalize_base_url);
+        .and_then(app_shared::normalize_optional_base_url);
 
     let provider = crate::llm::OllamaLlmProvider::with_url(
         configured_url.unwrap_or_else(|| "http://localhost:11434".to_string()),

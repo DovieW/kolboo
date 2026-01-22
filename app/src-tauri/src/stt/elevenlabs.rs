@@ -74,7 +74,7 @@ impl ElevenLabsSttProvider {
     }
 
     fn speech_to_text_url(&self) -> String {
-        format!("{}/v1/speech-to-text", self.api_base_url_trimmed())
+        http::join_base_url(self.api_base_url_trimmed(), "/v1/speech-to-text")
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {

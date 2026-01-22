@@ -27,7 +27,7 @@ impl DeepgramSttProvider {
     /// readability (e.g., numerals/date formatting), and we keep `punctuate=true`
     /// enabled for clean transcripts.
     fn listen_url(&self) -> Result<Url, SttError> {
-        let url = format!("{}/v1/listen", self.api_base_url_trimmed());
+        let url = http::join_base_url(self.api_base_url_trimmed(), "/v1/listen");
         let mut url = Url::parse(&url)
             .map_err(|e| SttError::Config(format!("Invalid Deepgram base URL: {}", e)))?;
 

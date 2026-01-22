@@ -66,3 +66,68 @@ pub(crate) fn sanitize_transcript(transcript: &str) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
+
+/// Normalize an optional string from settings/user input.
+///
+/// Behavior:
+/// - trims whitespace
+/// - returns `None` if the trimmed value is empty
+#[cfg_attr(not(desktop), allow(dead_code))]
+pub(crate) fn normalize_optional_string(raw: Option<String>) -> Option<String> {
+    raw.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
+    })
+}
+
+/// Normalize an optional base URL from settings/user input.
+///
+/// Behavior:
+/// - trims whitespace
+/// - trims trailing slashes
+/// - returns `None` if the normalized value is empty
+#[cfg_attr(not(desktop), allow(dead_code))]
+pub(crate) fn normalize_optional_base_url(raw: Option<String>) -> Option<String> {
+    raw.and_then(|s| {
+        let t = s.trim().trim_end_matches('/').to_string();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_optional_string_trims_and_drops_empty() {
+        assert_eq!(normalize_optional_string(None), None);
+        assert_eq!(normalize_optional_string(Some("".to_string())), None);
+        assert_eq!(normalize_optional_string(Some("   ".to_string())), None);
+        assert_eq!(
+            normalize_optional_string(Some("  hello  ".to_string())),
+            Some("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_optional_base_url_trims_and_strips_trailing_slashes() {
+        assert_eq!(normalize_optional_base_url(None), None);
+        assert_eq!(normalize_optional_base_url(Some("".to_string())), None);
+        assert_eq!(
+            normalize_optional_base_url(Some("  https://example.com/  ".to_string())),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            normalize_optional_base_url(Some("https://example.com///".to_string())),
+            Some("https://example.com".to_string())
+        );
+    }
+}

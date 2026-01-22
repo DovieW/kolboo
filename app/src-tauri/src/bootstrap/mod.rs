@@ -519,26 +519,12 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
 
     let whisper_server_base_url: Option<String> = {
         let raw: Option<String> = get_setting_from_store(app, "whisper_server_base_url", None);
-        raw.and_then(|s| {
-            let t = s.trim().to_string();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t)
-            }
-        })
+        crate::app_shared::normalize_optional_string(raw)
     };
 
     let ollama_url: Option<String> = {
         let raw: Option<String> = get_setting_from_store(app, "ollama_url", None);
-        raw.and_then(|s| {
-            let t = s.trim().trim_end_matches('/').to_string();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t)
-            }
-        })
+        crate::app_shared::normalize_optional_base_url(raw)
     };
 
     #[cfg(feature = "local-whisper")]

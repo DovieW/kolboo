@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use tauri::AppHandle;
 
+use crate::app_shared;
 use crate::commands::CommandResult;
 use crate::request_log::RequestLogStore;
 
@@ -269,7 +270,8 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .store("settings.json")
         .ok()
         .and_then(|store| store.get("whisper_server_base_url"))
-        .and_then(|v| serde_json::from_value(v).ok());
+        .and_then(|v| serde_json::from_value(v).ok())
+        .and_then(app_shared::normalize_optional_string);
 
     // Read Ollama base URL from store (optional)
     let ollama_url: Option<String> = app
@@ -277,15 +279,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .ok()
         .and_then(|store| store.get("ollama_url"))
         .and_then(|v| serde_json::from_value::<Option<String>>(v).ok())
-        .and_then(|s| s)
-        .and_then(|s| {
-            let t = s.trim().trim_end_matches('/').to_string();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t)
-            }
-        });
+        .and_then(app_shared::normalize_optional_base_url);
 
     #[cfg(feature = "local-whisper")]
     let whisper_model_path: Option<std::path::PathBuf> = {

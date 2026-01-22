@@ -12,8 +12,6 @@ Recent refactors extracted the common “safe” pieces (HTTP client builders, b
 
 ## Low-risk DRY TODOs (small, safe extractions)
 
-- Standardize STT provider endpoint builders to use a single join helper (avoid ad-hoc `format!("{}/...", base)` URL building).
-- Centralize “optional base URL” normalization used for settings-derived URLs (trim whitespace, trim trailing slashes, treat empty as `None`).
 - (Later) Consider a tiny crate-level URL join helper for non-STT providers too (LLM/embeddings), if we see more repeats.
 
 ## “Do not refactor” list (duplication that’s OK)

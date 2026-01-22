@@ -79,9 +79,9 @@ impl GroqSttProvider {
     }
 
     fn transcriptions_url(&self) -> String {
-        format!(
-            "{}/openai/v1/audio/transcriptions",
-            self.api_base_url_trimmed()
+        http::join_base_url(
+            self.api_base_url_trimmed(),
+            "/openai/v1/audio/transcriptions",
         )
     }
 

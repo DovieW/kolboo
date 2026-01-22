@@ -108,18 +108,17 @@ impl AssemblyAiSttProvider {
     }
 
     fn upload_url(&self) -> String {
-        format!("{}/v2/upload", self.api_base_url_trimmed())
+        http::join_base_url(self.api_base_url_trimmed(), "/v2/upload")
     }
 
     fn transcript_url(&self) -> String {
-        format!("{}/v2/transcript", self.api_base_url_trimmed())
+        http::join_base_url(self.api_base_url_trimmed(), "/v2/transcript")
     }
 
     fn transcript_get_url(&self, transcript_id: &str) -> String {
-        format!(
-            "{}/v2/transcript/{}",
+        http::join_base_url(
             self.api_base_url_trimmed(),
-            transcript_id
+            &format!("/v2/transcript/{}", transcript_id),
         )
     }
 
@@ -282,7 +281,7 @@ impl SttProvider for AssemblyAiSttProvider {
                         }
                     },
                     {
-                        "endpoint": format!("{}/v2/transcript/{{id}}", self.api_base_url_trimmed()),
+                            "endpoint": http::join_base_url(self.api_base_url_trimmed(), "/v2/transcript/{id}"),
                         "method": "GET",
                         "note": "Polled until status=completed",
                     }
