@@ -10,6 +10,7 @@
 //! - https://www.assemblyai.com/docs/api-reference/transcripts/submit
 //! - https://www.assemblyai.com/docs/api-reference/transcripts/get
 
+use super::http;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -65,12 +66,7 @@ impl AssemblyAiSttProvider {
     /// - "best" (legacy)
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>) -> Self {
-        let client = reqwest::Client::builder()
-            // AssemblyAI transcription is async; allow a longer HTTP timeout.
-            // The pipeline still applies its own overall timeout.
-            .timeout(Duration::from_secs(120))
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(120));
 
         Self {
             client,
@@ -108,7 +104,7 @@ impl AssemblyAiSttProvider {
     }
 
     fn api_base_url_trimmed(&self) -> &str {
-        self.api_base_url.trim_end_matches('/')
+        http::trim_base_url(&self.api_base_url)
     }
 
     fn upload_url(&self) -> String {

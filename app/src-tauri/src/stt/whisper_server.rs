@@ -13,11 +13,13 @@
 //! - None (keyless). If your server requires authentication, use a provider
 //!   that supports API keys, or extend this provider accordingly.
 
-use super::{AudioFormat, SttError, SttProvider};
+use super::{http, AudioFormat, SttError, SttProvider};
+use crate::network::build_plain_http_client_with_timeout;
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::multipart;
 use serde_json::json;
+use std::time::Duration;
 
 /// Whisper Server STT provider for OpenAI-compatible transcription servers.
 pub struct WhisperServerSttProvider {
@@ -33,8 +35,8 @@ impl WhisperServerSttProvider {
     const PROMPT_MAX_CHARS: usize = 224;
 
     fn normalize_base_url(base_url: &str) -> Result<String, SttError> {
-        let trimmed = base_url.trim();
-        if trimmed.is_empty() {
+        let raw = base_url.trim();
+        if raw.is_empty() {
             return Err(SttError::Config(
                 "Whisper server base URL is empty".to_string(),
             ));
@@ -42,11 +44,11 @@ impl WhisperServerSttProvider {
 
         // Validate that this looks like a URL early so we can show a clear error.
         // reqwest re-exports Url.
-        reqwest::Url::parse(trimmed).map_err(|e| {
-            SttError::Config(format!("Invalid Whisper server URL '{}': {}", trimmed, e))
+        reqwest::Url::parse(raw).map_err(|e| {
+            SttError::Config(format!("Invalid Whisper server URL '{}': {}", raw, e))
         })?;
 
-        Ok(trimmed.trim_end_matches('/').to_string())
+        Ok(String::from(http::trim_base_url(raw)))
     }
 
     fn normalize_model(model: Option<String>) -> String {
@@ -75,9 +77,8 @@ impl WhisperServerSttProvider {
         model: Option<String>,
         default_prompt: Option<String>,
     ) -> Result<Self, SttError> {
-        let client = reqwest::Client::builder()
-            .build()
-            .map_err(|e| SttError::Config(format!("Failed to create HTTP client: {}", e)))?;
+        // Whisper transcription can take a while on slower machines/servers.
+        let client = build_plain_http_client_with_timeout(Duration::from_secs(120));
 
         Self::with_client(client, base_url, model, default_prompt)
     }
@@ -104,7 +105,7 @@ impl WhisperServerSttProvider {
     }
 
     fn endpoint(&self) -> String {
-        format!("{}/audio/transcriptions", self.base_url)
+        http::join_base_url(&self.base_url, "/audio/transcriptions")
     }
 }
 

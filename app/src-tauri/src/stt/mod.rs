@@ -9,6 +9,7 @@ mod deepgram;
 mod elevenlabs;
 mod fireworks;
 mod groq;
+mod http;
 mod openai;
 mod openai_compat;
 mod retry;

@@ -751,13 +751,15 @@ pub(crate) fn stop_recording(
                     ) {
                         if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
                             if store.save_wav(req_id, &wav).is_ok() {
-                                let max_saved_recordings: usize = (get_setting_from_store(
-                                    &app_clone,
-                                    "max_saved_recordings",
-                                    1000u64,
-                                ))
-                                .clamp(1, 100_000)
-                                    as usize;
+                                let max_saved_recordings: usize =
+                                    crate::settings::store::get_u64_setting_clamped(
+                                        &app_clone,
+                                        crate::settings::store::SettingsReadMode::Cached,
+                                        "max_saved_recordings",
+                                        1000u64,
+                                        1,
+                                        100_000,
+                                    ) as usize;
 
                                 let _ = store.prune_to_max_files(max_saved_recordings);
                             }

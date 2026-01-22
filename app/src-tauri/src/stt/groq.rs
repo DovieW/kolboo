@@ -1,5 +1,6 @@
 //! Groq Whisper API STT provider implementation.
 
+use super::http;
 use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
@@ -29,10 +30,7 @@ impl GroqSttProvider {
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(60));
 
         Self {
             client,
@@ -77,7 +75,7 @@ impl GroqSttProvider {
     }
 
     fn api_base_url_trimmed(&self) -> &str {
-        self.api_base_url.trim_end_matches('/')
+        http::trim_base_url(&self.api_base_url)
     }
 
     fn transcriptions_url(&self) -> String {

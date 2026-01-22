@@ -4,7 +4,7 @@
 //! - whisper-v3:       https://audio-prod.api.fireworks.ai/v1/audio/transcriptions
 //! - whisper-v3-turbo: https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions
 
-use super::openai_compat;
+use super::{http, openai_compat};
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -65,7 +65,7 @@ impl FireworksSttProvider {
 
     fn transcriptions_url(&self) -> String {
         if let Some(base_url) = &self.api_base_url {
-            format!("{}/v1/audio/transcriptions", base_url.trim_end_matches('/'))
+            http::join_base_url(base_url, "/v1/audio/transcriptions")
         } else if self.model.contains("turbo") {
             "https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions".to_string()
         } else {

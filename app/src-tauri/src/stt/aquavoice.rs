@@ -8,6 +8,7 @@
 //! - Auth is via `Authorization: Bearer <api_key>`.
 //! - Model defaults to `avalon-v1-en`.
 
+use super::http;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -42,10 +43,7 @@ impl AquavoiceSttProvider {
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(60));
 
         Self {
             client,
@@ -90,7 +88,7 @@ impl AquavoiceSttProvider {
     }
 
     fn endpoint_for_base_url(base_url: &str) -> String {
-        format!("{}/audio/transcriptions", base_url.trim_end_matches('/'))
+        http::join_base_url(base_url, "/audio/transcriptions")
     }
 
     fn endpoint(&self) -> String {

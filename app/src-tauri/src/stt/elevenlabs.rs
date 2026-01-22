@@ -6,6 +6,7 @@
 //! Docs:
 //! - https://elevenlabs.io/docs/api-reference/speech-to-text/convert
 
+use super::http;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -36,10 +37,7 @@ impl ElevenLabsSttProvider {
     /// * `model` - Model to use (e.g., "scribe_v1")
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(60));
 
         Self {
             client,
@@ -72,7 +70,7 @@ impl ElevenLabsSttProvider {
     }
 
     fn api_base_url_trimmed(&self) -> &str {
-        self.api_base_url.trim_end_matches('/')
+        http::trim_base_url(&self.api_base_url)
     }
 
     fn speech_to_text_url(&self) -> String {

@@ -7,7 +7,7 @@ use tauri::Manager;
 use tauri::{AppHandle, State};
 
 use crate::commands::{CommandError, CommandResult};
-use crate::settings::store::{get_settings_store, SettingsReadMode};
+use crate::settings::store::{get_settings_store, store_get_u64_clamped, SettingsReadMode};
 
 fn history_error(message: impl Into<String>) -> CommandError {
     CommandError::new(message, "history")
@@ -17,13 +17,12 @@ pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
     #[cfg(desktop)]
     {
         let default: u64 = 1000;
-        let raw = get_settings_store(app, SettingsReadMode::Fresh)
-            .and_then(|store| store.get("max_saved_recordings"))
-            .and_then(|v| v.as_u64())
+        let store = get_settings_store(app, SettingsReadMode::Fresh);
+        let raw = store
+            .as_ref()
+            .map(|s| store_get_u64_clamped(s, "max_saved_recordings", default, 1, 100_000))
             .unwrap_or(default);
-
-        // Be defensive: avoid runaway values if settings.json was edited.
-        (raw.clamp(1, 100_000)) as usize
+        raw as usize
     }
 
     #[cfg(not(desktop))]
@@ -59,16 +58,17 @@ pub(crate) fn get_history_max_entries(app: &AppHandle) -> Option<usize> {
         let default_amount: u64 = 1000;
         let raw = store
             .as_ref()
-            .and_then(|s| s.get("transcription_retention_amount"))
-            .and_then(|v| {
-                v.as_u64()
-                    .or_else(|| v.as_f64().map(|f| f as u64))
-                    .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+            .map(|s| {
+                store_get_u64_clamped(
+                    s,
+                    "transcription_retention_amount",
+                    default_amount,
+                    1,
+                    100_000,
+                )
             })
             .unwrap_or(default_amount);
-
-        // Be defensive: avoid runaway values if settings.json was edited.
-        Some((raw.clamp(1, 100_000)) as usize)
+        Some(raw as usize)
     }
 
     #[cfg(not(desktop))]

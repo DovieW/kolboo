@@ -125,3 +125,27 @@ pub fn build_http_client_with_timeout(
     let builder = apply_proxy_settings(builder, proxy).map_err(|e| e.to_string())?;
     builder.build().map_err(|e| e.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// "Plain" clients (no proxy settings)
+// ---------------------------------------------------------------------------
+
+/// Build a reqwest `Client` with a default timeout, without applying proxy settings.
+///
+/// This is mainly used by provider `new(...)` constructors and lightweight helper clients.
+pub fn build_plain_http_client_with_timeout(timeout: Duration) -> Client {
+    Client::builder()
+        .timeout(timeout)
+        .build()
+        .expect("Failed to create HTTP client")
+}
+
+/// Build a reqwest `Client` with a user-agent, without applying proxy settings.
+///
+/// Used for requests like GitHub APIs that require a UA.
+pub fn build_plain_http_client_with_user_agent(user_agent: &str) -> Client {
+    Client::builder()
+        .user_agent(user_agent)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}

@@ -4,6 +4,7 @@
 //! - Legacy Whisper API (whisper-1) - uses /v1/audio/transcriptions
 //! - Audio chat models (e.g., gpt-4o-audio-preview) - uses /v1/responses with audio input
 
+use super::http;
 use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
@@ -35,10 +36,7 @@ impl OpenAiSttProvider {
     ///   - "whisper-1" - Legacy Whisper API
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120)) // Longer timeout for GPT-4o
-            .build()
-            .expect("Failed to create HTTP client");
+        let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(120));
 
         Self {
             client,
@@ -86,15 +84,15 @@ impl OpenAiSttProvider {
     }
 
     fn api_base_url_trimmed(&self) -> &str {
-        self.api_base_url.trim_end_matches('/')
+        http::trim_base_url(&self.api_base_url)
     }
 
     fn transcriptions_url(&self) -> String {
-        format!("{}/v1/audio/transcriptions", self.api_base_url_trimmed())
+        http::join_base_url(self.api_base_url_trimmed(), "/v1/audio/transcriptions")
     }
 
     fn responses_url(&self) -> String {
-        format!("{}/v1/responses", self.api_base_url_trimmed())
+        http::join_base_url(self.api_base_url_trimmed(), "/v1/responses")
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {

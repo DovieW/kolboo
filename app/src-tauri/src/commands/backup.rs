@@ -220,10 +220,7 @@ const GITHUB_GIST_BACKUP_FILE_NAME: &str = "kolboo-settings-backup.json";
 
 #[cfg(desktop)]
 fn github_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("kolboo")
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    crate::network::build_plain_http_client_with_user_agent("kolboo")
 }
 
 #[cfg(desktop)]
