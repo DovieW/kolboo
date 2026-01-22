@@ -1,8 +1,9 @@
-import { ActionIcon, Select, Switch, Text, Tooltip } from "@mantine/core";
-import { Info, RotateCcw } from "lucide-react";
+import { Select, Switch, Text } from "@mantine/core";
 import type { ModelOption } from "../../../lib/modelOptions";
 import type { AppSettings } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
+import { SettingsInheritanceIndicator } from "../SettingsInheritance";
+import { SettingsRow } from "../SettingsRow";
 
 const SELECT_DEFAULT = "default";
 
@@ -146,175 +147,85 @@ export function RewriteSettingsSection({
 			</div>
 
 			{/* Rewrite Transcription toggle */}
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Rewrite Transcription</p>
-					<p className="settings-description">
-						Enable or disable rewriting the transcription with an LLM
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && rewriteEnabledInheriting && (
-						<Tooltip label={inheritTooltip} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !rewriteEnabledInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={onDisableRewriteEnabledOverride}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Switch
-						checked={
-							isDefaultScope
-								? defaultRewriteEnabled
-								: localProfileRewriteEnabled
-						}
-						onChange={(e) => onRewriteEnabledChange(e.currentTarget.checked)}
-						disabled={isUpdatingRewriteEnabled}
-						color="gray"
-						size="md"
-					/>
-				</div>
-			</div>
+			<SettingsRow
+				label="Rewrite Transcription"
+				description="Enable or disable rewriting the transcription with an LLM"
+				right={
+					<>
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={rewriteEnabledInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={onDisableRewriteEnabledOverride}
+							disabled={isUpdatingRewriteEnabled}
+						/>
+						<Switch
+							checked={
+								isDefaultScope
+									? defaultRewriteEnabled
+									: localProfileRewriteEnabled
+							}
+							onChange={(e) =>
+								onRewriteEnabledChange(e.currentTarget.checked)
+							}
+							disabled={isUpdatingRewriteEnabled}
+							color="gray"
+							size="md"
+						/>
+					</>
+				}
+			/>
 
 			{/* Include Clipboard Context toggle */}
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Include Clipboard Context</p>
-					<p className="settings-description">
+			<SettingsRow
+				label="Include Clipboard Context"
+				description={
+					<>
 						When enabled, Kolboo reads your clipboard text and includes it as
 						optional context during the Rewrite step.
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && rewriteIncludeClipboardContextInheriting && (
-						<Tooltip label={inheritTooltip} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !rewriteIncludeClipboardContextInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={onDisableRewriteIncludeClipboardContextOverride}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Switch
-						checked={localProfileRewriteIncludeClipboardContext}
-						onChange={(e) =>
-							onRewriteIncludeClipboardContextChange(e.currentTarget.checked)
-						}
-						color="gray"
-						size="md"
-					/>
-				</div>
-			</div>
+					</>
+				}
+				right={
+					<>
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={rewriteIncludeClipboardContextInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={
+								onDisableRewriteIncludeClipboardContextOverride
+							}
+						/>
+						<Switch
+							checked={localProfileRewriteIncludeClipboardContext}
+							onChange={(e) =>
+								onRewriteIncludeClipboardContextChange(e.currentTarget.checked)
+							}
+							color="gray"
+							size="md"
+						/>
+					</>
+				}
+			/>
 
 			{/* LLM Provider */}
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Language Model Provider</p>
-					<p className="settings-description">AI service for text formatting</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && llmProviderInheriting && (
-						<Tooltip label={inheritTooltip} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !llmProviderInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={onDisableLlmProviderOverride}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Select
-						data={llmProviderOptions}
-						value={effectiveLlmProvider}
-						onChange={onLlmProviderChange}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={isLlmProviderDisabled}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
-			</div>
-
-			{/* LLM Model */}
-			{llmModelOptions.length > 0 ? (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Rewrite LLM Model</p>
-						<p className="settings-description">
-							LLM Model used to rewrite the transcription.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && llmModelInheriting && (
-							<Tooltip label={inheritTooltip} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !llmModelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={onDisableLlmModelOverride}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						{llmPricingLabel ? (
-							<Text
-								size="xs"
-								c="dimmed"
-								style={{ whiteSpace: "nowrap", lineHeight: 1 }}
-							>
-								{llmPricingLabel}
-							</Text>
-						) : null}
+			<SettingsRow
+				label="Language Model Provider"
+				description="AI service for text formatting"
+				right={
+					<>
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={llmProviderInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={onDisableLlmProviderOverride}
+						/>
 						<Select
-							data={llmModelOptions}
-							value={
-								isDefaultScope
-									? (settings?.llm_model ?? llmModelOptions[0]?.value ?? null)
-									: localProfileLlmModel
-							}
-							onChange={onLlmModelChange}
-							placeholder="Select model"
+							data={llmProviderOptions}
+							value={effectiveLlmProvider}
+							onChange={onLlmProviderChange}
+							placeholder="Select provider"
 							withCheckIcon={false}
+							disabled={isLlmProviderDisabled}
 							styles={{
 								input: {
 									backgroundColor: "var(--bg-elevated)",
@@ -324,57 +235,87 @@ export function RewriteSettingsSection({
 								},
 							}}
 						/>
-					</div>
-				</div>
+					</>
+				}
+			/>
+
+			{/* LLM Model */}
+			{llmModelOptions.length > 0 ? (
+				<SettingsRow
+					label="Rewrite LLM Model"
+					description="LLM Model used to rewrite the transcription."
+					right={
+						<>
+							<SettingsInheritanceIndicator
+								isDefaultScope={isDefaultScope}
+								inheriting={llmModelInheriting}
+								inheritTooltip={inheritTooltip}
+								onDisableOverride={onDisableLlmModelOverride}
+							/>
+							{llmPricingLabel ? (
+								<Text
+									size="xs"
+									c="dimmed"
+									style={{ whiteSpace: "nowrap", lineHeight: 1 }}
+								>
+									{llmPricingLabel}
+								</Text>
+							) : null}
+							<Select
+								data={llmModelOptions}
+								value={
+									isDefaultScope
+										? (settings?.llm_model ??
+												llmModelOptions[0]?.value ??
+												null)
+									: localProfileLlmModel
+								}
+								onChange={onLlmModelChange}
+								placeholder="Select model"
+								withCheckIcon={false}
+								styles={{
+									input: {
+										backgroundColor: "var(--bg-elevated)",
+										borderColor: "var(--border-default)",
+										color: "var(--text-primary)",
+										minWidth: 200,
+									},
+								}}
+							/>
+						</>
+					}
+				/>
 			) : null}
 
 			{/* OpenAI Thinking */}
 			{supportsOpenAiThinking && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking</p>
-						<p className="settings-description">
-							Set the reasoning effort for this model.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && openAiReasoningEffortInheriting && (
-							<Tooltip label={inheritTooltip} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !openAiReasoningEffortInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={onDisableOpenAiThinkingOverride}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-
-						<HintSelect
-							data={openAiThinkingOptions}
-							value={
-								isDefaultScope
-									? (settings?.openai_reasoning_effort ?? SELECT_DEFAULT)
+				<SettingsRow
+					label="Thinking"
+					description="Set the reasoning effort for this model."
+					right={
+						<>
+							<SettingsInheritanceIndicator
+								isDefaultScope={isDefaultScope}
+								inheriting={openAiReasoningEffortInheriting}
+								inheritTooltip={inheritTooltip}
+								onDisableOverride={onDisableOpenAiThinkingOverride}
+							/>
+							<HintSelect
+								data={openAiThinkingOptions}
+								value={
+									isDefaultScope
+										? (settings?.openai_reasoning_effort ?? SELECT_DEFAULT)
 									: localProfileOpenAiReasoningEffort
-							}
-							onChange={onOpenAiThinkingChange}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
+								}
+								onChange={onOpenAiThinkingChange}
+								placeholder="Default"
+								inputStyle={{
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								}}
+								renderSelected={({ option, placeholder }) => {
 								if (!option) {
 									return (
 										<Text size="sm" c="dimmed">
@@ -454,62 +395,45 @@ export function RewriteSettingsSection({
 									</div>
 								);
 							}}
-						/>
-					</div>
-				</div>
+							/>
+						</>
+					}
+				/>
 			)}
 
 			{/* Gemini Thinking Level */}
 			{supportsGeminiThinkingLevel && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking Level</p>
-						<p className="settings-description">
-							{isGemini3Pro
-								? "Gemini 3 Pro supports low/high (default high)."
-								: "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
-						</p>
-					</div>
-
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && geminiThinkingLevelInheriting && (
-							<Tooltip label={inheritTooltip} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-
-						{!isDefaultScope && !geminiThinkingLevelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={onDisableGeminiThinkingLevelOverride}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-
-						<HintSelect
-							data={geminiThinkingLevelOptions}
-							value={
-								isDefaultScope
-									? (settings?.gemini_thinking_level ?? SELECT_DEFAULT)
+				<SettingsRow
+					label="Thinking Level"
+					description={
+						isGemini3Pro
+							? "Gemini 3 Pro supports low/high (default high)."
+							: "Gemini 3 Flash supports minimal/low/medium/high (default high)."
+					}
+					right={
+						<>
+							<SettingsInheritanceIndicator
+								isDefaultScope={isDefaultScope}
+								inheriting={geminiThinkingLevelInheriting}
+								inheritTooltip={inheritTooltip}
+								onDisableOverride={onDisableGeminiThinkingLevelOverride}
+							/>
+							<HintSelect
+								data={geminiThinkingLevelOptions}
+								value={
+									isDefaultScope
+										? (settings?.gemini_thinking_level ?? SELECT_DEFAULT)
 									: localProfileGeminiThinkingLevel
-							}
-							onChange={onGeminiThinkingLevelChange}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
+								}
+								onChange={onGeminiThinkingLevelChange}
+								placeholder="Default"
+								inputStyle={{
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								}}
+								renderSelected={({ option, placeholder }) => {
 								if (!option) {
 									return (
 										<Text size="sm" c="dimmed">
@@ -578,59 +502,43 @@ export function RewriteSettingsSection({
 									</div>
 								);
 							}}
-						/>
-					</div>
-				</div>
+							/>
+						</>
+					}
+				/>
 			)}
 
 			{/* Gemini Thinking Budget */}
 			{supportsGeminiThinkingBudget && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking Budget</p>
-						<p className="settings-description">
-							Token budget for Gemini 2.5 thinking.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && geminiThinkingBudgetInheriting && (
-							<Tooltip label={inheritTooltip} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !geminiThinkingBudgetInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={onDisableGeminiThinkingBudgetOverride}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						<HintSelect
-							data={geminiThinkingBudgetOptions}
-							value={
-								isDefaultScope
-									? settings?.gemini_thinking_budget == null
-										? SELECT_DEFAULT
-										: String(settings.gemini_thinking_budget)
+				<SettingsRow
+					label="Thinking Budget"
+					description="Token budget for Gemini 2.5 thinking."
+					right={
+						<>
+							<SettingsInheritanceIndicator
+								isDefaultScope={isDefaultScope}
+								inheriting={geminiThinkingBudgetInheriting}
+								inheritTooltip={inheritTooltip}
+								onDisableOverride={onDisableGeminiThinkingBudgetOverride}
+							/>
+							<HintSelect
+								data={geminiThinkingBudgetOptions}
+								value={
+									isDefaultScope
+										? settings?.gemini_thinking_budget == null
+											? SELECT_DEFAULT
+											: String(settings.gemini_thinking_budget)
 									: localProfileGeminiThinkingBudget
-							}
-							onChange={onGeminiThinkingBudgetChange}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
+								}
+								onChange={onGeminiThinkingBudgetChange}
+								placeholder="Default"
+								inputStyle={{
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								}}
+								renderSelected={({ option, placeholder }) => {
 								if (!option) {
 									return (
 										<Text size="sm" c="dimmed">
@@ -712,59 +620,45 @@ export function RewriteSettingsSection({
 									</div>
 								);
 							}}
-						/>
-					</div>
-				</div>
+							/>
+						</>
+					}
+				/>
 			)}
 
 			{/* Anthropic Thinking Budget */}
 			{supportsAnthropicThinkingBudget && (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Thinking</p>
-						<p className="settings-description">
-							Extended thinking level for Claude models.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && anthropicThinkingBudgetInheriting && (
-							<Tooltip label={inheritTooltip} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !anthropicThinkingBudgetInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={onDisableAnthropicThinkingBudgetOverride}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						<HintSelect
-							data={anthropicThinkingLevelOptionsWithCustom}
-							value={
-								isDefaultScope
-									? settings?.anthropic_thinking_budget == null
-										? SELECT_DEFAULT
-										: String(settings.anthropic_thinking_budget)
-									: localProfileAnthropicThinkingBudget
+				<SettingsRow
+					label="Thinking"
+					description="Extended thinking level for Claude models."
+					right={
+						<>
+							<SettingsInheritanceIndicator
+								isDefaultScope={isDefaultScope}
+								inheriting={anthropicThinkingBudgetInheriting}
+								inheritTooltip={inheritTooltip}
+								onDisableOverride={
+								onDisableAnthropicThinkingBudgetOverride
 							}
-							onChange={onAnthropicThinkingBudgetChange}
-							placeholder="Default"
-							inputStyle={{
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							}}
-							renderSelected={({ option, placeholder }) => {
+							/>
+							<HintSelect
+								data={anthropicThinkingLevelOptionsWithCustom}
+								value={
+									isDefaultScope
+										? settings?.anthropic_thinking_budget == null
+											? SELECT_DEFAULT
+											: String(settings.anthropic_thinking_budget)
+									: localProfileAnthropicThinkingBudget
+								}
+								onChange={onAnthropicThinkingBudgetChange}
+								placeholder="Default"
+								inputStyle={{
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								}}
+								renderSelected={({ option, placeholder }) => {
 								if (!option) {
 									return (
 										<Text size="sm" c="dimmed">
@@ -884,9 +778,10 @@ export function RewriteSettingsSection({
 									</div>
 								);
 							}}
-						/>
-					</div>
-				</div>
+							/>
+						</>
+					}
+				/>
 			)}
 		</>
 	);

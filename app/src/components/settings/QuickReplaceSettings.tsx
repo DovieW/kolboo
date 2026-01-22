@@ -1,9 +1,10 @@
 import { Accordion, Select, Switch } from "@mantine/core";
-import { Info, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import type { RewriteProgramPromptProfile } from "../../lib/tauri";
 import { PromptSectionEditor } from "./PromptSectionEditor";
-import { SettingsIconButton, SettingsRow, SettingsTooltipIcon } from "./SettingsRow";
+import { SettingsInheritanceIndicator } from "./SettingsInheritance";
+import { SettingsIconButton, SettingsRow } from "./SettingsRow";
 
 type LlmOption = { value: string; label: string };
 type LlmOptionGroup = { group: string; items: LlmOption[] };
@@ -128,30 +129,23 @@ export function QuickReplaceSettings({
 				}
 				right={
 					<>
-						{!isDefaultScope && quickReplaceEnabledInheriting && (
-							<SettingsTooltipIcon label={inheritTooltip}>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</SettingsTooltipIcon>
-						)}
-						{!isDefaultScope && !quickReplaceEnabledInheriting && (
-							<SettingsIconButton
-								label="Disable override (inherit from Default)"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Quick Replace override?",
-										onConfirm: () => {
-											setQuickReplaceEnabledInheriting(true);
-											setLocalProfileQuickReplaceEnabled(
-												defaultQuickReplaceEnabled,
-											);
-											saveProfileMetadata({ quick_replace_enabled: null });
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</SettingsIconButton>
-						)}
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={quickReplaceEnabledInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={() =>
+								openDisableOverrideDialog({
+									title: "Disable Quick Replace override?",
+									onConfirm: () => {
+										setQuickReplaceEnabledInheriting(true);
+										setLocalProfileQuickReplaceEnabled(
+											defaultQuickReplaceEnabled,
+										);
+										saveProfileMetadata({ quick_replace_enabled: null });
+									},
+								})
+							}
+						/>
 						<Switch
 							checked={localProfileQuickReplaceEnabled}
 							onChange={(e) => {
@@ -178,34 +172,26 @@ export function QuickReplaceSettings({
 				}
 				right={
 					<>
-						{!isDefaultScope && quickReplaceIncludeClipboardContextInheriting && (
-							<SettingsTooltipIcon label={inheritTooltip}>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</SettingsTooltipIcon>
-						)}
-						{!isDefaultScope &&
-							!quickReplaceIncludeClipboardContextInheriting && (
-								<SettingsIconButton
-									label="Disable override (inherit from Default)"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title:
-											"Disable Quick Replace Clipboard Context override?",
-											onConfirm: () => {
-												setQuickReplaceIncludeClipboardContextInheriting(true);
-												setLocalProfileQuickReplaceIncludeClipboardContext(
-													defaultQuickReplaceIncludeClipboardContext,
-												);
-												saveProfileMetadata({
-													quick_replace_include_clipboard_context: null,
-												});
-										},
-									})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</SettingsIconButton>
-							)}
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={quickReplaceIncludeClipboardContextInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={() =>
+								openDisableOverrideDialog({
+									title:
+										"Disable Quick Replace Clipboard Context override?",
+									onConfirm: () => {
+										setQuickReplaceIncludeClipboardContextInheriting(true);
+										setLocalProfileQuickReplaceIncludeClipboardContext(
+											defaultQuickReplaceIncludeClipboardContext,
+										);
+										saveProfileMetadata({
+											quick_replace_include_clipboard_context: null,
+										});
+									},
+								})
+							}
+						/>
 						<Switch
 							checked={localProfileQuickReplaceIncludeClipboardContext}
 							onChange={(e) => {
@@ -230,11 +216,28 @@ export function QuickReplaceSettings({
 				description="AI service used to rewrite the highlighted text."
 				right={
 					<>
-						{!isDefaultScope && quickReplaceProviderInheriting && (
-							<SettingsTooltipIcon label={inheritTooltip}>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</SettingsTooltipIcon>
-						)}
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={quickReplaceProviderInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={() =>
+								openDisableOverrideDialog({
+									title: "Disable Quick Replace Provider override?",
+									onConfirm: () => {
+										setQuickReplaceProviderInheriting(true);
+										setQuickReplaceModelInheriting(true);
+										setLocalProfileQuickReplaceProvider(
+											defaultQuickReplaceProvider,
+										);
+										setLocalProfileQuickReplaceModel(defaultQuickReplaceModel);
+										saveProfileMetadata({
+											quick_replace_provider: null,
+											quick_replace_model: null,
+										});
+									},
+								})
+							}
+						/>
 						{showRewriteProviderReset && (
 							<SettingsIconButton
 								label="Use Rewrite provider/model"
@@ -246,32 +249,6 @@ export function QuickReplaceSettings({
 										quick_replace_model: null,
 									});
 								}}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</SettingsIconButton>
-						)}
-						{!isDefaultScope && !quickReplaceProviderInheriting && (
-							<SettingsIconButton
-								label="Disable override (inherit from Default)"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Quick Replace Provider override?",
-										onConfirm: () => {
-											setQuickReplaceProviderInheriting(true);
-											setQuickReplaceModelInheriting(true);
-											setLocalProfileQuickReplaceProvider(
-												defaultQuickReplaceProvider,
-											);
-											setLocalProfileQuickReplaceModel(
-												defaultQuickReplaceModel,
-											);
-											saveProfileMetadata({
-												quick_replace_provider: null,
-												quick_replace_model: null,
-											});
-										},
-									})
-								}
 							>
 								<RotateCcw size={14} style={{ opacity: 0.65 }} />
 							</SettingsIconButton>
@@ -318,30 +295,23 @@ export function QuickReplaceSettings({
 					description="LLM model used to rewrite the highlighted text."
 					right={
 						<>
-							{!isDefaultScope && quickReplaceModelInheriting && (
-								<SettingsTooltipIcon label={inheritTooltip}>
-									<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-								</SettingsTooltipIcon>
-							)}
-							{!isDefaultScope && !quickReplaceModelInheriting && (
-								<SettingsIconButton
-									label="Disable override (inherit from Default)"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Quick Replace Model override?",
-											onConfirm: () => {
-												setQuickReplaceModelInheriting(true);
-												setLocalProfileQuickReplaceModel(
-													defaultQuickReplaceModel,
-												);
-												saveProfileMetadata({ quick_replace_model: null });
-										},
+							<SettingsInheritanceIndicator
+								isDefaultScope={isDefaultScope}
+								inheriting={quickReplaceModelInheriting}
+								inheritTooltip={inheritTooltip}
+								onDisableOverride={() =>
+									openDisableOverrideDialog({
+										title: "Disable Quick Replace Model override?",
+										onConfirm: () => {
+											setQuickReplaceModelInheriting(true);
+											setLocalProfileQuickReplaceModel(
+												defaultQuickReplaceModel,
+											);
+											saveProfileMetadata({ quick_replace_model: null });
+									},
 									})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</SettingsIconButton>
-							)}
+								}
+							/>
 							<Select
 								data={quickReplaceModelOptions}
 								value={selectedQuickReplaceModelForUi}
