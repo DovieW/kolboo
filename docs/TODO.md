@@ -16,9 +16,7 @@ Legend:
 
 - **Where:** `app/src-tauri/src/commands/stats.rs`
 - **Previous problem:** cost summary endpoints scanned all JSONL lines on every query.
-- **Current state:** stats queries are now cached in-memory and invalidated whenever a new cost event is appended.
-- **Todo (optional follow-up):**
-  - Add an on-disk incremental index (for instant stats even after restart) and a “rebuild index” path if shards are corrupted.
+- **Current state:** stats queries are cached in-memory and invalidated whenever a new cost event is appended, and they also use an on-disk hourly index for instant stats after restart (with best-effort rebuild if an index file is corrupted).
 
 ---
 

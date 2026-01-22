@@ -4,11 +4,12 @@
 //! - request logs are in-memory and meant for debugging.
 //! - stats are persisted (for usage analytics / cost reporting).
 
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Timelike, Utc};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -171,6 +172,12 @@ struct StatsWriterState {
     writer: Option<BufWriter<fs::File>>,
     pending_appends: u32,
     last_flush_at: Instant,
+
+    // Best-effort on-disk hourly index for cost events.
+    // This makes stats queries fast immediately after restart.
+    index_date: Option<String>,
+    index_day: Option<cost_index::CostIndexDay>,
+    index_dirty: bool,
 }
 
 impl StatsStore {
@@ -187,6 +194,10 @@ impl StatsStore {
                 writer: None,
                 pending_appends: 0,
                 last_flush_at: Instant::now(),
+
+                index_date: None,
+                index_day: None,
+                index_dirty: false,
             })),
             revision: AtomicU64::new(0),
             query_cache: Arc::new(StdMutex::new(StatsQueryCacheState::default())),
@@ -283,6 +294,21 @@ impl StatsStore {
                 let _ = w.flush();
             }
 
+            // Best-effort flush old index before rotating.
+            if st.index_dirty {
+                if let (Some(idx), Some(idx_date)) = (st.index_day.as_ref(), st.index_date.as_ref())
+                {
+                    if let Err(e) = cost_index::save_day(&self.dir, idx_date, idx) {
+                        log::warn!(
+                            "Failed to save cost index for {}: {} (will rebuild later)",
+                            idx_date,
+                            e
+                        );
+                    }
+                }
+                st.index_dirty = false;
+            }
+
             let file = fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -293,6 +319,29 @@ impl StatsStore {
             st.current_date = Some(date);
             st.current_path = Some(file_path);
             st.pending_appends = 0;
+
+            // Load (or rebuild) the index for the new shard.
+            let new_date = st
+                .current_date
+                .clone()
+                .unwrap_or_else(|| event.created_at.format("%Y-%m-%d").to_string());
+            match cost_index::load_or_rebuild_day(&self.dir, &new_date) {
+                Ok(day) => {
+                    st.index_date = Some(new_date);
+                    st.index_day = Some(day);
+                    st.index_dirty = false;
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to load/rebuild cost index for {}: {} (stats queries will fall back)",
+                        new_date,
+                        e
+                    );
+                    st.index_date = Some(new_date);
+                    st.index_day = None;
+                    st.index_dirty = false;
+                }
+            }
         }
 
         let Some(ref mut writer) = st.writer else {
@@ -302,6 +351,20 @@ impl StatsStore {
         serde_json::to_writer(&mut *writer, event).map_err(|e| e.to_string())?;
         writer.write_all(b"\n").map_err(|e| e.to_string())?;
         st.pending_appends = st.pending_appends.saturating_add(1);
+
+        // Best-effort: update the hourly index for this day.
+        let idx_date = st.index_date.clone();
+        let mut index_updated = false;
+        if let Some(ref mut idx) = st.index_day {
+            let event_date = event.created_at.format("%Y-%m-%d").to_string();
+            if idx_date.as_deref() == Some(event_date.as_str()) {
+                idx.apply_event(event);
+                index_updated = true;
+            }
+        }
+        if index_updated {
+            st.index_dirty = true;
+        }
 
         // Any append means stats queries are stale.
         self.bump_revision();
@@ -324,6 +387,22 @@ impl StatsStore {
 
         if let Some(ref mut writer) = st.writer {
             writer.flush().map_err(|e| e.to_string())?;
+        }
+
+        // Best-effort persist index alongside the shard flush.
+        if st.index_dirty {
+            if let (Some(idx), Some(idx_date)) = (st.index_day.as_ref(), st.index_date.as_ref()) {
+                if let Err(e) = cost_index::save_day(&self.dir, idx_date, idx) {
+                    // Do not fail the app for an index write; we can rebuild it later.
+                    log::warn!(
+                        "Failed to save cost index for {}: {} (will rebuild later)",
+                        idx_date,
+                        e
+                    );
+                } else {
+                    st.index_dirty = false;
+                }
+            }
         }
 
         st.pending_appends = 0;
@@ -374,6 +453,10 @@ impl StatsStore {
                     // Compare by date; if it's strictly older than the cutoff date, delete.
                     if date < cutoff.date_naive() {
                         let _ = fs::remove_file(&path);
+
+                        // Also delete the corresponding index (best-effort).
+                        let idx_path = cost_index::index_path_for_date(&self.dir, date_part);
+                        let _ = fs::remove_file(idx_path);
                     }
                 }
             }
@@ -406,14 +489,609 @@ impl StatsStore {
             }
             if fs::remove_file(&path).is_ok() {
                 total_bytes = total_bytes.saturating_sub(sz as u128);
+
+                // If we deleted a shard file, also delete its index (best-effort).
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    if name.starts_with("cost-events-") && name.ends_with(".jsonl") {
+                        let date_part = name
+                            .trim_start_matches("cost-events-")
+                            .trim_end_matches(".jsonl");
+                        let idx_path = cost_index::index_path_for_date(&self.dir, date_part);
+                        let _ = fs::remove_file(idx_path);
+                    }
+                }
             }
         }
 
         Ok(())
     }
 
+    /// Aggregate cost events using the persisted hourly index when possible.
+    ///
+    /// This is used by the stats commands to avoid re-scanning all JSONL lines
+    /// on every query, while keeping results exact.
+    pub fn aggregate_cost_events(
+        &self,
+        cutoff: Option<DateTime<Utc>>,
+        kind_filter: Option<CostKind>,
+        selected_stt_model_keys: Option<&std::collections::HashSet<String>>,
+        selected_llm_model_keys: Option<&std::collections::HashSet<String>>,
+        exclude_free_tier: bool,
+    ) -> Result<AggregatedCostResult, String> {
+        let mut out = AggregatedCostResult::default();
+
+        if !self.dir.exists() {
+            return Ok(out);
+        }
+
+        fn apply_event_filtered(
+            out: &mut AggregatedCostResult,
+            ev: &CostEvent,
+            cutoff: Option<DateTime<Utc>>,
+            kind_filter: Option<CostKind>,
+            selected_stt_model_keys: Option<&std::collections::HashSet<String>>,
+            selected_llm_model_keys: Option<&std::collections::HashSet<String>>,
+            exclude_free_tier: bool,
+        ) {
+            if let Some(cut) = cutoff {
+                if ev.created_at < cut {
+                    return;
+                }
+            }
+
+            if let Some(kind_filter) = kind_filter {
+                if ev.kind != kind_filter {
+                    return;
+                }
+            }
+
+            if exclude_free_tier && ev.is_free_tier {
+                return;
+            }
+
+            let keys_to_apply = match ev.kind {
+                CostKind::Stt => selected_stt_model_keys,
+                CostKind::Llm => selected_llm_model_keys,
+            };
+
+            if let Some(keys) = keys_to_apply {
+                let Some(model) = ev.model.as_deref() else {
+                    return;
+                };
+                let key = format!("{}::{}", ev.provider, model);
+                if !keys.contains(&key) {
+                    return;
+                }
+            }
+
+            out.events_total = out.events_total.saturating_add(1);
+            out.earliest_included_at = match out.earliest_included_at {
+                None => Some(ev.created_at),
+                Some(t) => Some(std::cmp::min(t, ev.created_at)),
+            };
+            out.latest_included_at = match out.latest_included_at {
+                None => Some(ev.created_at),
+                Some(t) => Some(std::cmp::max(t, ev.created_at)),
+            };
+
+            // Provider totals always include events_total, regardless of cost.
+            let entry = out
+                .by_provider
+                .entry(ev.provider.clone())
+                .or_insert((0u128, 0u64, 0u64));
+            entry.1 = entry.1.saturating_add(1);
+
+            if let Some(micros) = ev.estimated_cost_usd_micros {
+                out.events_with_cost = out.events_with_cost.saturating_add(1);
+                out.total_usd_micros = out.total_usd_micros.saturating_add(micros as u128);
+                entry.0 = entry.0.saturating_add(micros as u128);
+                entry.2 = entry.2.saturating_add(1);
+            }
+        }
+
+        // If cutoff exists, we can avoid double-counting by treating the cutoff hour
+        // as the only "partial" interval that needs exact JSONL scanning.
+        let cutoff_date = cutoff.map(|t| t.date_naive());
+        let cutoff_hour = cutoff.map(|t| t.hour());
+
+        // 1) Use index for all available shard dates.
+        // For cutoff day, include only hours strictly after the cutoff hour.
+        let entries = fs::read_dir(&self.dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with("cost-events-") || !name.ends_with(".jsonl") {
+                continue;
+            }
+
+            let date_part = name
+                .trim_start_matches("cost-events-")
+                .trim_end_matches(".jsonl");
+            let Ok(date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") else {
+                continue;
+            };
+
+            // If cutoff exists and this whole day is strictly before it, skip.
+            if let Some(cut_date) = cutoff_date {
+                if date < cut_date {
+                    continue;
+                }
+            }
+
+            let day_res = cost_index::load_or_rebuild_day(&self.dir, date_part);
+            let day = match day_res {
+                Ok(d) => d,
+                Err(_) => {
+                    // If index can't be loaded/rebuilt, fall back to scanning this shard.
+                    // This keeps correctness and allows recovery even if index logic fails.
+                    let file = match fs::File::open(&path) {
+                        Ok(f) => f,
+                        Err(_) => continue,
+                    };
+                    let reader = BufReader::new(file);
+                    for line in reader.lines() {
+                        let Ok(line) = line else { continue };
+                        let line = line.trim();
+                        if line.is_empty() {
+                            continue;
+                        }
+                        let Ok(ev) = serde_json::from_str::<CostEvent>(line) else {
+                            continue;
+                        };
+
+                        // Keep the cutoff hour exclusively scanned in the dedicated pass below,
+                        // so we can apply the minute/second cutoff precisely without double-counting.
+                        if let (Some(cut_date), Some(cut_hour)) = (cutoff_date, cutoff_hour) {
+                            if ev.created_at.date_naive() == cut_date
+                                && (ev.created_at.hour() as u32) <= cut_hour
+                            {
+                                continue;
+                            }
+                        }
+
+                        apply_event_filtered(
+                            &mut out,
+                            &ev,
+                            cutoff,
+                            kind_filter,
+                            selected_stt_model_keys,
+                            selected_llm_model_keys,
+                            exclude_free_tier,
+                        );
+                    }
+                    continue;
+                }
+            };
+
+            let start_hour_exclusive: Option<u32> = match (cutoff_date, cutoff_hour) {
+                (Some(cut_date), Some(h)) if date == cut_date => Some(h),
+                _ => None,
+            };
+
+            day.sum_into(
+                &mut out,
+                cost_index::CostAggFilters {
+                    cutoff,
+                    kind_filter,
+                    selected_stt_model_keys,
+                    selected_llm_model_keys,
+                    exclude_free_tier,
+                },
+                start_hour_exclusive,
+            );
+        }
+
+        // 2) Exact scan for the cutoff hour (only), to exclude events earlier than the cutoff.
+        // This is needed because the index aggregates by hour.
+        if let (Some(cut), Some(cut_date), Some(cut_hour)) = (cutoff, cutoff_date, cutoff_hour) {
+            let shard_path = self
+                .dir
+                .join(format!("cost-events-{}.jsonl", cut_date.format("%Y-%m-%d")));
+            if shard_path.exists() {
+                let file = fs::File::open(&shard_path).map_err(|e| e.to_string())?;
+                let reader = BufReader::new(file);
+                for line in reader.lines() {
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(_) => continue,
+                    };
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    let ev: CostEvent = match serde_json::from_str(line) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    if ev.created_at < cut {
+                        continue;
+                    }
+
+                    if ev.created_at.date_naive() != cut_date {
+                        continue;
+                    }
+
+                    if ev.created_at.hour() != cut_hour {
+                        continue;
+                    }
+
+                    apply_event_filtered(
+                        &mut out,
+                        &ev,
+                        cutoff,
+                        kind_filter,
+                        selected_stt_model_keys,
+                        selected_llm_model_keys,
+                        exclude_free_tier,
+                    );
+                }
+            }
+        }
+
+        Ok(out)
+    }
+
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct AggregatedCostResult {
+    pub total_usd_micros: u128,
+    pub events_total: u64,
+    pub events_with_cost: u64,
+    pub earliest_included_at: Option<DateTime<Utc>>,
+    pub latest_included_at: Option<DateTime<Utc>>,
+    // provider -> (total_usd_micros, events_total, events_with_cost)
+    pub by_provider: std::collections::HashMap<String, (u128, u64, u64)>,
+}
+
+mod cost_index {
+    use super::{AggregatedCostResult, CostEvent, CostKind};
+    use chrono::{DateTime, Timelike, Utc};
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
+    use std::fs;
+    use std::hash::{Hash, Hasher};
+    use std::io::{BufRead, BufReader};
+    use std::path::{Path, PathBuf};
+
+    const COST_INDEX_VERSION: u32 = 1;
+
+    pub fn index_path_for_date(dir: &Path, date: &str) -> PathBuf {
+        dir.join(format!("cost-index-{}.json", date))
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct CostAggFilters<'a> {
+        pub cutoff: Option<DateTime<Utc>>,
+        pub kind_filter: Option<CostKind>,
+        pub selected_stt_model_keys: Option<&'a std::collections::HashSet<String>>,
+        pub selected_llm_model_keys: Option<&'a std::collections::HashSet<String>>,
+        pub exclude_free_tier: bool,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct CostIndexDayDisk {
+        version: u32,
+        date: String,
+        hours: Vec<CostIndexHourDisk>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct CostIndexHourDisk {
+        hour: u8,
+        buckets: Vec<CostIndexBucketDisk>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct CostIndexBucketDisk {
+        provider: String,
+        kind: CostKind,
+        model: Option<String>,
+        is_free_tier: bool,
+        total_usd_micros: u64,
+        events_total: u64,
+        events_with_cost: u64,
+        earliest_at: Option<DateTime<Utc>>,
+        latest_at: Option<DateTime<Utc>>,
+    }
+
+    #[derive(Debug, Clone, Eq)]
+    struct CostIndexKey {
+        provider: String,
+        kind: CostKind,
+        model: Option<String>,
+        is_free_tier: bool,
+    }
+
+    fn kind_ord(kind: CostKind) -> u8 {
+        match kind {
+            CostKind::Stt => 0,
+            CostKind::Llm => 1,
+        }
+    }
+
+    impl PartialEq for CostIndexKey {
+        fn eq(&self, other: &Self) -> bool {
+            self.provider == other.provider
+                && self.kind == other.kind
+                && self.model == other.model
+                && self.is_free_tier == other.is_free_tier
+        }
+    }
+
+    impl Hash for CostIndexKey {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.provider.hash(state);
+            kind_ord(self.kind).hash(state);
+            self.model.hash(state);
+            self.is_free_tier.hash(state);
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct CostIndexAgg {
+        total_usd_micros: u128,
+        events_total: u64,
+        events_with_cost: u64,
+        earliest_at: Option<DateTime<Utc>>,
+        latest_at: Option<DateTime<Utc>>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CostIndexDay {
+        pub date: String,
+        hours: Vec<HashMap<CostIndexKey, CostIndexAgg>>,
+    }
+
+    impl CostIndexDay {
+        pub fn new(date: String) -> Self {
+            let mut hours = Vec::with_capacity(24);
+            for _ in 0..24 {
+                hours.push(HashMap::new());
+            }
+            Self { date, hours }
+        }
+
+        pub fn apply_event(&mut self, ev: &CostEvent) {
+            let hour = (ev.created_at.hour().min(23)) as usize;
+            let key = CostIndexKey {
+                provider: ev.provider.clone(),
+                kind: ev.kind,
+                model: ev.model.clone(),
+                is_free_tier: ev.is_free_tier,
+            };
+            let entry = self.hours[hour].entry(key).or_default();
+            entry.events_total = entry.events_total.saturating_add(1);
+            entry.earliest_at = match entry.earliest_at {
+                None => Some(ev.created_at),
+                Some(t) => Some(std::cmp::min(t, ev.created_at)),
+            };
+            entry.latest_at = match entry.latest_at {
+                None => Some(ev.created_at),
+                Some(t) => Some(std::cmp::max(t, ev.created_at)),
+            };
+
+            if let Some(micros) = ev.estimated_cost_usd_micros {
+                entry.events_with_cost = entry.events_with_cost.saturating_add(1);
+                entry.total_usd_micros = entry.total_usd_micros.saturating_add(micros as u128);
+            }
+        }
+
+        pub fn sum_into(
+            &self,
+            out: &mut AggregatedCostResult,
+            filters: CostAggFilters<'_>,
+            start_hour_exclusive: Option<u32>,
+        ) {
+            for (hour, map) in self.hours.iter().enumerate() {
+                if let Some(h) = start_hour_exclusive {
+                    if (hour as u32) <= h {
+                        continue;
+                    }
+                }
+
+                for (k, agg) in map {
+                    if filters.exclude_free_tier && k.is_free_tier {
+                        continue;
+                    }
+
+                    if let Some(kind_filter) = filters.kind_filter {
+                        if k.kind != kind_filter {
+                            continue;
+                        }
+                    }
+
+                    // Model filters match command behavior: require model to exist.
+                    let keys_to_apply = match k.kind {
+                        CostKind::Stt => filters.selected_stt_model_keys,
+                        CostKind::Llm => filters.selected_llm_model_keys,
+                    };
+                    if let Some(keys) = keys_to_apply {
+                        let Some(model) = k.model.as_deref() else {
+                            continue;
+                        };
+                        let key = format!("{}::{}", k.provider, model);
+                        if !keys.contains(&key) {
+                            continue;
+                        }
+                    }
+
+                    out.events_total = out.events_total.saturating_add(agg.events_total);
+                    out.events_with_cost =
+                        out.events_with_cost.saturating_add(agg.events_with_cost);
+                    out.total_usd_micros =
+                        out.total_usd_micros.saturating_add(agg.total_usd_micros);
+
+                    if let Some(t) = agg.earliest_at {
+                        out.earliest_included_at = Some(match out.earliest_included_at {
+                            None => t,
+                            Some(cur) => std::cmp::min(cur, t),
+                        });
+                    }
+                    if let Some(t) = agg.latest_at {
+                        out.latest_included_at = Some(match out.latest_included_at {
+                            None => t,
+                            Some(cur) => std::cmp::max(cur, t),
+                        });
+                    }
+
+                    // Provider totals.
+                    let entry = out
+                        .by_provider
+                        .entry(k.provider.clone())
+                        .or_insert((0u128, 0u64, 0u64));
+                    entry.1 = entry.1.saturating_add(agg.events_total);
+                    entry.2 = entry.2.saturating_add(agg.events_with_cost);
+                    entry.0 = entry.0.saturating_add(agg.total_usd_micros);
+                }
+            }
+        }
+    }
+
+    pub fn save_day(dir: &Path, date: &str, day: &CostIndexDay) -> Result<(), String> {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let path = index_path_for_date(dir, date);
+
+        let mut hours: Vec<CostIndexHourDisk> = Vec::with_capacity(24);
+        for (hour, map) in day.hours.iter().enumerate() {
+            let mut buckets: Vec<CostIndexBucketDisk> = Vec::with_capacity(map.len());
+            for (k, agg) in map {
+                buckets.push(CostIndexBucketDisk {
+                    provider: k.provider.clone(),
+                    kind: k.kind,
+                    model: k.model.clone(),
+                    is_free_tier: k.is_free_tier,
+                    total_usd_micros: (agg.total_usd_micros.min(u128::from(u64::MAX))) as u64,
+                    events_total: agg.events_total,
+                    events_with_cost: agg.events_with_cost,
+                    earliest_at: agg.earliest_at,
+                    latest_at: agg.latest_at,
+                });
+            }
+            // Stable-ish ordering helps diffs and debugging.
+            buckets.sort_by(|a, b| {
+                a.provider
+                    .cmp(&b.provider)
+                    .then_with(|| kind_ord(a.kind).cmp(&kind_ord(b.kind)))
+                    .then_with(|| a.model.cmp(&b.model))
+                    .then_with(|| a.is_free_tier.cmp(&b.is_free_tier))
+            });
+
+            hours.push(CostIndexHourDisk {
+                hour: hour as u8,
+                buckets,
+            });
+        }
+
+        let disk = CostIndexDayDisk {
+            version: COST_INDEX_VERSION,
+            date: day.date.clone(),
+            hours,
+        };
+
+        let bytes = serde_json::to_vec(&disk).map_err(|e| e.to_string())?;
+        fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn load_day_from_disk(dir: &Path, date: &str) -> Result<CostIndexDay, String> {
+        let path = index_path_for_date(dir, date);
+        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        let disk: CostIndexDayDisk = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        if disk.version != COST_INDEX_VERSION {
+            return Err(format!("Unsupported cost index version: {}", disk.version));
+        }
+
+        let mut day = CostIndexDay::new(disk.date);
+        for h in disk.hours {
+            let idx = (h.hour.min(23)) as usize;
+            let map = &mut day.hours[idx];
+            for b in h.buckets {
+                map.insert(
+                    CostIndexKey {
+                        provider: b.provider,
+                        kind: b.kind,
+                        model: b.model,
+                        is_free_tier: b.is_free_tier,
+                    },
+                    CostIndexAgg {
+                        total_usd_micros: b.total_usd_micros as u128,
+                        events_total: b.events_total,
+                        events_with_cost: b.events_with_cost,
+                        earliest_at: b.earliest_at,
+                        latest_at: b.latest_at,
+                    },
+                );
+            }
+        }
+
+        Ok(day)
+    }
+
+    fn rebuild_day_from_shard(dir: &Path, date: &str) -> Result<CostIndexDay, String> {
+        let shard_path = dir.join(format!("cost-events-{}.jsonl", date));
+        if !shard_path.exists() {
+            return Ok(CostIndexDay::new(date.to_string()));
+        }
+
+        let file = fs::File::open(&shard_path).map_err(|e| e.to_string())?;
+        let reader = BufReader::new(file);
+        let mut day = CostIndexDay::new(date.to_string());
+
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let ev: CostEvent = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            day.apply_event(&ev);
+        }
+
+        Ok(day)
+    }
+
+    pub fn load_or_rebuild_day(dir: &Path, date: &str) -> Result<CostIndexDay, String> {
+        let idx_path = index_path_for_date(dir, date);
+
+        if idx_path.exists() {
+            match load_day_from_disk(dir, date) {
+                Ok(day) => return Ok(day),
+                Err(e) => {
+                    // Fall through to rebuild.
+                    log::warn!(
+                        "Cost index file {:?} is unreadable: {} (rebuilding)",
+                        idx_path,
+                        e
+                    );
+                }
+            }
+        }
+
+        let day = rebuild_day_from_shard(dir, date)?;
+        // Best-effort persist; if it fails we can still return the in-memory version.
+        let _ = save_day(dir, date, &day);
+        Ok(day)
     }
 }
 

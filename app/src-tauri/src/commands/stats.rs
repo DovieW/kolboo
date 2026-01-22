@@ -1,14 +1,11 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
-use std::io::{BufRead, BufReader};
 use tauri::State;
 
 use crate::commands::CommandResult;
 use crate::cost::openai::UsdMicros;
-use crate::stats::{CostEvent, CostKind, StatsStore};
+use crate::stats::{CostKind, StatsStore};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CostSummaryResponse {
@@ -104,10 +101,6 @@ fn cutoff_for_timeframe(timeframe: &str) -> Option<DateTime<Utc>> {
     }
 }
 
-fn is_stats_file_name(name: &str) -> bool {
-    name.starts_with("cost-events-") && name.ends_with(".jsonl")
-}
-
 fn parse_kind_filter(kind: Option<String>) -> Option<CostKind> {
     let kind = kind?.trim().to_lowercase();
     match kind.as_str() {
@@ -154,115 +147,23 @@ pub fn get_cost_summary(
         .filter(|v| !v.is_empty())
         .map(|v| v.into_iter().collect());
 
-    let mut total_usd_micros: u128 = 0;
-    let mut events_total: u64 = 0;
-    let mut events_with_cost: u64 = 0;
-    let mut earliest_included_at: Option<DateTime<Utc>> = None;
-    let mut latest_included_at: Option<DateTime<Utc>> = None;
-
-    let dir = stats_store.dir().to_path_buf();
-    if !dir.exists() {
-        return Ok(CostSummaryResponse {
-            timeframe,
-            total_usd_micros: 0,
-            events_total: 0,
-            events_with_cost: 0,
-            earliest_included_at: None,
-            latest_included_at: None,
-        });
-    }
-
-    let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !is_stats_file_name(&name) {
-            continue;
-        }
-
-        let file = fs::File::open(&path).map_err(|e| e.to_string())?;
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            let ev: CostEvent = match serde_json::from_str(line) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            if let Some(cut) = cutoff {
-                if ev.created_at < cut {
-                    continue;
-                }
-            }
-
-            if let Some(kind_filter) = kind_filter {
-                if ev.kind != kind_filter {
-                    continue;
-                }
-            }
-
-            if exclude_free_tier && ev.is_free_tier {
-                continue;
-            }
-
-            // Per-kind model filters.
-            // - If kind is explicitly filtered, only the corresponding model filter applies.
-            // - If kind is "all", apply STT filters to STT events and LLM filters to LLM events.
-            let keys_to_apply = match ev.kind {
-                CostKind::Stt => selected_stt_model_keys.as_ref(),
-                CostKind::Llm => selected_llm_model_keys.as_ref(),
-            };
-
-            if let Some(keys) = keys_to_apply {
-                // Model filters are based on `${provider}::${model}` keys.
-                let Some(model) = ev.model.as_deref() else {
-                    continue;
-                };
-                let key = format!("{}::{}", ev.provider, model);
-                if !keys.contains(&key) {
-                    continue;
-                }
-            }
-
-            events_total = events_total.saturating_add(1);
-            earliest_included_at = match earliest_included_at {
-                None => Some(ev.created_at),
-                Some(t) => Some(std::cmp::min(t, ev.created_at)),
-            };
-            latest_included_at = match latest_included_at {
-                None => Some(ev.created_at),
-                Some(t) => Some(std::cmp::max(t, ev.created_at)),
-            };
-
-            if let Some(micros) = ev.estimated_cost_usd_micros {
-                events_with_cost = events_with_cost.saturating_add(1);
-                total_usd_micros = total_usd_micros.saturating_add(micros as u128);
-            }
-        }
-    }
+    let aggregated = stats_store
+        .aggregate_cost_events(
+            cutoff,
+            kind_filter,
+            selected_stt_model_keys.as_ref(),
+            selected_llm_model_keys.as_ref(),
+            exclude_free_tier,
+        )
+        .map_err(|e| e.to_string())?;
 
     let out = CostSummaryResponse {
         timeframe,
-        total_usd_micros: (total_usd_micros.min(u128::from(u64::MAX))) as u64,
-        events_total,
-        events_with_cost,
-        earliest_included_at,
-        latest_included_at,
+        total_usd_micros: (aggregated.total_usd_micros.min(u128::from(u64::MAX))) as u64,
+        events_total: aggregated.events_total,
+        events_with_cost: aggregated.events_with_cost,
+        earliest_included_at: aggregated.earliest_included_at,
+        latest_included_at: aggregated.latest_included_at,
     };
 
     stats_store.cache_put_cost_summary(cache_key, &out);
@@ -316,94 +217,18 @@ pub fn get_cost_by_provider_v2(
         .map(|v| v.into_iter().collect());
     let exclude_free_tier = params.exclude_free_tier.unwrap_or(false);
 
-    // provider -> (total_usd_micros, events_total, events_with_cost)
-    let mut by_provider: HashMap<String, (u128, u64, u64)> = HashMap::new();
+    let aggregated = stats_store
+        .aggregate_cost_events(
+            cutoff,
+            kind_filter,
+            selected_stt_model_keys.as_ref(),
+            selected_llm_model_keys.as_ref(),
+            exclude_free_tier,
+        )
+        .map_err(|e| e.to_string())?;
 
-    let dir = stats_store.dir().to_path_buf();
-    if !dir.exists() {
-        return Ok(CostByProviderResponse {
-            timeframe,
-            providers: Vec::new(),
-        });
-    }
-
-    let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !is_stats_file_name(&name) {
-            continue;
-        }
-
-        let file = fs::File::open(&path).map_err(|e| e.to_string())?;
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            let ev: CostEvent = match serde_json::from_str(line) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            if let Some(cut) = cutoff {
-                if ev.created_at < cut {
-                    continue;
-                }
-            }
-
-            if let Some(kind_filter) = kind_filter {
-                if ev.kind != kind_filter {
-                    continue;
-                }
-            }
-
-            if exclude_free_tier && ev.is_free_tier {
-                continue;
-            }
-
-            // Per-kind model filters.
-            let keys_to_apply = match ev.kind {
-                CostKind::Stt => selected_stt_model_keys.as_ref(),
-                CostKind::Llm => selected_llm_model_keys.as_ref(),
-            };
-
-            if let Some(keys) = keys_to_apply {
-                let Some(model) = ev.model.as_deref() else {
-                    continue;
-                };
-                let key = format!("{}::{}", ev.provider, model);
-                if !keys.contains(&key) {
-                    continue;
-                }
-            }
-
-            let entry = by_provider
-                .entry(ev.provider.clone())
-                .or_insert((0u128, 0u64, 0u64));
-            entry.1 = entry.1.saturating_add(1);
-
-            if let Some(micros) = ev.estimated_cost_usd_micros {
-                entry.2 = entry.2.saturating_add(1);
-                entry.0 = entry.0.saturating_add(micros as u128);
-            }
-        }
-    }
-
-    let mut providers: Vec<ProviderCostTotal> = by_provider
+    let mut providers: Vec<ProviderCostTotal> = aggregated
+        .by_provider
         .into_iter()
         .map(
             |(provider, (total, events_total, events_with_cost))| ProviderCostTotal {
