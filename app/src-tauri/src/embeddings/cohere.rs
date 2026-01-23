@@ -268,8 +268,8 @@ pub async fn embed_text_with_debug(
         return Err(CohereEmbeddingsError::Api(format!("{}", response_json)));
     }
 
-    let parsed: JsonValue = serde_json::from_str(&body)
-        .map_err(|e| CohereEmbeddingsError::Api(format!("Failed to parse response JSON: {}", e)))?;
+    let parsed: JsonValue =
+        crate::http::parse_json_value(&body).map_err(CohereEmbeddingsError::Api)?;
 
     let embedding_arr_opt = parsed
         .get("embeddings")

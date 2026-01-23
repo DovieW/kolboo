@@ -28,6 +28,13 @@ pub async fn status_and_text(resp: reqwest::Response) -> (reqwest::StatusCode, S
     (status, body)
 }
 
+/// Convenience helper for parsing JSON from an HTTP response body.
+///
+/// We keep this in `http` so providers can share the same parse-error wording.
+pub fn parse_json_value(body: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(body).map_err(|e| format!("Failed to parse response JSON: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,5 +59,14 @@ mod tests {
             join_base_url("https://example.com/", "/v1/audio/transcriptions"),
             "https://example.com/v1/audio/transcriptions"
         );
+    }
+
+    #[test]
+    fn parses_json_value_or_returns_message() {
+        let ok = parse_json_value(r#"{\"a\": 1}"#).unwrap();
+        assert_eq!(ok.get("a").and_then(|v| v.as_i64()), Some(1));
+
+        let err = parse_json_value("not json").unwrap_err();
+        assert!(err.starts_with("Failed to parse response JSON:"));
     }
 }

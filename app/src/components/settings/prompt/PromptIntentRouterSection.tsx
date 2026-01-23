@@ -15,6 +15,7 @@ import type {
 	RewritePreset,
 } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
+import { HintSelectWithDefaultHint } from "../../HintSelectWithDefaultHint";
 import { isOpenAiReasoningEffort, normalizeRouter } from "./settingsUtils";
 import {
 	formatThinkingBudgetShort,
@@ -446,6 +447,11 @@ export function PromptIntentRouterSection({
 												),
 											];
 
+								const routerOpenAiThinkingDefaultHint = routerModel
+									? (settings?.openai_reasoning_effort ??
+										openAiDefaultReasoningEffortForModel(routerModel))
+									: (settings?.openai_reasoning_effort ?? "medium");
+
 								const supportsRouterGeminiThinkingLevel =
 									routerProvider === "gemini" &&
 									!!routerModel &&
@@ -481,6 +487,9 @@ export function PromptIntentRouterSection({
 													{ value: "low", label: "Low" },
 													{ value: "high", label: "High" },
 												];
+
+								const routerGeminiThinkingLevelDefaultHint =
+									settings?.gemini_thinking_level ?? "high";
 
 								const supportsRouterGeminiThinkingBudget =
 									routerProvider === "gemini" &&
@@ -534,6 +543,14 @@ export function PromptIntentRouterSection({
 													]
 												: []),
 										];
+
+								const routerGeminiThinkingBudgetDefaultHint = (() => {
+									const inherited = settings?.gemini_thinking_budget;
+									if (inherited == null) return "dynamic";
+									if (inherited === 0) return "off";
+									if (inherited === -1) return "dynamic";
+									return String(inherited);
+								})();
 
 								const supportsRouterAnthropicThinkingBudget =
 									routerProvider === "anthropic" &&
@@ -706,7 +723,7 @@ export function PromptIntentRouterSection({
 														Reasoning effort for supported OpenAI models.
 													</p>
 												</div>
-												<HintSelect
+												<HintSelectWithDefaultHint
 													data={routerOpenAiThinkingOptions}
 													value={
 														effectiveRouter?.openai_reasoning_effort ??
@@ -746,86 +763,8 @@ export function PromptIntentRouterSection({
 														color: "var(--text-primary)",
 														minWidth: 200,
 													}}
-													renderSelected={({ option, placeholder }) => {
-														if (!option) {
-															return (
-																<Text size="sm" c="dimmed">
-																	{placeholder}
-																</Text>
-															);
-														}
-
-														if (option.value !== selectDefaultValue) {
-															return <Text size="sm">{option.label}</Text>;
-														}
-
-														const hint = routerModel
-															? (settings?.openai_reasoning_effort ??
-																openAiDefaultReasoningEffortForModel(
-																	routerModel,
-																))
-															: (settings?.openai_reasoning_effort ?? "medium");
-
-														return (
-															<div
-																style={{
-																	display: "flex",
-																	alignItems: "baseline",
-																	gap: 8,
-																}}
-															>
-																<span style={{ fontSize: 14 }}>
-																	{option.label}
-																</span>
-																<span
-																	style={{
-																		fontSize: 11,
-																		color: "var(--text-muted)",
-																		opacity: 0.9,
-																		lineHeight: 1,
-																	}}
-																>
-																	· {hint}
-																</span>
-															</div>
-														);
-													}}
-													renderOption={({ option }) => {
-														if (option.value !== selectDefaultValue) {
-															return <Text size="sm">{option.label}</Text>;
-														}
-
-														const hint = routerModel
-															? (settings?.openai_reasoning_effort ??
-																openAiDefaultReasoningEffortForModel(
-																	routerModel,
-																))
-															: (settings?.openai_reasoning_effort ?? "medium");
-
-														return (
-															<div
-																style={{
-																	display: "flex",
-																	alignItems: "baseline",
-																	gap: 8,
-																}}
-															>
-																<span style={{ fontSize: 14 }}>
-																	{option.label}
-																</span>
-																<span
-																	style={{
-																		fontSize: 11,
-																		color: "var(--text-muted)",
-																		opacity: 0.9,
-																		lineHeight: 1,
-																	}}
-																>
-																	· {hint}
-																</span>
-															</div>
-														);
-													}}
+													defaultValue={selectDefaultValue}
+													defaultHint={routerOpenAiThinkingDefaultHint}
 												/>
 											</div>
 										) : null}
@@ -840,7 +779,7 @@ export function PromptIntentRouterSection({
 															: "Gemini 3 Flash supports minimal/low/medium/high (default high)."}
 													</p>
 												</div>
-												<HintSelect
+												<HintSelectWithDefaultHint
 													data={routerGeminiThinkingLevelOptions}
 													value={
 														effectiveRouter?.gemini_thinking_level ??
@@ -885,75 +824,8 @@ export function PromptIntentRouterSection({
 														color: "var(--text-primary)",
 														minWidth: 200,
 													}}
-													renderSelected={({ option, placeholder }) => {
-														if (!option) {
-															return (
-																<Text size="sm" c="dimmed">
-																	{placeholder}
-																</Text>
-															);
-														}
-														if (option.value !== selectDefaultValue) {
-															return <Text size="sm">{option.label}</Text>;
-														}
-
-														const hint =
-															settings?.gemini_thinking_level ?? "high";
-														return (
-															<div
-																style={{
-																	display: "flex",
-																	alignItems: "baseline",
-																	gap: 8,
-																}}
-															>
-																<span style={{ fontSize: 14 }}>
-																	{option.label}
-																</span>
-																<span
-																	style={{
-																		fontSize: 11,
-																		color: "var(--text-muted)",
-																		opacity: 0.9,
-																		lineHeight: 1,
-																	}}
-																>
-																	· {hint}
-																</span>
-															</div>
-														);
-													}}
-													renderOption={({ option }) => {
-														if (option.value !== selectDefaultValue) {
-															return <Text size="sm">{option.label}</Text>;
-														}
-
-														const hint =
-															settings?.gemini_thinking_level ?? "high";
-														return (
-															<div
-																style={{
-																	display: "flex",
-																	alignItems: "baseline",
-																	gap: 8,
-																}}
-															>
-																<span style={{ fontSize: 14 }}>
-																	{option.label}
-																</span>
-																<span
-																	style={{
-																		fontSize: 11,
-																		color: "var(--text-muted)",
-																		opacity: 0.9,
-																		lineHeight: 1,
-																	}}
-																>
-																	· {hint}
-																</span>
-															</div>
-														);
-													}}
+													defaultValue={selectDefaultValue}
+													defaultHint={routerGeminiThinkingLevelDefaultHint}
 												/>
 											</div>
 										) : null}
@@ -966,7 +838,7 @@ export function PromptIntentRouterSection({
 														Token budget for Gemini 2.5 thinking.
 													</p>
 												</div>
-												<HintSelect
+												<HintSelectWithDefaultHint
 													data={routerGeminiThinkingBudgetOptions}
 													value={
 														effectiveRouter?.gemini_thinking_budget == null
@@ -1007,90 +879,8 @@ export function PromptIntentRouterSection({
 														color: "var(--text-primary)",
 														minWidth: 200,
 													}}
-													renderSelected={({ option, placeholder }) => {
-														if (!option) {
-															return (
-																<Text size="sm" c="dimmed">
-																	{placeholder}
-																</Text>
-															);
-														}
-														if (option.value !== selectDefaultValue)
-															return <Text size="sm">{option.label}</Text>;
-
-														const inherited = settings?.gemini_thinking_budget;
-														const hint =
-															inherited == null
-																? "dynamic"
-																: inherited === 0
-																	? "off"
-																	: inherited === -1
-																		? "dynamic"
-																		: String(inherited);
-
-														return (
-															<div
-																style={{
-																	display: "flex",
-																	alignItems: "baseline",
-																	gap: 8,
-																}}
-															>
-																<span style={{ fontSize: 14 }}>
-																	{option.label}
-																</span>
-																<span
-																	style={{
-																		fontSize: 11,
-																		color: "var(--text-muted)",
-																		opacity: 0.9,
-																		lineHeight: 1,
-																	}}
-																>
-																	· {hint}
-																</span>
-															</div>
-														);
-													}}
-													renderOption={({ option }) => {
-														if (option.value !== selectDefaultValue) {
-															return <Text size="sm">{option.label}</Text>;
-														}
-
-														const inherited = settings?.gemini_thinking_budget;
-														const hint =
-															inherited == null
-																? "dynamic"
-																: inherited === 0
-																	? "off"
-																	: inherited === -1
-																		? "dynamic"
-																		: String(inherited);
-
-														return (
-															<div
-																style={{
-																	display: "flex",
-																	alignItems: "baseline",
-																	gap: 8,
-																}}
-															>
-																<span style={{ fontSize: 14 }}>
-																	{option.label}
-																</span>
-																<span
-																	style={{
-																		fontSize: 11,
-																		color: "var(--text-muted)",
-																		opacity: 0.9,
-																		lineHeight: 1,
-																	}}
-																>
-																	· {hint}
-																</span>
-															</div>
-														);
-													}}
+													defaultValue={selectDefaultValue}
+													defaultHint={routerGeminiThinkingBudgetDefaultHint}
 												/>
 											</div>
 										) : null}

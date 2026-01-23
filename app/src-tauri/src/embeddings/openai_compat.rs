@@ -101,9 +101,8 @@ pub async fn embed_text_with_url(
         )));
     }
 
-    let parsed: JsonValue = serde_json::from_str(&body).map_err(|e| {
-        OpenAiCompatEmbeddingsError::Api(format!("Failed to parse response JSON: {}", e))
-    })?;
+    let parsed: JsonValue =
+        crate::http::parse_json_value(&body).map_err(OpenAiCompatEmbeddingsError::Api)?;
 
     extract_openai_compat_embedding(&parsed)
 }
@@ -152,9 +151,8 @@ pub async fn embed_text_with_debug(
         )));
     }
 
-    let parsed: JsonValue = serde_json::from_str(&body).map_err(|e| {
-        OpenAiCompatEmbeddingsError::Api(format!("Failed to parse response JSON: {}", e))
-    })?;
+    let parsed: JsonValue =
+        crate::http::parse_json_value(&body).map_err(OpenAiCompatEmbeddingsError::Api)?;
 
     let embedding = extract_openai_compat_embedding(&parsed)?;
 
