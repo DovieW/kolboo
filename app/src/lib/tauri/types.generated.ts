@@ -6,22 +6,22 @@
 
 // From: audio-capture-diagnostics.schema.json
 export interface AudioCaptureDiagnostics {
-	speech_detected?: boolean | null;
-	stats: AudioLevelStats;
+  speech_detected?: boolean | null;
+  stats: AudioLevelStats;
 }
 /**
  * Basic audio level metrics for gating/diagnostics.
  */
 export interface AudioLevelStats {
-	duration_secs: number;
-	/**
-	 * Peak (max absolute) amplitude in [0, 1].
-	 */
-	peak: number;
-	/**
-	 * Root-mean-square amplitude in [0, 1].
-	 */
-	rms: number;
+  duration_secs: number;
+  /**
+   * Peak (max absolute) amplitude in [0, 1].
+   */
+  peak: number;
+  /**
+   * Root-mean-square amplitude in [0, 1].
+   */
+  rms: number;
 }
 
 // From: audio-level-stats.schema.json
@@ -31,8 +31,8 @@ export interface AudioLevelStats {
 
 // From: audio-settings-test-wavs.schema.json
 export interface AudioSettingsTestWavs {
-	processed_wav_base64: string;
-	raw_wav_base64: string;
+  processed_wav_base64: string;
+  raw_wav_base64: string;
 }
 
 // From: available-providers-response.schema.json
@@ -40,74 +40,69 @@ export interface AudioSettingsTestWavs {
  * Response listing available providers
  */
 export interface AvailableProvidersResponse {
-	llm: ProviderInfo[];
-	stt: ProviderInfo[];
+  llm: ProviderInfo[];
+  stt: ProviderInfo[];
 }
 /**
  * Information about a provider
  */
 export interface ProviderInfo {
-	is_local: boolean;
-	label: string;
-	value: string;
+  is_local: boolean;
+  label: string;
+  value: string;
 }
 
 // From: cache-router-embeddings-response.schema.json
 export interface CacheRouterEmbeddingsResponse {
-	cached_now: number;
-	model: string;
-	provider: string;
-	skipped_existing: number;
-	stored_inserted: number;
-	stored_updated: number;
-	total_hints: number;
+  cached_now: number;
+  model: string;
+  provider: string;
+  skipped_existing: number;
+  stored_inserted: number;
+  stored_updated: number;
+  total_hints: number;
 }
 
 // From: connection-state-changed.schema.json
-export type ConnectionStateEvent =
-	| "disconnected"
-	| "connecting"
-	| "idle"
-	| "recording"
-	| "processing";
+export type ConnectionStateEvent = "disconnected" | "connecting" | "idle" | "recording" | "processing";
 
 export interface ConnectionStateChangedPayload {
-	state: ConnectionStateEvent;
+  state: ConnectionStateEvent;
 }
 
 // From: cost-by-provider.schema.json
 export interface CostByProviderResponse {
-	providers: ProviderCostTotal[];
-	timeframe: string;
+  providers: ProviderCostTotal[];
+  timeframe: string;
 }
 export interface ProviderCostTotal {
-	events_total: number;
-	events_with_cost: number;
-	provider: string;
-	total_usd_micros: number;
+  events_total: number;
+  events_with_cost: number;
+  provider: string;
+  total_usd_micros: number;
 }
 
 // From: cost-summary.schema.json
 export interface CostSummaryResponse {
-	earliest_included_at?: string | null;
-	events_total: number;
-	events_with_cost: number;
-	latest_included_at?: string | null;
-	timeframe: string;
-	total_usd_micros: number;
+  earliest_included_at?: string | null;
+  events_total: number;
+  events_with_cost: number;
+  latest_included_at?: string | null;
+  timeframe: string;
+  total_usd_micros: number;
 }
 
 // From: data-storage-summary.schema.json
 export interface DataStorageSummary {
-	api_keys_set_count: number;
-	history_bytes: number;
-	history_count: number;
-	recordings_bytes: number;
-	recordings_count: number;
-	request_logs_count: number;
-	settings_bytes: number;
-	stats_bytes: number;
-	stats_files_count: number;
+  api_keys_set_count: number;
+  history_bytes: number;
+  history_count: number;
+  recordings_bytes: number;
+  recordings_count: number;
+  request_logs_count: number;
+  settings_bytes: number;
+  stats_bytes: number;
+  stats_files_count: number;
 }
 
 // From: default-sections-response.schema.json
@@ -115,47 +110,44 @@ export interface DataStorageSummary {
  * Response containing default prompt sections
  */
 export interface DefaultSectionsResponse {
-	system: string;
+  system: string;
 }
 
 // From: history-changed.schema.json
 export type Null = null;
 
 // From: history-delete-mode.schema.json
-export type HistoryDeleteMode =
-	| "entry_only"
-	| "entry_and_recording"
-	| "recording_and_all_entries";
+export type HistoryDeleteMode = "entry_only" | "entry_and_recording" | "recording_and_all_entries";
 
 // From: history-delete-options.schema.json
 export interface HistoryDeleteOptions {
-	recording_exists: boolean;
-	recording_id?: string | null;
-	recording_ref_count: number;
+  recording_exists: boolean;
+  recording_id?: string | null;
+  recording_ref_count: number;
 }
 
 // From: history-delete-result.schema.json
 export interface HistoryDeleteResult {
-	deleted_entries: number;
-	deleted_recording: boolean;
+  deleted_entries: number;
+  deleted_recording: boolean;
 }
 
 // From: history-page-query.schema.json
 export interface HistoryPageQuery {
-	filterText?: string | null;
-	/**
-	 * When true, include per-model usage counts in the response.
-	 */
-	includeUsageCounts?: boolean | null;
-	/**
-	 * 1-based page index.
-	 */
-	page?: number | null;
-	pageSize?: number | null;
-	selectedLlmModelKeys?: string[] | null;
-	selectedSttModelKeys?: string[] | null;
-	showEmptyTranscript?: boolean | null;
-	showFailed?: boolean | null;
+  filterText?: string | null;
+  /**
+   * When true, include per-model usage counts in the response.
+   */
+  includeUsageCounts?: boolean | null;
+  /**
+   * 1-based page index.
+   */
+  page?: number | null;
+  pageSize?: number | null;
+  selectedLlmModelKeys?: string[] | null;
+  selectedSttModelKeys?: string[] | null;
+  showEmptyTranscript?: boolean | null;
+  showFailed?: boolean | null;
 }
 
 // From: history-page-result.schema.json
@@ -165,71 +157,71 @@ export interface HistoryPageQuery {
 export type HistoryStatus = "in_progress" | "success" | "error";
 
 export interface HistoryPageResult {
-	items: HistoryEntry[];
-	llmModelUsage: ModelUsageCount[];
-	page: number;
-	pageSize: number;
-	sttModelUsage: ModelUsageCount[];
-	totalAll: number;
-	totalFiltered: number;
+  items: HistoryEntry[];
+  llmModelUsage: ModelUsageCount[];
+  page: number;
+  pageSize: number;
+  sttModelUsage: ModelUsageCount[];
+  totalAll: number;
+  totalFiltered: number;
 }
 /**
  * A single dictation history entry
  */
 export interface HistoryEntry {
-	error_message?: string | null;
-	id: string;
-	/**
-	 * LLM model used for rewriting (if enabled).
-	 */
-	llm_model?: string | null;
-	/**
-	 * LLM provider used for rewriting (if enabled).
-	 */
-	llm_provider?: string | null;
-	/**
-	 * Preset id selected for this transcription (if any).
-	 *
-	 * When None, the request used the profile/global defaults ("Default" in UI).
-	 */
-	preset_id?: string | null;
-	/**
-	 * Preset display name selected for this transcription (if any).
-	 */
-	preset_name?: string | null;
-	/**
-	 * Prompt profile id used for this transcription.
-	 *
-	 * "default" means no per-program profile matched.
-	 */
-	profile_id?: string | null;
-	/**
-	 * Prompt profile display name used for this transcription.
-	 */
-	profile_name?: string | null;
-	/**
-	 * Request id of the WAV recording to use for playback/rerun.
-	 *
-	 * - For "normal" requests this will typically equal `id` (when a recording was saved). - For reruns/retries, this should point to the original request id that owns the WAV.
-	 *
-	 * When `None`, no recording is known/available for this entry.
-	 */
-	recording_request_id?: string | null;
-	status?: HistoryStatus & string;
-	/**
-	 * STT model used for this transcription.
-	 */
-	stt_model?: string | null;
-	/**
-	 * STT provider used for this transcription (e.g., "groq", "openai").
-	 */
-	stt_provider?: string | null;
-	text: string;
-	timestamp: string;
+  error_message?: string | null;
+  id: string;
+  /**
+   * LLM model used for rewriting (if enabled).
+   */
+  llm_model?: string | null;
+  /**
+   * LLM provider used for rewriting (if enabled).
+   */
+  llm_provider?: string | null;
+  /**
+   * Preset id selected for this transcription (if any).
+   *
+   * When None, the request used the profile/global defaults ("Default" in UI).
+   */
+  preset_id?: string | null;
+  /**
+   * Preset display name selected for this transcription (if any).
+   */
+  preset_name?: string | null;
+  /**
+   * Prompt profile id used for this transcription.
+   *
+   * "default" means no per-program profile matched.
+   */
+  profile_id?: string | null;
+  /**
+   * Prompt profile display name used for this transcription.
+   */
+  profile_name?: string | null;
+  /**
+   * Request id of the WAV recording to use for playback/rerun.
+   *
+   * - For "normal" requests this will typically equal `id` (when a recording was saved). - For reruns/retries, this should point to the original request id that owns the WAV.
+   *
+   * When `None`, no recording is known/available for this entry.
+   */
+  recording_request_id?: string | null;
+  status?: HistoryStatus & string;
+  /**
+   * STT model used for this transcription.
+   */
+  stt_model?: string | null;
+  /**
+   * STT provider used for this transcription (e.g., "groq", "openai").
+   */
+  stt_provider?: string | null;
+  text: string;
+  timestamp: string;
 }
 export interface ModelUsageCount {
-	count: number;
-	key: string;
+  count: number;
+  key: string;
 }
 
 // From: hotkey-config.schema.json
@@ -237,53 +229,53 @@ export interface ModelUsageCount {
  * Configuration for a hotkey combination
  */
 export interface HotkeyConfig {
-	/**
-	 * The main key (e.g., "Space")
-	 */
-	key: string;
-	/**
-	 * Modifier keys (e.g., ["ctrl", "alt"])
-	 */
-	modifiers: string[];
+  /**
+   * The main key (e.g., "Space")
+   */
+  key: string;
+  /**
+   * Modifier keys (e.g., ["ctrl", "alt"])
+   */
+  modifiers: string[];
 }
 
 // From: intent-router-settings.schema.json
 export type IntentRouterStrategy = "off" | "embeddings" | "llm";
 
 export interface IntentRouterSettings {
-	anthropic_thinking_budget?: number | null;
-	embedding_model?: string | null;
-	embedding_provider?: string | null;
-	enabled?: boolean;
-	gemini_thinking_budget?: number | null;
-	gemini_thinking_level?: string | null;
-	llm_model?: string | null;
-	llm_provider?: string | null;
-	llm_system_prompt?: string | null;
-	openai_reasoning_effort?: string | null;
-	/**
-	 * If true, always pick the candidate with the highest similarity score. When enabled, threshold/margin are ignored.
-	 *
-	 * Some historical frontend versions may write this as null; tolerate it.
-	 */
-	pick_highest_score?: boolean;
-	similarity_margin?: number | null;
-	similarity_threshold?: number | null;
-	strategy?: IntentRouterStrategy & string;
+  anthropic_thinking_budget?: number | null;
+  embedding_model?: string | null;
+  embedding_provider?: string | null;
+  enabled?: boolean;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: string | null;
+  llm_model?: string | null;
+  llm_provider?: string | null;
+  llm_system_prompt?: string | null;
+  openai_reasoning_effort?: string | null;
+  /**
+   * If true, always pick the candidate with the highest similarity score. When enabled, threshold/margin are ignored.
+   *
+   * Some historical frontend versions may write this as null; tolerate it.
+   */
+  pick_highest_score?: boolean;
+  similarity_margin?: number | null;
+  similarity_threshold?: number | null;
+  strategy?: IntentRouterStrategy & string;
 }
 
 // From: iterate-rewrite-prompt-response.schema.json
 export interface IterateRewritePromptResponse {
-	improved_prompt: string;
-	model_used: string;
-	provider_used: string;
+  improved_prompt: string;
+  model_used: string;
+  provider_used: string;
 }
 
 // From: llm-complete-response.schema.json
 export interface LlmCompleteResponse {
-	model_used: string;
-	output: string;
-	provider_used: string;
+  model_used: string;
+  output: string;
+  provider_used: string;
 }
 
 // From: llm-provider-info.schema.json
@@ -291,105 +283,99 @@ export interface LlmCompleteResponse {
  * LLM provider information for the frontend
  */
 export interface LlmProviderInfo {
-	default_model: string;
-	id: string;
-	models: string[];
-	name: string;
-	requires_api_key: boolean;
+  default_model: string;
+  id: string;
+  models: string[];
+  name: string;
+  requires_api_key: boolean;
 }
 
 // From: local-whisper-backend-status.schema.json
 export type LocalWhisperComputeBackend = "cpu" | "cuda";
 
 export interface LocalWhisperBackendStatusResponse {
-	build_has_cuda: boolean;
-	build_has_local_whisper: boolean;
-	compute: LocalWhisperComputeBackend;
-	missing_dlls: string[];
-	observed: LocalWhisperBackendObserved;
-	reason?: string | null;
+  build_has_cuda: boolean;
+  build_has_local_whisper: boolean;
+  compute: LocalWhisperComputeBackend;
+  missing_dlls: string[];
+  observed: LocalWhisperBackendObserved;
+  reason?: string | null;
 }
 export interface LocalWhisperBackendObserved {
-	cuda_process_present?: boolean | null;
-	error?: string | null;
-	nvidia_smi_available: boolean;
-	pid: number;
-	used_gpu_memory_mb?: number | null;
+  cuda_process_present?: boolean | null;
+  error?: string | null;
+  nvidia_smi_available: boolean;
+  pid: number;
+  used_gpu_memory_mb?: number | null;
 }
 
 // From: local-whisper-model-load-event.schema.json
 export type LocalWhisperModelLoadStatus = "started" | "completed" | "error";
 
 export interface LocalWhisperModelLoadEvent {
-	message?: string | null;
-	status: LocalWhisperModelLoadStatus;
+  message?: string | null;
+  status: LocalWhisperModelLoadStatus;
 }
 
 // From: mic-test-audio-level-payload.schema.json
 export interface MicTestAudioLevelPayload {
-	active: boolean;
-	peak: number;
-	rms: number;
-	seq: number;
-	session_id: number;
+  active: boolean;
+  peak: number;
+  rms: number;
+  seq: number;
+  session_id: number;
 }
 
 // From: model-option.schema.json
 export interface ModelOption {
-	disabled?: boolean;
-	label: string;
-	value: string;
+  disabled?: boolean;
+  label: string;
+  value: string;
 }
 
 // From: model-pricing.schema.json
 export interface ModelPricingResponse {
-	kind: string;
-	llm?: LlmModelPricing | null;
-	model: string;
-	provider: string;
-	stt?: SttModelPricing | null;
+  kind: string;
+  llm?: LlmModelPricing | null;
+  model: string;
+  provider: string;
+  stt?: SttModelPricing | null;
 }
 export interface LlmModelPricing {
-	cached_input_usd_micros_per_1m?: number | null;
-	input_usd_micros_per_1m: number;
-	output_usd_micros_per_1m: number;
+  cached_input_usd_micros_per_1m?: number | null;
+  input_usd_micros_per_1m: number;
+  output_usd_micros_per_1m: number;
 }
 export interface SttModelPricing {
-	min_billed_secs?: number | null;
-	usd_micros_per_hour?: number | null;
-	usd_micros_per_minute?: number | null;
+  min_billed_secs?: number | null;
+  usd_micros_per_hour?: number | null;
+  usd_micros_per_minute?: number | null;
 }
 
 // From: open-window-info.schema.json
 export interface OpenWindowInfo {
-	process_path: string;
-	title: string;
+  process_path: string;
+  title: string;
 }
 
 // From: overlay-audio-level-payload.schema.json
 export interface OverlayAudioLevelPayload {
-	maxes?: number[] | null;
-	mins?: number[] | null;
-	peak: number;
-	rms: number;
-	seq: number;
-	wave_seq?: number | null;
+  maxes?: number[] | null;
+  mins?: number[] | null;
+  peak: number;
+  rms: number;
+  seq: number;
+  wave_seq?: number | null;
 }
 
 // From: pipeline-error-payload.schema.json
 export interface PipelineErrorPayload {
-	message: string;
-	request_id?: string | null;
+  message: string;
+  request_id?: string | null;
 }
 
 // From: pipeline-state-changed.schema.json
-export type PipelineStateEvent =
-	| "idle"
-	| "recording"
-	| "transcribing"
-	| "routing"
-	| "rewriting"
-	| "error";
+export type PipelineStateEvent = "idle" | "recording" | "transcribing" | "routing" | "rewriting" | "error";
 
 // From: pipeline-transcript-ready.schema.json
 export type String = string;
@@ -408,37 +394,37 @@ export type TrustedCaCertFormat = "pem" | "der";
  * Persistent proxy settings.
  */
 export interface ProxySettings {
-	/**
-	 * DANGEROUS: if enabled, accept invalid TLS certificates (e.g. self-signed). This weakens security and should only be used when required by your network.
-	 */
-	danger_accept_invalid_certs?: boolean;
-	manual?: ManualProxySettings;
-	mode?: ProxyMode & string;
-	/**
-	 * Additional trusted CA certificates for HTTPS requests. Prefer this over disabling TLS verification.
-	 */
-	trusted_ca_certificates?: TrustedCaCertificate[];
+  /**
+   * DANGEROUS: if enabled, accept invalid TLS certificates (e.g. self-signed). This weakens security and should only be used when required by your network.
+   */
+  danger_accept_invalid_certs?: boolean;
+  manual?: ManualProxySettings;
+  mode?: ProxyMode & string;
+  /**
+   * Additional trusted CA certificates for HTTPS requests. Prefer this over disabling TLS verification.
+   */
+  trusted_ca_certificates?: TrustedCaCertificate[];
 }
 /**
  * Manual proxy configuration.
  */
 export interface ManualProxySettings {
-	/**
-	 * Comma-separated or whitespace-separated host list to bypass the proxy. Mirrors NO_PROXY semantics.
-	 */
-	no_proxy?: string;
-	/**
-	 * Optional password for basic proxy auth.
-	 */
-	password?: string;
-	/**
-	 * Proxy URL (applied to both http + https). Example: "http://127.0.0.1:8080".
-	 */
-	proxy_url?: string;
-	/**
-	 * Optional username for basic proxy auth.
-	 */
-	username?: string;
+  /**
+   * Comma-separated or whitespace-separated host list to bypass the proxy. Mirrors NO_PROXY semantics.
+   */
+  no_proxy?: string;
+  /**
+   * Optional password for basic proxy auth.
+   */
+  password?: string;
+  /**
+   * Proxy URL (applied to both http + https). Example: "http://127.0.0.1:8080".
+   */
+  proxy_url?: string;
+  /**
+   * Optional username for basic proxy auth.
+   */
+  username?: string;
 }
 /**
  * A user-provided CA certificate that should be trusted for outgoing HTTPS.
@@ -446,52 +432,50 @@ export interface ManualProxySettings {
  * Stored in settings.json so it can be applied by reqwest at runtime.
  */
 export interface TrustedCaCertificate {
-	/**
-	 * Raw certificate bytes, base64-encoded.
-	 */
-	data_base64?: string;
-	/**
-	 * Original filename (for display only).
-	 */
-	file_name?: string;
-	/**
-	 * Encoding format used by reqwest when loading this certificate.
-	 */
-	format?: TrustedCaCertFormat & string;
-	/**
-	 * Stable ID for list operations in the UI.
-	 */
-	id?: string;
+  /**
+   * Raw certificate bytes, base64-encoded.
+   */
+  data_base64?: string;
+  /**
+   * Original filename (for display only).
+   */
+  file_name?: string;
+  /**
+   * Encoding format used by reqwest when loading this certificate.
+   */
+  format?: TrustedCaCertFormat & string;
+  /**
+   * Stable ID for list operations in the UI.
+   */
+  id?: string;
 }
 
 // From: quick-ask-answer-payload.schema.json
-export type QuickAskAnswerPayload =
-	| QuickAskAnswerOkPayload
-	| QuickAskAnswerErrorPayload;
+export type QuickAskAnswerPayload = QuickAskAnswerOkPayload | QuickAskAnswerErrorPayload;
 
 export interface QuickAskAnswerOkPayload {
-	answer: string;
-	duration_ms?: number | null;
-	model_used?: string | null;
-	ok: boolean;
-	provider_used?: string | null;
+  answer: string;
+  duration_ms?: number | null;
+  model_used?: string | null;
+  ok: boolean;
+  provider_used?: string | null;
 }
 export interface QuickAskAnswerErrorPayload {
-	error: string;
-	ok: boolean;
+  error: string;
+  ok: boolean;
 }
 
 // From: quick-ask-started-payload.schema.json
 export interface QuickAskStartedPayload {
-	model?: string | null;
-	provider?: string | null;
-	question?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  question?: string | null;
 }
 
 // From: recordings-stats.schema.json
 export interface RecordingsStats {
-	bytes: number;
-	count: number;
+  bytes: number;
+  count: number;
 }
 
 // From: request-log.schema.json
@@ -514,293 +498,293 @@ export type RequestStatus = "in_progress" | "success" | "error" | "cancelled";
  * A complete request log containing all entries for a single transcription request
  */
 export interface RequestLog {
-	/**
-	 * Audio duration in seconds
-	 */
-	audio_duration_secs?: number | null;
-	/**
-	 * Audio file size in bytes
-	 */
-	audio_size_bytes?: number | null;
-	/**
-	 * When the request completed (if finished)
-	 */
-	ended_at?: string | null;
-	/**
-	 * All log entries for this request
-	 */
-	entries: LogEntry[];
-	/**
-	 * Error message if status is Error
-	 */
-	error_message?: string | null;
-	/**
-	 * Formatted transcript from LLM (if used)
-	 */
-	final_text?: string | null;
-	/**
-	 * Unique ID for this request
-	 */
-	id: string;
-	/**
-	 * High-level request kind for UI grouping/filtering.
-	 */
-	kind?: RequestKind & string;
-	/**
-	 * LLM duration in milliseconds
-	 */
-	llm_duration_ms?: number | null;
-	/**
-	 * Optional details/error for the LLM rewrite step.
-	 *
-	 * - For `failed`: error message - For `not_attempted` + `provider_unavailable`: provider error detail
-	 */
-	llm_error_message?: string | null;
-	/**
-	 * Estimated total LLM cost for this request in USD micros.
-	 */
-	llm_estimated_cost_usd_micros?: number | null;
-	/**
-	 * Whether the LLM call was treated as free-tier for pricing/cost purposes.
-	 */
-	llm_is_free_tier?: boolean;
-	/**
-	 * LLM model used
-	 */
-	llm_model?: string | null;
-	/**
-	 * If `llm_outcome == "not_attempted"`, a stable reason code.
-	 *
-	 * Expected values: - "quiet_audio_gate" - "no_speech_detected_by_vad" - "disabled_default_profile" - "disabled_profile" - "disabled_preset" - "provider_unavailable" - "unknown"
-	 */
-	llm_not_attempted_reason?: string | null;
-	/**
-	 * Outcome of the optional LLM rewrite step.
-	 *
-	 * Stored as a stable string for UI display and backward-compatible persistence.
-	 *
-	 * Expected values: - "not_attempted" - "succeeded" - "timed_out" - "failed"
-	 */
-	llm_outcome?: string | null;
-	/**
-	 * LLM provider used (if formatting enabled)
-	 */
-	llm_provider?: string | null;
-	/**
-	 * Payload sent to LLM provider (if LLM rewrite attempted).
-	 */
-	llm_request_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * JSON response received from LLM provider (if available).
-	 */
-	llm_response_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Preset id selected for this request (if any).
-	 *
-	 * When None, the request used the profile/global defaults ("Default" in UI).
-	 */
-	preset_id?: string | null;
-	/**
-	 * Preset display name selected for this request (if any).
-	 */
-	preset_name?: string | null;
-	/**
-	 * When request *processing* started (excludes recording time).
-	 *
-	 * For the main pipeline flow, the request log is created at recording-start, but the user-facing "Total" duration should represent only the backend processing time (stop -> STT/LLM -> done).
-	 */
-	processing_started_at?: string | null;
-	/**
-	 * Prompt profile id used for this request.
-	 *
-	 * "default" means no per-program profile matched.
-	 */
-	profile_id?: string | null;
-	/**
-	 * Prompt profile display name used for this request.
-	 */
-	profile_name?: string | null;
-	/**
-	 * Quick Ask: the answer returned by the answering LLM.
-	 */
-	quick_ask_answer?: string | null;
-	/**
-	 * Quick Ask: clipboard text that was included as additional context (when enabled).
-	 */
-	quick_ask_clipboard_context?: string | null;
-	/**
-	 * Quick Ask: highlighted text context that was attached to the question and sent to the answering LLM.
-	 *
-	 * This is intentionally bounded (see Quick Ask prompt assembly) to keep request logs usable.
-	 */
-	quick_ask_context_text?: string | null;
-	/**
-	 * Quick Ask: duration of the answering LLM call in milliseconds.
-	 */
-	quick_ask_duration_ms?: number | null;
-	/**
-	 * Quick Ask: model used for the answering LLM.
-	 */
-	quick_ask_model?: string | null;
-	/**
-	 * Quick Ask: provider used for the answering LLM.
-	 */
-	quick_ask_provider?: string | null;
-	/**
-	 * Quick Ask: the question sent to the answering LLM (usually based on the transcript).
-	 */
-	quick_ask_question?: string | null;
-	/**
-	 * Quick Ask: payload sent to the answering LLM.
-	 */
-	quick_ask_request_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Quick Ask: payload received from the answering LLM.
-	 */
-	quick_ask_response_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Quick Replace: clipboard text that was included as additional context (when enabled).
-	 */
-	quick_replace_clipboard_context?: string | null;
-	/**
-	 * Quick Replace: duration of the rewrite call in milliseconds.
-	 */
-	quick_replace_duration_ms?: number | null;
-	/**
-	 * Quick Replace: the user's instruction (usually derived from the transcript).
-	 */
-	quick_replace_instructions?: string | null;
-	/**
-	 * Quick Replace: model used for the rewrite.
-	 */
-	quick_replace_model?: string | null;
-	/**
-	 * Quick Replace: the rewritten output returned by the LLM.
-	 */
-	quick_replace_output_text?: string | null;
-	/**
-	 * Quick Replace: provider used for the rewrite.
-	 */
-	quick_replace_provider?: string | null;
-	/**
-	 * Quick Replace: payload sent to the rewriting LLM.
-	 */
-	quick_replace_request_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Quick Replace: payload received from the rewriting LLM.
-	 */
-	quick_replace_response_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Quick Replace: the selected/highlighted text captured at recording start.
-	 */
-	quick_replace_selected_text?: string | null;
-	/**
-	 * Raw transcript from STT
-	 */
-	raw_transcript?: string | null;
-	/**
-	 * LLM rewrite: clipboard text that was included as context for the rewrite (when enabled).
-	 */
-	rewrite_clipboard_context?: string | null;
-	/**
-	 * Intent router duration in milliseconds (when routing is enabled and actually ran).
-	 */
-	router_duration_ms?: number | null;
-	/**
-	 * Payload sent to router provider (when routing ran).
-	 *
-	 * For embeddings routing this may be an array of calls. For LLM routing this contains the router prompt payload.
-	 */
-	router_request_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Payload received from router provider (when routing ran).
-	 *
-	 * For embeddings routing this may be an array of responses. For LLM routing this contains the raw router output.
-	 */
-	router_response_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Per-preset router scores (when routing ran).
-	 */
-	router_scores?: RouterPresetScore[] | null;
-	/**
-	 * Which router strategy was used (e.g. "embeddings" or "llm").
-	 */
-	router_strategy?: string | null;
-	/**
-	 * Sample rate of the audio
-	 */
-	sample_rate?: number | null;
-	/**
-	 * When the request started
-	 */
-	started_at: string;
-	/**
-	 * Final result (success or error)
-	 */
-	status: RequestStatus;
-	/**
-	 * STT duration in milliseconds
-	 */
-	stt_duration_ms?: number | null;
-	/**
-	 * Estimated total STT cost for this request in USD micros.
-	 */
-	stt_estimated_cost_usd_micros?: number | null;
-	/**
-	 * Whether the STT call was treated as free-tier for pricing/cost purposes.
-	 */
-	stt_is_free_tier?: boolean;
-	/**
-	 * STT model used
-	 */
-	stt_model?: string | null;
-	/**
-	 * STT provider used
-	 */
-	stt_provider: string;
-	/**
-	 * Exact-ish payload sent to STT provider (with binary audio redacted).
-	 *
-	 * NOTE: For providers that use multipart/raw binary bodies, we store a JSON description of the request with placeholders for binary content.
-	 */
-	stt_request_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * JSON response received from STT provider (if available).
-	 */
-	stt_response_json?: {
-		[k: string]: any | undefined;
-	};
-	/**
-	 * Total duration in milliseconds
-	 */
-	total_duration_ms?: number | null;
+  /**
+   * Audio duration in seconds
+   */
+  audio_duration_secs?: number | null;
+  /**
+   * Audio file size in bytes
+   */
+  audio_size_bytes?: number | null;
+  /**
+   * When the request completed (if finished)
+   */
+  ended_at?: string | null;
+  /**
+   * All log entries for this request
+   */
+  entries: LogEntry[];
+  /**
+   * Error message if status is Error
+   */
+  error_message?: string | null;
+  /**
+   * Formatted transcript from LLM (if used)
+   */
+  final_text?: string | null;
+  /**
+   * Unique ID for this request
+   */
+  id: string;
+  /**
+   * High-level request kind for UI grouping/filtering.
+   */
+  kind?: RequestKind & string;
+  /**
+   * LLM duration in milliseconds
+   */
+  llm_duration_ms?: number | null;
+  /**
+   * Optional details/error for the LLM rewrite step.
+   *
+   * - For `failed`: error message - For `not_attempted` + `provider_unavailable`: provider error detail
+   */
+  llm_error_message?: string | null;
+  /**
+   * Estimated total LLM cost for this request in USD micros.
+   */
+  llm_estimated_cost_usd_micros?: number | null;
+  /**
+   * Whether the LLM call was treated as free-tier for pricing/cost purposes.
+   */
+  llm_is_free_tier?: boolean;
+  /**
+   * LLM model used
+   */
+  llm_model?: string | null;
+  /**
+   * If `llm_outcome == "not_attempted"`, a stable reason code.
+   *
+   * Expected values: - "quiet_audio_gate" - "no_speech_detected_by_vad" - "disabled_default_profile" - "disabled_profile" - "disabled_preset" - "provider_unavailable" - "unknown"
+   */
+  llm_not_attempted_reason?: string | null;
+  /**
+   * Outcome of the optional LLM rewrite step.
+   *
+   * Stored as a stable string for UI display and backward-compatible persistence.
+   *
+   * Expected values: - "not_attempted" - "succeeded" - "timed_out" - "failed"
+   */
+  llm_outcome?: string | null;
+  /**
+   * LLM provider used (if formatting enabled)
+   */
+  llm_provider?: string | null;
+  /**
+   * Payload sent to LLM provider (if LLM rewrite attempted).
+   */
+  llm_request_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * JSON response received from LLM provider (if available).
+   */
+  llm_response_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Preset id selected for this request (if any).
+   *
+   * When None, the request used the profile/global defaults ("Default" in UI).
+   */
+  preset_id?: string | null;
+  /**
+   * Preset display name selected for this request (if any).
+   */
+  preset_name?: string | null;
+  /**
+   * When request *processing* started (excludes recording time).
+   *
+   * For the main pipeline flow, the request log is created at recording-start, but the user-facing "Total" duration should represent only the backend processing time (stop -> STT/LLM -> done).
+   */
+  processing_started_at?: string | null;
+  /**
+   * Prompt profile id used for this request.
+   *
+   * "default" means no per-program profile matched.
+   */
+  profile_id?: string | null;
+  /**
+   * Prompt profile display name used for this request.
+   */
+  profile_name?: string | null;
+  /**
+   * Quick Ask: the answer returned by the answering LLM.
+   */
+  quick_ask_answer?: string | null;
+  /**
+   * Quick Ask: clipboard text that was included as additional context (when enabled).
+   */
+  quick_ask_clipboard_context?: string | null;
+  /**
+   * Quick Ask: highlighted text context that was attached to the question and sent to the answering LLM.
+   *
+   * This is intentionally bounded (see Quick Ask prompt assembly) to keep request logs usable.
+   */
+  quick_ask_context_text?: string | null;
+  /**
+   * Quick Ask: duration of the answering LLM call in milliseconds.
+   */
+  quick_ask_duration_ms?: number | null;
+  /**
+   * Quick Ask: model used for the answering LLM.
+   */
+  quick_ask_model?: string | null;
+  /**
+   * Quick Ask: provider used for the answering LLM.
+   */
+  quick_ask_provider?: string | null;
+  /**
+   * Quick Ask: the question sent to the answering LLM (usually based on the transcript).
+   */
+  quick_ask_question?: string | null;
+  /**
+   * Quick Ask: payload sent to the answering LLM.
+   */
+  quick_ask_request_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Quick Ask: payload received from the answering LLM.
+   */
+  quick_ask_response_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Quick Replace: clipboard text that was included as additional context (when enabled).
+   */
+  quick_replace_clipboard_context?: string | null;
+  /**
+   * Quick Replace: duration of the rewrite call in milliseconds.
+   */
+  quick_replace_duration_ms?: number | null;
+  /**
+   * Quick Replace: the user's instruction (usually derived from the transcript).
+   */
+  quick_replace_instructions?: string | null;
+  /**
+   * Quick Replace: model used for the rewrite.
+   */
+  quick_replace_model?: string | null;
+  /**
+   * Quick Replace: the rewritten output returned by the LLM.
+   */
+  quick_replace_output_text?: string | null;
+  /**
+   * Quick Replace: provider used for the rewrite.
+   */
+  quick_replace_provider?: string | null;
+  /**
+   * Quick Replace: payload sent to the rewriting LLM.
+   */
+  quick_replace_request_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Quick Replace: payload received from the rewriting LLM.
+   */
+  quick_replace_response_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Quick Replace: the selected/highlighted text captured at recording start.
+   */
+  quick_replace_selected_text?: string | null;
+  /**
+   * Raw transcript from STT
+   */
+  raw_transcript?: string | null;
+  /**
+   * LLM rewrite: clipboard text that was included as context for the rewrite (when enabled).
+   */
+  rewrite_clipboard_context?: string | null;
+  /**
+   * Intent router duration in milliseconds (when routing is enabled and actually ran).
+   */
+  router_duration_ms?: number | null;
+  /**
+   * Payload sent to router provider (when routing ran).
+   *
+   * For embeddings routing this may be an array of calls. For LLM routing this contains the router prompt payload.
+   */
+  router_request_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Payload received from router provider (when routing ran).
+   *
+   * For embeddings routing this may be an array of responses. For LLM routing this contains the raw router output.
+   */
+  router_response_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Per-preset router scores (when routing ran).
+   */
+  router_scores?: RouterPresetScore[] | null;
+  /**
+   * Which router strategy was used (e.g. "embeddings" or "llm").
+   */
+  router_strategy?: string | null;
+  /**
+   * Sample rate of the audio
+   */
+  sample_rate?: number | null;
+  /**
+   * When the request started
+   */
+  started_at: string;
+  /**
+   * Final result (success or error)
+   */
+  status: RequestStatus;
+  /**
+   * STT duration in milliseconds
+   */
+  stt_duration_ms?: number | null;
+  /**
+   * Estimated total STT cost for this request in USD micros.
+   */
+  stt_estimated_cost_usd_micros?: number | null;
+  /**
+   * Whether the STT call was treated as free-tier for pricing/cost purposes.
+   */
+  stt_is_free_tier?: boolean;
+  /**
+   * STT model used
+   */
+  stt_model?: string | null;
+  /**
+   * STT provider used
+   */
+  stt_provider: string;
+  /**
+   * Exact-ish payload sent to STT provider (with binary audio redacted).
+   *
+   * NOTE: For providers that use multipart/raw binary bodies, we store a JSON description of the request with placeholders for binary content.
+   */
+  stt_request_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * JSON response received from STT provider (if available).
+   */
+  stt_response_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * Total duration in milliseconds
+   */
+  total_duration_ms?: number | null;
 }
 /**
  * A single log entry within a request
  */
 export interface LogEntry {
-	details?: string | null;
-	level: LogLevel;
-	message: string;
-	timestamp: string;
+  details?: string | null;
+  level: LogLevel;
+  message: string;
+  timestamp: string;
 }
 /**
  * Router score for a preset candidate.
@@ -808,184 +792,178 @@ export interface LogEntry {
  * - `score` is strategy-dependent. - embeddings router: cosine similarity (0..=1-ish) - llm router: currently `None` (no numeric scoring)
  */
 export interface RouterPresetScore {
-	preset_id: string;
-	preset_name: string;
-	score?: number | null;
-	selected?: boolean;
+  preset_id: string;
+  preset_name: string;
+  score?: number | null;
+  selected?: boolean;
 }
 
 // From: rewrite-preset.schema.json
 export interface RewritePreset {
-	anthropic_thinking_budget?: number | null;
-	cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
-	description?: string | null;
-	gemini_thinking_budget?: number | null;
-	gemini_thinking_level?: string | null;
-	id?: string;
-	llm_model?: string | null;
-	llm_provider?: string | null;
-	name?: string;
-	openai_reasoning_effort?: string | null;
-	output_hit_enter?: boolean | null;
-	output_mode?: string | null;
-	overlay_mode?: string | null;
-	playing_audio_handling?: string | null;
-	/**
-	 * Explicit per-preset gate for the rewrite step.
-	 *
-	 * Semantics: - Missing/null in legacy settings => defaults to true (backward compatible) - Does NOT override the global or per-profile rewrite gate (those are hard gates)
-	 */
-	rewrite_llm_enabled?: boolean;
-	/**
-	 * Example utterances / short hints used by the intent router.
-	 */
-	routing_hints?: string[];
-	sound_enabled?: boolean | null;
-	stt_model?: string | null;
-	stt_provider?: string | null;
-	stt_timeout_seconds?: number | null;
-	widget_position?: string | null;
+  anthropic_thinking_budget?: number | null;
+  cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
+  description?: string | null;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: string | null;
+  id?: string;
+  llm_model?: string | null;
+  llm_provider?: string | null;
+  name?: string;
+  openai_reasoning_effort?: string | null;
+  output_hit_enter?: boolean | null;
+  output_mode?: string | null;
+  overlay_mode?: string | null;
+  playing_audio_handling?: string | null;
+  /**
+   * Explicit per-preset gate for the rewrite step.
+   *
+   * Semantics: - Missing/null in legacy settings => defaults to true (backward compatible) - Does NOT override the global or per-profile rewrite gate (those are hard gates)
+   */
+  rewrite_llm_enabled?: boolean;
+  /**
+   * Example utterances / short hints used by the intent router.
+   */
+  routing_hints?: string[];
+  sound_enabled?: boolean | null;
+  stt_model?: string | null;
+  stt_provider?: string | null;
+  stt_timeout_seconds?: number | null;
+  widget_position?: string | null;
 }
 export interface CleanupPromptSectionsSetting {
-	/**
-	 * System prompt override. When missing/None, inherit from base prompts.
-	 */
-	system?: PromptSectionSetting | null;
+  /**
+   * System prompt override. When missing/None, inherit from base prompts.
+   */
+  system?: PromptSectionSetting | null;
 }
 export interface PromptSectionSetting {
-	content?: string | null;
+  content?: string | null;
 }
 
 // From: rewrite-program-profile.schema.json
 export interface RewriteProgramPromptProfile {
-	/**
-	 * Persisted manual selection (if set, can be used as an override for routing).
-	 */
-	active_preset_id?: string | null;
-	anthropic_thinking_budget?: number | null;
-	cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
-	/**
-	 * Context grabbing method for highlighted-text capture.
-	 *
-	 * Controls what shortcut Kolboo uses to copy the current selection when probing. Expected values: - "none" (disable selection capture) - "ctrl_c" (default) - "ctrl_shift_c" (common in terminals on Windows) - "ctrl_insert" (alternative terminal-friendly copy on Windows)
-	 */
-	context_grab_method?: string | null;
-	/**
-	 * Description for the implicit "Default" (no preset) routing target.
-	 */
-	default_preset_description?: string | null;
-	/**
-	 * Default preset used when routing is off/undecided.
-	 */
-	default_preset_id?: string | null;
-	/**
-	 * Per-profile gate for the rewrite step when routed to the implicit "Default" target (i.e., no preset selected).
-	 *
-	 * This is independent of per-preset rewrite gates. The global/per-profile rewrite gate remains a hard gate that can disable rewrite for *all* presets.
-	 */
-	default_target_rewrite_llm_enabled?: boolean;
-	gemini_thinking_budget?: number | null;
-	gemini_thinking_level?: string | null;
-	id: string;
-	llm_model?: string | null;
-	llm_provider?: string | null;
-	name: string;
-	openai_reasoning_effort?: string | null;
-	output_hit_enter?: boolean | null;
-	output_mode?: string | null;
-	overlay_mode?: string | null;
-	playing_audio_handling?: string | null;
-	presets?: RewritePreset[];
-	program_paths?: string[];
-	quick_ask_anthropic_thinking_budget?: number | null;
-	quick_ask_gemini_thinking_budget?: number | null;
-	quick_ask_gemini_thinking_level?: string | null;
-	quick_ask_include_clipboard_context?: boolean | null;
-	quick_ask_model?: string | null;
-	quick_ask_openai_reasoning_effort?: string | null;
-	quick_ask_provider?: string | null;
-	quick_ask_system_prompt?: string | null;
-	quick_replace_enabled?: boolean | null;
-	quick_replace_include_clipboard_context?: boolean | null;
-	quick_replace_model?: string | null;
-	quick_replace_provider?: string | null;
-	quick_replace_system_prompt?: string | null;
-	rewrite_include_clipboard_context?: boolean | null;
-	/**
-	 * Optional per-profile gate for the rewrite step (falls back to global setting)
-	 */
-	rewrite_llm_enabled?: boolean | null;
-	/**
-	 * Optional intent router configuration.
-	 */
-	router?: IntentRouterSettings | null;
-	sound_enabled?: boolean | null;
-	stt_model?: string | null;
-	stt_provider?: string | null;
-	stt_timeout_seconds?: number | null;
-	widget_position?: string | null;
+  /**
+   * Persisted manual selection (if set, can be used as an override for routing).
+   */
+  active_preset_id?: string | null;
+  anthropic_thinking_budget?: number | null;
+  cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
+  /**
+   * Context grabbing method for highlighted-text capture.
+   *
+   * Controls what shortcut Kolboo uses to copy the current selection when probing. Expected values: - "none" (disable selection capture) - "ctrl_c" (default) - "ctrl_shift_c" (common in terminals on Windows) - "ctrl_insert" (alternative terminal-friendly copy on Windows)
+   */
+  context_grab_method?: string | null;
+  /**
+   * Description for the implicit "Default" (no preset) routing target.
+   */
+  default_preset_description?: string | null;
+  /**
+   * Default preset used when routing is off/undecided.
+   */
+  default_preset_id?: string | null;
+  /**
+   * Per-profile gate for the rewrite step when routed to the implicit "Default" target (i.e., no preset selected).
+   *
+   * This is independent of per-preset rewrite gates. The global/per-profile rewrite gate remains a hard gate that can disable rewrite for *all* presets.
+   */
+  default_target_rewrite_llm_enabled?: boolean;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: string | null;
+  id: string;
+  llm_model?: string | null;
+  llm_provider?: string | null;
+  name: string;
+  openai_reasoning_effort?: string | null;
+  output_hit_enter?: boolean | null;
+  output_mode?: string | null;
+  overlay_mode?: string | null;
+  playing_audio_handling?: string | null;
+  presets?: RewritePreset[];
+  program_paths?: string[];
+  quick_ask_anthropic_thinking_budget?: number | null;
+  quick_ask_gemini_thinking_budget?: number | null;
+  quick_ask_gemini_thinking_level?: string | null;
+  quick_ask_include_clipboard_context?: boolean | null;
+  quick_ask_model?: string | null;
+  quick_ask_openai_reasoning_effort?: string | null;
+  quick_ask_provider?: string | null;
+  quick_ask_system_prompt?: string | null;
+  quick_replace_enabled?: boolean | null;
+  quick_replace_include_clipboard_context?: boolean | null;
+  quick_replace_model?: string | null;
+  quick_replace_provider?: string | null;
+  quick_replace_system_prompt?: string | null;
+  rewrite_include_clipboard_context?: boolean | null;
+  /**
+   * Optional per-profile gate for the rewrite step (falls back to global setting)
+   */
+  rewrite_llm_enabled?: boolean | null;
+  /**
+   * Optional intent router configuration.
+   */
+  router?: IntentRouterSettings | null;
+  sound_enabled?: boolean | null;
+  stt_model?: string | null;
+  stt_provider?: string | null;
+  stt_timeout_seconds?: number | null;
+  widget_position?: string | null;
 }
 
 // From: settings-changed.schema.json
 export interface MapOf_AnyValue {
-	[k: string]: any | undefined;
+  [k: string]: any | undefined;
 }
 
 // From: system-event.schema.json
 export interface SystemEvent {
-	details?: string | null;
-	event_type: string;
-	message: string;
-	timestamp: string;
+  details?: string | null;
+  event_type: string;
+  message: string;
+  timestamp: string;
 }
 
 // From: system-proxy-info.schema.json
 export interface SystemProxyInfo {
-	env_http_proxy?: string | null;
-	env_https_proxy?: string | null;
-	env_no_proxy?: string | null;
-	/**
-	 * Best-effort OS proxy settings (Windows only for now).
-	 */
-	windows_internet_settings?: WindowsInternetProxySettings | null;
+  env_http_proxy?: string | null;
+  env_https_proxy?: string | null;
+  env_no_proxy?: string | null;
+  /**
+   * Best-effort OS proxy settings (Windows only for now).
+   */
+  windows_internet_settings?: WindowsInternetProxySettings | null;
 }
 export interface WindowsInternetProxySettings {
-	auto_config_url?: string | null;
-	proxy_enable?: boolean | null;
-	proxy_override?: string | null;
-	proxy_server?: string | null;
+  auto_config_url?: string | null;
+  proxy_enable?: boolean | null;
+  proxy_override?: string | null;
+  proxy_server?: string | null;
 }
 
 // From: test-llm-rewrite-response.schema.json
 export interface TestLlmRewriteResponse {
-	model_used: string;
-	output: string;
-	provider_used: string;
+  model_used: string;
+  output: string;
+  provider_used: string;
 }
 
 // From: test-rewrite-with-prompt-response.schema.json
 export interface TestRewriteWithPromptResponse {
-	model_used: string;
-	output: string;
-	provider_used: string;
+  model_used: string;
+  output: string;
+  provider_used: string;
 }
 
 // From: whisper-model-download-progress.schema.json
-export type WhisperModelDownloadStatus =
-	| "queued"
-	| "downloading"
-	| "verifying"
-	| "completed"
-	| "cancelled"
-	| "error";
+export type WhisperModelDownloadStatus = "queued" | "downloading" | "verifying" | "completed" | "cancelled" | "error";
 
 export interface WhisperModelDownloadProgress {
-	downloaded_bytes: number;
-	message?: string | null;
-	model_id: string;
-	percent?: number | null;
-	status: WhisperModelDownloadStatus;
-	total_bytes?: number | null;
+  downloaded_bytes: number;
+  message?: string | null;
+  model_id: string;
+  percent?: number | null;
+  status: WhisperModelDownloadStatus;
+  total_bytes?: number | null;
 }
 
 // From: whisper-model-info.schema.json
@@ -993,13 +971,13 @@ export interface WhisperModelDownloadProgress {
  * Information about a Whisper model
  */
 export interface WhisperModelInfo {
-	download_url: string;
-	expected_sha256: string;
-	filename: string;
-	id: string;
-	is_downloaded: boolean;
-	is_english_only: boolean;
-	name: string;
-	size_bytes: number;
-	size_display: string;
+  download_url: string;
+  expected_sha256: string;
+  filename: string;
+  id: string;
+  is_downloaded: boolean;
+  is_english_only: boolean;
+  name: string;
+  size_bytes: number;
+  size_display: string;
 }
