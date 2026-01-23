@@ -326,8 +326,7 @@ pub async fn github_backup_push_to_gist(
         .map_err(|e| e.to_string())?;
 
     if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
+        let (status, text) = crate::http::status_and_text(resp).await;
         return Err(format!("GitHub API error ({}): {}", status, text).into());
     }
 
@@ -375,8 +374,7 @@ pub async fn github_backup_pull_from_gist(
         .map_err(|e| e.to_string())?;
 
     if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
+        let (status, text) = crate::http::status_and_text(resp).await;
         return Err(format!("GitHub API error ({}): {}", status, text).into());
     }
 

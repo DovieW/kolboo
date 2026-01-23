@@ -6,13 +6,7 @@ It was generated using a **simple duplicate scan + manual review** (no AST parsi
 
 ## Summary (where duplication clusters)
 
-The most meaningful duplication is in:
-
-1. **Backend provider plumbing (Rust)** — repeated HTTP request setup, timeouts, error mapping, request/response logging, and response parsing across:
-	 - `app/src-tauri/src/stt/**`
-	 - `app/src-tauri/src/embeddings/**`
-
-2. **Settings UI patterns (TS/TSX)** — repeated “select with Default + hint” rendering blocks across settings screens.
+See the ranked duplicate groups below.
 
 ## Ranked duplicate groups (top 10)
 

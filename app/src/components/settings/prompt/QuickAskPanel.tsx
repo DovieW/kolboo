@@ -18,6 +18,7 @@ import type {
 } from "../../../lib/tauri";
 import { llmAPI } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
+import { HintSelectWithDefaultHint } from "../../HintSelectWithDefaultHint";
 import { PromptSectionEditor } from "../PromptSectionEditor";
 
 type LlmOption = { value: string; label: string };
@@ -571,7 +572,7 @@ export function QuickAskPanel({
 							</Tooltip>
 						)}
 
-						<HintSelect
+						<HintSelectWithDefaultHint
 							data={quickAskOpenAiThinkingOptions}
 							value={
 								isDefaultScope
@@ -616,86 +617,15 @@ export function QuickAskPanel({
 								color: "var(--text-primary)",
 								minWidth: 200,
 							}}
-							renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-
-								if (option.value !== selectDefault) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
+							defaultValue={selectDefault}
+							defaultHint={(() => {
 								const modelHint = quickAskModelForThinking
-									? openAiDefaultReasoningEffortForModel(
-											quickAskModelForThinking,
-										)
+									? openAiDefaultReasoningEffortForModel(quickAskModelForThinking)
 									: "medium";
-								const hint = isDefaultScope
+								return isDefaultScope
 									? modelHint
 									: (settings?.quick_ask_openai_reasoning_effort ?? modelHint);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== selectDefault) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const modelHint = quickAskModelForThinking
-									? openAiDefaultReasoningEffortForModel(
-											quickAskModelForThinking,
-										)
-									: "medium";
-								const hint = isDefaultScope
-									? modelHint
-									: (settings?.quick_ask_openai_reasoning_effort ?? modelHint);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
+							})()}
 						/>
 					</div>
 				</div>
@@ -748,7 +678,7 @@ export function QuickAskPanel({
 							</Tooltip>
 						)}
 
-						<HintSelect
+						<HintSelectWithDefaultHint
 							data={quickAskGeminiThinkingLevelOptions}
 							value={
 								isDefaultScope
@@ -791,75 +721,12 @@ export function QuickAskPanel({
 								color: "var(--text-primary)",
 								minWidth: 200,
 							}}
-							renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-								if (option.value !== selectDefault) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
+							defaultValue={selectDefault}
+							defaultHint={
+								isDefaultScope
 									? "high"
-									: (settings?.quick_ask_gemini_thinking_level ?? "high");
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== selectDefault) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const hint = isDefaultScope
-									? "high"
-									: (settings?.quick_ask_gemini_thinking_level ?? "high");
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
+									: (settings?.quick_ask_gemini_thinking_level ?? "high")
+							}
 						/>
 					</div>
 				</div>
@@ -907,7 +774,7 @@ export function QuickAskPanel({
 								</ActionIcon>
 							</Tooltip>
 						)}
-						<HintSelect
+						<HintSelectWithDefaultHint
 							data={quickAskGeminiThinkingBudgetOptions}
 							value={
 								isDefaultScope
@@ -954,19 +821,10 @@ export function QuickAskPanel({
 								color: "var(--text-primary)",
 								minWidth: 200,
 							}}
-							renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
-								if (option.value !== selectDefault)
-									return <Text size="sm">{option.label}</Text>;
-
+							defaultValue={selectDefault}
+							defaultHint={(() => {
 								const inherited = settings?.quick_ask_gemini_thinking_budget;
-								const hint = isDefaultScope
+								return isDefaultScope
 									? "dynamic"
 									: inherited == null
 										? "dynamic"
@@ -975,67 +833,7 @@ export function QuickAskPanel({
 											: inherited === -1
 												? "dynamic"
 												: String(inherited);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
-							renderOption={({ option }) => {
-								if (option.value !== selectDefault) {
-									return <Text size="sm">{option.label}</Text>;
-								}
-
-								const inherited = settings?.quick_ask_gemini_thinking_budget;
-								const hint = isDefaultScope
-									? "dynamic"
-									: inherited == null
-										? "dynamic"
-										: inherited === 0
-											? "off"
-											: inherited === -1
-												? "dynamic"
-												: String(inherited);
-
-								return (
-									<div
-										style={{
-											display: "flex",
-											alignItems: "baseline",
-											gap: 8,
-										}}
-									>
-										<span style={{ fontSize: 14 }}>{option.label}</span>
-										<span
-											style={{
-												fontSize: 11,
-												color: "var(--text-muted)",
-												opacity: 0.9,
-												lineHeight: 1,
-											}}
-										>
-											· {hint}
-										</span>
-									</div>
-								);
-							}}
+							})()}
 						/>
 					</div>
 				</div>

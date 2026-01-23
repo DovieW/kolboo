@@ -66,8 +66,7 @@ where
         }
     })?;
 
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let (status, body) = crate::http::status_and_text(response).await;
 
     if !status.is_success() {
         let message = parse_error(&body).unwrap_or(body);

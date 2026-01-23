@@ -49,9 +49,7 @@ async fn send_openai_compat_embeddings_request(
         .send()
         .await?;
 
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    Ok((status, body))
+    Ok(crate::http::status_and_text(resp).await)
 }
 
 fn extract_openai_compat_embedding(

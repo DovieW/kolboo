@@ -21,6 +21,13 @@ pub fn join_base_url(base_url: &str, path: &str) -> String {
     format!("{}/{}", base, path)
 }
 
+/// Convenience helper to grab `(status, body_text)` from a `reqwest::Response`.
+pub async fn status_and_text(resp: reqwest::Response) -> (reqwest::StatusCode, String) {
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    (status, body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
