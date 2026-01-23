@@ -2,6 +2,8 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
+use super::debug::input_preview;
+
 #[derive(Debug, thiserror::Error)]
 pub enum OpenAiCompatEmbeddingsError {
     #[error("HTTP error: {0}")]
@@ -22,16 +24,6 @@ struct OpenAiCompatErrorResponse {
 #[derive(Debug, Deserialize)]
 struct OpenAiCompatErrorBody {
     message: String,
-}
-
-fn input_preview(input: &str, max_chars: usize) -> (usize, String, bool) {
-    let input_len = input.chars().count();
-    let mut preview: String = input.chars().take(max_chars).collect();
-    let truncated = input_len > max_chars;
-    if truncated {
-        preview.push('…');
-    }
-    (input_len, preview, truncated)
 }
 
 fn parse_openai_compat_error_message(body: &str) -> Option<String> {
@@ -184,7 +176,7 @@ pub async fn embed_text_with_debug(
 
 #[cfg(test)]
 mod tests {
-    use super::{input_preview, parse_openai_compat_error_message};
+    use super::parse_openai_compat_error_message;
 
     #[test]
     fn error_message_parses_openai_shape() {
@@ -193,13 +185,5 @@ mod tests {
             parse_openai_compat_error_message(body),
             Some("nope".to_string())
         );
-    }
-
-    #[test]
-    fn input_preview_truncates_with_ellipsis() {
-        let input = "abcdef";
-        let (_len, preview, truncated) = input_preview(input, 3);
-        assert_eq!(preview, "abc…");
-        assert!(truncated);
     }
 }

@@ -23,13 +23,35 @@ fn parse_error_message(body: &str) -> Option<String> {
 
 pub(super) async fn send_json_request_with_error_parser(
     provider_label: &str,
-    mut req: RequestBuilder,
+    req: RequestBuilder,
     timeout: Option<Duration>,
     parse_error: fn(&str) -> Option<String>,
 ) -> Result<serde_json::Value, LlmError> {
-    if let Some(timeout) = timeout {
-        req = req.timeout(timeout);
-    }
+    send_json_request_with_error_parser_and_network_mapper(
+        provider_label,
+        req,
+        timeout,
+        parse_error,
+        |e| LlmError::Network(e),
+    )
+    .await
+}
+
+pub(super) async fn send_json_request_with_error_parser_and_network_mapper<MapNetworkError>(
+    provider_label: &str,
+    req: RequestBuilder,
+    timeout: Option<Duration>,
+    parse_error: fn(&str) -> Option<String>,
+    map_network_error: MapNetworkError,
+) -> Result<serde_json::Value, LlmError>
+where
+    MapNetworkError: FnOnce(reqwest::Error) -> LlmError,
+{
+    let req = if let Some(timeout) = timeout {
+        req.timeout(timeout)
+    } else {
+        req
+    };
 
     let response = req.send().await.map_err(|e| {
         if e.is_timeout() {
@@ -40,7 +62,7 @@ pub(super) async fn send_json_request_with_error_parser(
                 LlmError::Network(e)
             }
         } else {
-            LlmError::Network(e)
+            map_network_error(e)
         }
     })?;
 

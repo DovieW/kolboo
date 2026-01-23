@@ -218,12 +218,8 @@ pub async fn embed_text_with_debug(
 ) -> Result<(Vec<f32>, JsonValue, JsonValue), CohereEmbeddingsError> {
     const INPUT_PREVIEW_MAX_CHARS: usize = 800;
 
-    let input_len = input.chars().count();
-    let mut preview: String = input.chars().take(INPUT_PREVIEW_MAX_CHARS).collect();
-    let truncated = input_len > INPUT_PREVIEW_MAX_CHARS;
-    if truncated {
-        preview.push('…');
-    }
+    let (input_len, preview, truncated) =
+        super::debug::input_preview(input, INPUT_PREVIEW_MAX_CHARS);
 
     let url = embeddings_url_for_base_url(DEFAULT_COHERE_BASE_URL);
     let url_for_request = url.clone();

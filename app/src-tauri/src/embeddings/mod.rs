@@ -6,6 +6,7 @@ pub mod cohere;
 pub mod fireworks;
 pub mod openai;
 
+mod debug;
 mod openai_compat;
 
 use async_trait::async_trait;

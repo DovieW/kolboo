@@ -1,6 +1,6 @@
 //! Ollama LLM provider for local text formatting.
 
-use super::{LlmError, LlmProvider};
+use super::{http_json, LlmError, LlmProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::Client;
@@ -169,6 +169,12 @@ struct ErrorResponse {
     error: String,
 }
 
+fn parse_ollama_error_message(body: &str) -> Option<String> {
+    serde_json::from_str::<ErrorResponse>(body)
+        .ok()
+        .map(|p| p.error)
+}
+
 #[async_trait]
 impl LlmProvider for OllamaLlmProvider {
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
@@ -205,49 +211,24 @@ impl LlmProvider for OllamaLlmProvider {
             });
         }
 
-        let mut req = self.client.post(&url).json(&request);
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
-
-        let response = req.send().await.map_err(|e| {
-            if e.is_timeout() {
-                if let Some(timeout) = self.timeout {
-                    LlmError::Timeout(timeout)
+        let req = self.client.post(&url).json(&request);
+        let response_json = http_json::send_json_request_with_error_parser_and_network_mapper(
+            "Ollama",
+            req,
+            self.timeout,
+            parse_ollama_error_message,
+            |e| {
+                if e.is_connect() {
+                    LlmError::ProviderNotAvailable(format!(
+                        "Ollama not reachable at {}: {}",
+                        self.base_url, e
+                    ))
                 } else {
-                    // If we didn't configure a timeout, treat this as a generic network error.
                     LlmError::Network(e)
                 }
-            } else if e.is_connect() {
-                LlmError::ProviderNotAvailable(format!(
-                    "Ollama not reachable at {}: {}",
-                    self.base_url, e
-                ))
-            } else {
-                LlmError::Network(e)
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            // Try to parse as error response
-            if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                return Err(LlmError::Api(format!(
-                    "Ollama error ({}): {}",
-                    status, error_response.error
-                )));
-            }
-            return Err(LlmError::Api(format!(
-                "Ollama error ({}): {}",
-                status, error_text
-            )));
-        }
-
-        let response_json: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| LlmError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+            },
+        )
+        .await?;
 
         if let Some(store) = &self.request_log_store {
             let response_for_log = response_json.clone();
