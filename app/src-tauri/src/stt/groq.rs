@@ -5,7 +5,6 @@ use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
-use serde_json::json;
 use std::time::Duration;
 
 /// Groq Whisper API provider for speech-to-text
@@ -101,70 +100,20 @@ impl SttProvider for GroqSttProvider {
     async fn transcribe(&self, audio: &[u8], _format: &AudioFormat) -> Result<String, SttError> {
         let endpoint = self.transcriptions_url();
 
-        if let Some(store) = &self.request_log_store {
-            let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
-            let request_json = json!({
-                "provider": "groq",
-                "endpoint": endpoint.clone(),
-                "content_type": "multipart/form-data",
-                "fields": {
-                    "model": self.model,
-                    "prompt": prompt,
-                },
-                "file": {
-                    "name": "audio.wav",
-                    "mime": "audio/wav",
-                    "bytes": audio.len(),
-                    "data": "<binary audio omitted>",
-                }
-            });
-
-            store.with_current(|log| {
-                log.stt_request_json = Some(request_json);
-            });
-        }
-
         let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
-        let form = openai_compat::wav_transcription_form(audio, &self.model, prompt.as_deref())?;
-
-        let response = self
-            .client
-            .post(endpoint)
-            .bearer_auth(&self.api_key)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    SttError::Timeout
-                } else {
-                    SttError::Network(e)
-                }
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(SttError::Api(format!(
-                "Groq API error ({}): {}",
-                status, error_text
-            )));
-        }
-
-        let result: serde_json::Value = response.json().await?;
-
-        if let Some(store) = &self.request_log_store {
-            let result_for_log = result.clone();
-            store.with_current(|log| {
-                log.stt_response_json = Some(result_for_log);
-            });
-        }
-        let text = result["text"].as_str().unwrap_or("").to_string();
-
-        Ok(text)
+        openai_compat::transcribe_wav_multipart_openai_compat(
+            &self.client,
+            "groq",
+            "Groq API error",
+            &endpoint,
+            audio,
+            &self.model,
+            prompt.as_deref(),
+            self.request_log_store.as_ref(),
+            |rb| rb.bearer_auth(&self.api_key),
+            SttError::Network,
+        )
+        .await
     }
 
     fn name(&self) -> &'static str {

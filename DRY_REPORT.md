@@ -18,37 +18,7 @@ The most meaningful duplication is in:
 
 Ranking criteria: (a) repeat count, then (b) size of block, then (c) importance/core runtime impact.
 
-### 1) STT providers: multipart transcription request + consistent error/log handling
-
-**What it does:** Build a multipart form (`wav_transcription_form`), send to a transcription endpoint, map timeout/network errors, parse non-2xx responses, log request/response JSON, extract `text` from JSON.
-
-**Where (examples / evidence):**
-
-- `app/src-tauri/src/stt/openai.rs` `[124:5 - 165:16]` and `[120..260]` shows request logging + send + status check + JSON parsing
-- `app/src-tauri/src/stt/groq.rs` `[80..200]` shows nearly identical flow
-- `app/src-tauri/src/stt/whisper_server.rs` `[177:36 - 191:2]` (very similar send/status/json/log)
-- Additional similar blocks detected in `stt/fireworks.rs`, `stt/elevenlabs.rs`, `stt/deepgram.rs`, `stt/assemblyai.rs`, `stt/aquavoice.rs`.
-
-**How many times it appears:** the same flow shows up across **5–8** STT provider implementations.
-
-**Recommendation:** Extract a helper for the common “transcribe WAV via OpenAI-compatible multipart endpoint” path.
-
-- Proposed helper: `openai_compat::transcribe_wav_multipart(...)` (or `stt/openai_style.rs`)
-- Proposed signature (example):
-	- `async fn transcribe_wav_multipart(client: &Client, provider: &'static str, endpoint: &str, api_key: Option<&str>, model: &str, audio: &[u8], prompt: Option<&str>, log: Option<&RequestLogStore>) -> Result<String, SttError>`
-- Variable parameters:
-	- provider name
-	- endpoint URL
-	- auth strategy
-	- model/prompt rules
-
-**Risks / gotchas:**
-
-- Prompt clamping is model/provider-specific (keep that logic per provider; pass final prompt into helper).
-
----
-
-### 2) Tests: repeated scaffolding (low priority)
+### 1) Tests: repeated scaffolding (low priority)
 
 **What it does:** repeated test setup/fixtures.
 

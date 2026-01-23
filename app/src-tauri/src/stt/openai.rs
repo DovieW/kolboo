@@ -142,72 +142,21 @@ impl OpenAiSttProvider {
         audio: &[u8],
         prompt: Option<&str>,
     ) -> Result<String, SttError> {
-        if let Some(store) = &self.request_log_store {
-            let prompt = self.clamp_prompt_for_model(prompt);
-            let request_json = json!({
-                "provider": "openai",
-                "endpoint": self.transcriptions_url(),
-                "content_type": "multipart/form-data",
-                "fields": {
-                    "model": self.model,
-                    "prompt": prompt,
-                },
-                "file": {
-                    "name": "audio.wav",
-                    "mime": "audio/wav",
-                    "bytes": audio.len(),
-                    "data": "<binary audio omitted>",
-                }
-            });
-
-            store.with_current(|log| {
-                log.stt_request_json = Some(request_json);
-            });
-        }
-
+        let endpoint = self.transcriptions_url();
         let clamped_prompt = self.clamp_prompt_for_model(prompt);
-        let form =
-            openai_compat::wav_transcription_form(audio, &self.model, clamped_prompt.as_deref())?;
-
-        let response = self
-            .client
-            .post(self.transcriptions_url())
-            .bearer_auth(&self.api_key)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    SttError::Timeout
-                } else {
-                    SttError::Network(e)
-                }
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(SttError::Api(format!(
-                "OpenAI Whisper API error ({}): {}",
-                status, error_text
-            )));
-        }
-
-        let result: serde_json::Value = response.json().await?;
-
-        if let Some(store) = &self.request_log_store {
-            let result_for_log = result.clone();
-            store.with_current(|log| {
-                log.stt_response_json = Some(result_for_log);
-            });
-        }
-
-        let text = result["text"].as_str().unwrap_or("").to_string();
-
-        Ok(text)
+        openai_compat::transcribe_wav_multipart_openai_compat(
+            &self.client,
+            "openai",
+            "OpenAI Whisper API error",
+            &endpoint,
+            audio,
+            &self.model,
+            clamped_prompt.as_deref(),
+            self.request_log_store.as_ref(),
+            |rb| rb.bearer_auth(&self.api_key),
+            SttError::Network,
+        )
+        .await
     }
 
     fn extract_responses_output_text(value: &serde_json::Value) -> Result<String, SttError> {

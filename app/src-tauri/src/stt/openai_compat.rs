@@ -6,7 +6,9 @@
 //! - fields: `file` (audio/wav) + `model` + optional `prompt`
 
 use super::SttError;
+use crate::request_log::RequestLogStore;
 use reqwest::multipart;
+use serde_json::json;
 
 pub(super) fn normalize_optional_text(s: Option<&str>) -> Option<String> {
     let s = s.map(str::trim).filter(|v| !v.is_empty())?;
@@ -32,6 +34,86 @@ pub(super) fn wav_transcription_form(
     }
 
     Ok(form)
+}
+
+pub(super) async fn transcribe_wav_multipart_openai_compat<BuildRequest, MapNetworkError>(
+    client: &reqwest::Client,
+    provider: &'static str,
+    api_error_label: &'static str,
+    endpoint: &str,
+    audio: &[u8],
+    model: &str,
+    prompt: Option<&str>,
+    request_log_store: Option<&RequestLogStore>,
+    build_request: BuildRequest,
+    map_network_error: MapNetworkError,
+) -> Result<String, SttError>
+where
+    BuildRequest: FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+    MapNetworkError: FnOnce(reqwest::Error) -> SttError,
+{
+    if let Some(store) = request_log_store {
+        let request_json = json!({
+            "provider": provider,
+            "endpoint": endpoint,
+            "content_type": "multipart/form-data",
+            "fields": {
+                "model": model,
+                "prompt": prompt,
+            },
+            "file": {
+                "name": "audio.wav",
+                "mime": "audio/wav",
+                "bytes": audio.len(),
+                "data": "<binary audio omitted>",
+            }
+        });
+
+        store.with_current(|log| {
+            log.stt_request_json = Some(request_json);
+        });
+    }
+
+    let form = wav_transcription_form(audio, model, prompt)?;
+
+    let response = build_request(client.post(endpoint))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                SttError::Timeout
+            } else {
+                map_network_error(e)
+            }
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(SttError::Api(format!(
+            "{} ({}): {}",
+            api_error_label, status, error_text
+        )));
+    }
+
+    let result: serde_json::Value = response.json().await?;
+
+    if let Some(store) = request_log_store {
+        let result_for_log = result.clone();
+        store.with_current(|log| {
+            log.stt_response_json = Some(result_for_log);
+        });
+    }
+
+    Ok(result
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string())
 }
 
 #[cfg(test)]
