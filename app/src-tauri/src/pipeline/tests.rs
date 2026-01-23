@@ -13,6 +13,9 @@ use crate::stt::AudioFormat;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+const MOCK_PROVIDER: &str = "mock";
+const MOCK_API_KEY: &str = "test-key";
+
 /// A fake audio capture backend that returns canned WAV data without using CPAL.
 pub(super) struct FakeAudioCapture {
     level_meter: SharedAudioLevelMeter,
@@ -226,6 +229,45 @@ fn set_state_for_test(
     inner.cancel_token = token;
 }
 
+fn test_config_with_max_recording_bytes() -> PipelineConfig {
+    let mut config = PipelineConfig::default();
+    config.max_recording_bytes = 1024;
+    config
+}
+
+fn test_config_for_transcription() -> PipelineConfig {
+    let mut config = test_config_with_max_recording_bytes();
+    config.stt_provider = MOCK_PROVIDER.to_string();
+    config.quiet_audio_gate_enabled = false;
+    config
+}
+
+fn mock_llm_config(
+    enabled: bool,
+    program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile>,
+) -> crate::llm::LlmConfig {
+    crate::llm::LlmConfig {
+        enabled,
+        provider: MOCK_PROVIDER.to_string(),
+        api_key: String::new(),
+        model: None,
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+        prompts: crate::llm::PromptSections::default(),
+        program_prompt_profiles,
+        timeout: std::time::Duration::from_secs(30),
+    }
+}
+
+fn insert_mock_llm_api_key(config: &mut PipelineConfig) {
+    config
+        .llm_api_keys
+        .insert(MOCK_PROVIDER.to_string(), MOCK_API_KEY.to_string());
+}
+
 #[test]
 fn test_shared_pipeline_creation() {
     let config = PipelineConfig {
@@ -303,8 +345,7 @@ fn test_stop_recording_transitions_to_idle() {
 
 #[test]
 fn pipeline_can_start_and_stop_without_cpal() {
-    let mut config = PipelineConfig::default();
-    config.max_recording_bytes = 1024;
+    let config = test_config_with_max_recording_bytes();
 
     let fake = FakeAudioCapture::new();
     let meter_handle = fake.shared_level_meter();
@@ -339,14 +380,11 @@ fn pipeline_can_start_and_stop_without_cpal() {
 async fn pipeline_can_transcribe_without_network_or_hardware() {
     // Given: a pipeline with fake audio capture (no CPAL device) and a fake STT provider
     // injected into the provider cache (no network).
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
+    let config = test_config_for_transcription();
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockSttProvider::new("hello from tests")),
     );
@@ -368,41 +406,19 @@ async fn pipeline_can_transcribe_without_network_or_hardware() {
 #[tokio::test]
 async fn pipeline_can_transcribe_and_rewrite_without_network_or_hardware() {
     // Given: a pipeline with fake audio capture, fake STT, AND fake LLM providers.
-    use crate::llm::{LlmConfig, PromptSections};
-
-    let llm_config = LlmConfig {
-        enabled: true,
-        provider: "mock".to_string(),
-        api_key: String::new(),
-        model: None,
-        ollama_url: None,
-        openai_reasoning_effort: None,
-        gemini_thinking_budget: None,
-        gemini_thinking_level: None,
-        anthropic_thinking_budget: None,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: std::time::Duration::from_secs(30),
-    };
-
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
-    config.llm_config = llm_config;
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, Vec::new());
     // Insert fake API key so the pipeline doesn't bail early.
-    config
-        .llm_api_keys
-        .insert("mock".to_string(), "test-key".to_string());
+    insert_mock_llm_api_key(&mut config);
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockSttProvider::new("hello from stt")),
     );
     p.inject_llm_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockLlmProvider::new("Hello from LLM")),
     );
@@ -426,32 +442,12 @@ async fn pipeline_can_transcribe_and_rewrite_without_network_or_hardware() {
 #[tokio::test]
 async fn rewrite_disabled_falls_back_to_stt_text() {
     // Given: a pipeline with LLM rewrite explicitly disabled.
-    use crate::llm::{LlmConfig, PromptSections};
-
-    let llm_config = LlmConfig {
-        enabled: false, // <-- rewrite disabled
-        provider: "mock".to_string(),
-        api_key: String::new(),
-        model: None,
-        ollama_url: None,
-        openai_reasoning_effort: None,
-        gemini_thinking_budget: None,
-        gemini_thinking_level: None,
-        anthropic_thinking_budget: None,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: std::time::Duration::from_secs(30),
-    };
-
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
-    config.llm_config = llm_config;
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(false, Vec::new());
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockSttProvider::new("raw stt transcript")),
     );
@@ -479,14 +475,11 @@ async fn rewrite_disabled_falls_back_to_stt_text() {
 #[tokio::test]
 async fn stt_error_propagates_correctly() {
     // Given: a pipeline with an STT provider that will fail.
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
+    let config = test_config_for_transcription();
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockSttProvider::new("unused").with_behavior(MockBehavior {
             error: Some("Simulated API failure".to_string()),
@@ -687,8 +680,6 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
 async fn routing_selects_preset_with_highest_similarity() {
     // Given: A profile with two presets and embeddings configured so that
     // "send email" is very similar to the "email" preset hint.
-    use crate::llm::LlmConfig;
-
     // Create embeddings where:
     // - Transcript "send email" -> [1.0, 0.0, 0.0]
     // - "email and messages" hint -> [0.95, 0.05, 0.0] (high similarity to transcript)
@@ -705,34 +696,18 @@ async fn routing_selects_preset_with_highest_similarity() {
         ("calendar-preset", "Calendar", vec!["calendar events"]),
     ]);
 
-    let llm_config = LlmConfig {
-        enabled: true,
-        provider: "mock".to_string(),
-        api_key: String::new(),
-        model: None,
-        ollama_url: None,
-        openai_reasoning_effort: None,
-        gemini_thinking_budget: None,
-        gemini_thinking_level: None,
-        anthropic_thinking_budget: None,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: vec![profile.clone()],
-        timeout: std::time::Duration::from_secs(30),
-    };
-
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
-    config.llm_config = llm_config;
-    config
-        .llm_api_keys
-        .insert("mock".to_string(), "test-key".to_string());
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, vec![profile.clone()]);
+    insert_mock_llm_api_key(&mut config);
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
-    p.inject_stt_provider_for_tests("mock", None, Arc::new(MockSttProvider::new("send email")));
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        Arc::new(MockSttProvider::new("send email")),
+    );
     p.inject_llm_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockLlmProvider::new("Sending email")),
     );
@@ -760,8 +735,6 @@ async fn routing_selects_preset_with_highest_similarity() {
 #[tokio::test]
 async fn routing_with_no_matching_preset_uses_default() {
     // Given: A profile with presets but transcript doesn't match any well
-    use crate::llm::LlmConfig;
-
     // Create embeddings where the transcript doesn't match any hints well
     let mock_embeddings = Arc::new(
         MockEmbeddingsProvider::new(vec![0.5, 0.5, 0.0])
@@ -782,38 +755,18 @@ async fn routing_with_no_matching_preset_uses_default() {
         router.similarity_threshold = Some(0.8); // High threshold
     }
 
-    let llm_config = LlmConfig {
-        enabled: true,
-        provider: "mock".to_string(),
-        api_key: String::new(),
-        model: None,
-        ollama_url: None,
-        openai_reasoning_effort: None,
-        gemini_thinking_budget: None,
-        gemini_thinking_level: None,
-        anthropic_thinking_budget: None,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: vec![profile.clone()],
-        timeout: std::time::Duration::from_secs(30),
-    };
-
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
-    config.llm_config = llm_config;
-    config
-        .llm_api_keys
-        .insert("mock".to_string(), "test-key".to_string());
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, vec![profile.clone()]);
+    insert_mock_llm_api_key(&mut config);
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockSttProvider::new("random unrelated text")),
     );
     p.inject_llm_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockLlmProvider::new("Processed text")),
     );
@@ -840,8 +793,6 @@ async fn routing_with_no_matching_preset_uses_default() {
 #[tokio::test]
 async fn routing_respects_session_preset_lock() {
     // Given: A profile with routing enabled BUT a session preset lock is set
-    use crate::llm::LlmConfig;
-
     let mock_embeddings = Arc::new(
         MockEmbeddingsProvider::new(vec![0.5, 0.5, 0.0])
             .with_embedding("send email", vec![1.0, 0.0, 0.0])
@@ -854,38 +805,18 @@ async fn routing_respects_session_preset_lock() {
         ("calendar-preset", "Calendar", vec!["calendar events"]),
     ]);
 
-    let llm_config = LlmConfig {
-        enabled: true,
-        provider: "mock".to_string(),
-        api_key: String::new(),
-        model: None,
-        ollama_url: None,
-        openai_reasoning_effort: None,
-        gemini_thinking_budget: None,
-        gemini_thinking_level: None,
-        anthropic_thinking_budget: None,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: vec![profile.clone()],
-        timeout: std::time::Duration::from_secs(30),
-    };
-
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
-    config.llm_config = llm_config;
-    config
-        .llm_api_keys
-        .insert("mock".to_string(), "test-key".to_string());
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, vec![profile.clone()]);
+    insert_mock_llm_api_key(&mut config);
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockSttProvider::new("send email")), // Would normally route to email-preset
     );
     p.inject_llm_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockLlmProvider::new("Calendar event created")),
     );
@@ -916,8 +847,6 @@ async fn routing_respects_session_preset_lock() {
 #[tokio::test]
 async fn embeddings_provider_error_gracefully_falls_back() {
     // Given: An embeddings provider configured to fail
-    use crate::llm::LlmConfig;
-
     let mock_embeddings = Arc::new(
         MockEmbeddingsProvider::new(vec![0.5, 0.5, 0.0])
             .with_error("Simulated embeddings API failure"),
@@ -926,34 +855,18 @@ async fn embeddings_provider_error_gracefully_falls_back() {
     let profile =
         create_routing_test_profile(vec![("email-preset", "Email", vec!["email and messages"])]);
 
-    let llm_config = LlmConfig {
-        enabled: true,
-        provider: "mock".to_string(),
-        api_key: String::new(),
-        model: None,
-        ollama_url: None,
-        openai_reasoning_effort: None,
-        gemini_thinking_budget: None,
-        gemini_thinking_level: None,
-        anthropic_thinking_budget: None,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: vec![profile.clone()],
-        timeout: std::time::Duration::from_secs(30),
-    };
-
-    let mut config = PipelineConfig::default();
-    config.stt_provider = "mock".to_string();
-    config.max_recording_bytes = 1024;
-    config.quiet_audio_gate_enabled = false;
-    config.llm_config = llm_config;
-    config
-        .llm_api_keys
-        .insert("mock".to_string(), "test-key".to_string());
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, vec![profile.clone()]);
+    insert_mock_llm_api_key(&mut config);
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
-    p.inject_stt_provider_for_tests("mock", None, Arc::new(MockSttProvider::new("send email")));
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        Arc::new(MockSttProvider::new("send email")),
+    );
     p.inject_llm_provider_for_tests(
-        "mock",
+        MOCK_PROVIDER,
         None,
         Arc::new(MockLlmProvider::new("Fallback output")),
     );

@@ -12,18 +12,7 @@ See the ranked duplicate groups below.
 
 Ranking criteria: (a) repeat count, then (b) size of block, then (c) importance/core runtime impact.
 
-### 1) Tests: repeated scaffolding (low priority)
-
-**What it does:** repeated test setup/fixtures.
-
-**Where (evidence):**
-
-- `app/src-tauri/src/pipeline/tests.rs` has multiple repeated blocks (jscpd flagged many clones)
-- Several `.test.ts` files under `app/src/lib/contracts/schemas/` were flagged
-
-**How many times it appears:** many occurrences, but mostly in tests.
-
-**Recommendation:** Optional. Only refactor test duplication if it improves readability without making the tests “too clever”.
+No ranked duplicate groups are currently tracked here.
 
 ## “Do not refactor” list (duplication that’s OK / risky)
 

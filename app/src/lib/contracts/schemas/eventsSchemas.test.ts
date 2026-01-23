@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import type {
 	ConnectionStateChangedPayload,
@@ -13,7 +12,7 @@ import type {
 	SettingsChangedPayload,
 	SystemEvent,
 } from "../../tauri";
-import { resolveSchemasDir, schemaPath } from "../contractTestPaths";
+import { hasSchemas, readSchemaJson } from "./schemaTestUtils";
 
 type SchemaDefinition = {
 	properties?: Record<string, unknown>;
@@ -26,34 +25,18 @@ type SchemaVariant = {
 	enum?: string[];
 };
 
-function readSchema(schemaFile: string): {
+
+type JsonSchema = {
 	properties?: Record<string, unknown>;
 	definitions?: Record<string, SchemaDefinition>;
 	oneOf?: SchemaVariant[];
 	anyOf?: SchemaVariant[];
 	enum?: string[];
 	type?: string;
-} {
-	const resolvedPath = schemaPath(schemaFile);
-	if (!fs.existsSync(resolvedPath)) {
-		throw new Error(`Schema missing: ${schemaFile}`);
-	}
-	const rawSchema = fs
-		.readFileSync(resolvedPath, "utf8")
-		.replace(/^\uFEFF/, "");
-	return JSON.parse(rawSchema) as {
-		properties?: Record<string, unknown>;
-		definitions?: Record<string, SchemaDefinition>;
-		oneOf?: SchemaVariant[];
-		anyOf?: SchemaVariant[];
-		enum?: string[];
-		type?: string;
-	};
-}
+};
 
-function hasSchemas(): boolean {
-	const schemasDir = resolveSchemasDir();
-	return fs.existsSync(schemasDir) && fs.readdirSync(schemasDir).length > 0;
+function readSchema(schemaFile: string): JsonSchema {
+	return readSchemaJson<JsonSchema>(schemaFile);
 }
 
 function assertNullEventSchema(schemaFile: string, label: string) {
