@@ -7,11 +7,6 @@ import type {
 // Type guards
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Check if a value is a plain object. */
-export const isRecord = (value: unknown): value is Record<string, unknown> => {
-	return value != null && typeof value === "object";
-};
-
 /** Check if a value is a valid OpenAI reasoning effort level. */
 export const isOpenAiReasoningEffort = (
 	value: unknown,
