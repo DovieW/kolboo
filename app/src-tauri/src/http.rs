@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn parses_json_value_or_returns_message() {
-        let ok = parse_json_value(r#"{\"a\": 1}"#).unwrap();
+        let ok = parse_json_value(r#"{"a": 1}"#).unwrap();
         assert_eq!(ok.get("a").and_then(|v| v.as_i64()), Some(1));
 
         let err = parse_json_value("not json").unwrap_err();

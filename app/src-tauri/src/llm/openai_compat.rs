@@ -36,7 +36,7 @@ pub(super) struct ChatRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub max_tokens: u32,
-    pub temperature: f32,
+    pub temperature: f64,
 }
 
 impl ChatRequest {
@@ -45,7 +45,7 @@ impl ChatRequest {
         system_prompt: &str,
         user_message: &str,
         max_tokens: u32,
-        temperature: f32,
+        temperature: f64,
     ) -> Self {
         Self {
             model,

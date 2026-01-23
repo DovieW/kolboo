@@ -570,7 +570,11 @@ let storeInstance: Store | null = null;
 const SETTINGS_GUIDE_STATE_KEY = "settings_guide_state";
 const SETTINGS_VERSION_KEY = "settings_version";
 // Bump when adding settings migrations; keep TS/Rust/tests in sync.
-const SETTINGS_VERSION_DEFAULT = 4;
+const SETTINGS_VERSION_LATEST = 4;
+// Legacy fixtures/settings files may predate `settings_version` being written.
+// For UI normalization and tests, treat a missing/invalid version as the last
+// pre-versioning schema we can reasonably assume.
+const SETTINGS_VERSION_ASSUME_IF_MISSING = 3;
 
 function normalizeSettingsGuideState(value: unknown): SettingsGuideState {
 	if (value === "pending" || value === "skipped" || value === "completed") {
@@ -581,11 +585,15 @@ function normalizeSettingsGuideState(value: unknown): SettingsGuideState {
 
 function normalizeSettingsVersion(value: unknown): number {
 	if (typeof value !== "number" || !Number.isFinite(value)) {
-		return SETTINGS_VERSION_DEFAULT;
+		return SETTINGS_VERSION_ASSUME_IF_MISSING;
 	}
+
 	const normalized = Math.trunc(value);
-	if (normalized < SETTINGS_VERSION_DEFAULT) {
-		return SETTINGS_VERSION_DEFAULT;
+	if (normalized < 1) {
+		return SETTINGS_VERSION_ASSUME_IF_MISSING;
+	}
+	if (normalized > SETTINGS_VERSION_LATEST) {
+		return SETTINGS_VERSION_LATEST;
 	}
 	return normalized;
 }

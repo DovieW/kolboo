@@ -4,6 +4,19 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tracing::Instrument;
 
+fn truncate_utf8_to_byte_cap(s: &str, cap_bytes: usize) -> &str {
+    if s.len() <= cap_bytes {
+        return s;
+    }
+
+    let mut idx = cap_bytes;
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+
+    &s[..idx]
+}
+
 // Extraction buckets: settings defaults, overlay wiring, shortcuts lifecycle, bootstrap wiring.
 
 // Re-export core/adapter types that lib.rs and commands need.
@@ -1092,7 +1105,10 @@ pub(crate) fn stop_recording(
                                     let selected_context_capped: Option<String> =
                                         selected_context_trimmed.map(|ctx| {
                                             if ctx.len() > cap {
-                                                format!("{}\n\n… (truncated)", &ctx[..cap])
+                                                format!(
+                                                    "{}\n\n… (truncated)",
+                                                    truncate_utf8_to_byte_cap(ctx, cap)
+                                                )
                                             } else {
                                                 ctx.to_string()
                                             }
@@ -1101,7 +1117,10 @@ pub(crate) fn stop_recording(
                                     let clipboard_context_capped: Option<String> =
                                         clipboard_trimmed.map(|cb| {
                                             if cb.len() > cap {
-                                                format!("{}\n\n… (truncated)", &cb[..cap])
+                                                format!(
+                                                    "{}\n\n… (truncated)",
+                                                    truncate_utf8_to_byte_cap(cb, cap)
+                                                )
                                             } else {
                                                 cb.to_string()
                                             }
@@ -1150,12 +1169,18 @@ pub(crate) fn stop_recording(
                                                     // Keep each turn reasonably bounded.
                                                     let cap = 1_500usize;
                                                     let q_capped = if q.len() > cap {
-                                                        format!("{}…", &q[..cap])
+                                                        format!(
+                                                            "{}…",
+                                                            truncate_utf8_to_byte_cap(q, cap)
+                                                        )
                                                     } else {
                                                         q.to_string()
                                                     };
                                                     let a_capped = if a.len() > cap {
-                                                        format!("{}…", &a[..cap])
+                                                        format!(
+                                                            "{}…",
+                                                            truncate_utf8_to_byte_cap(a, cap)
+                                                        )
                                                     } else {
                                                         a.to_string()
                                                     };
@@ -1383,14 +1408,23 @@ pub(crate) fn stop_recording(
                                             // Best-effort: keep these bounded so request logs stay usable.
                                             let cap = 8_000usize;
                                             let selected_capped = if selected.len() > cap {
-                                                format!("{}\n\n… (truncated)", &selected[..cap])
+                                                format!(
+                                                    "{}\n\n… (truncated)",
+                                                    truncate_utf8_to_byte_cap(selected, cap)
+                                                )
                                             } else {
                                                 selected.to_string()
                                             };
 
                                             let instructions = output_value.trim().to_string();
                                             let instructions_capped = if instructions.len() > cap {
-                                                format!("{}\n\n… (truncated)", &instructions[..cap])
+                                                format!(
+                                                    "{}\n\n… (truncated)",
+                                                    truncate_utf8_to_byte_cap(
+                                                        instructions.as_str(),
+                                                        cap
+                                                    )
+                                                )
                                             } else {
                                                 instructions
                                             };
