@@ -80,17 +80,44 @@ impl RecordingStore {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn has(&self, id: &str) -> bool {
+        if !Self::is_safe_request_id(id) {
+            return false;
+        }
+
+        // Even if cached, confirm disk existence (files can be deleted externally).
         if let Ok(known) = self.known_existing.read() {
             if known.contains(id) {
-                return true;
+                let p = self.path_for_id(id);
+                if self.fs.exists(&p) {
+                    return true;
+                }
+
+                // Cache was stale.
+                drop(known);
+                if let Ok(mut known2) = self.known_existing.write() {
+                    known2.remove(id);
+                }
+                return false;
             }
         }
-        self.fs.exists(&self.path_for_id(id))
+
+        let p = self.path_for_id(id);
+        if self.fs.exists(&p) {
+            if let Ok(mut known) = self.known_existing.write() {
+                known.insert(id.to_string());
+            }
+            true
+        } else {
+            false
+        }
     }
 
     pub fn save_wav(&self, id: &str, wav_bytes: &[u8]) -> Result<(), String> {
         if id.trim().is_empty() {
             return Err("Cannot save recording: empty id".to_string());
+        }
+        if !Self::is_safe_request_id(id) {
+            return Err("Invalid request id".to_string());
         }
         if wav_bytes.is_empty() {
             return Err("Cannot save recording: empty audio".to_string());

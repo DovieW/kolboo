@@ -6,6 +6,7 @@ pub trait Fs: Send + Sync + std::fmt::Debug {
     fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
     fn read_to_string(&self, path: &Path) -> io::Result<String>;
     fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
     fn create_dir_all(&self, path: &Path) -> io::Result<()>;
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>>;
     fn metadata(&self, path: &Path) -> io::Result<fs::Metadata>;
@@ -27,6 +28,10 @@ impl Fs for RealFs {
 
     fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         fs::write(path, contents)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(from, to)
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {

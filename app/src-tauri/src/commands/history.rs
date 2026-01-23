@@ -159,7 +159,7 @@ fn resolve_recording_source_id(
 
     // Best-effort backfill: if a WAV exists under this entry id, treat it as the recording source.
     if let Some(store) = app.try_state::<RecordingStore>() {
-        if store.has(&entry.id) {
+        if store.wav_path_if_exists(&entry.id).ok().flatten().is_some() {
             let _ = history.set_request_recording_id(&entry.id, Some(entry.id.clone()));
             return Ok(Some(entry.id.clone()));
         }
@@ -185,7 +185,7 @@ fn compute_recording_ref_count(
                 Some(r.to_string())
             }
         } else if let Some(store) = app.try_state::<RecordingStore>() {
-            if store.has(&e.id) {
+            if store.wav_path_if_exists(&e.id).ok().flatten().is_some() {
                 Some(e.id.clone())
             } else {
                 None
@@ -219,7 +219,7 @@ pub async fn get_history_delete_options(
         .as_deref()
         .map(|rid| {
             app.try_state::<RecordingStore>()
-                .map(|store| store.has(rid))
+                .map(|store| store.wav_path_if_exists(rid).ok().flatten().is_some())
                 .unwrap_or(false)
         })
         .unwrap_or(false);
@@ -297,7 +297,7 @@ pub async fn delete_history_entry_ex(
                         Some(t.to_string())
                     }
                 } else if let Some(store) = app.try_state::<RecordingStore>() {
-                    if store.has(&e.id) {
+                    if store.wav_path_if_exists(&e.id).ok().flatten().is_some() {
                         Some(e.id.clone())
                     } else {
                         None

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
@@ -33,6 +34,8 @@ struct CachedModels {
 }
 
 static FIREWORKS_MODELS_CACHE: OnceLock<Mutex<Option<CachedModels>>> = OnceLock::new();
+
+static FIREWORKS_CACHE_WRITE_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FireworksModelsCacheFile {
@@ -94,8 +97,48 @@ fn persist_fireworks_models_disk_cache(app: &AppHandle, api_key_fp: u64, models:
         fetched_at_unix_ms: now_unix_ms(),
         models: models.to_vec(),
     };
-    if let Ok(json) = serde_json::to_vec(&cache) {
-        let _ = std::fs::write(path, json);
+
+    let json = match serde_json::to_vec(&cache) {
+        Ok(j) => j,
+        Err(e) => {
+            if !FIREWORKS_CACHE_WRITE_WARNED.swap(true, Ordering::Relaxed) {
+                log::warn!("Fireworks models cache: failed to serialize disk cache: {e}");
+            }
+            return;
+        }
+    };
+
+    // Safer write: write temp -> move existing to .bak -> rename temp into place.
+    // This avoids corrupting the primary cache file on crashes mid-write.
+    let tmp_path = path.with_file_name(format!("fireworks-models.json.tmp.{}", now_unix_ms()));
+    let bak_path = path.with_extension("json.bak");
+
+    if let Err(e) = std::fs::write(&tmp_path, &json) {
+        if !FIREWORKS_CACHE_WRITE_WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "Fireworks models cache: failed to write temp file {}: {}",
+                tmp_path.display(),
+                e
+            );
+        }
+        return;
+    }
+
+    // Best-effort: move old cache to backup.
+    if path.exists() {
+        let _ = std::fs::remove_file(&bak_path);
+        let _ = std::fs::rename(&path, &bak_path);
+    }
+
+    if let Err(e) = std::fs::rename(&tmp_path, &path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        if !FIREWORKS_CACHE_WRITE_WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!(
+                "Fireworks models cache: failed to replace cache file {}: {}",
+                path.display(),
+                e
+            );
+        }
     }
 }
 

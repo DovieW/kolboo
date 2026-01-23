@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
@@ -162,11 +163,37 @@ impl HistoryStorage {
 
         // Ensure the directory exists
         if let Some(parent) = file_path.parent() {
-            let _ = ensure_dir(parent);
+            if let Err(e) = ensure_dir(parent) {
+                log::warn!(
+                    "HistoryStorage: failed to create history directory {}: {}",
+                    parent.display(),
+                    e
+                );
+            }
         }
 
-        // Load existing history or use empty
-        let data = Self::load_from_file(fs.as_ref(), &file_path).unwrap_or_default();
+        // Load existing history or recover safely.
+        let data = match Self::load_from_file(fs.as_ref(), &file_path) {
+            Ok(data) => data,
+            Err(LoadHistoryError::NotFound) => HistoryData::default(),
+            Err(LoadHistoryError::Read(e)) => {
+                log::warn!(
+                    "HistoryStorage: failed to read history file {}: {}",
+                    file_path.display(),
+                    e
+                );
+                HistoryData::default()
+            }
+            Err(LoadHistoryError::Parse { error, content }) => {
+                log::warn!(
+                    "HistoryStorage: failed to parse history file {}; preserving corrupt file and starting fresh: {}",
+                    file_path.display(),
+                    error
+                );
+                Self::preserve_corrupt_history_file(fs.as_ref(), &file_path, &content);
+                HistoryData::default()
+            }
+        };
 
         Self {
             data: RwLock::new(data),
@@ -175,10 +202,58 @@ impl HistoryStorage {
         }
     }
 
+    fn preserve_corrupt_history_file(fs: &dyn Fs, file_path: &std::path::Path, content: &str) {
+        let Some(parent) = file_path.parent() else {
+            return;
+        };
+
+        // Keep filename stable and filesystem-friendly (Windows-safe).
+        let ts = Utc::now().format("%Y%m%d_%H%M%S");
+        let corrupt_path = parent.join(format!("history.corrupt.{}.{}.json", ts, Uuid::new_v4()));
+
+        // Best-effort: rename the original file out of the way.
+        // If rename fails (e.g. cross-device or permission issues), fall back
+        // to copying the bytes to the corrupt path.
+        match fs.rename(file_path, &corrupt_path) {
+            Ok(()) => {
+                log::warn!(
+                    "HistoryStorage: moved corrupt history file to {}",
+                    corrupt_path.display()
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "HistoryStorage: failed to rename corrupt history file {} -> {}: {} (will attempt copy)",
+                    file_path.display(),
+                    corrupt_path.display(),
+                    e
+                );
+                if let Err(e2) = fs.write(&corrupt_path, content.as_bytes()) {
+                    log::warn!(
+                        "HistoryStorage: failed to write corrupt history copy {}: {}",
+                        corrupt_path.display(),
+                        e2
+                    );
+                }
+            }
+        }
+    }
+
     /// Load history from the JSON file
-    fn load_from_file(fs: &dyn Fs, file_path: &std::path::Path) -> Option<HistoryData> {
-        let content = fs.read_to_string(file_path).ok()?;
-        serde_json::from_str(&content).ok()
+    fn load_from_file(
+        fs: &dyn Fs,
+        file_path: &std::path::Path,
+    ) -> Result<HistoryData, LoadHistoryError> {
+        let content = match fs.read_to_string(file_path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Err(LoadHistoryError::NotFound),
+            Err(e) => return Err(LoadHistoryError::Read(e.to_string())),
+        };
+
+        serde_json::from_str(&content).map_err(|e| LoadHistoryError::Parse {
+            error: e.to_string(),
+            content,
+        })
     }
 
     /// Save current history to disk
@@ -191,9 +266,75 @@ impl HistoryStorage {
         let content = serde_json::to_string_pretty(&*data)
             .map_err(|e| format!("Failed to serialize history: {}", e))?;
 
+        self.atomic_write_history_json(content.as_bytes())?;
+
+        Ok(())
+    }
+
+    fn atomic_write_history_json(&self, bytes: &[u8]) -> Result<(), String> {
+        let Some(parent) = self.file_path.parent() else {
+            return Err("Failed to write history file: missing parent directory".to_string());
+        };
         self.fs
-            .write(&self.file_path, content.as_bytes())
-            .map_err(|e| format!("Failed to write history file: {}", e))?;
+            .create_dir_all(parent)
+            .map_err(|e| format!("Failed to create history dir {}: {}", parent.display(), e))?;
+
+        let file_name = self
+            .file_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("history.json");
+
+        let tmp_path = parent.join(format!("{}.tmp.{}", file_name, Uuid::new_v4()));
+        let bak_path = parent.join(format!("{}.bak", file_name));
+
+        // Write new content to a temp file first.
+        self.fs.write(&tmp_path, bytes).map_err(|e| {
+            format!(
+                "Failed to write temp history file {}: {}",
+                tmp_path.display(),
+                e
+            )
+        })?;
+
+        // Move current history file out of the way so we can atomically-ish replace.
+        if self.fs.exists(&self.file_path) {
+            // Best-effort: clear old backup.
+            if self.fs.exists(&bak_path) {
+                let _ = self.fs.remove_file(&bak_path);
+            }
+
+            // Prefer rename to a backup (keeps old content recoverable).
+            if let Err(e) = self.fs.rename(&self.file_path, &bak_path) {
+                log::warn!(
+                    "HistoryStorage: failed to move old history file to backup {}: {} (will attempt remove)",
+                    bak_path.display(),
+                    e
+                );
+                self.fs.remove_file(&self.file_path).map_err(|e| {
+                    let _ = self.fs.remove_file(&tmp_path);
+                    format!(
+                        "Failed to replace history file {} (could not remove old file): {}",
+                        self.file_path.display(),
+                        e
+                    )
+                })?;
+            }
+        }
+
+        // Now move the temp file into place.
+        if let Err(e) = self.fs.rename(&tmp_path, &self.file_path) {
+            // Best-effort restore: move backup back if it exists and target is missing.
+            if self.fs.exists(&bak_path) && !self.fs.exists(&self.file_path) {
+                let _ = self.fs.rename(&bak_path, &self.file_path);
+            }
+            let _ = self.fs.remove_file(&tmp_path);
+            return Err(format!(
+                "Failed to replace history file {}: {}",
+                self.file_path.display(),
+                e
+            ));
+        }
 
         Ok(())
     }
@@ -821,6 +962,13 @@ impl HistoryStorage {
     }
 }
 
+#[derive(Debug)]
+enum LoadHistoryError {
+    NotFound,
+    Read(String),
+    Parse { error: String, content: String },
+}
+
 // ============================================================================
 // Server-side paging/filtering structs (UI API)
 // ============================================================================
@@ -906,6 +1054,19 @@ mod tests {
                 .lock()
                 .map_err(|_| io::Error::other("memory fs lock poisoned"))?;
             guard.insert(path.to_path_buf(), contents.to_vec());
+            Ok(())
+        }
+
+        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            let mut guard = self
+                .files
+                .lock()
+                .map_err(|_| io::Error::other("memory fs lock poisoned"))?;
+
+            let Some(bytes) = guard.remove(from) else {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "file not found"));
+            };
+            guard.insert(to.to_path_buf(), bytes);
             Ok(())
         }
 
