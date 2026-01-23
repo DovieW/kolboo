@@ -14,6 +14,41 @@ export interface SelectOption {
 	label: string;
 }
 
+const GEMINI3_FLASH_THINKING_LEVEL_OPTIONS: SelectOption[] = [
+	{ value: SELECT_DEFAULT, label: "Default" },
+	{ value: "minimal", label: "Minimal" },
+	{ value: "low", label: "Low" },
+	{ value: "medium", label: "Medium" },
+	{ value: "high", label: "High" },
+];
+
+const GEMINI3_PRO_THINKING_LEVEL_OPTIONS: SelectOption[] = [
+	{ value: SELECT_DEFAULT, label: "Default" },
+	{ value: "low", label: "Low" },
+	{ value: "high", label: "High" },
+];
+
+function gemini3ThinkingLevelOptions(isFlash: boolean): SelectOption[] {
+	return isFlash
+		? GEMINI3_FLASH_THINKING_LEVEL_OPTIONS
+		: GEMINI3_PRO_THINKING_LEVEL_OPTIONS;
+}
+
+function withAnthropicCustomThinkingBudgetOption(
+	options: SelectOption[],
+	vRaw: unknown,
+): SelectOption[] {
+	const v =
+		typeof vRaw === "number" && Number.isFinite(vRaw) ? Math.trunc(vRaw) : null;
+	if (v == null) return options;
+
+	const asString = String(v);
+	const exists = options.some((o) => o.value === asString);
+	if (exists) return options;
+
+	return [...options, { value: asString, label: `Custom (${v})` }];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure utility functions (exported for use by other components)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -255,37 +290,11 @@ export function useThinkingOptions({
 		quickAskModelForThinking.includes("gemini-3-flash");
 
 	const geminiThinkingLevelOptions = useMemo<SelectOption[]>(() => {
-		if (isGemini3Flash) {
-			return [
-				{ value: SELECT_DEFAULT, label: "Default" },
-				{ value: "minimal", label: "Minimal" },
-				{ value: "low", label: "Low" },
-				{ value: "medium", label: "Medium" },
-				{ value: "high", label: "High" },
-			];
-		}
-		return [
-			{ value: SELECT_DEFAULT, label: "Default" },
-			{ value: "low", label: "Low" },
-			{ value: "high", label: "High" },
-		];
+		return gemini3ThinkingLevelOptions(isGemini3Flash);
 	}, [isGemini3Flash]);
 
 	const quickAskGeminiThinkingLevelOptions = useMemo<SelectOption[]>(() => {
-		if (isQuickAskGemini3Flash) {
-			return [
-				{ value: SELECT_DEFAULT, label: "Default" },
-				{ value: "minimal", label: "Minimal" },
-				{ value: "low", label: "Low" },
-				{ value: "medium", label: "Medium" },
-				{ value: "high", label: "High" },
-			];
-		}
-		return [
-			{ value: SELECT_DEFAULT, label: "Default" },
-			{ value: "low", label: "Low" },
-			{ value: "high", label: "High" },
-		];
+		return gemini3ThinkingLevelOptions(isQuickAskGemini3Flash);
 	}, [isQuickAskGemini3Flash]);
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -406,22 +415,10 @@ export function useThinkingOptions({
 			: localProfileAnthropicThinkingBudget === SELECT_DEFAULT
 				? null
 				: Number(localProfileAnthropicThinkingBudget);
-		const v =
-			typeof vRaw === "number" && Number.isFinite(vRaw)
-				? Math.trunc(vRaw)
-				: null;
-		if (v == null) return anthropicThinkingLevelOptions;
-
-		const asString = String(v);
-		const exists = anthropicThinkingLevelOptions.some(
-			(o) => o.value === asString,
+		return withAnthropicCustomThinkingBudgetOption(
+			anthropicThinkingLevelOptions,
+			vRaw,
 		);
-		if (exists) return anthropicThinkingLevelOptions;
-
-		return [
-			...anthropicThinkingLevelOptions,
-			{ value: asString, label: `Custom (${v})` },
-		];
 	}, [
 		isDefaultScope,
 		defaultAnthropicThinkingBudget,
@@ -437,22 +434,10 @@ export function useThinkingOptions({
 			: localProfileQuickAskAnthropicThinkingBudget === SELECT_DEFAULT
 				? null
 				: Number(localProfileQuickAskAnthropicThinkingBudget);
-		const v =
-			typeof vRaw === "number" && Number.isFinite(vRaw)
-				? Math.trunc(vRaw)
-				: null;
-		if (v == null) return anthropicThinkingLevelOptions;
-
-		const asString = String(v);
-		const exists = anthropicThinkingLevelOptions.some(
-			(o) => o.value === asString,
+		return withAnthropicCustomThinkingBudgetOption(
+			anthropicThinkingLevelOptions,
+			vRaw,
 		);
-		if (exists) return anthropicThinkingLevelOptions;
-
-		return [
-			...anthropicThinkingLevelOptions,
-			{ value: asString, label: `Custom (${v})` },
-		];
 	}, [
 		isDefaultScope,
 		defaultQuickAskAnthropicThinkingBudget,

@@ -1,1 +1,2 @@
-﻿# High-impact refactors
+# High-impact refactors
+
