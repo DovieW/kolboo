@@ -2031,6 +2031,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         None
     };
 
+    #[allow(clippy::too_many_arguments)]
     fn build_stream(
         device: &cpal::Device,
         config: &cpal::StreamConfig,

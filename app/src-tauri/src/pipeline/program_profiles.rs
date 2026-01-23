@@ -248,12 +248,14 @@ mod tests {
 
     #[test]
     fn select_profile_for_program_path_picks_first_match() {
-        let mut cfg = LlmConfig::default();
-        cfg.program_prompt_profiles = vec![
-            profile("a", vec!["notepad.exe"]),
-            profile("b", vec!["obsidian.exe"]),
-            profile("c", vec!["obsidian.exe"]),
-        ];
+        let cfg = LlmConfig {
+            program_prompt_profiles: vec![
+                profile("a", vec!["notepad.exe"]),
+                profile("b", vec!["obsidian.exe"]),
+                profile("c", vec!["obsidian.exe"]),
+            ],
+            ..Default::default()
+        };
 
         let selected = select_profile_for_program_path(&cfg, "C:\\Apps\\Obsidian\\Obsidian.exe")
             .expect("expected profile");

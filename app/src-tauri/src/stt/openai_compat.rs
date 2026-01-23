@@ -36,6 +36,9 @@ pub(super) fn wav_transcription_form(
     Ok(form)
 }
 
+// This is a shared helper used by multiple providers; keeping parameters explicit makes
+// the call sites easier to read.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn transcribe_wav_multipart_openai_compat<BuildRequest, MapNetworkError>(
     client: &reqwest::Client,
     provider: &'static str,

@@ -649,7 +649,7 @@ impl StatsStore {
                         // so we can apply the minute/second cutoff precisely without double-counting.
                         if let (Some(cut_date), Some(cut_hour)) = (cutoff_date, cutoff_hour) {
                             if ev.created_at.date_naive() == cut_date
-                                && (ev.created_at.hour() as u32) <= cut_hour
+                                && ev.created_at.hour() <= cut_hour
                             {
                                 continue;
                             }

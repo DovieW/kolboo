@@ -170,7 +170,7 @@ impl LlmProvider for CerebrasLlmProvider {
                 )
             })?;
 
-        if choices.first().is_none() {
+        if choices.is_empty() {
             return Err(LlmError::InvalidResponse(
                 "Cerebras response had an empty `choices` array (see Request Logs for llm_response_json)"
                     .to_string(),

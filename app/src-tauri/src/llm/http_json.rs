@@ -32,7 +32,7 @@ pub(super) async fn send_json_request_with_error_parser(
         req,
         timeout,
         parse_error,
-        |e| LlmError::Network(e),
+        LlmError::Network,
     )
     .await
 }

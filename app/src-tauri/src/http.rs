@@ -1,9 +1,9 @@
-/// Small helpers for building HTTP endpoint URLs consistently across providers.
-///
-/// We intentionally keep this string-based (instead of `url::Url`) because:
-/// - many provider base URLs include their own path segments (e.g. `/v1beta`)
-/// - most provider code already stores endpoint URLs as strings
-/// - we only need predictable joining/normalization for simple path appends
+//! Small helpers for building HTTP endpoint URLs consistently across providers.
+//!
+//! We intentionally keep this string-based (instead of `url::Url`) because:
+//! - many provider base URLs include their own path segments (e.g. `/v1beta`)
+//! - most provider code already stores endpoint URLs as strings
+//! - we only need predictable joining/normalization for simple path appends
 
 /// Trim trailing slashes from a base URL.
 pub fn trim_base_url(base_url: &str) -> &str {

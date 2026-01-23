@@ -176,7 +176,7 @@ impl HistoryStorage {
     }
 
     /// Load history from the JSON file
-    fn load_from_file(fs: &dyn Fs, file_path: &PathBuf) -> Option<HistoryData> {
+    fn load_from_file(fs: &dyn Fs, file_path: &std::path::Path) -> Option<HistoryData> {
         let content = fs.read_to_string(file_path).ok()?;
         serde_json::from_str(&content).ok()
     }
@@ -881,7 +881,7 @@ mod tests {
             let guard = self
                 .files
                 .lock()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "memory fs lock poisoned"))?;
+                .map_err(|_| io::Error::other("memory fs lock poisoned"))?;
             guard
                 .get(path)
                 .cloned()
@@ -904,7 +904,7 @@ mod tests {
             let mut guard = self
                 .files
                 .lock()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "memory fs lock poisoned"))?;
+                .map_err(|_| io::Error::other("memory fs lock poisoned"))?;
             guard.insert(path.to_path_buf(), contents.to_vec());
             Ok(())
         }
@@ -925,7 +925,7 @@ mod tests {
             let mut guard = self
                 .files
                 .lock()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "memory fs lock poisoned"))?;
+                .map_err(|_| io::Error::other("memory fs lock poisoned"))?;
             guard.remove(path);
             Ok(())
         }

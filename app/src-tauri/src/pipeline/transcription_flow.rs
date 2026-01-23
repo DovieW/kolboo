@@ -226,43 +226,19 @@ async fn run_llm_router<C: TranscriptionCallbacks>(
     profile: &ProgramPromptProfile,
     stt_text: &str,
 ) -> Option<String> {
-    let llm_config = ctx
-        .active_profile
-        .as_ref()
-        .map(|_| ()) // We just need to know there's a profile
-        .and_then(|_| {
-            // Build provider params from router config or global defaults
-            let router_cfg = profile.router.as_ref();
-            let desired_provider = router_cfg
-                .and_then(|r| r.llm_provider.clone())
-                .unwrap_or_else(|| "openai".to_string());
-            let desired_model = router_cfg.and_then(|r| r.llm_model.clone());
-            let desired_openai_effort = router_cfg.and_then(|r| r.openai_reasoning_effort.clone());
-            let desired_gemini_budget = router_cfg.and_then(|r| r.gemini_thinking_budget);
-            let desired_gemini_level = router_cfg.and_then(|r| r.gemini_thinking_level.clone());
-            let desired_anthropic_budget = router_cfg.and_then(|r| r.anthropic_thinking_budget);
+    // If there's no active profile, routing should be disabled.
+    let _active_profile = ctx.active_profile.as_ref()?;
 
-            Some((
-                desired_provider,
-                desired_model,
-                desired_openai_effort,
-                desired_gemini_budget,
-                desired_gemini_level,
-                desired_anthropic_budget,
-            ))
-        });
-
-    let Some((
-        desired_provider,
-        desired_model,
-        desired_openai_effort,
-        desired_gemini_budget,
-        desired_gemini_level,
-        desired_anthropic_budget,
-    )) = llm_config
-    else {
-        return None;
-    };
+    // Build provider params from router config or global defaults.
+    let router_cfg = profile.router.as_ref();
+    let desired_provider = router_cfg
+        .and_then(|r| r.llm_provider.clone())
+        .unwrap_or_else(|| "openai".to_string());
+    let desired_model = router_cfg.and_then(|r| r.llm_model.clone());
+    let desired_openai_effort = router_cfg.and_then(|r| r.openai_reasoning_effort.clone());
+    let desired_gemini_budget = router_cfg.and_then(|r| r.gemini_thinking_budget);
+    let desired_gemini_level = router_cfg.and_then(|r| r.gemini_thinking_level.clone());
+    let desired_anthropic_budget = router_cfg.and_then(|r| r.anthropic_thinking_budget);
 
     let maybe_provider = callbacks
         .get_or_create_llm_provider(

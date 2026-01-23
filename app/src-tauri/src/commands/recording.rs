@@ -1898,7 +1898,7 @@ async fn pipeline_dictate_inner(
                         log.error(format!("Failed to type text: {}", e));
                     });
                 }
-                let mut error = CommandError::from(e);
+                let mut error = e;
                 if let Some(req_id) = active_request_id.clone() {
                     error = error.with_request_id(req_id);
                 }
@@ -2177,7 +2177,7 @@ async fn pipeline_test_transcribe_last_audio_inner(
                 );
             }
 
-            Err(CommandError::from(e))
+            Err(e.into())
         }
     }
 }

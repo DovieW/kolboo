@@ -3,23 +3,23 @@ use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandError {
-    pub message: String,
-    pub error_type: String,
+    pub message: Box<str>,
+    pub error_type: Box<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
+    pub code: Option<Box<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<String>,
+    pub details: Option<Box<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retryable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
+    pub request_id: Option<Box<str>>,
 }
 
 impl CommandError {
     pub fn new(message: impl Into<String>, error_type: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
-            error_type: error_type.into(),
+            message: message.into().into_boxed_str(),
+            error_type: error_type.into().into_boxed_str(),
             code: None,
             details: None,
             retryable: None,
@@ -32,12 +32,12 @@ impl CommandError {
     }
 
     pub fn with_code(mut self, code: impl Into<String>) -> Self {
-        self.code = Some(code.into());
+        self.code = Some(code.into().into_boxed_str());
         self
     }
 
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
-        self.details = Some(details.into());
+        self.details = Some(details.into().into_boxed_str());
         self
     }
 
@@ -47,7 +47,7 @@ impl CommandError {
     }
 
     pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
-        self.request_id = Some(request_id.into());
+        self.request_id = Some(request_id.into().into_boxed_str());
         self
     }
 }
@@ -79,8 +79,8 @@ mod tests {
     #[test]
     fn command_error_new_sets_message_and_type() {
         let error = CommandError::new("test error", "llm");
-        assert_eq!(error.message, "test error");
-        assert_eq!(error.error_type, "llm");
+        assert_eq!(error.message.as_ref(), "test error");
+        assert_eq!(error.error_type.as_ref(), "llm");
         assert_eq!(error.code, None);
         assert_eq!(error.details, None);
         assert_eq!(error.retryable, None);
@@ -90,8 +90,8 @@ mod tests {
     #[test]
     fn command_error_from_string_defaults_unknown() {
         let error: CommandError = "test error".to_string().into();
-        assert_eq!(error.message, "test error");
-        assert_eq!(error.error_type, "unknown");
+        assert_eq!(error.message.as_ref(), "test error");
+        assert_eq!(error.error_type.as_ref(), "unknown");
     }
 
     #[test]

@@ -230,9 +230,10 @@ fn set_state_for_test(
 }
 
 fn test_config_with_max_recording_bytes() -> PipelineConfig {
-    let mut config = PipelineConfig::default();
-    config.max_recording_bytes = 1024;
-    config
+    PipelineConfig {
+        max_recording_bytes: 1024,
+        ..Default::default()
+    }
 }
 
 fn test_config_for_transcription() -> PipelineConfig {

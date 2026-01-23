@@ -226,10 +226,8 @@ fn migrate_v3_to_v4(store: &impl SettingsStore) -> bool {
                     let profile_id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
                     if profile_id != "default" {
-                        let needs_fix = match obj.get("rewrite_llm_enabled") {
-                            Some(Value::Bool(_)) => false,
-                            _ => true,
-                        };
+                        let needs_fix =
+                            !matches!(obj.get("rewrite_llm_enabled"), Some(Value::Bool(_)));
 
                         if needs_fix {
                             obj.insert(
