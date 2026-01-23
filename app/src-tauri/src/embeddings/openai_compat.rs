@@ -15,16 +15,6 @@ pub enum OpenAiCompatEmbeddingsError {
 }
 
 #[derive(Debug, Deserialize)]
-struct EmbeddingsResponse {
-    data: Vec<EmbeddingsData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingsData {
-    embedding: Vec<f32>,
-}
-
-#[derive(Debug, Deserialize)]
 struct OpenAiCompatErrorResponse {
     error: OpenAiCompatErrorBody,
 }
@@ -50,13 +40,13 @@ fn parse_openai_compat_error_message(body: &str) -> Option<String> {
         .map(|p| p.error.message)
 }
 
-pub async fn embed_text_with_url(
+async fn send_openai_compat_embeddings_request(
     client: &Client,
     api_key: &str,
     model: &str,
     input: &str,
     url: &str,
-) -> Result<Vec<f32>, OpenAiCompatEmbeddingsError> {
+) -> Result<(reqwest::StatusCode, String), OpenAiCompatEmbeddingsError> {
     let resp = client
         .post(url)
         .bearer_auth(api_key)
@@ -67,9 +57,48 @@ pub async fn embed_text_with_url(
         .send()
         .await?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    Ok((status, body))
+}
+
+fn extract_openai_compat_embedding(
+    parsed: &JsonValue,
+) -> Result<Vec<f32>, OpenAiCompatEmbeddingsError> {
+    let embedding_arr = parsed
+        .get("data")
+        .and_then(|d| d.as_array())
+        .and_then(|d| d.first())
+        .and_then(|x| x.get("embedding"))
+        .and_then(|e| e.as_array())
+        .ok_or(OpenAiCompatEmbeddingsError::MissingEmbedding)?;
+
+    let mut embedding: Vec<f32> = Vec::with_capacity(embedding_arr.len());
+    for v in embedding_arr {
+        let n = v
+            .as_f64()
+            .ok_or(OpenAiCompatEmbeddingsError::MissingEmbedding)?;
+        embedding.push(n as f32);
+    }
+
+    if embedding.is_empty() {
+        return Err(OpenAiCompatEmbeddingsError::MissingEmbedding);
+    }
+
+    Ok(embedding)
+}
+
+pub async fn embed_text_with_url(
+    client: &Client,
+    api_key: &str,
+    model: &str,
+    input: &str,
+    url: &str,
+) -> Result<Vec<f32>, OpenAiCompatEmbeddingsError> {
+    let (status, body) =
+        send_openai_compat_embeddings_request(client, api_key, model, input, url).await?;
+
+    if !status.is_success() {
         if let Some(message) = parse_openai_compat_error_message(&body) {
             return Err(OpenAiCompatEmbeddingsError::Api(format!(
                 "{}: {}",
@@ -82,19 +111,11 @@ pub async fn embed_text_with_url(
         )));
     }
 
-    let parsed: EmbeddingsResponse = resp.json().await?;
-    let embedding = parsed
-        .data
-        .into_iter()
-        .next()
-        .ok_or(OpenAiCompatEmbeddingsError::MissingEmbedding)?
-        .embedding;
+    let parsed: JsonValue = serde_json::from_str(&body).map_err(|e| {
+        OpenAiCompatEmbeddingsError::Api(format!("Failed to parse response JSON: {}", e))
+    })?;
 
-    if embedding.is_empty() {
-        return Err(OpenAiCompatEmbeddingsError::MissingEmbedding);
-    }
-
-    Ok(embedding)
+    extract_openai_compat_embedding(&parsed)
 }
 
 pub async fn embed_text_with_debug(
@@ -116,18 +137,8 @@ pub async fn embed_text_with_debug(
         "input_truncated": truncated,
     });
 
-    let resp = client
-        .post(url)
-        .bearer_auth(api_key)
-        .json(&serde_json::json!({
-            "model": model,
-            "input": input,
-        }))
-        .send()
-        .await?;
-
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let (status, body) =
+        send_openai_compat_embeddings_request(client, api_key, model, input, url).await?;
 
     if !status.is_success() {
         if let Some(message) = parse_openai_compat_error_message(&body) {
@@ -155,28 +166,10 @@ pub async fn embed_text_with_debug(
         OpenAiCompatEmbeddingsError::Api(format!("Failed to parse response JSON: {}", e))
     })?;
 
-    // Extract embedding values.
-    let embedding_arr = parsed
-        .get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|d| d.first())
-        .and_then(|x| x.get("embedding"))
-        .and_then(|e| e.as_array())
-        .ok_or(OpenAiCompatEmbeddingsError::MissingEmbedding)?;
-
-    let mut embedding: Vec<f32> = Vec::with_capacity(embedding_arr.len());
-    for v in embedding_arr {
-        let n = v
-            .as_f64()
-            .ok_or(OpenAiCompatEmbeddingsError::MissingEmbedding)?;
-        embedding.push(n as f32);
-    }
-    if embedding.is_empty() {
-        return Err(OpenAiCompatEmbeddingsError::MissingEmbedding);
-    }
+    let embedding = extract_openai_compat_embedding(&parsed)?;
 
     // Build a redacted response payload (exclude raw embedding floats).
-    let embedding_len = embedding_arr.len();
+    let embedding_len = embedding.len();
     let response_json = serde_json::json!({
         "status": status.as_u16(),
         "model": parsed.get("model").cloned().unwrap_or(JsonValue::Null),
