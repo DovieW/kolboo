@@ -89,6 +89,26 @@ fn has_nonempty_setting(app: &AppHandle, key: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Helper to check if a base URL setting exists, is non-empty, and parses as a URL.
+///
+/// Used for URL-based "local" providers (e.g. Whisper Server) that are otherwise selectable
+/// without an API key.
+#[cfg(desktop)]
+fn has_valid_url_setting(app: &AppHandle, key: &str) -> bool {
+    let raw = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get(key))
+        .and_then(|v| v.as_str().map(|s| s.trim().to_string()))
+        .unwrap_or_default();
+
+    if raw.is_empty() {
+        return false;
+    }
+
+    reqwest::Url::parse(&raw).is_ok()
+}
+
 /// Helper to check if an API key is configured in the store
 #[cfg(desktop)]
 fn has_api_key(app: &AppHandle, key: &str) -> bool {
@@ -115,10 +135,15 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
             continue;
         }
 
+        // Whisper Server requires a configured base URL; without it, selecting the provider
+        // deterministically fails at init time.
+        if *id == "whisper-server" && !has_valid_url_setting(&app, "whisper_server_base_url") {
+            continue;
+        }
+
         let key_name = format!("{}_api_key", id);
         // Local providers don't need API keys, remote ones do
-        // Whisper server is keyless (URL-based), so it should always be selectable.
-        if *is_local || *id == "whisper-server" || has_api_key(&app, &key_name) {
+        if *is_local || has_api_key(&app, &key_name) {
             stt_providers.push(ProviderInfo {
                 value: id.to_string(),
                 label: label.to_string(),

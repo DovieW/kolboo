@@ -156,6 +156,7 @@ impl PipelineInner {
         }
     }
 
+    #[allow(dead_code)]
     fn build_http_client_with_timeout(
         &self,
         timeout: Duration,
@@ -251,7 +252,7 @@ impl PipelineInner {
                 .unwrap_or_default();
 
             let provider = crate::stt::WhisperServerSttProvider::with_client(
-                self.build_http_client_with_timeout(self.config.transcription_timeout)?,
+                stt_provider::build_stt_client(&self.config.proxy_settings)?,
                 base_url,
                 model,
                 self.config.stt_transcription_prompt.clone(),
@@ -272,8 +273,7 @@ impl PipelineInner {
             .cloned()
             .unwrap_or_default();
 
-        let timeout = stt_provider::default_timeout_for_provider(&provider_id);
-        let client = stt_provider::build_stt_client(&self.config.proxy_settings, timeout)?;
+        let client = stt_provider::build_stt_client(&self.config.proxy_settings)?;
 
         let provider = stt_provider::create_cloud_stt_provider(
             client,
@@ -814,8 +814,6 @@ impl SharedPipeline {
         let encode_cfg = inner.config.audio_encode_config();
         match recording::stop_recording_session(inner.audio_capture.as_mut(), encode_cfg) {
             Ok(outcome) => {
-                // Keep a copy for STT testing/debugging UI.
-                inner.last_wav_bytes = Some(outcome.wav_bytes.clone());
                 inner.last_recording_diagnostics = Some(outcome.diagnostics);
 
                 // Check size limit
@@ -829,6 +827,9 @@ impl SharedPipeline {
                     ));
                     return Err(e);
                 }
+
+                // Keep a copy for STT testing/debugging UI.
+                inner.last_wav_bytes = Some(outcome.wav_bytes.clone());
 
                 inner.reset_to_idle();
                 log::info!(
@@ -864,8 +865,6 @@ impl SharedPipeline {
         let encode_cfg = inner.config.audio_encode_config();
         match recording::stop_recording_before_after(inner.audio_capture.as_mut(), encode_cfg) {
             Ok(outcome) => {
-                // Keep a copy of the processed output for STT test + debugging.
-                inner.last_wav_bytes = Some(outcome.after_wav.clone());
                 inner.last_recording_diagnostics = Some(outcome.diagnostics);
 
                 // Check size limit (both, to avoid surprising huge payloads)
@@ -888,6 +887,9 @@ impl SharedPipeline {
                     ));
                     return Err(e);
                 }
+
+                // Keep a copy of the processed output for STT test + debugging.
+                inner.last_wav_bytes = Some(outcome.after_wav.clone());
 
                 inner.reset_to_idle();
                 Ok((outcome.before_wav, outcome.after_wav))
@@ -1085,6 +1087,16 @@ impl SharedPipeline {
             // Persist diagnostics for UI readout.
             inner.last_recording_diagnostics = Some(outcome.diagnostics);
 
+            // Check size limit before cloning/storing debug audio.
+            let max_bytes = inner.config.max_recording_bytes;
+            if let Err(e) = recording::validate_recording_size(outcome.wav_bytes.len(), max_bytes) {
+                inner.set_error(&format!(
+                    "Recording too large: {} bytes",
+                    outcome.wav_bytes.len()
+                ));
+                return Err(e);
+            }
+
             // Keep a copy for STT testing/debugging UI.
             inner.last_wav_bytes = Some(outcome.wav_bytes.clone());
 
@@ -1126,16 +1138,6 @@ impl SharedPipeline {
                     });
                 }
                 recording::QuietAudioGateResult::NotQuiet => {}
-            }
-
-            // Check size limit
-            let max_bytes = inner.config.max_recording_bytes;
-            if let Err(e) = recording::validate_recording_size(outcome.wav_bytes.len(), max_bytes) {
-                inner.set_error(&format!(
-                    "Recording too large: {} bytes",
-                    outcome.wav_bytes.len()
-                ));
-                return Err(e);
             }
 
             inner.transition_to(PipelineState::Transcribing, "stop_and_transcribe_detailed");

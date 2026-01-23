@@ -11,6 +11,11 @@ use reqwest::Client;
 use std::sync::Arc;
 use std::time::Duration;
 
+// STT requests can legitimately take a while (slow networks, provider backlog, long audio).
+// We intentionally keep the reqwest client timeout very generous so the *user-configured*
+// Tokio timeout in `stt_flow` is the effective source of truth.
+const STT_HTTP_CLIENT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
 /// Parameters needed to create an STT provider.
 pub(super) struct SttProviderParams {
     pub provider_id: String,
@@ -21,11 +26,8 @@ pub(super) struct SttProviderParams {
 }
 
 /// Create an HTTP client configured for STT requests.
-pub(super) fn build_stt_client(
-    proxy_settings: &ProxySettings,
-    timeout: Duration,
-) -> Result<Client, PipelineError> {
-    crate::network::build_http_client_with_timeout(proxy_settings, timeout)
+pub(super) fn build_stt_client(proxy_settings: &ProxySettings) -> Result<Client, PipelineError> {
+    crate::network::build_http_client_with_timeout(proxy_settings, STT_HTTP_CLIENT_TIMEOUT)
         .map_err(|e| PipelineError::Config(format!("Failed to create HTTP client: {}", e)))
 }
 
@@ -113,6 +115,7 @@ pub(super) fn create_cloud_stt_provider(
 }
 
 /// Get the default timeout for a given STT provider.
+#[allow(dead_code)]
 pub(super) fn default_timeout_for_provider(provider_id: &str) -> Duration {
     match provider_id {
         "openai" | "fireworks" | "assemblyai" => Duration::from_secs(120),
