@@ -56,7 +56,15 @@ if (!targetDir) {
 }
 
 const buildResult = runCargo(
-	["build", "--bins", "--manifest-path", manifestPath, "--quiet"],
+	[
+		"build",
+		"--bins",
+		"--manifest-path",
+		manifestPath,
+		"--features",
+		"schema-export",
+		"--quiet",
+	],
 	{ stdio: ["ignore", "inherit", "inherit"] },
 );
 

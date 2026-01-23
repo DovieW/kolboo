@@ -182,8 +182,7 @@ pub(crate) fn stop_recording(
     // enter Transcribing/Rewriting.
     let quiet_audio_gate_enabled: bool =
         get_setting_from_store(app, "quiet_audio_gate_enabled", true);
-    let play_stop_sound_when_transcribing =
-        sound_enabled && quiet_audio_gate_enabled && !playing_audio_handling.wants_mute();
+    let play_stop_sound_when_transcribing = sound_enabled && quiet_audio_gate_enabled;
 
     // Keep Escape-to-cancel enabled during the transcription phase too.
     set_escape_cancel_shortcut_enabled(app, true);
@@ -196,7 +195,8 @@ pub(crate) fn stop_recording(
         }
     }
     // If the quiet-audio gate is disabled, play the stop sound immediately as before.
-    if sound_enabled && !quiet_audio_gate_enabled && !playing_audio_handling.wants_mute() {
+    // Note: we unmute above, so muted-during-recording should not suppress the stop cue.
+    if sound_enabled && !quiet_audio_gate_enabled {
         audio::play_sound(audio::SoundType::RecordingStop, audio_cue);
     }
 
