@@ -1,13 +1,14 @@
 import {
-	ActionIcon,
-	Button,
-	Group,
-	Loader,
-	Modal,
-	Select,
-	Text,
-	TextInput,
-	Tooltip,
+  ActionIcon,
+  Button,
+  Group,
+  Loader,
+  Modal,
+  Select,
+  Switch,
+  Text,
+  TextInput,
+  Tooltip,
 } from "@mantine/core";
 import { Crosshair, Plus, RotateCcw, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -54,24 +55,25 @@ export function ProfileConfigModal({
 		// Create new profile with all settings in inherit mode (null)
 		// Settings will inherit from default until user explicitly changes them
 		const newProfile: RewriteProgramPromptProfile = {
-			id: createId(),
-			name: "New Profile",
-			program_paths: [],
-			cleanup_prompt_sections: null, // inherit
-			// AI settings - all inherit
-			stt_provider: null,
-			stt_model: null,
-			stt_timeout_seconds: null,
-			llm_provider: null,
-			llm_model: null,
-			rewrite_llm_enabled: null,
-			// UI settings - all inherit
-			sound_enabled: null,
-			playing_audio_handling: null,
-			overlay_mode: null,
-			widget_position: null,
-			output_mode: null,
-		};
+      id: createId(),
+      name: "New Profile",
+      program_paths: [],
+      disabled: false,
+      cleanup_prompt_sections: null, // inherit
+      // AI settings - all inherit
+      stt_provider: null,
+      stt_model: null,
+      stt_timeout_seconds: null,
+      llm_provider: null,
+      llm_model: null,
+      rewrite_llm_enabled: null,
+      // UI settings - all inherit
+      sound_enabled: null,
+      playing_audio_handling: null,
+      overlay_mode: null,
+      widget_position: null,
+      output_mode: null,
+    };
 
 		const next = [...profiles, newProfile];
 		updateRewriteProgramPromptProfiles.mutate(next, {
@@ -97,6 +99,7 @@ export function ProfileConfigModal({
 		editingProfileId !== "default"
 			? (profiles.find((p) => p.id === editingProfileId) ?? null)
 			: null;
+	const isProfileDisabled = selectedProfile?.disabled ?? false;
 
 	const [localName, setLocalName] = useState<string>("");
 	const [localPaths, setLocalPaths] = useState<string[]>([]);
@@ -187,38 +190,38 @@ export function ProfileConfigModal({
 		if (!selectedProfile) return;
 		const name = selectedProfile.name.trim() || "this profile";
 		openConfirmDialog({
-			title: `Disable all overrides for ${name}?`,
-			description: (
-				<Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
-					This will reset the profile to inherit all settings from Default.
-					Program matching will remain unchanged.
-				</Text>
-			),
-			confirmLabel: "Disable overrides",
-			cancelLabel: "Cancel",
-			confirmColor: "orange",
-			onConfirm: () => {
-				saveProfileMetadata({
-					// Prompts
-					cleanup_prompt_sections: null,
+      title: `Reset profile for ${name}?`,
+      description: (
+        <Text size="sm" c="dimmed" style={{ lineHeight: 1.4 }}>
+          This will reset the profile to inherit all settings from Default.
+          Program matching will remain unchanged.
+        </Text>
+      ),
+      confirmLabel: "Reset profile",
+      cancelLabel: "Cancel",
+      confirmColor: "orange",
+      onConfirm: () => {
+        saveProfileMetadata({
+          // Prompts
+          cleanup_prompt_sections: null,
 
-					// AI settings
-					stt_provider: null,
-					stt_model: null,
-					stt_timeout_seconds: null,
-					llm_provider: null,
-					llm_model: null,
-					rewrite_llm_enabled: null,
+          // AI settings
+          stt_provider: null,
+          stt_model: null,
+          stt_timeout_seconds: null,
+          llm_provider: null,
+          llm_model: null,
+          rewrite_llm_enabled: null,
 
-					// UI settings
-					sound_enabled: null,
-					playing_audio_handling: null,
-					overlay_mode: null,
-					widget_position: null,
-					output_mode: null,
-				});
-			},
-		});
+          // UI settings
+          sound_enabled: null,
+          playing_audio_handling: null,
+          overlay_mode: null,
+          widget_position: null,
+          output_mode: null,
+        });
+      },
+    });
 	};
 
 	const updateProgramPathAtIndex = (idx: number, nextValue: string) => {
@@ -377,227 +380,246 @@ export function ProfileConfigModal({
 	const isBusy = isLoading || updateRewriteProgramPromptProfiles.isPending;
 
 	return (
-		<>
-			<Modal opened={opened} onClose={onClose} title="Profile config" centered>
-				{editingProfileId === "default" ? (
-					<div style={{ fontSize: 12, opacity: 0.75, padding: "8px 0" }}>
-						Select a profile in the Profile dropdown above, then click the gear
-						icon to configure it.
-					</div>
-				) : null}
+    <>
+      <Modal opened={opened} onClose={onClose} title="Profile config" centered>
+        {editingProfileId === "default" ? (
+          <div style={{ fontSize: 12, opacity: 0.75, padding: "8px 0" }}>
+            Select a profile in the Profile dropdown above, then click the gear
+            icon to configure it.
+          </div>
+        ) : null}
 
-				{editingProfileId !== "default" && !selectedProfile ? (
-					<div style={{ fontSize: 12, opacity: 0.75, padding: "8px 0" }}>
-						That profile no longer exists.
-					</div>
-				) : null}
+        {editingProfileId !== "default" && !selectedProfile ? (
+          <div style={{ fontSize: 12, opacity: 0.75, padding: "8px 0" }}>
+            That profile no longer exists.
+          </div>
+        ) : null}
 
-				{selectedProfile ? (
-					<>
-						<TextInput
-							label="Profile name"
-							placeholder="e.g. VS Code"
-							value={localName}
-							onChange={(e) => setLocalName(e.currentTarget.value)}
-							onBlur={() => {
-								if (!selectedProfile) return;
-								if (localName !== selectedProfile.name) {
-									saveProfileMetadata({ name: localName });
-								}
-							}}
-							styles={{ label: { fontSize: 12 } }}
-						/>
+        {selectedProfile ? (
+          <>
+            <TextInput
+              label="Profile name"
+              placeholder="e.g. VS Code"
+              value={localName}
+              onChange={(e) => setLocalName(e.currentTarget.value)}
+              onBlur={() => {
+                if (!selectedProfile) return;
+                if (localName !== selectedProfile.name) {
+                  saveProfileMetadata({ name: localName });
+                }
+              }}
+              styles={{ label: { fontSize: 12 } }}
+            />
 
-						<Group justify="space-between" align="center" mt="sm" mb={6}>
-							<div style={{ fontSize: 12, fontWeight: 500 }}>Programs</div>
-							<Group gap={8}>
-								<Tooltip
-									label="Pick from currently open apps"
-									withArrow
-									position="bottom"
-								>
-									<ActionIcon
-										variant="subtle"
-										color="gray"
-										onClick={openWindowPicker}
-										aria-label="Pick from open programs"
-										disabled={isBusy}
-									>
-										<Crosshair size={16} />
-									</ActionIcon>
-								</Tooltip>
+            <Group justify="space-between" align="center" mt="xs">
+              <Switch
+                label="Disable profile"
+                checked={isProfileDisabled}
+                onChange={(event) => {
+                  saveProfileMetadata({
+                    disabled: event.currentTarget.checked,
+                  });
+                }}
+                disabled={isBusy}
+                size="xs"
+              />
+              {isProfileDisabled ? (
+                <Text size="xs" c="dimmed">
+                  This profile is disabled and won’t activate.
+                </Text>
+              ) : null}
+            </Group>
 
-								<Tooltip label="Add a program path" withArrow position="bottom">
-									<ActionIcon
-										variant="light"
-										color="gray"
-										onClick={addEmptyProgramPath}
-										aria-label="Add program"
-										disabled={isBusy}
-									>
-										<Plus size={16} />
-									</ActionIcon>
-								</Tooltip>
-							</Group>
-						</Group>
+            <Group justify="space-between" align="center" mt="sm" mb={6}>
+              <div style={{ fontSize: 12, fontWeight: 500 }}>Programs</div>
+              <Group gap={8}>
+                <Tooltip
+                  label="Pick from currently open apps"
+                  withArrow
+                  position="bottom"
+                >
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    onClick={openWindowPicker}
+                    aria-label="Pick from open programs"
+                    disabled={isBusy}
+                  >
+                    <Crosshair size={16} />
+                  </ActionIcon>
+                </Tooltip>
 
-						{localPaths.length === 0 ? (
-							<div style={{ fontSize: 12, opacity: 0.7, paddingBottom: 8 }}>
-								No programs yet. Add one to apply this profile automatically.
-							</div>
-						) : null}
+                <Tooltip label="Add a program path" withArrow position="bottom">
+                  <ActionIcon
+                    variant="light"
+                    color="gray"
+                    onClick={addEmptyProgramPath}
+                    aria-label="Add program"
+                    disabled={isBusy}
+                  >
+                    <Plus size={16} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </Group>
 
-						{localPaths.map((path, idx) => (
-							<Group
-								key={`${selectedProfile.id}-path-${idx}`}
-								mt={6}
-								wrap="nowrap"
-							>
-								<TextInput
-									ref={(el) => {
-										programPathInputRefs.current[idx] = el;
-									}}
-									placeholder="C:\\Program Files\\...\\app.exe"
-									value={path}
-									onChange={(e) =>
-										updateProgramPathAtIndex(idx, e.currentTarget.value)
-									}
-									onBlur={() => {
-										const trimmed = localPaths.map((p) => p.trim());
-										const filtered = trimmed.filter((p) => p.length > 0);
+            {localPaths.length === 0 ? (
+              <div style={{ fontSize: 12, opacity: 0.7, paddingBottom: 8 }}>
+                No programs yet. Add one to apply this profile automatically.
+              </div>
+            ) : null}
 
-										const deduped: string[] = [];
-										const seen = new Set<string>();
-										for (const p of filtered) {
-											if (!seen.has(p)) {
-												seen.add(p);
-												deduped.push(p);
-											}
-										}
+            {localPaths.map((path, idx) => (
+              <Group
+                key={`${selectedProfile.id}-path-${idx}`}
+                mt={6}
+                wrap="nowrap"
+              >
+                <TextInput
+                  ref={(el) => {
+                    programPathInputRefs.current[idx] = el;
+                  }}
+                  placeholder="C:\\Program Files\\...\\app.exe"
+                  value={path}
+                  onChange={(e) =>
+                    updateProgramPathAtIndex(idx, e.currentTarget.value)
+                  }
+                  onBlur={() => {
+                    const trimmed = localPaths.map((p) => p.trim());
+                    const filtered = trimmed.filter((p) => p.length > 0);
 
-										setLocalPaths(deduped);
-										if (
-											JSON.stringify(deduped) !==
-											JSON.stringify(selectedProfile.program_paths ?? [])
-										) {
-											persistProgramPaths(deduped);
-										}
-									}}
-									styles={{ input: { fontSize: 12 } }}
-									style={{ flex: 1 }}
-								/>
-								<ActionIcon
-									variant="subtle"
-									color="red"
-									aria-label="Remove program"
-									onClick={() => removeProgramPathAtIndex(idx)}
-									disabled={isBusy}
-								>
-									<Trash2 size={16} />
-								</ActionIcon>
-							</Group>
-						))}
+                    const deduped: string[] = [];
+                    const seen = new Set<string>();
+                    for (const p of filtered) {
+                      if (!seen.has(p)) {
+                        seen.add(p);
+                        deduped.push(p);
+                      }
+                    }
 
-						{!hasAnyConfiguredProgram ? (
-							<div style={{ fontSize: 12, opacity: 0.7, marginTop: 16 }}>
-								Tip: you can use the crosshair to pick from open apps.
-							</div>
-						) : null}
+                    setLocalPaths(deduped);
+                    if (
+                      JSON.stringify(deduped) !==
+                      JSON.stringify(selectedProfile.program_paths ?? [])
+                    ) {
+                      persistProgramPaths(deduped);
+                    }
+                  }}
+                  styles={{ input: { fontSize: 12 } }}
+                  style={{ flex: 1 }}
+                />
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  aria-label="Remove program"
+                  onClick={() => removeProgramPathAtIndex(idx)}
+                  disabled={isBusy}
+                >
+                  <Trash2 size={16} />
+                </ActionIcon>
+              </Group>
+            ))}
 
-						<Group justify="flex-end" mt="md" gap={8}>
-							<Button
-								size="xs"
-								variant="light"
-								color="gray"
-								leftSection={<RotateCcw size={14} />}
-								onClick={disableAllOverridesForSelectedProfile}
-								disabled={isBusy}
-							>
-								Disable all overrides
-							</Button>
+            {!hasAnyConfiguredProgram ? (
+              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 16 }}>
+                Tip: you can use the crosshair to pick from open apps.
+              </div>
+            ) : null}
 
-							<Button
-								size="xs"
-								variant="light"
-								color="red"
-								leftSection={<Trash2 size={14} />}
-								onClick={deleteSelectedProfile}
-								disabled={isBusy}
-							>
-								Delete profile
-							</Button>
-						</Group>
-					</>
-				) : null}
+            <Group justify="flex-end" mt="md" gap={8}>
+              <Button
+                size="xs"
+                variant="light"
+                color="gray"
+                leftSection={<RotateCcw size={14} />}
+                onClick={disableAllOverridesForSelectedProfile}
+                disabled={isBusy}
+              >
+                Reset profile
+              </Button>
 
-				{updateRewriteProgramPromptProfiles.isPending ? (
-					<Group justify="center" mt="md">
-						<Loader size="sm" color="orange" />
-					</Group>
-				) : null}
-			</Modal>
+              <Button
+                size="xs"
+                variant="light"
+                color="red"
+                leftSection={<Trash2 size={14} />}
+                onClick={deleteSelectedProfile}
+                disabled={isBusy}
+              >
+                Delete profile
+              </Button>
+            </Group>
+          </>
+        ) : null}
 
-			<Modal
-				opened={windowPickerOpen}
-				onClose={() => {
-					setWindowPickerOpen(false);
-					setWindowPickerDropdownOpened(false);
-					setWindowPickerEntered(false);
-				}}
-				title="Pick an open program"
-				centered
-				onEnterTransitionEnd={() => setWindowPickerEntered(true)}
-				onExitTransitionEnd={() => {
-					setWindowPickerEntered(false);
-					setWindowPickerDropdownOpened(false);
-				}}
-			>
-				{isLoadingWindows ? (
-					<Group justify="center" p="md">
-						<Loader size="sm" color="orange" />
-					</Group>
-				) : (
-					<Select
-						ref={windowPickerSelectRef}
-						searchable
-						nothingFoundMessage="No windows found"
-						placeholder="Select a window"
-						data={windowPickerOptions}
-						dropdownOpened={windowPickerDropdownOpened}
-						onDropdownOpen={() => setWindowPickerDropdownOpened(true)}
-						onDropdownClose={() => setWindowPickerDropdownOpened(false)}
-						onChange={(value) => {
-							if (!value) return;
-							addProgramPathFromPicker(value);
-						}}
-					/>
-				)}
-			</Modal>
+        {updateRewriteProgramPromptProfiles.isPending ? (
+          <Group justify="center" mt="md">
+            <Loader size="sm" color="orange" />
+          </Group>
+        ) : null}
+      </Modal>
 
-			<Modal
-				opened={confirmDialog !== null}
-				onClose={() => setConfirmDialog(null)}
-				title={confirmDialog?.title ?? ""}
-				centered
-				zIndex={1000}
-			>
-				{confirmDialog?.description}
-				<Group justify="flex-end" mt="md" gap="sm">
-					<Button variant="default" onClick={() => setConfirmDialog(null)}>
-						{confirmDialog?.cancelLabel ?? "Cancel"}
-					</Button>
-					<Button
-						color={confirmDialog?.confirmColor ?? "orange"}
-						onClick={() => {
-							const confirm = confirmDialog?.onConfirm;
-							setConfirmDialog(null);
-							confirm?.();
-						}}
-					>
-						{confirmDialog?.confirmLabel ?? "Confirm"}
-					</Button>
-				</Group>
-			</Modal>
-		</>
-	);
+      <Modal
+        opened={windowPickerOpen}
+        onClose={() => {
+          setWindowPickerOpen(false);
+          setWindowPickerDropdownOpened(false);
+          setWindowPickerEntered(false);
+        }}
+        title="Pick an open program"
+        centered
+        onEnterTransitionEnd={() => setWindowPickerEntered(true)}
+        onExitTransitionEnd={() => {
+          setWindowPickerEntered(false);
+          setWindowPickerDropdownOpened(false);
+        }}
+      >
+        {isLoadingWindows ? (
+          <Group justify="center" p="md">
+            <Loader size="sm" color="orange" />
+          </Group>
+        ) : (
+          <Select
+            ref={windowPickerSelectRef}
+            searchable
+            nothingFoundMessage="No windows found"
+            placeholder="Select a window"
+            data={windowPickerOptions}
+            dropdownOpened={windowPickerDropdownOpened}
+            onDropdownOpen={() => setWindowPickerDropdownOpened(true)}
+            onDropdownClose={() => setWindowPickerDropdownOpened(false)}
+            onChange={(value) => {
+              if (!value) return;
+              addProgramPathFromPicker(value);
+            }}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        opened={confirmDialog !== null}
+        onClose={() => setConfirmDialog(null)}
+        title={confirmDialog?.title ?? ""}
+        centered
+        zIndex={1000}
+      >
+        {confirmDialog?.description}
+        <Group justify="flex-end" mt="md" gap="sm">
+          <Button variant="default" onClick={() => setConfirmDialog(null)}>
+            {confirmDialog?.cancelLabel ?? "Cancel"}
+          </Button>
+          <Button
+            color={confirmDialog?.confirmColor ?? "orange"}
+            onClick={() => {
+              const confirm = confirmDialog?.onConfirm;
+              setConfirmDialog(null);
+              confirm?.();
+            }}
+          >
+            {confirmDialog?.confirmLabel ?? "Confirm"}
+          </Button>
+        </Group>
+      </Modal>
+    </>
+  );
 }

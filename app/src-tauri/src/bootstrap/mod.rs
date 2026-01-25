@@ -403,6 +403,8 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
 
     let rewrite_program_prompt_profiles: Vec<settings::RewriteProgramPromptProfile> =
         get_setting_from_store(app, "rewrite_program_prompt_profiles", Vec::new());
+    let rewrite_program_prompt_profiles =
+        settings::filter_enabled_rewrite_profiles(rewrite_program_prompt_profiles);
 
     let program_prompt_profiles: Vec<llm::ProgramPromptProfile> = rewrite_program_prompt_profiles
         .into_iter()

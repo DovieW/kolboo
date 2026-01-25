@@ -21,7 +21,7 @@ use crate::audio_capture::{
 };
 use crate::llm::LlmProvider;
 use crate::stt::{SttProvider, SttRegistry};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
@@ -1749,6 +1749,14 @@ impl SharedPipeline {
         // Update VAD config on audio capture
         inner.audio_capture.set_vad_config(config.vad_config);
 
+        let enabled_profile_ids: HashSet<String> = inner
+            .config
+            .llm_config
+            .program_prompt_profiles
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+
         // Apply capture behavior (Hot Mic + auto-recovery).
         // Safe to call while recording: it won't stop the stream mid-session.
         inner
@@ -1760,6 +1768,28 @@ impl SharedPipeline {
                 config.input_device_name.as_deref(),
             )
             .map_err(PipelineError::AudioCapture)?;
+
+        // If the active override/lock refers to a disabled (filtered) profile, clear it.
+        if let Ok(mut override_guard) = self.session_profile_override.lock() {
+            if override_guard
+                .as_deref()
+                .map(|id| !enabled_profile_ids.contains(id))
+                .unwrap_or(false)
+            {
+                *override_guard = None;
+            }
+        }
+
+        if let Ok(mut lock_guard) = self.session_preset_lock.lock() {
+            if lock_guard
+                .as_ref()
+                .and_then(|lock| lock.profile_id.as_deref())
+                .map(|id| !enabled_profile_ids.contains(id))
+                .unwrap_or(false)
+            {
+                *lock_guard = None;
+            }
+        }
         log::info!("Pipeline configuration updated");
         Ok(())
     }

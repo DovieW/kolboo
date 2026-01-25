@@ -18,6 +18,7 @@ import {
 	Text,
 	Title,
 	Tooltip,
+	type SelectProps,
 } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -885,6 +886,7 @@ function _SettingsView() {
 	);
 }
 
+// Active settings view entrypoint; update UI tweaks here (not _SettingsView).
 function SettingsViewWithGuideLauncher({
 	onRunSetupGuide,
 }: {
@@ -895,6 +897,8 @@ function SettingsViewWithGuideLauncher({
 	const [editingProfileId, setEditingProfileId] = useState<string>("default");
 	const [programsModalOpen, setProgramsModalOpen] = useState(false);
 	const [autoCreateProfileOnOpen, setAutoCreateProfileOnOpen] = useState(false);
+	const selectedProfileDisabled =
+		profiles.find((p) => p.id === editingProfileId)?.disabled ?? false;
 
 	const { data: hasAnyApiKey } = useQuery({
 		queryKey: ["hasAnyApiKey"],
@@ -934,7 +938,13 @@ function SettingsViewWithGuideLauncher({
 		}
 	}, [editingProfileId, profiles]);
 
-	const editingOptions = [
+	type EditingOption = {
+		value: string;
+		label: string;
+		isDisabledProfile?: boolean;
+	};
+
+	const editingOptions: EditingOption[] = [
 		// Keep an explicit Default entry at the top for UX.
 		// If the backend has migrated Default into a real persisted profile (id="default"),
 		// avoid duplicating it in the options list.
@@ -944,8 +954,26 @@ function SettingsViewWithGuideLauncher({
 			.map((p) => ({
 				value: p.id,
 				label: p.name.trim() ? p.name.trim() : p.id,
+				isDisabledProfile: p.disabled ?? false,
 			})),
 	];
+
+	const renderEditingOption: SelectProps["renderOption"] = ({ option }) => {
+		const isDisabledProfile = (option as EditingOption).isDisabledProfile;
+
+		return (
+			<div
+				style={{
+					color: isDisabledProfile
+						? "var(--text-secondary)"
+						: "var(--text-primary)",
+					textDecoration: isDisabledProfile ? "line-through" : "none",
+				}}
+			>
+				{option.label}
+			</div>
+		);
+	};
 
 	return (
 		<div className="main-content">
@@ -1013,6 +1041,7 @@ function SettingsViewWithGuideLauncher({
 							data={editingOptions}
 							value={editingProfileId}
 							onChange={(v) => setEditingProfileId(v ?? "default")}
+							renderOption={renderEditingOption}
 							withCheckIcon={false}
 							size="xs"
 							styles={{
@@ -1020,7 +1049,12 @@ function SettingsViewWithGuideLauncher({
 									backgroundColor: "transparent",
 									border: "1px solid var(--border-default)",
 									borderRadius: 6,
-									color: "var(--text-primary)",
+									color: selectedProfileDisabled
+										? "var(--text-secondary)"
+										: "var(--text-primary)",
+									textDecoration: selectedProfileDisabled
+										? "line-through"
+										: "none",
 									minWidth: 140,
 									paddingLeft: 8,
 									paddingRight: 4,

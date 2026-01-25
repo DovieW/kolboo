@@ -356,6 +356,9 @@ pub struct RewriteProgramPromptProfile {
         deserialize_with = "deserialize_program_paths"
     )]
     pub program_paths: Vec<String>,
+    /// When true, this profile is temporarily disabled and never activated.
+    #[serde(default)]
+    pub disabled: bool,
     pub cleanup_prompt_sections: Option<CleanupPromptSectionsSetting>,
 
     // Presets/modes within this program profile.
@@ -477,6 +480,12 @@ pub struct RewriteProgramPromptProfile {
     pub output_mode: Option<String>,
     #[serde(default)]
     pub output_hit_enter: Option<bool>,
+}
+
+pub fn filter_enabled_rewrite_profiles(
+    profiles: Vec<RewriteProgramPromptProfile>,
+) -> Vec<RewriteProgramPromptProfile> {
+    profiles.into_iter().filter(|p| !p.disabled).collect()
 }
 
 // ============================================================================

@@ -146,84 +146,86 @@ export interface RewritePreset {
 }
 
 export interface RewriteProgramPromptProfile {
-	id: string;
-	name: string;
-	program_paths: string[];
-	cleanup_prompt_sections: CleanupPromptSectionsOverride | null;
+  id: string;
+  name: string;
+  program_paths: string[];
+  // When true, this profile is temporarily disabled and never activated.
+  disabled?: boolean;
+  cleanup_prompt_sections: CleanupPromptSectionsOverride | null;
 
-	// Presets/modes within this program profile.
-	// Missing/undefined means "no presets" (backward compatible).
-	presets?: RewritePreset[] | null;
-	// Default preset to use when routing is off or undecided.
-	default_preset_id?: string | null;
-	// Description for the implicit "Default" (no preset) target, used by the intent router.
-	default_preset_description?: string | null;
-	// Gate for whether rewrite runs when routed to the implicit "Default" target (no preset).
-	// Defaults to true. This does not override the global/per-profile rewrite gate.
-	default_target_rewrite_llm_enabled?: boolean | null;
-	// Router configuration for auto-selecting a preset based on dictation intent.
-	router?: IntentRouterSettings | null;
-	// Manually selected active preset for this profile (persisted selection).
-	active_preset_id?: string | null;
+  // Presets/modes within this program profile.
+  // Missing/undefined means "no presets" (backward compatible).
+  presets?: RewritePreset[] | null;
+  // Default preset to use when routing is off or undecided.
+  default_preset_id?: string | null;
+  // Description for the implicit "Default" (no preset) target, used by the intent router.
+  default_preset_description?: string | null;
+  // Gate for whether rewrite runs when routed to the implicit "Default" target (no preset).
+  // Defaults to true. This does not override the global/per-profile rewrite gate.
+  default_target_rewrite_llm_enabled?: boolean | null;
+  // Router configuration for auto-selecting a preset based on dictation intent.
+  router?: IntentRouterSettings | null;
+  // Manually selected active preset for this profile (persisted selection).
+  active_preset_id?: string | null;
 
-	// Per-profile gate for the optional LLM rewrite step (falls back to AppSettings.rewrite_llm_enabled)
-	rewrite_llm_enabled?: boolean | null;
+  // Per-profile gate for the optional LLM rewrite step (falls back to AppSettings.rewrite_llm_enabled)
+  rewrite_llm_enabled?: boolean | null;
 
-	// Per-profile overrides for the pipeline
-	stt_provider?: string | null;
-	stt_model?: string | null;
-	stt_timeout_seconds?: number | null;
-	llm_provider?: string | null;
-	llm_model?: string | null;
+  // Per-profile overrides for the pipeline
+  stt_provider?: string | null;
+  stt_model?: string | null;
+  stt_timeout_seconds?: number | null;
+  llm_provider?: string | null;
+  llm_model?: string | null;
 
-	// Per-profile provider-specific thinking/reasoning knobs
-	// (null/undefined means inherit from Default/global settings)
-	openai_reasoning_effort?: OpenAiReasoningEffort | null;
-	gemini_thinking_budget?: number | null;
-	gemini_thinking_level?: "minimal" | "low" | "medium" | "high" | null;
-	anthropic_thinking_budget?: number | null;
+  // Per-profile provider-specific thinking/reasoning knobs
+  // (null/undefined means inherit from Default/global settings)
+  openai_reasoning_effort?: OpenAiReasoningEffort | null;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: "minimal" | "low" | "medium" | "high" | null;
+  anthropic_thinking_budget?: number | null;
 
-	// Quick Ask (per-profile overrides)
-	quick_ask_provider?: string | null;
-	quick_ask_model?: string | null;
-	quick_ask_system_prompt?: string | null;
+  // Quick Ask (per-profile overrides)
+  quick_ask_provider?: string | null;
+  quick_ask_model?: string | null;
+  quick_ask_system_prompt?: string | null;
 
-	// Context grabbing method for highlighted-text capture.
-	context_grab_method?: ContextGrabMethod | null;
+  // Context grabbing method for highlighted-text capture.
+  context_grab_method?: ContextGrabMethod | null;
 
-	// Clipboard context toggles (per-profile)
-	rewrite_include_clipboard_context?: boolean | null;
-	quick_replace_include_clipboard_context?: boolean | null;
-	quick_ask_include_clipboard_context?: boolean | null;
+  // Clipboard context toggles (per-profile)
+  rewrite_include_clipboard_context?: boolean | null;
+  quick_replace_include_clipboard_context?: boolean | null;
+  quick_ask_include_clipboard_context?: boolean | null;
 
-	// Quick Replace (per-profile overrides)
-	quick_replace_enabled?: boolean | null;
-	quick_replace_provider?: string | null;
-	quick_replace_model?: string | null;
-	quick_replace_system_prompt?: string | null;
+  // Quick Replace (per-profile overrides)
+  quick_replace_enabled?: boolean | null;
+  quick_replace_provider?: string | null;
+  quick_replace_model?: string | null;
+  quick_replace_system_prompt?: string | null;
 
-	quick_ask_openai_reasoning_effort?: OpenAiReasoningEffort | null;
-	quick_ask_gemini_thinking_budget?: number | null;
-	quick_ask_gemini_thinking_level?:
-		| "minimal"
-		| "low"
-		| "medium"
-		| "high"
-		| null;
-	quick_ask_anthropic_thinking_budget?: number | null;
+  quick_ask_openai_reasoning_effort?: OpenAiReasoningEffort | null;
+  quick_ask_gemini_thinking_budget?: number | null;
+  quick_ask_gemini_thinking_level?:
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | null;
+  quick_ask_anthropic_thinking_budget?: number | null;
 
-	// Per-profile overrides for UI (Option 1: override-or-inherit)
-	// NOTE: These are persisted in settings.json as part of the profile object.
-	// The backend may ignore them until it is updated to apply them at runtime.
-	sound_enabled?: boolean | null;
-	playing_audio_handling?: PlayingAudioHandling | null;
-	overlay_mode?: OverlayMode | null;
-	widget_position?: WidgetPosition | null;
-	output_mode?: OutputMode | null;
+  // Per-profile overrides for UI (Option 1: override-or-inherit)
+  // NOTE: These are persisted in settings.json as part of the profile object.
+  // The backend may ignore them until it is updated to apply them at runtime.
+  sound_enabled?: boolean | null;
+  playing_audio_handling?: PlayingAudioHandling | null;
+  overlay_mode?: OverlayMode | null;
+  widget_position?: WidgetPosition | null;
+  output_mode?: OutputMode | null;
 
-	// After paste, optionally press Enter.
-	// (May be ignored by backend until runtime/profile routing supports it.)
-	output_hit_enter?: boolean | null;
+  // After paste, optionally press Enter.
+  // (May be ignored by backend until runtime/profile routing supports it.)
+  output_hit_enter?: boolean | null;
 }
 
 export type PlayingAudioHandling = "none" | "mute" | "pause" | "mute_and_pause";

@@ -868,6 +868,10 @@ export interface RewriteProgramPromptProfile {
    * This is independent of per-preset rewrite gates. The global/per-profile rewrite gate remains a hard gate that can disable rewrite for *all* presets.
    */
   default_target_rewrite_llm_enabled?: boolean;
+  /**
+   * When true, this profile is temporarily disabled and never activated.
+   */
+  disabled?: boolean;
   gemini_thinking_budget?: number | null;
   gemini_thinking_level?: string | null;
   id: string;

@@ -251,6 +251,40 @@ describe("tauriAPI.getSettings() normalization", () => {
 		expect(settings.transcription_retention_value).toBe(2);
 	});
 
+	it("normalizes profile.disabled (missing -> false, preserves true/false)", async () => {
+    vi.resetModules();
+    currentStore = new FakeStore({
+      rewrite_program_prompt_profiles: [
+        {
+          id: "profile-a",
+          name: "Profile A",
+          program_paths: [],
+          // disabled missing
+        },
+        {
+          id: "profile-b",
+          name: "Profile B",
+          program_paths: [],
+          disabled: true,
+        },
+        {
+          id: "profile-c",
+          name: "Profile C",
+          program_paths: [],
+          disabled: false,
+        },
+      ],
+    });
+
+    const { tauriAPI } = await import("./tauri");
+    const settings = await tauriAPI.getSettings();
+
+    expect(settings.rewrite_program_prompt_profiles).toHaveLength(3);
+    expect(settings.rewrite_program_prompt_profiles[0]?.disabled).toBe(false);
+    expect(settings.rewrite_program_prompt_profiles[1]?.disabled).toBe(true);
+    expect(settings.rewrite_program_prompt_profiles[2]?.disabled).toBe(false);
+  });
+
 	it("normalizes legacy/typo enum values (overlay_monitor_target, main_window_close_behavior, output_mode)", async () => {
 		vi.resetModules();
 		currentStore = new FakeStore({

@@ -726,6 +726,8 @@ export const tauriSettingsAPI = {
 					? [legacy_program_path]
 					: [];
 
+			const disabled = typeof p.disabled === "boolean" ? p.disabled : false;
+
 			const cleanup_prompt_sections = normalizeCleanupPromptSectionsOverride(
 				p.cleanup_prompt_sections,
 			);
@@ -886,50 +888,51 @@ export const tauriSettingsAPI = {
 			if (!id) return null;
 
 			return {
-				id,
-				name,
-				program_paths,
-				cleanup_prompt_sections,
+        id,
+        name,
+        program_paths,
+        disabled,
+        cleanup_prompt_sections,
 
-				presets,
-				default_preset_id,
-				default_preset_description,
-				router,
-				active_preset_id,
+        presets,
+        default_preset_id,
+        default_preset_description,
+        router,
+        active_preset_id,
 
-				rewrite_llm_enabled,
-				stt_provider,
-				stt_model,
-				stt_timeout_seconds,
-				llm_provider,
-				llm_model,
-				openai_reasoning_effort,
-				gemini_thinking_budget,
-				gemini_thinking_level,
-				anthropic_thinking_budget,
+        rewrite_llm_enabled,
+        stt_provider,
+        stt_model,
+        stt_timeout_seconds,
+        llm_provider,
+        llm_model,
+        openai_reasoning_effort,
+        gemini_thinking_budget,
+        gemini_thinking_level,
+        anthropic_thinking_budget,
 
-				quick_ask_provider,
-				quick_ask_model,
-				quick_ask_system_prompt,
-				context_grab_method,
-				rewrite_include_clipboard_context,
-				quick_replace_include_clipboard_context,
-				quick_ask_include_clipboard_context,
-				quick_replace_enabled,
-				quick_replace_provider,
-				quick_replace_model,
-				quick_replace_system_prompt,
-				quick_ask_openai_reasoning_effort,
-				quick_ask_gemini_thinking_budget,
-				quick_ask_gemini_thinking_level,
-				quick_ask_anthropic_thinking_budget,
-				sound_enabled,
-				playing_audio_handling,
-				overlay_mode,
-				widget_position,
-				output_mode,
-				output_hit_enter,
-			};
+        quick_ask_provider,
+        quick_ask_model,
+        quick_ask_system_prompt,
+        context_grab_method,
+        rewrite_include_clipboard_context,
+        quick_replace_include_clipboard_context,
+        quick_ask_include_clipboard_context,
+        quick_replace_enabled,
+        quick_replace_provider,
+        quick_replace_model,
+        quick_replace_system_prompt,
+        quick_ask_openai_reasoning_effort,
+        quick_ask_gemini_thinking_budget,
+        quick_ask_gemini_thinking_level,
+        quick_ask_anthropic_thinking_budget,
+        sound_enabled,
+        playing_audio_handling,
+        overlay_mode,
+        widget_position,
+        output_mode,
+        output_hit_enter,
+      };
 		};
 
 		const rawProfiles =

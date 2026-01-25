@@ -431,6 +431,8 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .and_then(|store| store.get("rewrite_program_prompt_profiles"))
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
+    let rewrite_program_prompt_profiles =
+        crate::settings::filter_enabled_rewrite_profiles(rewrite_program_prompt_profiles);
 
     let program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile> =
         rewrite_program_prompt_profiles
