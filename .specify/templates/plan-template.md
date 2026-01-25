@@ -3,7 +3,7 @@
 **Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
 **Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
 
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+**Note**: This template is filled in by the `/speckit.plan` command. See `.github/agents/speckit.plan.agent.md` for the execution workflow.
 
 ## Summary
 
@@ -17,21 +17,25 @@
   the iteration process.
 -->
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
+**Language/Version**: [e.g., TypeScript (strict) + Rust (Tauri) or NEEDS CLARIFICATION]
+**Primary Dependencies**: [e.g., React/Vite, Tauri, TanStack Query or NEEDS CLARIFICATION]
+**Storage**: [if applicable, e.g., Tauri store (settings.json), files, SQLite or N/A]
+**Testing**: [e.g., Vitest (`pnpm -C app test`), Rust tests (`pnpm -C app cargo:test`) or NEEDS CLARIFICATION]
+**Target Platform**: [e.g., Windows desktop (primary), macOS/Linux (secondary) or NEEDS CLARIFICATION]
+**Project Type**: [desktop app (Tauri) - determines source structure]
+**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
+**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
 **Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- [ ] Deterministic tests: no real network calls in tests; no real API keys required by default
+- [ ] UI↔backend contract: any command/event/type changes are updated in BOTH Rust and TypeScript
+- [ ] Settings discipline: any settings additions/changes include migrations/normalization and apply immediately at runtime
+- [ ] Secrets hygiene: no logging of secrets; redact sensitive data in logs
+- [ ] Tooling gate: plan includes how you’ll keep `pnpm -C app check:ci` green
 
 ## Project Structure
 
@@ -56,39 +60,13 @@ specs/[###-feature]/
 -->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
+app/
+├── src/                # React/TypeScript UI
+├── src-tauri/src/      # Rust/Tauri backend
+└── tests/              # (if present) test helpers, fixtures, etc.
 
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+docs/
+scripts/
 ```
 
 **Structure Decision**: [Document the selected structure and reference the real
