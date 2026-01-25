@@ -72,6 +72,22 @@ From `app/`:
 
 You can also pass features directly through Tauri, e.g. `pnpm dev -- --features local-whisper-cuda`.
 
+## Debug logging
+
+Kolboo's Tauri backend emits structured JSON logs.
+
+- Default log level is `info`.
+- To enable verbose logs, set `RUST_LOG` before launching.
+
+Examples (Windows PowerShell):
+
+- Enable extra overlay window logs:
+  - `$env:RUST_LOG = "info,kolboo_lib::commands::overlay=debug"`
+- Enable debug logs for everything (very noisy):
+  - `$env:RUST_LOG = "debug"`
+
+Tip: in debug builds, the overlay UI can also emit dev-only debug notes into the Rust log stream via the `ui_debug_log` command.
+
 > CI note: we do **not** build CUDA artifacts in GitHub Actions. Build CUDA locally (on a machine
 > with CUDA Toolkit installed) and upload the resulting artifacts to Releases.
 

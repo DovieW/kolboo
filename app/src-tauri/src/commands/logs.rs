@@ -110,3 +110,14 @@ pub fn export_request_logs_to_file(
     std::fs::write(p, json).map_err(|e| format!("Failed to write export file: {e}"))?;
     Ok(())
 }
+
+/// Dev-only: allow the frontend to write structured debug notes into the Rust log stream.
+///
+/// This is useful when diagnosing issues like overlay flicker where the window stays visible
+/// but the webview UI appears to blink (no Rust-side show/hide calls fire).
+#[tauri::command]
+pub fn ui_debug_log(scope: String, message: String) {
+    if cfg!(debug_assertions) {
+        log::debug!("[ui:{}] {}", scope, message);
+    }
+}

@@ -1857,9 +1857,24 @@ pub(crate) fn stop_recording(
                                     .state::<AppState>()
                                     .overlay_visibility_epoch
                                     .load(Ordering::SeqCst);
+                                let pipeline_state = app_check
+                                    .try_state::<pipeline::SharedPipeline>()
+                                    .map(|p| p.state());
+                                log::debug!(
+                                    "[overlay] transcription fallback hide check (current_mode={}, expected_epoch={}, current_epoch={}, pipeline_state={:?})",
+                                    current_mode,
+                                    expected_epoch,
+                                    current_epoch,
+                                    pipeline_state
+                                );
                                 if current_mode == "recording_only"
                                     && current_epoch == expected_epoch
                                 {
+                                    let visible_before = window_clone.is_visible().ok();
+                                    log::debug!(
+                                        "[overlay] transcription fallback hide firing (visible_before={:?})",
+                                        visible_before
+                                    );
                                     let _ = window_clone.hide();
                                 }
                             });
@@ -1908,6 +1923,15 @@ pub(crate) fn stop_recording(
                         if overlay_mode_clone == "recording_only" {
                             let _ = app_clone.emit(events::EVENT_OVERLAY_HIDE_REQUESTED, ());
                             if let Some(window) = app_clone.get_webview_window("overlay") {
+                                let visible_before = window.is_visible().ok();
+                                let pipeline_state = app_clone
+                                    .try_state::<pipeline::SharedPipeline>()
+                                    .map(|p| p.state());
+                                log::debug!(
+                                    "[overlay] cancellation direct hide (visible_before={:?}, pipeline_state={:?})",
+                                    visible_before,
+                                    pipeline_state
+                                );
                                 let _ = window.hide();
                             }
                         }
@@ -2151,6 +2175,7 @@ pub fn run() {
             commands::logs::get_request_logs,
             commands::logs::clear_request_logs,
             commands::logs::export_request_logs_to_file,
+            commands::logs::ui_debug_log,
             // Fireworks helpers
             commands::fireworks::fireworks_list_models,
             // Ollama helpers

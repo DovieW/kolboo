@@ -34,6 +34,7 @@ import { useOverlayHotkeyEvents } from "./useOverlayHotkeyEvents";
 import { useOverlayPipelineEvents } from "./useOverlayPipelineEvents";
 import { useOverlayPipelineStatePolling } from "./useOverlayPipelineStatePolling";
 import { useOverlayHoverGating } from "./useOverlayHoverGating";
+import { applyAnimatedHideGate } from "./overlayHideGate";
 
 type CommandErrorExtract = {
 	message: string;
@@ -703,6 +704,15 @@ export default function RecordingControl() {
 	}, [pipelineState, setExpanded, settings?.overlay_mode]);
 
 	const requestAnimatedHide = useCallback(() => {
+		const now = Date.now();
+		const gateRes = applyAnimatedHideGate({
+			now,
+			animState,
+			state: { lastRequestAt: controllerRef.current.exitRequestedAt },
+		});
+		controllerRef.current.exitRequestedAt = gateRes.nextState.lastRequestAt;
+		if (!gateRes.accept) return;
+
 		if (controllerRef.current.exitTimer) {
 			window.clearTimeout(controllerRef.current.exitTimer);
 			controllerRef.current.exitTimer = null;
@@ -723,9 +733,35 @@ export default function RecordingControl() {
 			setHoldPhaseText(null);
 			controllerRef.current.exitTimer = null;
 		}, 210);
-	}, [controllerRef, setAnimState, setHoldPhaseText]);
+	}, [animState, controllerRef, setAnimState, setHoldPhaseText]);
 
-	useOverlayHideRequested({ requestAnimatedHide });
+	const requestAnimatedHideWithReason = useCallback(
+		(reason: string) => {
+			if (import.meta.env.DEV) {
+				invoke("ui_debug_log", {
+					scope: "overlay",
+					message: `requestAnimatedHide(${reason}) (pipeline=${pipelineState}, anim=${animState}, overlayMode=${settings?.overlay_mode ?? null})`,
+				}).catch(() => {});
+			}
+			requestAnimatedHide();
+		},
+		[animState, pipelineState, requestAnimatedHide, settings?.overlay_mode],
+	);
+
+	useOverlayHideRequested({
+		requestAnimatedHide: () => requestAnimatedHideWithReason("backend_hide_requested"),
+	});
+
+	// Dev-only diagnostics: forward key overlay UI state to the Rust log stream.
+	// This helps diagnose flicker where the native window stays visible but the webview blinks.
+	useEffect(() => {
+		if (!import.meta.env.DEV) return;
+		const overlayMode = settings?.overlay_mode ?? null;
+		invoke("ui_debug_log", {
+			scope: "overlay",
+			message: `state pipeline=${pipelineState} anim=${animState} expanded=${expanded} renderExpanded=${renderExpanded} overlayMode=${overlayMode}`,
+		}).catch(() => {});
+	}, [animState, expanded, pipelineState, renderExpanded, settings?.overlay_mode]);
 
 	const dismissError = useCallback(() => {
 		// Reset pipeline state in backend so polling reflects reality.
@@ -734,9 +770,9 @@ export default function RecordingControl() {
 
 		// If we force-showed the window for an error (recording_only/never), allow the user to hide it.
 		if (settings?.overlay_mode !== "always") {
-			requestAnimatedHide();
+			requestAnimatedHideWithReason("dismiss_error");
 		}
-	}, [clearError, requestAnimatedHide, settings?.overlay_mode]);
+	}, [clearError, requestAnimatedHideWithReason, settings?.overlay_mode]);
 
 	const requestAnimatedShow = useCallback(() => {
 		if (controllerRef.current.exitTimer) {
@@ -759,15 +795,35 @@ export default function RecordingControl() {
 			return;
 		}
 
+		// IMPORTANT: this effect can re-run for reasons unrelated to pipeline changes
+		// (e.g. polling updates, hover-gating callbacks changing identity). If we call
+		// requestAnimatedShow() every time, animState will bounce enter<->visible and
+		// the overlay will appear to flicker.
+		const prev = controllerRef.current.prevPipelineForEnterAnim;
+		controllerRef.current.prevPipelineForEnterAnim = pipelineState;
+
+		const wasActive = prev !== "idle";
+		const isActive =
+			pipelineState === "arming" ||
+			pipelineState === "recording" ||
+			pipelineState === "routing" ||
+			pipelineState === "transcribing" ||
+			pipelineState === "rewriting" ||
+			pipelineState === "error";
+		if (!isActive || wasActive) return;
+
 		if (
 			pipelineState === "arming" ||
 			pipelineState === "recording" ||
+			pipelineState === "routing" ||
 			pipelineState === "transcribing" ||
-			pipelineState === "rewriting"
+			pipelineState === "rewriting" ||
+			pipelineState === "error"
 		) {
 			requestAnimatedShow();
 		}
 	}, [
+		controllerRef,
 		pipelineState,
 		requestAnimatedShow,
 		settings?.overlay_mode,
@@ -789,12 +845,12 @@ export default function RecordingControl() {
 			prev === "rewriting" ||
 			prev === "error"
 		) {
-			requestAnimatedHide();
+			requestAnimatedHideWithReason("idle_transition");
 		}
 	}, [
 		controllerRef,
 		pipelineState,
-		requestAnimatedHide,
+		requestAnimatedHideWithReason,
 		settings?.overlay_mode,
 	]);
 

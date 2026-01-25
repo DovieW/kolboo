@@ -384,7 +384,22 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
                     .state::<AppState>()
                     .overlay_visibility_epoch
                     .load(Ordering::SeqCst);
+                let pipeline_state = app_check
+                    .try_state::<pipeline::SharedPipeline>()
+                    .map(|p| p.state());
+                log::debug!(
+                    "[overlay] shortcut-cancel fallback hide check (current_mode={}, expected_epoch={}, current_epoch={}, pipeline_state={:?})",
+                    current_mode,
+                    expected_epoch,
+                    current_epoch,
+                    pipeline_state
+                );
                 if current_mode == "recording_only" && current_epoch == expected_epoch {
+                    let visible_before = window_clone.is_visible().ok();
+                    log::debug!(
+                        "[overlay] shortcut-cancel fallback hide firing (visible_before={:?})",
+                        visible_before
+                    );
                     let _ = window_clone.hide();
                 }
             });

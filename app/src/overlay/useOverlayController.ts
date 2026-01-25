@@ -10,9 +10,13 @@ export type ActiveProfileInfo = {
 
 export type OverlayControllerRefs = {
 	hasDragStarted: boolean;
+	// Used to debounce repeated hide requests that can cause UI flicker.
+	exitRequestedAt: number | null;
 	exitTimer: number | null;
 	lastBusyPhase: "transcribing" | "routing" | "rewriting" | null;
 	holdPhaseTimer: number | null;
+	// Used to gate entrance animations so we don't restart them on every re-render/poll.
+	prevPipelineForEnterAnim: PipelineState;
 	prevPipelineForPhaseHold: PipelineState;
 	prevPipelineForExpand: PipelineState;
 	prevPipelineState: PipelineState;
@@ -39,9 +43,11 @@ export type OverlayController = {
 export function useOverlayController(): OverlayController {
 	const refs = useRef<OverlayControllerRefs>({
 		hasDragStarted: false,
+		exitRequestedAt: null,
 		exitTimer: null,
 		lastBusyPhase: null,
 		holdPhaseTimer: null,
+		prevPipelineForEnterAnim: "idle",
 		prevPipelineForPhaseHold: "idle",
 		prevPipelineForExpand: "idle",
 		prevPipelineState: "idle",

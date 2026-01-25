@@ -12,16 +12,23 @@ export function useOverlayHideRequested({
 	requestAnimatedHide,
 }: UseOverlayHideRequestedInputs) {
 	useEffect(() => {
+		let cancelled = false;
 		let unlisten: (() => void) | undefined;
 
 		const setup = async () => {
-			unlisten = await listenTyped("overlay-hide-requested", () => {
+			const dispose = await listenTyped("overlay-hide-requested", () => {
 				requestAnimatedHide();
 			});
+			if (cancelled) {
+				dispose();
+				return;
+			}
+			unlisten = dispose;
 		};
 
 		void setup();
 		return () => {
+			cancelled = true;
 			unlisten?.();
 		};
 	}, [requestAnimatedHide]);

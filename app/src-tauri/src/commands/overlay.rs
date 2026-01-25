@@ -363,6 +363,27 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> CommandR
     let height = height.max(min_size);
 
     if let Some(window) = app.get_webview_window("overlay") {
+        // WARNING: this can be called frequently (resize observer + state changes).
+        // Keep logs compact but at DEBUG so normal runs aren't spammy.
+        #[cfg(desktop)]
+        let overlay_mode: String =
+            get_setting_from_store(&app, "overlay_mode", "recording_only".to_string());
+        #[cfg(not(desktop))]
+        let overlay_mode: &str = "<n/a>";
+
+        let pipeline_state = app
+            .try_state::<crate::pipeline::SharedPipeline>()
+            .map(|p| p.state());
+
+        let visible = window.is_visible().ok();
+        log::debug!(
+            "[overlay] resize requested (width={:.1}, height={:.1}, visible={:?}, overlay_mode={}, pipeline_state={:?})",
+            width,
+            height,
+            visible,
+            overlay_mode,
+            pipeline_state
+        );
         // We position using *outer* geometry (position + size) in PHYSICAL pixels.
         // Using logical floats here can accumulate rounding error across repeated
         // size transitions (notably hover open/close), causing the overlay to drift.
@@ -383,6 +404,14 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> CommandR
         window
             .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
             .map_err(|e| e.to_string())?;
+
+        let outer_after = window.outer_size().ok();
+        let pos_after = window.outer_position().ok();
+        log::debug!(
+            "[overlay] resize applied (pos={:?}, outer={:?})",
+            pos_after,
+            outer_after
+        );
 
         // For the fixed collapsed/expanded toggle sizes (56x56 <-> expanded x 56), keep the window
         // center fixed so the expanded state grows out from the collapsed widget's location.
@@ -473,6 +502,7 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> CommandR
 pub async fn show_overlay(app: AppHandle) -> CommandResult<()> {
     #[cfg(desktop)]
     {
+        log::debug!("[overlay] show_overlay command invoked");
         show_overlay_with_reset_if_not_always(&app)
     }
 
@@ -488,11 +518,38 @@ pub async fn show_overlay(app: AppHandle) -> CommandResult<()> {
 #[tauri::command]
 pub async fn hide_overlay(app: AppHandle) -> CommandResult<()> {
     if let Some(window) = app.get_webview_window("overlay") {
+        #[cfg(desktop)]
+        let overlay_mode: String =
+            get_setting_from_store(&app, "overlay_mode", "recording_only".to_string());
+        #[cfg(not(desktop))]
+        let overlay_mode: &str = "<n/a>";
+
+        let pipeline_state = app
+            .try_state::<crate::pipeline::SharedPipeline>()
+            .map(|p| p.state());
+
+        let visible_before = window.is_visible().ok();
+        log::debug!(
+            "[overlay] hide_overlay command invoked (visible_before={:?}, overlay_mode={}, pipeline_state={:?})",
+            visible_before,
+            overlay_mode,
+            pipeline_state
+        );
         window.hide().map_err(|e| e.to_string())?;
+        let visible_after = window.is_visible().ok();
+        log::debug!(
+            "[overlay] hide_overlay complete (visible_after={:?})",
+            visible_after
+        );
     }
 
     // Best-effort: also hide the hover panel window so it doesn't orphan.
     if let Some(window) = app.get_webview_window("overlay_hover") {
+        let visible_before = window.is_visible().ok();
+        log::debug!(
+            "[overlay_hover] hide via hide_overlay (visible_before={:?})",
+            visible_before
+        );
         let _ = window.hide();
     }
     Ok(())
@@ -510,6 +567,8 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
     app.state::<AppState>()
         .overlay_hover_epoch
         .fetch_add(1, Ordering::SeqCst);
+
+    log::debug!("[overlay_hover] show requested");
 
     // Fixed hover panel size (logical).
     let hover_w = 320.0;
@@ -578,13 +637,29 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
     let _ = hover.set_always_on_top(true);
     hover.show().map_err(|e| e.to_string())?;
 
+    let visible_after = hover.is_visible().ok();
+    log::debug!(
+        "[overlay_hover] show complete (visible_after={:?})",
+        visible_after
+    );
+
     Ok(())
 }
 
 #[tauri::command]
 pub async fn hide_overlay_hover(app: AppHandle) -> CommandResult<()> {
     if let Some(window) = app.get_webview_window("overlay_hover") {
+        let visible_before = window.is_visible().ok();
+        log::debug!(
+            "[overlay_hover] hide requested (visible_before={:?})",
+            visible_before
+        );
         window.hide().map_err(|e| e.to_string())?;
+        let visible_after = window.is_visible().ok();
+        log::debug!(
+            "[overlay_hover] hide complete (visible_after={:?})",
+            visible_after
+        );
     }
 
     // Bump epoch so any pending hides are considered stale.
@@ -602,6 +677,12 @@ pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Comma
         .overlay_hover_epoch
         .load(Ordering::SeqCst);
 
+    log::debug!(
+        "[overlay_hover] schedule hide requested (delay_ms={}, expected_epoch={})",
+        delay_ms,
+        expected_epoch
+    );
+
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         let delay = std::time::Duration::from_millis(delay_ms);
@@ -617,6 +698,12 @@ pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Comma
         }
 
         if let Some(window) = app_clone.get_webview_window("overlay_hover") {
+            let visible_before = window.is_visible().ok();
+            log::debug!(
+                "[overlay_hover] schedule hide firing (visible_before={:?}, epoch={})",
+                visible_before,
+                current_epoch
+            );
             let _ = window.hide();
         }
     });
@@ -654,7 +741,22 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> CommandResult<()>
                         .state::<AppState>()
                         .overlay_visibility_epoch
                         .load(Ordering::SeqCst);
+                    let pipeline_state = app_clone
+                        .try_state::<crate::pipeline::SharedPipeline>()
+                        .map(|p| p.state());
+                    log::debug!(
+                        "[overlay] set_overlay_mode fallback hide check (mode_req=never, current_mode={}, expected_epoch={}, current_epoch={}, pipeline_state={:?})",
+                        current_mode,
+                        expected_epoch,
+                        current_epoch,
+                        pipeline_state
+                    );
                     if current_mode == "never" && current_epoch == expected_epoch {
+                        let visible_before = window_clone.is_visible().ok();
+                        log::debug!(
+                            "[overlay] set_overlay_mode fallback hide firing (mode_req=never, visible_before={:?})",
+                            visible_before
+                        );
                         let _ = window_clone.hide();
                     }
                 });
@@ -679,7 +781,22 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> CommandResult<()>
                         .state::<AppState>()
                         .overlay_visibility_epoch
                         .load(Ordering::SeqCst);
+                    let pipeline_state = app_clone
+                        .try_state::<crate::pipeline::SharedPipeline>()
+                        .map(|p| p.state());
+                    log::debug!(
+                        "[overlay] set_overlay_mode fallback hide check (mode_req=recording_only, current_mode={}, expected_epoch={}, current_epoch={}, pipeline_state={:?})",
+                        current_mode,
+                        expected_epoch,
+                        current_epoch,
+                        pipeline_state
+                    );
                     if current_mode == "recording_only" && current_epoch == expected_epoch {
+                        let visible_before = window_clone.is_visible().ok();
+                        log::debug!(
+                            "[overlay] set_overlay_mode fallback hide firing (mode_req=recording_only, visible_before={:?})",
+                            visible_before
+                        );
                         let _ = window_clone.hide();
                     }
                 });
