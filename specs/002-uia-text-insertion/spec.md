@@ -1,6 +1,6 @@
 # Feature Specification: Windows Context + Insertion Reliability
 
-**Feature Branch**: `001-uia-text-insertion`
+**Feature Branch**: `002-uia-text-insertion`
 **Created**: 2026-01-25
 **Status**: Draft
 **Input**: User description: "Improve Windows text context and insertion reliability (automation-first)."

@@ -1,7 +1,7 @@
 # Implementation Plan: Windows Context + Insertion Reliability (UIA-first)
 
-**Branch**: `001-uia-text-insertion` | **Date**: 2026-01-25 | **Spec**: `specs/001-uia-text-insertion/spec.md`
-**Input**: Feature specification from `specs/001-uia-text-insertion/spec.md`
+**Branch**: `002-uia-text-insertion` | **Date**: 2026-01-25 | **Spec**: `specs/002-uia-text-insertion/spec.md`
+**Input**: Feature specification from `specs/002-uia-text-insertion/spec.md`
 
 ## Summary
 
@@ -12,7 +12,7 @@ Improve Windows text context capture and insertion reliability across _all_ inse
 - Persisting per-app “capability memory” locally to learn which insertion path works best for each app.
 - Preserving safety/UX guarantees: never read/insert into password fields; if insertion is blocked/unsafe, auto-copy transcript to clipboard and show a clear toast.
 
-The Phase 0 research output is in `specs/001-uia-text-insertion/research.md`.
+The Phase 0 research output is in `specs/002-uia-text-insertion/research.md`.
 
 ## Technical Context
 
@@ -60,7 +60,7 @@ _GATE: Must pass before Phase 0 research. Re-check after Phase 1 design._
 ### Documentation (this feature)
 
 ```text
-specs/001-uia-text-insertion/
+specs/002-uia-text-insertion/
 ├── spec.md              # Feature spec
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
@@ -91,7 +91,7 @@ specs/
 
 ## Phase 0: Outline & Research (completed)
 
-Output: `specs/001-uia-text-insertion/research.md`
+Output: `specs/002-uia-text-insertion/research.md`
 
 Key research questions answered:
 
@@ -103,9 +103,9 @@ Key research questions answered:
 
 Outputs:
 
-- `specs/001-uia-text-insertion/data-model.md`
-- `specs/001-uia-text-insertion/contracts/tauri-openapi.yaml`
-- `specs/001-uia-text-insertion/quickstart.md`
+- `specs/002-uia-text-insertion/data-model.md`
+- `specs/002-uia-text-insertion/contracts/tauri-openapi.yaml`
+- `specs/002-uia-text-insertion/quickstart.md`
 
 ## Phase 2: Implementation Planning (ready for /speckit.tasks)
 

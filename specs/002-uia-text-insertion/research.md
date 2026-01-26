@@ -1,6 +1,6 @@
 # Research: Windows UI Automation (UIA) Context + Insertion
 
-**Feature**: `specs/001-uia-text-insertion/spec.md`
+**Feature**: `specs/002-uia-text-insertion/spec.md`
 **Date**: 2026-01-25
 
 This document records the key technical decisions for the UIA-first Windows text context + insertion feature.
