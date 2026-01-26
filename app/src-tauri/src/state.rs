@@ -11,6 +11,9 @@ use std::sync::Arc;
 #[cfg(desktop)]
 use tokio_util::sync::CancellationToken;
 
+#[cfg(desktop)]
+use crate::windows_uia::types::WindowsTextContextSource;
+
 #[derive(Default)]
 pub struct AppState {
     /// Tracks if currently recording (for both toggle and hold modes)
@@ -68,6 +71,11 @@ pub struct AppState {
     /// Latest Quick Ask selection probe result (ephemeral; never persisted).
     #[cfg(desktop)]
     pub quick_ask_probe: Mutex<QuickAskProbe>,
+
+    /// Ephemeral Windows text target snapshot captured near recording stop.
+    #[cfg(desktop)]
+    pub windows_text_target_snapshot:
+        Mutex<Option<crate::windows_uia::types::WindowsTextTargetSnapshot>>,
 }
 
 /// A single Quick Ask conversation turn (question + answer).
@@ -139,6 +147,8 @@ pub struct QuickReplaceProbe {
     pub epoch: u64,
     pub ready: bool,
     pub selection_text: Option<String>,
+    pub surrounding_text: Option<String>,
+    pub source: WindowsTextContextSource,
 }
 
 #[cfg(desktop)]
@@ -148,6 +158,8 @@ impl Default for QuickReplaceProbe {
             epoch: 0,
             ready: true,
             selection_text: None,
+            surrounding_text: None,
+            source: WindowsTextContextSource::None,
         }
     }
 }
@@ -159,6 +171,8 @@ pub struct QuickAskProbe {
     pub epoch: u64,
     pub ready: bool,
     pub selection_text: Option<String>,
+    pub surrounding_text: Option<String>,
+    pub source: WindowsTextContextSource,
 }
 
 #[cfg(desktop)]
@@ -168,6 +182,8 @@ impl Default for QuickAskProbe {
             epoch: 0,
             ready: true,
             selection_text: None,
+            surrounding_text: None,
+            source: WindowsTextContextSource::None,
         }
     }
 }

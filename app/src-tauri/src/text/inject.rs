@@ -6,6 +6,13 @@ use std::time::Duration;
 
 use crate::text::clipboard::{set_clipboard_text_with_barrier, ClipboardRestoreGuard};
 use crate::text::key_inject::{release_common_modifiers_best_effort, with_pressed_key};
+#[cfg(desktop)]
+use tauri::AppHandle;
+#[cfg(desktop)]
+use tauri::Emitter;
+
+#[cfg(desktop)]
+use crate::events::EVENT_TRANSCRIPT_COPIED_TO_CLIPBOARD;
 
 /// Delay between keyboard key press and release events
 const KEY_EVENT_DELAY_MS: u64 = 50;
@@ -155,6 +162,14 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Copy text to clipboard and emit a toast event (safe fallback UX).
+#[cfg(desktop)]
+pub fn copy_to_clipboard_and_notify(app: &AppHandle, text: &str) -> Result<(), String> {
+    copy_to_clipboard(text)?;
+    let _ = app.emit(EVENT_TRANSCRIPT_COPIED_TO_CLIPBOARD, ());
+    Ok(())
+}
+
 // Keystrokes mode intentionally disabled.
 // (Kept as a stub in case any legacy call sites remain in downstream forks.)
 #[allow(dead_code)]
@@ -162,7 +177,25 @@ pub fn type_as_keystrokes(_text: &str) -> Result<(), String> {
     Err("Keystrokes output mode is disabled".to_string())
 }
 
+/// Best-effort keystrokes fallback (used by Windows UIA insertion ladder).
+pub fn type_text_as_keystrokes(text: &str) -> Result<(), String> {
+    let _guard = output_injection_lock()
+        .lock()
+        .map_err(|_| "Output lock poisoned".to_string())?;
+
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+    for ch in text.chars() {
+        enigo
+            .key(Key::Unicode(ch), Direction::Click)
+            .map_err(|e| e.to_string())?;
+    }
+
+    release_common_modifiers_best_effort(&mut enigo);
+    Ok(())
+}
+
 /// Type text using clipboard and paste. Used internally by shortcut handlers.
+#[cfg(not(target_os = "windows"))]
 pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
     type_text_blocking_with_options(text, hit_enter, true)
 }

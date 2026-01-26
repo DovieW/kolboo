@@ -623,271 +623,271 @@ async function applySettingsPatch(params: {
 }
 
 export const tauriSettingsAPI = {
-	async getSettings(): Promise<AppSettings> {
-		const store = await getStore();
+  async getSettings(): Promise<AppSettings> {
+    const store = await getStore();
 
-		const rawSettingsVersion = await store.get(SETTINGS_VERSION_KEY);
-		const settingsVersion = normalizeSettingsVersion(rawSettingsVersion);
-		// IMPORTANT: This getter should be read-only.
-		//
-		// Writes are centralized in the backend so multi-window store instances
-		// can't accidentally clobber each other.
+    const rawSettingsVersion = await store.get(SETTINGS_VERSION_KEY);
+    const settingsVersion = normalizeSettingsVersion(rawSettingsVersion);
+    // IMPORTANT: This getter should be read-only.
+    //
+    // Writes are centralized in the backend so multi-window store instances
+    // can't accidentally clobber each other.
 
-		// Keep a tiny subset of settings mirrored in localStorage so the UI can apply
-		// critical visuals (accent color) before the async store read completes.
-		// This reduces first-paint flicker on startup.
-		const tryWriteLocalStorage = (key: string, value: string | null) => {
-			try {
-				if (typeof window === "undefined") return;
-				if (!window.localStorage) return;
-				if (value === null) {
-					window.localStorage.removeItem(key);
-				} else {
-					window.localStorage.setItem(key, value);
-				}
-			} catch {
-				// ignore (private mode / disabled storage)
-			}
-		};
+    // Keep a tiny subset of settings mirrored in localStorage so the UI can apply
+    // critical visuals (accent color) before the async store read completes.
+    // This reduces first-paint flicker on startup.
+    const tryWriteLocalStorage = (key: string, value: string | null) => {
+      try {
+        if (typeof window === "undefined") return;
+        if (!window.localStorage) return;
+        if (value === null) {
+          window.localStorage.removeItem(key);
+        } else {
+          window.localStorage.setItem(key, value);
+        }
+      } catch {
+        // ignore (private mode / disabled storage)
+      }
+    };
 
-		const LOCAL_ACCENT_COLOR_KEY = "tv_accent_color";
+    const LOCAL_ACCENT_COLOR_KEY = "tv_accent_color";
 
-		const normalizePromptSection = (value: unknown) => {
-			if (value === null) return null;
-			if (!isRecord(value)) return null;
-			const content = typeof value.content === "string" ? value.content : null;
+    const normalizePromptSection = (value: unknown) => {
+      if (value === null) return null;
+      if (!isRecord(value)) return null;
+      const content = typeof value.content === "string" ? value.content : null;
 
-			return { content };
-		};
+      return { content };
+    };
 
-		const normalizeCleanupPromptSections = (
-			value: unknown,
-		): CleanupPromptSections | null => {
-			if (value === null || value === undefined) return null;
-			if (!isRecord(value)) return null;
-			const v = value;
+    const normalizeCleanupPromptSections = (
+      value: unknown,
+    ): CleanupPromptSections | null => {
+      if (value === null || value === undefined) return null;
+      if (!isRecord(value)) return null;
+      const v = value;
 
-			// New shape
-			if (Object.hasOwn(v, "system")) {
-				const system = normalizePromptSection(v.system) ?? { content: null };
-				return { system };
-			}
+      // New shape
+      if (Object.hasOwn(v, "system")) {
+        const system = normalizePromptSection(v.system) ?? { content: null };
+        return { system };
+      }
 
-			// Legacy shape: { main, advanced, dictionary }
-			// We keep only the old "main" section as the new System Prompt.
-			if (Object.hasOwn(v, "main")) {
-				const rawMain = v.main;
-				const legacyContent =
-					typeof rawMain === "string"
-						? rawMain.trim().length > 0
-							? rawMain
-							: null
-						: (normalizePromptSection(rawMain)?.content ?? null);
-				return { system: { content: legacyContent } };
-			}
+      // Legacy shape: { main, advanced, dictionary }
+      // We keep only the old "main" section as the new System Prompt.
+      if (Object.hasOwn(v, "main")) {
+        const rawMain = v.main;
+        const legacyContent =
+          typeof rawMain === "string"
+            ? rawMain.trim().length > 0
+              ? rawMain
+              : null
+            : (normalizePromptSection(rawMain)?.content ?? null);
+        return { system: { content: legacyContent } };
+      }
 
-			// Unknown/empty object => treat as unset.
-			return null;
-		};
+      // Unknown/empty object => treat as unset.
+      return null;
+    };
 
-		const normalizeCleanupPromptSectionsOverride = (
-			value: unknown,
-		): CleanupPromptSectionsOverride | null => {
-			if (value === null || value === undefined) return null;
-			if (!isRecord(value)) return null;
+    const normalizeCleanupPromptSectionsOverride = (
+      value: unknown,
+    ): CleanupPromptSectionsOverride | null => {
+      if (value === null || value === undefined) return null;
+      if (!isRecord(value)) return null;
 
-			const v = value;
-			const out: CleanupPromptSectionsOverride = {};
+      const v = value;
+      const out: CleanupPromptSectionsOverride = {};
 
-			if (Object.hasOwn(v, "system")) {
-				out.system = normalizePromptSection(v.system);
-			}
+      if (Object.hasOwn(v, "system")) {
+        out.system = normalizePromptSection(v.system);
+      }
 
-			// If we didn't recognize anything (or it's effectively empty), treat as unset.
-			if (out.system == null) return null;
+      // If we didn't recognize anything (or it's effectively empty), treat as unset.
+      if (out.system == null) return null;
 
-			return out;
-		};
+      return out;
+    };
 
-		const normalizeRewriteProfile = (
-			p: unknown,
-		): RewriteProgramPromptProfile | null => {
-			if (!isRecord(p)) return null;
-			const id = typeof p.id === "string" ? p.id : "";
-			const name = typeof p.name === "string" ? p.name : "";
+    const normalizeRewriteProfile = (
+      p: unknown,
+    ): RewriteProgramPromptProfile | null => {
+      if (!isRecord(p)) return null;
+      const id = typeof p.id === "string" ? p.id : "";
+      const name = typeof p.name === "string" ? p.name : "";
 
-			const program_paths_raw = p.program_paths;
-			const legacy_program_path = p.program_path;
+      const program_paths_raw = p.program_paths;
+      const legacy_program_path = p.program_path;
 
-			const program_paths = Array.isArray(program_paths_raw)
-				? program_paths_raw.filter((x) => typeof x === "string")
-				: typeof legacy_program_path === "string" &&
-						legacy_program_path.length > 0
-					? [legacy_program_path]
-					: [];
+      const program_paths = Array.isArray(program_paths_raw)
+        ? program_paths_raw.filter((x) => typeof x === "string")
+        : typeof legacy_program_path === "string" &&
+            legacy_program_path.length > 0
+          ? [legacy_program_path]
+          : [];
 
-			const disabled = typeof p.disabled === "boolean" ? p.disabled : false;
+      const disabled = typeof p.disabled === "boolean" ? p.disabled : false;
 
-			const cleanup_prompt_sections = normalizeCleanupPromptSectionsOverride(
-				p.cleanup_prompt_sections,
-			);
-			const stt_provider =
-				typeof p.stt_provider === "string" ? p.stt_provider : null;
-			const stt_model = typeof p.stt_model === "string" ? p.stt_model : null;
-			const stt_timeout_seconds =
-				typeof p.stt_timeout_seconds === "number"
-					? p.stt_timeout_seconds
-					: null;
-			const llm_provider =
-				typeof p.llm_provider === "string" ? p.llm_provider : null;
-			const llm_model = typeof p.llm_model === "string" ? p.llm_model : null;
+      const cleanup_prompt_sections = normalizeCleanupPromptSectionsOverride(
+        p.cleanup_prompt_sections,
+      );
+      const stt_provider =
+        typeof p.stt_provider === "string" ? p.stt_provider : null;
+      const stt_model = typeof p.stt_model === "string" ? p.stt_model : null;
+      const stt_timeout_seconds =
+        typeof p.stt_timeout_seconds === "number"
+          ? p.stt_timeout_seconds
+          : null;
+      const llm_provider =
+        typeof p.llm_provider === "string" ? p.llm_provider : null;
+      const llm_model = typeof p.llm_model === "string" ? p.llm_model : null;
 
-			const openai_reasoning_effort = normalizeOpenAiReasoningEffort(
-				p.openai_reasoning_effort,
-			);
-			const gemini_thinking_budget = normalizeGeminiThinkingBudget(
-				p.gemini_thinking_budget,
-			);
-			const gemini_thinking_level = normalizeGeminiThinkingLevel(
-				p.gemini_thinking_level,
-			);
-			const anthropic_thinking_budget =
-				normalizeAnthropicThinkingBudgetAllowOff(p.anthropic_thinking_budget);
+      const openai_reasoning_effort = normalizeOpenAiReasoningEffort(
+        p.openai_reasoning_effort,
+      );
+      const gemini_thinking_budget = normalizeGeminiThinkingBudget(
+        p.gemini_thinking_budget,
+      );
+      const gemini_thinking_level = normalizeGeminiThinkingLevel(
+        p.gemini_thinking_level,
+      );
+      const anthropic_thinking_budget =
+        normalizeAnthropicThinkingBudgetAllowOff(p.anthropic_thinking_budget);
 
-			const quick_ask_provider =
-				typeof p.quick_ask_provider === "string" ? p.quick_ask_provider : null;
-			const quick_ask_model =
-				typeof p.quick_ask_model === "string" ? p.quick_ask_model : null;
-			const quick_ask_system_prompt_raw = p.quick_ask_system_prompt;
-			const quick_ask_system_prompt =
-				typeof quick_ask_system_prompt_raw === "string" &&
-				quick_ask_system_prompt_raw.trim().length > 0
-					? quick_ask_system_prompt_raw
-					: null;
+      const quick_ask_provider =
+        typeof p.quick_ask_provider === "string" ? p.quick_ask_provider : null;
+      const quick_ask_model =
+        typeof p.quick_ask_model === "string" ? p.quick_ask_model : null;
+      const quick_ask_system_prompt_raw = p.quick_ask_system_prompt;
+      const quick_ask_system_prompt =
+        typeof quick_ask_system_prompt_raw === "string" &&
+        quick_ask_system_prompt_raw.trim().length > 0
+          ? quick_ask_system_prompt_raw
+          : null;
 
-			const context_grab_method_raw = p.context_grab_method;
-			const context_grab_method: ContextGrabMethod | null =
-				context_grab_method_raw === "none" ||
-				context_grab_method_raw === "ctrl_c" ||
-				context_grab_method_raw === "ctrl_shift_c" ||
-				context_grab_method_raw === "ctrl_insert" ||
-				context_grab_method_raw === "clipboard_only"
-					? (context_grab_method_raw as ContextGrabMethod)
-					: null;
+      const context_grab_method_raw = p.context_grab_method;
+      const context_grab_method: ContextGrabMethod | null =
+        context_grab_method_raw === "none" ||
+        context_grab_method_raw === "ctrl_c" ||
+        context_grab_method_raw === "ctrl_shift_c" ||
+        context_grab_method_raw === "ctrl_insert" ||
+        context_grab_method_raw === "clipboard_only"
+          ? (context_grab_method_raw as ContextGrabMethod)
+          : null;
 
-			const rewrite_include_clipboard_context =
-				typeof p.rewrite_include_clipboard_context === "boolean"
-					? p.rewrite_include_clipboard_context
-					: null;
-			const quick_replace_include_clipboard_context =
-				typeof p.quick_replace_include_clipboard_context === "boolean"
-					? p.quick_replace_include_clipboard_context
-					: null;
-			const quick_ask_include_clipboard_context =
-				typeof p.quick_ask_include_clipboard_context === "boolean"
-					? p.quick_ask_include_clipboard_context
-					: null;
+      const rewrite_include_clipboard_context =
+        typeof p.rewrite_include_clipboard_context === "boolean"
+          ? p.rewrite_include_clipboard_context
+          : null;
+      const quick_replace_include_clipboard_context =
+        typeof p.quick_replace_include_clipboard_context === "boolean"
+          ? p.quick_replace_include_clipboard_context
+          : null;
+      const quick_ask_include_clipboard_context =
+        typeof p.quick_ask_include_clipboard_context === "boolean"
+          ? p.quick_ask_include_clipboard_context
+          : null;
 
-			const quick_replace_enabled =
-				typeof p.quick_replace_enabled === "boolean"
-					? p.quick_replace_enabled
-					: null;
-			const quick_replace_provider =
-				typeof p.quick_replace_provider === "string"
-					? p.quick_replace_provider
-					: null;
-			const quick_replace_model =
-				typeof p.quick_replace_model === "string"
-					? p.quick_replace_model
-					: null;
-			const quick_replace_system_prompt_raw = p.quick_replace_system_prompt;
-			const quick_replace_system_prompt =
-				typeof quick_replace_system_prompt_raw === "string" &&
-				quick_replace_system_prompt_raw.trim().length > 0
-					? quick_replace_system_prompt_raw
-					: null;
+      const quick_replace_enabled =
+        typeof p.quick_replace_enabled === "boolean"
+          ? p.quick_replace_enabled
+          : null;
+      const quick_replace_provider =
+        typeof p.quick_replace_provider === "string"
+          ? p.quick_replace_provider
+          : null;
+      const quick_replace_model =
+        typeof p.quick_replace_model === "string"
+          ? p.quick_replace_model
+          : null;
+      const quick_replace_system_prompt_raw = p.quick_replace_system_prompt;
+      const quick_replace_system_prompt =
+        typeof quick_replace_system_prompt_raw === "string" &&
+        quick_replace_system_prompt_raw.trim().length > 0
+          ? quick_replace_system_prompt_raw
+          : null;
 
-			const quick_ask_openai_reasoning_effort = normalizeOpenAiReasoningEffort(
-				p.quick_ask_openai_reasoning_effort,
-			);
-			const quick_ask_gemini_thinking_budget = normalizeGeminiThinkingBudget(
-				p.quick_ask_gemini_thinking_budget,
-			);
-			const quick_ask_gemini_thinking_level = normalizeGeminiThinkingLevel(
-				p.quick_ask_gemini_thinking_level,
-			);
-			const quick_ask_anthropic_thinking_budget =
-				normalizeAnthropicThinkingBudgetAllowOff(
-					p.quick_ask_anthropic_thinking_budget,
-				);
-			const rewrite_llm_enabled =
-				typeof p.rewrite_llm_enabled === "boolean"
-					? p.rewrite_llm_enabled
-					: null;
+      const quick_ask_openai_reasoning_effort = normalizeOpenAiReasoningEffort(
+        p.quick_ask_openai_reasoning_effort,
+      );
+      const quick_ask_gemini_thinking_budget = normalizeGeminiThinkingBudget(
+        p.quick_ask_gemini_thinking_budget,
+      );
+      const quick_ask_gemini_thinking_level = normalizeGeminiThinkingLevel(
+        p.quick_ask_gemini_thinking_level,
+      );
+      const quick_ask_anthropic_thinking_budget =
+        normalizeAnthropicThinkingBudgetAllowOff(
+          p.quick_ask_anthropic_thinking_budget,
+        );
+      const rewrite_llm_enabled =
+        typeof p.rewrite_llm_enabled === "boolean"
+          ? p.rewrite_llm_enabled
+          : null;
 
-			const sound_enabled =
-				typeof p.sound_enabled === "boolean" ? p.sound_enabled : null;
-			const playing_audio_handling_raw = p.playing_audio_handling;
-			const legacy_auto_mute_audio = p.auto_mute_audio;
+      const sound_enabled =
+        typeof p.sound_enabled === "boolean" ? p.sound_enabled : null;
+      const playing_audio_handling_raw = p.playing_audio_handling;
+      const legacy_auto_mute_audio = p.auto_mute_audio;
 
-			const playing_audio_handling: PlayingAudioHandling | null =
-				typeof playing_audio_handling_raw === "string"
-					? normalizePlayingAudioHandling(playing_audio_handling_raw)
-					: typeof legacy_auto_mute_audio === "boolean"
-						? legacy_auto_mute_audio
-							? "mute"
-							: "none"
-						: null;
+      const playing_audio_handling: PlayingAudioHandling | null =
+        typeof playing_audio_handling_raw === "string"
+          ? normalizePlayingAudioHandling(playing_audio_handling_raw)
+          : typeof legacy_auto_mute_audio === "boolean"
+            ? legacy_auto_mute_audio
+              ? "mute"
+              : "none"
+            : null;
 
-			const overlay_mode =
-				p.overlay_mode === "always" ||
-				p.overlay_mode === "never" ||
-				p.overlay_mode === "recording_only"
-					? (p.overlay_mode as OverlayMode)
-					: null;
+      const overlay_mode =
+        p.overlay_mode === "always" ||
+        p.overlay_mode === "never" ||
+        p.overlay_mode === "recording_only"
+          ? (p.overlay_mode as OverlayMode)
+          : null;
 
-			const widget_position =
-				p.widget_position === "center" ||
-				p.widget_position === "top-left" ||
-				p.widget_position === "top-center" ||
-				p.widget_position === "top-right" ||
-				p.widget_position === "bottom-left" ||
-				p.widget_position === "bottom-center" ||
-				p.widget_position === "bottom-right"
-					? (p.widget_position as WidgetPosition)
-					: null;
+      const widget_position =
+        p.widget_position === "center" ||
+        p.widget_position === "top-left" ||
+        p.widget_position === "top-center" ||
+        p.widget_position === "top-right" ||
+        p.widget_position === "bottom-left" ||
+        p.widget_position === "bottom-center" ||
+        p.widget_position === "bottom-right"
+          ? (p.widget_position as WidgetPosition)
+          : null;
 
-			const output_mode =
-				typeof p.output_mode === "string"
-					? normalizeOutputMode(p.output_mode)
-					: null;
+      const output_mode =
+        typeof p.output_mode === "string"
+          ? normalizeOutputMode(p.output_mode)
+          : null;
 
-			const output_hit_enter =
-				typeof p.output_hit_enter === "boolean" ? p.output_hit_enter : null;
+      const output_hit_enter =
+        typeof p.output_hit_enter === "boolean" ? p.output_hit_enter : null;
 
-			const presets_raw = p.presets;
-			const presets: RewritePreset[] | null = Array.isArray(presets_raw)
-				? presets_raw
-						.map(normalizeRewritePreset)
-						.filter((x): x is RewritePreset => x !== null)
-				: null;
+      const presets_raw = p.presets;
+      const presets: RewritePreset[] | null = Array.isArray(presets_raw)
+        ? presets_raw
+            .map(normalizeRewritePreset)
+            .filter((x): x is RewritePreset => x !== null)
+        : null;
 
-			const default_preset_id =
-				typeof p.default_preset_id === "string" ? p.default_preset_id : null;
+      const default_preset_id =
+        typeof p.default_preset_id === "string" ? p.default_preset_id : null;
 
-			const default_preset_description =
-				typeof p.default_preset_description === "string"
-					? p.default_preset_description
-					: null;
+      const default_preset_description =
+        typeof p.default_preset_description === "string"
+          ? p.default_preset_description
+          : null;
 
-			const active_preset_id =
-				typeof p.active_preset_id === "string" ? p.active_preset_id : null;
+      const active_preset_id =
+        typeof p.active_preset_id === "string" ? p.active_preset_id : null;
 
-			const router = p.router ? normalizeIntentRouterSettings(p.router) : null;
+      const router = p.router ? normalizeIntentRouterSettings(p.router) : null;
 
-			if (!id) return null;
+      if (!id) return null;
 
-			return {
+      return {
         id,
         name,
         program_paths,
@@ -933,1025 +933,1025 @@ export const tauriSettingsAPI = {
         output_mode,
         output_hit_enter,
       };
-		};
-
-		const rawProfiles =
-			(await store.get<unknown>("rewrite_program_prompt_profiles")) ?? [];
-		const rewrite_program_prompt_profiles: RewriteProgramPromptProfile[] =
-			Array.isArray(rawProfiles)
-				? rawProfiles
-						.map(normalizeRewriteProfile)
-						.filter((p): p is RewriteProgramPromptProfile => p !== null)
-				: [];
-
-		// Backward compatibility:
-		// - Legacy key: quick_ask_hotkey (hold-to-record)
-		// - New keys: quick_ask_hold_hotkey + quick_ask_toggle_hotkey
-		// IMPORTANT: explicit null means "disabled" and must NOT fall back.
-		const rawQuickAskHold = await store.get("quick_ask_hold_hotkey");
-		const rawQuickAskHoldEffective =
-			rawQuickAskHold === undefined
-				? await store.get("quick_ask_hotkey")
-				: rawQuickAskHold;
-
-		const maxSavedRecordings = normalizeMaxSavedRecordings(
-			await store.get("max_saved_recordings"),
-		);
-		const recordingsRetentionMode = normalizeRetentionMode(
-			await store.get("recordings_retention_mode"),
-			"amount",
-		);
-		const recordingsRetentionAmount = await (async () => {
-			const raw = await store.get("recordings_retention_amount");
-			if (raw == null) return maxSavedRecordings;
-			return normalizeMaxSavedRecordings(raw);
-		})();
-		const recordingsRetentionUnit = normalizeTranscriptionRetentionUnit(
-			await store.get("recordings_retention_unit"),
-		);
-		const recordingsRetentionValue = normalizeTranscriptionRetentionValue(
-			await store.get("recordings_retention_value"),
-			recordingsRetentionUnit,
-		);
-		const transcriptionRetentionMode = normalizeRetentionMode(
-			(await store.get("transcription_retention_mode")) ?? "time",
-			"time",
-		);
-		const transcriptionRetentionAmount = normalizeTranscriptionRetentionAmount(
-			await store.get("transcription_retention_amount"),
-		);
-
-		const settings: AppSettings = {
-			settings_version: settingsVersion,
-			toggle_hotkey: normalizeHotkeyConfig(
-				await store.get("toggle_hotkey"),
-				defaultToggleHotkey,
-			),
-			hold_hotkey: normalizeHotkeyConfig(
-				await store.get("hold_hotkey"),
-				defaultHoldHotkey,
-			),
-			paste_last_hotkey: normalizeHotkeyConfig(
-				await store.get("paste_last_hotkey"),
-				defaultPasteLastHotkey,
-			),
-			retry_hotkey: normalizeHotkeyConfig(
-				await store.get("retry_hotkey"),
-				defaultRetryHotkey,
-			),
-			quick_ask_hold_hotkey: normalizeHotkeyConfig(
-				rawQuickAskHoldEffective,
-				defaultQuickAskHoldHotkey,
-			),
-			quick_ask_toggle_hotkey: normalizeHotkeyConfig(
-				await store.get("quick_ask_toggle_hotkey"),
-				defaultQuickAskToggleHotkey,
-			),
-
-			hotkey_debug_enabled:
-				(await store.get<boolean>("hotkey_debug_enabled")) ?? false,
-
-			selected_mic_id:
-				(await store.get<string | null>("selected_mic_id")) ?? null,
-			sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
-			audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-			accent_color: await (async () => {
-				const raw = (await store.get<string | null>("accent_color")) ?? null;
-				const normalized = normalizeHexColor(raw);
-
-				// If unset/invalid, default to the app's default accent.
-				// (Tangerine is an explicit option in the UI, not the implicit default.)
-				if (!normalized) return DEFAULT_ACCENT_HEX;
-
-				return normalized;
-			})(),
-			rewrite_llm_enabled:
-				(await store.get<boolean>("rewrite_llm_enabled")) ?? false,
-			quick_replace_enabled:
-				(await store.get<boolean>("quick_replace_enabled")) ?? false,
-			cleanup_prompt_sections: await (async () => {
-				const raw = await store.get<unknown>("cleanup_prompt_sections");
-				const normalized = normalizeCleanupPromptSections(raw);
-
-				return normalized;
-			})(),
-			rewrite_program_prompt_profiles,
-			stt_provider: (await store.get<string | null>("stt_provider")) ?? null,
-			stt_model: (await store.get<string | null>("stt_model")) ?? null,
-			stt_transcription_prompt:
-				(await store.get<string | null>("stt_transcription_prompt")) ?? null,
-			aquavoice_base_url:
-				(await store.get<string | null>("aquavoice_base_url")) ?? null,
-			whisper_server_base_url:
-				(await store.get<string | null>("whisper_server_base_url")) ?? null,
-			ollama_url: (await store.get<string | null>("ollama_url")) ?? null,
-			local_whisper_model_id: normalizeLocalWhisperModelId(
-				await store.get("local_whisper_model_id"),
-			),
-			local_whisper_load_mode: normalizeLocalWhisperLoadMode(
-				await store.get("local_whisper_load_mode"),
-			),
-			proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
-			llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
-			llm_model: (await store.get<string | null>("llm_model")) ?? null,
-
-			quick_ask_provider:
-				(await store.get<string | null>("quick_ask_provider")) ?? null,
-			quick_ask_model:
-				(await store.get<string | null>("quick_ask_model")) ?? null,
-			quick_ask_system_prompt:
-				(await store.get<string | null>("quick_ask_system_prompt")) ?? null,
-
-			quick_ask_include_selected_text:
-				(await store.get<boolean>("quick_ask_include_selected_text")) ?? false,
-
-			quick_ask_conversation_history_enabled:
-				(await store.get<boolean>("quick_ask_conversation_history_enabled")) ??
-				true,
-			quick_ask_conversation_history_count:
-				normalizeQuickAskConversationHistoryCount(
-					await store.get("quick_ask_conversation_history_count"),
-				),
-
-			quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(
-				await store.get("quick_ask_openai_reasoning_effort"),
-			),
-			quick_ask_anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
-				await store.get("quick_ask_anthropic_thinking_budget"),
-			),
-			quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(
-				await store.get("quick_ask_gemini_thinking_budget"),
-			),
-			quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(
-				await store.get("quick_ask_gemini_thinking_level"),
-			),
-			cerebras_free_tier:
-				(await store.get<boolean>("cerebras_free_tier")) ?? true,
-			groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
-			elevenlabs_free_tier:
-				(await store.get<boolean>("elevenlabs_free_tier")) ?? true,
-			cohere_free_tier: (await store.get<boolean>("cohere_free_tier")) ?? true,
-			assemblyai_free_tier:
-				(await store.get<boolean>("assemblyai_free_tier")) ?? true,
-			speechmatics_free_tier:
-				(await store.get<boolean>("speechmatics_free_tier")) ?? true,
-			openai_reasoning_effort: normalizeOpenAiReasoningEffort(
-				await store.get("openai_reasoning_effort"),
-			),
-			anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
-				await store.get("anthropic_thinking_budget"),
-			),
-			gemini_thinking_budget: normalizeGeminiThinkingBudget(
-				await store.get("gemini_thinking_budget"),
-			),
-			gemini_thinking_level: normalizeGeminiThinkingLevel(
-				await store.get("gemini_thinking_level"),
-			),
-			playing_audio_handling: normalizePlayingAudioHandling(
-				(await store.get("playing_audio_handling")) ??
-					// Legacy key for migration:
-					(await store.get<boolean>("auto_mute_audio")) ??
-					// If neither exists, default to none
-					"none",
-			),
-			stt_timeout_seconds:
-				(await store.get<number | null>("stt_timeout_seconds")) ?? null,
-			overlay_mode:
-				(await store.get<OverlayMode>("overlay_mode")) ?? "recording_only",
-			overlay_show_detailed_loading:
-				(await store.get<boolean>("overlay_show_detailed_loading")) ?? false,
-			overlay_monitor_target: normalizeOverlayMonitorTarget(
-				(await store.get("overlay_monitor_target")) ?? "main",
-			),
-			widget_position:
-				(await store.get<WidgetPosition>("widget_position")) ?? "bottom-center",
-			output_mode: normalizeOutputMode(await store.get("output_mode")),
-			output_hit_enter: (await store.get<boolean>("output_hit_enter")) ?? false,
-			output_clipboard_privacy_mode:
-				(await store.get<boolean>("output_clipboard_privacy_mode")) ?? false,
-
-			main_window_close_behavior: normalizeMainWindowCloseBehavior(
-				await store.get("main_window_close_behavior"),
-			),
-
-			quiet_audio_gate_enabled:
-				(await store.get<boolean>("quiet_audio_gate_enabled")) ?? true,
-			quiet_audio_min_duration_secs:
-				(await store.get<number>("quiet_audio_min_duration_secs")) ?? 0.15,
-			quiet_audio_rms_dbfs_threshold:
-				(await store.get<number>("quiet_audio_rms_dbfs_threshold")) ?? -60,
-			quiet_audio_peak_dbfs_threshold:
-				(await store.get<number>("quiet_audio_peak_dbfs_threshold")) ?? -50,
-			quiet_audio_require_speech:
-				(await store.get<boolean>("quiet_audio_require_speech")) ?? false,
-
-			hot_mic_enabled: (await store.get<boolean>("hot_mic_enabled")) ?? false,
-			hot_mic_pre_roll_ms:
-				(await store.get<number>("hot_mic_pre_roll_ms")) ?? 1500,
-			mic_auto_recover_enabled:
-				(await store.get<boolean>("mic_auto_recover_enabled")) ?? false,
-
-			noise_gate_threshold_dbfs: await (async () => {
-				const configured = normalizeNoiseGateThresholdDbfs(
-					await store.get("noise_gate_threshold_dbfs"),
-				);
-				if (configured != null) return configured;
-
-				// Legacy fallback
-				const legacyStrength = normalizeNoiseGateStrength(
-					await store.get("noise_gate_strength"),
-				);
-				return noiseGateStrengthToThresholdDbfs(legacyStrength);
-			})(),
-
-			audio_downmix_to_mono:
-				(await store.get<boolean>("audio_downmix_to_mono")) ?? true,
-			audio_resample_to_16khz:
-				(await store.get<boolean>("audio_resample_to_16khz")) ?? false,
-			audio_highpass_enabled:
-				(await store.get<boolean>("audio_highpass_enabled")) ?? true,
-			audio_agc_enabled:
-				(await store.get<boolean>("audio_agc_enabled")) ?? false,
-			audio_noise_suppression_enabled:
-				(await store.get<boolean>("audio_noise_suppression_enabled")) ?? false,
-
-			max_saved_recordings: maxSavedRecordings,
-			recordings_retention_mode: recordingsRetentionMode,
-			recordings_retention_amount: recordingsRetentionAmount,
-			recordings_retention_unit: recordingsRetentionUnit,
-			recordings_retention_value: recordingsRetentionValue,
-
-			request_logs_retention_mode: normalizeRequestLogsRetentionMode(
-				await store.get("request_logs_retention_mode"),
-			),
-			request_logs_retention_amount: normalizeRequestLogsRetentionAmount(
-				await store.get("request_logs_retention_amount"),
-			),
-			request_logs_retention_days: normalizeRequestLogsRetentionDays(
-				await store.get("request_logs_retention_days"),
-			),
-
-			transcription_retention_mode: transcriptionRetentionMode,
-			transcription_retention_amount: transcriptionRetentionAmount,
-			// Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-			...(await (async () => {
-				const rawUnit = await store.get("transcription_retention_unit");
-				const rawValue = await store.get("transcription_retention_value");
-
-				// Legacy installs only have days.
-				if (rawUnit == null && rawValue == null) {
-					const legacyDays = normalizeTranscriptionRetentionValue(
-						await store.get("transcription_retention_days"),
-						"days",
-					);
-					return {
-						transcription_retention_unit: "days" as const,
-						transcription_retention_value: legacyDays,
-					};
-				}
-
-				const unit = normalizeTranscriptionRetentionUnit(rawUnit);
-				const value = normalizeTranscriptionRetentionValue(rawValue, unit);
-				return {
-					transcription_retention_unit: unit,
-					transcription_retention_value: value,
-				};
-			})()),
-			transcription_retention_delete_recordings:
-				normalizeTranscriptionRetentionDeleteRecordings(
-					await store.get("transcription_retention_delete_recordings"),
-				),
-
-			// Stats retention (persisted on disk).
-			...(await (async () => {
-				const rawUnit = await store.get("stats_retention_unit");
-				const rawValue = await store.get("stats_retention_value");
-
-				const unit = normalizeTranscriptionRetentionUnit(rawUnit ?? "days");
-				const value = normalizeTranscriptionRetentionValue(
-					rawValue ?? 30,
-					unit,
-				);
-
-				return {
-					stats_retention_unit: unit,
-					stats_retention_value: value,
-				};
-			})()),
-			stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
-				await store.get("stats_retention_max_bytes"),
-			),
-
-			// Backups
-			github_backup_gist_id:
-				(await store.get<string | null>("github_backup_gist_id")) ?? null,
-		};
-
-		// Mirror the accent so index.html can apply it synchronously at next launch.
-		tryWriteLocalStorage(LOCAL_ACCENT_COLOR_KEY, settings.accent_color ?? null);
-
-		return settings;
-	},
-
-	async reloadSettingsFromDisk(): Promise<void> {
-		await reloadSettingsStoreFromDisk();
-	},
-
-	async updateAccentColor(color: string | null): Promise<void> {
-		const normalized = normalizeHexColor(color);
-
-		try {
-			if (typeof window !== "undefined" && window.localStorage) {
-				const LOCAL_ACCENT_COLOR_KEY = "tv_accent_color";
-				if (!normalized) {
-					window.localStorage.removeItem(LOCAL_ACCENT_COLOR_KEY);
-				} else {
-					window.localStorage.setItem(LOCAL_ACCENT_COLOR_KEY, normalized);
-				}
-			}
-		} catch {
-			// ignore
-		}
-
-		if (!normalized) {
-			await applySettingsPatch({ deleteKeys: ["accent_color"] });
-		} else {
-			await applySettingsPatch({ patch: { accent_color: normalized } });
-		}
-	},
-
-	async updateMainWindowCloseBehavior(
-		behavior: MainWindowCloseBehavior,
-	): Promise<void> {
-		const normalized = normalizeMainWindowCloseBehavior(behavior);
-		await applySettingsPatch({
-			patch: { main_window_close_behavior: normalized },
-		});
-	},
-
-	async updateGithubBackupGistId(gistId: string | null): Promise<void> {
-		const trimmed = (gistId ?? "").trim();
-		if (!trimmed) {
-			await applySettingsPatch({ deleteKeys: ["github_backup_gist_id"] });
-		} else {
-			await applySettingsPatch({ patch: { github_backup_gist_id: trimmed } });
-		}
-	},
-
-	async updateToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		await applySettingsPatch({ patch: { toggle_hotkey: hotkey } });
-	},
-
-	async updateHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		await applySettingsPatch({ patch: { hold_hotkey: hotkey } });
-	},
-
-	async updatePasteLastHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		await applySettingsPatch({ patch: { paste_last_hotkey: hotkey } });
-	},
-
-	async updateRetryHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		await applySettingsPatch({ patch: { retry_hotkey: hotkey } });
-	},
-
-	async updateQuickAskHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		await applySettingsPatch({ patch: { quick_ask_hold_hotkey: hotkey } });
-	},
-
-	async updateQuickAskToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		await applySettingsPatch({ patch: { quick_ask_toggle_hotkey: hotkey } });
-	},
-
-	/**
-	 * Legacy alias (pre split): Quick Ask hotkey (hold-to-record).
-	 *
-	 * Writes both keys for backward compatibility.
-	 */
-	async updateQuickAskHotkey(hotkey: HotkeyConfig | null): Promise<void> {
-		await applySettingsPatch({
-			patch: { quick_ask_hotkey: hotkey, quick_ask_hold_hotkey: hotkey },
-		});
-	},
-
-	async updateQuickAskProvider(provider: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { quick_ask_provider: provider } });
-	},
-
-	async updateQuickAskModel(model: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { quick_ask_model: model } });
-	},
-
-	async updateQuickAskSystemPrompt(prompt: string | null): Promise<void> {
-		const normalized = typeof prompt === "string" ? prompt.trim() : "";
-		await applySettingsPatch({
-			patch: {
-				quick_ask_system_prompt: normalized.length > 0 ? normalized : null,
-			},
-		});
-	},
-
-	async updateQuickAskIncludeSelectedText(enabled: boolean): Promise<void> {
-		await applySettingsPatch({
-			patch: { quick_ask_include_selected_text: Boolean(enabled) },
-		});
-	},
-
-	async updateQuickAskConversationHistoryEnabled(
-		enabled: boolean,
-	): Promise<void> {
-		await applySettingsPatch({
-			patch: { quick_ask_conversation_history_enabled: Boolean(enabled) },
-		});
-	},
-
-	async updateQuickAskConversationHistoryCount(count: number): Promise<void> {
-		const normalized = normalizeQuickAskConversationHistoryCount(count);
-		await applySettingsPatch({
-			patch: { quick_ask_conversation_history_count: normalized },
-		});
-	},
-
-	async updateQuickAskOpenAiReasoningEffort(
-		effort: OpenAiReasoningEffort | null,
-	): Promise<void> {
-		if (effort == null) {
-			await applySettingsPatch({
-				deleteKeys: ["quick_ask_openai_reasoning_effort"],
-			});
-			return;
-		}
-		await applySettingsPatch({
-			patch: {
-				quick_ask_openai_reasoning_effort:
-					normalizeOpenAiReasoningEffort(effort),
-			},
-		});
-	},
-
-	async updateQuickAskAnthropicThinkingBudget(
-		budget: number | null,
-	): Promise<void> {
-		if (budget == null) {
-			await applySettingsPatch({
-				deleteKeys: ["quick_ask_anthropic_thinking_budget"],
-			});
-			return;
-		}
-		await applySettingsPatch({
-			patch: {
-				quick_ask_anthropic_thinking_budget:
-					normalizeAnthropicThinkingBudget(budget),
-			},
-		});
-	},
-
-	async updateQuickAskGeminiThinkingBudget(
-		budget: number | null,
-	): Promise<void> {
-		if (budget == null) {
-			await applySettingsPatch({
-				deleteKeys: ["quick_ask_gemini_thinking_budget"],
-			});
-			return;
-		}
-		await applySettingsPatch({
-			patch: {
-				quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(budget),
-			},
-		});
-	},
-
-	async updateQuickAskGeminiThinkingLevel(
-		level: "minimal" | "low" | "medium" | "high" | null,
-	): Promise<void> {
-		if (level == null) {
-			await applySettingsPatch({
-				deleteKeys: ["quick_ask_gemini_thinking_level"],
-			});
-			return;
-		}
-		await applySettingsPatch({
-			patch: {
-				quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(level),
-			},
-		});
-	},
-
-	async updateSelectedMic(micId: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { selected_mic_id: micId } });
-	},
-
-	async updateSoundEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { sound_enabled: enabled } });
-	},
-
-	async updateHotkeyDebugEnabled(enabled: boolean): Promise<void> {
-		// Update backend runtime flag immediately so debug events can start flowing
-		// without waiting for store writes / reloads.
-		await invoke("set_hotkey_debug_enabled_runtime", { enabled: !!enabled });
-
-		await applySettingsPatch({
-			patch: { hotkey_debug_enabled: !!enabled },
-		});
-	},
-
-	async updateAudioCue(cue: AudioCue): Promise<void> {
-		await applySettingsPatch({ patch: { audio_cue: normalizeAudioCue(cue) } });
-	},
-
-	async updateRewriteLlmEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { rewrite_llm_enabled: enabled } });
-	},
-
-	async updateCleanupPromptSections(
-		sections: CleanupPromptSections | null,
-	): Promise<void> {
-		await applySettingsPatch({ patch: { cleanup_prompt_sections: sections } });
-	},
-
-	async updateRewriteProgramPromptProfiles(
-		profiles: RewriteProgramPromptProfile[],
-	): Promise<void> {
-		// Normalize a couple of legacy/nullable shapes before writing so the backend
-		// can deserialize reliably.
-		const sanitized = profiles.map((profile) => {
-			const presets = (profile.presets ?? []).map((preset) => ({
-				...preset,
-				routing_hints: preset.routing_hints ?? [],
-			}));
-
-			return {
-				...profile,
-				presets,
-			};
-		});
-
-		await applySettingsPatch({
-			patch: { rewrite_program_prompt_profiles: sanitized },
-		});
-	},
-
-	async updateSTTProvider(provider: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { stt_provider: provider } });
-	},
-
-	async updateCerebrasFreeTier(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { cerebras_free_tier: !!enabled } });
-	},
-
-	async updateGroqFreeTier(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { groq_free_tier: !!enabled } });
-	},
-
-	async updateElevenLabsFreeTier(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { elevenlabs_free_tier: !!enabled } });
-	},
-
-	async updateCohereFreeTier(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { cohere_free_tier: !!enabled } });
-	},
-
-	async updateAssemblyAiFreeTier(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { assemblyai_free_tier: !!enabled } });
-	},
-
-	async updateSpeechmaticsFreeTier(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { speechmatics_free_tier: !!enabled } });
-	},
-
-	async updateSTTModel(model: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { stt_model: model } });
-	},
-
-	async updateSTTTranscriptionPrompt(prompt: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { stt_transcription_prompt: prompt } });
-	},
-
-	async updateWhisperServerBaseUrl(baseUrl: string | null): Promise<void> {
-		const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
-		await applySettingsPatch({
-			patch: { whisper_server_base_url: normalized },
-		});
-	},
-
-	async updateOllamaUrl(baseUrl: string | null): Promise<void> {
-		const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
-		await applySettingsPatch({ patch: { ollama_url: normalized } });
-	},
-
-	async updateLocalWhisperModelId(modelId: string | null): Promise<void> {
-		const normalized = modelId?.trim() ? modelId.trim().toLowerCase() : null;
-		await applySettingsPatch({
-			patch: { local_whisper_model_id: normalized },
-		});
-	},
-
-	async updateLocalWhisperLoadMode(mode: LocalWhisperLoadMode): Promise<void> {
-		await applySettingsPatch({
-			patch: { local_whisper_load_mode: normalizeLocalWhisperLoadMode(mode) },
-		});
-	},
-
-	async updateProxySettings(proxySettings: ProxySettings): Promise<void> {
-		await applySettingsPatch({
-			patch: { proxy_settings: normalizeProxySettings(proxySettings) },
-		});
-	},
-
-	async updateLLMProvider(provider: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { llm_provider: provider } });
-	},
-
-	async updateLLMModel(model: string | null): Promise<void> {
-		await applySettingsPatch({ patch: { llm_model: model } });
-	},
-
-	async updateOpenAiReasoningEffort(
-		effort: OpenAiReasoningEffort | null,
-	): Promise<void> {
-		if (effort == null) {
-			await applySettingsPatch({ deleteKeys: ["openai_reasoning_effort"] });
-			return;
-		}
-		await applySettingsPatch({
-			patch: {
-				openai_reasoning_effort: normalizeOpenAiReasoningEffort(effort),
-			},
-		});
-	},
-
-	async updateAnthropicThinkingBudget(budget: number | null): Promise<void> {
-		if (budget == null) {
-			await applySettingsPatch({ deleteKeys: ["anthropic_thinking_budget"] });
-			return;
-		}
-		await applySettingsPatch({
-			patch: {
-				anthropic_thinking_budget: normalizeAnthropicThinkingBudget(budget),
-			},
-		});
-	},
-
-	async updateGeminiThinkingBudget(budget: number | null): Promise<void> {
-		if (budget == null) {
-			await applySettingsPatch({ deleteKeys: ["gemini_thinking_budget"] });
-			return;
-		}
-		await applySettingsPatch({
-			patch: { gemini_thinking_budget: normalizeGeminiThinkingBudget(budget) },
-		});
-	},
-
-	async updateGeminiThinkingLevel(
-		level: "minimal" | "low" | "medium" | "high" | null,
-	): Promise<void> {
-		if (level == null) {
-			await applySettingsPatch({ deleteKeys: ["gemini_thinking_level"] });
-			return;
-		}
-		await applySettingsPatch({
-			patch: { gemini_thinking_level: normalizeGeminiThinkingLevel(level) },
-		});
-	},
-
-	async updatePlayingAudioHandling(
-		handling: PlayingAudioHandling,
-	): Promise<void> {
-		await applySettingsPatch({ patch: { playing_audio_handling: handling } });
-	},
-
-	async updateSTTTimeout(timeoutSeconds: number | null): Promise<void> {
-		await applySettingsPatch({
-			patch: { stt_timeout_seconds: timeoutSeconds },
-		});
-	},
-
-	async updateOverlayMode(mode: OverlayMode): Promise<void> {
-		await applySettingsPatch({ patch: { overlay_mode: mode } });
-		// Apply the mode immediately
-		await invoke("set_overlay_mode", { mode });
-		// Best-effort: notify other windows immediately (the backend also emits this).
-		await emitTyped("settings-changed", {});
-	},
-
-	async updateOverlayShowDetailedLoading(enabled: boolean): Promise<void> {
-		await applySettingsPatch({
-			patch: { overlay_show_detailed_loading: !!enabled },
-		});
-	},
-
-	async updateOverlayMonitorTarget(
-		target: OverlayMonitorTarget,
-	): Promise<void> {
-		const normalized = normalizeOverlayMonitorTarget(target);
-		await applySettingsPatch({ patch: { overlay_monitor_target: normalized } });
-
-		// Best-effort: immediately re-snap overlay windows to the selected monitor.
-		// This uses the user's saved widget_position.
-		try {
-			const store = await getStore();
-			const raw = await store.get("widget_position");
-			const position =
-				raw === "center" ||
-				raw === "top-left" ||
-				raw === "top-center" ||
-				raw === "top-right" ||
-				raw === "bottom-left" ||
-				raw === "bottom-center" ||
-				raw === "bottom-right"
-					? (raw as WidgetPosition)
-					: ("bottom-center" as WidgetPosition);
-			await invoke("set_widget_position", { position });
-		} catch {
-			// ignore
-		}
-	},
-
-	async updateWidgetPosition(position: WidgetPosition): Promise<void> {
-		await applySettingsPatch({ patch: { widget_position: position } });
-		// Apply the position immediately
-		await invoke("set_widget_position", { position });
-	},
-
-	async updateOutputMode(mode: OutputMode): Promise<void> {
-		await applySettingsPatch({ patch: { output_mode: mode } });
-	},
-
-	async updateOutputHitEnter(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { output_hit_enter: enabled } });
-	},
-
-	async updateQuietAudioGateEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { quiet_audio_gate_enabled: enabled } });
-	},
-
-	async updateQuietAudioMinDurationSecs(seconds: number): Promise<void> {
-		await applySettingsPatch({
-			patch: { quiet_audio_min_duration_secs: seconds },
-		});
-	},
-
-	async updateQuietAudioRmsDbfsThreshold(dbfs: number): Promise<void> {
-		await applySettingsPatch({
-			patch: { quiet_audio_rms_dbfs_threshold: dbfs },
-		});
-	},
-
-	async updateQuietAudioPeakDbfsThreshold(dbfs: number): Promise<void> {
-		await applySettingsPatch({
-			patch: { quiet_audio_peak_dbfs_threshold: dbfs },
-		});
-	},
-
-	async updateQuietAudioRequireSpeech(enabled: boolean): Promise<void> {
-		await applySettingsPatch({
-			patch: { quiet_audio_require_speech: enabled },
-		});
-	},
-
-	async updateHotMicEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { hot_mic_enabled: !!enabled } });
-	},
-
-	async updateHotMicPreRollMs(ms: number): Promise<void> {
-		const normalized = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
-		await applySettingsPatch({ patch: { hot_mic_pre_roll_ms: normalized } });
-	},
-
-	async updateMicAutoRecoverEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({
-			patch: { mic_auto_recover_enabled: !!enabled },
-		});
-	},
-
-	async updateNoiseGateThresholdDbfs(
-		thresholdDbfs: number | null,
-	): Promise<void> {
-		const normalized = normalizeNoiseGateThresholdDbfs(thresholdDbfs);
-		await applySettingsPatch({
-			patch: {
-				noise_gate_threshold_dbfs: normalized,
-				// Best-effort legacy key for downgrade compatibility.
-				noise_gate_strength: noiseGateThresholdDbfsToStrength(normalized),
-			},
-		});
-	},
-
-	async updateNoiseGateStrength(strength: number): Promise<void> {
-		const normalizedStrength = normalizeNoiseGateStrength(strength);
-		await applySettingsPatch({
-			patch: {
-				noise_gate_strength: normalizedStrength,
-				// Keep the new key in sync for newer builds.
-				noise_gate_threshold_dbfs:
-					noiseGateStrengthToThresholdDbfs(normalizedStrength),
-			},
-		});
-	},
-
-	async updateAudioDownmixToMono(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { audio_downmix_to_mono: enabled } });
-	},
-
-	async updateAudioResampleTo16khz(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { audio_resample_to_16khz: enabled } });
-	},
-
-	async updateAudioHighpassEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { audio_highpass_enabled: enabled } });
-	},
-
-	async updateAudioAgcEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { audio_agc_enabled: enabled } });
-	},
-
-	async updateAudioNoiseSuppressionEnabled(enabled: boolean): Promise<void> {
-		await applySettingsPatch({
-			patch: { audio_noise_suppression_enabled: enabled },
-		});
-	},
-
-	async updateMaxSavedRecordings(max: number): Promise<void> {
-		await applySettingsPatch({
-			patch: { max_saved_recordings: normalizeMaxSavedRecordings(max) },
-		});
-	},
-
-	async updateRecordingsRetention(params: {
-		mode: "amount" | "time";
-		amount: number;
-		unit: TranscriptionRetentionUnit;
-		value: number;
-	}): Promise<void> {
-		const mode = normalizeRetentionMode(params.mode, "amount");
-		const amount = normalizeMaxSavedRecordings(params.amount);
-		const unit = normalizeTranscriptionRetentionUnit(params.unit);
-		const value = normalizeTranscriptionRetentionValue(params.value, unit);
-		await applySettingsPatch({
-			patch: {
-				recordings_retention_mode: mode,
-				recordings_retention_amount: amount,
-				recordings_retention_unit: unit,
-				recordings_retention_value: value,
-			},
-		});
-	},
-
-	async updateRequestLogsRetention(params: {
-		mode: AppSettings["request_logs_retention_mode"];
-		amount: number;
-		days: number;
-	}): Promise<void> {
-		const mode = normalizeRequestLogsRetentionMode(params.mode);
-		const amount = normalizeRequestLogsRetentionAmount(params.amount);
-		const days = normalizeRequestLogsRetentionDays(params.days);
-		await applySettingsPatch({
-			patch: {
-				request_logs_retention_mode: mode,
-				request_logs_retention_amount: amount,
-				request_logs_retention_days: days,
-			},
-		});
-	},
-
-	async updateTranscriptionRetentionPolicy(params: {
-		mode: "amount" | "time";
-		amount: number;
-		unit: TranscriptionRetentionUnit;
-		value: number;
-	}): Promise<void> {
-		const mode = normalizeRetentionMode(params.mode, "time");
-		const amount = normalizeTranscriptionRetentionAmount(params.amount);
-		const unit = normalizeTranscriptionRetentionUnit(params.unit);
-		const normalizedValue = normalizeTranscriptionRetentionValue(
-			params.value,
-			unit,
-		);
-		const effectiveValue = mode === "time" ? normalizedValue : 0;
-		await applySettingsPatch({
-			patch: {
-				transcription_retention_mode: mode,
-				transcription_retention_amount: amount,
-				transcription_retention_unit: unit,
-				transcription_retention_value: effectiveValue,
-				// Legacy key (kept for backward compatibility)
-				...(unit === "days"
-					? { transcription_retention_days: effectiveValue }
-					: {}),
-			},
-		});
-	},
-
-	async updateTranscriptionRetentionDays(days: number): Promise<void> {
-		const normalized = normalizeTranscriptionRetentionValue(days, "days");
-		await applySettingsPatch({
-			patch: {
-				// Legacy key (kept for backward compatibility)
-				transcription_retention_days: normalized,
-				// New keys
-				transcription_retention_unit: "days",
-				transcription_retention_value: normalized,
-			},
-		});
-	},
-
-	async updateTranscriptionRetention(params: {
-		unit: TranscriptionRetentionUnit;
-		value: number;
-	}): Promise<void> {
-		const unit = normalizeTranscriptionRetentionUnit(params.unit);
-		const value = normalizeTranscriptionRetentionValue(params.value, unit);
-		await applySettingsPatch({
-			patch: {
-				transcription_retention_unit: unit,
-				transcription_retention_value: value,
-				// Best-effort: keep the legacy days key in sync when unit is days.
-				// (If unit is hours, we leave the legacy key untouched to avoid silently
-				// changing semantics for older builds.)
-				...(unit === "days" ? { transcription_retention_days: value } : {}),
-			},
-		});
-	},
-
-	async updateTranscriptionRetentionDeleteRecordings(
-		enabled: boolean,
-	): Promise<void> {
-		await applySettingsPatch({
-			patch: {
-				transcription_retention_delete_recordings:
-					normalizeTranscriptionRetentionDeleteRecordings(enabled),
-			},
-		});
-	},
-
-	async updateStatsRetention(params: {
-		unit: TranscriptionRetentionUnit;
-		value: number;
-		max_bytes?: number;
-	}): Promise<void> {
-		const unit = normalizeTranscriptionRetentionUnit(params.unit);
-		const value = normalizeTranscriptionRetentionValue(params.value, unit);
-		await applySettingsPatch({
-			patch: {
-				stats_retention_unit: unit,
-				stats_retention_value: value,
-				...(typeof params.max_bytes === "number"
-					? {
-							stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
-								params.max_bytes,
-							),
-						}
-					: {}),
-			},
-		});
-	},
-
-	async getSettingsGuideState(): Promise<SettingsGuideState> {
-		const store = await getStore();
-		const raw = await store.get(SETTINGS_GUIDE_STATE_KEY);
-		const state = normalizeSettingsGuideState(raw);
-
-		try {
-			if (typeof window !== "undefined" && window.localStorage) {
-				window.localStorage.setItem("tv_settings_guide_state", state);
-			}
-		} catch {
-			// ignore
-		}
-
-		return state;
-	},
-
-	async setSettingsGuideState(state: SettingsGuideState): Promise<void> {
-		await applySettingsPatch({
-			patch: {
-				[SETTINGS_GUIDE_STATE_KEY]: normalizeSettingsGuideState(state),
-			},
-		});
-
-		try {
-			if (typeof window !== "undefined" && window.localStorage) {
-				window.localStorage.setItem("tv_settings_guide_state", state);
-			}
-		} catch {
-			// ignore
-		}
-
-		// No explicit event emit here; the backend patch command emits settings-changed.
-	},
-
-	async resetHotkeysToDefaults(): Promise<void> {
-		await applySettingsPatch({
-			patch: {
-				toggle_hotkey: DEFAULT_TOGGLE_HOTKEY,
-				hold_hotkey: DEFAULT_HOLD_HOTKEY,
-				paste_last_hotkey: DEFAULT_PASTE_LAST_HOTKEY,
-				retry_hotkey: DEFAULT_RETRY_HOTKEY,
-				quick_ask_hold_hotkey: DEFAULT_QUICK_ASK_HOLD_HOTKEY,
-				quick_ask_toggle_hotkey: DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
-				// Legacy alias (pre split): keep in sync.
-				quick_ask_hotkey: DEFAULT_QUICK_ASK_HOLD_HOTKEY,
-			},
-		});
-	},
+    };
+
+    const rawProfiles =
+      (await store.get<unknown>("rewrite_program_prompt_profiles")) ?? [];
+    const rewrite_program_prompt_profiles: RewriteProgramPromptProfile[] =
+      Array.isArray(rawProfiles)
+        ? rawProfiles
+            .map(normalizeRewriteProfile)
+            .filter((p): p is RewriteProgramPromptProfile => p !== null)
+        : [];
+
+    // Backward compatibility:
+    // - Legacy key: quick_ask_hotkey (hold-to-record)
+    // - New keys: quick_ask_hold_hotkey + quick_ask_toggle_hotkey
+    // IMPORTANT: explicit null means "disabled" and must NOT fall back.
+    const rawQuickAskHold = await store.get("quick_ask_hold_hotkey");
+    const rawQuickAskHoldEffective =
+      rawQuickAskHold === undefined
+        ? await store.get("quick_ask_hotkey")
+        : rawQuickAskHold;
+
+    const maxSavedRecordings = normalizeMaxSavedRecordings(
+      await store.get("max_saved_recordings"),
+    );
+    const recordingsRetentionMode = normalizeRetentionMode(
+      await store.get("recordings_retention_mode"),
+      "amount",
+    );
+    const recordingsRetentionAmount = await (async () => {
+      const raw = await store.get("recordings_retention_amount");
+      if (raw == null) return maxSavedRecordings;
+      return normalizeMaxSavedRecordings(raw);
+    })();
+    const recordingsRetentionUnit = normalizeTranscriptionRetentionUnit(
+      await store.get("recordings_retention_unit"),
+    );
+    const recordingsRetentionValue = normalizeTranscriptionRetentionValue(
+      await store.get("recordings_retention_value"),
+      recordingsRetentionUnit,
+    );
+    const transcriptionRetentionMode = normalizeRetentionMode(
+      (await store.get("transcription_retention_mode")) ?? "time",
+      "time",
+    );
+    const transcriptionRetentionAmount = normalizeTranscriptionRetentionAmount(
+      await store.get("transcription_retention_amount"),
+    );
+
+    const settings: AppSettings = {
+      settings_version: settingsVersion,
+      toggle_hotkey: normalizeHotkeyConfig(
+        await store.get("toggle_hotkey"),
+        defaultToggleHotkey,
+      ),
+      hold_hotkey: normalizeHotkeyConfig(
+        await store.get("hold_hotkey"),
+        defaultHoldHotkey,
+      ),
+      paste_last_hotkey: normalizeHotkeyConfig(
+        await store.get("paste_last_hotkey"),
+        defaultPasteLastHotkey,
+      ),
+      retry_hotkey: normalizeHotkeyConfig(
+        await store.get("retry_hotkey"),
+        defaultRetryHotkey,
+      ),
+      quick_ask_hold_hotkey: normalizeHotkeyConfig(
+        rawQuickAskHoldEffective,
+        defaultQuickAskHoldHotkey,
+      ),
+      quick_ask_toggle_hotkey: normalizeHotkeyConfig(
+        await store.get("quick_ask_toggle_hotkey"),
+        defaultQuickAskToggleHotkey,
+      ),
+
+      hotkey_debug_enabled:
+        (await store.get<boolean>("hotkey_debug_enabled")) ?? false,
+
+      selected_mic_id:
+        (await store.get<string | null>("selected_mic_id")) ?? null,
+      sound_enabled: (await store.get<boolean>("sound_enabled")) ?? true,
+      audio_cue: normalizeAudioCue(await store.get("audio_cue")),
+      accent_color: await (async () => {
+        const raw = (await store.get<string | null>("accent_color")) ?? null;
+        const normalized = normalizeHexColor(raw);
+
+        // If unset/invalid, default to the app's default accent.
+        // (Tangerine is an explicit option in the UI, not the implicit default.)
+        if (!normalized) return DEFAULT_ACCENT_HEX;
+
+        return normalized;
+      })(),
+      rewrite_llm_enabled:
+        (await store.get<boolean>("rewrite_llm_enabled")) ?? false,
+      quick_replace_enabled:
+        (await store.get<boolean>("quick_replace_enabled")) ?? false,
+      cleanup_prompt_sections: await (async () => {
+        const raw = await store.get<unknown>("cleanup_prompt_sections");
+        const normalized = normalizeCleanupPromptSections(raw);
+
+        return normalized;
+      })(),
+      rewrite_program_prompt_profiles,
+      stt_provider: (await store.get<string | null>("stt_provider")) ?? null,
+      stt_model: (await store.get<string | null>("stt_model")) ?? null,
+      stt_transcription_prompt:
+        (await store.get<string | null>("stt_transcription_prompt")) ?? null,
+      aquavoice_base_url:
+        (await store.get<string | null>("aquavoice_base_url")) ?? null,
+      whisper_server_base_url:
+        (await store.get<string | null>("whisper_server_base_url")) ?? null,
+      ollama_url: (await store.get<string | null>("ollama_url")) ?? null,
+      local_whisper_model_id: normalizeLocalWhisperModelId(
+        await store.get("local_whisper_model_id"),
+      ),
+      local_whisper_load_mode: normalizeLocalWhisperLoadMode(
+        await store.get("local_whisper_load_mode"),
+      ),
+      proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
+      llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
+      llm_model: (await store.get<string | null>("llm_model")) ?? null,
+
+      quick_ask_provider:
+        (await store.get<string | null>("quick_ask_provider")) ?? null,
+      quick_ask_model:
+        (await store.get<string | null>("quick_ask_model")) ?? null,
+      quick_ask_system_prompt:
+        (await store.get<string | null>("quick_ask_system_prompt")) ?? null,
+
+      quick_ask_include_selected_text:
+        (await store.get<boolean>("quick_ask_include_selected_text")) ?? false,
+
+      quick_ask_conversation_history_enabled:
+        (await store.get<boolean>("quick_ask_conversation_history_enabled")) ??
+        true,
+      quick_ask_conversation_history_count:
+        normalizeQuickAskConversationHistoryCount(
+          await store.get("quick_ask_conversation_history_count"),
+        ),
+
+      quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(
+        await store.get("quick_ask_openai_reasoning_effort"),
+      ),
+      quick_ask_anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
+        await store.get("quick_ask_anthropic_thinking_budget"),
+      ),
+      quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(
+        await store.get("quick_ask_gemini_thinking_budget"),
+      ),
+      quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(
+        await store.get("quick_ask_gemini_thinking_level"),
+      ),
+      cerebras_free_tier:
+        (await store.get<boolean>("cerebras_free_tier")) ?? true,
+      groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
+      elevenlabs_free_tier:
+        (await store.get<boolean>("elevenlabs_free_tier")) ?? true,
+      cohere_free_tier: (await store.get<boolean>("cohere_free_tier")) ?? true,
+      assemblyai_free_tier:
+        (await store.get<boolean>("assemblyai_free_tier")) ?? true,
+      speechmatics_free_tier:
+        (await store.get<boolean>("speechmatics_free_tier")) ?? true,
+      openai_reasoning_effort: normalizeOpenAiReasoningEffort(
+        await store.get("openai_reasoning_effort"),
+      ),
+      anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
+        await store.get("anthropic_thinking_budget"),
+      ),
+      gemini_thinking_budget: normalizeGeminiThinkingBudget(
+        await store.get("gemini_thinking_budget"),
+      ),
+      gemini_thinking_level: normalizeGeminiThinkingLevel(
+        await store.get("gemini_thinking_level"),
+      ),
+      playing_audio_handling: normalizePlayingAudioHandling(
+        (await store.get("playing_audio_handling")) ??
+          // Legacy key for migration:
+          (await store.get<boolean>("auto_mute_audio")) ??
+          // If neither exists, default to none
+          "none",
+      ),
+      stt_timeout_seconds:
+        (await store.get<number | null>("stt_timeout_seconds")) ?? null,
+      overlay_mode:
+        (await store.get<OverlayMode>("overlay_mode")) ?? "recording_only",
+      overlay_show_detailed_loading:
+        (await store.get<boolean>("overlay_show_detailed_loading")) ?? false,
+      overlay_monitor_target: normalizeOverlayMonitorTarget(
+        (await store.get("overlay_monitor_target")) ?? "main",
+      ),
+      widget_position:
+        (await store.get<WidgetPosition>("widget_position")) ?? "bottom-center",
+      output_mode: normalizeOutputMode(await store.get("output_mode")),
+      output_hit_enter: (await store.get<boolean>("output_hit_enter")) ?? false,
+      output_clipboard_privacy_mode:
+        (await store.get<boolean>("output_clipboard_privacy_mode")) ?? false,
+
+      main_window_close_behavior: normalizeMainWindowCloseBehavior(
+        await store.get("main_window_close_behavior"),
+      ),
+
+      quiet_audio_gate_enabled:
+        (await store.get<boolean>("quiet_audio_gate_enabled")) ?? true,
+      quiet_audio_min_duration_secs:
+        (await store.get<number>("quiet_audio_min_duration_secs")) ?? 0.15,
+      quiet_audio_rms_dbfs_threshold:
+        (await store.get<number>("quiet_audio_rms_dbfs_threshold")) ?? -60,
+      quiet_audio_peak_dbfs_threshold:
+        (await store.get<number>("quiet_audio_peak_dbfs_threshold")) ?? -50,
+      quiet_audio_require_speech:
+        (await store.get<boolean>("quiet_audio_require_speech")) ?? false,
+
+      hot_mic_enabled: (await store.get<boolean>("hot_mic_enabled")) ?? false,
+      hot_mic_pre_roll_ms:
+        (await store.get<number>("hot_mic_pre_roll_ms")) ?? 1500,
+      mic_auto_recover_enabled:
+        (await store.get<boolean>("mic_auto_recover_enabled")) ?? false,
+
+      noise_gate_threshold_dbfs: await (async () => {
+        const configured = normalizeNoiseGateThresholdDbfs(
+          await store.get("noise_gate_threshold_dbfs"),
+        );
+        if (configured != null) return configured;
+
+        // Legacy fallback
+        const legacyStrength = normalizeNoiseGateStrength(
+          await store.get("noise_gate_strength"),
+        );
+        return noiseGateStrengthToThresholdDbfs(legacyStrength);
+      })(),
+
+      audio_downmix_to_mono:
+        (await store.get<boolean>("audio_downmix_to_mono")) ?? true,
+      audio_resample_to_16khz:
+        (await store.get<boolean>("audio_resample_to_16khz")) ?? false,
+      audio_highpass_enabled:
+        (await store.get<boolean>("audio_highpass_enabled")) ?? true,
+      audio_agc_enabled:
+        (await store.get<boolean>("audio_agc_enabled")) ?? false,
+      audio_noise_suppression_enabled:
+        (await store.get<boolean>("audio_noise_suppression_enabled")) ?? false,
+
+      max_saved_recordings: maxSavedRecordings,
+      recordings_retention_mode: recordingsRetentionMode,
+      recordings_retention_amount: recordingsRetentionAmount,
+      recordings_retention_unit: recordingsRetentionUnit,
+      recordings_retention_value: recordingsRetentionValue,
+
+      request_logs_retention_mode: normalizeRequestLogsRetentionMode(
+        await store.get("request_logs_retention_mode"),
+      ),
+      request_logs_retention_amount: normalizeRequestLogsRetentionAmount(
+        await store.get("request_logs_retention_amount"),
+      ),
+      request_logs_retention_days: normalizeRequestLogsRetentionDays(
+        await store.get("request_logs_retention_days"),
+      ),
+
+      transcription_retention_mode: transcriptionRetentionMode,
+      transcription_retention_amount: transcriptionRetentionAmount,
+      // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
+      ...(await (async () => {
+        const rawUnit = await store.get("transcription_retention_unit");
+        const rawValue = await store.get("transcription_retention_value");
+
+        // Legacy installs only have days.
+        if (rawUnit == null && rawValue == null) {
+          const legacyDays = normalizeTranscriptionRetentionValue(
+            await store.get("transcription_retention_days"),
+            "days",
+          );
+          return {
+            transcription_retention_unit: "days" as const,
+            transcription_retention_value: legacyDays,
+          };
+        }
+
+        const unit = normalizeTranscriptionRetentionUnit(rawUnit);
+        const value = normalizeTranscriptionRetentionValue(rawValue, unit);
+        return {
+          transcription_retention_unit: unit,
+          transcription_retention_value: value,
+        };
+      })()),
+      transcription_retention_delete_recordings:
+        normalizeTranscriptionRetentionDeleteRecordings(
+          await store.get("transcription_retention_delete_recordings"),
+        ),
+
+      // Stats retention (persisted on disk).
+      ...(await (async () => {
+        const rawUnit = await store.get("stats_retention_unit");
+        const rawValue = await store.get("stats_retention_value");
+
+        const unit = normalizeTranscriptionRetentionUnit(rawUnit ?? "days");
+        const value = normalizeTranscriptionRetentionValue(
+          rawValue ?? 30,
+          unit,
+        );
+
+        return {
+          stats_retention_unit: unit,
+          stats_retention_value: value,
+        };
+      })()),
+      stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
+        await store.get("stats_retention_max_bytes"),
+      ),
+
+      // Backups
+      github_backup_gist_id:
+        (await store.get<string | null>("github_backup_gist_id")) ?? null,
+    };
+
+    // Mirror the accent so index.html can apply it synchronously at next launch.
+    tryWriteLocalStorage(LOCAL_ACCENT_COLOR_KEY, settings.accent_color ?? null);
+
+    return settings;
+  },
+
+  async reloadSettingsFromDisk(): Promise<void> {
+    await reloadSettingsStoreFromDisk();
+  },
+
+  async updateAccentColor(color: string | null): Promise<void> {
+    const normalized = normalizeHexColor(color);
+
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        const LOCAL_ACCENT_COLOR_KEY = "tv_accent_color";
+        if (!normalized) {
+          window.localStorage.removeItem(LOCAL_ACCENT_COLOR_KEY);
+        } else {
+          window.localStorage.setItem(LOCAL_ACCENT_COLOR_KEY, normalized);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!normalized) {
+      await applySettingsPatch({ deleteKeys: ["accent_color"] });
+    } else {
+      await applySettingsPatch({ patch: { accent_color: normalized } });
+    }
+  },
+
+  async updateMainWindowCloseBehavior(
+    behavior: MainWindowCloseBehavior,
+  ): Promise<void> {
+    const normalized = normalizeMainWindowCloseBehavior(behavior);
+    await applySettingsPatch({
+      patch: { main_window_close_behavior: normalized },
+    });
+  },
+
+  async updateGithubBackupGistId(gistId: string | null): Promise<void> {
+    const trimmed = (gistId ?? "").trim();
+    if (!trimmed) {
+      await applySettingsPatch({ deleteKeys: ["github_backup_gist_id"] });
+    } else {
+      await applySettingsPatch({ patch: { github_backup_gist_id: trimmed } });
+    }
+  },
+
+  async updateToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    await applySettingsPatch({ patch: { toggle_hotkey: hotkey } });
+  },
+
+  async updateHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    await applySettingsPatch({ patch: { hold_hotkey: hotkey } });
+  },
+
+  async updatePasteLastHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    await applySettingsPatch({ patch: { paste_last_hotkey: hotkey } });
+  },
+
+  async updateRetryHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    await applySettingsPatch({ patch: { retry_hotkey: hotkey } });
+  },
+
+  async updateQuickAskHoldHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    await applySettingsPatch({ patch: { quick_ask_hold_hotkey: hotkey } });
+  },
+
+  async updateQuickAskToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    await applySettingsPatch({ patch: { quick_ask_toggle_hotkey: hotkey } });
+  },
+
+  /**
+   * Legacy alias (pre split): Quick Ask hotkey (hold-to-record).
+   *
+   * Writes both keys for backward compatibility.
+   */
+  async updateQuickAskHotkey(hotkey: HotkeyConfig | null): Promise<void> {
+    await applySettingsPatch({
+      patch: { quick_ask_hotkey: hotkey, quick_ask_hold_hotkey: hotkey },
+    });
+  },
+
+  async updateQuickAskProvider(provider: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { quick_ask_provider: provider } });
+  },
+
+  async updateQuickAskModel(model: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { quick_ask_model: model } });
+  },
+
+  async updateQuickAskSystemPrompt(prompt: string | null): Promise<void> {
+    const normalized = typeof prompt === "string" ? prompt.trim() : "";
+    await applySettingsPatch({
+      patch: {
+        quick_ask_system_prompt: normalized.length > 0 ? normalized : null,
+      },
+    });
+  },
+
+  async updateQuickAskIncludeSelectedText(enabled: boolean): Promise<void> {
+    await applySettingsPatch({
+      patch: { quick_ask_include_selected_text: Boolean(enabled) },
+    });
+  },
+
+  async updateQuickAskConversationHistoryEnabled(
+    enabled: boolean,
+  ): Promise<void> {
+    await applySettingsPatch({
+      patch: { quick_ask_conversation_history_enabled: Boolean(enabled) },
+    });
+  },
+
+  async updateQuickAskConversationHistoryCount(count: number): Promise<void> {
+    const normalized = normalizeQuickAskConversationHistoryCount(count);
+    await applySettingsPatch({
+      patch: { quick_ask_conversation_history_count: normalized },
+    });
+  },
+
+  async updateQuickAskOpenAiReasoningEffort(
+    effort: OpenAiReasoningEffort | null,
+  ): Promise<void> {
+    if (effort == null) {
+      await applySettingsPatch({
+        deleteKeys: ["quick_ask_openai_reasoning_effort"],
+      });
+      return;
+    }
+    await applySettingsPatch({
+      patch: {
+        quick_ask_openai_reasoning_effort:
+          normalizeOpenAiReasoningEffort(effort),
+      },
+    });
+  },
+
+  async updateQuickAskAnthropicThinkingBudget(
+    budget: number | null,
+  ): Promise<void> {
+    if (budget == null) {
+      await applySettingsPatch({
+        deleteKeys: ["quick_ask_anthropic_thinking_budget"],
+      });
+      return;
+    }
+    await applySettingsPatch({
+      patch: {
+        quick_ask_anthropic_thinking_budget:
+          normalizeAnthropicThinkingBudget(budget),
+      },
+    });
+  },
+
+  async updateQuickAskGeminiThinkingBudget(
+    budget: number | null,
+  ): Promise<void> {
+    if (budget == null) {
+      await applySettingsPatch({
+        deleteKeys: ["quick_ask_gemini_thinking_budget"],
+      });
+      return;
+    }
+    await applySettingsPatch({
+      patch: {
+        quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(budget),
+      },
+    });
+  },
+
+  async updateQuickAskGeminiThinkingLevel(
+    level: "minimal" | "low" | "medium" | "high" | null,
+  ): Promise<void> {
+    if (level == null) {
+      await applySettingsPatch({
+        deleteKeys: ["quick_ask_gemini_thinking_level"],
+      });
+      return;
+    }
+    await applySettingsPatch({
+      patch: {
+        quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(level),
+      },
+    });
+  },
+
+  async updateSelectedMic(micId: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { selected_mic_id: micId } });
+  },
+
+  async updateSoundEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { sound_enabled: enabled } });
+  },
+
+  async updateHotkeyDebugEnabled(enabled: boolean): Promise<void> {
+    // Update backend runtime flag immediately so debug events can start flowing
+    // without waiting for store writes / reloads.
+    await invoke("set_hotkey_debug_enabled_runtime", { enabled: !!enabled });
+
+    await applySettingsPatch({
+      patch: { hotkey_debug_enabled: !!enabled },
+    });
+  },
+
+  async updateAudioCue(cue: AudioCue): Promise<void> {
+    await applySettingsPatch({ patch: { audio_cue: normalizeAudioCue(cue) } });
+  },
+
+  async updateRewriteLlmEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { rewrite_llm_enabled: enabled } });
+  },
+
+  async updateCleanupPromptSections(
+    sections: CleanupPromptSections | null,
+  ): Promise<void> {
+    await applySettingsPatch({ patch: { cleanup_prompt_sections: sections } });
+  },
+
+  async updateRewriteProgramPromptProfiles(
+    profiles: RewriteProgramPromptProfile[],
+  ): Promise<void> {
+    // Normalize a couple of legacy/nullable shapes before writing so the backend
+    // can deserialize reliably.
+    const sanitized = profiles.map((profile) => {
+      const presets = (profile.presets ?? []).map((preset) => ({
+        ...preset,
+        routing_hints: preset.routing_hints ?? [],
+      }));
+
+      return {
+        ...profile,
+        presets,
+      };
+    });
+
+    await applySettingsPatch({
+      patch: { rewrite_program_prompt_profiles: sanitized },
+    });
+  },
+
+  async updateSTTProvider(provider: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { stt_provider: provider } });
+  },
+
+  async updateCerebrasFreeTier(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { cerebras_free_tier: !!enabled } });
+  },
+
+  async updateGroqFreeTier(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { groq_free_tier: !!enabled } });
+  },
+
+  async updateElevenLabsFreeTier(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { elevenlabs_free_tier: !!enabled } });
+  },
+
+  async updateCohereFreeTier(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { cohere_free_tier: !!enabled } });
+  },
+
+  async updateAssemblyAiFreeTier(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { assemblyai_free_tier: !!enabled } });
+  },
+
+  async updateSpeechmaticsFreeTier(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { speechmatics_free_tier: !!enabled } });
+  },
+
+  async updateSTTModel(model: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { stt_model: model } });
+  },
+
+  async updateSTTTranscriptionPrompt(prompt: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { stt_transcription_prompt: prompt } });
+  },
+
+  async updateWhisperServerBaseUrl(baseUrl: string | null): Promise<void> {
+    const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
+    await applySettingsPatch({
+      patch: { whisper_server_base_url: normalized },
+    });
+  },
+
+  async updateOllamaUrl(baseUrl: string | null): Promise<void> {
+    const normalized = baseUrl?.trim() ? baseUrl.trim() : null;
+    await applySettingsPatch({ patch: { ollama_url: normalized } });
+  },
+
+  async updateLocalWhisperModelId(modelId: string | null): Promise<void> {
+    const normalized = modelId?.trim() ? modelId.trim().toLowerCase() : null;
+    await applySettingsPatch({
+      patch: { local_whisper_model_id: normalized },
+    });
+  },
+
+  async updateLocalWhisperLoadMode(mode: LocalWhisperLoadMode): Promise<void> {
+    await applySettingsPatch({
+      patch: { local_whisper_load_mode: normalizeLocalWhisperLoadMode(mode) },
+    });
+  },
+
+  async updateProxySettings(proxySettings: ProxySettings): Promise<void> {
+    await applySettingsPatch({
+      patch: { proxy_settings: normalizeProxySettings(proxySettings) },
+    });
+  },
+
+  async updateLLMProvider(provider: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { llm_provider: provider } });
+  },
+
+  async updateLLMModel(model: string | null): Promise<void> {
+    await applySettingsPatch({ patch: { llm_model: model } });
+  },
+
+  async updateOpenAiReasoningEffort(
+    effort: OpenAiReasoningEffort | null,
+  ): Promise<void> {
+    if (effort == null) {
+      await applySettingsPatch({ deleteKeys: ["openai_reasoning_effort"] });
+      return;
+    }
+    await applySettingsPatch({
+      patch: {
+        openai_reasoning_effort: normalizeOpenAiReasoningEffort(effort),
+      },
+    });
+  },
+
+  async updateAnthropicThinkingBudget(budget: number | null): Promise<void> {
+    if (budget == null) {
+      await applySettingsPatch({ deleteKeys: ["anthropic_thinking_budget"] });
+      return;
+    }
+    await applySettingsPatch({
+      patch: {
+        anthropic_thinking_budget: normalizeAnthropicThinkingBudget(budget),
+      },
+    });
+  },
+
+  async updateGeminiThinkingBudget(budget: number | null): Promise<void> {
+    if (budget == null) {
+      await applySettingsPatch({ deleteKeys: ["gemini_thinking_budget"] });
+      return;
+    }
+    await applySettingsPatch({
+      patch: { gemini_thinking_budget: normalizeGeminiThinkingBudget(budget) },
+    });
+  },
+
+  async updateGeminiThinkingLevel(
+    level: "minimal" | "low" | "medium" | "high" | null,
+  ): Promise<void> {
+    if (level == null) {
+      await applySettingsPatch({ deleteKeys: ["gemini_thinking_level"] });
+      return;
+    }
+    await applySettingsPatch({
+      patch: { gemini_thinking_level: normalizeGeminiThinkingLevel(level) },
+    });
+  },
+
+  async updatePlayingAudioHandling(
+    handling: PlayingAudioHandling,
+  ): Promise<void> {
+    await applySettingsPatch({ patch: { playing_audio_handling: handling } });
+  },
+
+  async updateSTTTimeout(timeoutSeconds: number | null): Promise<void> {
+    await applySettingsPatch({
+      patch: { stt_timeout_seconds: timeoutSeconds },
+    });
+  },
+
+  async updateOverlayMode(mode: OverlayMode): Promise<void> {
+    await applySettingsPatch({ patch: { overlay_mode: mode } });
+    // Apply the mode immediately
+    await invoke("set_overlay_mode", { mode });
+    // Best-effort: notify other windows immediately (the backend also emits this).
+    await emitTyped("settings-changed", {});
+  },
+
+  async updateOverlayShowDetailedLoading(enabled: boolean): Promise<void> {
+    await applySettingsPatch({
+      patch: { overlay_show_detailed_loading: !!enabled },
+    });
+  },
+
+  async updateOverlayMonitorTarget(
+    target: OverlayMonitorTarget,
+  ): Promise<void> {
+    const normalized = normalizeOverlayMonitorTarget(target);
+    await applySettingsPatch({ patch: { overlay_monitor_target: normalized } });
+
+    // Best-effort: immediately re-snap overlay windows to the selected monitor.
+    // This uses the user's saved widget_position.
+    try {
+      const store = await getStore();
+      const raw = await store.get("widget_position");
+      const position =
+        raw === "center" ||
+        raw === "top-left" ||
+        raw === "top-center" ||
+        raw === "top-right" ||
+        raw === "bottom-left" ||
+        raw === "bottom-center" ||
+        raw === "bottom-right"
+          ? (raw as WidgetPosition)
+          : ("bottom-center" as WidgetPosition);
+      await invoke("set_widget_position", { position });
+    } catch {
+      // ignore
+    }
+  },
+
+  async updateWidgetPosition(position: WidgetPosition): Promise<void> {
+    await applySettingsPatch({ patch: { widget_position: position } });
+    // Apply the position immediately
+    await invoke("set_widget_position", { position });
+  },
+
+  async updateOutputMode(mode: OutputMode): Promise<void> {
+    await applySettingsPatch({ patch: { output_mode: mode } });
+  },
+
+  async updateOutputHitEnter(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { output_hit_enter: enabled } });
+  },
+
+  async updateQuietAudioGateEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { quiet_audio_gate_enabled: enabled } });
+  },
+
+  async updateQuietAudioMinDurationSecs(seconds: number): Promise<void> {
+    await applySettingsPatch({
+      patch: { quiet_audio_min_duration_secs: seconds },
+    });
+  },
+
+  async updateQuietAudioRmsDbfsThreshold(dbfs: number): Promise<void> {
+    await applySettingsPatch({
+      patch: { quiet_audio_rms_dbfs_threshold: dbfs },
+    });
+  },
+
+  async updateQuietAudioPeakDbfsThreshold(dbfs: number): Promise<void> {
+    await applySettingsPatch({
+      patch: { quiet_audio_peak_dbfs_threshold: dbfs },
+    });
+  },
+
+  async updateQuietAudioRequireSpeech(enabled: boolean): Promise<void> {
+    await applySettingsPatch({
+      patch: { quiet_audio_require_speech: enabled },
+    });
+  },
+
+  async updateHotMicEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { hot_mic_enabled: !!enabled } });
+  },
+
+  async updateHotMicPreRollMs(ms: number): Promise<void> {
+    const normalized = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
+    await applySettingsPatch({ patch: { hot_mic_pre_roll_ms: normalized } });
+  },
+
+  async updateMicAutoRecoverEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({
+      patch: { mic_auto_recover_enabled: !!enabled },
+    });
+  },
+
+  async updateNoiseGateThresholdDbfs(
+    thresholdDbfs: number | null,
+  ): Promise<void> {
+    const normalized = normalizeNoiseGateThresholdDbfs(thresholdDbfs);
+    await applySettingsPatch({
+      patch: {
+        noise_gate_threshold_dbfs: normalized,
+        // Best-effort legacy key for downgrade compatibility.
+        noise_gate_strength: noiseGateThresholdDbfsToStrength(normalized),
+      },
+    });
+  },
+
+  async updateNoiseGateStrength(strength: number): Promise<void> {
+    const normalizedStrength = normalizeNoiseGateStrength(strength);
+    await applySettingsPatch({
+      patch: {
+        noise_gate_strength: normalizedStrength,
+        // Keep the new key in sync for newer builds.
+        noise_gate_threshold_dbfs:
+          noiseGateStrengthToThresholdDbfs(normalizedStrength),
+      },
+    });
+  },
+
+  async updateAudioDownmixToMono(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { audio_downmix_to_mono: enabled } });
+  },
+
+  async updateAudioResampleTo16khz(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { audio_resample_to_16khz: enabled } });
+  },
+
+  async updateAudioHighpassEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { audio_highpass_enabled: enabled } });
+  },
+
+  async updateAudioAgcEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({ patch: { audio_agc_enabled: enabled } });
+  },
+
+  async updateAudioNoiseSuppressionEnabled(enabled: boolean): Promise<void> {
+    await applySettingsPatch({
+      patch: { audio_noise_suppression_enabled: enabled },
+    });
+  },
+
+  async updateMaxSavedRecordings(max: number): Promise<void> {
+    await applySettingsPatch({
+      patch: { max_saved_recordings: normalizeMaxSavedRecordings(max) },
+    });
+  },
+
+  async updateRecordingsRetention(params: {
+    mode: "amount" | "time";
+    amount: number;
+    unit: TranscriptionRetentionUnit;
+    value: number;
+  }): Promise<void> {
+    const mode = normalizeRetentionMode(params.mode, "amount");
+    const amount = normalizeMaxSavedRecordings(params.amount);
+    const unit = normalizeTranscriptionRetentionUnit(params.unit);
+    const value = normalizeTranscriptionRetentionValue(params.value, unit);
+    await applySettingsPatch({
+      patch: {
+        recordings_retention_mode: mode,
+        recordings_retention_amount: amount,
+        recordings_retention_unit: unit,
+        recordings_retention_value: value,
+      },
+    });
+  },
+
+  async updateRequestLogsRetention(params: {
+    mode: AppSettings["request_logs_retention_mode"];
+    amount: number;
+    days: number;
+  }): Promise<void> {
+    const mode = normalizeRequestLogsRetentionMode(params.mode);
+    const amount = normalizeRequestLogsRetentionAmount(params.amount);
+    const days = normalizeRequestLogsRetentionDays(params.days);
+    await applySettingsPatch({
+      patch: {
+        request_logs_retention_mode: mode,
+        request_logs_retention_amount: amount,
+        request_logs_retention_days: days,
+      },
+    });
+  },
+
+  async updateTranscriptionRetentionPolicy(params: {
+    mode: "amount" | "time";
+    amount: number;
+    unit: TranscriptionRetentionUnit;
+    value: number;
+  }): Promise<void> {
+    const mode = normalizeRetentionMode(params.mode, "time");
+    const amount = normalizeTranscriptionRetentionAmount(params.amount);
+    const unit = normalizeTranscriptionRetentionUnit(params.unit);
+    const normalizedValue = normalizeTranscriptionRetentionValue(
+      params.value,
+      unit,
+    );
+    const effectiveValue = mode === "time" ? normalizedValue : 0;
+    await applySettingsPatch({
+      patch: {
+        transcription_retention_mode: mode,
+        transcription_retention_amount: amount,
+        transcription_retention_unit: unit,
+        transcription_retention_value: effectiveValue,
+        // Legacy key (kept for backward compatibility)
+        ...(unit === "days"
+          ? { transcription_retention_days: effectiveValue }
+          : {}),
+      },
+    });
+  },
+
+  async updateTranscriptionRetentionDays(days: number): Promise<void> {
+    const normalized = normalizeTranscriptionRetentionValue(days, "days");
+    await applySettingsPatch({
+      patch: {
+        // Legacy key (kept for backward compatibility)
+        transcription_retention_days: normalized,
+        // New keys
+        transcription_retention_unit: "days",
+        transcription_retention_value: normalized,
+      },
+    });
+  },
+
+  async updateTranscriptionRetention(params: {
+    unit: TranscriptionRetentionUnit;
+    value: number;
+  }): Promise<void> {
+    const unit = normalizeTranscriptionRetentionUnit(params.unit);
+    const value = normalizeTranscriptionRetentionValue(params.value, unit);
+    await applySettingsPatch({
+      patch: {
+        transcription_retention_unit: unit,
+        transcription_retention_value: value,
+        // Best-effort: keep the legacy days key in sync when unit is days.
+        // (If unit is hours, we leave the legacy key untouched to avoid silently
+        // changing semantics for older builds.)
+        ...(unit === "days" ? { transcription_retention_days: value } : {}),
+      },
+    });
+  },
+
+  async updateTranscriptionRetentionDeleteRecordings(
+    enabled: boolean,
+  ): Promise<void> {
+    await applySettingsPatch({
+      patch: {
+        transcription_retention_delete_recordings:
+          normalizeTranscriptionRetentionDeleteRecordings(enabled),
+      },
+    });
+  },
+
+  async updateStatsRetention(params: {
+    unit: TranscriptionRetentionUnit;
+    value: number;
+    max_bytes?: number;
+  }): Promise<void> {
+    const unit = normalizeTranscriptionRetentionUnit(params.unit);
+    const value = normalizeTranscriptionRetentionValue(params.value, unit);
+    await applySettingsPatch({
+      patch: {
+        stats_retention_unit: unit,
+        stats_retention_value: value,
+        ...(typeof params.max_bytes === "number"
+          ? {
+              stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
+                params.max_bytes,
+              ),
+            }
+          : {}),
+      },
+    });
+  },
+
+  async getSettingsGuideState(): Promise<SettingsGuideState> {
+    const store = await getStore();
+    const raw = await store.get(SETTINGS_GUIDE_STATE_KEY);
+    const state = normalizeSettingsGuideState(raw);
+
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem("tv_settings_guide_state", state);
+      }
+    } catch {
+      // ignore
+    }
+
+    return state;
+  },
+
+  async setSettingsGuideState(state: SettingsGuideState): Promise<void> {
+    await applySettingsPatch({
+      patch: {
+        [SETTINGS_GUIDE_STATE_KEY]: normalizeSettingsGuideState(state),
+      },
+    });
+
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem("tv_settings_guide_state", state);
+      }
+    } catch {
+      // ignore
+    }
+
+    // No explicit event emit here; the backend patch command emits settings-changed.
+  },
+
+  async resetHotkeysToDefaults(): Promise<void> {
+    await applySettingsPatch({
+      patch: {
+        toggle_hotkey: DEFAULT_TOGGLE_HOTKEY,
+        hold_hotkey: DEFAULT_HOLD_HOTKEY,
+        paste_last_hotkey: DEFAULT_PASTE_LAST_HOTKEY,
+        retry_hotkey: DEFAULT_RETRY_HOTKEY,
+        quick_ask_hold_hotkey: DEFAULT_QUICK_ASK_HOLD_HOTKEY,
+        quick_ask_toggle_hotkey: DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
+        // Legacy alias (pre split): keep in sync.
+        quick_ask_hotkey: DEFAULT_QUICK_ASK_HOLD_HOTKEY,
+      },
+    });
+  },
 };

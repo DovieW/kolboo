@@ -60,6 +60,7 @@ mod text;
 mod tracing_init;
 mod vad;
 mod windows_apps;
+mod windows_uia;
 
 mod adapters;
 mod core;
@@ -218,6 +219,16 @@ pub(crate) fn stop_recording(
 
     // Optional: after pasting, press Enter.
     let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
+
+    // Windows-only: capture a focused target snapshot near recording stop.
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(snapshot) = crate::windows_uia::snapshot::capture_focused_snapshot() {
+            if let Ok(mut guard) = state.windows_text_target_snapshot.lock() {
+                *guard = Some(snapshot);
+            }
+        }
+    }
 
     // Resolve the program profile id captured at recording start (before overlays can steal focus).
     // We "take" it (read and clear) so it can't leak across sessions.
@@ -620,6 +631,8 @@ pub(crate) fn stop_recording(
                 });
             }
 
+            let mut complete_request_log_after_output = false;
+
             match pipeline_clone.stop_and_transcribe_detailed().await {
                 Ok(result) => {
                     log::info!("Transcription complete: {} chars", result.final_text.len());
@@ -719,11 +732,15 @@ pub(crate) fn stop_recording(
                             }
 
                             if should_complete_now {
-                                log.complete_success();
+                                log.info("Transcription completed; output pending");
                             } else {
                                 log.info("Transcription completed; Quick Ask answer pending");
                             }
                         });
+
+                        if should_complete_now {
+                            complete_request_log_after_output = true;
+                        }
 
                         // Persist preset metadata into History (best-effort).
                         // The pipeline decides preset selection during routing and stores it
@@ -745,16 +762,6 @@ pub(crate) fn stop_recording(
                         // Persist cost/usage stats (best-effort).
                         // For Quick Ask sessions we emit stats after the answer step so we can
                         // include the answer LLM details.
-                        if should_complete_now {
-                            if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                                stats::emit_cost_events_for_current_request(
-                                    &app_clone,
-                                    stats::EventStatus::Success,
-                                    Some(&wav),
-                                );
-                            }
-                            log_store.complete_current();
-                        }
                     }
 
                     // Persist audio for retry (best-effort)
@@ -1035,7 +1042,7 @@ pub(crate) fn stop_recording(
 
                                     // Best-effort: attach any highlighted text captured at recording stop.
                                     // We keep this bounded so we don't blow up token usage.
-                                    let selected_context: Option<String> =
+                                    let selection_context =
                                         sessions::selection_probe::await_probe_result(
                                             &app_clone,
                                             sessions::selection_probe::ProbeKind::QuickAsk,
@@ -1044,8 +1051,15 @@ pub(crate) fn stop_recording(
                                         )
                                         .await;
 
-                                    let selected_context_trimmed = selected_context
-                                        .as_deref()
+                                    let selected_context_trimmed = selection_context
+                                        .as_ref()
+                                        .and_then(|ctx| ctx.selection_text.as_deref())
+                                        .map(str::trim)
+                                        .filter(|s| !s.is_empty());
+
+                                    let surrounding_context_trimmed = selection_context
+                                        .as_ref()
+                                        .and_then(|ctx| ctx.surrounding_text.as_deref())
                                         .map(str::trim)
                                         .filter(|s| !s.is_empty());
 
@@ -1113,6 +1127,18 @@ pub(crate) fn stop_recording(
                                             }
                                         });
 
+                                    let surrounding_context_capped: Option<String> =
+                                        surrounding_context_trimmed.map(|ctx| {
+                                            if ctx.len() > cap {
+                                                format!(
+                                                    "{}\n\n… (truncated)",
+                                                    truncate_utf8_to_byte_cap(ctx, cap)
+                                                )
+                                            } else {
+                                                ctx.to_string()
+                                            }
+                                        });
+
                                     let clipboard_context_capped: Option<String> =
                                         clipboard_trimmed.map(|cb| {
                                             if cb.len() > cap {
@@ -1128,13 +1154,16 @@ pub(crate) fn stop_recording(
                                     // This is the *exact* context text (if any) we attached to the question.
                                     // Stored for request logs/UI.
                                     let quick_ask_context_text_for_log: Option<String> =
-                                        selected_context_capped.clone();
+                                        selected_context_capped
+                                            .clone()
+                                            .or_else(|| surrounding_context_capped.clone());
                                     let quick_ask_clipboard_context_for_log: Option<String> =
                                         clipboard_context_capped.clone();
 
                                     let question_with_context = crate::clipboard_context::build_quick_ask_user_message_with_context(
                                         question.as_str(),
                                         selected_context_capped.as_deref(),
+                                        surrounding_context_capped.as_deref(),
                                         clipboard_context_capped.as_deref(),
                                     );
 
@@ -1205,7 +1234,9 @@ pub(crate) fn stop_recording(
                                         app_clone.try_state::<RequestLogStore>()
                                     {
                                         let context_chars =
-                                            selected_context_trimmed.map(|s| s.len());
+                                            selected_context_trimmed.map(|s| s.len()).or_else(
+                                                || surrounding_context_trimmed.map(|s| s.len()),
+                                            );
                                         let clipboard_chars = clipboard_trimmed.map(|s| s.len());
                                         let quick_ask_context_text_for_log =
                                             quick_ask_context_text_for_log.clone();
@@ -1381,19 +1412,28 @@ pub(crate) fn stop_recording(
                             // rewrite the selection using the transcript as an instruction.
                             if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
                                 // Wait briefly for the selection probe to finish (best-effort).
-                                let selected_text = sessions::selection_probe::await_probe_result(
-                                    &app_clone,
-                                    sessions::selection_probe::ProbeKind::QuickReplace,
-                                    quick_replace_epoch,
-                                    700,
-                                )
-                                .await;
+                                let selection_context =
+                                    sessions::selection_probe::await_probe_result(
+                                        &app_clone,
+                                        sessions::selection_probe::ProbeKind::QuickReplace,
+                                        quick_replace_epoch,
+                                        700,
+                                    )
+                                    .await;
 
-                                if let Some(selected) = selected_text
+                                let selected_text = selection_context
                                     .as_ref()
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                {
+                                    .and_then(|ctx| ctx.selection_text.as_deref())
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty());
+
+                                let surrounding_text = selection_context
+                                    .as_ref()
+                                    .and_then(|ctx| ctx.surrounding_text.as_deref())
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty());
+
+                                if let Some(selected) = selected_text {
                                     if let Some(log_store) =
                                         app_clone.try_state::<RequestLogStore>()
                                     {
@@ -1496,20 +1536,22 @@ pub(crate) fn stop_recording(
                                             None
                                         };
 
-                                        let user_prompt = if let Some(ref cb) = clipboard_text {
-                                            format!(
-                                                "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}\n\nCLIPBOARD CONTEXT:\n{}\n\nReturn only the updated text.",
-                                                instructions_text,
-                                                selected,
-                                                cb.trim()
-                                            )
-                                        } else {
-                                            format!(
-                                                "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}\n\nReturn only the updated text.",
-                                                instructions_text,
-                                                selected
-                                            )
-                                        };
+                                        let mut user_prompt = format!(
+                                            "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}",
+                                            instructions_text, selected
+                                        );
+
+                                        if let Some(surrounding) = surrounding_text {
+                                            user_prompt.push_str("\n\nSURROUNDING TEXT:\n");
+                                            user_prompt.push_str(surrounding);
+                                        }
+
+                                        if let Some(ref cb) = clipboard_text {
+                                            user_prompt.push_str("\n\nCLIPBOARD CONTEXT:\n");
+                                            user_prompt.push_str(cb.trim());
+                                        }
+
+                                        user_prompt.push_str("\n\nReturn only the updated text.");
 
                                         // Store clipboard context in request log if present.
                                         if let Some(ref cb_text) = clipboard_text {
@@ -1716,22 +1758,118 @@ pub(crate) fn stop_recording(
                                     false,
                                 );
 
-                                if let Err(e) = commands::text::output_text_with_mode_options(
-                                    &output_value,
-                                    output_mode,
-                                    output_hit_enter,
-                                    !output_clipboard_privacy_mode,
-                                ) {
-                                    log::error!("Failed to output transcript: {}", e);
+                                #[cfg(target_os = "windows")]
+                                {
+                                    if matches!(output_mode, commands::text::OutputMode::Paste) {
+                                        let snapshot = app_clone
+                                            .state::<AppState>()
+                                            .windows_text_target_snapshot
+                                            .lock()
+                                            .ok()
+                                            .and_then(|mut g| g.take());
 
-                                    if let Some(log_store) =
-                                        app_clone.try_state::<RequestLogStore>()
-                                    {
-                                        log_store.with_current(|log| {
-                                            log.warn(format!("Output failed: {}", e));
-                                        });
+                                        if let Err(e) =
+                                            crate::windows_uia::insert::insert_text_with_snapshot(
+                                                &app_clone,
+                                                &output_value,
+                                                snapshot,
+                                                true,
+                                                true,
+                                            )
+                                        {
+                                            log::error!(
+                                                "Failed to output transcript (UIA ladder): {}",
+                                                e
+                                            );
+
+                                            if let Some(log_store) =
+                                                app_clone.try_state::<RequestLogStore>()
+                                            {
+                                                log_store.with_current(|log| {
+                                                    log.warn(format!("Output failed: {}", e));
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        let safe_to_insert =
+                                            crate::windows_uia::snapshot::capture_focused_snapshot(
+                                            )
+                                            .ok()
+                                            .map(|snapshot| {
+                                                crate::windows_uia::safety::allow_insert(&snapshot)
+                                            })
+                                            .unwrap_or(true);
+
+                                        if !safe_to_insert {
+                                            if let Err(e) =
+                                                crate::text::inject::copy_to_clipboard_and_notify(
+                                                    &app_clone,
+                                                    &output_value,
+                                                )
+                                            {
+                                                log::error!("Failed to output transcript (safe fallback): {}", e);
+                                            }
+                                        } else if let Err(e) =
+                                            commands::text::output_text_with_mode_options(
+                                                &output_value,
+                                                output_mode,
+                                                output_hit_enter,
+                                                !output_clipboard_privacy_mode,
+                                            )
+                                        {
+                                            log::error!("Failed to output transcript: {}", e);
+
+                                            if let Some(log_store) =
+                                                app_clone.try_state::<RequestLogStore>()
+                                            {
+                                                log_store.with_current(|log| {
+                                                    log.warn(format!("Output failed: {}", e));
+                                                });
+                                            }
+                                        }
                                     }
                                 }
+
+                                #[cfg(not(target_os = "windows"))]
+                                {
+                                    if let Err(e) = commands::text::output_text_with_mode_options(
+                                        &output_value,
+                                        output_mode,
+                                        output_hit_enter,
+                                        !output_clipboard_privacy_mode,
+                                    ) {
+                                        log::error!("Failed to output transcript: {}", e);
+
+                                        if let Some(log_store) =
+                                            app_clone.try_state::<RequestLogStore>()
+                                        {
+                                            log_store.with_current(|log| {
+                                                log.warn(format!("Output failed: {}", e));
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Finalize request log after output so UIA insert logs are captured.
+                        if complete_request_log_after_output {
+                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+                                log_store.with_current(|log| {
+                                    if log.status == crate::request_log::RequestStatus::InProgress {
+                                        log.complete_success();
+                                    }
+                                });
+
+                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                                    stats::emit_cost_events_for_current_request(
+                                        &app_clone,
+                                        stats::EventStatus::Success,
+                                        Some(&wav),
+                                    );
+                                }
+
+                                log_store.complete_current();
                             }
                         }
 

@@ -507,178 +507,178 @@ export type LocalWhisperLoadMode = "manual" | "on_transcribe" | "on_launch";
 export type MainWindowCloseBehavior = "exit_program" | "minimize_to_tray";
 
 export interface AppSettings {
-	// Settings schema version (used for migrations).
-	settings_version: number;
-	toggle_hotkey: HotkeyConfig | null;
-	hold_hotkey: HotkeyConfig | null;
-	paste_last_hotkey: HotkeyConfig | null;
-	retry_hotkey: HotkeyConfig | null;
-	quick_ask_hold_hotkey: HotkeyConfig | null;
-	quick_ask_toggle_hotkey: HotkeyConfig | null;
+  // Settings schema version (used for migrations).
+  settings_version: number;
+  toggle_hotkey: HotkeyConfig | null;
+  hold_hotkey: HotkeyConfig | null;
+  paste_last_hotkey: HotkeyConfig | null;
+  retry_hotkey: HotkeyConfig | null;
+  quick_ask_hold_hotkey: HotkeyConfig | null;
+  quick_ask_toggle_hotkey: HotkeyConfig | null;
 
-	/** When true, backend emits extra hotkey diagnostics to the System Events panel. */
-	hotkey_debug_enabled: boolean;
+  /** When true, backend emits extra hotkey diagnostics to the System Events panel. */
+  hotkey_debug_enabled: boolean;
 
-	selected_mic_id: string | null;
-	sound_enabled: boolean;
-	audio_cue: AudioCue;
-	/** User-selected accent color (hex). */
-	accent_color: string | null;
-	// Global gate for the optional LLM rewrite step
-	rewrite_llm_enabled: boolean;
+  selected_mic_id: string | null;
+  sound_enabled: boolean;
+  audio_cue: AudioCue;
+  /** User-selected accent color (hex). */
+  accent_color: string | null;
+  // Global gate for the optional LLM rewrite step
+  rewrite_llm_enabled: boolean;
 
-	// Quick Replace (global defaults)
-	// NOTE: This is used by the backend; profiles may inherit from it.
-	quick_replace_enabled: boolean;
-	cleanup_prompt_sections: CleanupPromptSections | null;
-	rewrite_program_prompt_profiles: RewriteProgramPromptProfile[];
-	stt_provider: string | null;
-	stt_model: string | null;
-	// Global STT prompt (applies to all transcriptions when supported by the selected provider/model)
-	stt_transcription_prompt: string | null;
-	// AquaVoice server override (optional)
-	aquavoice_base_url: string | null;
-	// Whisper server base URL (OpenAI-compatible API; optional)
-	whisper_server_base_url: string | null;
+  // Quick Replace (global defaults)
+  // NOTE: This is used by the backend; profiles may inherit from it.
+  quick_replace_enabled: boolean;
+  cleanup_prompt_sections: CleanupPromptSections | null;
+  rewrite_program_prompt_profiles: RewriteProgramPromptProfile[];
+  stt_provider: string | null;
+  stt_model: string | null;
+  // Global STT prompt (applies to all transcriptions when supported by the selected provider/model)
+  stt_transcription_prompt: string | null;
+  // AquaVoice server override (optional)
+  aquavoice_base_url: string | null;
+  // Whisper server base URL (OpenAI-compatible API; optional)
+  whisper_server_base_url: string | null;
 
-	// Ollama server base URL (optional)
-	ollama_url: string | null;
+  // Ollama server base URL (optional)
+  ollama_url: string | null;
 
-	// Local Whisper model id (e.g. "base", "tinyen"). Only meaningful when the
-	// Local Whisper feature is compiled in.
-	local_whisper_model_id: string | null;
+  // Local Whisper model id (e.g. "base", "tinyen"). Only meaningful when the
+  // Local Whisper feature is compiled in.
+  local_whisper_model_id: string | null;
 
-	// When to load the local whisper.cpp model file.
-	local_whisper_load_mode: LocalWhisperLoadMode;
+  // When to load the local whisper.cpp model file.
+  local_whisper_load_mode: LocalWhisperLoadMode;
 
-	// Global proxy configuration for outgoing HTTP requests
-	proxy_settings: ProxySettings;
-	llm_provider: string | null;
-	llm_model: string | null;
+  // Global proxy configuration for outgoing HTTP requests
+  proxy_settings: ProxySettings;
+  llm_provider: string | null;
+  llm_model: string | null;
 
-	// Quick Ask (global defaults)
-	quick_ask_provider: string | null;
-	quick_ask_model: string | null;
-	quick_ask_system_prompt: string | null;
+  // Quick Ask (global defaults)
+  quick_ask_provider: string | null;
+  quick_ask_model: string | null;
+  quick_ask_system_prompt: string | null;
 
-	// When enabled, Quick Ask will attempt to capture the currently highlighted text
-	// (via a copy probe) and include it as additional context.
-	// NOTE: This is a global setting (not per-profile) and is disabled by default.
-	quick_ask_include_selected_text: boolean;
+  // When enabled, Quick Ask will attempt to capture the currently highlighted text
+  // (via a copy probe) and include it as additional context.
+  // NOTE: This is a global setting (not per-profile) and is disabled by default.
+  quick_ask_include_selected_text: boolean;
 
-	// Quick Ask conversation history (ephemeral; in-memory only)
-	quick_ask_conversation_history_enabled: boolean;
-	// How many previous Q/A turns to include when enabled.
-	quick_ask_conversation_history_count: number;
+  // Quick Ask conversation history (ephemeral; in-memory only)
+  quick_ask_conversation_history_enabled: boolean;
+  // How many previous Q/A turns to include when enabled.
+  quick_ask_conversation_history_count: number;
 
-	quick_ask_openai_reasoning_effort: OpenAiReasoningEffort | null;
-	quick_ask_anthropic_thinking_budget: number | null;
-	quick_ask_gemini_thinking_budget: number | null;
-	quick_ask_gemini_thinking_level: "minimal" | "low" | "medium" | "high" | null;
+  quick_ask_openai_reasoning_effort: OpenAiReasoningEffort | null;
+  quick_ask_anthropic_thinking_budget: number | null;
+  quick_ask_gemini_thinking_budget: number | null;
+  quick_ask_gemini_thinking_level: "minimal" | "low" | "medium" | "high" | null;
 
-	// Provider-specific knobs
-	// When true, treat Cerebras usage as free-tier for stats filtering.
-	cerebras_free_tier: boolean;
+  // Provider-specific knobs
+  // When true, treat Cerebras usage as free-tier for stats filtering.
+  cerebras_free_tier: boolean;
 
-	// When true, treat Groq usage as free-tier (UI-only for now; kept in settings for future backend usage).
-	groq_free_tier: boolean;
+  // When true, treat Groq usage as free-tier (UI-only for now; kept in settings for future backend usage).
+  groq_free_tier: boolean;
 
-	// When true, treat ElevenLabs usage as free-tier for stats filtering.
-	elevenlabs_free_tier: boolean;
+  // When true, treat ElevenLabs usage as free-tier for stats filtering.
+  elevenlabs_free_tier: boolean;
 
-	// When true, treat Cohere usage as free-tier for stats filtering.
-	cohere_free_tier: boolean;
+  // When true, treat Cohere usage as free-tier for stats filtering.
+  cohere_free_tier: boolean;
 
-	// When true, treat AssemblyAI usage as free-tier for stats filtering.
-	assemblyai_free_tier: boolean;
+  // When true, treat AssemblyAI usage as free-tier for stats filtering.
+  assemblyai_free_tier: boolean;
 
-	// When true, treat Speechmatics usage as free-tier for stats filtering.
-	speechmatics_free_tier: boolean;
+  // When true, treat Speechmatics usage as free-tier for stats filtering.
+  speechmatics_free_tier: boolean;
 
-	// Optional per-provider reasoning/thinking knobs.
-	// These are ignored unless the selected provider/model supports them.
-	openai_reasoning_effort: OpenAiReasoningEffort | null;
-	anthropic_thinking_budget: number | null;
-	gemini_thinking_budget: number | null;
-	gemini_thinking_level: "minimal" | "low" | "medium" | "high" | null;
+  // Optional per-provider reasoning/thinking knobs.
+  // These are ignored unless the selected provider/model supports them.
+  openai_reasoning_effort: OpenAiReasoningEffort | null;
+  anthropic_thinking_budget: number | null;
+  gemini_thinking_budget: number | null;
+  gemini_thinking_level: "minimal" | "low" | "medium" | "high" | null;
 
-	playing_audio_handling: PlayingAudioHandling;
-	stt_timeout_seconds: number | null;
-	overlay_mode: OverlayMode;
-	/** When true, show detailed phase text (routing/transcribing/rewriting) in the overlay. */
-	overlay_show_detailed_loading: boolean;
-	/** Which monitor the overlay windows should appear on. */
-	overlay_monitor_target: OverlayMonitorTarget;
-	widget_position: WidgetPosition;
-	output_mode: OutputMode;
-	output_hit_enter: boolean;
-	// When true, output injection will not read/restore the clipboard.
-	output_clipboard_privacy_mode: boolean;
+  playing_audio_handling: PlayingAudioHandling;
+  stt_timeout_seconds: number | null;
+  overlay_mode: OverlayMode;
+  /** When true, show detailed phase text (routing/transcribing/rewriting) in the overlay. */
+  overlay_show_detailed_loading: boolean;
+  /** Which monitor the overlay windows should appear on. */
+  overlay_monitor_target: OverlayMonitorTarget;
+  widget_position: WidgetPosition;
+  output_mode: OutputMode;
+  output_hit_enter: boolean;
+  // When true, output injection will not read/restore the clipboard.
+  output_clipboard_privacy_mode: boolean;
 
-	/** What the window close button does for the main/settings window. */
-	main_window_close_behavior: MainWindowCloseBehavior;
+  /** What the window close button does for the main/settings window. */
+  main_window_close_behavior: MainWindowCloseBehavior;
 
-	// Hallucination protection (quiet-audio gate)
-	quiet_audio_gate_enabled: boolean;
-	quiet_audio_min_duration_secs: number;
-	quiet_audio_rms_dbfs_threshold: number;
-	quiet_audio_peak_dbfs_threshold: number;
-	// Extra protection: if enabled, also require that VAD detects speech.
-	quiet_audio_require_speech: boolean;
+  // Hallucination protection (quiet-audio gate)
+  quiet_audio_gate_enabled: boolean;
+  quiet_audio_min_duration_secs: number;
+  quiet_audio_rms_dbfs_threshold: number;
+  quiet_audio_peak_dbfs_threshold: number;
+  // Extra protection: if enabled, also require that VAD detects speech.
+  quiet_audio_require_speech: boolean;
 
-	// Capture behavior (Hot Mic + recovery)
-	// When enabled, keep the microphone stream open while idle and maintain a rolling pre-roll.
-	hot_mic_enabled: boolean;
-	// How much audio to keep before record start (ms). Only used when hot_mic_enabled is true.
-	hot_mic_pre_roll_ms: number;
-	// When enabled, watchdog the mic stream and attempt auto-recovery on hangs/disconnects.
-	mic_auto_recover_enabled: boolean;
+  // Capture behavior (Hot Mic + recovery)
+  // When enabled, keep the microphone stream open while idle and maintain a rolling pre-roll.
+  hot_mic_enabled: boolean;
+  // How much audio to keep before record start (ms). Only used when hot_mic_enabled is true.
+  hot_mic_pre_roll_ms: number;
+  // When enabled, watchdog the mic stream and attempt auto-recovery on hangs/disconnects.
+  mic_auto_recover_enabled: boolean;
 
-	// Experimental: noise gate threshold (dBFS). null means off.
-	noise_gate_threshold_dbfs: number | null;
+  // Experimental: noise gate threshold (dBFS). null means off.
+  noise_gate_threshold_dbfs: number | null;
 
-	// Voice pickup (stop-time preprocessing)
-	audio_downmix_to_mono: boolean;
-	audio_resample_to_16khz: boolean;
-	audio_highpass_enabled: boolean;
-	audio_agc_enabled: boolean;
-	audio_noise_suppression_enabled: boolean;
+  // Voice pickup (stop-time preprocessing)
+  audio_downmix_to_mono: boolean;
+  audio_resample_to_16khz: boolean;
+  audio_highpass_enabled: boolean;
+  audio_agc_enabled: boolean;
+  audio_noise_suppression_enabled: boolean;
 
-	// How many recordings/history entries to retain
-	max_saved_recordings: number;
+  // How many recordings/history entries to retain
+  max_saved_recordings: number;
 
-	// Time-based retention for transcriptions/history.
-	// 0 means keep forever.
-	transcription_retention_mode: RequestLogsRetentionMode;
-	transcription_retention_amount: number;
-	transcription_retention_unit: TranscriptionRetentionUnit;
-	transcription_retention_value: number;
-	// If enabled, deleting old transcriptions also deletes their recordings (best-effort).
-	transcription_retention_delete_recordings: boolean;
+  // Time-based retention for transcriptions/history.
+  // 0 means keep forever.
+  transcription_retention_mode: RequestLogsRetentionMode;
+  transcription_retention_amount: number;
+  transcription_retention_unit: TranscriptionRetentionUnit;
+  transcription_retention_value: number;
+  // If enabled, deleting old transcriptions also deletes their recordings (best-effort).
+  transcription_retention_delete_recordings: boolean;
 
-	// Recordings retention (amount or time-based).
-	recordings_retention_mode: RequestLogsRetentionMode;
-	recordings_retention_amount: number;
-	recordings_retention_unit: TranscriptionRetentionUnit;
-	recordings_retention_value: number;
+  // Recordings retention (amount or time-based).
+  recordings_retention_mode: RequestLogsRetentionMode;
+  recordings_retention_amount: number;
+  recordings_retention_unit: TranscriptionRetentionUnit;
+  recordings_retention_value: number;
 
-	// Persisted stats retention (usage/cost events).
-	// 0 means keep forever.
-	stats_retention_unit: TranscriptionRetentionUnit;
-	stats_retention_value: number;
-	// Defensive cap for on-disk stats storage.
-	stats_retention_max_bytes: number;
+  // Persisted stats retention (usage/cost events).
+  // 0 means keep forever.
+  stats_retention_unit: TranscriptionRetentionUnit;
+  stats_retention_value: number;
+  // Defensive cap for on-disk stats storage.
+  stats_retention_max_bytes: number;
 
-	// Request logs retention (in-memory request log history)
-	request_logs_retention_mode: RequestLogsRetentionMode;
-	// Only used when mode === "amount"
-	request_logs_retention_amount: number;
-	// Only used when mode === "time" (0 = forever)
-	request_logs_retention_days: number;
+  // Request logs retention (in-memory request log history)
+  request_logs_retention_mode: RequestLogsRetentionMode;
+  // Only used when mode === "amount"
+  request_logs_retention_amount: number;
+  // Only used when mode === "time" (0 = forever)
+  request_logs_retention_days: number;
 
-	// Backups
-	// Optional: GitHub Gist id used for "push/pull" backups.
-	github_backup_gist_id: string | null;
+  // Backups
+  // Optional: GitHub Gist id used for "push/pull" backups.
+  github_backup_gist_id: string | null;
 }
 
 export interface SettingsDoctorIssue {

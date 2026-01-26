@@ -1,15 +1,18 @@
-use std::sync::mpsc;
 use tauri::AppHandle;
+#[cfg(target_os = "windows")]
+use tauri::Manager;
 
 use crate::commands::{CommandError, CommandResult};
-use crate::text::inject::run_with_output_injection_lock;
 
 #[allow(unused_imports)]
 pub use crate::text::inject::{
     copy_to_clipboard, output_text_with_mode, output_text_with_mode_options,
-    paste_and_keep_clipboard, type_as_keystrokes, type_text_blocking,
-    type_text_blocking_with_options, OutputMode,
+    paste_and_keep_clipboard, type_as_keystrokes, type_text_blocking_with_options, OutputMode,
 };
+
+#[cfg(not(target_os = "windows"))]
+#[allow(unused_imports)]
+pub use crate::text::inject::type_text_blocking;
 
 #[cfg(desktop)]
 #[allow(unused_imports)]
@@ -24,8 +27,29 @@ pub async fn get_server_url() -> String {
     SERVER_URL.to_string()
 }
 
+#[cfg(target_os = "windows")]
 #[tauri::command]
 pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
+    // Windows: use UIA-first insertion ladder (with fallbacks).
+    let snapshot = app
+        .state::<crate::state::AppState>()
+        .windows_text_target_snapshot
+        .lock()
+        .ok()
+        .and_then(|mut g| g.take());
+
+    crate::windows_uia::insert::insert_text_with_snapshot(&app, &text, snapshot, true, true)
+        .map_err(CommandError::from)?;
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
+    use crate::text::inject::run_with_output_injection_lock;
+    use std::sync::mpsc;
+
     // macOS HIToolbox APIs (used by enigo) must run on the main thread
     // Use a channel to get the result back from the main thread
     let (tx, rx) = mpsc::channel::<Result<(), CommandError>>();

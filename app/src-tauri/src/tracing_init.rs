@@ -19,12 +19,21 @@ pub fn init() {
             .or_else(|_| EnvFilter::try_new("info"))
             .unwrap_or_else(|_| EnvFilter::new("info"));
 
-        let fmt_layer = fmt::layer().json().flatten_event(true).with_target(false);
+        let log_format = std::env::var("KOLBOO_LOG_FORMAT")
+            .unwrap_or_else(|_| "json".to_string())
+            .to_lowercase();
 
         // Best-effort: tests or embedded environments may initialize tracing elsewhere.
-        let _ = tracing_subscriber::registry()
-            .with(filter_layer)
-            .with(fmt_layer)
-            .try_init();
+        let _ = if matches!(log_format.as_str(), "pretty" | "text") {
+            tracing_subscriber::registry()
+                .with(filter_layer.clone())
+                .with(fmt::layer().pretty().with_target(false).with_ansi(true))
+                .try_init()
+        } else {
+            tracing_subscriber::registry()
+                .with(filter_layer)
+                .with(fmt::layer().json().flatten_event(true).with_target(false))
+                .try_init()
+        };
     });
 }

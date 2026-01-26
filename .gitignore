@@ -26,6 +26,7 @@ app/src-tauri/target-ci/
 release/
 dist/
 out/
+build/
 
 # Environment
 .env
@@ -34,6 +35,7 @@ out/
 
 # IDE
 .idea/
+.vscode/
 *.swp
 *.swo
 *~

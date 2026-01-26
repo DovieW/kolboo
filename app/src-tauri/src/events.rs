@@ -70,6 +70,9 @@ pub const EVENT_STATS_CHANGED: &str = "stats-changed";
 /// Emitted when settings are updated and dependents should refresh.
 pub const EVENT_SETTINGS_CHANGED: &str = "settings-changed";
 
+/// Emitted when a transcript is copied to clipboard as a safe fallback.
+pub const EVENT_TRANSCRIPT_COPIED_TO_CLIPBOARD: &str = "transcript-copied-to-clipboard";
+
 /// Emitted for system-level events (e.g., sleep/wake, session lock).
 pub const EVENT_SYSTEM_EVENT: &str = "system-event";
 

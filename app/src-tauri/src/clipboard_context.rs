@@ -82,7 +82,7 @@ pub fn build_rewrite_user_message(transcript: &str, clipboard_text: Option<&str>
 
 /// Build a user message for Quick Ask that optionally includes clipboard context.
 pub fn build_quick_ask_user_message(question: &str, clipboard_text: Option<&str>) -> String {
-    build_quick_ask_user_message_with_context(question, None, clipboard_text)
+    build_quick_ask_user_message_with_context(question, None, None, clipboard_text)
 }
 
 /// Build a user message for Quick Ask that can include highlighted selection text and/or
@@ -92,13 +92,15 @@ pub fn build_quick_ask_user_message(question: &str, clipboard_text: Option<&str>
 pub fn build_quick_ask_user_message_with_context(
     question: &str,
     selected_text: Option<&str>,
+    surrounding_text: Option<&str>,
     clipboard_text: Option<&str>,
 ) -> String {
     let question = question.trim();
     let selected_text = selected_text.map(|s| s.trim()).filter(|s| !s.is_empty());
+    let surrounding_text = surrounding_text.map(|s| s.trim()).filter(|s| !s.is_empty());
     let clipboard_text = clipboard_text.map(|s| s.trim()).filter(|s| !s.is_empty());
 
-    if selected_text.is_none() && clipboard_text.is_none() {
+    if selected_text.is_none() && surrounding_text.is_none() && clipboard_text.is_none() {
         return question.to_string();
     }
 
@@ -107,6 +109,11 @@ pub fn build_quick_ask_user_message_with_context(
     if let Some(sel) = selected_text {
         out.push_str("\n\nSelected text:\n");
         out.push_str(sel);
+    }
+
+    if let Some(surrounding) = surrounding_text {
+        out.push_str("\n\nSurrounding text:\n");
+        out.push_str(surrounding);
     }
 
     if let Some(cb) = clipboard_text {
