@@ -4,10 +4,10 @@ description: "Task list for Windows UIA-first context + insertion reliability"
 
 # Tasks: Windows Context + Insertion Reliability (UIA-first)
 
-**Input**: Design documents from `specs/001-uia-text-insertion/`
+**Input**: Design documents from `specs/002-uia-text-insertion/`
 
-- Required: `specs/001-uia-text-insertion/spec.md`, `specs/001-uia-text-insertion/plan.md`
-- Supporting: `specs/001-uia-text-insertion/research.md`, `specs/001-uia-text-insertion/data-model.md`, `specs/001-uia-text-insertion/contracts/tauri-openapi.yaml`, `specs/001-uia-text-insertion/quickstart.md`
+- Required: `specs/002-uia-text-insertion/spec.md`, `specs/002-uia-text-insertion/plan.md`
+- Supporting: `specs/002-uia-text-insertion/research.md`, `specs/002-uia-text-insertion/data-model.md`, `specs/002-uia-text-insertion/contracts/tauri-openapi.yaml`, `specs/002-uia-text-insertion/quickstart.md`
 
 **Tests** (recommended where they lock behavior fast):
 
@@ -24,7 +24,7 @@ description: "Task list for Windows UIA-first context + insertion reliability"
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [x] T001 Add `specs/001-uia-text-insertion/tasks.md` from template structure (this file)
+- [x] T001 Add `specs/002-uia-text-insertion/tasks.md` from template structure (this file)
 - [x] T002 [P] Confirm Windows UIA dependencies are available and documented in `app/src-tauri/Cargo.toml`
 - [x] T003 [P] Add a dedicated module namespace for UIA work in `app/src-tauri/src/windows_uia/mod.rs`
 
@@ -133,18 +133,18 @@ description: "Task list for Windows UIA-first context + insertion reliability"
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 - [x] T037 [P] Improve structured logging around UIA attempts/fallbacks (no sensitive text) in `app/src-tauri/src/windows_uia/*.rs`
-- [x] T038 Document the new setting and manual test steps in `specs/001-uia-text-insertion/quickstart.md`
-- [x] T039 Add a brief developer note on known UIA limitations (Chromium/Electron) in `specs/001-uia-text-insertion/research.md`
+- [x] T038 Document the new setting and manual test steps in `specs/002-uia-text-insertion/quickstart.md`
+- [x] T039 Add a brief developer note on known UIA limitations (Chromium/Electron) in `specs/002-uia-text-insertion/research.md`
 - [ ] T040 Run the repo CI gate and fix regressions as needed (`pnpm -C app check:ci` from `app/package.json`)
 
 ---
 
 ## Manual testing (recommended)
 
-- [x] T044 [US1] Verify insertion succeeds in Notepad and focus-change aborts to safe fallback (clipboard + toast) in `specs/001-uia-text-insertion/quickstart.md`
-- [ ] T045 [US2] Verify selection/surrounding context capture works without clipboard changes when fallback is OFF in `specs/001-uia-text-insertion/quickstart.md`
-- [ ] T046 [US2] Verify clipboard context is only included when explicitly enabled (not as a highlighted-text fallback) in `specs/001-uia-text-insertion/quickstart.md`
-- [ ] T047 [US3] Verify password/disabled/read-only fields block capture/insert and trigger safe fallback in `specs/001-uia-text-insertion/quickstart.md`
+- [x] T044 [US1] Verify insertion succeeds in Notepad and focus-change aborts to safe fallback (clipboard + toast) in `specs/002-uia-text-insertion/quickstart.md`
+- [ ] T045 [US2] Verify selection/surrounding context capture works without clipboard changes when fallback is OFF in `specs/002-uia-text-insertion/quickstart.md`
+- [ ] T046 [US2] Verify clipboard context is only included when explicitly enabled (not as a highlighted-text fallback) in `specs/002-uia-text-insertion/quickstart.md`
+- [ ] T047 [US3] Verify password/disabled/read-only fields block capture/insert and trigger safe fallback in `specs/002-uia-text-insertion/quickstart.md`
 
 ---
 
