@@ -705,10 +705,18 @@ export default function RecordingControl() {
 
 	const requestAnimatedHide = useCallback(() => {
 		const now = Date.now();
+		const pipelineActive =
+			pipelineState === "arming" ||
+			pipelineState === "recording" ||
+			pipelineState === "routing" ||
+			pipelineState === "transcribing" ||
+			pipelineState === "rewriting" ||
+			pipelineState === "error";
 		const gateRes = applyAnimatedHideGate({
 			now,
 			animState,
 			state: { lastRequestAt: controllerRef.current.exitRequestedAt },
+			pipelineActive,
 		});
 		controllerRef.current.exitRequestedAt = gateRes.nextState.lastRequestAt;
 		if (!gateRes.accept) return;
@@ -733,7 +741,7 @@ export default function RecordingControl() {
 			setHoldPhaseText(null);
 			controllerRef.current.exitTimer = null;
 		}, 210);
-	}, [animState, controllerRef, setAnimState, setHoldPhaseText]);
+	}, [animState, controllerRef, pipelineState, setAnimState, setHoldPhaseText]);
 
 	const requestAnimatedHideWithReason = useCallback(
 		(reason: string) => {
@@ -747,6 +755,26 @@ export default function RecordingControl() {
 		},
 		[animState, pipelineState, requestAnimatedHide, settings?.overlay_mode],
 	);
+
+		useEffect(() => {
+			const pipelineActive =
+				pipelineState === "arming" ||
+				pipelineState === "recording" ||
+				pipelineState === "routing" ||
+				pipelineState === "transcribing" ||
+				pipelineState === "rewriting" ||
+				pipelineState === "error";
+			if (!pipelineActive) return;
+
+			if (controllerRef.current.exitTimer) {
+				window.clearTimeout(controllerRef.current.exitTimer);
+				controllerRef.current.exitTimer = null;
+			}
+
+			if (animState === "exit") {
+				setAnimState("visible");
+			}
+		}, [animState, controllerRef, pipelineState, setAnimState]);
 
 	useOverlayHideRequested({
 		requestAnimatedHide: () => requestAnimatedHideWithReason("backend_hide_requested"),

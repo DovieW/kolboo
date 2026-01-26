@@ -8,6 +8,7 @@ describe("applyAnimatedHideGate", () => {
 			now: 1000,
 			animState: "visible",
 			state: { lastRequestAt: null },
+			pipelineActive: false,
 			cooldownMs: 350,
 		});
 		expect(res.accept).toBe(true);
@@ -19,9 +20,22 @@ describe("applyAnimatedHideGate", () => {
 			now: 1000,
 			animState: "exit",
 			state: { lastRequestAt: null },
+			pipelineActive: false,
 			cooldownMs: 350,
 		});
 		expect(res.accept).toBe(false);
+	});
+
+	it("rejects when pipeline is active", () => {
+		const res = applyAnimatedHideGate({
+			now: 1000,
+			animState: "visible",
+			state: { lastRequestAt: null },
+			pipelineActive: true,
+			cooldownMs: 350,
+		});
+		expect(res.accept).toBe(false);
+		expect(res.nextState.lastRequestAt).toBeNull();
 	});
 
 	it("rejects repeated requests inside cooldown", () => {
@@ -29,6 +43,7 @@ describe("applyAnimatedHideGate", () => {
 			now: 1000,
 			animState: "visible",
 			state: { lastRequestAt: null },
+			pipelineActive: false,
 			cooldownMs: 350,
 		});
 		expect(first.accept).toBe(true);
@@ -37,6 +52,7 @@ describe("applyAnimatedHideGate", () => {
 			now: 1200,
 			animState: "visible",
 			state: first.nextState,
+			pipelineActive: false,
 			cooldownMs: 350,
 		});
 		expect(second.accept).toBe(false);
@@ -47,6 +63,7 @@ describe("applyAnimatedHideGate", () => {
 			now: 1000,
 			animState: "visible",
 			state: { lastRequestAt: null },
+			pipelineActive: false,
 			cooldownMs: 350,
 		});
 		expect(first.accept).toBe(true);
@@ -55,6 +72,7 @@ describe("applyAnimatedHideGate", () => {
 			now: 1500,
 			animState: "visible",
 			state: first.nextState,
+			pipelineActive: false,
 			cooldownMs: 350,
 		});
 		expect(second.accept).toBe(true);

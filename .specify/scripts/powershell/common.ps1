@@ -5,7 +5,7 @@ function Get-RepoRoot {
     try {
         $result = git rev-parse --show-toplevel 2>$null
         if ($LASTEXITCODE -eq 0) {
-            return $result
+            return $result.Trim()
         }
     } catch {
         # Git command failed
@@ -25,7 +25,7 @@ function Get-CurrentBranch {
     try {
         $result = git rev-parse --abbrev-ref HEAD 2>$null
         if ($LASTEXITCODE -eq 0) {
-            return $result
+            return $result.Trim()
         }
     } catch {
         # Git command failed

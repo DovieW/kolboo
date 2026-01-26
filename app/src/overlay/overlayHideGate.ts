@@ -6,6 +6,7 @@ export type AnimatedHideGateParams = {
 	now: number;
 	animState: "enter" | "visible" | "exit";
 	state: AnimatedHideGateState;
+	pipelineActive: boolean;
 	cooldownMs?: number;
 };
 
@@ -27,8 +28,14 @@ export function applyAnimatedHideGate({
 	now,
 	animState,
 	state,
+	pipelineActive,
 	cooldownMs = 350,
 }: AnimatedHideGateParams): AnimatedHideGateResult {
+	// If the pipeline is active, never accept an animated hide.
+	if (pipelineActive) {
+		return { accept: false, nextState: state };
+	}
+
 	// If we're already exiting, ignore duplicates.
 	if (animState === "exit") {
 		return { accept: false, nextState: state };

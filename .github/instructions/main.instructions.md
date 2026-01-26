@@ -14,3 +14,5 @@ applyTo: '**'
 
 - Do not cut corners when making changes. When adding new things or fixing things, try to do it in a robust way.
   - Don't create massive files that do many different things.
+
+- Always run the format commands before test/check commands.

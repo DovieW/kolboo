@@ -158,6 +158,93 @@ fn resolve_target_monitor(window: &tauri::WebviewWindow, app: &AppHandle) -> Opt
         .or_else(|| window.available_monitors().ok().and_then(|mut m| m.pop()))
 }
 
+#[cfg(desktop)]
+fn format_monitor_summary(monitor: Option<&Monitor>) -> String {
+    match monitor {
+        Some(m) => format!(
+            "name={:?}, pos={:?}, size={:?}, scale={}",
+            m.name(),
+            m.position(),
+            m.size(),
+            m.scale_factor()
+        ),
+        None => "<none>".to_string(),
+    }
+}
+
+#[cfg(desktop)]
+fn describe_available_monitors(window: &tauri::WebviewWindow) -> String {
+    let Ok(monitors) = window.available_monitors() else {
+        return "<unavailable>".to_string();
+    };
+
+    if monitors.is_empty() {
+        return "<none>".to_string();
+    }
+
+    monitors
+        .into_iter()
+        .map(|m| {
+            format!(
+                "{{name={:?}, pos={:?}, size={:?}, scale={}}}",
+                m.name(),
+                m.position(),
+                m.size(),
+                m.scale_factor()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[cfg(desktop)]
+fn is_window_offscreen(
+    pos: Option<tauri::PhysicalPosition<i32>>,
+    outer: Option<tauri::PhysicalSize<u32>>,
+    monitor: Option<&Monitor>,
+) -> bool {
+    let (Some(pos), Some(outer), Some(monitor)) = (pos, outer, monitor) else {
+        return true;
+    };
+
+    let screen_pos = monitor.position();
+    let screen_size = monitor.size();
+    let screen_left = screen_pos.x;
+    let screen_top = screen_pos.y;
+    let screen_right = screen_left.saturating_add(screen_size.width as i32);
+    let screen_bottom = screen_top.saturating_add(screen_size.height as i32);
+
+    let win_left = pos.x;
+    let win_top = pos.y;
+    let win_right = win_left.saturating_add(outer.width as i32);
+    let win_bottom = win_top.saturating_add(outer.height as i32);
+
+    // Small margin to tolerate tiny rounding drift.
+    let margin = 12;
+
+    win_right <= screen_left + margin
+        || win_left >= screen_right - margin
+        || win_bottom <= screen_top + margin
+        || win_top >= screen_bottom - margin
+}
+
+#[cfg(all(desktop, target_os = "windows"))]
+fn raise_overlay_without_focus(window: &tauri::WebviewWindow) -> Result<(), String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+        SWP_SHOWWINDOW,
+    };
+
+    let hwnd: HWND = window.hwnd().map_err(|e| e.to_string())?;
+
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER;
+
+    unsafe {
+        SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags).map_err(|err| err.to_string())
+    }
+}
+
 fn set_widget_position_impl(app: &AppHandle, position: &str) -> CommandResult<()> {
     let Some(window) = app.get_webview_window("overlay") else {
         return Err("Overlay window not found".to_string().into());
@@ -277,9 +364,11 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
 
     if let Some(window) = app.get_webview_window("overlay") {
         // Bump the epoch so any previously-scheduled delayed hides know they are outdated.
-        app.state::<AppState>()
+        let expected_epoch = app
+            .state::<AppState>()
             .overlay_visibility_epoch
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, Ordering::SeqCst)
+            .saturating_add(1);
 
         let visible_before = window.is_visible().ok();
         log::info!(
@@ -304,10 +393,23 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
         // but the window can still be effectively invisible. Centering is a good best-effort
         // recovery before we snap to the user's preferred position.
         let _ = window.unminimize();
-        let _ = window.center();
+        if overlay_mode == "always" {
+            let _ = window.center();
+        }
 
         // Best-effort: some environments can lose the always-on-top flag across hide/show.
         let _ = window.set_always_on_top(true);
+
+        #[cfg(all(desktop, target_os = "windows"))]
+        let raise_status = match raise_overlay_without_focus(&window) {
+            Ok(()) => "ok",
+            Err(err) => {
+                log::warn!("[overlay] raise without focus failed: {}", err);
+                "err"
+            }
+        };
+        #[cfg(not(all(desktop, target_os = "windows")))]
+        let raise_status = "n/a";
 
         // For non-always modes, snap after show/center so current_monitor() resolves reliably.
         if overlay_mode != "always" {
@@ -347,9 +449,164 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
 
         let visible_after = window.is_visible().ok();
         log::info!(
-            "[overlay] show complete (visible_after={:?})",
-            visible_after
+            "[overlay] show complete (visible_after={:?}, raise_without_focus={}, verify_retry_scheduled=true)",
+            visible_after,
+            raise_status
         );
+
+        // Post-show snap: ensure the overlay ends up at the saved position after any
+        // late resize/layout work (recording-only/never modes).
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let delay = std::time::Duration::from_millis(75);
+            tokio::time::sleep(delay).await;
+
+            let current_epoch = app_clone
+                .state::<AppState>()
+                .overlay_visibility_epoch
+                .load(Ordering::SeqCst);
+
+            if current_epoch != expected_epoch {
+                return;
+            }
+
+            let overlay_mode: String =
+                get_setting_from_store(&app_clone, "overlay_mode", "recording_only".to_string());
+            if overlay_mode == "always" {
+                return;
+            }
+
+            if let Err(e) = snap_overlay_to_saved_position(&app_clone) {
+                log::debug!("[overlay] post-show snap failed: {}", e);
+            } else {
+                log::debug!("[overlay] post-show snap applied (mode={})", overlay_mode);
+            }
+        });
+
+        // Post-show verify/retry (guarded by epoch so stale shows don't fight).
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let delay = std::time::Duration::from_millis(120);
+            tokio::time::sleep(delay).await;
+
+            let current_epoch = app_clone
+                .state::<AppState>()
+                .overlay_visibility_epoch
+                .load(Ordering::SeqCst);
+
+            if current_epoch != expected_epoch {
+                log::debug!(
+                    "[overlay] post-show verify skipped (expected_epoch={}, current_epoch={})",
+                    expected_epoch,
+                    current_epoch
+                );
+                return;
+            }
+
+            let Some(window) = app_clone.get_webview_window("overlay") else {
+                return;
+            };
+
+            let visible_before = window.is_visible().ok();
+            let pos_before = window.outer_position().ok();
+            let outer_before = window.outer_size().ok();
+            let inner_before = window.inner_size().ok();
+            let scale_before = window.scale_factor().ok();
+            let monitor_before = window.current_monitor().ok().flatten();
+
+            let mut suspicious = false;
+            if monitor_before.is_none() {
+                suspicious = true;
+            }
+            if let Some(outer) = outer_before {
+                if outer.width < 20 || outer.height < 20 {
+                    suspicious = true;
+                }
+            } else {
+                suspicious = true;
+            }
+            if is_window_offscreen(pos_before, outer_before, monitor_before.as_ref()) {
+                suspicious = true;
+            }
+
+            if !suspicious {
+                log::debug!(
+                    "[overlay] post-show verify ok (visible={:?}, pos={:?}, outer={:?}, inner={:?}, scale={:?}, monitor={})",
+                    visible_before,
+                    pos_before,
+                    outer_before,
+                    inner_before,
+                    scale_before,
+                    format_monitor_summary(monitor_before.as_ref())
+                );
+                return;
+            }
+
+            let overlay_mode: String =
+                get_setting_from_store(&app_clone, "overlay_mode", "recording_only".to_string());
+
+            log::warn!(
+                "[overlay] post-show verify retry (mode={}, visible={:?}, pos={:?}, outer={:?}, inner={:?}, scale={:?}, monitor={}, offscreen={})",
+                overlay_mode,
+                visible_before,
+                pos_before,
+                outer_before,
+                inner_before,
+                scale_before,
+                format_monitor_summary(monitor_before.as_ref()),
+                is_window_offscreen(pos_before, outer_before, monitor_before.as_ref())
+            );
+            log::warn!(
+                "[overlay] post-show verify monitors: {}",
+                describe_available_monitors(&window)
+            );
+
+            let _ = window.show();
+            if overlay_mode == "recording_only" {
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                    width: 224.0,
+                    height: 56.0,
+                }));
+            }
+            let _ = window.unminimize();
+            let _ = window.center();
+            let _ = window.set_always_on_top(true);
+
+            #[cfg(all(desktop, target_os = "windows"))]
+            let raise_status = match raise_overlay_without_focus(&window) {
+                Ok(()) => "ok",
+                Err(err) => {
+                    log::warn!("[overlay] post-show raise without focus failed: {}", err);
+                    "err"
+                }
+            };
+            #[cfg(not(all(desktop, target_os = "windows")))]
+            let raise_status = "n/a";
+
+            if overlay_mode != "always" {
+                if let Err(e) = snap_overlay_to_saved_position(&app_clone) {
+                    log::warn!("Failed to snap overlay position on retry: {}", e);
+                }
+            }
+
+            let visible_after = window.is_visible().ok();
+            let pos_after = window.outer_position().ok();
+            let outer_after = window.outer_size().ok();
+            let inner_after = window.inner_size().ok();
+            let scale_after = window.scale_factor().ok();
+            let monitor_after = window.current_monitor().ok().flatten();
+
+            log::info!(
+                "[overlay] post-show retry complete (visible_after={:?}, pos={:?}, outer={:?}, inner={:?}, scale={:?}, monitor={}, raise_without_focus={})",
+                visible_after,
+                pos_after,
+                outer_after,
+                inner_after,
+                scale_after,
+                format_monitor_summary(monitor_after.as_ref()),
+                raise_status
+            );
+        });
     }
 
     Ok(())
