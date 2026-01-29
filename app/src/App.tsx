@@ -13,12 +13,12 @@ import {
 	ScrollArea,
 	SegmentedControl,
 	Select,
+	type SelectProps,
 	Stack,
 	Tabs,
 	Text,
 	Title,
 	Tooltip,
-	type SelectProps,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1249,32 +1249,32 @@ export default function App() {
 	}, [queryClient]);
 
 	useEffect(() => {
-    let unlisten: (() => void) | null = null;
+		let unlisten: (() => void) | null = null;
 
-    tauriAPI
-      .onTranscriptCopiedToClipboard(() => {
-        notifications.show({
-          title: "Copied to clipboard",
-          message:
-            "Transcript was copied because the app couldn't safely insert it.",
-          color: "orange",
-        });
-      })
-      .then((fn) => {
-        unlisten = fn;
-      })
-      .catch((e) => {
-        console.warn("Failed to subscribe to clipboard fallback:", e);
-      });
+		tauriAPI
+			.onTranscriptCopiedToClipboard(() => {
+				notifications.show({
+					title: "Copied to clipboard",
+					message:
+						"Transcript was copied because the app couldn't safely insert it.",
+					color: "orange",
+				});
+			})
+			.then((fn) => {
+				unlisten = fn;
+			})
+			.catch((e) => {
+				console.warn("Failed to subscribe to clipboard fallback:", e);
+			});
 
-    return () => {
-      try {
-        unlisten?.();
-      } catch {
-        // ignore
-      }
-    };
-  }, []);
+		return () => {
+			try {
+				unlisten?.();
+			} catch {
+				// ignore
+			}
+		};
+	}, []);
 
 	useEffect(() => {
 		if (bootGuideKnown) return;

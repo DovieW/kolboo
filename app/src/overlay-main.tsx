@@ -15,7 +15,6 @@ const queryClient = new QueryClient({
 	},
 });
 
-
 type ErrorBoundaryState = {
 	hasError: boolean;
 	message: string;

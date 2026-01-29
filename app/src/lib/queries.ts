@@ -6,8 +6,8 @@ import {
 } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import {
-	updateHotkeyAndReregisterShortcuts,
 	type HotkeyKind,
+	updateHotkeyAndReregisterShortcuts,
 } from "./hotkeyMutations";
 import {
 	createAudioMuteSupportedQueryFn,
@@ -49,6 +49,8 @@ import {
 	logsAPI,
 	type MainWindowCloseBehavior,
 	type ModelPricingKind,
+	type OcrAuthMode,
+	type OcrAutoCaptureTiming,
 	type OpenAiReasoningEffort,
 	type OutputMode,
 	type OverlayMonitorTarget,
@@ -1059,6 +1061,216 @@ export function useUpdateOllamaUrl() {
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrBaseUrl() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (baseUrl: string | null) => {
+			await tauriAPI.updateOcrBaseUrl(baseUrl);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrModel() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (model: string | null) => {
+			await tauriAPI.updateOcrModel(model);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrAuthMode() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (mode: OcrAuthMode) => {
+			await tauriAPI.updateOcrAuthMode(mode);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrPrompt() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (prompt: string) => {
+			await tauriAPI.updateOcrPrompt(prompt);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrMaxTokens() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (maxTokens: number) => {
+			await tauriAPI.updateOcrMaxTokens(maxTokens);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrTemperature() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (temperature: number) => {
+			await tauriAPI.updateOcrTemperature(temperature);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrTopP() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (topP: number) => {
+			await tauriAPI.updateOcrTopP(topP);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrRequestTimeoutMs() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (timeoutMs: number) => {
+			await tauriAPI.updateOcrRequestTimeoutMs(timeoutMs);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrContextMaxChars() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (maxChars: number) => {
+			await tauriAPI.updateOcrContextMaxChars(maxChars);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrAutoCaptureTiming() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (timing: OcrAutoCaptureTiming) => {
+			await tauriAPI.updateOcrAutoCaptureTiming(timing);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrHallucinationProtection() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (enabled: boolean) => {
+			await tauriAPI.updateOcrHallucinationProtection(enabled);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrHallucinationThreshold() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (value: number) => {
+			await tauriAPI.updateOcrHallucinationThreshold(value);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrResizeMaxDimension() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (value: number) => {
+			await tauriAPI.updateOcrResizeMaxDimension(value);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOcrResizeFilter() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (
+			filter: "nearest" | "triangle" | "catmullrom" | "lanczos3",
+		) => {
+			await tauriAPI.updateOcrResizeFilter(filter);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useSetOcrApiKey() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (apiKey: string) => {
+			await tauriAPI.setApiKey("ocr_api_key", apiKey);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
+		},
+	});
+}
+
+export function useClearOcrApiKey() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async () => {
+			await tauriAPI.clearApiKey("ocr_api_key");
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
 		},
 	});
 }

@@ -1,5 +1,8 @@
 use crate::audio_capture::{AudioEncodeConfig, VadAutoStopConfig};
 use crate::llm::LlmConfig;
+use crate::ocr::{
+    OCR_MAX_TOKENS_DEFAULT, OCR_PROMPT_DEFAULT, OCR_TEMPERATURE_DEFAULT, OCR_TOP_P_DEFAULT,
+};
 use crate::request_log::RequestLogStore;
 use crate::settings::ProxySettings;
 use crate::stt::RetryConfig;
@@ -110,6 +113,9 @@ pub struct PipelineConfig {
     /// API keys for all configured LLM providers (provider id -> key)
     pub llm_api_keys: HashMap<String, String>,
 
+    /// OCR provider + per-tool configuration.
+    pub ocr_config: OcrConfig,
+
     /// Optional request log store for capturing provider request/response payloads.
     pub request_log_store: Option<RequestLogStore>,
     /// Path to local Whisper model (for local-whisper feature)
@@ -123,6 +129,34 @@ pub struct PipelineConfig {
     /// - "on_transcribe": load when first needed
     /// - "on_launch": best-effort preload at startup
     pub local_whisper_load_mode: String,
+}
+
+/// OCR provider configuration + per-tool modes.
+#[derive(Debug, Clone)]
+pub struct OcrConfig {
+    pub base_url: Option<String>,
+    pub model: String,
+    pub auth_mode: String,
+    /// Prompt sent as the text part alongside the image.
+    pub prompt: String,
+    pub max_tokens: u32,
+    pub temperature: f64,
+    pub top_p: f64,
+    pub request_timeout_ms: u64,
+    pub context_max_chars: usize,
+    pub rewrite_mode: String,
+    pub quick_replace_mode: String,
+    pub quick_ask_mode: String,
+    /// When to capture the screenshot in Auto mode: "on_stop" or "on_start".
+    pub auto_capture_timing: String,
+    /// Enable robust image validation to prevent OCR hallucinations on blank/uniform images.
+    pub hallucination_protection: bool,
+    /// Variance threshold for hallucination protection. Higher = more tolerant.
+    pub hallucination_threshold: u64,
+    /// Max dimension (width or height) for resizing. 0 = no resize.
+    pub resize_max_dimension: u32,
+    /// Resize filter: "nearest", "triangle", "catmullrom", "lanczos3".
+    pub resize_filter: String,
 }
 
 impl Default for PipelineConfig {
@@ -164,6 +198,25 @@ impl Default for PipelineConfig {
 
             llm_config: LlmConfig::default(),
             llm_api_keys: HashMap::new(),
+            ocr_config: OcrConfig {
+                base_url: None,
+                model: "lightonai/LightOnOCR-1B-1025".to_string(),
+                auth_mode: "none".to_string(),
+                prompt: OCR_PROMPT_DEFAULT.to_string(),
+                max_tokens: OCR_MAX_TOKENS_DEFAULT,
+                temperature: OCR_TEMPERATURE_DEFAULT,
+                top_p: OCR_TOP_P_DEFAULT,
+                request_timeout_ms: 2000,
+                context_max_chars: 8000,
+                rewrite_mode: "off".to_string(),
+                quick_replace_mode: "off".to_string(),
+                quick_ask_mode: "off".to_string(),
+                auto_capture_timing: "on_start".to_string(),
+                hallucination_protection: true,
+                hallucination_threshold: 2000,
+                resize_max_dimension: 0,
+                resize_filter: "nearest".to_string(),
+            },
             request_log_store: None,
             #[cfg(feature = "local-whisper")]
             whisper_model_path: None,

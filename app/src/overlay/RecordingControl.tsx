@@ -8,6 +8,7 @@ import {
 	useLayoutEffect,
 	useMemo,
 	useRef,
+	useState,
 } from "react";
 import { applyAccentColor } from "../lib/accentColor";
 import { readBootAccentColor } from "../lib/bootStorage";
@@ -22,19 +23,21 @@ import {
 	type CommandErrorPayload,
 	type ConnectionState,
 	type IntentRouterSettings,
+	type OverlayPipelineState,
+	ocrAPI,
 	type RewriteProgramPromptProfile,
 	tauriAPI,
 } from "../lib/tauri";
 import { useOverlayUiReducer } from "../lib/useOverlayUiReducer";
 import { AudioWave, BackendAudioWave } from "./AudioWave";
-import { useOverlayController } from "./useOverlayController";
+import { applyAnimatedHideGate } from "./overlayHideGate";
 import { useOverlayActiveProfilePolling } from "./useOverlayActiveProfilePolling";
+import { useOverlayController } from "./useOverlayController";
 import { useOverlayHideRequested } from "./useOverlayHideRequested";
 import { useOverlayHotkeyEvents } from "./useOverlayHotkeyEvents";
+import { useOverlayHoverGating } from "./useOverlayHoverGating";
 import { useOverlayPipelineEvents } from "./useOverlayPipelineEvents";
 import { useOverlayPipelineStatePolling } from "./useOverlayPipelineStatePolling";
-import { useOverlayHoverGating } from "./useOverlayHoverGating";
-import { applyAnimatedHideGate } from "./overlayHideGate";
 
 type CommandErrorExtract = {
 	message: string;
@@ -82,15 +85,13 @@ function extractCommandError(error: unknown): CommandErrorExtract {
 /**
  * Parse error message to user-friendly format
  */
-function parseErrorMessage(
-	inputs: {
-		message: string;
-		retryable: boolean | null;
-		errorType: string | null;
-		code: string | null;
-		details: string | null;
-	},
-): ErrorInfo {
+function parseErrorMessage(inputs: {
+	message: string;
+	retryable: boolean | null;
+	errorType: string | null;
+	code: string | null;
+	details: string | null;
+}): ErrorInfo {
 	const errorStr = inputs.message;
 	const recoverable = inputs.retryable ?? true;
 	const code = inputs.code;
@@ -301,6 +302,9 @@ export default function RecordingControl() {
 
 	// Load settings (overlay mode + selected mic)
 	const { data: settings } = useSettings();
+	const [overlayState, setOverlayState] = useState<OverlayPipelineState | null>(
+		null,
+	);
 
 	const onSettingsChanged = useMemo(
 		() =>
@@ -501,9 +505,10 @@ export default function RecordingControl() {
 		pipelineState,
 		animState,
 		overlayMode: settings?.overlay_mode,
+		ocrStatus: overlayState?.ocr_status,
 		setPipelineState,
+		setOverlayState,
 	});
-
 
 	useOverlayActiveProfilePolling({ enabled: expanded, setActiveProfile });
 
@@ -531,6 +536,14 @@ export default function RecordingControl() {
 	useEffect(() => {
 		const prev = controllerRef.current.prevPipelineForPhaseHold;
 		controllerRef.current.prevPipelineForPhaseHold = pipelineState;
+
+		// If OCR is running, we don't want the phase text to clear prematurely.
+		// Cancel any pending clear timer and keep showing the last busy phase.
+		const ocrActive = overlayState?.ocr_status === "running";
+		if (ocrActive && controllerRef.current.holdPhaseTimer) {
+			window.clearTimeout(controllerRef.current.holdPhaseTimer);
+			controllerRef.current.holdPhaseTimer = null;
+		}
 
 		if (
 			pipelineState === "transcribing" ||
@@ -561,12 +574,15 @@ export default function RecordingControl() {
 			if (controllerRef.current.holdPhaseTimer) {
 				window.clearTimeout(controllerRef.current.holdPhaseTimer);
 			}
-			// Small grace window; hide event typically arrives quickly. If it doesn't,
-			// we still don't want the overlay to look "stuck".
-			controllerRef.current.holdPhaseTimer = window.setTimeout(() => {
-				setHoldPhaseText(null);
-				controllerRef.current.holdPhaseTimer = null;
-			}, 650);
+			// Don't start the clear timer if OCR is still active (keeps the overlay visible).
+			if (!ocrActive) {
+				// Small grace window; hide event typically arrives quickly. If it doesn't,
+				// we still don't want the overlay to look "stuck".
+				controllerRef.current.holdPhaseTimer = window.setTimeout(() => {
+					setHoldPhaseText(null);
+					controllerRef.current.holdPhaseTimer = null;
+				}, 650);
+			}
 			return;
 		}
 
@@ -584,7 +600,12 @@ export default function RecordingControl() {
 		}
 
 		// In always-visible mode, don't let phase text linger after returning idle.
-		if (settings?.overlay_mode === "always" && pipelineState === "idle") {
+		// But keep it if OCR is running.
+		if (
+			settings?.overlay_mode === "always" &&
+			pipelineState === "idle" &&
+			!ocrActive
+		) {
 			if (controllerRef.current.holdPhaseTimer) {
 				window.clearTimeout(controllerRef.current.holdPhaseTimer);
 				controllerRef.current.holdPhaseTimer = null;
@@ -596,11 +617,35 @@ export default function RecordingControl() {
 	}, [
 		controllerRef,
 		holdPhaseText,
+		overlayState?.ocr_status,
 		pipelineState,
 		hoverPanelEnabled,
 		shouldShowHoverPresets,
 		setHoldPhaseText,
 		settings?.overlay_mode,
+	]);
+
+	// When OCR finishes (transitions from running to done/failed/etc) and we're still idle,
+	// clear the held phase text so we can proceed to hide or show the waveform.
+	useEffect(() => {
+		const prevOcrStatus = controllerRef.current.prevOcrStatus;
+		controllerRef.current.prevOcrStatus = overlayState?.ocr_status ?? null;
+
+		// Only act on transitions FROM running.
+		if (prevOcrStatus !== "running") return;
+		const currentStatus = overlayState?.ocr_status;
+		if (currentStatus === "running") return;
+
+		// OCR finished. If we're idle and have phase text held, clear it.
+		if (pipelineState === "idle" && holdPhaseText !== null) {
+			setHoldPhaseText(null);
+		}
+	}, [
+		controllerRef,
+		holdPhaseText,
+		overlayState?.ocr_status,
+		pipelineState,
+		setHoldPhaseText,
 	]);
 
 	// Resize the native window for the target widget, and only then render it.
@@ -711,7 +756,8 @@ export default function RecordingControl() {
 			pipelineState === "routing" ||
 			pipelineState === "transcribing" ||
 			pipelineState === "rewriting" ||
-			pipelineState === "error";
+			pipelineState === "error" ||
+			overlayState?.ocr_status === "running";
 		const gateRes = applyAnimatedHideGate({
 			now,
 			animState,
@@ -741,7 +787,14 @@ export default function RecordingControl() {
 			setHoldPhaseText(null);
 			controllerRef.current.exitTimer = null;
 		}, 210);
-	}, [animState, controllerRef, pipelineState, setAnimState, setHoldPhaseText]);
+	}, [
+		animState,
+		controllerRef,
+		overlayState?.ocr_status,
+		pipelineState,
+		setAnimState,
+		setHoldPhaseText,
+	]);
 
 	const requestAnimatedHideWithReason = useCallback(
 		(reason: string) => {
@@ -756,28 +809,36 @@ export default function RecordingControl() {
 		[animState, pipelineState, requestAnimatedHide, settings?.overlay_mode],
 	);
 
-		useEffect(() => {
-			const pipelineActive =
-				pipelineState === "arming" ||
-				pipelineState === "recording" ||
-				pipelineState === "routing" ||
-				pipelineState === "transcribing" ||
-				pipelineState === "rewriting" ||
-				pipelineState === "error";
-			if (!pipelineActive) return;
+	useEffect(() => {
+		const pipelineActive =
+			pipelineState === "arming" ||
+			pipelineState === "recording" ||
+			pipelineState === "routing" ||
+			pipelineState === "transcribing" ||
+			pipelineState === "rewriting" ||
+			pipelineState === "error" ||
+			overlayState?.ocr_status === "running";
+		if (!pipelineActive) return;
 
-			if (controllerRef.current.exitTimer) {
-				window.clearTimeout(controllerRef.current.exitTimer);
-				controllerRef.current.exitTimer = null;
-			}
+		if (controllerRef.current.exitTimer) {
+			window.clearTimeout(controllerRef.current.exitTimer);
+			controllerRef.current.exitTimer = null;
+		}
 
-			if (animState === "exit") {
-				setAnimState("visible");
-			}
-		}, [animState, controllerRef, pipelineState, setAnimState]);
+		if (animState === "exit") {
+			setAnimState("visible");
+		}
+	}, [
+		animState,
+		controllerRef,
+		overlayState?.ocr_status,
+		pipelineState,
+		setAnimState,
+	]);
 
 	useOverlayHideRequested({
-		requestAnimatedHide: () => requestAnimatedHideWithReason("backend_hide_requested"),
+		requestAnimatedHide: () =>
+			requestAnimatedHideWithReason("backend_hide_requested"),
 	});
 
 	// Dev-only diagnostics: forward key overlay UI state to the Rust log stream.
@@ -789,7 +850,13 @@ export default function RecordingControl() {
 			scope: "overlay",
 			message: `state pipeline=${pipelineState} anim=${animState} expanded=${expanded} renderExpanded=${renderExpanded} overlayMode=${overlayMode}`,
 		}).catch(() => {});
-	}, [animState, expanded, pipelineState, renderExpanded, settings?.overlay_mode]);
+	}, [
+		animState,
+		expanded,
+		pipelineState,
+		renderExpanded,
+		settings?.overlay_mode,
+	]);
 
 	const dismissError = useCallback(() => {
 		// Reset pipeline state in backend so polling reflects reality.
@@ -858,7 +925,6 @@ export default function RecordingControl() {
 		setAnimState,
 	]);
 
-
 	// If the overlay itself was used to record (not hotkey path), honor recording-only by
 	// animating out when we return to idle.
 	useEffect(() => {
@@ -899,9 +965,10 @@ export default function RecordingControl() {
 			// If recording is already active, reflect it immediately.
 			// This reduces the confusing "Arm" state when the backend is already capturing.
 			try {
-				const state = await invoke<string>("pipeline_get_state");
-				if (isPipelineState(state)) {
-					setPipelineState("sync", state);
+				const state = await ocrAPI.getOverlayState();
+				setOverlayState(state);
+				if (isPipelineState(state.pipeline_state)) {
+					setPipelineState("sync", state.pipeline_state);
 				}
 			} catch {
 				// If polling fails, we'll still rely on event listeners / interval polling.
@@ -1066,7 +1133,6 @@ export default function RecordingControl() {
 		typeTextMutation,
 	]);
 
-
 	useOverlayHotkeyEvents({
 		clearError,
 		setPipelineState,
@@ -1164,7 +1230,94 @@ export default function RecordingControl() {
 	const isBusy = isArming || isLoading;
 	const isError = pipelineState === "error";
 	const showDetailedLoading = settings?.overlay_show_detailed_loading ?? false;
+
+	const ocrStatus = overlayState?.ocr_status ?? "not_started";
+	const showOcrPill =
+		!isError && overlayState?.ocr_manual_available && pipelineState !== "idle";
+	const ocrProviderAvailable = overlayState?.ocr_provider.available ?? false;
+	const ocrProviderReason = overlayState?.ocr_provider.reason ?? null;
+	const ocrIsRunning = ocrStatus === "running";
+	const ocrIsDone = ocrStatus === "done";
+	const sttComplete = overlayState?.stt_complete ?? false;
+	// OCR is blocking: STT is done but waiting for OCR result before LLM/output
+	const ocrBlocking = ocrIsRunning && sttComplete;
+	const ocrCanClick =
+		showOcrPill &&
+		ocrProviderAvailable &&
+		(ocrStatus === "not_started" ||
+			ocrStatus === "failed" ||
+			ocrStatus === "cancelled");
+	const ocrPillIcon = ocrIsDone ? (
+    // Checkmark icon when done
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label="OCR complete"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  ) : (
+    // Screenshot/camera icon
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label="Capture screenshot for OCR"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+    </svg>
+  );
+	const ocrPillTitle = !ocrProviderAvailable
+		? ocrProviderReason || "OCR provider unavailable"
+		: ocrIsRunning
+			? "Running OCR"
+			: ocrIsDone
+				? "OCR ready"
+				: "Run OCR for the active window";
+	const ocrPillVariant = ocrIsRunning ? "arming" : "dim";
+
+	const onTriggerOcr = useCallback(async () => {
+		if (!ocrCanClick) return;
+
+		// Optimistic UI: show running immediately.
+		setOverlayState((prev) =>
+			prev ? { ...prev, ocr_status: "running" } : prev,
+		);
+
+		try {
+			await ocrAPI.triggerActiveWindowOcr();
+		} catch (error) {
+			console.error("[Overlay] Failed to trigger OCR:", error);
+		} finally {
+			try {
+				const next = await ocrAPI.getOverlayState();
+				setOverlayState(next);
+			} catch {
+				// ignore
+			}
+		}
+	}, [ocrCanClick]);
 	const centerPhaseText = (() => {
+		// If STT is done but OCR is still running, show "OCR..." to indicate we're waiting.
+		// Check this first since OCR may continue running after pipeline moves past transcribing
+		// (e.g. for Quick Ask where transcription completes but answer generation waits for OCR).
+		if (ocrBlocking) return "OCR...";
+
 		if (pipelineState === "rewriting") return "rewriting...";
 		if (pipelineState === "routing") return "routing...";
 		if (pipelineState === "transcribing") return "transcribing...";
@@ -1204,131 +1357,145 @@ export default function RecordingControl() {
 	};
 
 	return (
-		<div
-			ref={setWidgetRef}
-			role="application"
-			{...bindDrag()}
-			className="overlay-widget"
-			data-anim={animState}
-			onMouseEnter={handleMouseEnter}
-			onMouseLeave={handleMouseLeave}
-			style={{
-				width: "100%",
-				position: "relative",
-				cursor: "grab",
-				userSelect: "none",
-			}}
-		>
-			<div className="overlay-stage">
-				{/* Collapsed widget */}
-				{!renderExpanded && settings?.overlay_mode !== "recording_only" ? (
-					<button
-						type="button"
-						onClick={handleClick}
-						disabled={isBusy}
-						className="overlay-button overlay-button--collapsed"
-						style={
-							isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
-						}
-					>
-						<div className="overlay-icon">{renderLeftIndicator()}</div>
-					</button>
-				) : null}
+    <div
+      ref={setWidgetRef}
+      role="application"
+      {...bindDrag()}
+      className="overlay-widget"
+      data-anim={animState}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      style={{
+        width: "100%",
+        position: "relative",
+        cursor: "grab",
+        userSelect: "none",
+      }}
+    >
+      <div className="overlay-stage">
+        {/* Collapsed widget */}
+        {!renderExpanded && settings?.overlay_mode !== "recording_only" ? (
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={isBusy}
+            className="overlay-button overlay-button--collapsed"
+            style={
+              isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
+            }
+          >
+            <div className="overlay-icon">{renderLeftIndicator()}</div>
+          </button>
+        ) : null}
 
-				{/* Expanded widget */}
-				{renderExpanded || settings?.overlay_mode === "recording_only" ? (
-					<button
-						type="button"
-						onClick={handleClick}
-						disabled={isBusy}
-						className="overlay-button overlay-button--expanded"
-						style={
-							isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
-						}
-					>
-						<div className="overlay-icon">{renderLeftIndicator()}</div>
-						<div
-							className={`overlay-center${
-								isError && lastError ? " overlay-center--error" : ""
-							}`}
-						>
-							{isError && lastError ? (
-								<div
-									style={{ display: "flex", flexDirection: "column", gap: 4 }}
-								>
-									<button
-										type="button"
-										className="overlay-error-text"
-										title={lastError.message}
-										style={{ all: "unset", display: "block" }}
-										onFocus={(e) => {
-											e.currentTarget.scrollLeft = 0;
-										}}
-									>
-										{lastError.message}
-									</button>
-								</div>
-							) : centerPhaseText && showDetailedLoading ? (
-								<div className="overlay-phase-text" aria-live="polite">
-									{centerPhaseText}
-								</div>
-							) : (
-								<>
-									{/* Backend-driven waveform (no getUserMedia startup lag).
+        {/* Expanded widget */}
+        {renderExpanded || settings?.overlay_mode === "recording_only" ? (
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={isBusy}
+            className="overlay-button overlay-button--expanded"
+            style={
+              isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
+            }
+          >
+            <div className="overlay-icon">{renderLeftIndicator()}</div>
+            <div
+              className={`overlay-center${
+                isError && lastError ? " overlay-center--error" : ""
+              }`}
+            >
+              {isError && lastError ? (
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <button
+                    type="button"
+                    className="overlay-error-text"
+                    title={lastError.message}
+                    style={{ all: "unset", display: "block" }}
+                    onFocus={(e) => {
+                      e.currentTarget.scrollLeft = 0;
+                    }}
+                  >
+                    {lastError.message}
+                  </button>
+                </div>
+              ) : centerPhaseText && showDetailedLoading ? (
+                <div className="overlay-phase-text" aria-live="polite">
+                  {centerPhaseText}
+                </div>
+              ) : (
+                <>
+                  {/* Backend-driven waveform (no getUserMedia startup lag).
                       While "arming" (UI-only), keep an idle animation so the overlay
                       doesn't look dead before recording actually starts. */}
-									{isWaveActive ? (
-										<BackendAudioWave
-											isActive={true}
-											isVisible={true}
-											className={isArming ? "overlay-wave--arming" : undefined}
-										/>
-									) : (
-										<AudioWave
-											isActive={false}
-											isVisible={true}
-											selectedMicId={settings?.selected_mic_id ?? null}
-											className={isArming ? "overlay-wave--arming" : undefined}
-										/>
-									)}
-								</>
-							)}
-						</div>
-						<div className="overlay-meta">
-							{isError ? (
-								<>
-									{lastFailedRequestId ? (
-										<button
-											type="button"
-											className="overlay-pill"
-											data-variant="dim"
-											onClick={(e) => {
-												e.stopPropagation();
-												void onRetry();
-											}}
-										>
-											Retry
-										</button>
-									) : null}
+                  {isWaveActive ? (
+                    <BackendAudioWave
+                      isActive={true}
+                      isVisible={true}
+                      className={isArming ? "overlay-wave--arming" : undefined}
+                    />
+                  ) : (
+                    <AudioWave
+                      isActive={false}
+                      isVisible={true}
+                      selectedMicId={settings?.selected_mic_id ?? null}
+                      className={isArming ? "overlay-wave--arming" : undefined}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+            <div className="overlay-meta">
+              {isError ? (
+                <>
+                  {lastFailedRequestId ? (
+                    <button
+                      type="button"
+                      className="overlay-pill"
+                      data-variant="dim"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onRetry();
+                      }}
+                    >
+                      Retry
+                    </button>
+                  ) : null}
 
-									<button
-										type="button"
-										className="overlay-pill overlay-pill--close"
-										aria-label="Close"
-										title="Close"
-										onClick={(e) => {
-											e.stopPropagation();
-											dismissError();
-										}}
-									>
-										×
-									</button>
-								</>
-							) : null}
-						</div>
-					</button>
-				) : null}
-			</div>
-		</div>
-	);
+                  <button
+                    type="button"
+                    className="overlay-pill overlay-pill--close"
+                    aria-label="Close"
+                    title="Close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dismissError();
+                    }}
+                  >
+                    ×
+                  </button>
+                </>
+              ) : showOcrPill ? (
+                <button
+                  type="button"
+                  className={`overlay-pill${ocrIsRunning ? " overlay-pill--pulsing" : ""}`}
+                  data-variant={ocrPillVariant}
+                  title={ocrPillTitle}
+                  disabled={!ocrCanClick}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onTriggerOcr();
+                  }}
+                >
+                  {ocrPillIcon}
+                </button>
+              ) : null}
+            </div>
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
 }

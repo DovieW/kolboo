@@ -117,11 +117,6 @@ body {
 	justify-content: center;
 }
 
-.overlay-button--collapsed .overlay-center,
-.overlay-button--collapsed .overlay-meta {
-	display: none;
-}
-
 /* Expanded: indicator + waveform (meta only shown on error) */
 .overlay-button--expanded {
 	width: 224px;
@@ -212,6 +207,11 @@ body {
 	/* expand/collapse animation disabled (see .overlay-button note) */
 }
 
+.overlay-button--collapsed .overlay-center,
+.overlay-button--collapsed .overlay-meta {
+	display: none;
+}
+
 .overlay-pill {
 	font-size: 11px;
 	font-weight: 700;
@@ -222,6 +222,11 @@ body {
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	background: rgba(255, 255, 255, 0.06);
 	color: rgba(255, 255, 255, 0.9);
+}
+
+.overlay-pill:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
 }
 
 .overlay-pill[data-variant="dim"] {
@@ -242,6 +247,16 @@ body {
 	background: rgba(var(--accent-rgb) / 0.14);
 	color: rgba(255, 255, 255, 0.9);
 	animation: overlay-pill-pulse 1.1s ease-in-out infinite;
+}
+
+.overlay-pill--pulsing {
+	animation: overlay-pill-pulse 1.1s ease-in-out infinite;
+}
+
+.overlay-pill[data-variant="warn"] {
+	border-color: rgba(245, 158, 11, 0.42);
+	background: rgba(245, 158, 11, 0.16);
+	color: rgba(255, 239, 209, 0.95);
 }
 
 @keyframes overlay-pill-pulse {
@@ -490,17 +505,6 @@ body {
 	margin: 4px 0;
 }
 
-.quick-ask-answer-md :not(pre) > code {
-	font-family:
-		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-		"Courier New", monospace;
-	font-size: 12.5px;
-	background: rgba(255, 255, 255, 0.06);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 6px;
-	padding: 1px 6px;
-}
-
 /* Code blocks: render full content (no nested scrollbars).
 	We wrap long lines to avoid horizontal scrolling.
 */
@@ -562,6 +566,17 @@ body {
 	white-space: pre-wrap;
 	word-break: break-word;
 	overflow-wrap: anywhere;
+}
+
+.quick-ask-answer-md :not(pre) > code {
+	font-family:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+		"Courier New", monospace;
+	font-size: 12.5px;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	padding: 1px 6px;
 }
 
 .quick-ask-hint {

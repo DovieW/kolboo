@@ -485,6 +485,10 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
                 rewrite_include_clipboard_context: p.rewrite_include_clipboard_context,
                 quick_replace_include_clipboard_context: p.quick_replace_include_clipboard_context,
                 quick_ask_include_clipboard_context: p.quick_ask_include_clipboard_context,
+
+                rewrite_active_window_ocr_mode: p.rewrite_active_window_ocr_mode,
+                quick_replace_active_window_ocr_mode: p.quick_replace_active_window_ocr_mode,
+                quick_ask_active_window_ocr_mode: p.quick_ask_active_window_ocr_mode,
             }
         })
         .collect();
@@ -528,6 +532,56 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         let raw: Option<String> = get_setting_from_store(app, "ollama_url", None);
         crate::app_shared::normalize_optional_base_url(raw)
     };
+    let ocr_base_url: Option<String> = {
+        let raw: Option<String> = get_setting_from_store(app, "ocr_base_url", None);
+        crate::app_shared::normalize_optional_base_url(raw)
+    };
+    let ocr_model: String =
+        get_setting_from_store(app, "ocr_model", "lightonai/LightOnOCR-1B-1025".to_string());
+    let ocr_auth_mode: String = get_setting_from_store(app, "ocr_auth_mode", "none".to_string());
+    let ocr_prompt: String = {
+        let raw: String = get_setting_from_store(
+            app,
+            "ocr_prompt",
+            crate::ocr::OCR_PROMPT_DEFAULT.to_string(),
+        );
+        let trimmed = raw.trim().to_string();
+        if trimmed.is_empty() {
+            crate::ocr::OCR_PROMPT_DEFAULT.to_string()
+        } else {
+            trimmed
+        }
+    };
+    let ocr_max_tokens: u32 =
+        get_setting_from_store(app, "ocr_max_tokens", crate::ocr::OCR_MAX_TOKENS_DEFAULT)
+            .clamp(1, 4096);
+    let ocr_temperature: f64 =
+        get_setting_from_store(app, "ocr_temperature", crate::ocr::OCR_TEMPERATURE_DEFAULT)
+            .clamp(0.0, 2.0);
+    let ocr_top_p: f64 =
+        get_setting_from_store(app, "ocr_top_p", crate::ocr::OCR_TOP_P_DEFAULT).clamp(0.0, 1.0);
+    let ocr_request_timeout_ms: u64 =
+        get_setting_from_store(app, "ocr_request_timeout_ms", 2000u64);
+    let ocr_context_max_chars: u64 = get_setting_from_store(app, "ocr_context_max_chars", 8000u64);
+    let rewrite_active_window_ocr_mode: String =
+        get_setting_from_store(app, "rewrite_active_window_ocr_mode", "off".to_string());
+    let quick_replace_active_window_ocr_mode: String = get_setting_from_store(
+        app,
+        "quick_replace_active_window_ocr_mode",
+        "off".to_string(),
+    );
+    let quick_ask_active_window_ocr_mode: String =
+        get_setting_from_store(app, "quick_ask_active_window_ocr_mode", "off".to_string());
+    let ocr_auto_capture_timing: String =
+        get_setting_from_store(app, "ocr_auto_capture_timing", "on_start".to_string());
+    let ocr_hallucination_protection: bool =
+        get_setting_from_store(app, "ocr_hallucination_protection", true);
+    let ocr_hallucination_threshold: u64 =
+        get_setting_from_store(app, "ocr_hallucination_threshold", 2500u64);
+    let ocr_resize_max_dimension: u32 =
+        get_setting_from_store(app, "ocr_resize_max_dimension", 0u32);
+    let ocr_resize_filter: String =
+        get_setting_from_store(app, "ocr_resize_filter", "nearest".to_string());
 
     #[cfg(feature = "local-whisper")]
     let whisper_model_path: Option<std::path::PathBuf> = {
@@ -614,6 +668,26 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
             ..Default::default()
         },
         llm_api_keys,
+
+        ocr_config: pipeline::OcrConfig {
+            base_url: ocr_base_url,
+            model: ocr_model,
+            auth_mode: ocr_auth_mode,
+            prompt: ocr_prompt,
+            max_tokens: ocr_max_tokens,
+            temperature: ocr_temperature,
+            top_p: ocr_top_p,
+            request_timeout_ms: ocr_request_timeout_ms,
+            context_max_chars: ocr_context_max_chars as usize,
+            rewrite_mode: rewrite_active_window_ocr_mode,
+            quick_replace_mode: quick_replace_active_window_ocr_mode,
+            quick_ask_mode: quick_ask_active_window_ocr_mode,
+            auto_capture_timing: ocr_auto_capture_timing,
+            hallucination_protection: ocr_hallucination_protection,
+            hallucination_threshold: ocr_hallucination_threshold,
+            resize_max_dimension: ocr_resize_max_dimension,
+            resize_filter: ocr_resize_filter,
+        },
 
         // Allow providers to enrich the active RequestLog with request/response payloads.
         request_log_store: app

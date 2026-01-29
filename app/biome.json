@@ -12,12 +12,21 @@
 	"overrides": [
 		{
 			"includes": ["src/lib/tauri/types.generated.ts"],
+			"formatter": {
+				"enabled": false
+			},
 			"linter": {
 				"rules": {
 					"suspicious": {
 						"noExplicitAny": "off"
 					}
 				}
+			}
+		},
+		{
+			"includes": ["src/lib/tauri/events.generated.ts"],
+			"formatter": {
+				"enabled": false
 			}
 		},
 		{

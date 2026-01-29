@@ -188,7 +188,7 @@ export function useRewriteSettingsHandlers({
 				value === "high"
 					? value
 					: null;
-				updateGeminiThinkingLevel.mutate(v);
+			updateGeminiThinkingLevel.mutate(v);
 		},
 		[updateGeminiThinkingLevel],
 	);

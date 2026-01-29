@@ -18,7 +18,9 @@ export type CostInvokeParams = {
 	excludeFreeTier?: boolean;
 };
 
-export function normalizeCostKind(kind?: CostKind): Exclude<CostKind, "all"> | undefined {
+export function normalizeCostKind(
+	kind?: CostKind,
+): Exclude<CostKind, "all"> | undefined {
 	return kind === "all" ? undefined : kind;
 }
 
@@ -27,7 +29,9 @@ export function normalizeCostKind(kind?: CostKind): Exclude<CostKind, "all"> | u
  *
  * Today this mainly means mapping `kind: "all"` => `kind: undefined`.
  */
-export function buildCostInvokeParams(params: CostQueryParams): CostInvokeParams {
+export function buildCostInvokeParams(
+	params: CostQueryParams,
+): CostInvokeParams {
 	return {
 		timeframe: params.timeframe,
 		kind: normalizeCostKind(params.kind),

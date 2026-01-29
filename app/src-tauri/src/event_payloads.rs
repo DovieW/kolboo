@@ -25,6 +25,16 @@ pub struct OverlayAudioLevelPayload {
 }
 
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct OverlayOcrContextUnavailablePayload {
+    /// Short user-facing message (e.g. "OCR context unavailable").
+    pub message: String,
+    /// Optional diagnostic reason (safe to show to the user; should not include secrets).
+    pub reason: Option<String>,
+    /// Current request id (if known) for correlating with request logs.
+    pub request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct QuickAskStartedPayload {
     pub question: Option<String>,
     pub provider: Option<String>,

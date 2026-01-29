@@ -17,8 +17,18 @@ pub fn trim_base_url(base_url: &str) -> &str {
 /// - `path` may be prefixed with `/`.
 pub fn join_base_url(base_url: &str, path: &str) -> String {
     let base = trim_base_url(base_url);
-    let path = path.trim_start_matches('/');
-    format!("{}/{}", base, path)
+    let path_raw = path.trim_start_matches('/');
+
+    // Convenience for OpenAI-ish base URLs:
+    // Users often paste base URLs that already include `/v1`.
+    // Many callsites also append paths that start with `/v1/...`.
+    // Avoid generating `.../v1/v1/...` in that common case.
+    if base.ends_with("/v1") && path_raw.starts_with("v1/") {
+        let without_dup = path_raw.trim_start_matches("v1/");
+        return format!("{}/{}", base, without_dup);
+    }
+
+    format!("{}/{}", base, path_raw)
 }
 
 /// Convenience helper to grab `(status, body_text)` from a `reqwest::Response`.
@@ -58,6 +68,12 @@ mod tests {
         assert_eq!(
             join_base_url("https://example.com/", "/v1/audio/transcriptions"),
             "https://example.com/v1/audio/transcriptions"
+        );
+
+        // If the user includes `/v1` in the base URL, don't duplicate it.
+        assert_eq!(
+            join_base_url("https://example.com/v1", "/v1/chat/completions"),
+            "https://example.com/v1/chat/completions"
         );
     }
 

@@ -521,10 +521,11 @@ pub fn pipeline_start_recording(
     };
 
     // Start request logging
+    let mut request_id: Option<String> = None;
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        let request_id =
-            log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
-        tracing::Span::current().record("request_id", tracing::field::display(&request_id));
+        let id = log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+        tracing::Span::current().record("request_id", tracing::field::display(&id));
+        request_id = Some(id.clone());
 
         log_store.with_current(|log| {
             log.profile_id = profile_id;
@@ -539,9 +540,20 @@ pub fn pipeline_start_recording(
         });
     }
 
+    // Bind OCR to this request id so OCR survives internal pipeline transitions and cannot
+    // leak across requests.
+    if let Some(id) = request_id.clone() {
+        pipeline.begin_ocr_session(id);
+    }
+
     pipeline.start_recording().map_err(|e| {
         // If we fail to start, clear any pinned session profile so it doesn't leak.
         let _ = pipeline.set_session_profile_override(None);
+
+        if let Some(req_id) = request_id.as_deref() {
+            pipeline.end_ocr_session_if_matches(req_id);
+        }
+
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
             log_store.with_current(|log| {
                 log.error(format!("Failed to start recording: {}", e));
@@ -624,6 +636,25 @@ async fn pipeline_stop_and_transcribe_inner(
 
     if let Some(req_id) = active_request_id.as_deref() {
         tracing::Span::current().record("request_id", tracing::field::display(req_id));
+    }
+
+    // Bind OCR to this request id so OCR survives internal pipeline transitions and
+    // cannot leak across requests. This also handles edge cases where request logging
+    // begins at stop rather than recording-start.
+    if let Some(id) = active_request_id.clone() {
+        pipeline.begin_ocr_session(id);
+
+        // NEW: Capture screenshot immediately if timing is "on_start" and any mode is auto.
+        // This allows OCR to run in parallel with recording, so results are ready by stop time.
+        let ocr_config = config.ocr_config.clone();
+        if ocr_config.auto_capture_timing == "on_start" {
+            let any_mode_auto = ocr_config.rewrite_mode == "auto"
+                || ocr_config.quick_ask_mode == "auto"
+                || ocr_config.quick_replace_mode == "auto";
+            if any_mode_auto {
+                pipeline.start_ocr_task(&ocr_config);
+            }
+        }
     }
 
     // Capture model info for persistence in history.
@@ -838,6 +869,10 @@ async fn pipeline_stop_and_transcribe_inner(
                 log_store.complete_current();
             }
 
+            if let Some(req_id) = active_request_id.as_deref() {
+                pipeline.end_ocr_session_if_matches(req_id);
+            }
+
             // Best-effort: remove the in-progress history entry so it doesn't linger as
             // "Transcribing..." forever.
             if let Some(req_id) = active_request_id.as_deref() {
@@ -877,6 +912,10 @@ async fn pipeline_stop_and_transcribe_inner(
                 );
 
                 log_store.complete_current();
+            }
+
+            if let Some(req_id) = active_request_id.as_deref() {
+                pipeline.end_ocr_session_if_matches(req_id);
             }
 
             // Update history entry with error (keep it visible for retry)
@@ -1054,6 +1093,10 @@ async fn pipeline_stop_and_transcribe_inner(
         log_store.complete_current();
     }
 
+    if let Some(req_id) = active_request_id.as_deref() {
+        pipeline.end_ocr_session_if_matches(req_id);
+    }
+
     // Persist audio for retry (best-effort)
     if let (Some(req_id), Some(store)) = (
         active_request_id.as_deref(),
@@ -1186,6 +1229,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     let new_request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
         log_store.start_request(config.stt_provider.clone(), config.stt_model.clone())
     });
+
+    // Bind OCR to this retry request id so OCR cannot leak across requests.
+    if let Some(id) = new_request_id.clone() {
+        pipeline.begin_ocr_session(id);
+    }
 
     if let Some(req_id) = new_request_id.as_deref() {
         tracing::Span::current().record("request_id", tracing::field::display(req_id));
@@ -1336,6 +1384,19 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         Err(PipelineError::Cancelled) => {
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
+
+            if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                log_store.with_current(|log| {
+                    log.warn("Retry transcription cancelled by user");
+                    log.complete_cancelled();
+                });
+                log_store.complete_current();
+            }
+
+            if let Some(req_id) = new_request_id.as_deref() {
+                pipeline.end_ocr_session_if_matches(req_id);
+            }
+
             let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
             let _ = app.emit(
                 events::EVENT_PIPELINE_STATE_CHANGED,
@@ -1364,6 +1425,10 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 );
 
                 log_store.complete_current();
+            }
+
+            if let Some(req_id) = new_request_id.as_deref() {
+                pipeline.end_ocr_session_if_matches(req_id);
             }
 
             if let Some(req_id) = new_request_id.as_deref() {
@@ -1450,6 +1515,10 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         }
 
         log_store.complete_current();
+    }
+
+    if let Some(req_id) = new_request_id.as_deref() {
+        pipeline.end_ocr_session_if_matches(req_id);
     }
 
     // Update history on success
@@ -1824,6 +1893,10 @@ async fn pipeline_dictate_inner(
                 log_store.complete_current();
             }
 
+            if let Some(req_id) = active_request_id.as_deref() {
+                pipeline.end_ocr_session_if_matches(req_id);
+            }
+
             // Persist audio for retry (best-effort)
             if let (Some(req_id), Some(store)) = (
                 active_request_id.as_deref(),
@@ -1997,6 +2070,10 @@ async fn pipeline_dictate_inner(
         log_store.complete_current();
     }
 
+    if let Some(req_id) = active_request_id.as_deref() {
+        pipeline.end_ocr_session_if_matches(req_id);
+    }
+
     // Persist audio for retry/playback (best-effort)
     if let (Some(req_id), Some(store)) = (
         active_request_id.as_deref(),
@@ -2063,6 +2140,7 @@ async fn pipeline_test_transcribe_last_audio_inner(
     // This is important because it is a standalone STT call (no recording/start step).
     let stt_started_at = Instant::now();
 
+    let mut request_id: Option<String> = None;
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         let cfg = pipeline.config();
 
@@ -2093,8 +2171,12 @@ async fn pipeline_test_transcribe_last_audio_inner(
             })
             .unwrap_or_else(|| (cfg.stt_provider.clone(), cfg.stt_model.clone()));
 
-        let request_id = log_store.start_request(desired_provider, desired_model);
-        tracing::Span::current().record("request_id", tracing::field::display(&request_id));
+        let id = log_store.start_request(desired_provider, desired_model);
+        tracing::Span::current().record("request_id", tracing::field::display(&id));
+        request_id = Some(id.clone());
+
+        // Tie OCR to this request id so OCR (if triggered) is isolated to this test request.
+        pipeline.begin_ocr_session(id);
 
         log_store.with_current(|log| {
             log.profile_id = profile_id_used;
@@ -2145,6 +2227,10 @@ async fn pipeline_test_transcribe_last_audio_inner(
                 );
             }
 
+            if let Some(req_id) = request_id.as_deref() {
+                pipeline.end_ocr_session_if_matches(req_id);
+            }
+
             Ok(s)
         }
         Err(e) => {
@@ -2175,6 +2261,10 @@ async fn pipeline_test_transcribe_last_audio_inner(
                     EventStatus::Error,
                     wav.as_deref(),
                 );
+            }
+
+            if let Some(req_id) = request_id.as_deref() {
+                pipeline.end_ocr_session_if_matches(req_id);
             }
 
             Err(e.into())
@@ -2251,7 +2341,11 @@ pub async fn pipeline_toggle(
         // Pipeline started successfully - now create the request log
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
             let config = pipeline.config();
-            log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+            let request_id =
+                log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+
+            // Bind OCR to this request id so OCR cannot leak across requests.
+            pipeline.begin_ocr_session(request_id);
             log_store.with_current(|log| {
                 log.llm_provider = if config.llm_config.enabled {
                     Some(config.llm_config.provider.clone())

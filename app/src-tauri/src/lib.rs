@@ -27,6 +27,7 @@ pub(crate) use crate::core::recording::{
     get_playing_audio_handling, start_recording, PlayingAudioHandling,
 };
 
+mod active_window_capture;
 mod app_paths;
 mod audio;
 mod audio_capture;
@@ -42,6 +43,7 @@ mod history;
 mod http;
 mod llm;
 mod network;
+mod ocr;
 mod overlay;
 mod pipeline;
 mod recordings;
@@ -70,9 +72,10 @@ mod event_payloads;
 
 pub use event_payloads::{
     ConnectionStateChangedPayload, ConnectionStateEvent, EmptyEventPayload,
-    OverlayAudioLevelPayload, PipelineErrorPayload, PipelineStateEvent,
-    PipelineTranscriptReadyPayload, QuickAskAnswerErrorPayload, QuickAskAnswerOkPayload,
-    QuickAskAnswerPayload, QuickAskStartedPayload, SettingsChangedPayload, SystemEvent,
+    OverlayAudioLevelPayload, OverlayOcrContextUnavailablePayload, PipelineErrorPayload,
+    PipelineStateEvent, PipelineTranscriptReadyPayload, QuickAskAnswerErrorPayload,
+    QuickAskAnswerOkPayload, QuickAskAnswerPayload, QuickAskStartedPayload, SettingsChangedPayload,
+    SystemEvent,
 };
 
 pub use audio_capture::AudioCaptureDiagnostics;
@@ -297,6 +300,98 @@ pub(crate) fn stop_recording(
             preset_name: None,
         };
 
+        let default_profile = config
+            .llm_config
+            .program_prompt_profiles
+            .iter()
+            .find(|p| p.id == "default");
+
+        let ocr_config = config.ocr_config.clone();
+
+        let rewrite_ocr_mode = pipeline::resolve_rewrite_active_window_ocr_mode(
+            profile.as_ref(),
+            default_profile,
+            ocr_config.rewrite_mode.as_str(),
+        );
+        let quick_ask_ocr_mode = pipeline::resolve_quick_ask_active_window_ocr_mode(
+            profile.as_ref(),
+            default_profile,
+            ocr_config.quick_ask_mode.as_str(),
+        );
+        let quick_replace_ocr_mode = pipeline::resolve_quick_replace_active_window_ocr_mode(
+            profile.as_ref(),
+            default_profile,
+            ocr_config.quick_replace_mode.as_str(),
+        );
+
+        // Debug breadcrumbs for OCR gating.
+        // This is intentionally high-level (no screenshot bytes, no secrets).
+        if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+            let rewrite_ocr_mode = rewrite_ocr_mode.clone();
+            let quick_ask_ocr_mode = quick_ask_ocr_mode.clone();
+            let quick_replace_ocr_mode = quick_replace_ocr_mode.clone();
+            log_store.with_current(|log| {
+                // Record the effective mode for the active flow.
+                log.ocr_effective_mode = Some(if is_quick_ask_session {
+                    quick_ask_ocr_mode.clone()
+                } else {
+                    // The normal recording flow uses rewrite by default.
+                    // Quick Replace may still consume OCR when enabled.
+                    rewrite_ocr_mode.clone()
+                });
+
+                log.debug(format!(
+                    "OCR: effective modes (rewrite={}, quick_ask={}, quick_replace={})",
+                    rewrite_ocr_mode, quick_ask_ocr_mode, quick_replace_ocr_mode
+                ));
+            });
+        }
+
+        // IMPORTANT: Only auto-start OCR for the *current* flow.
+        // Previously, rewrite_mode == "auto" caused OCR to start even during Quick Ask sessions,
+        // which made the tri-state dropdown feel broken (Quick Ask always did OCR work).
+        let should_auto_ocr = pipeline::should_auto_start_active_window_ocr(
+            is_quick_ask_session,
+            rewrite_ocr_mode.as_str(),
+            quick_ask_ocr_mode.as_str(),
+            quick_replace_ocr_mode.as_str(),
+        );
+
+        if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
+            let quick_ask_ocr_mode = quick_ask_ocr_mode.clone();
+            log_store.with_current(|log| {
+                log.debug(format!(
+                    "OCR: auto-start decision (is_quick_ask_session={}, should_auto={})",
+                    is_quick_ask_session, should_auto_ocr
+                ));
+
+                if is_quick_ask_session {
+                    // Make the Quick Ask tri-state behavior explicit in the logs.
+                    if !should_auto_ocr {
+                        log.ocr_status = Some("not_started".to_string());
+                        log.ocr_not_attempted_reason = Some(
+                            match quick_ask_ocr_mode.as_str() {
+                                "off" => "mode_off",
+                                "manual" => "mode_manual",
+                                _ => "unknown",
+                            }
+                            .to_string(),
+                        );
+                        log.info(format!(
+                            "OCR: not auto-started for Quick Ask (mode={})",
+                            quick_ask_ocr_mode
+                        ));
+                    }
+                }
+            });
+        }
+        // Only start OCR at stop time if it hasn't already started (on_start timing).
+        let ocr_status = pipeline_clone.get_ocr_status();
+        let ocr_already_started = ocr_status == "running" || ocr_status == "done";
+        if !ocr_already_started {
+            pipeline_clone.start_ocr_task_if_auto(&ocr_config, should_auto_ocr);
+        }
+
         #[derive(Clone, Debug, Default)]
         struct QuickAskProfileConfig {
             provider: Option<String>,
@@ -308,12 +403,6 @@ pub(crate) fn stop_recording(
             anthropic_thinking_budget: Option<i64>,
             include_clipboard_context: bool,
         }
-
-        let default_profile = config
-            .llm_config
-            .program_prompt_profiles
-            .iter()
-            .find(|p| p.id == "default");
 
         let quick_ask_profile_cfg: QuickAskProfileConfig = {
             let include_clipboard_context = profile
@@ -461,6 +550,10 @@ pub(crate) fn stop_recording(
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 let id =
                     log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+
+                // Tie OCR to this request id (edge case: request log was missing at stop).
+                pipeline_clone.begin_ocr_session(id.clone());
+
                 log_store.with_current(|log| {
                     log.profile_id = model_info.profile_id.clone();
                     log.profile_name = model_info.profile_name.clone();
@@ -812,9 +905,6 @@ pub(crate) fn stop_recording(
                                 .trim()
                                 .to_string();
 
-                            // Ensure the answer window is visible before we start the LLM call.
-                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
-
                             if question.is_empty() {
                                 // Quick Ask is considered the "request" here, so mark the request log
                                 // accordingly and finalize it.
@@ -847,6 +937,11 @@ pub(crate) fn stop_recording(
                                         ok: false,
                                         error: "No transcript to answer (empty)".to_string(),
                                     }),
+                                );
+
+                                // Show the Quick Ask window only once we have something to display.
+                                crate::sessions::quick_ask::ensure_quick_ask_window_visible(
+                                    &app_clone,
                                 );
                             } else {
                                 // Resolve effective Quick Ask configuration:
@@ -961,6 +1056,7 @@ pub(crate) fn stop_recording(
                                         log.quick_ask_request_json = Some(serde_json::json!({
                                                 "system_prompt": system_prompt.clone(),
                                                 "question": question.clone(),
+                                                "ocr_mode": quick_ask_ocr_mode.clone(),
                                                 "provider": provider.clone(),
                                                 "model": model.clone(),
                                         }));
@@ -1011,6 +1107,10 @@ pub(crate) fn stop_recording(
                                         log_store.complete_current();
                                     }
 
+                                    if let Some(req_id) = request_id.as_deref() {
+                                        pipeline_clone.end_ocr_session_if_matches(req_id);
+                                    }
+
                                     crate::sessions::quick_ask::emit_to_quick_ask(
                                         &app_clone,
                                         crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
@@ -1018,6 +1118,11 @@ pub(crate) fn stop_recording(
                                             ok: false,
                                             error: err,
                                         }),
+                                    );
+
+                                    // Show the Quick Ask window only once we have something to display.
+                                    crate::sessions::quick_ask::ensure_quick_ask_window_visible(
+                                        &app_clone,
                                     );
                                 } else {
                                     let provider_cfg = crate::llm::LlmConfig {
@@ -1160,11 +1265,94 @@ pub(crate) fn stop_recording(
                                     let quick_ask_clipboard_context_for_log: Option<String> =
                                         clipboard_context_capped.clone();
 
+                                    // In "manual" mode, the overlay may have already started OCR.
+                                    // If so, we should consume it here (without auto-starting).
+                                    let ocr_text = if quick_ask_ocr_mode != "off" {
+                                        pipeline_clone
+                                            .get_ocr_result_with_timeout(Duration::from_millis(
+                                                ocr_config.request_timeout_ms,
+                                            ))
+                                            .await
+                                            .map(|r| r.text)
+                                    } else {
+                                        None
+                                    };
+
+                                    // Explicit breadcrumbs so it's obvious whether OCR was actually attached.
+                                    if let Some(log_store) =
+                                        app_clone.try_state::<RequestLogStore>()
+                                    {
+                                        let ocr_status = pipeline_clone.get_ocr_status();
+                                        let ocr_chars = ocr_text.as_deref().map(|s| s.len());
+                                        let ocr_failed_reason =
+                                            pipeline_clone.get_ocr_failed_reason();
+
+                                        log_store.with_current(|log| {
+                                            if let Some(n) = ocr_chars {
+                                                log.info(format!(
+                                                    "Quick Ask: OCR context attached ({} chars)",
+                                                    n
+                                                ));
+                                            } else if quick_ask_ocr_mode != "off" {
+                                                match ocr_status.as_str() {
+                                                    "running" => {
+                                                        log.warn(format!(
+                                                            "Quick Ask: proceeding without OCR (OCR still running; timeout={}ms)",
+                                                            ocr_config.request_timeout_ms
+                                                        ));
+                                                    }
+                                                    "failed" => {
+                                                        log.warn(format!(
+                                                            "Quick Ask: proceeding without OCR (OCR failed: {})",
+                                                            ocr_failed_reason.unwrap_or_else(|| "unknown".to_string())
+                                                        ));
+                                                    }
+                                                    "cancelled" => {
+                                                        log.info(
+                                                            "Quick Ask: proceeding without OCR (OCR cancelled)".to_string(),
+                                                        );
+                                                    }
+                                                    _ => {
+                                                        log.info(format!(
+                                                            "Quick Ask: proceeding without OCR (status={})",
+                                                            ocr_status
+                                                        ));
+                                                    }
+                                                }
+                                            }
+
+                                            // Mirror the OCR attachment status into the Quick Ask request JSON.
+                                            if let Some(serde_json::Value::Object(map)) =
+                                                log.quick_ask_request_json.as_mut()
+                                            {
+                                                map.insert(
+                                                    "ocr_status".to_string(),
+                                                    serde_json::Value::String(ocr_status),
+                                                );
+                                                map.insert(
+                                                    "ocr_context_present".to_string(),
+                                                    serde_json::Value::Bool(ocr_chars.is_some()),
+                                                );
+                                                map.insert(
+                                                    "ocr_context_chars".to_string(),
+                                                    ocr_chars
+                                                        .map(|n| {
+                                                            serde_json::Value::Number(
+                                                                serde_json::Number::from(n as u64),
+                                                            )
+                                                        })
+                                                        .unwrap_or(serde_json::Value::Null),
+                                                );
+                                            }
+                                        });
+                                    }
+
                                     let question_with_context = crate::clipboard_context::build_quick_ask_user_message_with_context(
                                         question.as_str(),
                                         selected_context_capped.as_deref(),
                                         surrounding_context_capped.as_deref(),
                                         clipboard_context_capped.as_deref(),
+                                        ocr_text.as_deref(),
                                     );
 
                                     // Best-effort: include last N Quick Ask turns from in-memory history.
@@ -1238,6 +1426,9 @@ pub(crate) fn stop_recording(
                                                 || surrounding_context_trimmed.map(|s| s.len()),
                                             );
                                         let clipboard_chars = clipboard_trimmed.map(|s| s.len());
+                                        let ocr_chars = ocr_text.as_deref().map(|s| s.len());
+                                        let ocr_failed_reason =
+                                            pipeline_clone.get_ocr_failed_reason();
                                         let quick_ask_context_text_for_log =
                                             quick_ask_context_text_for_log.clone();
                                         let quick_ask_clipboard_context_for_log =
@@ -1247,6 +1438,12 @@ pub(crate) fn stop_recording(
                                                 quick_ask_context_text_for_log;
                                             log.quick_ask_clipboard_context =
                                                 quick_ask_clipboard_context_for_log;
+                                            log.ocr_context_present = ocr_chars.is_some();
+                                            log.ocr_context_chars = ocr_chars.map(|n| n as u64);
+                                            log.ocr_context_text = ocr_text.clone();
+                                            if ocr_chars.is_none() {
+                                                log.ocr_failed_reason = ocr_failed_reason;
+                                            }
 
                                             if let Some(serde_json::Value::Object(map)) =
                                                 log.quick_ask_request_json.as_mut()
@@ -1341,6 +1538,10 @@ pub(crate) fn stop_recording(
                                                 log_store.complete_current();
                                             }
 
+                                            if let Some(req_id) = request_id.as_deref() {
+                                                pipeline_clone.end_ocr_session_if_matches(req_id);
+                                            }
+
                                             crate::sessions::quick_ask::emit_to_quick_ask(
                                                 &app_clone,
                                                 crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
@@ -1358,6 +1559,9 @@ pub(crate) fn stop_recording(
                                                     },
                                                 ),
                                             );
+
+                                            // Show the Quick Ask window only once we have something to display.
+                                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
                                         }
                                         Err(e) => {
                                             let err = e.to_string();
@@ -1392,6 +1596,10 @@ pub(crate) fn stop_recording(
                                                 log_store.complete_current();
                                             }
 
+                                            if let Some(req_id) = request_id.as_deref() {
+                                                pipeline_clone.end_ocr_session_if_matches(req_id);
+                                            }
+
                                             crate::sessions::quick_ask::emit_to_quick_ask(
                                                 &app_clone,
                                                 crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
@@ -1402,6 +1610,9 @@ pub(crate) fn stop_recording(
                                                     },
                                                 ),
                                             );
+
+                                            // Show the Quick Ask window only once we have something to display.
+                                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
                                         }
                                     }
                                 }
@@ -1434,6 +1645,21 @@ pub(crate) fn stop_recording(
                                     .filter(|s| !s.is_empty());
 
                                 if let Some(selected) = selected_text {
+                                    let ocr_text = if quick_replace_ocr_mode != "off" {
+                                        pipeline_clone
+                                            .get_ocr_result_with_timeout(Duration::from_millis(
+                                                ocr_config.request_timeout_ms,
+                                            ))
+                                            .await
+                                            .map(|r| r.text)
+                                    } else {
+                                        None
+                                    };
+
+                                    let ocr_context = ocr_text
+                                        .as_deref()
+                                        .map(crate::ocr::build_labeled_ocr_context)
+                                        .filter(|s| !s.is_empty());
                                     if let Some(log_store) =
                                         app_clone.try_state::<RequestLogStore>()
                                     {
@@ -1551,6 +1777,11 @@ pub(crate) fn stop_recording(
                                             user_prompt.push_str(cb.trim());
                                         }
 
+                                        if let Some(ref ocr) = ocr_context {
+                                            user_prompt.push_str("\n\n");
+                                            user_prompt.push_str(ocr.as_str());
+                                        }
+
                                         user_prompt.push_str("\n\nReturn only the updated text.");
 
                                         // Store clipboard context in request log if present.
@@ -1563,6 +1794,23 @@ pub(crate) fn stop_recording(
                                                         Some(cb_text.clone());
                                                 });
                                             }
+                                        }
+
+                                        if let Some(log_store) =
+                                            app_clone.try_state::<RequestLogStore>()
+                                        {
+                                            let ocr_chars = ocr_text.as_deref().map(|s| s.len());
+                                            let ocr_failed_reason =
+                                                pipeline_clone.get_ocr_failed_reason();
+                                            let ocr_text_clone = ocr_text.clone();
+                                            log_store.with_current(|log| {
+                                                log.ocr_context_present = ocr_chars.is_some();
+                                                log.ocr_context_chars = ocr_chars.map(|n| n as u64);
+                                                log.ocr_context_text = ocr_text_clone;
+                                                if ocr_chars.is_none() {
+                                                    log.ocr_failed_reason = ocr_failed_reason;
+                                                }
+                                            });
                                         }
 
                                         let provider_cfg = crate::llm::LlmConfig {
@@ -1731,6 +1979,10 @@ pub(crate) fn stop_recording(
 
                                     log_store.complete_current();
                                 }
+
+                                if let Some(req_id) = request_id.as_deref() {
+                                    pipeline_clone.end_ocr_session_if_matches(req_id);
+                                }
                             }
 
                             // If Quick Replace was intended but failed, surface an error instead of
@@ -1871,6 +2123,10 @@ pub(crate) fn stop_recording(
 
                                 log_store.complete_current();
                             }
+
+                            if let Some(req_id) = request_id.as_deref() {
+                                pipeline_clone.end_ocr_session_if_matches(req_id);
+                            }
                         }
 
                         // Save to history
@@ -1913,9 +2169,6 @@ pub(crate) fn stop_recording(
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
                         if is_quick_ask_session {
-                            // Ensure the answer window is visible so the error is actually seen.
-                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
-
                             // Finalize the deferred Quick Ask request log.
                             if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
                                 log_store.with_current(|log| {
@@ -1944,6 +2197,9 @@ pub(crate) fn stop_recording(
                                     error: "No transcript to answer (empty)".to_string(),
                                 }),
                             );
+
+                            // Show the Quick Ask window only once we have something to display.
+                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
                         }
 
                         // Mark history entry as success with empty text (keeps timeline consistent)
@@ -2042,6 +2298,10 @@ pub(crate) fn stop_recording(
                             log_store.complete_current();
                         }
 
+                        if let Some(req_id) = request_id.as_deref() {
+                            pipeline_clone.end_ocr_session_if_matches(req_id);
+                        }
+
                         // Notify frontend and hide overlay if needed.
                         let _ = app_clone.emit(events::EVENT_PIPELINE_CANCELLED, ());
                         let _ = app_clone.emit(
@@ -2109,6 +2369,10 @@ pub(crate) fn stop_recording(
                         }
 
                         log_store.complete_current();
+                    }
+
+                    if let Some(req_id) = request_id.as_deref() {
+                        pipeline_clone.end_ocr_session_if_matches(req_id);
                     }
 
                     // Persist audio for retry (best-effort)
@@ -2230,6 +2494,9 @@ pub fn run() {
             commands::recording::pipeline_stop_and_transcribe,
             commands::recording::pipeline_cancel,
             commands::recording::pipeline_get_state,
+            commands::ocr::pipeline_get_overlay_state,
+            commands::ocr::pipeline_trigger_active_window_ocr,
+            commands::ocr::pipeline_cancel_active_window_ocr,
             commands::recording::pipeline_is_recording,
             commands::recording::pipeline_is_error,
             commands::recording::pipeline_update_config,

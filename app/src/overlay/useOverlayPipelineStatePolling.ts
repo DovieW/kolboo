@@ -1,18 +1,20 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect } from "react";
 import {
 	isPipelineState,
+	type OverlayAnimState,
 	type PipelineState,
 	type PipelineStateSource,
-	type OverlayAnimState,
 } from "../lib/overlay/overlayUiReducer";
+import { type OverlayPipelineState, ocrAPI } from "../lib/tauri";
 import { getPipelinePollIntervalMs } from "./pipelinePolling";
 
 type UseOverlayPipelineStatePollingInputs = {
 	pipelineState: PipelineState;
 	animState: OverlayAnimState;
 	overlayMode: string | null | undefined;
+	ocrStatus?: string | null;
 	setPipelineState: (source: PipelineStateSource, next: PipelineState) => void;
+	setOverlayState: (next: OverlayPipelineState) => void;
 };
 
 /**
@@ -24,7 +26,9 @@ export function useOverlayPipelineStatePolling({
 	pipelineState,
 	animState,
 	overlayMode,
+	ocrStatus,
 	setPipelineState,
+	setOverlayState,
 }: UseOverlayPipelineStatePollingInputs) {
 	useEffect(() => {
 		let cancelled = false;
@@ -35,6 +39,7 @@ export function useOverlayPipelineStatePolling({
 			pipelineState,
 			animState,
 			overlayMode,
+			ocrStatus,
 		});
 
 		const syncState = async () => {
@@ -42,10 +47,11 @@ export function useOverlayPipelineStatePolling({
 			if (inFlight) return;
 			inFlight = true;
 			try {
-				const state = await invoke<string>("pipeline_get_state");
+				const state = await ocrAPI.getOverlayState();
 				if (cancelled) return;
-				if (isPipelineState(state)) {
-					setPipelineState("poll", state);
+				setOverlayState(state);
+				if (isPipelineState(state.pipeline_state)) {
+					setPipelineState("poll", state.pipeline_state);
 				} else {
 					setPipelineState("poll", "idle");
 				}
@@ -67,5 +73,12 @@ export function useOverlayPipelineStatePolling({
 			cancelled = true;
 			if (interval) window.clearInterval(interval);
 		};
-	}, [animState, overlayMode, pipelineState, setPipelineState]);
+	}, [
+		animState,
+		ocrStatus,
+		overlayMode,
+		pipelineState,
+		setOverlayState,
+		setPipelineState,
+	]);
 }

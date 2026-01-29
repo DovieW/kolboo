@@ -6,12 +6,13 @@ use tauri::Runtime;
 use tauri_plugin_store::Store;
 
 #[cfg(desktop)]
-pub(crate) const SETTINGS_VERSION_LATEST: u32 = 4;
+pub(crate) const SETTINGS_VERSION_LATEST: u32 = 5;
 
 // Version history:
 // 1 -> 2: quick ask hotkey key rename, retention key split, enum typo fixes, auto_mute_audio -> playing_audio_handling
 // 2 -> 3: cleanup_prompt_sections schema normalization (global + per-profile)
 // 3 -> 4: rewrite profile rewrite_llm_enabled normalization (ensure explicit boolean for non-default profiles)
+// 4 -> 5: active-window OCR mode migration (legacy bool -> tri-state)
 
 #[cfg(desktop)]
 pub(crate) trait SettingsStore {
@@ -254,6 +255,58 @@ fn migrate_v3_to_v4(store: &impl SettingsStore) -> bool {
 }
 
 #[cfg(desktop)]
+fn normalize_ocr_mode_value(raw: Option<Value>) -> Option<String> {
+    match raw {
+        Some(Value::String(s)) => match s.as_str() {
+            "off" | "auto" | "manual" => Some(s),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[cfg(desktop)]
+fn migrate_v4_to_v5(store: &impl SettingsStore) -> bool {
+    let mut dirty = false;
+
+    let migrate_mode = |legacy_key: &str, new_key: &str, dirty: &mut bool| {
+        let current = normalize_ocr_mode_value(store.get(new_key));
+        if current.is_some() {
+            return;
+        }
+
+        if let Some(Value::Bool(enabled)) = store.get(legacy_key) {
+            store.set(new_key, json!(if enabled { "auto" } else { "off" }));
+            *dirty = true;
+            return;
+        }
+
+        if store.get(new_key).is_some() {
+            store.set(new_key, json!("off"));
+            *dirty = true;
+        }
+    };
+
+    migrate_mode(
+        "rewrite_include_active_window_ocr_context",
+        "rewrite_active_window_ocr_mode",
+        &mut dirty,
+    );
+    migrate_mode(
+        "quick_replace_include_active_window_ocr_context",
+        "quick_replace_active_window_ocr_mode",
+        &mut dirty,
+    );
+    migrate_mode(
+        "quick_ask_include_active_window_ocr_context",
+        "quick_ask_active_window_ocr_mode",
+        &mut dirty,
+    );
+
+    dirty
+}
+
+#[cfg(desktop)]
 pub(crate) fn run_settings_migrations(
     store: &impl SettingsStore,
 ) -> Result<bool, Box<dyn std::error::Error>> {
@@ -279,6 +332,11 @@ pub(crate) fn run_settings_migrations(
     if version < 4 {
         dirty |= migrate_v3_to_v4(store);
         version = 4;
+    }
+
+    if version < 5 {
+        dirty |= migrate_v4_to_v5(store);
+        version = 5;
     }
 
     if version != current_version {
@@ -334,7 +392,7 @@ mod tests {
 
         assert!(dirty);
         assert!(store.get("quick_ask_hold_hotkey").is_some());
-        assert_eq!(store.get("settings_version"), Some(json!(4)));
+        assert_eq!(store.get("settings_version"), Some(json!(5)));
     }
 
     #[test]
@@ -369,7 +427,7 @@ mod tests {
             Some(&json!({"system": {"content": "P1"}}))
         );
 
-        assert_eq!(store.get("settings_version"), Some(json!(4)));
+        assert_eq!(store.get("settings_version"), Some(json!(5)));
     }
 
     #[test]
@@ -389,7 +447,7 @@ mod tests {
 
         let dirty = run_settings_migrations(&store).expect("migration failed");
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(4)));
+        assert_eq!(store.get("settings_version"), Some(json!(5)));
 
         let profiles = store.get("rewrite_program_prompt_profiles").unwrap();
         let arr = profiles.as_array().unwrap();
@@ -449,5 +507,32 @@ mod tests {
 
         assert!(dirty);
         assert_eq!(store.get("playing_audio_handling"), Some(json!("mute")));
+    }
+
+    #[test]
+    fn migrates_active_window_ocr_mode_from_legacy_bool() {
+        let store = TestStore::with_entries(vec![
+            ("settings_version", json!(4)),
+            ("rewrite_include_active_window_ocr_context", json!(true)),
+            (
+                "quick_replace_include_active_window_ocr_context",
+                json!(false),
+            ),
+        ]);
+
+        let dirty = run_settings_migrations(&store).expect("migration failed");
+
+        assert!(dirty);
+        assert_eq!(store.get("settings_version"), Some(json!(5)));
+        assert_eq!(
+            store.get("rewrite_active_window_ocr_mode"),
+            Some(json!("auto"))
+        );
+        assert_eq!(
+            store.get("quick_replace_active_window_ocr_mode"),
+            Some(json!("off"))
+        );
+        // Unset legacy + no explicit value should leave missing (defaults will seed later).
+        assert_eq!(store.get("quick_ask_active_window_ocr_mode"), None);
     }
 }

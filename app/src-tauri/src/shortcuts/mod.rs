@@ -347,6 +347,12 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
         log_store.complete_current();
     }
 
+    // End OCR session (best-effort) so any in-flight OCR work is cancelled and does not
+    // leak into later requests.
+    if let (Some(pipeline), Some(req_id)) = (pipeline.as_ref(), active_request_id.as_deref()) {
+        pipeline.end_ocr_session_if_matches(req_id);
+    }
+
     // Best-effort: remove any in-progress history entry for this request.
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {

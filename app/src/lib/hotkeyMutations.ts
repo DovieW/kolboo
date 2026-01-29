@@ -1,4 +1,4 @@
-import { validateHotkeyNotDuplicate, type HotkeyConfig } from "./hotkeys";
+import { type HotkeyConfig, validateHotkeyNotDuplicate } from "./hotkeys";
 
 export type HotkeyKind =
 	| "toggle"

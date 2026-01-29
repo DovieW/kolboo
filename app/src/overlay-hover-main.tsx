@@ -1,6 +1,6 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppMantineProvider } from "./lib/bootstrap/AppMantineProvider";
 import { renderRoot } from "./lib/bootstrap/renderRoot";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import OverlayHoverApp from "./OverlayHoverApp";
 

@@ -1,7 +1,10 @@
-import { Accordion, Select, Switch } from "@mantine/core";
+import { Accordion, Select, Switch, Tooltip } from "@mantine/core";
 import { RotateCcw } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
-import type { RewriteProgramPromptProfile } from "../../lib/tauri";
+import type {
+	ActiveWindowOcrMode,
+	RewriteProgramPromptProfile,
+} from "../../lib/tauri";
 import { PromptSectionEditor } from "./PromptSectionEditor";
 import { SettingsInheritanceIndicator } from "./SettingsInheritance";
 import { SettingsIconButton, SettingsRow } from "./SettingsRow";
@@ -15,8 +18,14 @@ export function QuickReplaceSettings({
 	isDefaultScope,
 	inheritTooltip,
 	defaultSystemPrompt,
+	ocrProviderAvailable,
+	ocrProviderUnavailableReason,
 	defaultQuickReplaceEnabled,
 	defaultQuickReplaceIncludeClipboardContext,
+	localProfileQuickReplaceActiveWindowOcrMode,
+	quickReplaceActiveWindowOcrModeInheriting,
+	setQuickReplaceActiveWindowOcrModeInheriting,
+	setLocalProfileQuickReplaceActiveWindowOcrMode,
 	defaultQuickReplaceProvider,
 	defaultQuickReplaceModel,
 	defaultQuickReplaceSystemPrompt,
@@ -55,8 +64,18 @@ export function QuickReplaceSettings({
 	isDefaultScope: boolean;
 	inheritTooltip: string;
 	defaultSystemPrompt: string;
+	ocrProviderAvailable: boolean;
+	ocrProviderUnavailableReason: string | null;
 	defaultQuickReplaceEnabled: boolean;
 	defaultQuickReplaceIncludeClipboardContext: boolean;
+	localProfileQuickReplaceActiveWindowOcrMode: ActiveWindowOcrMode;
+	quickReplaceActiveWindowOcrModeInheriting: boolean;
+	setQuickReplaceActiveWindowOcrModeInheriting: Dispatch<
+		SetStateAction<boolean>
+	>;
+	setLocalProfileQuickReplaceActiveWindowOcrMode: Dispatch<
+		SetStateAction<ActiveWindowOcrMode>
+	>;
 	defaultQuickReplaceProvider: string | null;
 	defaultQuickReplaceModel: string | null;
 	defaultQuickReplaceSystemPrompt: string;
@@ -97,6 +116,11 @@ export function QuickReplaceSettings({
 	rewriteModel: string | null;
 	isSaving: boolean;
 }) {
+	const ocrModeDisabled = !ocrProviderAvailable;
+	const ocrModeDisabledTooltip =
+		ocrProviderUnavailableReason ??
+		"OCR is disabled until an OCR Base URL is set in Settings → Providers.";
+
 	const quickReplaceHasCustom = isDefaultScope
 		? (() => {
 				const stored = activeProfile?.quick_replace_system_prompt;
@@ -122,9 +146,9 @@ export function QuickReplaceSettings({
 				description={
 					<>
 						If you have text highlighted when transcription starts, Kolboo will
-						copy the selection, treat your transcript as instructions, rewrite the
-						selected text with an LLM, then output using your output mode (Paste
-						replaces the selection).
+						copy the selection, treat your transcript as instructions, rewrite
+						the selected text with an LLM, then output using your output mode
+						(Paste replaces the selection).
 					</>
 				}
 				right={
@@ -161,7 +185,6 @@ export function QuickReplaceSettings({
 				}
 			/>
 
-
 			<SettingsRow
 				label="Include Clipboard Context"
 				description={
@@ -178,8 +201,7 @@ export function QuickReplaceSettings({
 							inheritTooltip={inheritTooltip}
 							onDisableOverride={() =>
 								openDisableOverrideDialog({
-									title:
-										"Disable Quick Replace Clipboard Context override?",
+									title: "Disable Quick Replace Clipboard Context override?",
 									onConfirm: () => {
 										setQuickReplaceIncludeClipboardContextInheriting(true);
 										setLocalProfileQuickReplaceIncludeClipboardContext(
@@ -202,11 +224,85 @@ export function QuickReplaceSettings({
 								setLocalProfileQuickReplaceIncludeClipboardContext(enabled);
 								saveProfileMetadata({
 									quick_replace_include_clipboard_context: enabled,
-							});
+								});
 							}}
 							color="gray"
 							size="md"
 						/>
+					</>
+				}
+			/>
+
+			<SettingsRow
+				label="Active Window OCR"
+				description={
+					<>
+						Optionally capture the currently active window, run OCR, and include
+						the text as extra context in Quick Replace prompts.
+					</>
+				}
+				className={ocrModeDisabled ? "settings-row--disabled" : undefined}
+				right={
+					<>
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={quickReplaceActiveWindowOcrModeInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={() =>
+								openDisableOverrideDialog({
+									title: "Disable Quick Replace Active Window OCR override?",
+									onConfirm: () => {
+										setQuickReplaceActiveWindowOcrModeInheriting(true);
+										saveProfileMetadata({
+											quick_replace_active_window_ocr_mode: null,
+										});
+									},
+								})
+							}
+							disabled={isSaving || ocrModeDisabled}
+						/>
+						<Tooltip
+							label={ocrModeDisabledTooltip}
+							withArrow
+							disabled={!ocrModeDisabled}
+						>
+							<div>
+								<Select
+									data={[
+										{ value: "off", label: "Off" },
+										{ value: "auto", label: "Auto" },
+										{ value: "manual", label: "Manual" },
+									]}
+									value={localProfileQuickReplaceActiveWindowOcrMode}
+									onChange={(value) => {
+										if (!value) return;
+										if (
+											value === "off" ||
+											value === "auto" ||
+											value === "manual"
+										) {
+											if (!isDefaultScope) {
+												setQuickReplaceActiveWindowOcrModeInheriting(false);
+											}
+											setLocalProfileQuickReplaceActiveWindowOcrMode(value);
+											saveProfileMetadata({
+												quick_replace_active_window_ocr_mode: value,
+											});
+										}
+									}}
+									withCheckIcon={false}
+									disabled={isSaving || ocrModeDisabled}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											minWidth: 140,
+										},
+									}}
+								/>
+							</div>
+						</Tooltip>
 					</>
 				}
 			/>
@@ -254,37 +350,37 @@ export function QuickReplaceSettings({
 							</SettingsIconButton>
 						)}
 						<Select
-						data={llmProviderOptions}
-						value={effectiveQuickReplaceProvider}
-						onChange={(value) => {
-							if (!value) return;
+							data={llmProviderOptions}
+							value={effectiveQuickReplaceProvider}
+							onChange={(value) => {
+								if (!value) return;
 
-							if (!isDefaultScope) {
-								setQuickReplaceProviderInheriting(false);
-								setQuickReplaceModelInheriting(false);
-							}
+								if (!isDefaultScope) {
+									setQuickReplaceProviderInheriting(false);
+									setQuickReplaceModelInheriting(false);
+								}
 
-							setLocalProfileQuickReplaceProvider(value);
-							const models = getLlmModelOptionsForProvider(value);
-							const firstModel = models[0]?.value ?? null;
-							setLocalProfileQuickReplaceModel(firstModel);
-							saveProfileMetadata({
-								quick_replace_provider: value,
-								quick_replace_model: firstModel,
-							});
-						}}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={llmProviderDisabled}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
+								setLocalProfileQuickReplaceProvider(value);
+								const models = getLlmModelOptionsForProvider(value);
+								const firstModel = models[0]?.value ?? null;
+								setLocalProfileQuickReplaceModel(firstModel);
+								saveProfileMetadata({
+									quick_replace_provider: value,
+									quick_replace_model: firstModel,
+								});
+							}}
+							placeholder="Select provider"
+							withCheckIcon={false}
+							disabled={llmProviderDisabled}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								},
+							}}
+						/>
 					</>
 				}
 			/>
@@ -308,7 +404,7 @@ export function QuickReplaceSettings({
 												defaultQuickReplaceModel,
 											);
 											saveProfileMetadata({ quick_replace_model: null });
-									},
+										},
 									})
 								}
 							/>

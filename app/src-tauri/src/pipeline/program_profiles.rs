@@ -1,6 +1,117 @@
 use crate::llm::{LlmConfig, ProgramPreset, ProgramPromptProfile};
 use crate::settings::IntentRouterStrategy;
 
+fn normalize_active_window_ocr_mode(mode: Option<&str>) -> Option<&str> {
+    match mode {
+        Some("off") | Some("auto") | Some("manual") => mode,
+        _ => None,
+    }
+}
+
+pub(crate) fn resolve_rewrite_active_window_ocr_mode(
+    active_profile: Option<&ProgramPromptProfile>,
+    default_profile: Option<&ProgramPromptProfile>,
+    global_fallback: &str,
+) -> String {
+    let global = normalize_active_window_ocr_mode(Some(global_fallback)).unwrap_or("off");
+    normalize_active_window_ocr_mode(
+        active_profile.and_then(|p| p.rewrite_active_window_ocr_mode.as_deref()),
+    )
+    .or_else(|| {
+        normalize_active_window_ocr_mode(
+            default_profile.and_then(|p| p.rewrite_active_window_ocr_mode.as_deref()),
+        )
+    })
+    .unwrap_or(global)
+    .to_string()
+}
+
+pub(crate) fn resolve_quick_replace_active_window_ocr_mode(
+    active_profile: Option<&ProgramPromptProfile>,
+    default_profile: Option<&ProgramPromptProfile>,
+    global_fallback: &str,
+) -> String {
+    let global = normalize_active_window_ocr_mode(Some(global_fallback)).unwrap_or("off");
+    normalize_active_window_ocr_mode(
+        active_profile.and_then(|p| p.quick_replace_active_window_ocr_mode.as_deref()),
+    )
+    .or_else(|| {
+        normalize_active_window_ocr_mode(
+            default_profile.and_then(|p| p.quick_replace_active_window_ocr_mode.as_deref()),
+        )
+    })
+    .unwrap_or(global)
+    .to_string()
+}
+
+pub(crate) fn resolve_quick_ask_active_window_ocr_mode(
+    active_profile: Option<&ProgramPromptProfile>,
+    default_profile: Option<&ProgramPromptProfile>,
+    global_fallback: &str,
+) -> String {
+    let global = normalize_active_window_ocr_mode(Some(global_fallback)).unwrap_or("off");
+    normalize_active_window_ocr_mode(
+        active_profile.and_then(|p| p.quick_ask_active_window_ocr_mode.as_deref()),
+    )
+    .or_else(|| {
+        normalize_active_window_ocr_mode(
+            default_profile.and_then(|p| p.quick_ask_active_window_ocr_mode.as_deref()),
+        )
+    })
+    .unwrap_or(global)
+    .to_string()
+}
+
+/// Decide whether to auto-start Active Window OCR for the current flow.
+///
+/// - Quick Ask sessions should only consider the Quick Ask OCR mode.
+/// - Non-Quick-Ask sessions may use OCR for rewrite and/or quick-replace flows.
+pub(crate) fn should_auto_start_active_window_ocr(
+    is_quick_ask_session: bool,
+    rewrite_ocr_mode: &str,
+    quick_ask_ocr_mode: &str,
+    quick_replace_ocr_mode: &str,
+) -> bool {
+    if is_quick_ask_session {
+        quick_ask_ocr_mode == "auto"
+    } else {
+        rewrite_ocr_mode == "auto" || quick_replace_ocr_mode == "auto"
+    }
+}
+
+#[cfg(test)]
+mod active_window_ocr_mode_tests {
+    use super::should_auto_start_active_window_ocr;
+
+    #[test]
+    fn quick_ask_session_ignores_rewrite_auto() {
+        // Regression test: rewrite auto should NOT force OCR to run during Quick Ask.
+        assert!(!should_auto_start_active_window_ocr(
+            true, "auto", "off", "auto"
+        ));
+    }
+
+    #[test]
+    fn quick_ask_session_respects_quick_ask_auto() {
+        assert!(should_auto_start_active_window_ocr(
+            true, "off", "auto", "off"
+        ));
+    }
+
+    #[test]
+    fn non_quick_ask_session_uses_rewrite_or_quick_replace_auto() {
+        assert!(should_auto_start_active_window_ocr(
+            false, "auto", "off", "off"
+        ));
+        assert!(should_auto_start_active_window_ocr(
+            false, "off", "off", "auto"
+        ));
+        assert!(!should_auto_start_active_window_ocr(
+            false, "off", "auto", "off"
+        ));
+    }
+}
+
 fn normalize_program_path(path: &str) -> String {
     // Windows comparisons are case-insensitive, and we want to treat / and \\ equivalently.
     // Also strip common Windows path prefixes that may appear depending on how the OS reports
@@ -214,7 +325,42 @@ mod tests {
             quick_ask_gemini_thinking_budget: None,
             quick_ask_gemini_thinking_level: None,
             quick_ask_anthropic_thinking_budget: None,
+
+            rewrite_active_window_ocr_mode: None,
+            quick_replace_active_window_ocr_mode: None,
+            quick_ask_active_window_ocr_mode: None,
         }
+    }
+
+    #[test]
+    fn resolve_rewrite_ocr_mode_prefers_active_profile_then_default_then_global() {
+        let mut default_p = profile("default", vec![]);
+        default_p.rewrite_active_window_ocr_mode = Some("manual".to_string());
+
+        let mut active_p = profile("app", vec!["app.exe"]);
+        active_p.rewrite_active_window_ocr_mode = Some("auto".to_string());
+
+        let mode = resolve_rewrite_active_window_ocr_mode(Some(&active_p), Some(&default_p), "off");
+        assert_eq!(mode, "auto");
+
+        let mode = resolve_rewrite_active_window_ocr_mode(None, Some(&default_p), "off");
+        assert_eq!(mode, "manual");
+
+        let mode = resolve_rewrite_active_window_ocr_mode(None, None, "auto");
+        assert_eq!(mode, "auto");
+    }
+
+    #[test]
+    fn resolve_quick_ask_ocr_mode_ignores_invalid_values() {
+        let mut default_p = profile("default", vec![]);
+        default_p.quick_ask_active_window_ocr_mode = Some("not-a-mode".to_string());
+
+        let mut active_p = profile("app", vec!["app.exe"]);
+        active_p.quick_ask_active_window_ocr_mode = Some("also-bad".to_string());
+
+        let mode =
+            resolve_quick_ask_active_window_ocr_mode(Some(&active_p), Some(&default_p), "manual");
+        assert_eq!(mode, "manual");
     }
 
     #[test]

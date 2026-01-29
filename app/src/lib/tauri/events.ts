@@ -6,6 +6,7 @@ import type {
 	LocalWhisperModelLoadEvent,
 	MicTestAudioLevelPayload,
 	OverlayAudioLevelPayload,
+	OverlayOcrContextUnavailablePayload,
 	PipelineErrorPayload,
 	PipelineStateEvent,
 	PipelineTranscriptReadyPayload,
@@ -17,31 +18,32 @@ import type {
 } from "./types";
 
 export type EventMap = {
-  "connection-state-changed": ConnectionStateChangedPayload;
-  "history-changed": EmptyEventPayload;
-  "local-whisper-model-load": LocalWhisperModelLoadEvent;
-  "mic-test-audio-level": MicTestAudioLevelPayload;
-  "overlay-audio-level": OverlayAudioLevelPayload;
-  "overlay-hide-requested": EmptyEventPayload;
-  "pipeline-cancelled": EmptyEventPayload;
-  "pipeline-error": PipelineErrorPayload;
-  "pipeline-recording-started": EmptyEventPayload;
-  "pipeline-reset": EmptyEventPayload;
-  "pipeline-rewriting-started": EmptyEventPayload;
-  "pipeline-routing-started": EmptyEventPayload;
-  "pipeline-state-changed": PipelineStateEvent;
-  "pipeline-transcript-ready": PipelineTranscriptReadyPayload;
-  "pipeline-transcription-started": EmptyEventPayload;
-  "quick-ask-answer": QuickAskAnswerPayload;
-  "quick-ask-started": QuickAskStartedPayload;
-  "recording-start": EmptyEventPayload;
-  "recording-stop": EmptyEventPayload;
-  "request-disconnect": EmptyEventPayload;
-  "settings-changed": SettingsChangedPayload;
-  "transcript-copied-to-clipboard": EmptyEventPayload;
-  "stats-changed": EmptyEventPayload;
-  "system-event": SystemEvent;
-  "whisper-model-download-progress": WhisperModelDownloadProgress;
+	"connection-state-changed": ConnectionStateChangedPayload;
+	"history-changed": EmptyEventPayload;
+	"local-whisper-model-load": LocalWhisperModelLoadEvent;
+	"mic-test-audio-level": MicTestAudioLevelPayload;
+	"overlay-audio-level": OverlayAudioLevelPayload;
+	"overlay-ocr-context-unavailable": OverlayOcrContextUnavailablePayload;
+	"overlay-hide-requested": EmptyEventPayload;
+	"pipeline-cancelled": EmptyEventPayload;
+	"pipeline-error": PipelineErrorPayload;
+	"pipeline-recording-started": EmptyEventPayload;
+	"pipeline-reset": EmptyEventPayload;
+	"pipeline-rewriting-started": EmptyEventPayload;
+	"pipeline-routing-started": EmptyEventPayload;
+	"pipeline-state-changed": PipelineStateEvent;
+	"pipeline-transcript-ready": PipelineTranscriptReadyPayload;
+	"pipeline-transcription-started": EmptyEventPayload;
+	"quick-ask-answer": QuickAskAnswerPayload;
+	"quick-ask-started": QuickAskStartedPayload;
+	"recording-start": EmptyEventPayload;
+	"recording-stop": EmptyEventPayload;
+	"request-disconnect": EmptyEventPayload;
+	"settings-changed": SettingsChangedPayload;
+	"transcript-copied-to-clipboard": EmptyEventPayload;
+	"stats-changed": EmptyEventPayload;
+	"system-event": SystemEvent;
+	"whisper-model-download-progress": WhisperModelDownloadProgress;
 };
 
 export type EventName = BackendEventName;

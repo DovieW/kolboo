@@ -307,6 +307,11 @@ pub struct ProgramPromptProfile {
     pub quick_replace_include_clipboard_context: Option<bool>,
     pub quick_ask_include_clipboard_context: Option<bool>,
 
+    // Active window OCR (per-profile)
+    pub rewrite_active_window_ocr_mode: Option<String>,
+    pub quick_replace_active_window_ocr_mode: Option<String>,
+    pub quick_ask_active_window_ocr_mode: Option<String>,
+
     // Quick Replace (per-profile overrides)
     pub quick_replace_enabled: Option<bool>,
     pub quick_replace_provider: Option<String>,

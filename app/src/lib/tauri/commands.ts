@@ -40,304 +40,304 @@ import type {
 } from "./types";
 
 export const tauriAPI = {
-  async typeText(text: string): Promise<{ success: boolean; error?: string }> {
-    try {
-      await invoke("type_text", { text });
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: String(error) };
-    }
-  },
+	async typeText(text: string): Promise<{ success: boolean; error?: string }> {
+		try {
+			await invoke("type_text", { text });
+			return { success: true };
+		} catch (error) {
+			return { success: false, error: String(error) };
+		}
+	},
 
-  async onStartRecording(callback: () => void): Promise<UnlistenFn> {
-    return listenTyped("recording-start", () => {
-      callback();
-    });
-  },
+	async onStartRecording(callback: () => void): Promise<UnlistenFn> {
+		return listenTyped("recording-start", () => {
+			callback();
+		});
+	},
 
-  async onStopRecording(callback: () => void): Promise<UnlistenFn> {
-    return listenTyped("recording-stop", () => {
-      callback();
-    });
-  },
+	async onStopRecording(callback: () => void): Promise<UnlistenFn> {
+		return listenTyped("recording-stop", () => {
+			callback();
+		});
+	},
 
-  async getCostSummary(params: {
-    timeframe: CostTimeframe;
-    kind?: "all" | "stt" | "llm";
-    sttModelKeys?: string[];
-    llmModelKeys?: string[];
-    excludeFreeTier?: boolean;
-  }): Promise<CostSummary> {
-    const costParams = buildCostInvokeParams(params);
-    return invoke("get_cost_summary_v2", {
-      params: {
-        timeframe: costParams.timeframe,
-        kind: costParams.kind,
-        sttModelKeys: costParams.sttModelKeys,
-        llmModelKeys: costParams.llmModelKeys,
-        excludeFreeTier: costParams.excludeFreeTier,
-      },
-    });
-  },
+	async getCostSummary(params: {
+		timeframe: CostTimeframe;
+		kind?: "all" | "stt" | "llm";
+		sttModelKeys?: string[];
+		llmModelKeys?: string[];
+		excludeFreeTier?: boolean;
+	}): Promise<CostSummary> {
+		const costParams = buildCostInvokeParams(params);
+		return invoke("get_cost_summary_v2", {
+			params: {
+				timeframe: costParams.timeframe,
+				kind: costParams.kind,
+				sttModelKeys: costParams.sttModelKeys,
+				llmModelKeys: costParams.llmModelKeys,
+				excludeFreeTier: costParams.excludeFreeTier,
+			},
+		});
+	},
 
-  async getCostByProvider(params: {
-    timeframe: CostTimeframe;
-    kind?: "all" | "stt" | "llm";
-    sttModelKeys?: string[];
-    llmModelKeys?: string[];
-    excludeFreeTier?: boolean;
-  }): Promise<CostByProvider> {
-    const costParams = buildCostInvokeParams(params);
-    return invoke("get_cost_by_provider_v2", {
-      params: {
-        timeframe: costParams.timeframe,
-        kind: costParams.kind,
-        sttModelKeys: costParams.sttModelKeys,
-        llmModelKeys: costParams.llmModelKeys,
-        excludeFreeTier: costParams.excludeFreeTier,
-      },
-    });
-  },
+	async getCostByProvider(params: {
+		timeframe: CostTimeframe;
+		kind?: "all" | "stt" | "llm";
+		sttModelKeys?: string[];
+		llmModelKeys?: string[];
+		excludeFreeTier?: boolean;
+	}): Promise<CostByProvider> {
+		const costParams = buildCostInvokeParams(params);
+		return invoke("get_cost_by_provider_v2", {
+			params: {
+				timeframe: costParams.timeframe,
+				kind: costParams.kind,
+				sttModelKeys: costParams.sttModelKeys,
+				llmModelKeys: costParams.llmModelKeys,
+				excludeFreeTier: costParams.excludeFreeTier,
+			},
+		});
+	},
 
-  async getModelPricing(params: {
-    provider: string;
-    kind: ModelPricingKind;
-    model: string;
-  }): Promise<ModelPricing | null> {
-    return invoke("get_model_pricing", {
-      provider: params.provider,
-      kind: params.kind,
-      model: params.model,
-    });
-  },
+	async getModelPricing(params: {
+		provider: string;
+		kind: ModelPricingKind;
+		model: string;
+	}): Promise<ModelPricing | null> {
+		return invoke("get_model_pricing", {
+			provider: params.provider,
+			kind: params.kind,
+			model: params.model,
+		});
+	},
 
-  async getSystemProxyInfo(): Promise<SystemProxyInfo> {
-    return invoke<SystemProxyInfo>("get_system_proxy_info");
-  },
+	async getSystemProxyInfo(): Promise<SystemProxyInfo> {
+		return invoke<SystemProxyInfo>("get_system_proxy_info");
+	},
 
-  async loadTrustedCaCertificateFromFile(
-    path: string,
-  ): Promise<TrustedCaCertificate> {
-    return invoke<TrustedCaCertificate>(
-      "load_trusted_ca_certificate_from_file",
-      {
-        path,
-      },
-    );
-  },
+	async loadTrustedCaCertificateFromFile(
+		path: string,
+	): Promise<TrustedCaCertificate> {
+		return invoke<TrustedCaCertificate>(
+			"load_trusted_ca_certificate_from_file",
+			{
+				path,
+			},
+		);
+	},
 
-  async listOpenWindows(params?: {
-    includeTitles?: boolean;
-  }): Promise<OpenWindowInfo[]> {
-    if (params?.includeTitles) {
-      return invoke("list_open_windows", { includeTitles: true });
-    }
-    return invoke("list_open_windows");
-  },
+	async listOpenWindows(params?: {
+		includeTitles?: boolean;
+	}): Promise<OpenWindowInfo[]> {
+		if (params?.includeTitles) {
+			return invoke("list_open_windows", { includeTitles: true });
+		}
+		return invoke("list_open_windows");
+	},
 
-  async getForegroundProcessPath(): Promise<string | null> {
-    return invoke("get_foreground_process_path");
-  },
+	async getForegroundProcessPath(): Promise<string | null> {
+		return invoke("get_foreground_process_path");
+	},
 
-  async isLocalWhisperAvailable(): Promise<boolean> {
-    return invoke("is_local_whisper_available");
-  },
+	async isLocalWhisperAvailable(): Promise<boolean> {
+		return invoke("is_local_whisper_available");
+	},
 
-  async getLocalWhisperBackendStatus(): Promise<LocalWhisperBackendStatus> {
-    return invoke("get_local_whisper_backend_status");
-  },
+	async getLocalWhisperBackendStatus(): Promise<LocalWhisperBackendStatus> {
+		return invoke("get_local_whisper_backend_status");
+	},
 
-  async getWhisperModels(): Promise<WhisperModelInfo[]> {
-    return invoke("get_whisper_models");
-  },
+	async getWhisperModels(): Promise<WhisperModelInfo[]> {
+		return invoke("get_whisper_models");
+	},
 
-  async getWhisperModelsDir(): Promise<string> {
-    return invoke("get_whisper_models_dir");
-  },
+	async getWhisperModelsDir(): Promise<string> {
+		return invoke("get_whisper_models_dir");
+	},
 
-  async downloadWhisperModel(modelId: string): Promise<void> {
-    await invoke("download_whisper_model", { modelId });
-  },
+	async downloadWhisperModel(modelId: string): Promise<void> {
+		await invoke("download_whisper_model", { modelId });
+	},
 
-  async cancelWhisperModelDownload(modelId: string): Promise<void> {
-    await invoke("cancel_whisper_model_download", { modelId });
-  },
+	async cancelWhisperModelDownload(modelId: string): Promise<void> {
+		await invoke("cancel_whisper_model_download", { modelId });
+	},
 
-  async deleteWhisperModel(modelId: string): Promise<void> {
-    await invoke("delete_whisper_model", { modelId });
-  },
+	async deleteWhisperModel(modelId: string): Promise<void> {
+		await invoke("delete_whisper_model", { modelId });
+	},
 
-  async validateWhisperModel(modelId: string): Promise<boolean> {
-    return invoke("validate_whisper_model", { modelId });
-  },
+	async validateWhisperModel(modelId: string): Promise<boolean> {
+		return invoke("validate_whisper_model", { modelId });
+	},
 
-  async isLocalWhisperModelLoaded(): Promise<boolean> {
-    return invoke("is_local_whisper_model_loaded");
-  },
+	async isLocalWhisperModelLoaded(): Promise<boolean> {
+		return invoke("is_local_whisper_model_loaded");
+	},
 
-  async loadLocalWhisperModel(): Promise<void> {
-    await invoke("load_local_whisper_model");
-  },
+	async loadLocalWhisperModel(): Promise<void> {
+		await invoke("load_local_whisper_model");
+	},
 
-  async unloadLocalWhisperModel(): Promise<void> {
-    await invoke("unload_local_whisper_model");
-  },
+	async unloadLocalWhisperModel(): Promise<void> {
+		await invoke("unload_local_whisper_model");
+	},
 
-  async isAudioMuteSupported(): Promise<boolean> {
-    return invoke("is_audio_mute_supported");
-  },
+	async isAudioMuteSupported(): Promise<boolean> {
+		return invoke("is_audio_mute_supported");
+	},
 
-  // API Key management
-  async hasApiKey(storeKey: string): Promise<boolean> {
-    return invoke("secrets_has_api_key", { storeKey });
-  },
+	// API Key management
+	async hasApiKey(storeKey: string): Promise<boolean> {
+		return invoke("secrets_has_api_key", { storeKey });
+	},
 
-  async getApiKey(storeKey: string): Promise<string | null> {
-    const value = await invoke<string | null>("secrets_get_api_key", {
-      storeKey,
-    });
-    return value ?? null;
-  },
+	async getApiKey(storeKey: string): Promise<string | null> {
+		const value = await invoke<string | null>("secrets_get_api_key", {
+			storeKey,
+		});
+		return value ?? null;
+	},
 
-  async setApiKey(storeKey: string, apiKey: string): Promise<void> {
-    await invoke("secrets_set_api_key", { storeKey, apiKey });
-    // API keys affect available provider lists and runtime behavior; notify other windows.
-    await emitTyped("settings-changed", { api_keys_changed: true });
-  },
+	async setApiKey(storeKey: string, apiKey: string): Promise<void> {
+		await invoke("secrets_set_api_key", { storeKey, apiKey });
+		// API keys affect available provider lists and runtime behavior; notify other windows.
+		await emitTyped("settings-changed", { api_keys_changed: true });
+	},
 
-  async clearApiKey(storeKey: string): Promise<void> {
-    await invoke("secrets_clear_api_key", { storeKey });
-    await emitTyped("settings-changed", { api_keys_changed: true });
-  },
+	async clearApiKey(storeKey: string): Promise<void> {
+		await invoke("secrets_clear_api_key", { storeKey });
+		await emitTyped("settings-changed", { api_keys_changed: true });
+	},
 
-  async registerShortcuts(): Promise<void> {
-    return invoke("register_shortcuts");
-  },
+	async registerShortcuts(): Promise<void> {
+		return invoke("register_shortcuts");
+	},
 
-  async unregisterShortcuts(): Promise<void> {
-    return invoke("unregister_shortcuts");
-  },
+	async unregisterShortcuts(): Promise<void> {
+		return invoke("unregister_shortcuts");
+	},
 
-  async runSettingsDoctor(): Promise<SettingsDoctorReport> {
-    return invoke("settings_doctor");
-  },
+	async runSettingsDoctor(): Promise<SettingsDoctorReport> {
+		return invoke("settings_doctor");
+	},
 
-  // History API
-  async addHistoryEntry(text: string): Promise<HistoryEntry> {
-    return invoke("add_history_entry", { text });
-  },
+	// History API
+	async addHistoryEntry(text: string): Promise<HistoryEntry> {
+		return invoke("add_history_entry", { text });
+	},
 
-  async getHistory(limit?: number): Promise<HistoryEntry[]> {
-    return invoke("get_history", { limit });
-  },
+	async getHistory(limit?: number): Promise<HistoryEntry[]> {
+		return invoke("get_history", { limit });
+	},
 
-  async getHistoryPage(params: HistoryPageQuery): Promise<HistoryPageResult> {
-    return invoke("get_history_page", { params });
-  },
+	async getHistoryPage(params: HistoryPageQuery): Promise<HistoryPageResult> {
+		return invoke("get_history_page", { params });
+	},
 
-  async deleteHistoryEntry(id: string): Promise<boolean> {
-    return invoke("delete_history_entry", { id });
-  },
+	async deleteHistoryEntry(id: string): Promise<boolean> {
+		return invoke("delete_history_entry", { id });
+	},
 
-  async getHistoryDeleteOptions(id: string): Promise<HistoryDeleteOptions> {
-    return invoke("get_history_delete_options", { id });
-  },
+	async getHistoryDeleteOptions(id: string): Promise<HistoryDeleteOptions> {
+		return invoke("get_history_delete_options", { id });
+	},
 
-  async deleteHistoryEntryEx(
-    id: string,
-    mode: HistoryDeleteMode,
-  ): Promise<HistoryDeleteResult> {
-    return invoke("delete_history_entry_ex", { id, mode });
-  },
+	async deleteHistoryEntryEx(
+		id: string,
+		mode: HistoryDeleteMode,
+	): Promise<HistoryDeleteResult> {
+		return invoke("delete_history_entry_ex", { id, mode });
+	},
 
-  async clearHistory(): Promise<void> {
-    return invoke("clear_history");
-  },
+	async clearHistory(): Promise<void> {
+		return invoke("clear_history");
+	},
 
-  // Overlay API
-  async resizeOverlay(width: number, height: number): Promise<void> {
-    return invoke("resize_overlay", { width, height });
-  },
+	// Overlay API
+	async resizeOverlay(width: number, height: number): Promise<void> {
+		return invoke("resize_overlay", { width, height });
+	},
 
-  async showOverlayHover(): Promise<void> {
-    return invoke("show_overlay_hover");
-  },
+	async showOverlayHover(): Promise<void> {
+		return invoke("show_overlay_hover");
+	},
 
-  async scheduleHideOverlayHover(delayMs: number): Promise<void> {
-    return invoke("schedule_hide_overlay_hover", { delayMs });
-  },
+	async scheduleHideOverlayHover(delayMs: number): Promise<void> {
+		return invoke("schedule_hide_overlay_hover", { delayMs });
+	},
 
-  async hideOverlayHover(): Promise<void> {
-    return invoke("hide_overlay_hover");
-  },
+	async hideOverlayHover(): Promise<void> {
+		return invoke("hide_overlay_hover");
+	},
 
-  async startDragging(): Promise<void> {
-    const window = getCurrentWindow();
-    return window.startDragging();
-  },
+	async startDragging(): Promise<void> {
+		const window = getCurrentWindow();
+		return window.startDragging();
+	},
 
-  // Connection state sync between windows
-  async emitConnectionState(state: ConnectionState): Promise<void> {
-    return emitTyped("connection-state-changed", { state });
-  },
+	// Connection state sync between windows
+	async emitConnectionState(state: ConnectionState): Promise<void> {
+		return emitTyped("connection-state-changed", { state });
+	},
 
-  async onConnectionStateChanged(
-    callback: (state: ConnectionState) => void,
-  ): Promise<UnlistenFn> {
-    return listenTyped("connection-state-changed", (payload) => {
-      callback(payload.state);
-    });
-  },
+	async onConnectionStateChanged(
+		callback: (state: ConnectionState) => void,
+	): Promise<UnlistenFn> {
+		return listenTyped("connection-state-changed", (payload) => {
+			callback(payload.state);
+		});
+	},
 
-  // History sync between windows
-  async emitHistoryChanged(): Promise<void> {
-    return emitTyped("history-changed", null);
-  },
+	// History sync between windows
+	async emitHistoryChanged(): Promise<void> {
+		return emitTyped("history-changed", null);
+	},
 
-  async onHistoryChanged(callback: () => void): Promise<UnlistenFn> {
-    return listenTyped("history-changed", () => {
-      callback();
-    });
-  },
+	async onHistoryChanged(callback: () => void): Promise<UnlistenFn> {
+		return listenTyped("history-changed", () => {
+			callback();
+		});
+	},
 
-  async onStatsChanged(callback: () => void): Promise<UnlistenFn> {
-    return listenTyped("stats-changed", () => {
-      callback();
-    });
-  },
+	async onStatsChanged(callback: () => void): Promise<UnlistenFn> {
+		return listenTyped("stats-changed", () => {
+			callback();
+		});
+	},
 
-  async onTranscriptCopiedToClipboard(
-    callback: () => void,
-  ): Promise<UnlistenFn> {
-    return listenTyped("transcript-copied-to-clipboard", () => {
-      callback();
-    });
-  },
+	async onTranscriptCopiedToClipboard(
+		callback: () => void,
+	): Promise<UnlistenFn> {
+		return listenTyped("transcript-copied-to-clipboard", () => {
+			callback();
+		});
+	},
 
-  // Settings sync between windows (main -> overlay)
-  async emitSettingsChanged(
-    payload: SettingsChangedPayload = {},
-  ): Promise<void> {
-    return emitTyped("settings-changed", payload);
-  },
+	// Settings sync between windows (main -> overlay)
+	async emitSettingsChanged(
+		payload: SettingsChangedPayload = {},
+	): Promise<void> {
+		return emitTyped("settings-changed", payload);
+	},
 
-  async onSettingsChanged(
-    callback: (payload: SettingsChangedPayload) => void,
-  ): Promise<UnlistenFn> {
-    return listenTyped("settings-changed", (payload) => {
-      callback((payload ?? {}) as SettingsChangedPayload);
-    });
-  },
+	async onSettingsChanged(
+		callback: (payload: SettingsChangedPayload) => void,
+	): Promise<UnlistenFn> {
+		return listenTyped("settings-changed", (payload) => {
+			callback((payload ?? {}) as SettingsChangedPayload);
+		});
+	},
 
-  async cacheRouterEmbeddings(params: {
-    profileId: string;
-    forceRefresh?: boolean;
-  }): Promise<CacheRouterEmbeddingsResponse> {
-    return invoke("cache_router_embeddings", {
-      profileId: params.profileId,
-      forceRefresh: params.forceRefresh ?? null,
-    });
-  },
+	async cacheRouterEmbeddings(params: {
+		profileId: string;
+		forceRefresh?: boolean;
+	}): Promise<CacheRouterEmbeddingsResponse> {
+		return invoke("cache_router_embeddings", {
+			profileId: params.profileId,
+			forceRefresh: params.forceRefresh ?? null,
+		});
+	},
 };
 
 export const llmAPI = {
@@ -475,9 +475,25 @@ interface ProviderInfo {
 	is_local: boolean;
 }
 
+interface OcrProviderStatus {
+	available: boolean;
+	reason?: string | null;
+}
+
+export interface OverlayPipelineState {
+	pipeline_state: string;
+	ocr_session_id: string | null;
+	ocr_status: "not_started" | "running" | "done" | "failed" | "cancelled";
+	ocr_manual_available: boolean;
+	ocr_provider: OcrProviderStatus;
+	/** True when STT is done (before LLM / output). Use with ocr_status == "running" to show "waiting for OCR". */
+	stt_complete: boolean;
+}
+
 interface AvailableProvidersResponse {
 	stt: ProviderInfo[];
 	llm: ProviderInfo[];
+	ocr: OcrProviderStatus;
 }
 
 export const configAPI = {
@@ -491,6 +507,15 @@ export const configAPI = {
 
 	// Sync pipeline config when settings change
 	syncPipelineConfig: () => invoke<void>("sync_pipeline_config"),
+};
+
+export const ocrAPI = {
+	triggerActiveWindowOcr: () =>
+		invoke<boolean>("pipeline_trigger_active_window_ocr"),
+	cancelActiveWindowOcr: () =>
+		invoke<void>("pipeline_cancel_active_window_ocr"),
+	getOverlayState: () =>
+		invoke<OverlayPipelineState>("pipeline_get_overlay_state"),
 };
 
 export const logsAPI = {

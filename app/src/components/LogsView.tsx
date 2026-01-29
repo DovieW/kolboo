@@ -355,10 +355,12 @@ function RequestLogItem({
 	const quickAskClipboardContextTrimmed = (
 		log.quick_ask_clipboard_context ?? ""
 	).trim();
+	const quickAskOcrContextTrimmed = (log.ocr_context_text ?? "").trim();
 	const quickAskAnswerTrimmed = (log.quick_ask_answer ?? "").trim();
 	const hasAnyQuickAskText = !!(
 		quickAskContextTrimmed ||
 		quickAskClipboardContextTrimmed ||
+		quickAskOcrContextTrimmed ||
 		quickAskQuestionTrimmed ||
 		quickAskAnswerTrimmed
 	);
@@ -379,6 +381,7 @@ function RequestLogItem({
 		quickReplaceInstructionsTrimmed ||
 		quickReplaceSelectedTextTrimmed ||
 		quickReplaceClipboardContextTrimmed ||
+		quickAskOcrContextTrimmed ||
 		quickReplaceOutputTextTrimmed
 	);
 	const playDisabled = log.status === "in_progress";
@@ -541,6 +544,17 @@ function RequestLogItem({
 									</Box>
 								) : null}
 
+								{quickAskOcrContextTrimmed ? (
+									<Box>
+										<Text size="xs" fw={600} c="dimmed">
+											OCR Context:
+										</Text>
+										<Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+											{log.ocr_context_text}
+										</Text>
+									</Box>
+								) : null}
+
 								{quickAskQuestionTrimmed ? (
 									<Box>
 										<Text size="xs" fw={600} c="dimmed">
@@ -587,6 +601,17 @@ function RequestLogItem({
 										</Text>
 										<Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
 											{log.quick_replace_clipboard_context}
+										</Text>
+									</Box>
+								) : null}
+
+								{quickAskOcrContextTrimmed ? (
+									<Box>
+										<Text size="xs" fw={600} c="dimmed">
+											OCR Context:
+										</Text>
+										<Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+											{log.ocr_context_text}
 										</Text>
 									</Box>
 								) : null}
@@ -1319,10 +1344,8 @@ export function LogsView(
 												try {
 													const path = await save({
 														defaultPath: "kolboo-request-logs.json",
-														filters: [
-															{ name: "JSON", extensions: ["json"] },
-														],
-												});
+														filters: [{ name: "JSON", extensions: ["json"] }],
+													});
 													if (!path) return;
 
 													await logsAPI.exportRequestLogsToFile({
@@ -1354,10 +1377,8 @@ export function LogsView(
 												try {
 													const path = await save({
 														defaultPath: "kolboo-request-logs-full.json",
-														filters: [
-															{ name: "JSON", extensions: ["json"] },
-														],
-												});
+														filters: [{ name: "JSON", extensions: ["json"] }],
+													});
 													if (!path) return;
 
 													await logsAPI.exportRequestLogsToFile({

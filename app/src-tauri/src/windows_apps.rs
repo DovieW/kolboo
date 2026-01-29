@@ -3,6 +3,18 @@
 // These are used for per-program prompt profiles.
 
 #[cfg(target_os = "windows")]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct ForegroundWindowCaptureTarget {
+    /// The chosen window handle (HWND) to capture, stored as a raw pointer value (usize)
+    /// so it can safely cross threads.
+    #[serde(skip_serializing)]
+    pub hwnd_raw: usize,
+    pub process_path: String,
+    /// True if the true foreground was Kolboo and we had to pick an external window.
+    pub used_external_fallback: bool,
+}
+
+#[cfg(target_os = "windows")]
 mod imp {
     use schemars::JsonSchema;
     use std::sync::{Mutex, OnceLock};
@@ -18,6 +30,8 @@ mod imp {
         EnumWindows, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
         GetWindowThreadProcessId, IsWindowVisible,
     };
+
+    use super::ForegroundWindowCaptureTarget;
 
     #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
     pub struct OpenWindowInfo {
@@ -133,6 +147,93 @@ mod imp {
         state.found
     }
 
+    fn find_external_window_by_z_order(current_pid: u32) -> Option<(HWND, String)> {
+        #[derive(Debug)]
+        struct State {
+            current_pid: u32,
+            found: Option<(HWND, String)>,
+        }
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            // Safety: caller passes a valid mutable State pointer via LPARAM.
+            let state = unsafe { &mut *(lparam.0 as *mut State) };
+
+            unsafe {
+                if !IsWindowVisible(hwnd).as_bool() {
+                    return BOOL(1);
+                }
+
+                let title_len = GetWindowTextLengthW(hwnd);
+                if title_len == 0 {
+                    return BOOL(1);
+                }
+
+                let mut pid: u32 = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                if pid == 0 {
+                    return BOOL(1);
+                }
+                if pid == state.current_pid {
+                    return BOOL(1);
+                }
+
+                let Some(process_path) = query_process_path(pid) else {
+                    return BOOL(1);
+                };
+
+                state.found = Some((hwnd, process_path));
+                // Stop enumeration once we found the first plausible external window.
+                BOOL(0)
+            }
+        }
+
+        let mut state = State {
+            current_pid,
+            found: None,
+        };
+
+        unsafe {
+            let _ = EnumWindows(Some(enum_proc), LPARAM((&mut state as *mut _) as isize));
+        }
+
+        state.found
+    }
+
+    pub fn get_foreground_window_capture_target() -> Option<ForegroundWindowCaptureTarget> {
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.0.is_null() {
+                return None;
+            }
+
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == 0 {
+                return None;
+            }
+
+            let current_pid = GetCurrentProcessId();
+            if pid == current_pid {
+                // If Kolboo is foreground, pick a plausible external window by z-order.
+                let (external_hwnd, external_path) = find_external_window_by_z_order(current_pid)?;
+                record_external_foreground(&external_path);
+                return Some(ForegroundWindowCaptureTarget {
+                    hwnd_raw: external_hwnd.0 as usize,
+                    process_path: external_path,
+                    used_external_fallback: true,
+                });
+            }
+
+            let path = query_process_path(pid)?;
+            record_external_foreground(&path);
+            Some(ForegroundWindowCaptureTarget {
+                hwnd_raw: hwnd.0 as usize,
+                process_path: path,
+                used_external_fallback: false,
+            })
+        }
+    }
+
     pub fn get_foreground_process_path() -> Option<String> {
         unsafe {
             let hwnd = GetForegroundWindow();
@@ -245,7 +346,10 @@ mod imp {
 }
 
 #[cfg(target_os = "windows")]
-pub use imp::{get_foreground_process_path, list_open_windows, OpenWindowInfo};
+pub use imp::{
+    get_foreground_process_path, get_foreground_window_capture_target, list_open_windows,
+    OpenWindowInfo,
+};
 
 #[cfg(not(target_os = "windows"))]
 mod imp_stub {

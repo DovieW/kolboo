@@ -56,8 +56,7 @@ export function ProvidersSettings() {
 	const handleSTTModelChange = (value: string | null) => {
 		if (!value) return;
 		updateSTTModel.mutate(value, {
-			onSuccess: () => {
-			},
+			onSuccess: () => {},
 		});
 	};
 
@@ -79,16 +78,14 @@ export function ProvidersSettings() {
 	const handleLLMModelChange = (value: string | null) => {
 		if (!value) return;
 		updateLLMModel.mutate(value, {
-			onSuccess: () => {
-			},
+			onSuccess: () => {},
 		});
 	};
 
 	const handleSTTTimeoutChange = (value: number) => {
 		// Save to local settings (Tauri) then notify overlay window to sync to server
 		updateSTTTimeout.mutate(value, {
-			onSuccess: () => {
-			},
+			onSuccess: () => {},
 		});
 	};
 
@@ -97,7 +94,6 @@ export function ProvidersSettings() {
 
 	// Local state for smooth slider dragging
 	const [sliderValue, setSliderValue] = useState(currentTimeout);
-
 	// Sync local state when server value changes
 	useEffect(() => {
 		setSliderValue(currentTimeout);

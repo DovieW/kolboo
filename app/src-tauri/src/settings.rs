@@ -15,6 +15,12 @@ pub mod patch;
 #[path = "settings/store.rs"]
 pub mod store;
 
+/// Settings key: allow clipboard-based fallback for context capture on Windows.
+/// NOTE: Currently unused but reserved for future implementation.
+#[allow(dead_code)]
+pub const WINDOWS_CLIPBOARD_FALLBACK_FOR_CONTEXT_CAPTURE_KEY: &str =
+    "windows_clipboard_fallback_for_context_capture";
+
 // ============================================================================
 // Network / proxy settings (stored in settings.json)
 // ============================================================================
@@ -444,6 +450,14 @@ pub struct RewriteProgramPromptProfile {
     pub quick_replace_include_clipboard_context: Option<bool>,
     #[serde(default)]
     pub quick_ask_include_clipboard_context: Option<bool>,
+
+    // Active window OCR (per-profile mode overrides: "off" | "auto" | "manual")
+    #[serde(default)]
+    pub rewrite_active_window_ocr_mode: Option<String>,
+    #[serde(default)]
+    pub quick_replace_active_window_ocr_mode: Option<String>,
+    #[serde(default)]
+    pub quick_ask_active_window_ocr_mode: Option<String>,
 
     // Quick Replace (per-profile overrides)
     // When enabled and there is highlighted text when transcription starts, treat the transcript

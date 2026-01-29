@@ -2,6 +2,25 @@
 
 <!-- Add medium-priority refactor ideas here. Keep each item specific and code-grounded. -->
 
+## Centralize setting default values (DRY violation)
+
+Setting defaults are currently defined in multiple places, making it easy for them to drift out of sync:
+
+1. **Rust struct defaults** — `pipeline/config.rs` (`PipelineConfig::default()`, `OcrConfig` fields)
+2. **Settings store seeding** — `settings/defaults.rs` (`set_default(...)` calls)
+3. **Bootstrap loading** — `bootstrap/mod.rs` (`get_setting_from_store` fallback values)
+4. **TS normalization** — `settings.ts` (normalize functions return a fallback)
+5. **UI components** — `OcrProviderSettings.tsx` (uses `?? "default_value"` inline)
+
+Example: `ocr_auto_capture_timing` default is defined as `"on_start"` in all 5 places.
+
+Ideas:
+
+- Create a `settings_defaults.rs` module that exports typed constants for each setting default.
+- Have `PipelineConfig::default()`, `ensure_default_settings()`, and `get_setting_from_store` all reference these constants.
+- For TypeScript, generate a `defaults.generated.ts` from the Rust constants (similar to how we generate types from schemas), or define them once in `types.ts` and import everywhere.
+- UI components should reference the normalize function's output rather than inline `?? "..."` fallbacks.
+
 ## Reduce maintenance cost of schema registry
 
 `app/src-tauri/xtask/src/schema_registry.rs` is currently a hand-maintained list of all JSON Schemas we export.

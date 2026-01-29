@@ -13,7 +13,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { Info, Play, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { applyAccentColor, DEFAULT_ACCENT_HEX } from "../../lib/accentColor";
-import { SettingsIconButton, SettingsRow, SettingsTooltipIcon } from "./SettingsRow";
 import {
 	useIsAudioMuteSupported,
 	useSettings,
@@ -39,6 +38,11 @@ import type {
 	PlayingAudioHandling,
 	RewriteProgramPromptProfile,
 } from "../../lib/tauri";
+import {
+	SettingsIconButton,
+	SettingsRow,
+	SettingsTooltipIcon,
+} from "./SettingsRow";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
 
@@ -109,7 +113,7 @@ export function UiSettings({
 }) {
 	const { data: settings, isLoading } = useSettings();
 	const isWindows =
-    typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+		typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
 	const { data: isAudioMuteSupported } = useIsAudioMuteSupported();
 	const updateSoundEnabled = useUpdateSoundEnabled();
 	const updateAccentColor = useUpdateAccentColor();
@@ -397,569 +401,569 @@ export function UiSettings({
 	};
 
 	return (
-    <>
-      <Modal
-        opened={resetDialog !== null}
-        onClose={() => setResetDialog(null)}
-        title={resetDialog?.title ?? ""}
-        centered
-      >
-        <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.4 }}>
-          This setting is currently overriding the Default profile. Disable the
-          override to inherit from Default.
-        </div>
-        <Group justify="flex-end" mt="md" gap="sm">
-          <Button variant="default" onClick={() => setResetDialog(null)}>
-            Keep override
-          </Button>
-          <Button
-            color="gray"
-            onClick={() => {
-              const confirm = resetDialog?.onConfirm;
-              setResetDialog(null);
-              confirm?.();
-            }}
-          >
-            Disable override
-          </Button>
-        </Group>
-      </Modal>
+		<>
+			<Modal
+				opened={resetDialog !== null}
+				onClose={() => setResetDialog(null)}
+				title={resetDialog?.title ?? ""}
+				centered
+			>
+				<div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.4 }}>
+					This setting is currently overriding the Default profile. Disable the
+					override to inherit from Default.
+				</div>
+				<Group justify="flex-end" mt="md" gap="sm">
+					<Button variant="default" onClick={() => setResetDialog(null)}>
+						Keep override
+					</Button>
+					<Button
+						color="gray"
+						onClick={() => {
+							const confirm = resetDialog?.onConfirm;
+							setResetDialog(null);
+							confirm?.();
+						}}
+					>
+						Disable override
+					</Button>
+				</Group>
+			</Modal>
 
-      <SettingsRow
-        label="Sound feedback"
-        description="Play sounds when recording starts and stops"
-        right={
-          <>
-            {isProfileScope && !soundInheriting && (
-              <SettingsIconButton
-                label="Disable override (inherit from Default)"
-                disabled={isLoading}
-                onClick={() =>
-                  openDisableOverrideDialog({
-                    title: "Disable Sound feedback override?",
-                    onConfirm: () => updateProfile({ sound_enabled: null }),
-                  })
-                }
-              >
-                <RotateCcw size={14} style={{ opacity: 0.65 }} />
-              </SettingsIconButton>
-            )}
-            {soundInheriting && (
-              <SettingsTooltipIcon label={INHERIT_TOOLTIP}>
-                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-              </SettingsTooltipIcon>
-            )}
-            <Switch
-              checked={soundEnabled}
-              onChange={(event) =>
-                handleSoundToggle(event.currentTarget.checked)
-              }
-              disabled={isLoading}
-              color="gray"
-              size="md"
-            />
-          </>
-        }
-      />
+			<SettingsRow
+				label="Sound feedback"
+				description="Play sounds when recording starts and stops"
+				right={
+					<>
+						{isProfileScope && !soundInheriting && (
+							<SettingsIconButton
+								label="Disable override (inherit from Default)"
+								disabled={isLoading}
+								onClick={() =>
+									openDisableOverrideDialog({
+										title: "Disable Sound feedback override?",
+										onConfirm: () => updateProfile({ sound_enabled: null }),
+									})
+								}
+							>
+								<RotateCcw size={14} style={{ opacity: 0.65 }} />
+							</SettingsIconButton>
+						)}
+						{soundInheriting && (
+							<SettingsTooltipIcon label={INHERIT_TOOLTIP}>
+								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+							</SettingsTooltipIcon>
+						)}
+						<Switch
+							checked={soundEnabled}
+							onChange={(event) =>
+								handleSoundToggle(event.currentTarget.checked)
+							}
+							disabled={isLoading}
+							color="gray"
+							size="md"
+						/>
+					</>
+				}
+			/>
 
-      <SettingsRow
-        label="Sound cue"
-        description="Choose which sound plays when recording starts and stops"
-        right={
-          <>
-            <Tooltip
-              label={cueDisabledReason ?? "Preview (start + stop)"}
-              withArrow
-            >
-              {/* Wrap so tooltip still shows even when the button is disabled */}
-              <span style={{ display: "inline-flex" }}>
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  size="sm"
-                  disabled={isLoading || cueDisabledByMuteHandling}
-                  onMouseDown={(e) => {
-                    // Prevent focusing/opening the select when clicking the button.
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onClick={handlePreviewAudioCue}
-                >
-                  <Play size={14} style={{ opacity: 0.65 }} />
-                </ActionIcon>
-              </span>
-            </Tooltip>
+			<SettingsRow
+				label="Sound cue"
+				description="Choose which sound plays when recording starts and stops"
+				right={
+					<>
+						<Tooltip
+							label={cueDisabledReason ?? "Preview (start + stop)"}
+							withArrow
+						>
+							{/* Wrap so tooltip still shows even when the button is disabled */}
+							<span style={{ display: "inline-flex" }}>
+								<ActionIcon
+									variant="subtle"
+									color="gray"
+									size="sm"
+									disabled={isLoading || cueDisabledByMuteHandling}
+									onMouseDown={(e) => {
+										// Prevent focusing/opening the select when clicking the button.
+										e.preventDefault();
+										e.stopPropagation();
+									}}
+									onClick={handlePreviewAudioCue}
+								>
+									<Play size={14} style={{ opacity: 0.65 }} />
+								</ActionIcon>
+							</span>
+						</Tooltip>
 
-            <Tooltip
-              label={
-                isProfileScope ? GLOBAL_ONLY_TOOLTIP : (cueDisabledReason ?? "")
-              }
-              disabled={!(isProfileScope || cueDisabledByMuteHandling)}
-              withArrow
-            >
-              {/* Wrap so tooltip still shows even when the select is disabled */}
-              <div style={{ display: "inline-block" }}>
-                <Select
-                  data={AUDIO_CUE_OPTIONS}
-                  value={audioCueDropdownValue}
-                  onChange={handleAudioCueChange}
-                  disabled={
-                    isLoading || isProfileScope || cueDisabledByMuteHandling
-                  }
-                  withCheckIcon={false}
-                  styles={{
-                    input: {
-                      backgroundColor: "var(--bg-elevated)",
-                      borderColor: "var(--border-default)",
-                      color: "var(--text-primary)",
-                      minWidth: 180,
-                    },
-                  }}
-                />
-              </div>
-            </Tooltip>
-          </>
-        }
-      />
+						<Tooltip
+							label={
+								isProfileScope ? GLOBAL_ONLY_TOOLTIP : (cueDisabledReason ?? "")
+							}
+							disabled={!(isProfileScope || cueDisabledByMuteHandling)}
+							withArrow
+						>
+							{/* Wrap so tooltip still shows even when the select is disabled */}
+							<div style={{ display: "inline-block" }}>
+								<Select
+									data={AUDIO_CUE_OPTIONS}
+									value={audioCueDropdownValue}
+									onChange={handleAudioCueChange}
+									disabled={
+										isLoading || isProfileScope || cueDisabledByMuteHandling
+									}
+									withCheckIcon={false}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											minWidth: 180,
+										},
+									}}
+								/>
+							</div>
+						</Tooltip>
+					</>
+				}
+			/>
 
-      <SettingsRow
-        label="Playing audio handling"
-        description="Mute and/or pause playing audio while recording"
-        right={
-          <>
-            {isProfileScope && !playingAudioHandlingInheriting && (
-              <SettingsIconButton
-                label="Disable override (inherit from Default)"
-                disabled={isLoading}
-                onClick={() =>
-                  openDisableOverrideDialog({
-                    title: "Disable Playing audio handling override?",
-                    onConfirm: () =>
-                      updateProfile({ playing_audio_handling: null }),
-                  })
-                }
-              >
-                <RotateCcw size={14} style={{ opacity: 0.65 }} />
-              </SettingsIconButton>
-            )}
-            {playingAudioHandlingInheriting && (
-              <SettingsTooltipIcon label={INHERIT_TOOLTIP}>
-                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-              </SettingsTooltipIcon>
-            )}
-            <Tooltip
-              label="Mute not supported on this platform"
-              disabled={isAudioMuteSupported !== false}
-              withArrow
-            >
-              <Select
-                data={PLAYING_AUDIO_HANDLING_OPTIONS.map((o) => ({
-                  ...o,
-                  disabled:
-                    isAudioMuteSupported === false &&
-                    (o.value === "mute" || o.value === "mute_and_pause"),
-                }))}
-                value={playingAudioHandling}
-                onChange={handlePlayingAudioHandlingChange}
-                disabled={isLoading}
-                withCheckIcon={false}
-                styles={{
-                  input: {
-                    backgroundColor: "var(--bg-elevated)",
-                    borderColor: "var(--border-default)",
-                    color: "var(--text-primary)",
-                    minWidth: 180,
-                  },
-                }}
-              />
-            </Tooltip>
-          </>
-        }
-      />
+			<SettingsRow
+				label="Playing audio handling"
+				description="Mute and/or pause playing audio while recording"
+				right={
+					<>
+						{isProfileScope && !playingAudioHandlingInheriting && (
+							<SettingsIconButton
+								label="Disable override (inherit from Default)"
+								disabled={isLoading}
+								onClick={() =>
+									openDisableOverrideDialog({
+										title: "Disable Playing audio handling override?",
+										onConfirm: () =>
+											updateProfile({ playing_audio_handling: null }),
+									})
+								}
+							>
+								<RotateCcw size={14} style={{ opacity: 0.65 }} />
+							</SettingsIconButton>
+						)}
+						{playingAudioHandlingInheriting && (
+							<SettingsTooltipIcon label={INHERIT_TOOLTIP}>
+								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+							</SettingsTooltipIcon>
+						)}
+						<Tooltip
+							label="Mute not supported on this platform"
+							disabled={isAudioMuteSupported !== false}
+							withArrow
+						>
+							<Select
+								data={PLAYING_AUDIO_HANDLING_OPTIONS.map((o) => ({
+									...o,
+									disabled:
+										isAudioMuteSupported === false &&
+										(o.value === "mute" || o.value === "mute_and_pause"),
+								}))}
+								value={playingAudioHandling}
+								onChange={handlePlayingAudioHandlingChange}
+								disabled={isLoading}
+								withCheckIcon={false}
+								styles={{
+									input: {
+										backgroundColor: "var(--bg-elevated)",
+										borderColor: "var(--border-default)",
+										color: "var(--text-primary)",
+										minWidth: 180,
+									},
+								}}
+							/>
+						</Tooltip>
+					</>
+				}
+			/>
 
-      <SettingsRow
-        label="Overlay widget"
-        description="When to show the on-screen recording widget"
-        right={
-          <>
-            {isProfileScope && !overlayModeInheriting && (
-              <SettingsIconButton
-                label="Disable override (inherit from Default)"
-                disabled={isLoading}
-                onClick={() =>
-                  openDisableOverrideDialog({
-                    title: "Disable Overlay widget override?",
-                    onConfirm: () => updateProfile({ overlay_mode: null }),
-                  })
-                }
-              >
-                <RotateCcw size={14} style={{ opacity: 0.65 }} />
-              </SettingsIconButton>
-            )}
-            {overlayModeInheriting && (
-              <SettingsTooltipIcon label={INHERIT_TOOLTIP}>
-                <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-              </SettingsTooltipIcon>
-            )}
-            <Select
-              data={OVERLAY_MODE_OPTIONS}
-              value={overlayMode}
-              onChange={handleOverlayModeChange}
-              disabled={isLoading}
-              withCheckIcon={false}
-              styles={{
-                input: {
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 180,
-                },
-              }}
-            />
-          </>
-        }
-      />
+			<SettingsRow
+				label="Overlay widget"
+				description="When to show the on-screen recording widget"
+				right={
+					<>
+						{isProfileScope && !overlayModeInheriting && (
+							<SettingsIconButton
+								label="Disable override (inherit from Default)"
+								disabled={isLoading}
+								onClick={() =>
+									openDisableOverrideDialog({
+										title: "Disable Overlay widget override?",
+										onConfirm: () => updateProfile({ overlay_mode: null }),
+									})
+								}
+							>
+								<RotateCcw size={14} style={{ opacity: 0.65 }} />
+							</SettingsIconButton>
+						)}
+						{overlayModeInheriting && (
+							<SettingsTooltipIcon label={INHERIT_TOOLTIP}>
+								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+							</SettingsTooltipIcon>
+						)}
+						<Select
+							data={OVERLAY_MODE_OPTIONS}
+							value={overlayMode}
+							onChange={handleOverlayModeChange}
+							disabled={isLoading}
+							withCheckIcon={false}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 180,
+								},
+							}}
+						/>
+					</>
+				}
+			/>
 
-      <SettingsRow
-        label="Overlay detailed loading"
-        description={
-          <>
-            Show text like “transcribing…”, “routing…”, “rewriting…” instead of
-            a loading waveform
-          </>
-        }
-        right={
-          <Tooltip
-            label={GLOBAL_ONLY_TOOLTIP}
-            disabled={!isProfileScope}
-            withArrow
-            position="top-start"
-          >
-            <div style={isProfileScope ? { opacity: 0.5 } : undefined}>
-              <Switch
-                checked={overlayShowDetailedLoading}
-                onChange={(event) =>
-                  handleOverlayShowDetailedLoadingChange(
-                    event.currentTarget.checked,
-                  )
-                }
-                disabled={isLoading || isProfileScope}
-                color="gray"
-                size="md"
-              />
-            </div>
-          </Tooltip>
-        }
-      />
+			<SettingsRow
+				label="Overlay detailed loading"
+				description={
+					<>
+						Show text like “transcribing…”, “routing…”, “rewriting…” instead of
+						a loading waveform
+					</>
+				}
+				right={
+					<Tooltip
+						label={GLOBAL_ONLY_TOOLTIP}
+						disabled={!isProfileScope}
+						withArrow
+						position="top-start"
+					>
+						<div style={isProfileScope ? { opacity: 0.5 } : undefined}>
+							<Switch
+								checked={overlayShowDetailedLoading}
+								onChange={(event) =>
+									handleOverlayShowDetailedLoadingChange(
+										event.currentTarget.checked,
+									)
+								}
+								disabled={isLoading || isProfileScope}
+								color="gray"
+								size="md"
+							/>
+						</div>
+					</Tooltip>
+				}
+			/>
 
-      {/* Widget position setting intentionally hidden for now (we may bring it back later). */}
+			{/* Widget position setting intentionally hidden for now (we may bring it back later). */}
 
-      <SettingsRow
-        label="Overlay monitor"
-        description="Which display the overlay windows should appear on"
-        right={
-          <Tooltip
-            label={GLOBAL_ONLY_TOOLTIP}
-            disabled={!isProfileScope}
-            withArrow
-            position="top-start"
-          >
-            <div style={isProfileScope ? { opacity: 0.5 } : undefined}>
-              <Select
-                data={OVERLAY_MONITOR_TARGET_OPTIONS}
-                value={overlayMonitorTarget}
-                onChange={handleOverlayMonitorTargetChange}
-                disabled={isLoading || isProfileScope}
-                withCheckIcon={false}
-                styles={{
-                  input: {
-                    backgroundColor: "var(--bg-elevated)",
-                    borderColor: "var(--border-default)",
-                    color: "var(--text-primary)",
-                    minWidth: 220,
-                  },
-                }}
-              />
-            </div>
-          </Tooltip>
-        }
-      />
+			<SettingsRow
+				label="Overlay monitor"
+				description="Which display the overlay windows should appear on"
+				right={
+					<Tooltip
+						label={GLOBAL_ONLY_TOOLTIP}
+						disabled={!isProfileScope}
+						withArrow
+						position="top-start"
+					>
+						<div style={isProfileScope ? { opacity: 0.5 } : undefined}>
+							<Select
+								data={OVERLAY_MONITOR_TARGET_OPTIONS}
+								value={overlayMonitorTarget}
+								onChange={handleOverlayMonitorTargetChange}
+								disabled={isLoading || isProfileScope}
+								withCheckIcon={false}
+								styles={{
+									input: {
+										backgroundColor: "var(--bg-elevated)",
+										borderColor: "var(--border-default)",
+										color: "var(--text-primary)",
+										minWidth: 220,
+									},
+								}}
+							/>
+						</div>
+					</Tooltip>
+				}
+			/>
 
-      <SettingsRow
-        label="Output"
-        description="How to output transcribed text"
-        right={
-          <>
-            {isProfileScope &&
-              !(outputModeInheriting && outputHitEnterInheriting) && (
-                <SettingsIconButton
-                  label="Disable override (inherit from Default)"
-                  disabled={isLoading}
-                  onClick={() =>
-                    openDisableOverrideDialog({
-                      title: "Disable Output override?",
-                      onConfirm: () =>
-                        updateProfile({
-                          output_mode: null,
-                          output_hit_enter: null,
-                        }),
-                    })
-                  }
-                >
-                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
-                </SettingsIconButton>
-              )}
-            {isProfileScope &&
-              outputModeInheriting &&
-              outputHitEnterInheriting && (
-                <SettingsTooltipIcon label={INHERIT_TOOLTIP}>
-                  <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                </SettingsTooltipIcon>
-              )}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "flex-end",
-                gap: 12,
-              }}
-            >
-              <SegmentedControl
-                value={outputMode}
-                onChange={handleOutputModeChange}
-                disabled={isLoading}
-                data={[
-                  { value: "paste", label: "Paste" },
-                  { value: "clipboard", label: "Copy" },
-                  { value: "paste_and_clipboard", label: "Both" },
-                ]}
-                size="sm"
-                radius="md"
-                styles={{
-                  root: {
-                    backgroundColor: "var(--bg-elevated)",
-                    border: "1px solid var(--border-default)",
-                    minWidth: 260,
-                  },
-                }}
-              />
-              <Checkbox
-                label="Press Enter after paste"
-                checked={outputHitEnter}
-                onChange={(event) =>
-                  handleOutputHitEnterToggle(event.currentTarget.checked)
-                }
-                disabled={isLoading || outputMode === "clipboard"}
-                color="gray"
-                size="sm"
-              />
-            </div>
-          </>
-        }
-      />
+			<SettingsRow
+				label="Output"
+				description="How to output transcribed text"
+				right={
+					<>
+						{isProfileScope &&
+							!(outputModeInheriting && outputHitEnterInheriting) && (
+								<SettingsIconButton
+									label="Disable override (inherit from Default)"
+									disabled={isLoading}
+									onClick={() =>
+										openDisableOverrideDialog({
+											title: "Disable Output override?",
+											onConfirm: () =>
+												updateProfile({
+													output_mode: null,
+													output_hit_enter: null,
+												}),
+										})
+									}
+								>
+									<RotateCcw size={14} style={{ opacity: 0.65 }} />
+								</SettingsIconButton>
+							)}
+						{isProfileScope &&
+							outputModeInheriting &&
+							outputHitEnterInheriting && (
+								<SettingsTooltipIcon label={INHERIT_TOOLTIP}>
+									<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+								</SettingsTooltipIcon>
+							)}
+						<div
+							style={{
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "flex-end",
+								gap: 12,
+							}}
+						>
+							<SegmentedControl
+								value={outputMode}
+								onChange={handleOutputModeChange}
+								disabled={isLoading}
+								data={[
+									{ value: "paste", label: "Paste" },
+									{ value: "clipboard", label: "Copy" },
+									{ value: "paste_and_clipboard", label: "Both" },
+								]}
+								size="sm"
+								radius="md"
+								styles={{
+									root: {
+										backgroundColor: "var(--bg-elevated)",
+										border: "1px solid var(--border-default)",
+										minWidth: 260,
+									},
+								}}
+							/>
+							<Checkbox
+								label="Press Enter after paste"
+								checked={outputHitEnter}
+								onChange={(event) =>
+									handleOutputHitEnterToggle(event.currentTarget.checked)
+								}
+								disabled={isLoading || outputMode === "clipboard"}
+								color="gray"
+								size="sm"
+							/>
+						</div>
+					</>
+				}
+			/>
 
-      {!isWindows && (
-        <SettingsRow
-          label="Context Grab Shortcut"
-          description={
-            <>
-              Shortcut Kolboo uses to copy your highlighted selection when a
-              feature needs selected-text context
-            </>
-          }
-          right={
-            <>
-              {isProfileScope && !contextGrabMethodInheriting && (
-                <SettingsIconButton
-                  label="Disable override (inherit from Default)"
-                  disabled={isLoading}
-                  onClick={() =>
-                    openDisableOverrideDialog({
-                      title: "Disable Context Grab Shortcut override?",
-                      onConfirm: () =>
-                        updateProfile({ context_grab_method: null }),
-                    })
-                  }
-                >
-                  <RotateCcw size={14} style={{ opacity: 0.65 }} />
-                </SettingsIconButton>
-              )}
-              {isProfileScope && contextGrabMethodInheriting && (
-                <SettingsTooltipIcon label={INHERIT_TOOLTIP}>
-                  <Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-                </SettingsTooltipIcon>
-              )}
-              <Select
-                data={CONTEXT_GRAB_METHOD_OPTIONS}
-                value={contextGrabMethodUiValue}
-                onChange={handleContextGrabMethodChange}
-                disabled={isLoading}
-                withCheckIcon={false}
-                allowDeselect={false}
-                styles={{
-                  input: {
-                    backgroundColor: "var(--bg-elevated)",
-                    borderColor: "var(--border-default)",
-                    color: "var(--text-primary)",
-                    minWidth: 220,
-                  },
-                }}
-              />
-            </>
-          }
-        />
-      )}
+			{!isWindows && (
+				<SettingsRow
+					label="Context Grab Shortcut"
+					description={
+						<>
+							Shortcut Kolboo uses to copy your highlighted selection when a
+							feature needs selected-text context
+						</>
+					}
+					right={
+						<>
+							{isProfileScope && !contextGrabMethodInheriting && (
+								<SettingsIconButton
+									label="Disable override (inherit from Default)"
+									disabled={isLoading}
+									onClick={() =>
+										openDisableOverrideDialog({
+											title: "Disable Context Grab Shortcut override?",
+											onConfirm: () =>
+												updateProfile({ context_grab_method: null }),
+										})
+									}
+								>
+									<RotateCcw size={14} style={{ opacity: 0.65 }} />
+								</SettingsIconButton>
+							)}
+							{isProfileScope && contextGrabMethodInheriting && (
+								<SettingsTooltipIcon label={INHERIT_TOOLTIP}>
+									<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+								</SettingsTooltipIcon>
+							)}
+							<Select
+								data={CONTEXT_GRAB_METHOD_OPTIONS}
+								value={contextGrabMethodUiValue}
+								onChange={handleContextGrabMethodChange}
+								disabled={isLoading}
+								withCheckIcon={false}
+								allowDeselect={false}
+								styles={{
+									input: {
+										backgroundColor: "var(--bg-elevated)",
+										borderColor: "var(--border-default)",
+										color: "var(--text-primary)",
+										minWidth: 220,
+									},
+								}}
+							/>
+						</>
+					}
+				/>
+			)}
 
-      <SettingsRow
-        label="Accent color"
-        description="Changes the app highlight color"
-        right={
-          isProfileScope ? (
-            <Tooltip label={GLOBAL_ONLY_TOOLTIP} withArrow position="top-start">
-              <div style={{ opacity: 0.5, cursor: "not-allowed" }}>
-                <div style={{ pointerEvents: "none" }}>
-                  <Select
-                    data={ACCENT_COLOR_OPTIONS}
-                    value={accentDropdownValue}
-                    onChange={handleAccentColorChange}
-                    disabled={true}
-                    withCheckIcon={false}
-                    leftSection={
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: 999,
-                          backgroundColor: getAccentSwatch(accentDropdownValue),
-                          boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
-                          display: "inline-block",
-                        }}
-                      />
-                    }
-                    leftSectionPointerEvents="none"
-                    renderOption={({ option }) => (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: 999,
-                            backgroundColor: getAccentSwatch(option.value),
-                            boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
-                            display: "inline-block",
-                            flex: "0 0 auto",
-                          }}
-                        />
-                        <span>{option.label}</span>
-                      </div>
-                    )}
-                    styles={{
-                      input: {
-                        backgroundColor: "var(--bg-elevated)",
-                        borderColor: "var(--border-default)",
-                        color: "var(--text-primary)",
-                        minWidth: 180,
-                      },
-                    }}
-                  />
-                </div>
-              </div>
-            </Tooltip>
-          ) : (
-            <Select
-              data={ACCENT_COLOR_OPTIONS}
-              value={accentDropdownValue}
-              onChange={handleAccentColorChange}
-              disabled={isLoading}
-              withCheckIcon={false}
-              leftSection={
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 999,
-                    backgroundColor: getAccentSwatch(accentDropdownValue),
-                    boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
-                    display: "inline-block",
-                  }}
-                />
-              }
-              leftSectionPointerEvents="none"
-              renderOption={({ option }) => (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 999,
-                      backgroundColor: getAccentSwatch(option.value),
-                      boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
-                      display: "inline-block",
-                      flex: "0 0 auto",
-                    }}
-                  />
-                  <span>{option.label}</span>
-                </div>
-              )}
-              styles={{
-                input: {
-                  backgroundColor: "var(--bg-elevated)",
-                  borderColor: "var(--border-default)",
-                  color: "var(--text-primary)",
-                  minWidth: 180,
-                },
-              }}
-            />
-          )
-        }
-      />
+			<SettingsRow
+				label="Accent color"
+				description="Changes the app highlight color"
+				right={
+					isProfileScope ? (
+						<Tooltip label={GLOBAL_ONLY_TOOLTIP} withArrow position="top-start">
+							<div style={{ opacity: 0.5, cursor: "not-allowed" }}>
+								<div style={{ pointerEvents: "none" }}>
+									<Select
+										data={ACCENT_COLOR_OPTIONS}
+										value={accentDropdownValue}
+										onChange={handleAccentColorChange}
+										disabled={true}
+										withCheckIcon={false}
+										leftSection={
+											<span
+												aria-hidden="true"
+												style={{
+													width: 10,
+													height: 10,
+													borderRadius: 999,
+													backgroundColor: getAccentSwatch(accentDropdownValue),
+													boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
+													display: "inline-block",
+												}}
+											/>
+										}
+										leftSectionPointerEvents="none"
+										renderOption={({ option }) => (
+											<div
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: 8,
+												}}
+											>
+												<span
+													aria-hidden="true"
+													style={{
+														width: 10,
+														height: 10,
+														borderRadius: 999,
+														backgroundColor: getAccentSwatch(option.value),
+														boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
+														display: "inline-block",
+														flex: "0 0 auto",
+													}}
+												/>
+												<span>{option.label}</span>
+											</div>
+										)}
+										styles={{
+											input: {
+												backgroundColor: "var(--bg-elevated)",
+												borderColor: "var(--border-default)",
+												color: "var(--text-primary)",
+												minWidth: 180,
+											},
+										}}
+									/>
+								</div>
+							</div>
+						</Tooltip>
+					) : (
+						<Select
+							data={ACCENT_COLOR_OPTIONS}
+							value={accentDropdownValue}
+							onChange={handleAccentColorChange}
+							disabled={isLoading}
+							withCheckIcon={false}
+							leftSection={
+								<span
+									aria-hidden="true"
+									style={{
+										width: 10,
+										height: 10,
+										borderRadius: 999,
+										backgroundColor: getAccentSwatch(accentDropdownValue),
+										boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
+										display: "inline-block",
+									}}
+								/>
+							}
+							leftSectionPointerEvents="none"
+							renderOption={({ option }) => (
+								<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+									<span
+										aria-hidden="true"
+										style={{
+											width: 10,
+											height: 10,
+											borderRadius: 999,
+											backgroundColor: getAccentSwatch(option.value),
+											boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.18)",
+											display: "inline-block",
+											flex: "0 0 auto",
+										}}
+									/>
+									<span>{option.label}</span>
+								</div>
+							)}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 180,
+								},
+							}}
+						/>
+					)
+				}
+			/>
 
-      <SettingsRow
-        label="Close button"
-        description="What happens when you close the settings window"
-        right={
-          <Tooltip
-            label={GLOBAL_ONLY_TOOLTIP}
-            disabled={!isProfileScope}
-            withArrow
-            position="top-start"
-          >
-            <div style={isProfileScope ? { opacity: 0.5 } : undefined}>
-              <SegmentedControl
-                value={mainWindowCloseBehavior}
-                onChange={handleMainWindowCloseBehaviorChange}
-                disabled={isLoading || isProfileScope}
-                data={[
-                  { value: "exit_program", label: "Exit Program" },
-                  {
-                    value: "minimize_to_tray",
-                    label: "Minimize to tray",
-                  },
-                ]}
-                size="sm"
-                radius="md"
-                styles={{
-                  root: {
-                    backgroundColor: "var(--bg-elevated)",
-                    border: "1px solid var(--border-default)",
-                    minWidth: 260,
-                  },
-                }}
-              />
-            </div>
-          </Tooltip>
-        }
-      />
-    </>
-  );
+			<SettingsRow
+				label="Close button"
+				description="What happens when you close the settings window"
+				right={
+					<Tooltip
+						label={GLOBAL_ONLY_TOOLTIP}
+						disabled={!isProfileScope}
+						withArrow
+						position="top-start"
+					>
+						<div style={isProfileScope ? { opacity: 0.5 } : undefined}>
+							<SegmentedControl
+								value={mainWindowCloseBehavior}
+								onChange={handleMainWindowCloseBehaviorChange}
+								disabled={isLoading || isProfileScope}
+								data={[
+									{ value: "exit_program", label: "Exit Program" },
+									{
+										value: "minimize_to_tray",
+										label: "Minimize to tray",
+									},
+								]}
+								size="sm"
+								radius="md"
+								styles={{
+									root: {
+										backgroundColor: "var(--bg-elevated)",
+										border: "1px solid var(--border-default)",
+										minWidth: 260,
+									},
+								}}
+							/>
+						</div>
+					</Tooltip>
+				}
+			/>
+		</>
+	);
 }

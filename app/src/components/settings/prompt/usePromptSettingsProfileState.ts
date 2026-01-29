@@ -1,5 +1,6 @@
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import type {
+	ActiveWindowOcrMode,
 	AppSettings,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
@@ -45,6 +46,12 @@ type PromptSettingsProfileState = {
 	setLocalProfileQuickReplaceIncludeClipboardContext: Setter<boolean>;
 	localProfileQuickAskIncludeClipboardContext: boolean;
 	setLocalProfileQuickAskIncludeClipboardContext: Setter<boolean>;
+	localProfileRewriteActiveWindowOcrMode: ActiveWindowOcrMode;
+	setLocalProfileRewriteActiveWindowOcrMode: Setter<ActiveWindowOcrMode>;
+	localProfileQuickReplaceActiveWindowOcrMode: ActiveWindowOcrMode;
+	setLocalProfileQuickReplaceActiveWindowOcrMode: Setter<ActiveWindowOcrMode>;
+	localProfileQuickAskActiveWindowOcrMode: ActiveWindowOcrMode;
+	setLocalProfileQuickAskActiveWindowOcrMode: Setter<ActiveWindowOcrMode>;
 	localProfileOpenAiReasoningEffort: string;
 	setLocalProfileOpenAiReasoningEffort: Setter<string>;
 	localProfileGeminiThinkingLevel: string;
@@ -83,6 +90,12 @@ type PromptSettingsProfileState = {
 	setQuickReplaceIncludeClipboardContextInheriting: Setter<boolean>;
 	quickAskIncludeClipboardContextInheriting: boolean;
 	setQuickAskIncludeClipboardContextInheriting: Setter<boolean>;
+	rewriteActiveWindowOcrModeInheriting: boolean;
+	setRewriteActiveWindowOcrModeInheriting: Setter<boolean>;
+	quickReplaceActiveWindowOcrModeInheriting: boolean;
+	setQuickReplaceActiveWindowOcrModeInheriting: Setter<boolean>;
+	quickAskActiveWindowOcrModeInheriting: boolean;
+	setQuickAskActiveWindowOcrModeInheriting: Setter<boolean>;
 	openAiReasoningEffortInheriting: boolean;
 	setOpenAiReasoningEffortInheriting: Setter<boolean>;
 	geminiThinkingLevelInheriting: boolean;
@@ -169,6 +182,19 @@ export function usePromptSettingsProfileState({
 		setLocalProfileQuickAskIncludeClipboardContext,
 	] = useState<boolean>(false);
 
+	const [
+		localProfileRewriteActiveWindowOcrMode,
+		setLocalProfileRewriteActiveWindowOcrMode,
+	] = useState<ActiveWindowOcrMode>("off");
+	const [
+		localProfileQuickReplaceActiveWindowOcrMode,
+		setLocalProfileQuickReplaceActiveWindowOcrMode,
+	] = useState<ActiveWindowOcrMode>("off");
+	const [
+		localProfileQuickAskActiveWindowOcrMode,
+		setLocalProfileQuickAskActiveWindowOcrMode,
+	] = useState<ActiveWindowOcrMode>("off");
+
 	// Per-profile thinking/reasoning knobs (stored on the profile object).
 	// In UI, SELECT_DEFAULT means "inherit from Default/global settings".
 	const [
@@ -228,6 +254,19 @@ export function usePromptSettingsProfileState({
 	const [
 		quickAskIncludeClipboardContextInheriting,
 		setQuickAskIncludeClipboardContextInheriting,
+	] = useState(false);
+
+	const [
+		rewriteActiveWindowOcrModeInheriting,
+		setRewriteActiveWindowOcrModeInheriting,
+	] = useState(false);
+	const [
+		quickReplaceActiveWindowOcrModeInheriting,
+		setQuickReplaceActiveWindowOcrModeInheriting,
+	] = useState(false);
+	const [
+		quickAskActiveWindowOcrModeInheriting,
+		setQuickAskActiveWindowOcrModeInheriting,
 	] = useState(false);
 
 	const [openAiReasoningEffortInheriting, setOpenAiReasoningEffortInheriting] =
@@ -353,6 +392,19 @@ export function usePromptSettingsProfileState({
 					? defaultProfile.quick_ask_include_clipboard_context
 					: false;
 
+			const baseRewriteActiveWindowOcrMode: ActiveWindowOcrMode =
+				defaultProfile?.rewrite_active_window_ocr_mode ??
+				settings?.rewrite_active_window_ocr_mode ??
+				"off";
+			const baseQuickReplaceActiveWindowOcrMode: ActiveWindowOcrMode =
+				defaultProfile?.quick_replace_active_window_ocr_mode ??
+				settings?.quick_replace_active_window_ocr_mode ??
+				"off";
+			const baseQuickAskActiveWindowOcrMode: ActiveWindowOcrMode =
+				defaultProfile?.quick_ask_active_window_ocr_mode ??
+				settings?.quick_ask_active_window_ocr_mode ??
+				"off";
+
 			const quickReplaceEnabledIsNull =
 				activeProfile.quick_replace_enabled === null ||
 				activeProfile.quick_replace_enabled === undefined;
@@ -375,6 +427,16 @@ export function usePromptSettingsProfileState({
 			const quickAskIncludeClipboardContextIsNull =
 				activeProfile.quick_ask_include_clipboard_context === null ||
 				activeProfile.quick_ask_include_clipboard_context === undefined;
+
+			const rewriteActiveWindowOcrModeIsNull =
+				activeProfile.rewrite_active_window_ocr_mode === null ||
+				activeProfile.rewrite_active_window_ocr_mode === undefined;
+			const quickReplaceActiveWindowOcrModeIsNull =
+				activeProfile.quick_replace_active_window_ocr_mode === null ||
+				activeProfile.quick_replace_active_window_ocr_mode === undefined;
+			const quickAskActiveWindowOcrModeIsNull =
+				activeProfile.quick_ask_active_window_ocr_mode === null ||
+				activeProfile.quick_ask_active_window_ocr_mode === undefined;
 
 			const quickAskOpenAiReasoningEffortIsNull =
 				activeProfile.quick_ask_openai_reasoning_effort === null ||
@@ -418,6 +480,14 @@ export function usePromptSettingsProfileState({
 			);
 			setQuickAskIncludeClipboardContextInheriting(
 				quickAskIncludeClipboardContextIsNull,
+			);
+
+			setRewriteActiveWindowOcrModeInheriting(rewriteActiveWindowOcrModeIsNull);
+			setQuickReplaceActiveWindowOcrModeInheriting(
+				quickReplaceActiveWindowOcrModeIsNull,
+			);
+			setQuickAskActiveWindowOcrModeInheriting(
+				quickAskActiveWindowOcrModeIsNull,
 			);
 
 			setQuickAskOpenAiReasoningEffortInheriting(
@@ -521,6 +591,31 @@ export function usePromptSettingsProfileState({
 							baseQuickAskIncludeClipboardContext),
 			);
 
+			setLocalProfileRewriteActiveWindowOcrMode(
+				activeProfileId === "default"
+					? (activeProfile.rewrite_active_window_ocr_mode ??
+							settings?.rewrite_active_window_ocr_mode ??
+							"off")
+					: (activeProfile.rewrite_active_window_ocr_mode ??
+							baseRewriteActiveWindowOcrMode),
+			);
+			setLocalProfileQuickReplaceActiveWindowOcrMode(
+				activeProfileId === "default"
+					? (activeProfile.quick_replace_active_window_ocr_mode ??
+							settings?.quick_replace_active_window_ocr_mode ??
+							"off")
+					: (activeProfile.quick_replace_active_window_ocr_mode ??
+							baseQuickReplaceActiveWindowOcrMode),
+			);
+			setLocalProfileQuickAskActiveWindowOcrMode(
+				activeProfileId === "default"
+					? (activeProfile.quick_ask_active_window_ocr_mode ??
+							settings?.quick_ask_active_window_ocr_mode ??
+							"off")
+					: (activeProfile.quick_ask_active_window_ocr_mode ??
+							baseQuickAskActiveWindowOcrMode),
+			);
+
 			setLocalProfileOpenAiReasoningEffort(
 				activeProfile.openai_reasoning_effort ?? "default",
 			);
@@ -588,6 +683,9 @@ export function usePromptSettingsProfileState({
 			setRewriteIncludeClipboardContextInheriting(false);
 			setQuickReplaceIncludeClipboardContextInheriting(false);
 			setQuickAskIncludeClipboardContextInheriting(false);
+			setRewriteActiveWindowOcrModeInheriting(false);
+			setQuickReplaceActiveWindowOcrModeInheriting(false);
+			setQuickAskActiveWindowOcrModeInheriting(false);
 
 			setQuickAskOpenAiReasoningEffortInheriting(false);
 			setQuickAskGeminiThinkingLevelInheriting(false);
@@ -612,6 +710,15 @@ export function usePromptSettingsProfileState({
 			setLocalProfileRewriteIncludeClipboardContext(false);
 			setLocalProfileQuickReplaceIncludeClipboardContext(false);
 			setLocalProfileQuickAskIncludeClipboardContext(false);
+			setLocalProfileRewriteActiveWindowOcrMode(
+				settings?.rewrite_active_window_ocr_mode ?? "off",
+			);
+			setLocalProfileQuickReplaceActiveWindowOcrMode(
+				settings?.quick_replace_active_window_ocr_mode ?? "off",
+			);
+			setLocalProfileQuickAskActiveWindowOcrMode(
+				settings?.quick_ask_active_window_ocr_mode ?? "off",
+			);
 			setLocalProfileRewriteEnabled(defaultRewriteEnabled);
 			setLocalProfileSttTimeout(
 				settings?.stt_timeout_seconds ?? defaultSttTimeout,
@@ -630,6 +737,9 @@ export function usePromptSettingsProfileState({
 	}, [
 		activeProfileId,
 		activeProfile,
+		settings?.rewrite_active_window_ocr_mode,
+		settings?.quick_replace_active_window_ocr_mode,
+		settings?.quick_ask_active_window_ocr_mode,
 		settings?.stt_timeout_seconds,
 		settings?.stt_provider,
 		settings?.stt_model,
@@ -674,6 +784,12 @@ export function usePromptSettingsProfileState({
 		setLocalProfileQuickReplaceIncludeClipboardContext,
 		localProfileQuickAskIncludeClipboardContext,
 		setLocalProfileQuickAskIncludeClipboardContext,
+		localProfileRewriteActiveWindowOcrMode,
+		setLocalProfileRewriteActiveWindowOcrMode,
+		localProfileQuickReplaceActiveWindowOcrMode,
+		setLocalProfileQuickReplaceActiveWindowOcrMode,
+		localProfileQuickAskActiveWindowOcrMode,
+		setLocalProfileQuickAskActiveWindowOcrMode,
 		localProfileOpenAiReasoningEffort,
 		setLocalProfileOpenAiReasoningEffort,
 		localProfileGeminiThinkingLevel,
@@ -712,6 +828,12 @@ export function usePromptSettingsProfileState({
 		setQuickReplaceIncludeClipboardContextInheriting,
 		quickAskIncludeClipboardContextInheriting,
 		setQuickAskIncludeClipboardContextInheriting,
+		rewriteActiveWindowOcrModeInheriting,
+		setRewriteActiveWindowOcrModeInheriting,
+		quickReplaceActiveWindowOcrModeInheriting,
+		setQuickReplaceActiveWindowOcrModeInheriting,
+		quickAskActiveWindowOcrModeInheriting,
+		setQuickAskActiveWindowOcrModeInheriting,
 		openAiReasoningEffortInheriting,
 		setOpenAiReasoningEffortInheriting,
 		geminiThinkingLevelInheriting,

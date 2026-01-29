@@ -89,6 +89,18 @@ describe("legacy settings fixtures", () => {
 		expect(settings.output_mode).toBe("paste");
 		expect(settings.playing_audio_handling).toBe("none");
 		expect(settings.overlay_show_detailed_loading).toBe(false);
+		expect(settings.ocr_auth_mode).toBe("none");
+		expect(settings.ocr_base_url).toBeNull();
+		expect(settings.ocr_model).toBeNull();
+		expect(settings.ocr_prompt).toBe("");
+		expect(settings.ocr_max_tokens).toBe(512);
+		expect(settings.ocr_temperature).toBe(0);
+		expect(settings.ocr_top_p).toBe(1);
+		expect(settings.ocr_request_timeout_ms).toBe(2000);
+		expect(settings.ocr_context_max_chars).toBe(8000);
+		expect(settings.rewrite_active_window_ocr_mode).toBe("off");
+		expect(settings.quick_replace_active_window_ocr_mode).toBe("off");
+		expect(settings.quick_ask_active_window_ocr_mode).toBe("off");
 
 		expect(settings.rewrite_program_prompt_profiles).toHaveLength(1);
 		const profile = settings.rewrite_program_prompt_profiles[0];

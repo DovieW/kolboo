@@ -77,6 +77,39 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("stt_transcription_prompt", json!(null), false);
     dirty |= set_default("whisper_server_base_url", json!(null), false);
     dirty |= set_default("ollama_url", json!(null), false);
+    dirty |= set_default("ocr_base_url", json!(null), false);
+    dirty |= set_default("ocr_model", json!("lightonai/LightOnOCR-1B-1025"), false);
+    dirty |= set_default("ocr_auth_mode", json!("none"), false);
+    dirty |= set_default(
+        "ocr_prompt",
+        json!(default_pipeline_config.ocr_config.prompt),
+        false,
+    );
+    dirty |= set_default(
+        "ocr_max_tokens",
+        json!(default_pipeline_config.ocr_config.max_tokens),
+        false,
+    );
+    dirty |= set_default(
+        "ocr_temperature",
+        json!(default_pipeline_config.ocr_config.temperature),
+        false,
+    );
+    dirty |= set_default(
+        "ocr_top_p",
+        json!(default_pipeline_config.ocr_config.top_p),
+        false,
+    );
+    dirty |= set_default("ocr_request_timeout_ms", json!(2000u64), false);
+    dirty |= set_default("ocr_context_max_chars", json!(8000u64), false);
+    dirty |= set_default("ocr_auto_capture_timing", json!("on_start"), false);
+    dirty |= set_default("ocr_hallucination_protection", json!(true), false);
+    dirty |= set_default("ocr_hallucination_threshold", json!(2500u64), false);
+    dirty |= set_default("ocr_resize_max_dimension", json!(0u32), false);
+    dirty |= set_default("ocr_resize_filter", json!("nearest"), false);
+    dirty |= set_default("rewrite_active_window_ocr_mode", json!("off"), false);
+    dirty |= set_default("quick_replace_active_window_ocr_mode", json!("off"), false);
+    dirty |= set_default("quick_ask_active_window_ocr_mode", json!("off"), false);
 
     // Local Whisper model selection (only meaningful when compiled with the feature).
     // This is the *model file* used by whisper.cpp (not the remote STT model dropdown).

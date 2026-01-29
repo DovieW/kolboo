@@ -194,6 +194,22 @@ impl MockLlmProvider {
     }
 }
 
+/// A mock LLM provider that returns different outputs depending on whether OCR context
+/// is present in the user message.
+struct ConditionalOcrLlmProvider {
+    with_ocr: String,
+    without_ocr: String,
+}
+
+impl ConditionalOcrLlmProvider {
+    fn new(with_ocr: impl Into<String>, without_ocr: impl Into<String>) -> Self {
+        Self {
+            with_ocr: with_ocr.into(),
+            without_ocr: without_ocr.into(),
+        }
+    }
+}
+
 #[async_trait]
 impl crate::llm::LlmProvider for MockLlmProvider {
     async fn complete(
@@ -208,6 +224,30 @@ impl crate::llm::LlmProvider for MockLlmProvider {
             return Err(crate::llm::LlmError::Api(err.clone()));
         }
         Ok(self.response.clone())
+    }
+
+    fn name(&self) -> &'static str {
+        "mock"
+    }
+
+    fn model(&self) -> &str {
+        "mock-model"
+    }
+}
+
+#[async_trait]
+impl crate::llm::LlmProvider for ConditionalOcrLlmProvider {
+    async fn complete(
+        &self,
+        _system_prompt: &str,
+        user_message: &str,
+    ) -> Result<String, crate::llm::LlmError> {
+        let has_ocr = user_message.contains("OCR context from the currently active window:");
+        Ok(if has_ocr {
+            self.with_ocr.clone()
+        } else {
+            self.without_ocr.clone()
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -342,6 +382,54 @@ fn test_stop_recording_transitions_to_idle() {
     assert_eq!(pipeline.state(), PipelineState::Idle);
     assert!(pipeline.clone_last_wav_bytes().is_some());
     assert!(pipeline.get_cancel_token().is_none());
+}
+
+#[test]
+fn ocr_session_survives_reset_to_idle() {
+    let config = test_config_with_max_recording_bytes();
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+
+    p.begin_ocr_session("req-1".to_string());
+
+    // Seed a completed OCR result so status reports "done".
+    {
+        let mut inner = p.inner.lock().unwrap();
+        inner.state = PipelineState::Recording;
+        inner.ocr_result = Some(crate::ocr::OcrResult {
+            text: "hello".to_string(),
+            provider: "test".to_string(),
+            model: "test".to_string(),
+        });
+        inner.reset_to_idle();
+        assert_eq!(inner.state, PipelineState::Idle);
+        assert_eq!(inner.ocr_session_id.as_deref(), Some("req-1"));
+        assert!(inner.ocr_result.is_some());
+    }
+
+    assert_eq!(p.get_ocr_status(), "done");
+    assert_eq!(p.ocr_session_id().as_deref(), Some("req-1"));
+}
+
+#[test]
+fn end_ocr_session_clears_ocr_state() {
+    let config = test_config_with_max_recording_bytes();
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+
+    p.begin_ocr_session("req-2".to_string());
+    {
+        let mut inner = p.inner.lock().unwrap();
+        inner.ocr_result = Some(crate::ocr::OcrResult {
+            text: "hello".to_string(),
+            provider: "test".to_string(),
+            model: "test".to_string(),
+        });
+    }
+
+    assert_eq!(p.get_ocr_status(), "done");
+
+    p.end_ocr_session_if_matches("req-2");
+    assert_eq!(p.ocr_session_id(), None);
+    assert_eq!(p.get_ocr_status(), "not_started");
 }
 
 #[test]
@@ -674,6 +762,10 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
         quick_ask_gemini_thinking_budget: None,
         quick_ask_gemini_thinking_level: None,
         quick_ask_anthropic_thinking_budget: None,
+
+        rewrite_active_window_ocr_mode: None,
+        quick_replace_active_window_ocr_mode: None,
+        quick_ask_active_window_ocr_mode: None,
     }
 }
 
@@ -730,6 +822,57 @@ async fn routing_selects_preset_with_highest_similarity() {
 
     // Then: the pipeline successfully completed (LLM rewrite happened)
     assert_eq!(result.final_text, "Sending email");
+    assert_eq!(p.state(), PipelineState::Idle);
+}
+
+#[tokio::test]
+async fn rewrite_consumes_manual_ocr_result_when_available() {
+    // Given: manual OCR mode, and an OCR result already produced (e.g. user clicked
+    // the overlay OCR pill while recording).
+    let mut profile = create_routing_test_profile(vec![]);
+    profile.id = "default".to_string();
+    profile.name = "Default".to_string();
+    // Keep this test focused: we only care about rewrite user-message assembly.
+    profile.router = None;
+
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, vec![profile.clone()]);
+    insert_mock_llm_api_key(&mut config);
+    config.ocr_config.rewrite_mode = "manual".to_string();
+
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    // STT produces any transcript (not important).
+    p.inject_stt_provider_for_tests(MOCK_PROVIDER, None, Arc::new(MockSttProvider::new("hello")));
+    // LLM returns a different string depending on whether OCR context made it into the prompt.
+    p.inject_llm_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        Arc::new(ConditionalOcrLlmProvider::new("WITH_OCR", "NO_OCR")),
+    );
+
+    {
+        let mut inner = p.inner.lock().expect("pipeline lock");
+        inner.config.llm_config.program_prompt_profiles = vec![profile];
+    }
+
+    p.start_recording().expect("start recording should succeed");
+
+    // Simulate: OCR already finished before we hit rewrite.
+    {
+        let mut inner = p.inner.lock().expect("pipeline lock");
+        inner.ocr_result = Some(crate::ocr::OcrResult {
+            text: "some ocr text".to_string(),
+            provider: "mock".to_string(),
+            model: "mock-model".to_string(),
+        });
+    }
+
+    let result = p
+        .stop_and_transcribe_detailed()
+        .await
+        .expect("stop/transcribe should succeed");
+
+    assert_eq!(result.final_text, "WITH_OCR");
     assert_eq!(p.state(), PipelineState::Idle);
 }
 

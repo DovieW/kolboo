@@ -45,11 +45,19 @@ pub struct ProviderInfo {
     pub is_local: bool,
 }
 
+/// OCR provider availability status
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OcrProviderStatus {
+    pub available: bool,
+    pub reason: Option<String>,
+}
+
 /// Response listing available providers
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AvailableProvidersResponse {
     pub stt: Vec<ProviderInfo>,
     pub llm: Vec<ProviderInfo>,
+    pub ocr: OcrProviderStatus,
 }
 
 /// STT provider definitions
@@ -107,6 +115,49 @@ fn has_valid_url_setting(app: &AppHandle, key: &str) -> bool {
     }
 
     reqwest::Url::parse(&raw).is_ok()
+}
+
+#[cfg(desktop)]
+fn get_ocr_provider_status(app: &AppHandle) -> OcrProviderStatus {
+    let base_url_raw = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_base_url"))
+        .and_then(|v| v.as_str().map(|s| s.trim().to_string()))
+        .unwrap_or_default();
+
+    if base_url_raw.is_empty() {
+        return OcrProviderStatus {
+            available: false,
+            reason: Some("OCR base URL not set".to_string()),
+        };
+    }
+
+    if reqwest::Url::parse(&base_url_raw).is_err() {
+        return OcrProviderStatus {
+            available: false,
+            reason: Some("OCR base URL is invalid".to_string()),
+        };
+    }
+
+    let auth_mode = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_auth_mode"))
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "none".to_string());
+
+    if auth_mode == "bearer_api_key" && !has_api_key(app, "ocr_api_key") {
+        return OcrProviderStatus {
+            available: false,
+            reason: Some("OCR API key not set".to_string()),
+        };
+    }
+
+    OcrProviderStatus {
+        available: true,
+        reason: None,
+    }
 }
 
 /// Helper to check if an API key is configured in the store
@@ -174,6 +225,7 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
     AvailableProvidersResponse {
         stt: stt_providers,
         llm: llm_providers,
+        ocr: get_ocr_provider_status(&app),
     }
 }
 
@@ -184,6 +236,10 @@ pub fn get_available_providers(_app: AppHandle) -> AvailableProvidersResponse {
     AvailableProvidersResponse {
         stt: vec![],
         llm: vec![],
+        ocr: OcrProviderStatus {
+            available: false,
+            reason: None,
+        },
     }
 }
 
@@ -507,6 +563,10 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
                         .quick_replace_include_clipboard_context,
                     quick_ask_include_clipboard_context: p.quick_ask_include_clipboard_context,
 
+                    rewrite_active_window_ocr_mode: p.rewrite_active_window_ocr_mode,
+                    quick_replace_active_window_ocr_mode: p.quick_replace_active_window_ocr_mode,
+                    quick_ask_active_window_ocr_mode: p.quick_ask_active_window_ocr_mode,
+
                     quick_replace_enabled: p.quick_replace_enabled,
                     quick_replace_provider: p.quick_replace_provider,
                     quick_replace_model: p.quick_replace_model,
@@ -678,6 +738,152 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
 
+    // OCR settings
+    let ocr_base_url: Option<String> = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_base_url"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .and_then(|s: String| {
+            let trimmed = s.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+        .or_else(|| default_pipeline_config.ocr_config.base_url.clone());
+
+    let ocr_model: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_model"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| default_pipeline_config.ocr_config.model.clone());
+
+    let ocr_auth_mode: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_auth_mode"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| default_pipeline_config.ocr_config.auth_mode.clone());
+
+    let ocr_prompt: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_prompt"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .map(|s: String| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| default_pipeline_config.ocr_config.prompt.clone());
+
+    let ocr_max_tokens: u32 = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_max_tokens"))
+        .and_then(|v| serde_json::from_value::<u64>(v).ok())
+        .map(|v| v.clamp(1, 4096) as u32)
+        .unwrap_or(default_pipeline_config.ocr_config.max_tokens);
+
+    let ocr_temperature: f64 = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_temperature"))
+        .and_then(|v| serde_json::from_value::<f64>(v).ok())
+        .filter(|v| v.is_finite())
+        .map(|v| v.clamp(0.0, 2.0))
+        .unwrap_or(default_pipeline_config.ocr_config.temperature);
+
+    let ocr_top_p: f64 = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_top_p"))
+        .and_then(|v| serde_json::from_value::<f64>(v).ok())
+        .filter(|v| v.is_finite())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(default_pipeline_config.ocr_config.top_p);
+
+    let ocr_request_timeout_ms: u64 = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_request_timeout_ms"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(default_pipeline_config.ocr_config.request_timeout_ms);
+
+    let ocr_context_max_chars: usize = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_context_max_chars"))
+        .and_then(|v| serde_json::from_value::<u64>(v).ok())
+        .unwrap_or(default_pipeline_config.ocr_config.context_max_chars as u64)
+        as usize;
+
+    let rewrite_active_window_ocr_mode: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("rewrite_active_window_ocr_mode"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| default_pipeline_config.ocr_config.rewrite_mode.clone());
+
+    let quick_replace_active_window_ocr_mode: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("quick_replace_active_window_ocr_mode"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| {
+            default_pipeline_config
+                .ocr_config
+                .quick_replace_mode
+                .clone()
+        });
+
+    let quick_ask_active_window_ocr_mode: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("quick_ask_active_window_ocr_mode"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| default_pipeline_config.ocr_config.quick_ask_mode.clone());
+
+    let ocr_auto_capture_timing: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_auto_capture_timing"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| {
+            default_pipeline_config
+                .ocr_config
+                .auto_capture_timing
+                .clone()
+        });
+
+    let ocr_hallucination_protection: bool = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_hallucination_protection"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(default_pipeline_config.ocr_config.hallucination_protection);
+
+    let ocr_hallucination_threshold: u64 = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_hallucination_threshold"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(default_pipeline_config.ocr_config.hallucination_threshold);
+
+    let ocr_resize_max_dimension: u32 = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_resize_max_dimension"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(default_pipeline_config.ocr_config.resize_max_dimension);
+
+    let ocr_resize_filter: String = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("ocr_resize_filter"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_else(|| default_pipeline_config.ocr_config.resize_filter.clone());
+
     let config = PipelineConfig {
         input_device_name,
         stt_provider: stt_provider.clone(),
@@ -728,6 +934,26 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
             ..Default::default()
         },
         llm_api_keys,
+
+        ocr_config: crate::pipeline::OcrConfig {
+            base_url: ocr_base_url,
+            model: ocr_model,
+            auth_mode: ocr_auth_mode,
+            prompt: ocr_prompt,
+            max_tokens: ocr_max_tokens,
+            temperature: ocr_temperature,
+            top_p: ocr_top_p,
+            request_timeout_ms: ocr_request_timeout_ms,
+            context_max_chars: ocr_context_max_chars,
+            rewrite_mode: rewrite_active_window_ocr_mode,
+            quick_replace_mode: quick_replace_active_window_ocr_mode,
+            quick_ask_mode: quick_ask_active_window_ocr_mode,
+            auto_capture_timing: ocr_auto_capture_timing,
+            hallucination_protection: ocr_hallucination_protection,
+            hallucination_threshold: ocr_hallucination_threshold,
+            resize_max_dimension: ocr_resize_max_dimension,
+            resize_filter: ocr_resize_filter,
+        },
 
         // Preserve provider payload logging across config sync.
         request_log_store: app

@@ -61,6 +61,7 @@ import type {
 	WhisperModelInfo,
 } from "../../lib/tauri";
 import { configAPI, tauriAPI } from "../../lib/tauri";
+import { OcrProviderSettings } from "./OcrProviderSettings";
 import { SettingsRow } from "./SettingsRow";
 
 const GLOBAL_ONLY_TOOLTIP =
@@ -200,226 +201,226 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 			left={
 				<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
 					<p className="settings-label">{config.label}</p>
-				{config.id === "groq" && (
-					<Group gap={10} align="center" wrap="nowrap" mt={2}>
-						<Switch
-							size="sm"
-							checked={settings?.groq_free_tier ?? true}
-							onChange={(e) =>
-								updateGroqFreeTier.mutate(e.currentTarget.checked)
-							}
-							aria-label="Groq free tier"
-						/>
-						<Text size="xs" c="var(--text-secondary)" fw={600}>
-							Free tier
-						</Text>
-						<Text
-							size="xs"
-							c="var(--text-muted)"
-							className="settings-description--single-line"
-							style={{ flex: 1 }}
-							title="Assume Groq calls cost $0 for stats"
-						>
-							Assume Groq calls cost $0 for stats
-						</Text>
-					</Group>
-				)}
-				{config.id === "elevenlabs" && (
-					<Group gap={10} align="center" wrap="nowrap" mt={2}>
-						<Switch
-							size="sm"
-							checked={settings?.elevenlabs_free_tier ?? true}
-							onChange={(e) =>
-								updateElevenLabsFreeTier.mutate(e.currentTarget.checked)
-							}
-							aria-label="ElevenLabs free tier"
-						/>
-						<Text size="xs" c="var(--text-secondary)" fw={600}>
-							Free tier
-						</Text>
-						<Text
-							size="xs"
-							c="var(--text-muted)"
-							className="settings-description--single-line"
-							style={{ flex: 1 }}
-							title="Assume ElevenLabs calls cost $0 for stats"
-						>
-							Assume ElevenLabs calls cost $0 for stats
-						</Text>
-					</Group>
-				)}
-				{config.id === "cerebras" && (
-					<Group gap={10} align="center" wrap="nowrap" mt={2}>
-						<Switch
-							size="sm"
-							checked={settings?.cerebras_free_tier ?? true}
-							onChange={(e) =>
-								updateCerebrasFreeTier.mutate(e.currentTarget.checked)
-							}
-							aria-label="Cerebras free tier"
-						/>
-						<Text size="xs" c="var(--text-secondary)" fw={600}>
-							Free tier
-						</Text>
-						<Text
-							size="xs"
-							c="var(--text-muted)"
-							className="settings-description--single-line"
-							style={{ flex: 1 }}
-							title="Assume Cerebras calls cost $0 for stats"
-						>
-							Assume Cerebras calls cost $0 for stats
-						</Text>
-					</Group>
-				)}
-				{config.id === "assemblyai" && (
-					<Group gap={10} align="center" wrap="nowrap" mt={2}>
-						<Switch
-							size="sm"
-							checked={settings?.assemblyai_free_tier ?? true}
-							onChange={(e) =>
-								updateAssemblyAiFreeTier.mutate(e.currentTarget.checked)
-							}
-							aria-label="AssemblyAI free tier"
-						/>
-						<Text size="xs" c="var(--text-secondary)" fw={600}>
-							Free tier
-						</Text>
-						<Text
-							size="xs"
-							c="var(--text-muted)"
-							className="settings-description--single-line"
-							style={{ flex: 1 }}
-							title="Assume AssemblyAI calls cost $0 for stats"
-						>
-							Assume AssemblyAI calls cost $0 for stats
-						</Text>
-					</Group>
-				)}
-				{config.id === "speechmatics" && (
-					<Group gap={10} align="center" wrap="nowrap" mt={2}>
-						<Switch
-							size="sm"
-							checked={settings?.speechmatics_free_tier ?? true}
-							onChange={(e) =>
-								updateSpeechmaticsFreeTier.mutate(e.currentTarget.checked)
-							}
-							aria-label="Speechmatics free tier"
-						/>
-						<Text size="xs" c="var(--text-secondary)" fw={600}>
-							Free tier
-						</Text>
-						<Text
-							size="xs"
-							c="var(--text-muted)"
-							className="settings-description--single-line"
-							style={{ flex: 1 }}
-							title="Assume Speechmatics calls cost $0 for stats"
-						>
-							Assume Speechmatics calls cost $0 for stats
-						</Text>
-					</Group>
-				)}
-				{config.id === "cohere" && (
-					<Group gap={10} align="center" wrap="nowrap" mt={2}>
-						<Switch
-							size="sm"
-							checked={settings?.cohere_free_tier ?? true}
-							onChange={(e) =>
-								updateCohereFreeTier.mutate(e.currentTarget.checked)
-							}
-							aria-label="Cohere free tier"
-						/>
-						<Text size="xs" c="var(--text-secondary)" fw={600}>
-							Free tier
-						</Text>
-						<Text
-							size="xs"
-							c="var(--text-muted)"
-							className="settings-description--single-line"
-							style={{ flex: 1 }}
-							title="Assume Cohere calls cost $0 for stats"
-						>
-							Assume Cohere calls cost $0 for stats
-						</Text>
-					</Group>
-				)}
+					{config.id === "groq" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.groq_free_tier ?? true}
+								onChange={(e) =>
+									updateGroqFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Groq free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Groq calls cost $0 for stats"
+							>
+								Assume Groq calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "elevenlabs" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.elevenlabs_free_tier ?? true}
+								onChange={(e) =>
+									updateElevenLabsFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="ElevenLabs free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume ElevenLabs calls cost $0 for stats"
+							>
+								Assume ElevenLabs calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "cerebras" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.cerebras_free_tier ?? true}
+								onChange={(e) =>
+									updateCerebrasFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Cerebras free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Cerebras calls cost $0 for stats"
+							>
+								Assume Cerebras calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "assemblyai" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.assemblyai_free_tier ?? true}
+								onChange={(e) =>
+									updateAssemblyAiFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="AssemblyAI free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume AssemblyAI calls cost $0 for stats"
+							>
+								Assume AssemblyAI calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "speechmatics" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.speechmatics_free_tier ?? true}
+								onChange={(e) =>
+									updateSpeechmaticsFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Speechmatics free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Speechmatics calls cost $0 for stats"
+							>
+								Assume Speechmatics calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "cohere" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.cohere_free_tier ?? true}
+								onChange={(e) =>
+									updateCohereFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Cohere free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Cohere calls cost $0 for stats"
+							>
+								Assume Cohere calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
 				</div>
 			}
 			right={
 				<>
-				{modelCountsLabel && (
-					<Tooltip
-						label={modelsTooltip ?? ""}
-						withArrow
-						multiline
-						disabled={!modelsTooltip}
-						position="bottom"
-						styles={{
-							tooltip: {
-								backgroundColor: "var(--bg-elevated)",
-								color: "var(--text-primary)",
-								border: "1px solid var(--border-default)",
-							},
-						}}
-					>
-						<Text
-							size="xs"
-							c="var(--text-muted)"
-							style={{ alignSelf: "center", whiteSpace: "nowrap" }}
+					{modelCountsLabel && (
+						<Tooltip
+							label={modelsTooltip ?? ""}
+							withArrow
+							multiline
+							disabled={!modelsTooltip}
+							position="bottom"
+							styles={{
+								tooltip: {
+									backgroundColor: "var(--bg-elevated)",
+									color: "var(--text-primary)",
+									border: "1px solid var(--border-default)",
+								},
+							}}
 						>
-							{modelCountsLabel}
-						</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								style={{ alignSelf: "center", whiteSpace: "nowrap" }}
+							>
+								{modelCountsLabel}
+							</Text>
+						</Tooltip>
+					)}
+					<Tooltip label="Get key" withArrow>
+						<ActionIcon
+							component="a"
+							href={config.getKeyUrl}
+							target="_blank"
+							rel="noreferrer"
+							variant="subtle"
+							color="gray"
+							size={36}
+						>
+							<LinkIcon size={16} />
+						</ActionIcon>
 					</Tooltip>
-				)}
-				<Tooltip label="Get key" withArrow>
-					<ActionIcon
-						component="a"
-						href={config.getKeyUrl}
-						target="_blank"
-						rel="noreferrer"
-						variant="subtle"
-						color="gray"
-						size={36}
-					>
-						<LinkIcon size={16} />
-					</ActionIcon>
-				</Tooltip>
-				<PasswordInput
-					value={value}
-					onChange={(e) => setValue(e.currentTarget.value)}
-					placeholder={config.placeholder}
-					size="sm"
-					disabled={isPrefilling || saveKey.isPending}
-					styles={{
-						input: {
-							backgroundColor: "var(--bg-elevated)",
-							borderColor: "var(--border-default)",
-							color: "var(--text-primary)",
-							height: 36,
-							width: 200,
-						},
-					}}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") handleSave();
-					}}
-				/>
-				<Tooltip label="Set API key">
-					<Button
-						color="orange"
+					<PasswordInput
+						value={value}
+						onChange={(e) => setValue(e.currentTarget.value)}
+						placeholder={config.placeholder}
 						size="sm"
-						onClick={handleSave}
-						loading={saveKey.isPending}
-						disabled={!trimmedValue || saveKey.isPending || isUnchanged}
+						disabled={isPrefilling || saveKey.isPending}
 						styles={{
-							root: {
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
 								height: 36,
+								width: 200,
 							},
 						}}
-					>
-						Set
-					</Button>
-				</Tooltip>
+						onKeyDown={(e) => {
+							if (e.key === "Enter") handleSave();
+						}}
+					/>
+					<Tooltip label="Set API key">
+						<Button
+							color="orange"
+							size="sm"
+							onClick={handleSave}
+							loading={saveKey.isPending}
+							disabled={!trimmedValue || saveKey.isPending || isUnchanged}
+							styles={{
+								root: {
+									height: 36,
+								},
+							}}
+						>
+							Set
+						</Button>
+					</Tooltip>
 				</>
 			}
 		/>
@@ -488,8 +489,7 @@ function LocalWhisperModelsCard() {
 						if (normalized.status === "error") {
 							setErrorById((prev) => ({
 								...prev,
-								[normalized.model_id]:
-									normalized.message ?? "Download failed",
+								[normalized.model_id]: normalized.message ?? "Download failed",
 							}));
 						}
 
@@ -1220,23 +1220,23 @@ export function ApiKeysSettings({
 				}
 				right={
 					<TextInput
-					value={ollamaUrlDraft}
-					onChange={(e) => setOllamaUrlDraft(e.currentTarget.value)}
-					onBlur={() => {
-						const trimmed = ollamaUrlDraft.trim();
-						const normalized = trimmed ? trimmed : null;
-						updateOllamaUrl.mutate(normalized);
-					}}
-					placeholder="http://localhost:11434"
-					styles={{
-						input: {
-							backgroundColor: "var(--bg-elevated)",
-							borderColor: "var(--border-default)",
-							color: "var(--text-primary)",
-							minWidth: 280,
-						},
-					}}
-				/>
+						value={ollamaUrlDraft}
+						onChange={(e) => setOllamaUrlDraft(e.currentTarget.value)}
+						onBlur={() => {
+							const trimmed = ollamaUrlDraft.trim();
+							const normalized = trimmed ? trimmed : null;
+							updateOllamaUrl.mutate(normalized);
+						}}
+						placeholder="http://localhost:11434"
+						styles={{
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 280,
+							},
+						}}
+					/>
 				}
 			/>
 
@@ -1247,25 +1247,29 @@ export function ApiKeysSettings({
 				}
 				right={
 					<TextInput
-					value={whisperServerBaseUrlDraft}
-					onChange={(e) => setWhisperServerBaseUrlDraft(e.currentTarget.value)}
-					onBlur={() => {
-						const trimmed = whisperServerBaseUrlDraft.trim();
-						const normalized = trimmed ? trimmed : null;
-						updateWhisperServerBaseUrl.mutate(normalized);
-					}}
-					placeholder="http://localhost:8000/v1"
-					styles={{
-						input: {
-							backgroundColor: "var(--bg-elevated)",
-							borderColor: "var(--border-default)",
-							color: "var(--text-primary)",
-							minWidth: 280,
-						},
-					}}
-				/>
+						value={whisperServerBaseUrlDraft}
+						onChange={(e) =>
+							setWhisperServerBaseUrlDraft(e.currentTarget.value)
+						}
+						onBlur={() => {
+							const trimmed = whisperServerBaseUrlDraft.trim();
+							const normalized = trimmed ? trimmed : null;
+							updateWhisperServerBaseUrl.mutate(normalized);
+						}}
+						placeholder="http://localhost:8000/v1"
+						styles={{
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 280,
+							},
+						}}
+					/>
 				}
 			/>
+
+			<OcrProviderSettings editingProfileId={editingProfileId} />
 
 			<LocalWhisperModelsCard />
 		</>

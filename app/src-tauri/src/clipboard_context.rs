@@ -66,23 +66,41 @@ pub async fn read_clipboard_text_best_effort_async(_max_chars: usize) -> Option<
     None
 }
 
-/// Build a user message for the rewrite step that optionally includes clipboard context.
-pub fn build_rewrite_user_message(transcript: &str, clipboard_text: Option<&str>) -> String {
-    if let Some(cb) = clipboard_text {
-        // Keep the transcript prominent. Clipboard is explicitly labeled as context.
-        format!(
-            "Transcript:\n{}\n\nClipboard context:\n{}",
-            transcript.trim(),
-            cb.trim()
-        )
-    } else {
-        transcript.to_string()
+/// Build a user message for the rewrite step that optionally includes clipboard + OCR context.
+pub fn build_rewrite_user_message(
+    transcript: &str,
+    clipboard_text: Option<&str>,
+    ocr_text: Option<&str>,
+) -> String {
+    let transcript = transcript.trim();
+    let clipboard_text = clipboard_text.map(|s| s.trim()).filter(|s| !s.is_empty());
+    let ocr_text = ocr_text.map(|s| s.trim()).filter(|s| !s.is_empty());
+
+    if clipboard_text.is_none() && ocr_text.is_none() {
+        return transcript.to_string();
     }
+
+    let mut out = format!("Transcript:\n{}", transcript);
+
+    if let Some(cb) = clipboard_text {
+        out.push_str("\n\nClipboard context:\n");
+        out.push_str(cb);
+    }
+
+    if let Some(ocr) = ocr_text {
+        let labeled = crate::ocr::build_labeled_ocr_context(ocr);
+        if !labeled.is_empty() {
+            out.push_str("\n\n");
+            out.push_str(labeled.as_str());
+        }
+    }
+
+    out
 }
 
 /// Build a user message for Quick Ask that optionally includes clipboard context.
 pub fn build_quick_ask_user_message(question: &str, clipboard_text: Option<&str>) -> String {
-    build_quick_ask_user_message_with_context(question, None, None, clipboard_text)
+    build_quick_ask_user_message_with_context(question, None, None, clipboard_text, None)
 }
 
 /// Build a user message for Quick Ask that can include highlighted selection text and/or
@@ -94,13 +112,19 @@ pub fn build_quick_ask_user_message_with_context(
     selected_text: Option<&str>,
     surrounding_text: Option<&str>,
     clipboard_text: Option<&str>,
+    ocr_text: Option<&str>,
 ) -> String {
     let question = question.trim();
     let selected_text = selected_text.map(|s| s.trim()).filter(|s| !s.is_empty());
     let surrounding_text = surrounding_text.map(|s| s.trim()).filter(|s| !s.is_empty());
     let clipboard_text = clipboard_text.map(|s| s.trim()).filter(|s| !s.is_empty());
+    let ocr_text = ocr_text.map(|s| s.trim()).filter(|s| !s.is_empty());
 
-    if selected_text.is_none() && surrounding_text.is_none() && clipboard_text.is_none() {
+    if selected_text.is_none()
+        && surrounding_text.is_none()
+        && clipboard_text.is_none()
+        && ocr_text.is_none()
+    {
         return question.to_string();
     }
 
@@ -119,6 +143,14 @@ pub fn build_quick_ask_user_message_with_context(
     if let Some(cb) = clipboard_text {
         out.push_str("\n\nClipboard context:\n");
         out.push_str(cb);
+    }
+
+    if let Some(ocr) = ocr_text {
+        let labeled = crate::ocr::build_labeled_ocr_context(ocr);
+        if !labeled.is_empty() {
+            out.push_str("\n\n");
+            out.push_str(labeled.as_str());
+        }
     }
 
     out

@@ -1059,8 +1059,7 @@ export function HistoryFeed({
 				if (!url) {
 					notifications.show({
 						title: "Retry",
-						message:
-							"No saved audio found for the most recent failed request.",
+						message: "No saved audio found for the most recent failed request.",
 						color: "yellow",
 					});
 					return;
@@ -1070,7 +1069,8 @@ export function HistoryFeed({
 				clipboard.copy(transcript);
 				notifications.show({
 					title: "Retry",
-					message: "Retried the most recent failed request and copied the result.",
+					message:
+						"Retried the most recent failed request and copied the result.",
 					color: "green",
 				});
 			} catch (e) {

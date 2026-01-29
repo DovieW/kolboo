@@ -37,6 +37,8 @@ use super::utils::normalize_stt_text;
 pub(super) struct TranscriptionContext<'a> {
     /// Active profile for this transcription (already resolved from foreground app or override).
     pub active_profile: Option<ProgramPromptProfile>,
+    /// Optional OCR context from the active window.
+    pub active_window_ocr_text: Option<String>,
     /// Whether LLM rewrite is enabled globally (used as fallback for Default profile).
     pub llm_enabled_global: bool,
     /// Default profile's include_clipboard_context setting.
@@ -768,6 +770,7 @@ pub(super) async fn run_llm_rewrite<C: TranscriptionCallbacks>(
         let rewrite_user_message = crate::clipboard_context::build_rewrite_user_message(
             stt_text,
             clipboard_text.as_deref(),
+            ctx.active_window_ocr_text.as_deref(),
         );
 
         // Apply LLM formatting with timeout
@@ -808,6 +811,12 @@ pub(super) async fn run_llm_rewrite<C: TranscriptionCallbacks>(
                 log.llm_provider = llm_provider_used.clone();
                 log.llm_model = llm_model_used.clone();
                 log.rewrite_clipboard_context = clipboard_text.clone();
+                let ocr_chars = ctx
+                    .active_window_ocr_text
+                    .as_deref()
+                    .map(|s| s.len() as u64);
+                log.ocr_context_present = ocr_chars.is_some();
+                log.ocr_context_chars = ocr_chars;
             });
         }
 

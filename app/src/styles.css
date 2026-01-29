@@ -744,6 +744,11 @@ a:focus-visible {
 	border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Utility: visually grey out a row when its controls are disabled */
+.settings-row--disabled {
+	opacity: 0.55;
+}
+
 /* Shared right-side control container for settings rows */
 .settings-row-actions {
 	display: flex;

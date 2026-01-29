@@ -53,7 +53,6 @@ type SchemaVariant = {
 	enum?: string[];
 };
 
-
 type JsonSchema = {
 	properties?: Record<string, unknown>;
 	definitions?: Record<string, SchemaDefinition>;
@@ -352,6 +351,7 @@ describe.skipIf(!hasSchemas())("schema contract: command responses", () => {
 		const sample: AvailableProvidersResponse = {
 			stt: [provider],
 			llm: [provider],
+			ocr: { available: true, reason: null },
 		};
 
 		const schema = readSchema("available-providers-response.schema.json");

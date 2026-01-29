@@ -1,10 +1,9 @@
+import type { CostKind } from "../costParams";
 import type {
 	CostTimeframe,
 	HistoryPageQuery,
 	ModelPricingKind,
 } from "../tauri";
-
-import type { CostKind } from "../costParams";
 
 type TauriAPI = typeof import("../tauri").tauriAPI;
 type SttAPI = typeof import("../tauri").sttAPI;
@@ -146,15 +145,13 @@ export const createCostByProviderQueryFn = (
 function createCostQueryFn<TResult>(
 	timeframe: CostTimeframe,
 	filters: CostFilters | undefined,
-	get: (
-		params: {
-			timeframe: CostTimeframe;
-			kind?: CostKind;
-			sttModelKeys?: string[];
-			llmModelKeys?: string[];
-			excludeFreeTier?: boolean;
-		},
-	) => Promise<TResult>,
+	get: (params: {
+		timeframe: CostTimeframe;
+		kind?: CostKind;
+		sttModelKeys?: string[];
+		llmModelKeys?: string[];
+		excludeFreeTier?: boolean;
+	}) => Promise<TResult>,
 ) {
 	const normalized = normalizeCostFilters(filters);
 	return {

@@ -9,7 +9,6 @@ import type {
 } from "../../tauri";
 import { hasSchemas, readSchemaJson } from "./schemaTestUtils";
 
-
 type JsonSchema = {
 	properties?: Record<string, unknown>;
 	definitions?: Record<string, { properties?: Record<string, unknown> }>;

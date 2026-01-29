@@ -101,6 +101,9 @@ futures-util = "0.3"
 # Base64 encoding for audio data
 base64 = "0.22"
 
+# Image processing (active-window OCR capture)
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 # Async utilities
 async-trait = "0.1"
 
@@ -129,6 +132,7 @@ windows = { version = "0.61.3", features = [
     "Win32_Media",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
+    "Win32_Graphics_Gdi",
     "Win32_System",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
@@ -138,6 +142,7 @@ windows = { version = "0.61.3", features = [
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
     "Win32_System_Variant",
+    "Win32_Storage_Xps",
 ] }
 keyring = { version = "3", features = ["windows-native"] }
 
@@ -157,5 +162,11 @@ wiremock = "0.6"
 name = "kolboo"
 path = "src/main.rs"
 # Avoid building the full Tauri app binary as a test harness during `cargo test`.
+test = false
+bench = false
+
+[[bin]]
+name = "export_request_log_schema"
+path = "src/bin/export_request_log_schema.rs"
 test = false
 bench = false

@@ -25,7 +25,6 @@ type SchemaVariant = {
 	enum?: string[];
 };
 
-
 type JsonSchema = {
 	properties?: Record<string, unknown>;
 	definitions?: Record<string, SchemaDefinition>;

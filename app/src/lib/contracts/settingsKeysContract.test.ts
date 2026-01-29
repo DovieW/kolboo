@@ -174,6 +174,8 @@ describe("settings contract: Rust defaults vs TS getSettings", () => {
 			"quick_ask_gemini_thinking_level",
 			// Provider-specific base URL
 			"aquavoice_base_url",
+			// Windows-specific setting (not seeded in Rust defaults yet)
+			"windows_clipboard_fallback_for_context_capture",
 		]);
 
 		const missingInRust = [...tsKeys].filter(

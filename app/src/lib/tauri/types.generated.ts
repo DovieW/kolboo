@@ -41,6 +41,7 @@ export interface AudioSettingsTestWavs {
  */
 export interface AvailableProvidersResponse {
   llm: ProviderInfo[];
+  ocr: OcrProviderStatus;
   stt: ProviderInfo[];
 }
 /**
@@ -50,6 +51,13 @@ export interface ProviderInfo {
   is_local: boolean;
   label: string;
   value: string;
+}
+/**
+ * OCR provider availability status
+ */
+export interface OcrProviderStatus {
+  available: boolean;
+  reason?: string | null;
 }
 
 // From: cache-router-embeddings-response.schema.json
@@ -583,6 +591,60 @@ export interface RequestLog {
     [k: string]: any | undefined;
   };
   /**
+   * Number of OCR characters included (if any).
+   */
+  ocr_context_chars?: number | null;
+  /**
+   * Whether OCR context was included in the prompt.
+   */
+  ocr_context_present?: boolean;
+  /**
+   * OCR context text that was attached to the prompt (if any).
+   *
+   * Intentionally bounded (see OCR context assembly) to keep request logs usable.
+   */
+  ocr_context_text?: string | null;
+  /**
+   * OCR duration in milliseconds (if it completed or failed).
+   */
+  ocr_duration_ms?: number | null;
+  /**
+   * Effective OCR mode used for the current flow (e.g. "off" | "auto" | "manual").
+   */
+  ocr_effective_mode?: string | null;
+  /**
+   * Best-effort, user-friendly OCR failure reason (if OCR was enabled but failed).
+   */
+  ocr_failed_reason?: string | null;
+  /**
+   * If OCR was not started (or not used), a stable reason code.
+   *
+   * Expected values: - "mode_off" - "mode_manual" - "provider_unavailable" - "invalid_base_url" - "missing_api_key" - "not_triggered" - "unknown"
+   */
+  ocr_not_attempted_reason?: string | null;
+  /**
+   * OCR request payload preview (redacted; does NOT include image bytes).
+   */
+  ocr_request_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * OCR response payload (redacted).
+   */
+  ocr_response_json?: {
+    [k: string]: any | undefined;
+  };
+  /**
+   * When OCR started for this request (if it started).
+   */
+  ocr_started_at?: string | null;
+  /**
+   * OCR task lifecycle status for this request.
+   *
+   * Expected values: "not_started" | "running" | "done" | "failed" | "cancelled"
+   */
+  ocr_status?: string | null;
+  /**
    * Preset id selected for this request (if any).
    *
    * When None, the request used the profile/global defaults ("Default" in UI).
@@ -885,6 +947,7 @@ export interface RewriteProgramPromptProfile {
   playing_audio_handling?: string | null;
   presets?: RewritePreset[];
   program_paths?: string[];
+  quick_ask_active_window_ocr_mode?: string | null;
   quick_ask_anthropic_thinking_budget?: number | null;
   quick_ask_gemini_thinking_budget?: number | null;
   quick_ask_gemini_thinking_level?: string | null;
@@ -893,11 +956,13 @@ export interface RewriteProgramPromptProfile {
   quick_ask_openai_reasoning_effort?: string | null;
   quick_ask_provider?: string | null;
   quick_ask_system_prompt?: string | null;
+  quick_replace_active_window_ocr_mode?: string | null;
   quick_replace_enabled?: boolean | null;
   quick_replace_include_clipboard_context?: boolean | null;
   quick_replace_model?: string | null;
   quick_replace_provider?: string | null;
   quick_replace_system_prompt?: string | null;
+  rewrite_active_window_ocr_mode?: string | null;
   rewrite_include_clipboard_context?: boolean | null;
   /**
    * Optional per-profile gate for the rewrite step (falls back to global setting)

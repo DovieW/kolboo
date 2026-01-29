@@ -9,7 +9,7 @@ type SettingsRowProps =
 			noDivider?: boolean;
 			label?: never;
 			description?: never;
-	}
+	  }
 	| {
 			label: ReactNode;
 			description?: ReactNode;
@@ -17,7 +17,7 @@ type SettingsRowProps =
 			className?: string;
 			noDivider?: boolean;
 			left?: never;
-	};
+	  };
 
 export function SettingsRow({
 	left,

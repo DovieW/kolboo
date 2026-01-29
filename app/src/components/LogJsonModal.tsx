@@ -9,6 +9,8 @@ type TabKey =
 	| "stt-response"
 	| "llm-request"
 	| "llm-response"
+	| "ocr-request"
+	| "ocr-response"
 	| "quick-ask-request"
 	| "quick-ask-response"
 	| "quick-replace-request"
@@ -101,6 +103,8 @@ export function LogJsonModal({
 	const hasQuickReplacePayload =
 		log.quick_replace_request_json !== undefined ||
 		log.quick_replace_response_json !== undefined;
+	const hasOcrPayload =
+		log.ocr_request_json !== undefined || log.ocr_response_json !== undefined;
 	const hasRouterPayload =
 		log.router_request_json !== undefined ||
 		log.router_response_json !== undefined;
@@ -173,6 +177,13 @@ export function LogJsonModal({
 							<>
 								<Tabs.Tab value="llm-request">LLM Request</Tabs.Tab>
 								<Tabs.Tab value="llm-response">LLM Response</Tabs.Tab>
+							</>
+						)}
+
+						{hasOcrPayload && (
+							<>
+								<Tabs.Tab value="ocr-request">OCR Request (preview)</Tabs.Tab>
+								<Tabs.Tab value="ocr-response">OCR Response</Tabs.Tab>
 							</>
 						)}
 
@@ -250,6 +261,25 @@ export function LogJsonModal({
 						</>
 					)}
 
+					{hasOcrPayload && (
+						<>
+							<Tabs.Panel
+								value="ocr-request"
+								pt="sm"
+								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+							>
+								<JsonPanel value={log.ocr_request_json} />
+							</Tabs.Panel>
+							<Tabs.Panel
+								value="ocr-response"
+								pt="sm"
+								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
+							>
+								<JsonPanel value={log.ocr_response_json} />
+							</Tabs.Panel>
+						</>
+					)}
+
 					{hasQuickAskPayload && (
 						<>
 							<Tabs.Panel
@@ -310,12 +340,13 @@ export function LogJsonModal({
 
 				{!hasSttPayload &&
 					!hasLlmPayload &&
+					!hasOcrPayload &&
 					!hasQuickAskPayload &&
 					!hasQuickReplacePayload &&
 					!hasRouterPayload && (
 						<Text size="xs" c="dimmed">
-							No STT/LLM/Quick Ask/Quick Replace/Router payloads captured for
-							this request.
+							No STT/LLM/OCR/Quick Ask/Quick Replace/Router payloads captured
+							for this request.
 						</Text>
 					)}
 			</Stack>

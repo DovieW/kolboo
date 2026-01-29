@@ -169,38 +169,38 @@ export function AudioSettings({
 				}
 				right={
 					<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-					<Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-						Pre-roll: {hotMicPreRollMs} ms
-					</Text>
-					<NumberInput
-						value={hotMicPreRollMs}
-						onChange={(value) => {
-							const next = typeof value === "number" ? value : 1500;
-							updateHotMicPreRollMs.mutate(next);
-						}}
-						min={0}
-						max={5000}
-						step={100}
-						disabled={isProfileScope || !hotMicEnabled}
-						placeholder="Pre-roll (ms)"
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								width: 140,
-							},
-						}}
-					/>
-					<Switch
-						checked={hotMicEnabled}
-						onChange={(event) =>
-							updateHotMicEnabled.mutate(event.currentTarget.checked)
-						}
-						disabled={isProfileScope}
-						color="gray"
-						size="md"
-					/>
+						<Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+							Pre-roll: {hotMicPreRollMs} ms
+						</Text>
+						<NumberInput
+							value={hotMicPreRollMs}
+							onChange={(value) => {
+								const next = typeof value === "number" ? value : 1500;
+								updateHotMicPreRollMs.mutate(next);
+							}}
+							min={0}
+							max={5000}
+							step={100}
+							disabled={isProfileScope || !hotMicEnabled}
+							placeholder="Pre-roll (ms)"
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									width: 140,
+								},
+							}}
+						/>
+						<Switch
+							checked={hotMicEnabled}
+							onChange={(event) =>
+								updateHotMicEnabled.mutate(event.currentTarget.checked)
+							}
+							disabled={isProfileScope}
+							color="gray"
+							size="md"
+						/>
 					</div>
 				}
 			/>
@@ -212,14 +212,14 @@ export function AudioSettings({
 				}
 				right={
 					<Switch
-					checked={micAutoRecoverEnabled}
-					onChange={(event) =>
-						updateMicAutoRecoverEnabled.mutate(event.currentTarget.checked)
-					}
-					disabled={isProfileScope}
-					color="gray"
-					size="md"
-				/>
+						checked={micAutoRecoverEnabled}
+						onChange={(event) =>
+							updateMicAutoRecoverEnabled.mutate(event.currentTarget.checked)
+						}
+						disabled={isProfileScope}
+						color="gray"
+						size="md"
+					/>
 				}
 			/>
 
@@ -237,42 +237,42 @@ export function AudioSettings({
 				}
 				right={
 					<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-					<Switch
-						checked={quietAudioGateEnabled}
-						onChange={(event) =>
-							updateQuietAudioGateEnabled.mutate(event.currentTarget.checked)
-						}
-						disabled={isProfileScope}
-						color="gray"
-						size="md"
-					/>
-					<NumberInput
-						value={quietAudioRmsDbfsThreshold}
-						onChange={(value) => {
-							const next = typeof value === "number" ? value : -60;
-							updateQuietAudioRmsDbfsThreshold.mutate(next);
-
-							// If peak looks like it's in the "auto" relationship with RMS, keep it in sync.
-							if (peakSeemsAuto) {
-								updateQuietAudioPeakDbfsThreshold.mutate(
-									Math.min(0, next + 10),
-								);
+						<Switch
+							checked={quietAudioGateEnabled}
+							onChange={(event) =>
+								updateQuietAudioGateEnabled.mutate(event.currentTarget.checked)
 							}
-						}}
-						min={-120}
-						max={0}
-						step={1}
-						disabled={isProfileScope || !quietAudioGateEnabled}
-						placeholder="Sensitivity (RMS dBFS)"
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								width: 140,
-							},
-						}}
-					/>
+							disabled={isProfileScope}
+							color="gray"
+							size="md"
+						/>
+						<NumberInput
+							value={quietAudioRmsDbfsThreshold}
+							onChange={(value) => {
+								const next = typeof value === "number" ? value : -60;
+								updateQuietAudioRmsDbfsThreshold.mutate(next);
+
+								// If peak looks like it's in the "auto" relationship with RMS, keep it in sync.
+								if (peakSeemsAuto) {
+									updateQuietAudioPeakDbfsThreshold.mutate(
+										Math.min(0, next + 10),
+									);
+								}
+							}}
+							min={-120}
+							max={0}
+							step={1}
+							disabled={isProfileScope || !quietAudioGateEnabled}
+							placeholder="Sensitivity (RMS dBFS)"
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									width: 140,
+								},
+							}}
+						/>
 					</div>
 				}
 			/>
@@ -385,14 +385,14 @@ export function AudioSettings({
 				description="Extra skip: don't transcribe if VAD finds no speech"
 				right={
 					<Switch
-					checked={quietAudioRequireSpeech}
-					onChange={(event) =>
-						updateQuietAudioRequireSpeech.mutate(event.currentTarget.checked)
-					}
-					disabled={isProfileScope || !quietAudioGateEnabled}
-					color="gray"
-					size="md"
-				/>
+						checked={quietAudioRequireSpeech}
+						onChange={(event) =>
+							updateQuietAudioRequireSpeech.mutate(event.currentTarget.checked)
+						}
+						disabled={isProfileScope || !quietAudioGateEnabled}
+						color="gray"
+						size="md"
+					/>
 				}
 			/>
 
@@ -401,26 +401,26 @@ export function AudioSettings({
 				description="Treat very short recordings as quiet (seconds)"
 				right={
 					<Group gap={8} align="center">
-					<NumberInput
-						value={quietAudioMinDurationSecs}
-						onChange={(value) => {
-							const next = typeof value === "number" ? value : 0;
-							updateQuietAudioMinDurationSecs.mutate(next);
-						}}
-						min={0}
-						max={5}
-						step={0.05}
-						decimalScale={2}
-						disabled={isProfileScope || !quietAudioGateEnabled}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								width: 140,
-							},
-						}}
-					/>
+						<NumberInput
+							value={quietAudioMinDurationSecs}
+							onChange={(value) => {
+								const next = typeof value === "number" ? value : 0;
+								updateQuietAudioMinDurationSecs.mutate(next);
+							}}
+							min={0}
+							max={5}
+							step={0.05}
+							decimalScale={2}
+							disabled={isProfileScope || !quietAudioGateEnabled}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									width: 140,
+								},
+							}}
+						/>
 					</Group>
 				}
 			/>
@@ -430,25 +430,25 @@ export function AudioSettings({
 				description="Peak level below this is considered quiet (dBFS)"
 				right={
 					<Group gap={8} align="center">
-					<NumberInput
-						value={quietAudioPeakDbfsThreshold}
-						onChange={(value) => {
-							const next = typeof value === "number" ? value : -40;
-							updateQuietAudioPeakDbfsThreshold.mutate(next);
-						}}
-						min={-120}
-						max={0}
-						step={1}
-						disabled={isProfileScope || !quietAudioGateEnabled}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								width: 140,
-							},
-						}}
-					/>
+						<NumberInput
+							value={quietAudioPeakDbfsThreshold}
+							onChange={(value) => {
+								const next = typeof value === "number" ? value : -40;
+								updateQuietAudioPeakDbfsThreshold.mutate(next);
+							}}
+							min={-120}
+							max={0}
+							step={1}
+							disabled={isProfileScope || !quietAudioGateEnabled}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									width: 140,
+								},
+							}}
+						/>
 					</Group>
 				}
 			/>
@@ -458,43 +458,43 @@ export function AudioSettings({
 				description="Set how quiet audio must be to be suppressed. Blank = Off."
 				right={
 					<Group gap={8} align="center">
-					<NumberInput
-						value={noiseGateThresholdDbfs}
-						onChange={(value) => {
-							// Mantine NumberInput can emit string/number. Our draft state
-							// allows only number, empty string (""), or null.
-							if (value === "") {
+						<NumberInput
+							value={noiseGateThresholdDbfs}
+							onChange={(value) => {
+								// Mantine NumberInput can emit string/number. Our draft state
+								// allows only number, empty string (""), or null.
+								if (value === "") {
+									setNoiseGateThresholdDraft("");
+									return;
+								}
+								if (value == null) {
+									setNoiseGateThresholdDraft(null);
+									return;
+								}
+								if (typeof value === "number") {
+									setNoiseGateThresholdDraft(value);
+									return;
+								}
+								// Any other string => treat as "blank" until commit.
 								setNoiseGateThresholdDraft("");
-								return;
-							}
-							if (value == null) {
-								setNoiseGateThresholdDraft(null);
-								return;
-							}
-							if (typeof value === "number") {
-								setNoiseGateThresholdDraft(value);
-								return;
-							}
-							// Any other string => treat as "blank" until commit.
-							setNoiseGateThresholdDraft("");
-						}}
-						onBlur={commitNoiseGateThresholdDbfs}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") commitNoiseGateThresholdDbfs();
-						}}
-						min={-75}
-						max={-30}
-						step={1}
-						placeholder="Off"
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								width: 140,
-							},
-						}}
-					/>
+							}}
+							onBlur={commitNoiseGateThresholdDbfs}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") commitNoiseGateThresholdDbfs();
+							}}
+							min={-75}
+							max={-30}
+							step={1}
+							placeholder="Off"
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									width: 140,
+								},
+							}}
+						/>
 					</Group>
 				}
 			/>
@@ -520,14 +520,14 @@ export function AudioSettings({
 				description="Removes DC/rumble to help voice clarity (very lightweight)"
 				right={
 					<Switch
-					checked={audioHighpassEnabled}
-					onChange={(event) =>
-						updateAudioHighpassEnabled.mutate(event.currentTarget.checked)
-					}
-					disabled={isProfileScope}
-					color="gray"
-					size="md"
-				/>
+						checked={audioHighpassEnabled}
+						onChange={(event) =>
+							updateAudioHighpassEnabled.mutate(event.currentTarget.checked)
+						}
+						disabled={isProfileScope}
+						color="gray"
+						size="md"
+					/>
 				}
 			/>
 
@@ -536,14 +536,14 @@ export function AudioSettings({
 				description="Normalizes volume so quiet voices are easier to transcribe"
 				right={
 					<Switch
-					checked={audioAgcEnabled}
-					onChange={(event) =>
-						updateAudioAgcEnabled.mutate(event.currentTarget.checked)
-					}
-					disabled={isProfileScope}
-					color="gray"
-					size="md"
-				/>
+						checked={audioAgcEnabled}
+						onChange={(event) =>
+							updateAudioAgcEnabled.mutate(event.currentTarget.checked)
+						}
+						disabled={isProfileScope}
+						color="gray"
+						size="md"
+					/>
 				}
 			/>
 
@@ -552,16 +552,16 @@ export function AudioSettings({
 				description="Reduces steady background noise (best-effort, stop-time)"
 				right={
 					<Switch
-					checked={audioNoiseSuppressionEnabled}
-					onChange={(event) =>
-						updateAudioNoiseSuppressionEnabled.mutate(
-							event.currentTarget.checked,
-						)
-					}
-					disabled={isProfileScope}
-					color="gray"
-					size="md"
-				/>
+						checked={audioNoiseSuppressionEnabled}
+						onChange={(event) =>
+							updateAudioNoiseSuppressionEnabled.mutate(
+								event.currentTarget.checked,
+							)
+						}
+						disabled={isProfileScope}
+						color="gray"
+						size="md"
+					/>
 				}
 			/>
 
@@ -570,14 +570,14 @@ export function AudioSettings({
 				description="Helpful for some STT engines; costs a bit of CPU at stop time"
 				right={
 					<Switch
-					checked={audioResampleTo16khz}
-					onChange={(event) =>
-						updateAudioResampleTo16khz.mutate(event.currentTarget.checked)
-					}
-					disabled={isProfileScope}
-					color="gray"
-					size="md"
-				/>
+						checked={audioResampleTo16khz}
+						onChange={(event) =>
+							updateAudioResampleTo16khz.mutate(event.currentTarget.checked)
+						}
+						disabled={isProfileScope}
+						color="gray"
+						size="md"
+					/>
 				}
 			/>
 		</>

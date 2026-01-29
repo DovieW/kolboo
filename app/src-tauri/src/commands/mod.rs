@@ -9,6 +9,7 @@ pub mod history;
 pub mod llm;
 pub mod logs;
 pub mod network;
+pub mod ocr;
 pub mod ollama;
 pub mod overlay;
 pub mod pricing;

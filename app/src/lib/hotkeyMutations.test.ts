@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	updateHotkeyAndReregisterShortcuts,
 	type HotkeySettingsLike,
+	updateHotkeyAndReregisterShortcuts,
 } from "./hotkeyMutations";
 
-function createSettings(overrides?: Partial<HotkeySettingsLike>): HotkeySettingsLike {
+function createSettings(
+	overrides?: Partial<HotkeySettingsLike>,
+): HotkeySettingsLike {
 	return {
 		toggle_hotkey: { modifiers: ["ctrl", "alt"], key: "Space" },
 		hold_hotkey: { modifiers: ["ctrl", "alt"], key: "Backquote" },
@@ -35,7 +37,10 @@ describe("updateHotkeyAndReregisterShortcuts", () => {
 		});
 
 		expect(updateHotkey).toHaveBeenCalledTimes(1);
-		expect(updateHotkey).toHaveBeenCalledWith({ modifiers: ["ctrl"], key: "A" });
+		expect(updateHotkey).toHaveBeenCalledWith({
+			modifiers: ["ctrl"],
+			key: "A",
+		});
 		expect(unregisterShortcuts).toHaveBeenCalledTimes(1);
 		expect(registerShortcuts).toHaveBeenCalledTimes(1);
 	});
@@ -89,7 +94,10 @@ describe("updateHotkeyAndReregisterShortcuts", () => {
 
 		// First attempt updates to next hotkey, then restore updates back to previous.
 		expect(updateHotkey).toHaveBeenCalledTimes(2);
-		expect(updateHotkey).toHaveBeenNthCalledWith(1, { modifiers: ["ctrl"], key: "A" });
+		expect(updateHotkey).toHaveBeenNthCalledWith(1, {
+			modifiers: ["ctrl"],
+			key: "A",
+		});
 		expect(updateHotkey).toHaveBeenNthCalledWith(2, settings.toggle_hotkey);
 
 		// Unregister called once on initial attempt and once during restore.

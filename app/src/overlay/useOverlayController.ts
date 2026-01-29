@@ -20,6 +20,8 @@ export type OverlayControllerRefs = {
 	prevPipelineForPhaseHold: PipelineState;
 	prevPipelineForExpand: PipelineState;
 	prevPipelineState: PipelineState;
+	// Tracks OCR status transitions so we can react when OCR completes.
+	prevOcrStatus: string | null;
 };
 
 type OverlayControllerState = {
@@ -51,6 +53,7 @@ export function useOverlayController(): OverlayController {
 		prevPipelineForPhaseHold: "idle",
 		prevPipelineForExpand: "idle",
 		prevPipelineState: "idle",
+		prevOcrStatus: null,
 	});
 
 	const [state, setState] = useState<OverlayControllerState>({

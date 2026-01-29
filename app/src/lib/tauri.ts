@@ -8,6 +8,7 @@ export {
 	hotkeyIsSameAs,
 	validateHotkeyNotDuplicate,
 } from "./hotkeys";
+export type { OverlayPipelineState } from "./tauri/commands";
 export {
 	audioSettingsTestAPI,
 	backupAPI,
@@ -15,6 +16,7 @@ export {
 	dataAPI,
 	llmAPI,
 	logsAPI,
+	ocrAPI,
 	recordingsAPI,
 	sttAPI,
 } from "./tauri/commands";

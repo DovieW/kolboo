@@ -54,5 +54,10 @@ export function useOverlayHotkeyEvents({
 			unlistenStart?.();
 			unlistenStop?.();
 		};
-	}, [clearError, markOverlayShownForHoverGating, setAnimState, setPipelineState]);
+	}, [
+		clearError,
+		markOverlayShownForHoverGating,
+		setAnimState,
+		setPipelineState,
+	]);
 }

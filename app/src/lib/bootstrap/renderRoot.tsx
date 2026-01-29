@@ -1,4 +1,4 @@
-import { StrictMode, type ReactNode } from "react";
+import { type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { getRootElementOrThrow } from "./rootElement";
 
@@ -11,6 +11,10 @@ export function renderRoot(
 ): void {
 	const rootElement = getRootElementOrThrow(options?.elementId);
 	createRoot(rootElement).render(
-		options?.strictMode === false ? children : <StrictMode>{children}</StrictMode>,
+		options?.strictMode === false ? (
+			children
+		) : (
+			<StrictMode>{children}</StrictMode>
+		),
 	);
 }

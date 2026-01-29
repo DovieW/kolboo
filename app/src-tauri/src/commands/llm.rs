@@ -473,8 +473,14 @@ pub async fn test_llm_rewrite(
         .try_state::<RequestLogStore>()
         .map(|s| s.inner().clone());
 
+    let mut request_id: Option<String> = None;
+
     if let Some(store) = request_log_store.as_ref() {
-        store.start_request("rewrite-only".to_string(), None);
+        let id = store.start_request("rewrite-only".to_string(), None);
+        request_id = Some(id.clone());
+
+        // Tie OCR to this request id so any OCR work (present/future) cannot leak across requests.
+        pipeline.begin_ocr_session(id);
         store.with_current(|log| {
             log.raw_transcript = Some(transcript.clone());
             log.info("Test rewrite started");
@@ -615,6 +621,10 @@ pub async fn test_llm_rewrite(
 
                 store.complete_current();
 
+                if let Some(req_id) = request_id.as_deref() {
+                    pipeline.end_ocr_session_if_matches(req_id);
+                }
+
                 return Ok(TestLlmRewriteResponse {
                     output,
                     provider_used,
@@ -643,6 +653,10 @@ pub async fn test_llm_rewrite(
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
 
                 store.complete_current();
+
+                if let Some(req_id) = request_id.as_deref() {
+                    pipeline.end_ocr_session_if_matches(req_id);
+                }
             } else {
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }
@@ -683,8 +697,14 @@ pub async fn iterate_rewrite_prompt(
         .try_state::<RequestLogStore>()
         .map(|s| s.inner().clone());
 
+    let mut request_id: Option<String> = None;
+
     if let Some(store) = request_log_store.as_ref() {
-        store.start_request("prompt-iter".to_string(), None);
+        let id = store.start_request("prompt-iter".to_string(), None);
+        request_id = Some(id.clone());
+
+        // Tie OCR to this request id so OCR state cannot leak across requests.
+        pipeline.begin_ocr_session(id);
         store.with_current(|log| {
             log.raw_transcript = Some(transcript.clone());
             let mode_label = mode.as_deref().unwrap_or("fixed").to_string();
@@ -924,6 +944,10 @@ pub async fn iterate_rewrite_prompt(
                 );
                 store.complete_current();
 
+                if let Some(req_id) = request_id.as_deref() {
+                    pipeline.end_ocr_session_if_matches(req_id);
+                }
+
                 return Ok(IterateRewritePromptResponse {
                     improved_prompt: improved,
                     provider_used,
@@ -950,6 +974,10 @@ pub async fn iterate_rewrite_prompt(
 
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
                 store.complete_current();
+
+                if let Some(req_id) = request_id.as_deref() {
+                    pipeline.end_ocr_session_if_matches(req_id);
+                }
             } else {
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }
@@ -977,8 +1005,14 @@ pub async fn test_rewrite_with_prompt(
         .try_state::<RequestLogStore>()
         .map(|s| s.inner().clone());
 
+    let mut request_id: Option<String> = None;
+
     if let Some(store) = request_log_store.as_ref() {
-        store.start_request("prompt-test".to_string(), None);
+        let id = store.start_request("prompt-test".to_string(), None);
+        request_id = Some(id.clone());
+
+        // Tie OCR to this request id so OCR state cannot leak across requests.
+        pipeline.begin_ocr_session(id);
         store.with_current(|log| {
             log.raw_transcript = Some(transcript.clone());
             log.info("Prompt test started");
@@ -1109,6 +1143,10 @@ pub async fn test_rewrite_with_prompt(
                 );
                 store.complete_current();
 
+                if let Some(req_id) = request_id.as_deref() {
+                    pipeline.end_ocr_session_if_matches(req_id);
+                }
+
                 return Ok(TestRewriteWithPromptResponse {
                     output,
                     provider_used,
@@ -1135,6 +1173,10 @@ pub async fn test_rewrite_with_prompt(
 
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
                 store.complete_current();
+
+                if let Some(req_id) = request_id.as_deref() {
+                    pipeline.end_ocr_session_if_matches(req_id);
+                }
             } else {
                 crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }

@@ -167,7 +167,12 @@ pub(crate) fn start_recording(
 
         // Pipeline started successfully - now start request logging.
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+            let request_id =
+                log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+
+            // Begin an OCR session tied to this request id so OCR can survive internal
+            // pipeline transitions (e.g. reset-to-idle) and still be consumable later.
+            pipeline.begin_ocr_session(request_id.clone());
             log_store.with_current(|log| {
                 log.profile_id = profile_id;
                 log.profile_name = profile_name;

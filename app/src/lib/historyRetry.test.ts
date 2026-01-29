@@ -24,7 +24,9 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
 
 describe("getRetryLastFailedCandidate", () => {
 	it("returns null when there are no failed entries", () => {
-		expect(getRetryLastFailedCandidate([entry(), entry({ id: "x" })])).toBeNull();
+		expect(
+			getRetryLastFailedCandidate([entry(), entry({ id: "x" })]),
+		).toBeNull();
 	});
 
 	it("prefers a failed entry that explicitly points at a recording", () => {

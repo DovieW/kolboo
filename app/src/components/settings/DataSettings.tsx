@@ -644,48 +644,20 @@ export function DataSettings({
 				right={
 					<Group gap={10} align="center" wrap="wrap">
 						{logsRetentionMode === "amount" ? (
-						<NumberInput
-							value={logsRetentionAmount}
-							onChange={(value) => {
-								const nextAmount = typeof value === "number" ? value : 10;
-								commitLogsRetention({
-									mode: "amount",
-									amount: nextAmount,
-									unit: logsRetentionUnit,
-									value: logsRetentionValue,
-								});
-							}}
-							min={1}
-							max={1000}
-							step={1}
-							clampBehavior="strict"
-							disabled={isProfileScope}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									width: 140,
-								},
-							}}
-						/>
-					) : (
-						<>
 							<NumberInput
-								value={logsRetentionValue}
+								value={logsRetentionAmount}
 								onChange={(value) => {
-									const nextValue = typeof value === "number" ? value : 7;
+									const nextAmount = typeof value === "number" ? value : 10;
 									commitLogsRetention({
-										mode: "time",
-										amount: logsRetentionAmount,
+										mode: "amount",
+										amount: nextAmount,
 										unit: logsRetentionUnit,
-										value: nextValue,
+										value: logsRetentionValue,
 									});
 								}}
-								min={0}
-								max={logsRetentionUnit === "hours" ? 36500 * 24 : 36500}
-								step={logsRetentionUnit === "hours" ? 0.5 : 1}
-								decimalScale={logsRetentionUnit === "hours" ? 2 : 0}
+								min={1}
+								max={1000}
+								step={1}
 								clampBehavior="strict"
 								disabled={isProfileScope}
 								styles={{
@@ -697,80 +669,108 @@ export function DataSettings({
 									},
 								}}
 							/>
+						) : (
+							<>
+								<NumberInput
+									value={logsRetentionValue}
+									onChange={(value) => {
+										const nextValue = typeof value === "number" ? value : 7;
+										commitLogsRetention({
+											mode: "time",
+											amount: logsRetentionAmount,
+											unit: logsRetentionUnit,
+											value: nextValue,
+										});
+									}}
+									min={0}
+									max={logsRetentionUnit === "hours" ? 36500 * 24 : 36500}
+									step={logsRetentionUnit === "hours" ? 0.5 : 1}
+									decimalScale={logsRetentionUnit === "hours" ? 2 : 0}
+									clampBehavior="strict"
+									disabled={isProfileScope}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											width: 140,
+										},
+									}}
+								/>
 
-							<SegmentedControl
-								value={logsRetentionUnit}
-								onChange={(next) => {
-									const nextUnit = next === "hours" ? "hours" : "days";
+								<SegmentedControl
+									value={logsRetentionUnit}
+									onChange={(next) => {
+										const nextUnit = next === "hours" ? "hours" : "days";
 
-									const current =
-										typeof logsRetentionValue === "number"
-											? logsRetentionValue
-											: 0;
+										const current =
+											typeof logsRetentionValue === "number"
+												? logsRetentionValue
+												: 0;
 
-									// Preserve the underlying duration when switching units.
-									const nextValue =
-										current === 0
-											? 0
-											: logsRetentionUnit === "days" && nextUnit === "hours"
-												? current * 24
-												: logsRetentionUnit === "hours" && nextUnit === "days"
-													? Math.round(current / 24)
-													: current;
+										// Preserve the underlying duration when switching units.
+										const nextValue =
+											current === 0
+												? 0
+												: logsRetentionUnit === "days" && nextUnit === "hours"
+													? current * 24
+													: logsRetentionUnit === "hours" && nextUnit === "days"
+														? Math.round(current / 24)
+														: current;
 
-									commitLogsRetention({
-										mode: "time",
-										amount: logsRetentionAmount,
-										unit: nextUnit,
-										value: nextValue,
-									});
-								}}
-								data={[
-									{ label: "Days", value: "days" },
-									{ label: "Hours", value: "hours" },
-								]}
-								disabled={isProfileScope}
-								styles={{
-									root: {
-										backgroundColor: "var(--bg-elevated)",
-										border: "1px solid var(--border-default)",
-									},
-									label: {
-										color: "var(--text-primary)",
-									},
-								}}
-							/>
-						</>
-					)}
+										commitLogsRetention({
+											mode: "time",
+											amount: logsRetentionAmount,
+											unit: nextUnit,
+											value: nextValue,
+										});
+									}}
+									data={[
+										{ label: "Days", value: "days" },
+										{ label: "Hours", value: "hours" },
+									]}
+									disabled={isProfileScope}
+									styles={{
+										root: {
+											backgroundColor: "var(--bg-elevated)",
+											border: "1px solid var(--border-default)",
+										},
+										label: {
+											color: "var(--text-primary)",
+										},
+									}}
+								/>
+							</>
+						)}
 
-					<SegmentedControl
-						value={logsRetentionMode}
-						onChange={(next) => {
-							const mode =
-								next === "time" ? ("time" as const) : ("amount" as const);
-							commitLogsRetention({
-								mode,
-								amount: logsRetentionAmount,
-								unit: logsRetentionUnit,
-								value: logsRetentionValue,
-							});
-						}}
-						data={[
-							{ label: "Amount", value: "amount" },
-							{ label: "Time", value: "time" },
-						]}
-						disabled={isProfileScope}
-						styles={{
-							root: {
-								backgroundColor: "var(--bg-elevated)",
-								border: "1px solid var(--border-default)",
-							},
-							label: {
-								color: "var(--text-primary)",
-							},
-						}}
-					/>
-				</Group>
+						<SegmentedControl
+							value={logsRetentionMode}
+							onChange={(next) => {
+								const mode =
+									next === "time" ? ("time" as const) : ("amount" as const);
+								commitLogsRetention({
+									mode,
+									amount: logsRetentionAmount,
+									unit: logsRetentionUnit,
+									value: logsRetentionValue,
+								});
+							}}
+							data={[
+								{ label: "Amount", value: "amount" },
+								{ label: "Time", value: "time" },
+							]}
+							disabled={isProfileScope}
+							styles={{
+								root: {
+									backgroundColor: "var(--bg-elevated)",
+									border: "1px solid var(--border-default)",
+								},
+								label: {
+									color: "var(--text-primary)",
+								},
+							}}
+						/>
+					</Group>
 				}
 			/>
 
@@ -803,55 +803,27 @@ export function DataSettings({
 											width: 36,
 										},
 									}}
-							>
-								<FolderOpen size={14} style={{ opacity: 0.75 }} />
-							</ActionIcon>
-						</span>
-					</Tooltip>
+								>
+									<FolderOpen size={14} style={{ opacity: 0.75 }} />
+								</ActionIcon>
+							</span>
+						</Tooltip>
 
-					{recordingsRetentionMode === "amount" ? (
-						<NumberInput
-							value={recordingsRetentionAmount}
-							onChange={(value) => {
-								const nextAmount = typeof value === "number" ? value : 50;
-								commitRecordingsRetention({
-									mode: "amount",
-									amount: nextAmount,
-									unit: recordingsRetentionUnit,
-									value: recordingsRetentionValue,
-								});
-							}}
-							min={1}
-							max={100000}
-							step={10}
-							clampBehavior="strict"
-							disabled={isProfileScope}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									width: 140,
-								},
-							}}
-						/>
-					) : (
-						<>
+						{recordingsRetentionMode === "amount" ? (
 							<NumberInput
-								value={recordingsRetentionValue}
+								value={recordingsRetentionAmount}
 								onChange={(value) => {
-									const nextValue = typeof value === "number" ? value : 0;
+									const nextAmount = typeof value === "number" ? value : 50;
 									commitRecordingsRetention({
-										mode: "time",
-										amount: recordingsRetentionAmount,
+										mode: "amount",
+										amount: nextAmount,
 										unit: recordingsRetentionUnit,
-										value: nextValue,
+										value: recordingsRetentionValue,
 									});
 								}}
-								min={0}
-								max={recordingsRetentionUnit === "hours" ? 36500 * 24 : 36500}
-								step={recordingsRetentionUnit === "hours" ? 0.5 : 1}
-								decimalScale={recordingsRetentionUnit === "hours" ? 2 : 0}
+								min={1}
+								max={100000}
+								step={10}
 								clampBehavior="strict"
 								disabled={isProfileScope}
 								styles={{
@@ -863,81 +835,109 @@ export function DataSettings({
 									},
 								}}
 							/>
+						) : (
+							<>
+								<NumberInput
+									value={recordingsRetentionValue}
+									onChange={(value) => {
+										const nextValue = typeof value === "number" ? value : 0;
+										commitRecordingsRetention({
+											mode: "time",
+											amount: recordingsRetentionAmount,
+											unit: recordingsRetentionUnit,
+											value: nextValue,
+										});
+									}}
+									min={0}
+									max={recordingsRetentionUnit === "hours" ? 36500 * 24 : 36500}
+									step={recordingsRetentionUnit === "hours" ? 0.5 : 1}
+									decimalScale={recordingsRetentionUnit === "hours" ? 2 : 0}
+									clampBehavior="strict"
+									disabled={isProfileScope}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											width: 140,
+										},
+									}}
+								/>
 
-							<SegmentedControl
-								value={recordingsRetentionUnit}
-								onChange={(next) => {
-									const nextUnit = next === "hours" ? "hours" : "days";
+								<SegmentedControl
+									value={recordingsRetentionUnit}
+									onChange={(next) => {
+										const nextUnit = next === "hours" ? "hours" : "days";
 
-									const current =
-										typeof recordingsRetentionValue === "number"
-											? recordingsRetentionValue
-											: 0;
+										const current =
+											typeof recordingsRetentionValue === "number"
+												? recordingsRetentionValue
+												: 0;
 
-									// Preserve the underlying duration when switching units.
-									const nextValue =
-										current === 0
-											? 0
-											: recordingsRetentionUnit === "days" &&
-													nextUnit === "hours"
-												? current * 24
-												: recordingsRetentionUnit === "hours" &&
-														nextUnit === "days"
-													? Math.round(current / 24)
-													: current;
+										// Preserve the underlying duration when switching units.
+										const nextValue =
+											current === 0
+												? 0
+												: recordingsRetentionUnit === "days" &&
+														nextUnit === "hours"
+													? current * 24
+													: recordingsRetentionUnit === "hours" &&
+															nextUnit === "days"
+														? Math.round(current / 24)
+														: current;
 
-									commitRecordingsRetention({
-										mode: "time",
-										amount: recordingsRetentionAmount,
-										unit: nextUnit,
-										value: nextValue,
-									});
-								}}
-								data={[
-									{ label: "Days", value: "days" },
-									{ label: "Hours", value: "hours" },
-								]}
-								disabled={isProfileScope}
-								styles={{
-									root: {
-										backgroundColor: "var(--bg-elevated)",
-										border: "1px solid var(--border-default)",
-									},
-									label: {
-										color: "var(--text-primary)",
-									},
-								}}
-							/>
-						</>
-					)}
+										commitRecordingsRetention({
+											mode: "time",
+											amount: recordingsRetentionAmount,
+											unit: nextUnit,
+											value: nextValue,
+										});
+									}}
+									data={[
+										{ label: "Days", value: "days" },
+										{ label: "Hours", value: "hours" },
+									]}
+									disabled={isProfileScope}
+									styles={{
+										root: {
+											backgroundColor: "var(--bg-elevated)",
+											border: "1px solid var(--border-default)",
+										},
+										label: {
+											color: "var(--text-primary)",
+										},
+									}}
+								/>
+							</>
+						)}
 
-					<SegmentedControl
-						value={recordingsRetentionMode}
-						onChange={(next) => {
-							const mode = next === "time" ? "time" : "amount";
-							commitRecordingsRetention({
-								mode,
-								amount: recordingsRetentionAmount,
-								unit: recordingsRetentionUnit,
-								value: recordingsRetentionValue,
-							});
-						}}
-						data={[
-							{ label: "Amount", value: "amount" },
-							{ label: "Time", value: "time" },
-						]}
-						disabled={isProfileScope}
-						styles={{
-							root: {
-								backgroundColor: "var(--bg-elevated)",
-								border: "1px solid var(--border-default)",
-							},
-							label: {
-								color: "var(--text-primary)",
-							},
-						}}
-					/>
-				</Group>
+						<SegmentedControl
+							value={recordingsRetentionMode}
+							onChange={(next) => {
+								const mode = next === "time" ? "time" : "amount";
+								commitRecordingsRetention({
+									mode,
+									amount: recordingsRetentionAmount,
+									unit: recordingsRetentionUnit,
+									value: recordingsRetentionValue,
+								});
+							}}
+							data={[
+								{ label: "Amount", value: "amount" },
+								{ label: "Time", value: "time" },
+							]}
+							disabled={isProfileScope}
+							styles={{
+								root: {
+									backgroundColor: "var(--bg-elevated)",
+									border: "1px solid var(--border-default)",
+								},
+								label: {
+									color: "var(--text-primary)",
+								},
+							}}
+						/>
+					</Group>
 				}
 			/>
 
@@ -947,50 +947,20 @@ export function DataSettings({
 				right={
 					<Group gap={10} align="center" wrap="wrap">
 						{transcriptionRetentionMode === "amount" ? (
-						<NumberInput
-							value={transcriptionRetentionAmount}
-							onChange={(value) => {
-								const nextAmount = typeof value === "number" ? value : 1000;
-								commitTranscriptionRetentionPolicy({
-									mode: "amount",
-									amount: nextAmount,
-									unit: transcriptionRetentionUnit,
-									value: transcriptionRetentionValue,
-								});
-							}}
-							min={1}
-							max={100000}
-							step={10}
-							clampBehavior="strict"
-							disabled={isProfileScope}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									width: 140,
-								},
-							}}
-						/>
-					) : (
-						<>
 							<NumberInput
-								value={transcriptionRetentionValue}
+								value={transcriptionRetentionAmount}
 								onChange={(value) => {
-									const next = typeof value === "number" ? value : 0;
+									const nextAmount = typeof value === "number" ? value : 1000;
 									commitTranscriptionRetentionPolicy({
-										mode: "time",
-										amount: transcriptionRetentionAmount,
+										mode: "amount",
+										amount: nextAmount,
 										unit: transcriptionRetentionUnit,
-										value: next,
+										value: transcriptionRetentionValue,
 									});
 								}}
-								min={0}
-								max={
-									transcriptionRetentionUnit === "hours" ? 36500 * 24 : 36500
-								}
-								step={transcriptionRetentionUnit === "hours" ? 0.5 : 1}
-								decimalScale={transcriptionRetentionUnit === "hours" ? 2 : 0}
+								min={1}
+								max={100000}
+								step={10}
 								clampBehavior="strict"
 								disabled={isProfileScope}
 								styles={{
@@ -1002,99 +972,129 @@ export function DataSettings({
 									},
 								}}
 							/>
+						) : (
+							<>
+								<NumberInput
+									value={transcriptionRetentionValue}
+									onChange={(value) => {
+										const next = typeof value === "number" ? value : 0;
+										commitTranscriptionRetentionPolicy({
+											mode: "time",
+											amount: transcriptionRetentionAmount,
+											unit: transcriptionRetentionUnit,
+											value: next,
+										});
+									}}
+									min={0}
+									max={
+										transcriptionRetentionUnit === "hours" ? 36500 * 24 : 36500
+									}
+									step={transcriptionRetentionUnit === "hours" ? 0.5 : 1}
+									decimalScale={transcriptionRetentionUnit === "hours" ? 2 : 0}
+									clampBehavior="strict"
+									disabled={isProfileScope}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											width: 140,
+										},
+									}}
+								/>
 
-							<SegmentedControl
-								value={transcriptionRetentionUnit}
-								onChange={(next) => {
-									const nextUnit =
-										next === "hours" ? ("hours" as const) : ("days" as const);
+								<SegmentedControl
+									value={transcriptionRetentionUnit}
+									onChange={(next) => {
+										const nextUnit =
+											next === "hours" ? ("hours" as const) : ("days" as const);
 
-									const current =
-										typeof transcriptionRetentionValue === "number"
-											? transcriptionRetentionValue
-											: 0;
+										const current =
+											typeof transcriptionRetentionValue === "number"
+												? transcriptionRetentionValue
+												: 0;
 
-									// Preserve the underlying duration when switching units.
-									const nextValue =
-										current === 0
-											? 0
-											: transcriptionRetentionUnit === "days" &&
-													nextUnit === "hours"
-												? current * 24
-												: transcriptionRetentionUnit === "hours" &&
-														nextUnit === "days"
-													? Math.round(current / 24)
-													: current;
+										// Preserve the underlying duration when switching units.
+										const nextValue =
+											current === 0
+												? 0
+												: transcriptionRetentionUnit === "days" &&
+														nextUnit === "hours"
+													? current * 24
+													: transcriptionRetentionUnit === "hours" &&
+															nextUnit === "days"
+														? Math.round(current / 24)
+														: current;
 
-									commitTranscriptionRetentionPolicy({
-										mode: "time",
-										amount: transcriptionRetentionAmount,
-										unit: nextUnit,
-										value: nextValue,
-									});
-								}}
-								data={[
-									{ label: "Days", value: "days" },
-									{ label: "Hours", value: "hours" },
-								]}
-								disabled={isProfileScope}
-								styles={{
-									root: {
-										backgroundColor: "var(--bg-elevated)",
-										border: "1px solid var(--border-default)",
-									},
-									label: {
-										color: "var(--text-primary)",
-									},
-								}}
-							/>
-						</>
-					)}
+										commitTranscriptionRetentionPolicy({
+											mode: "time",
+											amount: transcriptionRetentionAmount,
+											unit: nextUnit,
+											value: nextValue,
+										});
+									}}
+									data={[
+										{ label: "Days", value: "days" },
+										{ label: "Hours", value: "hours" },
+									]}
+									disabled={isProfileScope}
+									styles={{
+										root: {
+											backgroundColor: "var(--bg-elevated)",
+											border: "1px solid var(--border-default)",
+										},
+										label: {
+											color: "var(--text-primary)",
+										},
+									}}
+								/>
+							</>
+						)}
 
-					<SegmentedControl
-						value={transcriptionRetentionMode}
-						onChange={(next) => {
-							const mode = next === "time" ? "time" : "amount";
-							commitTranscriptionRetentionPolicy({
-								mode,
-								amount: transcriptionRetentionAmount,
-								unit: transcriptionRetentionUnit,
-								value: transcriptionRetentionValue,
-							});
-						}}
-						data={[
-							{ label: "Amount", value: "amount" },
-							{ label: "Time", value: "time" },
-						]}
-						disabled={isProfileScope}
-						styles={{
-							root: {
-								backgroundColor: "var(--bg-elevated)",
-								border: "1px solid var(--border-default)",
-							},
-							label: {
-								color: "var(--text-primary)",
-							},
-						}}
-					/>
+						<SegmentedControl
+							value={transcriptionRetentionMode}
+							onChange={(next) => {
+								const mode = next === "time" ? "time" : "amount";
+								commitTranscriptionRetentionPolicy({
+									mode,
+									amount: transcriptionRetentionAmount,
+									unit: transcriptionRetentionUnit,
+									value: transcriptionRetentionValue,
+								});
+							}}
+							data={[
+								{ label: "Amount", value: "amount" },
+								{ label: "Time", value: "time" },
+							]}
+							disabled={isProfileScope}
+							styles={{
+								root: {
+									backgroundColor: "var(--bg-elevated)",
+									border: "1px solid var(--border-default)",
+								},
+								label: {
+									color: "var(--text-primary)",
+								},
+							}}
+						/>
 
-					<Checkbox
-						checked={transcriptionRetentionDeleteRecordings}
-						onChange={(event) =>
-							updateTranscriptionRetentionDeleteRecordings.mutate(
-								event.currentTarget.checked,
-							)
-						}
-						disabled={
-							isProfileScope ||
-							(transcriptionRetentionMode === "time"
-								? transcriptionRetentionValue === 0
-								: transcriptionRetentionAmount <= 0)
-						}
-						label="Also delete recordings"
-						color="gray"
-					/>
-				</Group>
+						<Checkbox
+							checked={transcriptionRetentionDeleteRecordings}
+							onChange={(event) =>
+								updateTranscriptionRetentionDeleteRecordings.mutate(
+									event.currentTarget.checked,
+								)
+							}
+							disabled={
+								isProfileScope ||
+								(transcriptionRetentionMode === "time"
+									? transcriptionRetentionValue === 0
+									: transcriptionRetentionAmount <= 0)
+							}
+							label="Also delete recordings"
+							color="gray"
+						/>
+					</Group>
 				}
 			/>
 
@@ -1128,44 +1128,44 @@ export function DataSettings({
 							}}
 						/>
 
-					<SegmentedControl
-						value={statsRetentionUnit}
-						onChange={(next) => {
-							const nextUnit =
-								next === "hours" ? ("hours" as const) : ("days" as const);
+						<SegmentedControl
+							value={statsRetentionUnit}
+							onChange={(next) => {
+								const nextUnit =
+									next === "hours" ? ("hours" as const) : ("days" as const);
 
-							const current =
-								typeof statsRetentionValue === "number"
-									? statsRetentionValue
-									: 0;
+								const current =
+									typeof statsRetentionValue === "number"
+										? statsRetentionValue
+										: 0;
 
-							const nextValue =
-								current === 0
-									? 0
-									: statsRetentionUnit === "days" && nextUnit === "hours"
-										? current * 24
-										: statsRetentionUnit === "hours" && nextUnit === "days"
-											? Math.round(current / 24)
-											: current;
+								const nextValue =
+									current === 0
+										? 0
+										: statsRetentionUnit === "days" && nextUnit === "hours"
+											? current * 24
+											: statsRetentionUnit === "hours" && nextUnit === "days"
+												? Math.round(current / 24)
+												: current;
 
-							commitStatsRetention({ unit: nextUnit, value: nextValue });
-						}}
-						data={[
-							{ label: "Days", value: "days" },
-							{ label: "Hours", value: "hours" },
-						]}
-						disabled={isProfileScope}
-						styles={{
-							root: {
-								backgroundColor: "var(--bg-elevated)",
-								border: "1px solid var(--border-default)",
-							},
-							label: {
-								color: "var(--text-primary)",
-							},
-						}}
-					/>
-				</Group>
+								commitStatsRetention({ unit: nextUnit, value: nextValue });
+							}}
+							data={[
+								{ label: "Days", value: "days" },
+								{ label: "Hours", value: "hours" },
+							]}
+							disabled={isProfileScope}
+							styles={{
+								root: {
+									backgroundColor: "var(--bg-elevated)",
+									border: "1px solid var(--border-default)",
+								},
+								label: {
+									color: "var(--text-primary)",
+								},
+							}}
+						/>
+					</Group>
 				}
 			/>
 

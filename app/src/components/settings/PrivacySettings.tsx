@@ -4,7 +4,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 const AGPL_URL = "https://www.gnu.org/licenses/agpl-3.0.en.html";
 
-type SettingsTabId = "ai" | "ui" | "audio" | "hotkeys" | "api-keys" | "data" | "network";
+type SettingsTabId =
+	| "ai"
+	| "ui"
+	| "audio"
+	| "hotkeys"
+	| "api-keys"
+	| "data"
+	| "network";
 
 export function PrivacySettings({
 	onNavigateToTab,
@@ -31,27 +38,27 @@ export function PrivacySettings({
 					Privacy & Data
 				</Title>
 				<Text size="sm" c="dimmed">
-					This page explains (in plain English) what Kolboo can store locally, and
-					what it might send to third-party providers.
+					This page explains (in plain English) what Kolboo can store locally,
+					and what it might send to third-party providers.
 				</Text>
 			</div>
 
 			<Stack gap="xs">
 				<Text size="sm">
-					<strong>Microphone audio:</strong> When you record, the app captures mic
-					audio to transcribe it.
+					<strong>Microphone audio:</strong> When you record, the app captures
+					mic audio to transcribe it.
 				</Text>
 				<Text size="sm">
-					<strong>Third-party providers:</strong> If you choose an STT/LLM provider
-					and configure an API key, your audio/transcripts and prompts may be sent
-					to that provider to generate results. Provider pricing, retention, and
-					privacy policies apply.
+					<strong>Third-party providers:</strong> If you choose an STT/LLM
+					provider and configure an API key, your audio/transcripts and prompts
+					may be sent to that provider to generate results. Provider pricing,
+					retention, and privacy policies apply.
 				</Text>
 				<Text size="sm">
 					<strong>Request logs:</strong> For debugging, the app can keep recent
 					request logs <em>in memory</em> (not on disk) and you can export them.
-					These logs are redacted as a last line of defense, but you should still
-					treat exported logs as sensitive.
+					These logs are redacted as a last line of defense, but you should
+					still treat exported logs as sensitive.
 				</Text>
 			</Stack>
 
@@ -78,29 +85,20 @@ export function PrivacySettings({
 					</li>
 					<li>
 						<Text size="sm">
-							<strong>Settings</strong> (preferences; API keys are stored securely in
-							your OS credential manager)
+							<strong>Settings</strong> (preferences; API keys are stored
+							securely in your OS credential manager)
 						</Text>
 					</li>
 				</ul>
 
 				<Group gap="sm" wrap="wrap">
-					<Button
-						variant="default"
-						onClick={() => onNavigateToTab("data")}
-					>
+					<Button variant="default" onClick={() => onNavigateToTab("data")}>
 						Manage stored data
 					</Button>
-					<Button
-						variant="default"
-						onClick={() => onNavigateToTab("api-keys")}
-					>
+					<Button variant="default" onClick={() => onNavigateToTab("api-keys")}>
 						Manage provider keys
 					</Button>
-					<Button
-						variant="default"
-						onClick={() => onNavigateToTab("network")}
-					>
+					<Button variant="default" onClick={() => onNavigateToTab("network")}>
 						Network settings
 					</Button>
 				</Group>
@@ -126,8 +124,8 @@ export function PrivacySettings({
 				</Group>
 				<Text size="sm" c="dimmed">
 					If you connect third-party AI services, they may charge money and may
-					process/store data according to their own policies. Kolboo can’t override
-					those provider policies—so only enable providers you trust.
+					process/store data according to their own policies. Kolboo can’t
+					override those provider policies—so only enable providers you trust.
 				</Text>
 			</Stack>
 		</Stack>

@@ -14,12 +14,7 @@ import "@fontsource/outfit/index.css";
 import { Notifications } from "@mantine/notifications";
 import "@mantine/notifications/styles.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-	Component,
-	type ReactNode,
-	useEffect,
-	useState,
-} from "react";
+import { Component, type ReactNode, useEffect, useState } from "react";
 import App from "./App";
 import "./styles.css";
 

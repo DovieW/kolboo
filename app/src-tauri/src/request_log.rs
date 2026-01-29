@@ -90,6 +90,8 @@ fn redact_request_log_json_fields(mut log: RequestLog) -> RequestLog {
     log.quick_ask_response_json = log.quick_ask_response_json.map(redact_json);
     log.quick_replace_request_json = log.quick_replace_request_json.map(redact_json);
     log.quick_replace_response_json = log.quick_replace_response_json.map(redact_json);
+    log.ocr_request_json = log.ocr_request_json.map(redact_json);
+    log.ocr_response_json = log.ocr_response_json.map(redact_json);
     log
 }
 
@@ -130,6 +132,10 @@ pub fn strip_request_log_text_and_payloads(mut log: RequestLog) -> RequestLog {
     log.quick_ask_response_json = None;
     log.quick_replace_request_json = None;
     log.quick_replace_response_json = None;
+
+    // OCR provider payloads (may contain screenshot-derived text)
+    log.ocr_request_json = None;
+    log.ocr_response_json = None;
 
     log
 }
@@ -425,6 +431,60 @@ pub struct RequestLog {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub router_response_json: Option<JsonValue>,
 
+    /// Whether OCR context was included in the prompt.
+    #[serde(default)]
+    pub ocr_context_present: bool,
+    /// Number of OCR characters included (if any).
+    #[serde(default)]
+    pub ocr_context_chars: Option<u64>,
+    /// OCR context text that was attached to the prompt (if any).
+    ///
+    /// Intentionally bounded (see OCR context assembly) to keep request logs usable.
+    #[serde(default)]
+    pub ocr_context_text: Option<String>,
+    /// Best-effort, user-friendly OCR failure reason (if OCR was enabled but failed).
+    #[serde(default)]
+    pub ocr_failed_reason: Option<String>,
+
+    /// Effective OCR mode used for the current flow (e.g. "off" | "auto" | "manual").
+    #[serde(default)]
+    pub ocr_effective_mode: Option<String>,
+
+    /// OCR task lifecycle status for this request.
+    ///
+    /// Expected values: "not_started" | "running" | "done" | "failed" | "cancelled"
+    #[serde(default)]
+    pub ocr_status: Option<String>,
+
+    /// If OCR was not started (or not used), a stable reason code.
+    ///
+    /// Expected values:
+    /// - "mode_off"
+    /// - "mode_manual"
+    /// - "provider_unavailable"
+    /// - "invalid_base_url"
+    /// - "missing_api_key"
+    /// - "not_triggered"
+    /// - "unknown"
+    #[serde(default)]
+    pub ocr_not_attempted_reason: Option<String>,
+
+    /// When OCR started for this request (if it started).
+    #[serde(default)]
+    pub ocr_started_at: Option<DateTime<Utc>>,
+
+    /// OCR duration in milliseconds (if it completed or failed).
+    #[serde(default)]
+    pub ocr_duration_ms: Option<u64>,
+
+    /// OCR request payload preview (redacted; does NOT include image bytes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_request_json: Option<JsonValue>,
+
+    /// OCR response payload (redacted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_response_json: Option<JsonValue>,
+
     /// Whether the STT call was treated as free-tier for pricing/cost purposes.
     #[serde(default)]
     pub stt_is_free_tier: bool,
@@ -518,6 +578,19 @@ impl RequestLog {
 
             router_request_json: None,
             router_response_json: None,
+
+            ocr_context_present: false,
+            ocr_context_chars: None,
+            ocr_context_text: None,
+            ocr_failed_reason: None,
+
+            ocr_effective_mode: None,
+            ocr_status: None,
+            ocr_not_attempted_reason: None,
+            ocr_started_at: None,
+            ocr_duration_ms: None,
+            ocr_request_json: None,
+            ocr_response_json: None,
 
             stt_is_free_tier: false,
             llm_is_free_tier: false,

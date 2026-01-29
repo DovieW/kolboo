@@ -18,6 +18,7 @@ export const BACKEND_EVENT_NAMES = [
 	"recording-stop",
 	"overlay-audio-level",
 	"overlay-hide-requested",
+	"overlay-ocr-context-unavailable",
 	"mic-test-audio-level",
 	"history-changed",
 	"stats-changed",

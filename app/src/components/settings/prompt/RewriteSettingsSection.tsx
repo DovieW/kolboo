@@ -1,6 +1,6 @@
-import { Select, Switch, Text } from "@mantine/core";
+import { Select, Switch, Text, Tooltip } from "@mantine/core";
 import type { ModelOption } from "../../../lib/modelOptions";
-import type { AppSettings } from "../../../lib/tauri";
+import type { ActiveWindowOcrMode, AppSettings } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
 import { HintSelectWithDefaultHint } from "../../HintSelectWithDefaultHint";
 import { SettingsHintSelectRow } from "../SettingsHintSelectRow";
@@ -12,6 +12,8 @@ const SELECT_DEFAULT = "default";
 type RewriteSettingsSectionProps = {
 	isDefaultScope: boolean;
 	inheritTooltip: string;
+	ocrProviderAvailable: boolean;
+	ocrProviderUnavailableReason: string | null;
 	// Rewrite enabled
 	defaultRewriteEnabled: boolean;
 	localProfileRewriteEnabled: boolean;
@@ -24,6 +26,11 @@ type RewriteSettingsSectionProps = {
 	rewriteIncludeClipboardContextInheriting: boolean;
 	onRewriteIncludeClipboardContextChange: (enabled: boolean) => void;
 	onDisableRewriteIncludeClipboardContextOverride: () => void;
+	// Active window OCR mode (global)
+	localProfileRewriteActiveWindowOcrMode: ActiveWindowOcrMode;
+	rewriteActiveWindowOcrModeInheriting: boolean;
+	onRewriteActiveWindowOcrModeChange: (mode: ActiveWindowOcrMode) => void;
+	onDisableRewriteActiveWindowOcrModeOverride: () => void;
 	// LLM provider
 	effectiveLlmProvider: string | null;
 	llmProviderOptions: Array<{
@@ -82,6 +89,8 @@ type RewriteSettingsSectionProps = {
 export function RewriteSettingsSection({
 	isDefaultScope,
 	inheritTooltip,
+	ocrProviderAvailable,
+	ocrProviderUnavailableReason,
 	// Rewrite enabled
 	defaultRewriteEnabled,
 	localProfileRewriteEnabled,
@@ -94,6 +103,11 @@ export function RewriteSettingsSection({
 	rewriteIncludeClipboardContextInheriting,
 	onRewriteIncludeClipboardContextChange,
 	onDisableRewriteIncludeClipboardContextOverride,
+	// Active window OCR mode (global)
+	localProfileRewriteActiveWindowOcrMode,
+	rewriteActiveWindowOcrModeInheriting,
+	onRewriteActiveWindowOcrModeChange,
+	onDisableRewriteActiveWindowOcrModeOverride,
 	// LLM provider
 	effectiveLlmProvider,
 	llmProviderOptions,
@@ -142,6 +156,11 @@ export function RewriteSettingsSection({
 	onDisableAnthropicThinkingBudgetOverride,
 	formatThinkingBudgetShort,
 }: RewriteSettingsSectionProps) {
+	const ocrModeDisabled = !ocrProviderAvailable;
+	const ocrModeDisabledTooltip =
+		ocrProviderUnavailableReason ??
+		"OCR is disabled until an OCR Base URL is set in Settings → Providers.";
+
 	return (
 		<>
 			<div className="settings-mini-header">
@@ -167,9 +186,7 @@ export function RewriteSettingsSection({
 									? defaultRewriteEnabled
 									: localProfileRewriteEnabled
 							}
-							onChange={(e) =>
-								onRewriteEnabledChange(e.currentTarget.checked)
-							}
+							onChange={(e) => onRewriteEnabledChange(e.currentTarget.checked)}
 							disabled={isUpdatingRewriteEnabled}
 							color="gray"
 							size="md"
@@ -205,6 +222,64 @@ export function RewriteSettingsSection({
 							color="gray"
 							size="md"
 						/>
+					</>
+				}
+			/>
+
+			<SettingsRow
+				label="Active Window OCR"
+				description={
+					<>
+						Optionally capture the currently active window, run OCR, and include
+						the text as extra context in Rewrite prompts.
+					</>
+				}
+				className={ocrModeDisabled ? "settings-row--disabled" : undefined}
+				right={
+					<>
+						<SettingsInheritanceIndicator
+							isDefaultScope={isDefaultScope}
+							inheriting={rewriteActiveWindowOcrModeInheriting}
+							inheritTooltip={inheritTooltip}
+							onDisableOverride={onDisableRewriteActiveWindowOcrModeOverride}
+							disabled={ocrModeDisabled}
+						/>
+						<Tooltip
+							label={ocrModeDisabledTooltip}
+							withArrow
+							disabled={!ocrModeDisabled}
+						>
+							<div>
+								<Select
+									data={[
+										{ value: "off", label: "Off" },
+										{ value: "auto", label: "Auto" },
+										{ value: "manual", label: "Manual" },
+									]}
+									value={localProfileRewriteActiveWindowOcrMode}
+									onChange={(value) => {
+										if (!value) return;
+										if (
+											value === "off" ||
+											value === "auto" ||
+											value === "manual"
+										) {
+											onRewriteActiveWindowOcrModeChange(value);
+										}
+									}}
+									withCheckIcon={false}
+									disabled={ocrModeDisabled}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											minWidth: 140,
+										},
+									}}
+								/>
+							</div>
+						</Tooltip>
 					</>
 				}
 			/>
@@ -267,10 +342,8 @@ export function RewriteSettingsSection({
 								data={llmModelOptions}
 								value={
 									isDefaultScope
-										? (settings?.llm_model ??
-												llmModelOptions[0]?.value ??
-												null)
-									: localProfileLlmModel
+										? (settings?.llm_model ?? llmModelOptions[0]?.value ?? null)
+										: localProfileLlmModel
 								}
 								onChange={onLlmModelChange}
 								placeholder="Select model"
@@ -354,7 +427,9 @@ export function RewriteSettingsSection({
 						placeholder="Default"
 						defaultValue={SELECT_DEFAULT}
 						defaultHint={
-							isDefaultScope ? "high" : (settings?.gemini_thinking_level ?? "high")
+							isDefaultScope
+								? "high"
+								: (settings?.gemini_thinking_level ?? "high")
 						}
 						inputStyle={{
 							backgroundColor: "var(--bg-elevated)",
@@ -418,125 +493,68 @@ export function RewriteSettingsSection({
 					onDisableOverride={onDisableAnthropicThinkingBudgetOverride}
 				>
 					<HintSelect
-								data={anthropicThinkingLevelOptionsWithCustom}
-								value={
-									isDefaultScope
-										? settings?.anthropic_thinking_budget == null
-											? SELECT_DEFAULT
-											: String(settings.anthropic_thinking_budget)
-									: localProfileAnthropicThinkingBudget
-								}
-								onChange={onAnthropicThinkingBudgetChange}
-								placeholder="Default"
-								inputStyle={{
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								}}
-								renderSelected={({ option, placeholder }) => {
-								if (!option) {
-									return (
-										<Text size="sm" c="dimmed">
-											{placeholder}
-										</Text>
-									);
-								}
+						data={anthropicThinkingLevelOptionsWithCustom}
+						value={
+							isDefaultScope
+								? settings?.anthropic_thinking_budget == null
+									? SELECT_DEFAULT
+									: String(settings.anthropic_thinking_budget)
+								: localProfileAnthropicThinkingBudget
+						}
+						onChange={onAnthropicThinkingBudgetChange}
+						placeholder="Default"
+						inputStyle={{
+							backgroundColor: "var(--bg-elevated)",
+							borderColor: "var(--border-default)",
+							color: "var(--text-primary)",
+							minWidth: 200,
+						}}
+						renderSelected={({ option, placeholder }) => {
+							if (!option) {
+								return (
+									<Text size="sm" c="dimmed">
+										{placeholder}
+									</Text>
+								);
+							}
 
-								if (option.value === SELECT_DEFAULT) {
-									const inheritedBudget = settings?.anthropic_thinking_budget;
-									const hint = isDefaultScope
+							if (option.value === SELECT_DEFAULT) {
+								const inheritedBudget = settings?.anthropic_thinking_budget;
+								const hint = isDefaultScope
+									? "off"
+									: inheritedBudget == null
 										? "off"
-										: inheritedBudget == null
-											? "off"
-											: formatThinkingBudgetShort(inheritedBudget);
+										: formatThinkingBudgetShort(inheritedBudget);
 
-									return (
-										<div
+								return (
+									<div
+										style={{
+											display: "flex",
+											alignItems: "baseline",
+											gap: 8,
+										}}
+									>
+										<span style={{ fontSize: 14 }}>{option.label}</span>
+										<span
 											style={{
-												display: "flex",
-												alignItems: "baseline",
-												gap: 8,
+												fontSize: 11,
+												color: "var(--text-muted)",
+												opacity: 0.9,
+												lineHeight: 1,
 											}}
 										>
-											<span style={{ fontSize: 14 }}>{option.label}</span>
-											<span
-												style={{
-													fontSize: 11,
-													color: "var(--text-muted)",
-													opacity: 0.9,
-													lineHeight: 1,
-												}}
-											>
-												· {hint}
-											</span>
-										</div>
-									);
-								}
+											· {hint}
+										</span>
+									</div>
+								);
+							}
 
-								// Closed state: keep it simple (label only) unless it's a custom token budget.
-								if (option.label.startsWith("Custom")) {
-									const n = Number(option.value);
-									const suffix = Number.isFinite(n)
-										? formatThinkingBudgetShort(n)
-										: null;
-									return (
-										<div
-											style={{
-												display: "flex",
-												alignItems: "baseline",
-												gap: 8,
-											}}
-										>
-											<Text size="sm">{option.label}</Text>
-											{suffix && (
-												<Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
-													{suffix}
-												</Text>
-											)}
-										</div>
-									);
-								}
-
-									return <Text size="sm">{option.label}</Text>;
-							}}
-							renderOption={({ option }) => {
-								if (option.value === SELECT_DEFAULT) {
-									const inheritedBudget = settings?.anthropic_thinking_budget;
-									const hint = isDefaultScope
-										? "off"
-										: inheritedBudget == null
-											? "off"
-											: formatThinkingBudgetShort(inheritedBudget);
-
-									return (
-										<div
-											style={{
-												display: "flex",
-												alignItems: "baseline",
-												gap: 8,
-											}}
-										>
-											<span style={{ fontSize: 14 }}>{option.label}</span>
-											<span
-												style={{
-													fontSize: 11,
-													color: "var(--text-muted)",
-													opacity: 0.9,
-													lineHeight: 1,
-												}}
-											>
-												· {hint}
-											</span>
-										</div>
-									);
-								}
-
+							// Closed state: keep it simple (label only) unless it's a custom token budget.
+							if (option.label.startsWith("Custom")) {
 								const n = Number(option.value);
 								const suffix = Number.isFinite(n)
 									? formatThinkingBudgetShort(n)
 									: null;
-
 								return (
 									<div
 										style={{
@@ -553,7 +571,64 @@ export function RewriteSettingsSection({
 										)}
 									</div>
 								);
-							}}
+							}
+
+							return <Text size="sm">{option.label}</Text>;
+						}}
+						renderOption={({ option }) => {
+							if (option.value === SELECT_DEFAULT) {
+								const inheritedBudget = settings?.anthropic_thinking_budget;
+								const hint = isDefaultScope
+									? "off"
+									: inheritedBudget == null
+										? "off"
+										: formatThinkingBudgetShort(inheritedBudget);
+
+								return (
+									<div
+										style={{
+											display: "flex",
+											alignItems: "baseline",
+											gap: 8,
+										}}
+									>
+										<span style={{ fontSize: 14 }}>{option.label}</span>
+										<span
+											style={{
+												fontSize: 11,
+												color: "var(--text-muted)",
+												opacity: 0.9,
+												lineHeight: 1,
+											}}
+										>
+											· {hint}
+										</span>
+									</div>
+								);
+							}
+
+							const n = Number(option.value);
+							const suffix = Number.isFinite(n)
+								? formatThinkingBudgetShort(n)
+								: null;
+
+							return (
+								<div
+									style={{
+										display: "flex",
+										alignItems: "baseline",
+										gap: 8,
+									}}
+								>
+									<Text size="sm">{option.label}</Text>
+									{suffix && (
+										<Text size="xs" c="dimmed" style={{ lineHeight: 1 }}>
+											{suffix}
+										</Text>
+									)}
+								</div>
+							);
+						}}
 					/>
 				</SettingsHintSelectRow>
 			)}

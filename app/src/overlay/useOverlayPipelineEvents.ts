@@ -1,10 +1,10 @@
 import { useEffect } from "react";
-import { listenTyped } from "../lib/tauri/events";
 import {
 	isPipelineState,
 	type PipelineState,
 	type PipelineStateSource,
 } from "../lib/overlay/overlayUiReducer";
+import { listenTyped } from "../lib/tauri/events";
 
 type UseOverlayPipelineEventsInputs = {
 	setPipelineState: (source: PipelineStateSource, next: PipelineState) => void;

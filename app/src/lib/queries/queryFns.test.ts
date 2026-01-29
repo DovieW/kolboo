@@ -119,7 +119,11 @@ const createDeps = (): QueryFnDeps => {
 		},
 		configAPI: {
 			getDefaultSections: vi.fn(async () => ({ system: "" })),
-			getAvailableProviders: vi.fn(async () => ({ stt: [], llm: [] })),
+			getAvailableProviders: vi.fn(async () => ({
+				stt: [],
+				llm: [],
+				ocr: { available: false, reason: null },
+			})),
 		},
 		llmAPI: {
 			getFireworksModels: vi.fn(async () => []),
