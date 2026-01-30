@@ -1248,40 +1248,40 @@ export default function RecordingControl() {
 			ocrStatus === "failed" ||
 			ocrStatus === "cancelled");
 	const ocrPillIcon = ocrIsDone ? (
-    // Checkmark icon when done
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      role="img"
-      aria-label="OCR complete"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  ) : (
-    // Screenshot/camera icon
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      role="img"
-      aria-label="Capture screenshot for OCR"
-    >
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <circle cx="8.5" cy="8.5" r="1.5" />
-      <polyline points="21 15 16 10 5 21" />
-    </svg>
-  );
+		// Checkmark icon when done
+		<svg
+			width="14"
+			height="14"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="2.5"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			role="img"
+			aria-label="OCR complete"
+		>
+			<polyline points="20 6 9 17 4 12" />
+		</svg>
+	) : (
+		// Screenshot/camera icon
+		<svg
+			width="14"
+			height="14"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="2"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			role="img"
+			aria-label="Capture screenshot for OCR"
+		>
+			<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+			<circle cx="8.5" cy="8.5" r="1.5" />
+			<polyline points="21 15 16 10 5 21" />
+		</svg>
+	);
 	const ocrPillTitle = !ocrProviderAvailable
 		? ocrProviderReason || "OCR provider unavailable"
 		: ocrIsRunning
@@ -1357,145 +1357,145 @@ export default function RecordingControl() {
 	};
 
 	return (
-    <div
-      ref={setWidgetRef}
-      role="application"
-      {...bindDrag()}
-      className="overlay-widget"
-      data-anim={animState}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      style={{
-        width: "100%",
-        position: "relative",
-        cursor: "grab",
-        userSelect: "none",
-      }}
-    >
-      <div className="overlay-stage">
-        {/* Collapsed widget */}
-        {!renderExpanded && settings?.overlay_mode !== "recording_only" ? (
-          <button
-            type="button"
-            onClick={handleClick}
-            disabled={isBusy}
-            className="overlay-button overlay-button--collapsed"
-            style={
-              isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
-            }
-          >
-            <div className="overlay-icon">{renderLeftIndicator()}</div>
-          </button>
-        ) : null}
+		<div
+			ref={setWidgetRef}
+			role="application"
+			{...bindDrag()}
+			className="overlay-widget"
+			data-anim={animState}
+			onMouseEnter={handleMouseEnter}
+			onMouseLeave={handleMouseLeave}
+			style={{
+				width: "100%",
+				position: "relative",
+				cursor: "grab",
+				userSelect: "none",
+			}}
+		>
+			<div className="overlay-stage">
+				{/* Collapsed widget */}
+				{!renderExpanded && settings?.overlay_mode !== "recording_only" ? (
+					<button
+						type="button"
+						onClick={handleClick}
+						disabled={isBusy}
+						className="overlay-button overlay-button--collapsed"
+						style={
+							isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
+						}
+					>
+						<div className="overlay-icon">{renderLeftIndicator()}</div>
+					</button>
+				) : null}
 
-        {/* Expanded widget */}
-        {renderExpanded || settings?.overlay_mode === "recording_only" ? (
-          <button
-            type="button"
-            onClick={handleClick}
-            disabled={isBusy}
-            className="overlay-button overlay-button--expanded"
-            style={
-              isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
-            }
-          >
-            <div className="overlay-icon">{renderLeftIndicator()}</div>
-            <div
-              className={`overlay-center${
-                isError && lastError ? " overlay-center--error" : ""
-              }`}
-            >
-              {isError && lastError ? (
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <button
-                    type="button"
-                    className="overlay-error-text"
-                    title={lastError.message}
-                    style={{ all: "unset", display: "block" }}
-                    onFocus={(e) => {
-                      e.currentTarget.scrollLeft = 0;
-                    }}
-                  >
-                    {lastError.message}
-                  </button>
-                </div>
-              ) : centerPhaseText && showDetailedLoading ? (
-                <div className="overlay-phase-text" aria-live="polite">
-                  {centerPhaseText}
-                </div>
-              ) : (
-                <>
-                  {/* Backend-driven waveform (no getUserMedia startup lag).
+				{/* Expanded widget */}
+				{renderExpanded || settings?.overlay_mode === "recording_only" ? (
+					<button
+						type="button"
+						onClick={handleClick}
+						disabled={isBusy}
+						className="overlay-button overlay-button--expanded"
+						style={
+							isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
+						}
+					>
+						<div className="overlay-icon">{renderLeftIndicator()}</div>
+						<div
+							className={`overlay-center${
+								isError && lastError ? " overlay-center--error" : ""
+							}`}
+						>
+							{isError && lastError ? (
+								<div
+									style={{ display: "flex", flexDirection: "column", gap: 4 }}
+								>
+									<button
+										type="button"
+										className="overlay-error-text"
+										title={lastError.message}
+										style={{ all: "unset", display: "block" }}
+										onFocus={(e) => {
+											e.currentTarget.scrollLeft = 0;
+										}}
+									>
+										{lastError.message}
+									</button>
+								</div>
+							) : centerPhaseText && showDetailedLoading ? (
+								<div className="overlay-phase-text" aria-live="polite">
+									{centerPhaseText}
+								</div>
+							) : (
+								<>
+									{/* Backend-driven waveform (no getUserMedia startup lag).
                       While "arming" (UI-only), keep an idle animation so the overlay
                       doesn't look dead before recording actually starts. */}
-                  {isWaveActive ? (
-                    <BackendAudioWave
-                      isActive={true}
-                      isVisible={true}
-                      className={isArming ? "overlay-wave--arming" : undefined}
-                    />
-                  ) : (
-                    <AudioWave
-                      isActive={false}
-                      isVisible={true}
-                      selectedMicId={settings?.selected_mic_id ?? null}
-                      className={isArming ? "overlay-wave--arming" : undefined}
-                    />
-                  )}
-                </>
-              )}
-            </div>
-            <div className="overlay-meta">
-              {isError ? (
-                <>
-                  {lastFailedRequestId ? (
-                    <button
-                      type="button"
-                      className="overlay-pill"
-                      data-variant="dim"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void onRetry();
-                      }}
-                    >
-                      Retry
-                    </button>
-                  ) : null}
+									{isWaveActive ? (
+										<BackendAudioWave
+											isActive={true}
+											isVisible={true}
+											className={isArming ? "overlay-wave--arming" : undefined}
+										/>
+									) : (
+										<AudioWave
+											isActive={false}
+											isVisible={true}
+											selectedMicId={settings?.selected_mic_id ?? null}
+											className={isArming ? "overlay-wave--arming" : undefined}
+										/>
+									)}
+								</>
+							)}
+						</div>
+						<div className="overlay-meta">
+							{isError ? (
+								<>
+									{lastFailedRequestId ? (
+										<button
+											type="button"
+											className="overlay-pill"
+											data-variant="dim"
+											onClick={(e) => {
+												e.stopPropagation();
+												void onRetry();
+											}}
+										>
+											Retry
+										</button>
+									) : null}
 
-                  <button
-                    type="button"
-                    className="overlay-pill overlay-pill--close"
-                    aria-label="Close"
-                    title="Close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      dismissError();
-                    }}
-                  >
-                    ×
-                  </button>
-                </>
-              ) : showOcrPill ? (
-                <button
-                  type="button"
-                  className={`overlay-pill${ocrIsRunning ? " overlay-pill--pulsing" : ""}`}
-                  data-variant={ocrPillVariant}
-                  title={ocrPillTitle}
-                  disabled={!ocrCanClick}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void onTriggerOcr();
-                  }}
-                >
-                  {ocrPillIcon}
-                </button>
-              ) : null}
-            </div>
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
+									<button
+										type="button"
+										className="overlay-pill overlay-pill--close"
+										aria-label="Close"
+										title="Close"
+										onClick={(e) => {
+											e.stopPropagation();
+											dismissError();
+										}}
+									>
+										×
+									</button>
+								</>
+							) : showOcrPill ? (
+								<button
+									type="button"
+									className={`overlay-pill${ocrIsRunning ? " overlay-pill--pulsing" : ""}`}
+									data-variant={ocrPillVariant}
+									title={ocrPillTitle}
+									disabled={!ocrCanClick}
+									onClick={(e) => {
+										e.stopPropagation();
+										void onTriggerOcr();
+									}}
+								>
+									{ocrPillIcon}
+								</button>
+							) : null}
+						</div>
+					</button>
+				) : null}
+			</div>
+		</div>
+	);
 }

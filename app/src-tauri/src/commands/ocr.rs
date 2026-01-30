@@ -184,3 +184,140 @@ pub fn pipeline_cancel_active_window_ocr(
     pipeline.cancel_ocr_task();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_ocr_provider_status_serializes_with_snake_case() {
+        let status = OverlayOcrProviderStatus {
+            available: true,
+            reason: None,
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert!(json.get("available").is_some());
+        assert!(json.get("reason").is_some());
+        assert_eq!(json["available"], true);
+        assert!(json["reason"].is_null());
+    }
+
+    #[test]
+    fn overlay_ocr_provider_status_includes_reason_when_unavailable() {
+        let status = OverlayOcrProviderStatus {
+            available: false,
+            reason: Some("OCR base URL not set".to_string()),
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["available"], false);
+        assert_eq!(json["reason"], "OCR base URL not set");
+    }
+
+    #[test]
+    fn overlay_pipeline_state_serializes_all_fields() {
+        let state = OverlayPipelineState {
+            pipeline_state: "recording".to_string(),
+            ocr_session_id: Some("test-session-123".to_string()),
+            ocr_status: "running".to_string(),
+            ocr_manual_available: true,
+            ocr_provider: OverlayOcrProviderStatus {
+                available: true,
+                reason: None,
+            },
+            stt_complete: false,
+        };
+        let json = serde_json::to_value(&state).unwrap();
+
+        // Verify all expected fields are present with snake_case naming
+        assert_eq!(json["pipeline_state"], "recording");
+        assert_eq!(json["ocr_session_id"], "test-session-123");
+        assert_eq!(json["ocr_status"], "running");
+        assert_eq!(json["ocr_manual_available"], true);
+        assert_eq!(json["stt_complete"], false);
+
+        // Verify nested ocr_provider
+        let provider = &json["ocr_provider"];
+        assert_eq!(provider["available"], true);
+        assert!(provider["reason"].is_null());
+    }
+
+    #[test]
+    fn overlay_pipeline_state_handles_null_session_id() {
+        let state = OverlayPipelineState {
+            pipeline_state: "idle".to_string(),
+            ocr_session_id: None,
+            ocr_status: "not_started".to_string(),
+            ocr_manual_available: false,
+            ocr_provider: OverlayOcrProviderStatus {
+                available: false,
+                reason: Some("OCR API key not set".to_string()),
+            },
+            stt_complete: false,
+        };
+        let json = serde_json::to_value(&state).unwrap();
+
+        assert!(json["ocr_session_id"].is_null());
+        assert_eq!(json["ocr_status"], "not_started");
+        assert_eq!(json["ocr_manual_available"], false);
+        assert_eq!(json["ocr_provider"]["available"], false);
+        assert_eq!(json["ocr_provider"]["reason"], "OCR API key not set");
+    }
+
+    #[test]
+    fn overlay_pipeline_state_stt_complete_flag_serializes_correctly() {
+        // When STT is complete and OCR is running, this indicates "waiting for OCR"
+        let state_waiting_for_ocr = OverlayPipelineState {
+            pipeline_state: "idle".to_string(),
+            ocr_session_id: Some("session-456".to_string()),
+            ocr_status: "running".to_string(),
+            ocr_manual_available: true,
+            ocr_provider: OverlayOcrProviderStatus {
+                available: true,
+                reason: None,
+            },
+            stt_complete: true,
+        };
+        let json = serde_json::to_value(&state_waiting_for_ocr).unwrap();
+
+        assert_eq!(json["stt_complete"], true);
+        assert_eq!(json["ocr_status"], "running");
+        // UI can derive ocr_blocking = stt_complete && ocr_status == "running"
+    }
+
+    #[test]
+    fn overlay_pipeline_state_ocr_done_status() {
+        let state = OverlayPipelineState {
+            pipeline_state: "rewriting".to_string(),
+            ocr_session_id: Some("done-session".to_string()),
+            ocr_status: "done".to_string(),
+            ocr_manual_available: false,
+            ocr_provider: OverlayOcrProviderStatus {
+                available: true,
+                reason: None,
+            },
+            stt_complete: true,
+        };
+        let json = serde_json::to_value(&state).unwrap();
+
+        assert_eq!(json["pipeline_state"], "rewriting");
+        assert_eq!(json["ocr_status"], "done");
+    }
+
+    #[test]
+    fn overlay_pipeline_state_ocr_failed_status() {
+        let state = OverlayPipelineState {
+            pipeline_state: "transcribing".to_string(),
+            ocr_session_id: Some("failed-session".to_string()),
+            ocr_status: "failed".to_string(),
+            ocr_manual_available: true,
+            ocr_provider: OverlayOcrProviderStatus {
+                available: true,
+                reason: None,
+            },
+            stt_complete: false,
+        };
+        let json = serde_json::to_value(&state).unwrap();
+
+        assert_eq!(json["ocr_status"], "failed");
+    }
+}

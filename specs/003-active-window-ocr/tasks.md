@@ -118,6 +118,9 @@
 - [x] T042 [P] Add cross-flow Rust tests ensuring OCR remains consumable after internal state transitions within a session in `app/src-tauri/src/pipeline/tests.rs`
 - [x] T043 [P] Add tests ensuring session cancellation cancels OCR and produces a stable cancellation reason in `app/src-tauri/src/pipeline/tests.rs`
 - [x] T044 [P] Add tests ensuring starting a new session supersedes/cancels old OCR without cross-contamination in `app/src-tauri/src/pipeline/tests.rs`
+- [x] T050 [P] Add UI tests for overlay OCR behavior (pill visibility, disabled state, OCR-running hold) in `app/src/overlay/ocrOverlayBehavior.test.ts`
+- [x] T051 [P] Add unit tests for overlay polling interval behavior with OCR running in `app/src/overlay/pipelinePolling.test.ts`
+- [x] T052 [P] Add Rust tests for overlay OCR payload fields (provider availability + OCR status) in `app/src-tauri/src/commands/ocr.rs`
 
 ---
 
