@@ -932,16 +932,21 @@ pub(crate) fn stop_recording(
 
                                 crate::sessions::quick_ask::emit_to_quick_ask(
                                     &app_clone,
+                                    crate::sessions::quick_ask::EVENT_QUICK_ASK_STARTED,
+                                    QuickAskStartedPayload {
+                                        question: Some(String::new()),
+                                        provider: None,
+                                        model: None,
+                                    },
+                                );
+
+                                crate::sessions::quick_ask::emit_to_quick_ask(
+                                    &app_clone,
                                     crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
                                     QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
                                         ok: false,
                                         error: "No transcript to answer (empty)".to_string(),
                                     }),
-                                );
-
-                                // Show the Quick Ask window only once we have something to display.
-                                crate::sessions::quick_ask::ensure_quick_ask_window_visible(
-                                    &app_clone,
                                 );
                             } else {
                                 // Resolve effective Quick Ask configuration:
@@ -1118,11 +1123,6 @@ pub(crate) fn stop_recording(
                                             ok: false,
                                             error: err,
                                         }),
-                                    );
-
-                                    // Show the Quick Ask window only once we have something to display.
-                                    crate::sessions::quick_ask::ensure_quick_ask_window_visible(
-                                        &app_clone,
                                     );
                                 } else {
                                     let provider_cfg = crate::llm::LlmConfig {
@@ -1610,9 +1610,6 @@ pub(crate) fn stop_recording(
                                                     },
                                                 ),
                                             );
-
-                                            // Show the Quick Ask window only once we have something to display.
-                                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
                                         }
                                     }
                                 }
@@ -2191,15 +2188,22 @@ pub(crate) fn stop_recording(
 
                             crate::sessions::quick_ask::emit_to_quick_ask(
                                 &app_clone,
+                                crate::sessions::quick_ask::EVENT_QUICK_ASK_STARTED,
+                                QuickAskStartedPayload {
+                                    question: Some(String::new()),
+                                    provider: None,
+                                    model: None,
+                                },
+                            );
+
+                            crate::sessions::quick_ask::emit_to_quick_ask(
+                                &app_clone,
                                 crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
                                 QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
                                     ok: false,
                                     error: "No transcript to answer (empty)".to_string(),
                                 }),
                             );
-
-                            // Show the Quick Ask window only once we have something to display.
-                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
                         }
 
                         // Mark history entry as success with empty text (keeps timeline consistent)
