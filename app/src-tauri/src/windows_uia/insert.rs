@@ -92,13 +92,30 @@ pub fn insert_text_with_snapshot(
         return Ok(WindowsInsertMethod::None);
     }
 
-    if let Some(reason) = insert_block_reason(&snapshot) {
+    // Capture a fresh snapshot for safety checks - the initial snapshot from recording stop may
+    // be stale (focus may not have settled on the editable field yet, causing false read_only).
+    let current_snapshot = capture_focused_snapshot()?;
+    let target_matches_now = target_matches(&snapshot, &current_snapshot);
+
+    // For password fields, block if EITHER snapshot showed password (security-first).
+    // For enabled/read_only, use the current snapshot since those can be transient during focus.
+    let safety_snapshot = WindowsTextTargetSnapshot {
+        is_password: match (snapshot.is_password, current_snapshot.is_password) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            _ => current_snapshot.is_password,
+        },
+        is_enabled: current_snapshot.is_enabled,
+        is_read_only: current_snapshot.is_read_only,
+        ..current_snapshot.clone()
+    };
+
+    if let Some(reason) = insert_block_reason(&safety_snapshot) {
         log::info!(
             "UIA insert: blocked by safety policy (reason={}, is_password={:?}, is_enabled={:?}, is_read_only={:?}), using safe fallback",
             reason.as_str(),
-            snapshot.is_password,
-            snapshot.is_enabled,
-            snapshot.is_read_only
+            safety_snapshot.is_password,
+            safety_snapshot.is_enabled,
+            safety_snapshot.is_read_only
         );
         log_request_entry(
             app,
@@ -111,9 +128,6 @@ pub fn insert_text_with_snapshot(
         copy_to_clipboard_and_notify(app, text)?;
         return Ok(WindowsInsertMethod::None);
     }
-
-    let current_snapshot = capture_focused_snapshot()?;
-    let target_matches_now = target_matches(&snapshot, &current_snapshot);
 
     let mut method_error: Option<String> = None;
     let mut clipboard_restored: Option<bool> = None;
