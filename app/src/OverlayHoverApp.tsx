@@ -2,6 +2,7 @@ import "./app.css";
 
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import { useSettings } from "./lib/queries";
 import { tauriAPI } from "./lib/tauri";
 
@@ -16,6 +17,10 @@ type SessionPresetLockInfo = {
 };
 
 export default function OverlayHoverApp() {
+	// Forward modifier-only key events (like AltRight) to the backend.
+	// WebView2 intercepts these before our keyboard hook sees them.
+	useModifierKeyForwarder();
+
 	const { data: settings } = useSettings();
 	const [activeProfile, setActiveProfile] = useState<ActiveProfileInfo | null>(
 		null,

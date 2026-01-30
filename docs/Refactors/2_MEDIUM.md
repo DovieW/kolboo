@@ -46,3 +46,27 @@ Ideas:
 - Centralize "context sources" (selected text + clipboard context) into a single helper that returns a structured object with consistent size limits and sentinel protection.
 - Consider wiring up `ContextGrabMethod::ClipboardOnly` end-to-end (it exists in Rust but isn't currently selectable via the `context_grab_method` string mapping in `lib.rs` / settings docs).
 - Move the Quick Replace user-prompt builder into `clipboard_context.rs` (or a new `prompt_builders.rs`) so both Quick Ask + Quick Replace follow the same conventions and are easier to test.
+
+## Improve Win+C (Copilot) hotkey reliability when Kolboo is focused
+
+**Problem:** When Kolboo's main window is focused and the user presses Win+C (or physical Copilot key via Win+Shift+F23), Windows intercepts the key combination at the OS level before it reaches either the WH_KEYBOARD_LL hook or JavaScript event handlers. This causes the OS Copilot to launch instead of triggering Kolboo's action.
+
+**Context:**
+- AltRight was fixed by adding a JavaScript handler in `useModifierKeyForwarder.ts` that captures the key before Chromium's menu accelerator handling.
+- Win+C cannot be captured the same way because Windows itself intercepts Win-key combinations at the OS level.
+- The hook DOES receive keyup events for these keys, just not keydown.
+
+**Current state:**
+- AltRight hotkey works fine even when Kolboo is focused (via JS forwarder).
+- Win+C/Copilot key bypasses to OS Copilot when Kolboo is focused.
+- Works correctly when other apps are focused.
+
+**Potential solutions:**
+1. **RegisterHotKey approach:** Instead of using the keyboard hook for Copilot, register Win+C as a global hotkey via `tauri-plugin-global-shortcut`. This would work even when Kolboo is focused since RegisterHotKey operates at the OS level.
+2. **Keyboard filter driver:** More invasive but would work — requires elevated privileges.
+3. **Document as a limitation:** If the above are too complex, document that Copilot key doesn't work when Kolboo is focused and suggest alternatives (use a different hotkey, or don't focus Kolboo while using Copilot key).
+
+**Files involved:**
+- `app/src-tauri/src/windows_modifier_hotkeys.rs` — WH_KEYBOARD_LL hook
+- `app/src-tauri/src/commands/settings.rs` — `is_windows_hook_handled_hotkey()` determines routing
+- `app/src/hooks/useModifierKeyForwarder.ts` — JavaScript key forwarder (already handles AltRight)

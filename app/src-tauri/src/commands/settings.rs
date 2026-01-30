@@ -53,6 +53,25 @@ pub async fn set_hotkey_debug_enabled_runtime(
     Ok(())
 }
 
+/// Forward a modifier-only key event (like AltRight) from the frontend.
+///
+/// Why this exists:
+/// WebView2 (Chromium) intercepts Alt key events for menu accelerator handling
+/// before they reach the Windows low-level keyboard hook. When the WebView has
+/// focus, our WH_KEYBOARD_LL hook never sees AltRight events. This command
+/// allows the frontend to detect AltRight via JavaScript and forward it.
+#[cfg(all(desktop, target_os = "windows"))]
+#[tauri::command]
+pub fn forward_modifier_key_event(app: AppHandle, key: String, is_down: bool) {
+    crate::shortcuts::handle_modifier_key_event(&app, &key, is_down, false);
+}
+
+#[cfg(not(all(desktop, target_os = "windows")))]
+#[tauri::command]
+pub fn forward_modifier_key_event(_app: AppHandle, _key: String, _is_down: bool) {
+    // No-op on non-Windows platforms
+}
+
 #[cfg(all(desktop, target_os = "windows"))]
 fn is_windows_hook_handled_hotkey(hk: &HotkeyConfig) -> bool {
     // These are handled by a low-level Windows keyboard hook, not by

@@ -1,10 +1,15 @@
 import { Loader } from "@mantine/core";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import RecordingControl from "./overlay/RecordingControl";
 import "./app.css";
 
 export default function OverlayApp() {
+	// Forward modifier-only key events (like AltRight) to the backend.
+	// WebView2 intercepts these before our keyboard hook sees them.
+	useModifierKeyForwarder();
+
 	const [ready, setReady] = useState(false);
 
 	// Sync pipeline config on mount

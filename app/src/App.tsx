@@ -50,6 +50,7 @@ import {
 } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
 import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
+import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import { applyAccentColor } from "./lib/accentColor";
 import { API_KEY_STORE_KEYS } from "./lib/apiKeys";
 import {
@@ -1198,6 +1199,10 @@ function AccentColorSync() {
 }
 
 export default function App() {
+	// Forward modifier-only key events (like AltRight) to the backend.
+	// WebView2 intercepts these before our keyboard hook sees them.
+	useModifierKeyForwarder();
+
 	const queryClient = useQueryClient();
 
 	const bootGuideState = readBootGuideState();

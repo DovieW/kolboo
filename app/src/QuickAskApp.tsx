@@ -5,6 +5,7 @@ import hljs from "highlight.js/lib/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import { applyAccentColor } from "./lib/accentColor";
 import { readBootAccentColor } from "./lib/bootStorage";
 import type {
@@ -139,6 +140,10 @@ function QuickAskCodeBlock({
 }
 
 export default function QuickAskApp() {
+	// Forward modifier-only key events (like AltRight) to the backend.
+	// WebView2 intercepts these before our keyboard hook sees them.
+	useModifierKeyForwarder();
+
 	const win = useMemo(() => getCurrentWindow(), []);
 	const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
 		"idle",

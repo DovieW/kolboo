@@ -436,6 +436,18 @@ export const llmAPI = {
 			prompt: params.prompt,
 			profileId: params.profileId ?? null,
 		}),
+
+	/**
+	 * Forward a modifier-only key event (like AltRight) from the frontend to the backend.
+	 *
+	 * Why this exists:
+	 * WebView2 (Chromium) intercepts Alt key events for menu accelerator handling
+	 * before they reach the Windows low-level keyboard hook. When the WebView has
+	 * focus, the WH_KEYBOARD_LL hook never sees AltRight events. This allows the
+	 * frontend to detect AltRight via JavaScript and forward it.
+	 */
+	forwardModifierKeyEvent: (key: string, isDown: boolean) =>
+		invoke<void>("forward_modifier_key_event", { key, isDown }),
 };
 
 export const sttAPI = {
