@@ -164,8 +164,8 @@ pub async fn pipeline_get_overlay_state(
         stt_complete: pipeline.is_stt_complete(),
     };
 
-    // Debug logging for overlay state (only at debug level)
-    log::debug!(
+    // Trace logging for overlay state (to avoid noise in debug)
+    log::trace!(
         "overlay_state: pipeline={}, ocr_status={}, stt_complete={}, ocr_blocking={}",
         state.pipeline_state,
         state.ocr_status,

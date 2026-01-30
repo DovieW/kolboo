@@ -223,8 +223,8 @@ pub(crate) fn select_profile_for_program_path(
     }
 
     // Helpful when users report everything is always "Default".
-    // Keep this at debug to avoid noisy logs, but include key derived values.
-    log::debug!(
+    // Keep this at trace to avoid noisy logs, but include key derived values.
+    log::trace!(
         "Pipeline: No program profile match for foreground_base='{}' (profiles={})",
         program_basename_for_log(foreground),
         llm_config.program_prompt_profiles.len()

@@ -251,7 +251,7 @@ mod imp {
             if pid == current_pid {
                 // Prefer the most recent external foreground.
                 if let Some(path) = get_recent_external_foreground(Duration::from_secs(5)) {
-                    log::debug!(
+                    log::trace!(
                         "[windows_apps] Foreground is Kolboo pid {}; using recent external foreground: {}",
                         current_pid,
                         crate::app_shared::basename_for_log(&path)
@@ -262,7 +262,7 @@ mod imp {
                 // If we don't have a recent external sample yet, try to recover a plausible
                 // external "active" app by scanning top-level windows (best-effort).
                 let path = find_external_process_path_by_z_order(current_pid)?;
-                log::debug!(
+                log::trace!(
                     "[windows_apps] Foreground is Kolboo pid {}; recovered external foreground from z-order: {}",
                     current_pid,
                     crate::app_shared::basename_for_log(&path)
