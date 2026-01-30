@@ -7,6 +7,7 @@ use tauri::window::Monitor;
 
 use crate::commands::CommandResult;
 use crate::events;
+use crate::pipeline;
 use crate::state::AppState;
 
 #[cfg(desktop)]
@@ -809,6 +810,47 @@ pub async fn hide_overlay(app: AppHandle) -> CommandResult<()> {
         );
         let _ = window.hide();
     }
+    Ok(())
+}
+
+/// Notify backend that the overlay frontend has mounted.
+///
+/// This gives us a chance to re-assert visibility/position when recording starts
+/// before the webview is ready (common source of "overlay didn't show" reports).
+#[tauri::command]
+pub async fn overlay_frontend_ready(app: AppHandle) -> CommandResult<()> {
+    #[cfg(desktop)]
+    {
+        let overlay_mode: String =
+            get_setting_from_store(&app, "overlay_mode", "recording_only".to_string());
+        let pipeline_state = app
+            .try_state::<pipeline::SharedPipeline>()
+            .map(|p| p.state());
+
+        log::info!(
+            "[overlay] frontend ready (overlay_mode={}, pipeline_state={:?})",
+            overlay_mode,
+            pipeline_state
+        );
+
+        let should_show = match overlay_mode.as_str() {
+            "always" => true,
+            "recording_only" => matches!(
+                pipeline_state,
+                Some(pipeline::PipelineState::Recording)
+                    | Some(pipeline::PipelineState::Routing)
+                    | Some(pipeline::PipelineState::Transcribing)
+                    | Some(pipeline::PipelineState::Rewriting)
+                    | Some(pipeline::PipelineState::Error)
+            ),
+            _ => false,
+        };
+
+        if should_show {
+            let _ = show_overlay_with_reset_if_not_always(&app);
+        }
+    }
+
     Ok(())
 }
 
