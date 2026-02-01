@@ -206,6 +206,13 @@ fn get_hotkey_from_store(
 #[cfg(desktop)]
 const ESCAPE_CANCEL_SHORTCUT: &str = "Escape";
 
+#[cfg(desktop)]
+fn is_quick_ask_visible(app: &AppHandle) -> bool {
+    app.get_webview_window("quick_ask")
+        .and_then(|win| win.is_visible().ok())
+        .unwrap_or(false)
+}
+
 /// Enable/disable the Escape global shortcut that cancels the current pipeline session.
 ///
 /// We register this shortcut only while the pipeline is Recording/Transcribing so we don't
@@ -225,15 +232,21 @@ pub(crate) fn set_escape_cancel_shortcut_enabled(app: &AppHandle, enabled: bool)
 async fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool) {
     let _guard = shortcuts_lock::global_shortcut_lock().lock().await;
     let shortcut_manager = app.global_shortcut();
+    let quick_ask_visible = is_quick_ask_visible(app);
+    let pipeline_can_cancel = app
+        .try_state::<pipeline::SharedPipeline>()
+        .map(|p| p.state().can_cancel())
+        .unwrap_or(false);
+    let should_enable = enabled || pipeline_can_cancel || quick_ask_visible;
 
     let is_registered = shortcut_manager.is_registered(ESCAPE_CANCEL_SHORTCUT);
     log::debug!(
         "Escape shortcut toggle: enabled={} (currently registered={})",
-        enabled,
+        should_enable,
         is_registered
     );
 
-    if enabled {
+    if should_enable {
         if is_registered {
             return;
         }
@@ -241,6 +254,12 @@ async fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool
         if let Err(e) =
             shortcut_manager.on_shortcut(ESCAPE_CANCEL_SHORTCUT, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
+                    if let Some(win) = app.get_webview_window("quick_ask") {
+                        if win.is_visible().unwrap_or(false) {
+                            let _ = win.emit(crate::events::EVENT_QUICK_ASK_DISMISS_REQUESTED, ());
+                            return;
+                        }
+                    }
                     cancel_pipeline_session(app, "Escape");
                 }
             })

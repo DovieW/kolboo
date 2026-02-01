@@ -294,6 +294,9 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         true,
     );
 
+    // Quick Ask dismiss mode (manual or auto).
+    dirty |= set_default("quick_ask_dismiss_mode", json!("manual"), false);
+
     // Quick Ask conversation history (ephemeral; stored in memory only).
     // These keys only control whether/how much in-memory history to attach to prompts.
     dirty |= set_default("quick_ask_conversation_history_enabled", json!(true), false);

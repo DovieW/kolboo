@@ -15,6 +15,10 @@ pub(crate) fn emit_to_quick_ask<T: serde::Serialize>(app: &AppHandle, event: &st
     let Ok(value) = serde_json::to_value(payload) else {
         return;
     };
+    // Important: ensure the Quick Ask window is visible/focused *before* emitting.
+    // The window's visibility/positioning can change based on monitors and settings;
+    // doing this first avoids emitting streaming/error events to a hidden or off-screen window.
+    ensure_quick_ask_window_visible(app);
     if let Some(win) = app.get_webview_window(QUICK_ASK_WINDOW_LABEL) {
         let _ = win.emit(event, value);
     } else {

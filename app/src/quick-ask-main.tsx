@@ -33,3 +33,8 @@ renderRoot(
 		</AppMantineProvider>
 	</CodeHighlightAdapterProvider>,
 );
+
+const fallback = document.getElementById("quick-ask-fallback");
+if (fallback) {
+	fallback.remove();
+}

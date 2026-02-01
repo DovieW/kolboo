@@ -157,6 +157,18 @@ describe("tauriAPI.getSettings() normalization", () => {
 		expect(settings.quick_ask_hold_hotkey).toBeNull();
 	});
 
+	it("normalizes quick_ask_dismiss_mode (invalid -> manual)", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			quick_ask_dismiss_mode: "banana",
+		});
+
+		const { tauriAPI } = await import("./tauri");
+		const settings = await tauriAPI.getSettings();
+
+		expect(settings.quick_ask_dismiss_mode).toBe("manual");
+	});
+
 	it("normalizes quick_ask_conversation_history_count (invalid/missing -> default, clamps range)", async () => {
 		vi.resetModules();
 		currentStore = new FakeStore({

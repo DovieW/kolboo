@@ -54,6 +54,13 @@ impl OverlayWindowPreset {
             Self::Hover | Self::QuickAsk => false,
         }
     }
+
+    fn focusable(self) -> bool {
+        match self {
+            Self::QuickAsk => true,
+            Self::Overlay | Self::Hover => false,
+        }
+    }
 }
 
 fn overlay_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
@@ -63,6 +70,7 @@ fn overlay_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     title: &str,
     (width, height): (f64, f64),
     visible: bool,
+    focusable: bool,
 ) -> tauri::webview::WebviewWindowBuilder<'a, R, M> {
     tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(html_path.into()))
         .title(title)
@@ -74,7 +82,7 @@ fn overlay_window_builder<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
         .skip_taskbar(true)
         .resizable(false)
         .focused(false)
-        .focusable(false)
+        .focusable(focusable)
         .accept_first_mouse(true)
         .visible(visible)
         .visible_on_all_workspaces(true)
@@ -85,14 +93,20 @@ fn overlay_window_builder_preset<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     app: &'a M,
     preset: OverlayWindowPreset,
 ) -> tauri::webview::WebviewWindowBuilder<'a, R, M> {
-    overlay_window_builder(
+    let builder = overlay_window_builder(
         app,
         preset.label(),
         preset.html_path(),
         preset.title(),
         preset.size(),
         preset.visible(),
-    )
+        preset.focusable(),
+    );
+
+    match preset {
+        OverlayWindowPreset::QuickAsk => builder.focused(true),
+        _ => builder,
+    }
 }
 
 /// Backend-driven overlay waveform publisher.

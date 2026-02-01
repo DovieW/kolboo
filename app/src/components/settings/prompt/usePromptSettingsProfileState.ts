@@ -2,6 +2,7 @@ import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import type {
 	ActiveWindowOcrMode,
 	AppSettings,
+	QuickAskDismissMode,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
 
@@ -30,6 +31,8 @@ type PromptSettingsProfileState = {
 	setLocalProfileQuickAskProvider: Setter<string | null>;
 	localProfileQuickAskModel: string | null;
 	setLocalProfileQuickAskModel: Setter<string | null>;
+	localProfileQuickAskDismissMode: QuickAskDismissMode;
+	setLocalProfileQuickAskDismissMode: Setter<QuickAskDismissMode>;
 	localQuickAskSystemPrompt: string;
 	setLocalQuickAskSystemPrompt: Setter<string>;
 	localProfileQuickReplaceEnabled: boolean;
@@ -110,6 +113,8 @@ type PromptSettingsProfileState = {
 	setQuickAskModelInheriting: Setter<boolean>;
 	quickAskSystemPromptInheriting: boolean;
 	setQuickAskSystemPromptInheriting: Setter<boolean>;
+	quickAskDismissModeInheriting: boolean;
+	setQuickAskDismissModeInheriting: Setter<boolean>;
 	quickReplaceEnabledInheriting: boolean;
 	setQuickReplaceEnabledInheriting: Setter<boolean>;
 	quickReplaceProviderInheriting: boolean;
@@ -155,6 +160,8 @@ export function usePromptSettingsProfileState({
 	const [localProfileQuickAskModel, setLocalProfileQuickAskModel] = useState<
 		string | null
 	>(null);
+	const [localProfileQuickAskDismissMode, setLocalProfileQuickAskDismissMode] =
+		useState<QuickAskDismissMode>("manual");
 	const [localQuickAskSystemPrompt, setLocalQuickAskSystemPrompt] =
 		useState<string>("");
 
@@ -285,6 +292,8 @@ export function usePromptSettingsProfileState({
 	const [quickAskModelInheriting, setQuickAskModelInheriting] = useState(false);
 	const [quickAskSystemPromptInheriting, setQuickAskSystemPromptInheriting] =
 		useState(false);
+	const [quickAskDismissModeInheriting, setQuickAskDismissModeInheriting] =
+		useState(false);
 
 	const [quickReplaceEnabledInheriting, setQuickReplaceEnabledInheriting] =
 		useState(false);
@@ -358,6 +367,9 @@ export function usePromptSettingsProfileState({
 			const quickAskSystemPromptIsNull =
 				activeProfile.quick_ask_system_prompt === null ||
 				activeProfile.quick_ask_system_prompt === undefined;
+			const quickAskDismissModeIsNull =
+				activeProfile.quick_ask_dismiss_mode === null ||
+				activeProfile.quick_ask_dismiss_mode === undefined;
 
 			const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
 
@@ -404,6 +416,14 @@ export function usePromptSettingsProfileState({
 				defaultProfile?.quick_ask_active_window_ocr_mode ??
 				settings?.quick_ask_active_window_ocr_mode ??
 				"off";
+			const baseQuickAskDismissMode: QuickAskDismissMode =
+				defaultProfile?.quick_ask_dismiss_mode === "auto"
+					? "auto"
+					: defaultProfile?.quick_ask_dismiss_mode === "manual"
+						? "manual"
+						: settings?.quick_ask_dismiss_mode === "auto"
+							? "auto"
+							: "manual";
 
 			const quickReplaceEnabledIsNull =
 				activeProfile.quick_replace_enabled === null ||
@@ -466,6 +486,7 @@ export function usePromptSettingsProfileState({
 			setQuickAskProviderInheriting(quickAskProviderIsNull);
 			setQuickAskModelInheriting(quickAskModelIsNull);
 			setQuickAskSystemPromptInheriting(quickAskSystemPromptIsNull);
+			setQuickAskDismissModeInheriting(quickAskDismissModeIsNull);
 
 			setQuickReplaceEnabledInheriting(quickReplaceEnabledIsNull);
 			setQuickReplaceProviderInheriting(quickReplaceProviderIsNull);
@@ -528,6 +549,13 @@ export function usePromptSettingsProfileState({
 					settings?.quick_ask_model ??
 					settings?.llm_model ??
 					null,
+			);
+			setLocalProfileQuickAskDismissMode(
+				activeProfileId === "default"
+					? (activeProfile.quick_ask_dismiss_mode ??
+							settings?.quick_ask_dismiss_mode ??
+							"manual")
+					: (activeProfile.quick_ask_dismiss_mode ?? baseQuickAskDismissMode),
 			);
 			setLocalQuickAskSystemPrompt(
 				activeProfile.quick_ask_system_prompt ??
@@ -674,6 +702,7 @@ export function usePromptSettingsProfileState({
 			setQuickAskProviderInheriting(false);
 			setQuickAskModelInheriting(false);
 			setQuickAskSystemPromptInheriting(false);
+			setQuickAskDismissModeInheriting(false);
 
 			setQuickReplaceEnabledInheriting(false);
 			setQuickReplaceProviderInheriting(false);
@@ -698,6 +727,9 @@ export function usePromptSettingsProfileState({
 			setLocalProfileLlmModel(null);
 			setLocalProfileQuickAskProvider(null);
 			setLocalProfileQuickAskModel(null);
+			setLocalProfileQuickAskDismissMode(
+				settings?.quick_ask_dismiss_mode ?? "manual",
+			);
 			setLocalQuickAskSystemPrompt(settings?.quick_ask_system_prompt ?? "");
 
 			setLocalProfileQuickReplaceEnabled(
@@ -748,6 +780,7 @@ export function usePromptSettingsProfileState({
 		settings?.quick_ask_provider,
 		settings?.quick_ask_model,
 		settings?.quick_ask_system_prompt,
+		settings?.quick_ask_dismiss_mode,
 		defaultRewriteEnabled,
 		profiles,
 		settings?.quick_replace_enabled,
@@ -768,6 +801,8 @@ export function usePromptSettingsProfileState({
 		setLocalProfileQuickAskProvider,
 		localProfileQuickAskModel,
 		setLocalProfileQuickAskModel,
+		localProfileQuickAskDismissMode,
+		setLocalProfileQuickAskDismissMode,
 		localQuickAskSystemPrompt,
 		setLocalQuickAskSystemPrompt,
 		localProfileQuickReplaceEnabled,
@@ -848,6 +883,8 @@ export function usePromptSettingsProfileState({
 		setQuickAskModelInheriting,
 		quickAskSystemPromptInheriting,
 		setQuickAskSystemPromptInheriting,
+		quickAskDismissModeInheriting,
+		setQuickAskDismissModeInheriting,
 		quickReplaceEnabledInheriting,
 		setQuickReplaceEnabledInheriting,
 		quickReplaceProviderInheriting,

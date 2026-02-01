@@ -56,6 +56,7 @@ import {
 	type OverlayMonitorTarget,
 	type PlayingAudioHandling,
 	type ProxySettings,
+	type QuickAskDismissMode,
 	type RewriteProgramPromptProfile,
 	recordingsAPI,
 	type SettingsGuideState,
@@ -1514,6 +1515,19 @@ export function useUpdateQuickAskSystemPrompt() {
 	return useMutation({
 		mutationFn: async (prompt: string | null) => {
 			await tauriAPI.updateQuickAskSystemPrompt(prompt);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateQuickAskDismissMode() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (mode: QuickAskDismissMode) => {
+			await tauriAPI.updateQuickAskDismissMode(mode);
 			await configAPI.syncPipelineConfig();
 		},
 		onSuccess: () => {

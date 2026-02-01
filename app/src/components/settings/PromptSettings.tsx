@@ -23,6 +23,7 @@ import {
 	useUpdateQuickAskAnthropicThinkingBudget,
 	useUpdateQuickAskConversationHistoryCount,
 	useUpdateQuickAskConversationHistoryEnabled,
+	useUpdateQuickAskDismissMode,
 	useUpdateQuickAskGeminiThinkingBudget,
 	useUpdateQuickAskGeminiThinkingLevel,
 	useUpdateQuickAskIncludeSelectedText,
@@ -42,6 +43,7 @@ import {
 	type CleanupPromptSections,
 	type CleanupPromptSectionsOverride,
 	type IntentRouterSettings,
+	type QuickAskDismissMode,
 	type RewritePreset,
 	type RewriteProgramPromptProfile,
 	tauriAPI,
@@ -149,6 +151,7 @@ export function PromptSettings({
 	const updateQuickAskProvider = useUpdateQuickAskProvider();
 	const updateQuickAskModel = useUpdateQuickAskModel();
 	const updateQuickAskSystemPrompt = useUpdateQuickAskSystemPrompt();
+	const updateQuickAskDismissMode = useUpdateQuickAskDismissMode();
 	const updateQuickAskIncludeSelectedText =
 		useUpdateQuickAskIncludeSelectedText();
 	const updateQuickAskConversationHistoryEnabled =
@@ -192,6 +195,7 @@ export function PromptSettings({
 				rewrite_include_clipboard_context: null,
 				quick_replace_include_clipboard_context: null,
 				quick_ask_include_clipboard_context: null,
+				quick_ask_dismiss_mode: null,
 
 				rewrite_active_window_ocr_mode: null,
 				quick_replace_active_window_ocr_mode: null,
@@ -233,6 +237,8 @@ export function PromptSettings({
 		setLocalProfileQuickAskProvider,
 		localProfileQuickAskModel,
 		setLocalProfileQuickAskModel,
+		localProfileQuickAskDismissMode,
+		setLocalProfileQuickAskDismissMode,
 		localQuickAskSystemPrompt,
 		setLocalQuickAskSystemPrompt,
 		localProfileQuickReplaceEnabled,
@@ -313,6 +319,8 @@ export function PromptSettings({
 		setQuickAskModelInheriting,
 		quickAskSystemPromptInheriting,
 		setQuickAskSystemPromptInheriting,
+		quickAskDismissModeInheriting,
+		setQuickAskDismissModeInheriting,
 		quickReplaceEnabledInheriting,
 		setQuickReplaceEnabledInheriting,
 		quickReplaceProviderInheriting,
@@ -422,6 +430,13 @@ export function PromptSettings({
 		localProfileQuickReplaceModel,
 		effectiveRouterLlmProvider: effectiveRouter?.llm_provider ?? null,
 	});
+
+	const defaultQuickAskDismissMode: QuickAskDismissMode = useMemo(() => {
+		const defaultProfile = profiles.find((p) => p.id === "default");
+		if (defaultProfile?.quick_ask_dismiss_mode === "auto") return "auto";
+		if (defaultProfile?.quick_ask_dismiss_mode === "manual") return "manual";
+		return settings?.quick_ask_dismiss_mode ?? "manual";
+	}, [profiles, settings?.quick_ask_dismiss_mode]);
 
 	const saveRouter = (router: IntentRouterSettings | null) => {
 		if (!activeProfile) return;
@@ -713,6 +728,7 @@ export function PromptSettings({
 				rewrite_llm_enabled: null,
 
 				context_grab_method: null,
+				quick_ask_dismiss_mode: null,
 			};
 
 			const updated = [...profiles, { ...defaultProfile, ...next }];
@@ -1636,12 +1652,15 @@ export function PromptSettings({
 					quickAskAnthropicThinkingBudgetInheriting
 				}
 				quickAskSystemPromptInheriting={quickAskSystemPromptInheriting}
+				quickAskDismissModeInheriting={quickAskDismissModeInheriting}
 				defaultQuickAskIncludeClipboardContext={
 					defaultQuickAskIncludeClipboardContext
 				}
+				defaultQuickAskDismissMode={defaultQuickAskDismissMode}
 				localProfileQuickAskIncludeClipboardContext={
 					localProfileQuickAskIncludeClipboardContext
 				}
+				localProfileQuickAskDismissMode={localProfileQuickAskDismissMode}
 				localProfileQuickAskOpenAiReasoningEffort={
 					localProfileQuickAskOpenAiReasoningEffort
 				}
@@ -1696,6 +1715,7 @@ export function PromptSettings({
 					updateQuickAskAnthropicThinkingBudget
 				}
 				updateQuickAskSystemPrompt={updateQuickAskSystemPrompt}
+				updateQuickAskDismissMode={updateQuickAskDismissMode}
 				setQuickAskIncludeClipboardContextInheriting={
 					setQuickAskIncludeClipboardContextInheriting
 				}
@@ -1714,11 +1734,13 @@ export function PromptSettings({
 					setQuickAskAnthropicThinkingBudgetInheriting
 				}
 				setQuickAskSystemPromptInheriting={setQuickAskSystemPromptInheriting}
+				setQuickAskDismissModeInheriting={setQuickAskDismissModeInheriting}
 				setLocalProfileQuickAskIncludeClipboardContext={
 					setLocalProfileQuickAskIncludeClipboardContext
 				}
 				setLocalProfileQuickAskProvider={setLocalProfileQuickAskProvider}
 				setLocalProfileQuickAskModel={setLocalProfileQuickAskModel}
+				setLocalProfileQuickAskDismissMode={setLocalProfileQuickAskDismissMode}
 				setLocalProfileQuickAskOpenAiReasoningEffort={
 					setLocalProfileQuickAskOpenAiReasoningEffort
 				}

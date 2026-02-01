@@ -35,6 +35,7 @@ export type EventMap = {
 	"pipeline-transcript-ready": PipelineTranscriptReadyPayload;
 	"pipeline-transcription-started": EmptyEventPayload;
 	"quick-ask-answer": QuickAskAnswerPayload;
+	"quick-ask-dismiss-requested": EmptyEventPayload;
 	"quick-ask-started": QuickAskStartedPayload;
 	"recording-start": EmptyEventPayload;
 	"recording-stop": EmptyEventPayload;

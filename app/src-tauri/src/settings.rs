@@ -426,6 +426,8 @@ pub struct RewriteProgramPromptProfile {
     pub quick_ask_model: Option<String>,
     #[serde(default)]
     pub quick_ask_system_prompt: Option<String>,
+    #[serde(default)]
+    pub quick_ask_dismiss_mode: Option<String>,
 
     /// Context grabbing method for highlighted-text capture.
     ///

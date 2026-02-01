@@ -271,6 +271,19 @@ export const tauriAPI = {
 		return invoke("hide_overlay_hover");
 	},
 
+	/**
+	 * Enable or disable the Escape-key shortcut while the Quick Ask UI is visible.
+	 *
+	 * When enabled, pressing Escape will be handled by Quick Ask (e.g. to cancel/close it).
+	 * When disabled, Quick Ask will not register the Escape shortcut, allowing other handlers
+	 * or windows to receive the key event instead.
+	 *
+	 * @param enabled Whether the Quick Ask Escape shortcut should be registered.
+	 */
+	async setQuickAskEscapeEnabled(enabled: boolean): Promise<void> {
+		return invoke("set_quick_ask_escape_enabled", { enabled });
+	},
+
 	async startDragging(): Promise<void> {
 		const window = getCurrentWindow();
 		return window.startDragging();

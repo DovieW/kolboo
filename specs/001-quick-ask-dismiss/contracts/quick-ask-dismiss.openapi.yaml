@@ -1,0 +1,69 @@
+openapi: 3.0.3
+info:
+  title: Quick Ask Dismiss Mode (Conceptual Contract)
+  version: 1.0.0
+  description: |
+    Conceptual API contracts that mirror settings and overlay behaviors for Quick Ask.
+    These map to internal settings/commands rather than public HTTP endpoints.
+paths:
+  /settings/quick-ask-dismiss-mode:
+    get:
+      summary: Get default dismiss mode and per-profile overrides
+      responses:
+        "200":
+          description: Current dismiss mode settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DismissModeSettings"
+  /settings/profiles/{profileId}/quick-ask-dismiss-mode:
+    put:
+      summary: Set dismiss mode for a profile
+      parameters:
+        - name: profileId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DismissModeUpdate"
+      responses:
+        "204":
+          description: Updated
+  /quick-ask/dismiss:
+    post:
+      summary: Explicitly dismiss Quick Ask (manual close button)
+      responses:
+        "204":
+          description: Dismissed
+  /quick-ask/click-away:
+    post:
+      summary: Handle click-away dismissal (auto mode only)
+      responses:
+        "204":
+          description: Dismissed when auto mode is enabled
+components:
+  schemas:
+    DismissModeSettings:
+      type: object
+      properties:
+        defaultMode:
+          $ref: "#/components/schemas/DismissMode"
+        overrides:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/DismissMode"
+      required: [defaultMode, overrides]
+    DismissModeUpdate:
+      type: object
+      properties:
+        mode:
+          $ref: "#/components/schemas/DismissMode"
+      required: [mode]
+    DismissMode:
+      type: string
+      enum: [manual, auto]

@@ -813,6 +813,17 @@ pub async fn hide_overlay(app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
+/// Toggle Escape shortcut while the Quick Ask overlay is visible.
+#[tauri::command]
+pub async fn set_quick_ask_escape_enabled(app: AppHandle, enabled: bool) -> CommandResult<()> {
+    #[cfg(desktop)]
+    {
+        crate::set_escape_cancel_shortcut_enabled(&app, enabled);
+    }
+
+    Ok(())
+}
+
 /// Notify backend that the overlay frontend has mounted.
 ///
 /// This gives us a chance to re-assert visibility/position when recording starts
@@ -1116,7 +1127,8 @@ pub async fn set_widget_position(app: AppHandle, position: String) -> CommandRes
 
 /// Best-effort: position the Quick Ask overlay window to the configured monitor.
 ///
-/// Quick Ask is implemented as a transparent always-on-top window that covers a full monitor.
+/// Quick Ask is implemented as a transparent always-on-top window sized to the panel,
+/// so it doesn't block interaction with the rest of the screen.
 #[cfg(desktop)]
 pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()> {
     let Some(win) = app.get_webview_window("quick_ask") else {
@@ -1128,16 +1140,37 @@ pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()
     let pos = monitor.position();
 
     // Use PHYSICAL coordinates to avoid DPI conversion edge cases (especially on Windows).
+    let scale = monitor.scale_factor();
+    let desired_width = 520.0;
+    let desired_height = 260.0;
+    let mut width_px = (desired_width * scale).round().max(1.0) as u32;
+    let mut height_px = (desired_height * scale).round().max(1.0) as u32;
+
+    width_px = width_px.min(size.width);
+    height_px = height_px.min(size.height);
+
     win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-        width: size.width,
-        height: size.height,
+        width: width_px,
+        height: height_px,
     }))
     .map_err(|e| e.to_string())?;
-    win.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-        x: pos.x,
-        y: pos.y,
-    }))
-    .map_err(|e| e.to_string())?;
+
+    let screen_right = pos.x.saturating_add(size.width as i32);
+    let screen_bottom = pos.y.saturating_add(size.height as i32);
+    let max_x = screen_right.saturating_sub(width_px as i32);
+    let max_y = screen_bottom.saturating_sub(height_px as i32);
+    let min_x = pos.x;
+    let min_y = pos.y;
+
+    let margin_px = (4.0 * scale).round() as i32;
+    let mut x = pos.x + ((size.width as i32 - width_px as i32) / 2);
+    let mut y = max_y.saturating_sub(margin_px);
+
+    x = x.clamp(min_x, max_x);
+    y = y.clamp(min_y, max_y);
+
+    win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }

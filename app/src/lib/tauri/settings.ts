@@ -30,6 +30,7 @@ import type {
 	OverlayMonitorTarget,
 	PlayingAudioHandling,
 	ProxySettings,
+	QuickAskDismissMode,
 	RewritePreset,
 	RewriteProgramPromptProfile,
 	SettingsGuideState,
@@ -315,6 +316,18 @@ function normalizeMainWindowCloseBehavior(
 
 	// Default for unknown/missing values
 	return "minimize_to_tray";
+}
+
+function normalizeQuickAskDismissMode(value: unknown): QuickAskDismissMode {
+	if (value === "manual" || value === "auto") return value;
+	return "manual";
+}
+
+function normalizeQuickAskDismissModeOverride(
+	value: unknown,
+): QuickAskDismissMode | null {
+	if (value === "manual" || value === "auto") return value;
+	return null;
 }
 
 function normalizeQuickAskConversationHistoryCount(raw: unknown): number {
@@ -800,6 +813,9 @@ export const tauriSettingsAPI = {
 				quick_ask_system_prompt_raw.trim().length > 0
 					? quick_ask_system_prompt_raw
 					: null;
+			const quick_ask_dismiss_mode = normalizeQuickAskDismissModeOverride(
+				p.quick_ask_dismiss_mode,
+			);
 
 			const context_grab_method_raw = p.context_grab_method;
 			const context_grab_method: ContextGrabMethod | null =
@@ -970,6 +986,7 @@ export const tauriSettingsAPI = {
 				quick_ask_provider,
 				quick_ask_model,
 				quick_ask_system_prompt,
+				quick_ask_dismiss_mode,
 				context_grab_method,
 				rewrite_include_clipboard_context,
 				quick_replace_include_clipboard_context,
@@ -1120,6 +1137,9 @@ export const tauriSettingsAPI = {
 				(await store.get<string | null>("quick_ask_model")) ?? null,
 			quick_ask_system_prompt:
 				(await store.get<string | null>("quick_ask_system_prompt")) ?? null,
+			quick_ask_dismiss_mode: normalizeQuickAskDismissMode(
+				await store.get("quick_ask_dismiss_mode"),
+			),
 
 			quick_ask_include_selected_text:
 				(await store.get<boolean>("quick_ask_include_selected_text")) ?? false,
@@ -1449,6 +1469,13 @@ export const tauriSettingsAPI = {
 			patch: {
 				quick_ask_system_prompt: normalized.length > 0 ? normalized : null,
 			},
+		});
+	},
+
+	async updateQuickAskDismissMode(mode: QuickAskDismissMode): Promise<void> {
+		const normalized = normalizeQuickAskDismissMode(mode);
+		await applySettingsPatch({
+			patch: { quick_ask_dismiss_mode: normalized },
 		});
 	},
 

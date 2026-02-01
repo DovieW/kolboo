@@ -29,6 +29,7 @@ export const BACKEND_EVENT_NAMES = [
 	"request-disconnect",
 	"quick-ask-started",
 	"quick-ask-answer",
+	"quick-ask-dismiss-requested",
 	"local-whisper-model-load",
 	"whisper-model-download-progress",
 ] as const;

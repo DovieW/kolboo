@@ -11,10 +11,12 @@ import {
 } from "@mantine/core";
 import { Info, RotateCcw } from "lucide-react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import { QUICK_ASK_DISMISS_MODE_OPTIONS } from "../../../lib/quickAskDismissMode";
 import type {
 	ActiveWindowOcrMode,
 	AppSettings,
 	OpenAiReasoningEffort,
+	QuickAskDismissMode,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
 import { llmAPI } from "../../../lib/tauri";
@@ -58,8 +60,11 @@ export function QuickAskPanel({
 	quickAskGeminiThinkingBudgetInheriting,
 	quickAskAnthropicThinkingBudgetInheriting,
 	quickAskSystemPromptInheriting,
+	quickAskDismissModeInheriting,
 	defaultQuickAskIncludeClipboardContext,
+	defaultQuickAskDismissMode,
 	localProfileQuickAskIncludeClipboardContext,
+	localProfileQuickAskDismissMode,
 	localProfileQuickAskOpenAiReasoningEffort,
 	localProfileQuickAskGeminiThinkingLevel,
 	localProfileQuickAskGeminiThinkingBudget,
@@ -86,6 +91,7 @@ export function QuickAskPanel({
 	updateQuickAskGeminiThinkingBudget,
 	updateQuickAskAnthropicThinkingBudget,
 	updateQuickAskSystemPrompt,
+	updateQuickAskDismissMode,
 	setQuickAskIncludeClipboardContextInheriting,
 	setQuickAskActiveWindowOcrModeInheriting,
 	setQuickAskProviderInheriting,
@@ -95,10 +101,12 @@ export function QuickAskPanel({
 	setQuickAskGeminiThinkingBudgetInheriting,
 	setQuickAskAnthropicThinkingBudgetInheriting,
 	setQuickAskSystemPromptInheriting,
+	setQuickAskDismissModeInheriting,
 	setLocalProfileQuickAskIncludeClipboardContext,
 	setLocalProfileQuickAskActiveWindowOcrMode,
 	setLocalProfileQuickAskProvider,
 	setLocalProfileQuickAskModel,
+	setLocalProfileQuickAskDismissMode,
 	setLocalProfileQuickAskOpenAiReasoningEffort,
 	setLocalProfileQuickAskGeminiThinkingLevel,
 	setLocalProfileQuickAskGeminiThinkingBudget,
@@ -151,8 +159,11 @@ export function QuickAskPanel({
 	quickAskGeminiThinkingBudgetInheriting: boolean;
 	quickAskAnthropicThinkingBudgetInheriting: boolean;
 	quickAskSystemPromptInheriting: boolean;
+	quickAskDismissModeInheriting: boolean;
 	defaultQuickAskIncludeClipboardContext: boolean;
+	defaultQuickAskDismissMode: QuickAskDismissMode;
 	localProfileQuickAskIncludeClipboardContext: boolean;
+	localProfileQuickAskDismissMode: QuickAskDismissMode;
 	localProfileQuickAskOpenAiReasoningEffort: string;
 	localProfileQuickAskGeminiThinkingLevel: string;
 	localProfileQuickAskGeminiThinkingBudget: string;
@@ -179,6 +190,7 @@ export function QuickAskPanel({
 	updateQuickAskGeminiThinkingBudget: Mutation<number | null>;
 	updateQuickAskAnthropicThinkingBudget: Mutation<number | null>;
 	updateQuickAskSystemPrompt: Mutation<string | null>;
+	updateQuickAskDismissMode: Mutation<QuickAskDismissMode>;
 	setQuickAskIncludeClipboardContextInheriting: Dispatch<
 		SetStateAction<boolean>
 	>;
@@ -192,6 +204,7 @@ export function QuickAskPanel({
 		SetStateAction<boolean>
 	>;
 	setQuickAskSystemPromptInheriting: Dispatch<SetStateAction<boolean>>;
+	setQuickAskDismissModeInheriting: Dispatch<SetStateAction<boolean>>;
 	setLocalProfileQuickAskIncludeClipboardContext: Dispatch<
 		SetStateAction<boolean>
 	>;
@@ -200,6 +213,9 @@ export function QuickAskPanel({
 	>;
 	setLocalProfileQuickAskProvider: Dispatch<SetStateAction<string | null>>;
 	setLocalProfileQuickAskModel: Dispatch<SetStateAction<string | null>>;
+	setLocalProfileQuickAskDismissMode: Dispatch<
+		SetStateAction<QuickAskDismissMode>
+	>;
 	setLocalProfileQuickAskOpenAiReasoningEffort: Dispatch<
 		SetStateAction<string>
 	>;
@@ -239,6 +255,8 @@ export function QuickAskPanel({
 	const ocrModeDisabledTooltip =
 		ocrProviderUnavailableReason ??
 		"OCR is disabled until an OCR Base URL is set in Settings → Providers.";
+	const dismissModeDisabled =
+		isSavingProfile || updateQuickAskDismissMode.isPending;
 
 	return (
 		<>
@@ -271,6 +289,63 @@ export function QuickAskPanel({
 						color="gray"
 						size="md"
 						disabled={!isDefaultScope}
+					/>
+				</div>
+			</div>
+
+			<div className="settings-row">
+				<div>
+					<p className="settings-label">Dismiss Mode</p>
+					<p className="settings-description">
+						Manual keeps the Quick Ask overlay open until you close it. Auto
+						dismisses when you click away.
+					</p>
+				</div>
+				<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+					<SettingsInheritanceIndicator
+						isDefaultScope={isDefaultScope}
+						inheriting={quickAskDismissModeInheriting}
+						inheritTooltip={inheritTooltip}
+						onDisableOverride={() =>
+							openDisableOverrideDialog({
+								title: "Disable Quick Ask Dismiss Mode override?",
+								onConfirm: () => {
+									setQuickAskDismissModeInheriting(true);
+									setLocalProfileQuickAskDismissMode(
+										defaultQuickAskDismissMode,
+									);
+									saveProfileMetadata({
+										quick_ask_dismiss_mode: null,
+									});
+								},
+							})
+						}
+						disabled={dismissModeDisabled}
+					/>
+					<Select
+						data={QUICK_ASK_DISMISS_MODE_OPTIONS}
+						value={localProfileQuickAskDismissMode}
+						onChange={(value) => {
+							if (value !== "manual" && value !== "auto") return;
+							if (isDefaultScope) {
+								setLocalProfileQuickAskDismissMode(value);
+								updateQuickAskDismissMode.mutate(value);
+								return;
+							}
+							setQuickAskDismissModeInheriting(false);
+							setLocalProfileQuickAskDismissMode(value);
+							saveProfileMetadata({ quick_ask_dismiss_mode: value });
+						}}
+						disabled={dismissModeDisabled}
+						withCheckIcon={false}
+						styles={{
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 160,
+							},
+						}}
 					/>
 				</div>
 			</div>

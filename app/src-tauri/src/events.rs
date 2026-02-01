@@ -97,6 +97,9 @@ pub const EVENT_QUICK_ASK_STARTED: &str = "quick-ask-started";
 /// Emitted when a Quick Ask response is ready.
 pub const EVENT_QUICK_ASK_ANSWER: &str = "quick-ask-answer";
 
+/// Emitted to request that the Quick Ask overlay dismiss itself (animate out).
+pub const EVENT_QUICK_ASK_DISMISS_REQUESTED: &str = "quick-ask-dismiss-requested";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Whisper/model events
 // ─────────────────────────────────────────────────────────────────────────────

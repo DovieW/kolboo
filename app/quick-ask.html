@@ -71,6 +71,12 @@
 		<title>Kolboo Quick Ask</title>
 	</head>
 	<body>
+		<div id="quick-ask-fallback" style="position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding: 16px 16px 32px; box-sizing: border-box; font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+			<div style="width: min(520px, 100%); background: rgba(10, 10, 10, 0.85); color: #fff; border-radius: 16px; border: 1px solid rgba(255,255,255,0.12); padding: 12px 14px; font-size: 13px; line-height: 1.4;">
+				<strong style="display: block; margin-bottom: 6px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7;">Quick Ask</strong>
+				Loading… If this stays blank, the app didn’t finish loading the overlay.
+			</div>
+		</div>
 		<div id="root"></div>
 		<script type="module" src="./src/quick-ask-main.tsx"></script>
 	</body>

@@ -189,6 +189,7 @@ export interface RewriteProgramPromptProfile {
 	quick_ask_provider?: string | null;
 	quick_ask_model?: string | null;
 	quick_ask_system_prompt?: string | null;
+	quick_ask_dismiss_mode?: QuickAskDismissMode | null;
 
 	// Context grabbing method for highlighted-text capture.
 	context_grab_method?: ContextGrabMethod | null;
@@ -448,6 +449,8 @@ export type WidgetPosition =
 
 export type OutputMode = "paste" | "paste_and_clipboard" | "clipboard";
 
+export type QuickAskDismissMode = "manual" | "auto";
+
 export type TranscriptionRetentionUnit = "days" | "hours";
 
 export type RequestLogsRetentionMode = "amount" | "time";
@@ -619,6 +622,7 @@ export interface AppSettings {
 	quick_ask_provider: string | null;
 	quick_ask_model: string | null;
 	quick_ask_system_prompt: string | null;
+	quick_ask_dismiss_mode: QuickAskDismissMode;
 
 	// When enabled, Quick Ask will attempt to capture the currently highlighted text
 	// (via a copy probe) and include it as additional context.

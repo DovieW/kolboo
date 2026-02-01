@@ -2492,6 +2492,7 @@ pub fn run() {
             commands::overlay::schedule_hide_overlay_hover,
             commands::overlay::set_overlay_mode,
             commands::overlay::set_widget_position,
+            commands::overlay::set_quick_ask_escape_enabled,
             // Pipeline commands for all-in-app STT
             commands::recording::pipeline_start_recording,
             commands::recording::pipeline_get_active_profile_for_foreground_app,

@@ -370,7 +370,7 @@ body {
 	border-radius: 16px;
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	/* Make the panel more readable by reducing transparency. */
-	background: rgba(10, 10, 10, 0.96);
+	background: rgba(10, 10, 10, 0.95);
 	backdrop-filter: blur(12px);
 	opacity: 1;
 	transform: translateY(0) scale(1);
@@ -419,6 +419,49 @@ body {
 	text-overflow: ellipsis;
 }
 
+.quick-ask-question-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.quick-ask-question-row .quick-ask-question {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.quick-ask-close {
+	appearance: none;
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	background: rgba(255, 255, 255, 0.06);
+	color: rgba(255, 255, 255, 0.85);
+	width: 22px;
+	height: 22px;
+	border-radius: 999px;
+	font-size: 14px;
+	line-height: 1;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	flex: 0 0 auto;
+}
+
+.quick-ask-close:hover {
+	border-color: rgba(255, 255, 255, 0.22);
+	background: rgba(255, 255, 255, 0.12);
+}
+
+.quick-ask-close:focus-visible {
+	outline: 2px solid rgba(var(--accent-rgb) / 0.35);
+	outline-offset: 2px;
+}
+
+.quick-ask-close:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
 .quick-ask-loading {
 	display: flex;
 	align-items: center;
@@ -434,18 +477,12 @@ body {
 }
 
 .quick-ask-answer {
-	max-height: 320px;
 	/* Allow ScrollArea to shrink inside the panel and keep scrolling working. */
 	flex: 1 1 auto;
 	min-height: 0;
 	border-radius: 12px;
 	background: rgba(255, 255, 255, 0.05);
 	border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-/* Mantine ScrollArea needs an actual constrained viewport to become scrollable. */
-.quick-ask-answer .mantine-ScrollArea-viewport {
-	max-height: 320px;
 }
 
 .quick-ask-answer-text {
@@ -463,6 +500,10 @@ body {
 	white-space: normal;
 	word-break: break-word;
 	overflow-wrap: anywhere;
+}
+
+.quick-ask-answer--scrollable .quick-ask-answer-md {
+	padding-bottom: 14px;
 }
 
 .quick-ask-answer-md > :first-child {
