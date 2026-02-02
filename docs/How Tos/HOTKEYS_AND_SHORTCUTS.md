@@ -40,7 +40,14 @@ A single user hotkey setting may be handled by (1) or (2) depending on platform 
 
 ## Where hotkey settings are stored
 
-These keys live in the store (`settings.json`):
+Hotkeys are now stored as **cards** in the store (`settings.json`):
+
+- `hotkey_shortcuts`: array of cards
+  - `id`: stable ID for the UI
+  - `type`: action type (`toggle`, `hold`, `paste_last`, `retry`, `quick_ask_hold`, `quick_ask_toggle`)
+  - `hotkey`: `{ modifiers: string[], key: string } | null`
+
+Legacy keys are still written for backwards compatibility (older builds):
 
 - `toggle_hotkey`: start/stop recording
 - `hold_hotkey`: push-to-talk style record
@@ -95,17 +102,18 @@ Keep these aligned with backend defaults.
   current parser, so they cannot be registered as global shortcuts without adding new native handling.
 
 - `app/src/components/settings/HotkeySettings.tsx`
-  - Wires inputs to React Query mutations.
+  - Renders shortcut cards, add dropdown, and per-card actions.
 
 ### Settings writes + re-register flow
 
 - `app/src/lib/queries.ts`
-  - Mutations update store keys via `tauriAPI.update*Hotkey(...)`.
-  - Then calls:
-    - `tauriAPI.unregisterShortcuts()`
-    - `tauriAPI.registerShortcuts()`
+  - Card mutations call backend commands:
+    - `hotkey_shortcut_cards_create`
+    - `hotkey_shortcut_cards_update`
+    - `hotkey_shortcut_cards_delete`
+  - Backend re-registers shortcuts after a card update.
 
-That explicit unregister/register sequence is intentional; it keeps registrations consistent.
+Hotkey capture still temporarily unregisters shortcuts while recording a new key.
 
 ---
 
@@ -115,6 +123,8 @@ That explicit unregister/register sequence is intentional; it keeps registration
 
 - `app/src-tauri/src/settings.rs`
   - `HotkeyConfig` struct
+  - `HotkeyAction` enum
+  - `HotkeyShortcutCard` struct
   - Default key constants
   - Default constructors:
     - `HotkeyConfig::default_toggle()`
@@ -146,7 +156,8 @@ There are two separate registration paths:
    - `app/src-tauri/src/lib.rs` → `register_initial_shortcuts(...)`
 
 2. Runtime registration (when user changes settings):
-   - `app/src-tauri/src/commands/settings.rs` → `register_shortcuts` / `unregister_shortcuts`
+  - `app/src-tauri/src/commands/settings.rs` → `register_shortcuts` / `unregister_shortcuts`
+  - Reads `hotkey_shortcuts` (cards) and supports multiple cards per action.
 
 ### Shortcut event handling
 
@@ -187,32 +198,32 @@ Checklist:
 
 ## How to add a new hotkey (end-to-end)
 
-Example: add a new store setting `foo_hotkey`.
+Example: add a new shortcut action `foo`.
 
 ### Frontend
 
-1. Add setting to `AppSettings`
+1. Add new action type
 
-   - File: `app/src/lib/tauri.ts`
+  - `app/src/lib/hotkeys.ts` → add to `HotkeyType`
+  - `app/src-tauri/src/settings.rs` → add to `HotkeyAction`
 
-2. Add normalization
+2. Add card support
 
-   - Implement `normalizeHotkeyConfig(value, fallback)` usage for the new key.
+  - Update card label/description in `HotkeySettings.tsx`.
+  - Update any defaults/seeding if needed.
 
-3. Add store update helper
+3. Update backend card handling
 
-   - `tauriAPI.updateFooHotkey(hotkey: HotkeyConfig | null)` in `app/src/lib/tauri.ts`
+  - `app/src-tauri/src/shortcuts/mod.rs` → handle new action in dispatch.
+  - Ensure registration reads cards (already supports duplicates).
 
-4. Add mutation
+4. Update frontend mutations
 
-   - `useUpdateFooHotkey()` in `app/src/lib/queries.ts`
-   - Follow the existing pattern:
-     - read settings (for duplicate check)
-     - write the key
-     - unregister/register shortcuts
+  - Use card CRUD mutations in `app/src/lib/queries.ts`.
+  - Add duplicate validation in `hotkeyMutations.ts` if needed.
 
-5. Add UI
-   - Add a `HotkeyInput` in an appropriate settings panel.
+5. Update UI
+  - Add the new type to the dropdown list in `HotkeySettings.tsx`.
 
 ### Backend
 

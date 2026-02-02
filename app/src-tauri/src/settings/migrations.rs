@@ -6,13 +6,14 @@ use tauri::Runtime;
 use tauri_plugin_store::Store;
 
 #[cfg(desktop)]
-pub(crate) const SETTINGS_VERSION_LATEST: u32 = 5;
+pub(crate) const SETTINGS_VERSION_LATEST: u32 = 6;
 
 // Version history:
 // 1 -> 2: quick ask hotkey key rename, retention key split, enum typo fixes, auto_mute_audio -> playing_audio_handling
 // 2 -> 3: cleanup_prompt_sections schema normalization (global + per-profile)
 // 3 -> 4: rewrite profile rewrite_llm_enabled normalization (ensure explicit boolean for non-default profiles)
 // 4 -> 5: active-window OCR mode migration (legacy bool -> tri-state)
+// 5 -> 6: migrate legacy hotkey keys into hotkey_shortcuts array
 
 #[cfg(desktop)]
 pub(crate) trait SettingsStore {
@@ -307,6 +308,46 @@ fn migrate_v4_to_v5(store: &impl SettingsStore) -> bool {
 }
 
 #[cfg(desktop)]
+fn migrate_v5_to_v6(store: &impl SettingsStore) -> bool {
+    if matches!(store.get("hotkey_shortcuts"), Some(Value::Array(_))) {
+        return false;
+    }
+
+    let mut cards: Vec<Value> = Vec::new();
+
+    let push_card = |cards: &mut Vec<Value>, action: &str, value: Option<Value>| {
+        let Some(Value::Object(_)) = value else {
+            return;
+        };
+
+        cards.push(json!({
+            "id": format!("legacy-{}", action),
+            "type": action,
+            "hotkey": value,
+        }));
+    };
+
+    push_card(cards.as_mut(), "toggle", store.get("toggle_hotkey"));
+    push_card(cards.as_mut(), "hold", store.get("hold_hotkey"));
+    push_card(cards.as_mut(), "paste_last", store.get("paste_last_hotkey"));
+    push_card(cards.as_mut(), "retry", store.get("retry_hotkey"));
+
+    let raw_quick_ask_hold = match store.get("quick_ask_hold_hotkey") {
+        None => store.get("quick_ask_hotkey"),
+        other => other,
+    };
+    push_card(cards.as_mut(), "quick_ask_hold", raw_quick_ask_hold);
+    push_card(
+        cards.as_mut(),
+        "quick_ask_toggle",
+        store.get("quick_ask_toggle_hotkey"),
+    );
+
+    store.set("hotkey_shortcuts", Value::Array(cards));
+    true
+}
+
+#[cfg(desktop)]
 pub(crate) fn run_settings_migrations(
     store: &impl SettingsStore,
 ) -> Result<bool, Box<dyn std::error::Error>> {
@@ -337,6 +378,11 @@ pub(crate) fn run_settings_migrations(
     if version < 5 {
         dirty |= migrate_v4_to_v5(store);
         version = 5;
+    }
+
+    if version < 6 {
+        dirty |= migrate_v5_to_v6(store);
+        version = 6;
     }
 
     if version != current_version {
@@ -392,7 +438,7 @@ mod tests {
 
         assert!(dirty);
         assert!(store.get("quick_ask_hold_hotkey").is_some());
-        assert_eq!(store.get("settings_version"), Some(json!(5)));
+        assert_eq!(store.get("settings_version"), Some(json!(6)));
     }
 
     #[test]
@@ -427,7 +473,7 @@ mod tests {
             Some(&json!({"system": {"content": "P1"}}))
         );
 
-        assert_eq!(store.get("settings_version"), Some(json!(5)));
+        assert_eq!(store.get("settings_version"), Some(json!(6)));
     }
 
     #[test]
@@ -447,7 +493,7 @@ mod tests {
 
         let dirty = run_settings_migrations(&store).expect("migration failed");
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(5)));
+        assert_eq!(store.get("settings_version"), Some(json!(6)));
 
         let profiles = store.get("rewrite_program_prompt_profiles").unwrap();
         let arr = profiles.as_array().unwrap();
@@ -510,6 +556,30 @@ mod tests {
     }
 
     #[test]
+    fn migrates_hotkey_shortcuts_from_legacy_keys() {
+        let store = TestStore::with_entries(vec![
+            ("toggle_hotkey", json!({"key":"F3","modifiers":[]})),
+            (
+                "quick_ask_toggle_hotkey",
+                json!({"key":"F4","modifiers":[]}),
+            ),
+        ]);
+
+        let dirty = run_settings_migrations(&store).expect("migration failed");
+
+        assert!(dirty);
+        assert_eq!(store.get("settings_version"), Some(json!(6)));
+        let cards = store.get("hotkey_shortcuts").expect("missing cards");
+        let arr = cards.as_array().expect("cards array");
+        assert!(arr
+            .iter()
+            .any(|card| card.get("type") == Some(&json!("toggle"))));
+        assert!(arr
+            .iter()
+            .any(|card| card.get("type") == Some(&json!("quick_ask_toggle"))));
+    }
+
+    #[test]
     fn migrates_active_window_ocr_mode_from_legacy_bool() {
         let store = TestStore::with_entries(vec![
             ("settings_version", json!(4)),
@@ -523,7 +593,7 @@ mod tests {
         let dirty = run_settings_migrations(&store).expect("migration failed");
 
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(5)));
+        assert_eq!(store.get("settings_version"), Some(json!(6)));
         assert_eq!(
             store.get("rewrite_active_window_ocr_mode"),
             Some(json!("auto"))

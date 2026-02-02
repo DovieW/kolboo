@@ -285,6 +285,41 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("quick_ask_hold_hotkey", json!(null), true);
     dirty |= set_default("quick_ask_toggle_hotkey", json!(null), true);
 
+    if store.get("hotkey_shortcuts").is_none() {
+        let mut cards: Vec<Value> = Vec::new();
+
+        let push_card = |cards: &mut Vec<Value>, action: &str, value: Option<Value>| {
+            let Some(Value::Object(_)) = value else {
+                return;
+            };
+
+            cards.push(json!({
+                "id": format!("seed-{}", action),
+                "type": action,
+                "hotkey": value,
+            }));
+        };
+
+        push_card(cards.as_mut(), "toggle", store.get("toggle_hotkey"));
+        push_card(cards.as_mut(), "hold", store.get("hold_hotkey"));
+        push_card(cards.as_mut(), "paste_last", store.get("paste_last_hotkey"));
+        push_card(cards.as_mut(), "retry", store.get("retry_hotkey"));
+
+        let raw_quick_ask_hold = match store.get("quick_ask_hold_hotkey") {
+            None => store.get("quick_ask_hotkey"),
+            other => other,
+        };
+        push_card(cards.as_mut(), "quick_ask_hold", raw_quick_ask_hold);
+        push_card(
+            cards.as_mut(),
+            "quick_ask_toggle",
+            store.get("quick_ask_toggle_hotkey"),
+        );
+
+        store.set("hotkey_shortcuts".to_string(), Value::Array(cards));
+        dirty = true;
+    }
+
     // Quick Ask system prompt:
     // - missing key => seed the default
     // - explicit null => user disabled it, don't overwrite

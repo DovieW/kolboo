@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	type HotkeySettingsLike,
 	updateHotkeyAndReregisterShortcuts,
+	updateHotkeyShortcutCardWithValidation,
+	validateHotkeyNotDuplicateInCards,
 } from "./hotkeyMutations";
+import type { HotkeyShortcutCard } from "./hotkeys";
 
 function createSettings(
 	overrides?: Partial<HotkeySettingsLike>,
@@ -138,5 +141,113 @@ describe("updateHotkeyAndReregisterShortcuts", () => {
 
 		expect(logRestoreError).toHaveBeenCalledTimes(1);
 		expect(logRestoreError).toHaveBeenCalledWith(restoreError);
+	});
+});
+
+describe("validateHotkeyNotDuplicateInCards", () => {
+	it("returns null when no duplicate exists", () => {
+		const cards: HotkeyShortcutCard[] = [
+			{
+				id: "a",
+				type: "toggle",
+				hotkey: { modifiers: ["ctrl"], key: "A" },
+			},
+			{
+				id: "b",
+				type: "hold",
+				hotkey: { modifiers: ["ctrl"], key: "B" },
+			},
+		];
+
+		const error = validateHotkeyNotDuplicateInCards(
+			{ modifiers: ["ctrl"], key: "C" },
+			cards,
+			"a",
+		);
+
+		expect(error).toBeNull();
+	});
+
+	it("returns an error when a duplicate exists", () => {
+		const cards: HotkeyShortcutCard[] = [
+			{
+				id: "a",
+				type: "toggle",
+				hotkey: { modifiers: ["ctrl"], key: "A" },
+			},
+			{
+				id: "b",
+				type: "hold",
+				hotkey: { modifiers: ["ctrl"], key: "B" },
+			},
+		];
+
+		const error = validateHotkeyNotDuplicateInCards(
+			{ modifiers: ["ctrl"], key: "B" },
+			cards,
+			"a",
+		);
+
+		expect(error).toBe("This shortcut is already used by another card.");
+	});
+});
+
+describe("updateHotkeyShortcutCardWithValidation", () => {
+	it("updates card when hotkey is unique", async () => {
+		const cards: HotkeyShortcutCard[] = [
+			{
+				id: "a",
+				type: "toggle",
+				hotkey: { modifiers: ["ctrl"], key: "A" },
+			},
+			{
+				id: "b",
+				type: "hold",
+				hotkey: { modifiers: ["ctrl"], key: "B" },
+			},
+		];
+
+		const updateCard = vi.fn(async () => {});
+
+		await updateHotkeyShortcutCardWithValidation({
+			cardId: "a",
+			nextHotkey: { modifiers: ["ctrl"], key: "C" },
+			cards,
+			updateCard,
+		});
+
+		expect(updateCard).toHaveBeenCalledTimes(1);
+		expect(updateCard).toHaveBeenCalledWith("a", {
+			modifiers: ["ctrl"],
+			key: "C",
+		});
+	});
+
+	it("throws when hotkey is a duplicate", async () => {
+		const cards: HotkeyShortcutCard[] = [
+			{
+				id: "a",
+				type: "toggle",
+				hotkey: { modifiers: ["ctrl"], key: "A" },
+			},
+			{
+				id: "b",
+				type: "hold",
+				hotkey: { modifiers: ["ctrl"], key: "B" },
+			},
+		];
+
+		const updateCard = vi.fn(async () => {});
+
+		await expect(
+			updateHotkeyShortcutCardWithValidation({
+				cardId: "a",
+				nextHotkey: { modifiers: ["ctrl"], key: "B" },
+				cards,
+				updateCard,
+			}),
+		).rejects.toThrow("This shortcut is already used by another card.");
+
+		expect(updateCard).not.toHaveBeenCalled();
 	});
 });

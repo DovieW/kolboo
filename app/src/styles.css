@@ -849,6 +849,69 @@ a:focus-visible {
 	margin-top: 8px;
 }
 
+.hotkey-shortcut-controls {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 8px 0 18px;
+	flex-wrap: wrap;
+}
+
+.hotkey-shortcut-controls__select {
+	flex: 1 1 240px;
+	max-width: 360px;
+}
+
+.hotkey-shortcut-list {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+	gap: 16px;
+	grid-auto-rows: 1fr;
+}
+
+.hotkey-shortcut-card {
+	background: var(--bg-card);
+	border: 1px solid var(--border-default);
+	border-radius: 14px;
+	padding: 16px 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.hotkey-shortcut-card__header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 16px;
+}
+
+.hotkey-shortcut-card__meta {
+	min-width: 0;
+	flex: 1 1 auto;
+}
+
+.hotkey-shortcut-card__title {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.hotkey-shortcut-card__description {
+	margin-top: 4px;
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+.hotkey-shortcut-card__actions {
+	flex-shrink: 0;
+}
+
+.hotkey-shortcut-card__body {
+	display: flex;
+	flex-direction: column;
+}
+
 .hotkey-display {
 	display: flex;
 	align-items: center;

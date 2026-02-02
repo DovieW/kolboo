@@ -9,7 +9,14 @@ import {
 	DEFAULT_RETRY_HOTKEY,
 	DEFAULT_TOGGLE_HOTKEY,
 } from "../hotkeyDefaults";
-import { type HotkeyConfig, normalizeHotkeyConfig } from "../hotkeys";
+import {
+	createHotkeyShortcutId,
+	type HotkeyConfig,
+	type HotkeyShortcutCard,
+	HotkeyShortcutCardsSchema,
+	type HotkeyType,
+	normalizeHotkeyConfig,
+} from "../hotkeys";
 import { emitTyped } from "./events";
 import type {
 	ActiveWindowOcrMode,
@@ -619,11 +626,73 @@ let storeInstance: Store | null = null;
 const SETTINGS_GUIDE_STATE_KEY = "settings_guide_state";
 const SETTINGS_VERSION_KEY = "settings_version";
 // Bump when adding settings migrations; keep TS/Rust/tests in sync.
-const SETTINGS_VERSION_LATEST = 4;
+const SETTINGS_VERSION_LATEST = 6;
 // Legacy fixtures/settings files may predate `settings_version` being written.
 // For UI normalization and tests, treat a missing/invalid version as the last
 // pre-versioning schema we can reasonably assume.
 const SETTINGS_VERSION_ASSUME_IF_MISSING = 3;
+
+const HOTKEY_TYPES: HotkeyType[] = [
+	"toggle",
+	"hold",
+	"paste_last",
+	"retry",
+	"quick_ask_hold",
+	"quick_ask_toggle",
+];
+
+type LegacyHotkeySettings = {
+	toggle_hotkey: HotkeyConfig | null;
+	hold_hotkey: HotkeyConfig | null;
+	paste_last_hotkey: HotkeyConfig | null;
+	retry_hotkey: HotkeyConfig | null;
+	quick_ask_hold_hotkey: HotkeyConfig | null;
+	quick_ask_toggle_hotkey: HotkeyConfig | null;
+};
+
+function normalizeHotkeyShortcutCards(
+	value: unknown,
+): HotkeyShortcutCard[] | null {
+	const result = HotkeyShortcutCardsSchema.safeParse(value);
+	return result.success ? result.data : null;
+}
+
+function buildShortcutCardsFromLegacy(
+	legacy: LegacyHotkeySettings,
+): HotkeyShortcutCard[] {
+	const byType: Record<HotkeyType, HotkeyConfig | null> = {
+		toggle: legacy.toggle_hotkey,
+		hold: legacy.hold_hotkey,
+		paste_last: legacy.paste_last_hotkey,
+		retry: legacy.retry_hotkey,
+		quick_ask_hold: legacy.quick_ask_hold_hotkey,
+		quick_ask_toggle: legacy.quick_ask_toggle_hotkey,
+	};
+
+	return HOTKEY_TYPES.flatMap((type) => {
+		const hotkey = byType[type];
+		if (!hotkey) return [];
+		return [
+			{
+				id: createHotkeyShortcutId(),
+				type,
+				hotkey,
+			},
+		];
+	});
+}
+
+function getFirstHotkeyByType(
+	cards: HotkeyShortcutCard[],
+	type: HotkeyType,
+): HotkeyConfig | null {
+	for (const card of cards) {
+		if (card.type !== type) continue;
+		if (card.hotkey) return card.hotkey;
+	}
+
+	return null;
+}
 
 function normalizeSettingsGuideState(value: unknown): SettingsGuideState {
 	if (value === "pending" || value === "skipped" || value === "completed") {
@@ -1057,8 +1126,7 @@ export const tauriSettingsAPI = {
 			await store.get("transcription_retention_amount"),
 		);
 
-		const settings: AppSettings = {
-			settings_version: settingsVersion,
+		const legacyHotkeys: LegacyHotkeySettings = {
 			toggle_hotkey: normalizeHotkeyConfig(
 				await store.get("toggle_hotkey"),
 				defaultToggleHotkey,
@@ -1083,6 +1151,29 @@ export const tauriSettingsAPI = {
 				await store.get("quick_ask_toggle_hotkey"),
 				defaultQuickAskToggleHotkey,
 			),
+		};
+
+		const rawShortcutCards = await store.get("hotkey_shortcuts");
+		const normalizedShortcutCards =
+			normalizeHotkeyShortcutCards(rawShortcutCards);
+		const hotkey_shortcuts =
+			normalizedShortcutCards ?? buildShortcutCardsFromLegacy(legacyHotkeys);
+
+		const settings: AppSettings = {
+			settings_version: settingsVersion,
+			toggle_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "toggle"),
+			hold_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "hold"),
+			paste_last_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "paste_last"),
+			retry_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "retry"),
+			quick_ask_hold_hotkey: getFirstHotkeyByType(
+				hotkey_shortcuts,
+				"quick_ask_hold",
+			),
+			quick_ask_toggle_hotkey: getFirstHotkeyByType(
+				hotkey_shortcuts,
+				"quick_ask_toggle",
+			),
+			hotkey_shortcuts,
 
 			hotkey_debug_enabled:
 				(await store.get<boolean>("hotkey_debug_enabled")) ?? false,
@@ -1442,6 +1533,25 @@ export const tauriSettingsAPI = {
 
 	async updateQuickAskToggleHotkey(hotkey: HotkeyConfig | null): Promise<void> {
 		await applySettingsPatch({ patch: { quick_ask_toggle_hotkey: hotkey } });
+	},
+
+	async createHotkeyShortcutCard(
+		card: HotkeyShortcutCard,
+	): Promise<HotkeyShortcutCard[]> {
+		return invoke("hotkey_shortcut_cards_create", { card });
+	},
+
+	async updateHotkeyShortcutCard(
+		cardId: string,
+		hotkey: HotkeyConfig | null,
+	): Promise<HotkeyShortcutCard[]> {
+		return invoke("hotkey_shortcut_cards_update", { cardId, hotkey });
+	},
+
+	async deleteHotkeyShortcutCard(
+		cardId: string,
+	): Promise<HotkeyShortcutCard[]> {
+		return invoke("hotkey_shortcut_cards_delete", { cardId });
 	},
 
 	/**
@@ -2080,6 +2190,23 @@ export const tauriSettingsAPI = {
 	},
 
 	async resetHotkeysToDefaults(): Promise<void> {
+		const hotkey_shortcuts: HotkeyShortcutCard[] = [];
+		const pushCard = (type: HotkeyType, hotkey: HotkeyConfig | null) => {
+			if (!hotkey) return;
+			hotkey_shortcuts.push({
+				id: createHotkeyShortcutId(),
+				type,
+				hotkey,
+			});
+		};
+
+		pushCard("toggle", DEFAULT_TOGGLE_HOTKEY);
+		pushCard("hold", DEFAULT_HOLD_HOTKEY);
+		pushCard("paste_last", DEFAULT_PASTE_LAST_HOTKEY);
+		pushCard("retry", DEFAULT_RETRY_HOTKEY);
+		pushCard("quick_ask_hold", DEFAULT_QUICK_ASK_HOLD_HOTKEY);
+		pushCard("quick_ask_toggle", DEFAULT_QUICK_ASK_TOGGLE_HOTKEY);
+
 		await applySettingsPatch({
 			patch: {
 				toggle_hotkey: DEFAULT_TOGGLE_HOTKEY,
@@ -2090,6 +2217,7 @@ export const tauriSettingsAPI = {
 				quick_ask_toggle_hotkey: DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
 				// Legacy alias (pre split): keep in sync.
 				quick_ask_hotkey: DEFAULT_QUICK_ASK_HOLD_HOTKEY,
+				hotkey_shortcuts,
 			},
 		});
 	},

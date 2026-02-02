@@ -1,4 +1,4 @@
-import type { HotkeyConfig } from "../hotkeys";
+import type { HotkeyConfig, HotkeyShortcutCard } from "../hotkeys";
 
 /**
  * Connection state for UI display (maps from pipeline state)
@@ -577,6 +577,8 @@ export interface AppSettings {
 	retry_hotkey: HotkeyConfig | null;
 	quick_ask_hold_hotkey: HotkeyConfig | null;
 	quick_ask_toggle_hotkey: HotkeyConfig | null;
+	/** Card-based shortcuts (supports multiple per action). */
+	hotkey_shortcuts: HotkeyShortcutCard[];
 
 	/** When true, backend emits extra hotkey diagnostics to the System Events panel. */
 	hotkey_debug_enabled: boolean;

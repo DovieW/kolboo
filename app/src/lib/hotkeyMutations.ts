@@ -1,4 +1,9 @@
-import { type HotkeyConfig, validateHotkeyNotDuplicate } from "./hotkeys";
+import {
+	type HotkeyConfig,
+	type HotkeyShortcutCard,
+	hotkeyIsSameAs,
+	validateHotkeyNotDuplicate,
+} from "./hotkeys";
 
 export type HotkeyKind =
 	| "toggle"
@@ -15,6 +20,40 @@ export interface HotkeySettingsLike {
 	retry_hotkey: HotkeyConfig | null;
 	quick_ask_hold_hotkey: HotkeyConfig | null;
 	quick_ask_toggle_hotkey: HotkeyConfig | null;
+}
+
+export function validateHotkeyNotDuplicateInCards(
+	nextHotkey: HotkeyConfig | null,
+	cards: HotkeyShortcutCard[],
+	excludeCardId: string,
+): string | null {
+	if (!nextHotkey) return null;
+
+	for (const card of cards) {
+		if (card.id === excludeCardId) continue;
+		if (!card.hotkey) continue;
+		if (hotkeyIsSameAs(nextHotkey, card.hotkey)) {
+			return "This shortcut is already used by another card.";
+		}
+	}
+
+	return null;
+}
+
+export async function updateHotkeyShortcutCardWithValidation(params: {
+	cardId: string;
+	nextHotkey: HotkeyConfig | null;
+	cards: HotkeyShortcutCard[];
+	updateCard: (cardId: string, hotkey: HotkeyConfig | null) => Promise<void>;
+}): Promise<void> {
+	const error = validateHotkeyNotDuplicateInCards(
+		params.nextHotkey,
+		params.cards,
+		params.cardId,
+	);
+	if (error) throw new Error(error);
+
+	await params.updateCard(params.cardId, params.nextHotkey);
 }
 
 function getAllHotkeys(settings: HotkeySettingsLike) {

@@ -179,6 +179,32 @@ pub struct HotkeyConfig {
     pub key: String,
 }
 
+/// Supported hotkey action types.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum HotkeyAction {
+    Toggle,
+    Hold,
+    PasteLast,
+    Retry,
+    QuickAskHold,
+    QuickAskToggle,
+}
+
+/// Card-based hotkey entry (stored in settings.json).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct HotkeyShortcutCard {
+    /// Stable ID for list operations in the UI.
+    #[serde(default)]
+    pub id: String,
+    /// Which action this card triggers.
+    #[serde(rename = "type")]
+    pub kind: HotkeyAction,
+    /// Hotkey configuration. None means "unset".
+    #[serde(default)]
+    pub hotkey: Option<HotkeyConfig>,
+}
+
 impl Default for HotkeyConfig {
     fn default() -> Self {
         Self {

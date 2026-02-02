@@ -1,4 +1,4 @@
-use crate::settings::HotkeyConfig;
+use crate::settings::{HotkeyAction, HotkeyConfig, HotkeyShortcutCard};
 use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
@@ -14,7 +14,7 @@ use crate::settings::doctor::SettingsDoctorReport;
 #[cfg(desktop)]
 use crate::settings::doctor::{self, SETTINGS_DOCTOR_KEYS};
 #[cfg(desktop)]
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(desktop)]
 use serde_json::{Map, Value};
@@ -107,34 +107,6 @@ pub async fn unregister_shortcuts(_app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
-/// Read a hotkey setting from the store.
-///
-/// Semantics:
-/// - missing key => use default
-/// - explicit null => disabled (None)
-/// - invalid value => use default
-#[cfg(desktop)]
-fn get_hotkey_from_store(
-    app: &AppHandle,
-    key: &str,
-    default_fn: fn() -> Option<HotkeyConfig>,
-) -> Option<HotkeyConfig> {
-    use serde_json::Value;
-
-    let raw = app
-        .store("settings.json")
-        .ok()
-        .and_then(|store| store.get(key));
-
-    match raw {
-        None => default_fn(),
-        Some(Value::Null) => None,
-        Some(v) => serde_json::from_value::<HotkeyConfig>(v)
-            .ok()
-            .or_else(default_fn),
-    }
-}
-
 /// Re-register global shortcuts with the current settings from the store.
 /// Called from frontend after hotkey settings are changed.
 /// Falls back to defaults if stored values are invalid.
@@ -153,100 +125,41 @@ pub async fn register_shortcuts(app: AppHandle) -> CommandResult<()> {
     // - missing => default
     // - null => disabled
     // - invalid => default
-    let toggle_hotkey =
-        get_hotkey_from_store(&app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
-    let hold_hotkey = get_hotkey_from_store(&app, "hold_hotkey", HotkeyConfig::default_hold);
-    let paste_last_hotkey =
-        get_hotkey_from_store(&app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
-    let retry_hotkey = get_hotkey_from_store(&app, "retry_hotkey", HotkeyConfig::default_retry);
-
-    // Quick Ask hotkeys:
-    // - Legacy key: quick_ask_hotkey (hold-to-record)
-    // - New keys: quick_ask_hold_hotkey + quick_ask_toggle_hotkey
-    // For backward compatibility, Quick Ask Hold falls back to the legacy key only
-    // when the new key is absent (not when explicitly null).
-    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
-        use serde_json::Value;
-
-        let store = app.store("settings.json").ok();
-        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
-
-        let hold = match raw_hold {
-            None => {
-                get_hotkey_from_store(&app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask)
-            }
-            Some(Value::Null) => None,
-            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
-                .ok()
-                .or_else(HotkeyConfig::default_quick_ask),
-        };
-
-        let toggle = get_hotkey_from_store(
-            &app,
-            "quick_ask_toggle_hotkey",
-            HotkeyConfig::default_quick_ask,
-        );
-
-        (hold, toggle)
-    };
+    let cards = crate::shortcuts::get_hotkey_cards_from_store(&app);
 
     // Keep Windows hook behavior in sync with settings.
     #[cfg(target_os = "windows")]
     {
-        let matches_copilot = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "Copilot";
-        let matches_alt_right = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "AltRight";
-
-        let copilot_enabled = toggle_hotkey.as_ref().is_some_and(matches_copilot)
-            || hold_hotkey.as_ref().is_some_and(matches_copilot)
-            || paste_last_hotkey.as_ref().is_some_and(matches_copilot)
-            || retry_hotkey.as_ref().is_some_and(matches_copilot)
-            || quick_ask_hold_hotkey.as_ref().is_some_and(matches_copilot)
-            || quick_ask_toggle_hotkey
+        let copilot_enabled = cards.iter().any(|card| {
+            card.hotkey
                 .as_ref()
-                .is_some_and(matches_copilot);
-
-        let alt_right_enabled = toggle_hotkey.as_ref().is_some_and(matches_alt_right)
-            || hold_hotkey.as_ref().is_some_and(matches_alt_right)
-            || paste_last_hotkey.as_ref().is_some_and(matches_alt_right)
-            || retry_hotkey.as_ref().is_some_and(matches_alt_right)
-            || quick_ask_hold_hotkey
+                .is_some_and(|hk| hk.modifiers.is_empty() && hk.key == "Copilot")
+        });
+        let alt_right_enabled = cards.iter().any(|card| {
+            card.hotkey
                 .as_ref()
-                .is_some_and(matches_alt_right)
-            || quick_ask_toggle_hotkey
-                .as_ref()
-                .is_some_and(matches_alt_right);
+                .is_some_and(|hk| hk.modifiers.is_empty() && hk.key == "AltRight")
+        });
 
         crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
         crate::windows_modifier_hotkeys::set_alt_right_hotkey_enabled(alt_right_enabled);
     }
 
+    let mut hotkey_summaries: Vec<String> = Vec::new();
+    for card in &cards {
+        let Some(hotkey) = card.hotkey.as_ref() else {
+            continue;
+        };
+        hotkey_summaries.push(hotkey.to_shortcut_string());
+    }
     log::info!(
-        "Re-registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}, QuickAskHold: {}, QuickAskToggle: {}",
-        toggle_hotkey
-            .as_ref()
-            .map(|h| h.to_shortcut_string())
-            .unwrap_or_else(|| "<disabled>".to_string()),
-        hold_hotkey
-            .as_ref()
-            .map(|h| h.to_shortcut_string())
-            .unwrap_or_else(|| "<disabled>".to_string()),
-        paste_last_hotkey
-            .as_ref()
-            .map(|h| h.to_shortcut_string())
-            .unwrap_or_else(|| "<disabled>".to_string()),
-        retry_hotkey
-            .as_ref()
-            .map(|h| h.to_shortcut_string())
-            .unwrap_or_else(|| "<disabled>".to_string()),
-        quick_ask_hold_hotkey
-            .as_ref()
-            .map(|h| h.to_shortcut_string())
-            .unwrap_or_else(|| "<disabled>".to_string())
-        ,
-        quick_ask_toggle_hotkey
-            .as_ref()
-            .map(|h| h.to_shortcut_string())
-            .unwrap_or_else(|| "<disabled>".to_string())
+        "Re-registering {} shortcut cards: {}",
+        hotkey_summaries.len(),
+        if hotkey_summaries.is_empty() {
+            "<disabled>".to_string()
+        } else {
+            hotkey_summaries.join(", ")
+        }
     );
 
     // Get the global shortcut manager
@@ -269,145 +182,21 @@ pub async fn register_shortcuts(app: AppHandle) -> CommandResult<()> {
             log::warn!("Duplicate hotkey detected; skipping duplicate registration");
         }
     }
-    if let Some(hk) = toggle_hotkey {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            // handled by Windows hook (not tauri-plugin-global-shortcut)
-        } else {
-            match hk.to_shortcut() {
-                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-                Err(e) => log::warn!(
-                    "Invalid toggle hotkey in settings store ({}); treating as disabled",
-                    e
-                ),
-            }
-        }
+    for card in &cards {
+        let Some(hk) = card.hotkey.as_ref() else {
+            continue;
+        };
 
-        #[cfg(not(all(desktop, target_os = "windows")))]
-        {
-            match hk.to_shortcut() {
-                Ok(sc) => shortcuts.push(sc),
-                Err(e) => log::warn!(
-                    "Invalid toggle hotkey in settings store ({}); treating as disabled",
-                    e
-                ),
-            }
-        }
-    }
-    if let Some(hk) = hold_hotkey {
         #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
+        if is_windows_hook_handled_hotkey(hk) {
             // handled by Windows hook
-        } else {
-            match hk.to_shortcut() {
-                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-                Err(e) => log::warn!(
-                    "Invalid hold hotkey in settings store ({}); treating as disabled",
-                    e
-                ),
-            }
+            continue;
         }
 
-        #[cfg(not(all(desktop, target_os = "windows")))]
-        match hk.to_shortcut() {
-            Ok(sc) => shortcuts.push(sc),
-            Err(e) => log::warn!(
-                "Invalid hold hotkey in settings store ({}); treating as disabled",
-                e
-            ),
-        }
-    }
-    if let Some(hk) = paste_last_hotkey {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            // handled by Windows hook
-        } else {
-            match hk.to_shortcut() {
-                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-                Err(e) => log::warn!(
-                    "Invalid paste-last hotkey in settings store ({}); treating as disabled",
-                    e
-                ),
-            }
-        }
-
-        #[cfg(not(all(desktop, target_os = "windows")))]
-        match hk.to_shortcut() {
-            Ok(sc) => shortcuts.push(sc),
-            Err(e) => log::warn!(
-                "Invalid paste-last hotkey in settings store ({}); treating as disabled",
-                e
-            ),
-        }
-    }
-
-    if let Some(hk) = retry_hotkey {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            // handled by Windows hook
-        } else {
-            match hk.to_shortcut() {
-                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-                Err(e) => log::warn!(
-                    "Invalid retry hotkey in settings store ({}); treating as disabled",
-                    e
-                ),
-            }
-        }
-
-        #[cfg(not(all(desktop, target_os = "windows")))]
-        match hk.to_shortcut() {
-            Ok(sc) => shortcuts.push(sc),
-            Err(e) => log::warn!(
-                "Invalid retry hotkey in settings store ({}); treating as disabled",
-                e
-            ),
-        }
-    }
-
-    if let Some(hk) = quick_ask_hold_hotkey {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            // handled by Windows hook
-        } else {
-            match hk.to_shortcut() {
-                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-                Err(e) => log::warn!(
-                    "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
-                    e
-                ),
-            }
-        }
-
-        #[cfg(not(all(desktop, target_os = "windows")))]
         match hk.to_shortcut() {
             Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
             Err(e) => log::warn!(
-                "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
-                e
-            ),
-        }
-    }
-
-    if let Some(hk) = quick_ask_toggle_hotkey {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            // handled by Windows hook
-        } else {
-            match hk.to_shortcut() {
-                Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-                Err(e) => log::warn!(
-                    "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
-                    e
-                ),
-            }
-        }
-
-        #[cfg(not(all(desktop, target_os = "windows")))]
-        match hk.to_shortcut() {
-            Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-            Err(e) => log::warn!(
-                "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
+                "Invalid hotkey in settings store ({}); treating as disabled",
                 e
             ),
         }
@@ -432,6 +221,252 @@ pub async fn register_shortcuts(app: AppHandle) -> CommandResult<()> {
 
     log::info!("Shortcuts re-registered successfully");
     Ok(())
+}
+
+#[cfg(desktop)]
+fn hotkey_action_label(action: HotkeyAction) -> &'static str {
+    match action {
+        HotkeyAction::Toggle => "Toggle",
+        HotkeyAction::Hold => "Hold",
+        HotkeyAction::PasteLast => "PasteLast",
+        HotkeyAction::Retry => "Retry",
+        HotkeyAction::QuickAskHold => "QuickAskHold",
+        HotkeyAction::QuickAskToggle => "QuickAskToggle",
+    }
+}
+
+#[cfg(desktop)]
+fn validate_hotkey_shortcut_cards(cards: &[HotkeyShortcutCard]) -> CommandResult<()> {
+    let mut ids: HashSet<String> = HashSet::new();
+    let mut seen: HashMap<String, String> = HashMap::new();
+
+    for card in cards {
+        if card.id.trim().is_empty() {
+            return Err(
+                CommandError::new("Hotkey card id is required", "invalid_input")
+                    .with_code("hotkey_card_invalid"),
+            );
+        }
+        if !ids.insert(card.id.clone()) {
+            return Err(
+                CommandError::new("Duplicate hotkey card id", "invalid_input")
+                    .with_code("hotkey_card_duplicate_id"),
+            );
+        }
+
+        let Some(hotkey) = card.hotkey.as_ref() else {
+            continue;
+        };
+
+        let needs_global_shortcut = {
+            #[cfg(all(desktop, target_os = "windows"))]
+            {
+                !is_windows_hook_handled_hotkey(hotkey)
+            }
+            #[cfg(not(all(desktop, target_os = "windows")))]
+            {
+                true
+            }
+        };
+
+        if needs_global_shortcut {
+            hotkey.to_shortcut().map_err(|e| {
+                CommandError::new(
+                    format!("Invalid {} hotkey: {}", hotkey_action_label(card.kind), e),
+                    "invalid_input",
+                )
+                .with_code("hotkey_invalid")
+            })?;
+        }
+
+        let normalized = crate::shortcuts::normalize_shortcut_string(&hotkey.to_shortcut_string());
+        if let Some(existing) = seen.insert(normalized.clone(), card.id.clone()) {
+            return Err(CommandError::new(
+                format!("Shortcut is already used by another card ({existing})",),
+                "conflict",
+            )
+            .with_code("hotkey_conflict"));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn first_hotkey_for_action(
+    cards: &[HotkeyShortcutCard],
+    action: HotkeyAction,
+) -> Option<HotkeyConfig> {
+    for card in cards {
+        if card.kind != action {
+            continue;
+        }
+        if let Some(hotkey) = card.hotkey.as_ref() {
+            return Some(hotkey.clone());
+        }
+    }
+
+    None
+}
+
+#[cfg(desktop)]
+fn build_hotkey_shortcuts_patch(
+    cards: &[HotkeyShortcutCard],
+) -> Result<Map<String, Value>, CommandError> {
+    let mut patch: Map<String, Value> = Map::new();
+    patch.insert(
+        "hotkey_shortcuts".to_string(),
+        serde_json::to_value(cards)
+            .map_err(|e| CommandError::unknown(format!("Failed to encode hotkey cards: {e}")))?,
+    );
+
+    let toggle = first_hotkey_for_action(cards, HotkeyAction::Toggle);
+    let hold = first_hotkey_for_action(cards, HotkeyAction::Hold);
+    let paste_last = first_hotkey_for_action(cards, HotkeyAction::PasteLast);
+    let retry = first_hotkey_for_action(cards, HotkeyAction::Retry);
+    let quick_ask_hold = first_hotkey_for_action(cards, HotkeyAction::QuickAskHold);
+    let quick_ask_toggle = first_hotkey_for_action(cards, HotkeyAction::QuickAskToggle);
+
+    let insert_hotkey = |patch: &mut Map<String, Value>, key: &str, value: Option<HotkeyConfig>| {
+        patch.insert(
+            key.to_string(),
+            serde_json::to_value(value).unwrap_or(Value::Null),
+        );
+    };
+
+    insert_hotkey(&mut patch, "toggle_hotkey", toggle);
+    insert_hotkey(&mut patch, "hold_hotkey", hold);
+    insert_hotkey(&mut patch, "paste_last_hotkey", paste_last);
+    insert_hotkey(&mut patch, "retry_hotkey", retry);
+    insert_hotkey(&mut patch, "quick_ask_hold_hotkey", quick_ask_hold.clone());
+    insert_hotkey(&mut patch, "quick_ask_toggle_hotkey", quick_ask_toggle);
+    // Legacy alias: keep the pre-split quick_ask_hotkey in sync with hold.
+    insert_hotkey(&mut patch, "quick_ask_hotkey", quick_ask_hold);
+
+    Ok(patch)
+}
+
+#[cfg(desktop)]
+async fn apply_hotkey_shortcuts_update(
+    app: &AppHandle,
+    cards: Vec<HotkeyShortcutCard>,
+) -> CommandResult<Vec<HotkeyShortcutCard>> {
+    validate_hotkey_shortcut_cards(&cards)?;
+    let patch = build_hotkey_shortcuts_patch(&cards)?;
+
+    let store = app
+        .store("settings.json")
+        .map_err(|e| CommandError::unknown(format!("Failed to open settings store: {e}")))?;
+    let previous_cards = crate::shortcuts::get_hotkey_cards_from_store(app);
+
+    let payload = crate::settings::patch::apply_settings_patch(&store, patch, vec![])?;
+    store
+        .save()
+        .map_err(|e| CommandError::unknown(format!("Failed to save settings store: {e}")))?;
+    crate::app_shared::emit_settings_changed(app, payload);
+
+    if let Err(error) = register_shortcuts(app.clone()).await {
+        log::warn!(
+            "Hotkey re-registration failed after update; reverting cards: {}",
+            error
+        );
+        let rollback_patch = build_hotkey_shortcuts_patch(&previous_cards)?;
+        let rollback_payload =
+            crate::settings::patch::apply_settings_patch(&store, rollback_patch, vec![])?;
+        if let Err(save_error) = store.save() {
+            log::warn!("Failed to save rollback hotkey settings: {save_error}");
+        } else {
+            crate::app_shared::emit_settings_changed(app, rollback_payload);
+        }
+        let _ = register_shortcuts(app.clone()).await;
+        return Err(error);
+    }
+
+    Ok(cards)
+}
+
+/// Create a new hotkey shortcut card.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn hotkey_shortcut_cards_create(
+    app: AppHandle,
+    card: HotkeyShortcutCard,
+) -> CommandResult<Vec<HotkeyShortcutCard>> {
+    let mut cards = crate::shortcuts::get_hotkey_cards_from_store(&app);
+    if cards.iter().any(|existing| existing.id == card.id) {
+        return Err(
+            CommandError::new("Hotkey card id already exists", "conflict")
+                .with_code("hotkey_card_duplicate_id"),
+        );
+    }
+    cards.push(card);
+    apply_hotkey_shortcuts_update(&app, cards).await
+}
+
+// Stub for non-desktop platforms
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn hotkey_shortcut_cards_create(
+    _app: AppHandle,
+    _card: HotkeyShortcutCard,
+) -> CommandResult<Vec<HotkeyShortcutCard>> {
+    Ok(Vec::new())
+}
+
+/// Update an existing hotkey shortcut card.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn hotkey_shortcut_cards_update(
+    app: AppHandle,
+    card_id: String,
+    hotkey: Option<HotkeyConfig>,
+) -> CommandResult<Vec<HotkeyShortcutCard>> {
+    let mut cards = crate::shortcuts::get_hotkey_cards_from_store(&app);
+    let Some(existing) = cards.iter_mut().find(|card| card.id == card_id) else {
+        return Err(CommandError::new("Hotkey card not found", "not_found")
+            .with_code("hotkey_card_not_found"));
+    };
+
+    existing.hotkey = hotkey;
+    apply_hotkey_shortcuts_update(&app, cards).await
+}
+
+// Stub for non-desktop platforms
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn hotkey_shortcut_cards_update(
+    _app: AppHandle,
+    _card_id: String,
+    _hotkey: Option<HotkeyConfig>,
+) -> CommandResult<Vec<HotkeyShortcutCard>> {
+    Ok(Vec::new())
+}
+
+/// Delete a hotkey shortcut card.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn hotkey_shortcut_cards_delete(
+    app: AppHandle,
+    card_id: String,
+) -> CommandResult<Vec<HotkeyShortcutCard>> {
+    let mut cards = crate::shortcuts::get_hotkey_cards_from_store(&app);
+    let before = cards.len();
+    cards.retain(|card| card.id != card_id);
+    if cards.len() == before {
+        return Err(CommandError::new("Hotkey card not found", "not_found")
+            .with_code("hotkey_card_not_found"));
+    }
+    apply_hotkey_shortcuts_update(&app, cards).await
+}
+
+// Stub for non-desktop platforms
+#[cfg(not(desktop))]
+#[tauri::command]
+pub async fn hotkey_shortcut_cards_delete(
+    _app: AppHandle,
+    _card_id: String,
+) -> CommandResult<Vec<HotkeyShortcutCard>> {
+    Ok(Vec::new())
 }
 
 // Stub for non-desktop platforms

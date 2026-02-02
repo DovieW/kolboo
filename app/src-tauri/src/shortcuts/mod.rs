@@ -15,8 +15,10 @@ use crate::history::HistoryStorage;
 use crate::pipeline;
 use crate::recordings::RecordingStore;
 use crate::request_log::RequestLogStore;
+use crate::settings::HotkeyAction;
 use crate::settings::HotkeyConfig as InternalHotkeyConfig;
 use crate::settings::HotkeyConfig;
+use crate::settings::HotkeyShortcutCard;
 use crate::shortcuts_lock;
 use crate::state::AppState;
 use crate::{
@@ -171,6 +173,55 @@ pub(crate) fn normalize_shortcut_string(s: &str) -> String {
     modifiers.join("+")
 }
 
+#[cfg(desktop)]
+fn build_action_shortcut_strings(
+    cards: &[HotkeyShortcutCard],
+) -> std::collections::HashMap<HotkeyAction, Vec<String>> {
+    let mut map: std::collections::HashMap<HotkeyAction, Vec<String>> =
+        std::collections::HashMap::new();
+
+    for card in cards {
+        let Some(hotkey) = card.hotkey.as_ref() else {
+            continue;
+        };
+
+        match hotkey.to_shortcut() {
+            Ok(_) => {
+                let normalized = normalize_shortcut_string(&hotkey.to_shortcut_string());
+                map.entry(card.kind).or_default().push(normalized);
+            }
+            Err(e) => {
+                log::warn!(
+                    "Invalid {:?} hotkey in settings store ({}); treating as disabled",
+                    card.kind,
+                    e
+                );
+            }
+        }
+    }
+
+    map
+}
+
+#[cfg(desktop)]
+fn card_matches_modifier_only(card: &HotkeyShortcutCard, key: &str) -> bool {
+    card.hotkey
+        .as_ref()
+        .is_some_and(|hk| hk.modifiers.is_empty() && hk.key == key)
+}
+
+#[cfg(desktop)]
+fn hotkey_action_label(action: HotkeyAction) -> &'static str {
+    match action {
+        HotkeyAction::Toggle => "Toggle",
+        HotkeyAction::Hold => "Hold",
+        HotkeyAction::PasteLast => "PasteLast",
+        HotkeyAction::Retry => "Retry",
+        HotkeyAction::QuickAskHold => "QuickAskHold",
+        HotkeyAction::QuickAskToggle => "QuickAskToggle",
+    }
+}
+
 /// Read a hotkey setting from the store.
 ///
 /// Semantics:
@@ -196,6 +247,92 @@ fn get_hotkey_from_store(
         Some(v) => serde_json::from_value::<InternalHotkeyConfig>(v)
             .ok()
             .or_else(default_fn),
+    }
+}
+
+#[cfg(desktop)]
+fn build_legacy_hotkey_cards(app: &AppHandle) -> Vec<HotkeyShortcutCard> {
+    let toggle_hotkey =
+        get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
+    let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
+    let paste_last_hotkey =
+        get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
+    let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
+    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
+        use serde_json::Value;
+
+        let store = app.store("settings.json").ok();
+        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
+        let hold = match raw_hold {
+            None => get_hotkey_from_store(app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
+            Some(Value::Null) => None,
+            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
+                .ok()
+                .or_else(HotkeyConfig::default_quick_ask),
+        };
+
+        let toggle = get_hotkey_from_store(
+            app,
+            "quick_ask_toggle_hotkey",
+            HotkeyConfig::default_quick_ask,
+        );
+
+        (hold, toggle)
+    };
+
+    let mut cards: Vec<HotkeyShortcutCard> = Vec::new();
+    let mut push_card = |kind: HotkeyAction, hotkey: Option<HotkeyConfig>, label: &str| {
+        if let Some(hotkey) = hotkey {
+            cards.push(HotkeyShortcutCard {
+                id: format!("legacy-{}", label),
+                kind,
+                hotkey: Some(hotkey),
+            });
+        }
+    };
+
+    push_card(HotkeyAction::Toggle, toggle_hotkey, "toggle");
+    push_card(HotkeyAction::Hold, hold_hotkey, "hold");
+    push_card(HotkeyAction::PasteLast, paste_last_hotkey, "paste_last");
+    push_card(HotkeyAction::Retry, retry_hotkey, "retry");
+    push_card(
+        HotkeyAction::QuickAskHold,
+        quick_ask_hold_hotkey,
+        "quick_ask_hold",
+    );
+    push_card(
+        HotkeyAction::QuickAskToggle,
+        quick_ask_toggle_hotkey,
+        "quick_ask_toggle",
+    );
+
+    cards
+}
+
+#[cfg(desktop)]
+pub(crate) fn get_hotkey_cards_from_store(app: &AppHandle) -> Vec<HotkeyShortcutCard> {
+    let raw = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("hotkey_shortcuts"));
+
+    let Some(raw) = raw else {
+        return build_legacy_hotkey_cards(app);
+    };
+
+    if raw.is_null() {
+        return build_legacy_hotkey_cards(app);
+    }
+
+    match serde_json::from_value::<Vec<HotkeyShortcutCard>>(raw) {
+        Ok(cards) => cards,
+        Err(e) => {
+            log::warn!(
+                "Invalid hotkey_shortcuts in settings store ({}); falling back to legacy keys",
+                e
+            );
+            build_legacy_hotkey_cards(app)
+        }
     }
 }
 
@@ -456,123 +593,25 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     // Get shortcut string for comparison (normalized to handle "ctrl" vs "control" differences)
     let shortcut_str = normalize_shortcut_string(&shortcut.to_string());
 
-    // Get configured hotkeys from store.
-    // - missing => default
-    // - null => disabled
-    // - invalid => default
-    let toggle_hotkey =
-        get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
-    let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
-    let paste_last_hotkey =
-        get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
-    let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
-
-    // Quick Ask hotkeys:
-    // - Legacy key: quick_ask_hotkey (hold-to-record)
-    // - New keys: quick_ask_hold_hotkey + quick_ask_toggle_hotkey
-    // For backward compatibility, Quick Ask Hold falls back to the legacy key only
-    // when the new key is absent (not when explicitly null).
-    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
-        use serde_json::Value;
-
-        let store = app.store("settings.json").ok();
-
-        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
-        let hold = match raw_hold {
-            None => get_hotkey_from_store(app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
-            Some(Value::Null) => None,
-            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
-                .ok()
-                .or_else(HotkeyConfig::default_quick_ask),
-        };
-
-        let toggle = get_hotkey_from_store(
-            app,
-            "quick_ask_toggle_hotkey",
-            HotkeyConfig::default_quick_ask,
-        );
-
-        (hold, toggle)
-    };
-
-    // Convert to normalized shortcut strings.
-    // For disabled hotkeys, we keep None so it can never match.
-    let toggle_shortcut_str: Option<String> = toggle_hotkey.map(|hk| {
-        let shortcut_str = hk
-            .to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .unwrap_or_else(|_| HotkeyConfig::default_toggle().to_shortcut_string());
-        normalize_shortcut_string(&shortcut_str)
-    });
-    let hold_shortcut_str: Option<String> = hold_hotkey.and_then(|hk| {
-        hk.to_shortcut()
-            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid hold hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.and_then(|hk| {
-        hk.to_shortcut()
-            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid paste-last hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-    let retry_shortcut_str: Option<String> = retry_hotkey.and_then(|hk| {
-        hk.to_shortcut()
-            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid retry hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-
-    let quick_ask_hold_shortcut_str: Option<String> = quick_ask_hold_hotkey.and_then(|hk| {
-        hk.to_shortcut()
-            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-
-    let quick_ask_toggle_shortcut_str: Option<String> = quick_ask_toggle_hotkey.and_then(|hk| {
-        hk.to_shortcut()
-            .map(|_| normalize_shortcut_string(&hk.to_shortcut_string()))
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
+    let cards = get_hotkey_cards_from_store(app);
+    let action_shortcuts = build_action_shortcut_strings(&cards);
 
     // Get audio mute manager if available
     let audio_mute_manager = app.try_state::<AudioMuteManager>();
 
     // Compare normalized strings directly
-    let is_toggle = toggle_shortcut_str.as_deref() == Some(shortcut_str.as_str());
-    let is_hold = hold_shortcut_str.as_deref() == Some(shortcut_str.as_str());
-    let is_paste_last = paste_last_shortcut_str.as_deref() == Some(shortcut_str.as_str());
-    let is_retry = retry_shortcut_str.as_deref() == Some(shortcut_str.as_str());
-    let is_quick_ask_hold = quick_ask_hold_shortcut_str.as_deref() == Some(shortcut_str.as_str());
-    let is_quick_ask_toggle =
-        quick_ask_toggle_shortcut_str.as_deref() == Some(shortcut_str.as_str());
+    let matches_action = |action: HotkeyAction| {
+        action_shortcuts
+            .get(&action)
+            .is_some_and(|list| list.iter().any(|s| s == &shortcut_str))
+    };
+
+    let is_toggle = matches_action(HotkeyAction::Toggle);
+    let is_hold = matches_action(HotkeyAction::Hold);
+    let is_paste_last = matches_action(HotkeyAction::PasteLast);
+    let is_retry = matches_action(HotkeyAction::Retry);
+    let is_quick_ask_hold = matches_action(HotkeyAction::QuickAskHold);
+    let is_quick_ask_toggle = matches_action(HotkeyAction::QuickAskToggle);
 
     if is_toggle {
         // Toggle mode: action happens on key release (debounced)
@@ -966,49 +1005,25 @@ pub(crate) fn handle_modifier_key_event(
 
     let hotkey_debug = crate::windows_modifier_hotkeys::hotkey_debug_runtime_enabled();
 
-    // Determine which (if any) configured hotkey uses this modifier-only key.
-    let toggle_hotkey =
-        get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
-    let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
-    let paste_last_hotkey =
-        get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
-    let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
-    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
-        use serde_json::Value;
-
-        let store = app.store("settings.json").ok();
-        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
-
-        let hold = match raw_hold {
-            None => get_hotkey_from_store(app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
-            Some(Value::Null) => None,
-            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
-                .ok()
-                .or_else(HotkeyConfig::default_quick_ask),
-        };
-
-        let toggle = get_hotkey_from_store(
-            app,
-            "quick_ask_toggle_hotkey",
-            HotkeyConfig::default_quick_ask,
-        );
-
-        (hold, toggle)
-    };
-
-    let matches_modifier_only = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == key;
-    let is_toggle = toggle_hotkey.as_ref().is_some_and(matches_modifier_only);
-    let is_hold = hold_hotkey.as_ref().is_some_and(matches_modifier_only);
-    let is_paste_last = paste_last_hotkey
-        .as_ref()
-        .is_some_and(matches_modifier_only);
-    let is_retry = retry_hotkey.as_ref().is_some_and(matches_modifier_only);
-    let is_quick_ask_hold = quick_ask_hold_hotkey
-        .as_ref()
-        .is_some_and(matches_modifier_only);
-    let is_quick_ask_toggle = quick_ask_toggle_hotkey
-        .as_ref()
-        .is_some_and(matches_modifier_only);
+    let cards = get_hotkey_cards_from_store(app);
+    let is_toggle = cards
+        .iter()
+        .any(|card| card.kind == HotkeyAction::Toggle && card_matches_modifier_only(card, key));
+    let is_hold = cards
+        .iter()
+        .any(|card| card.kind == HotkeyAction::Hold && card_matches_modifier_only(card, key));
+    let is_paste_last = cards
+        .iter()
+        .any(|card| card.kind == HotkeyAction::PasteLast && card_matches_modifier_only(card, key));
+    let is_retry = cards
+        .iter()
+        .any(|card| card.kind == HotkeyAction::Retry && card_matches_modifier_only(card, key));
+    let is_quick_ask_hold = cards.iter().any(|card| {
+        card.kind == HotkeyAction::QuickAskHold && card_matches_modifier_only(card, key)
+    });
+    let is_quick_ask_toggle = cards.iter().any(|card| {
+        card.kind == HotkeyAction::QuickAskToggle && card_matches_modifier_only(card, key)
+    });
 
     if !(is_toggle
         || is_hold
@@ -1018,32 +1033,30 @@ pub(crate) fn handle_modifier_key_event(
         || is_quick_ask_toggle)
     {
         if hotkey_debug {
+            let action_hotkeys = |action: HotkeyAction| {
+                let list: Vec<String> = cards
+                    .iter()
+                    .filter_map(|card| {
+                        if card.kind != action {
+                            return None;
+                        }
+                        card.hotkey.as_ref().map(|hk| hk.to_shortcut_string())
+                    })
+                    .collect();
+                if list.is_empty() {
+                    "<disabled>".to_string()
+                } else {
+                    list.join(", ")
+                }
+            };
             let details = format!(
                 "key={key} is_down={is_down} suppress_release_actions={suppress_release_actions} toggle_hotkey={} hold_hotkey={} paste_last_hotkey={} retry_hotkey={} quick_ask_hold_hotkey={} quick_ask_toggle_hotkey={} (no match)",
-                toggle_hotkey
-                    .as_ref()
-                    .map(|h| h.to_shortcut_string())
-                    .unwrap_or_else(|| "<disabled>".to_string()),
-                hold_hotkey
-                    .as_ref()
-                    .map(|h| h.to_shortcut_string())
-                    .unwrap_or_else(|| "<disabled>".to_string()),
-                paste_last_hotkey
-                    .as_ref()
-                    .map(|h| h.to_shortcut_string())
-                    .unwrap_or_else(|| "<disabled>".to_string()),
-                retry_hotkey
-                    .as_ref()
-                    .map(|h| h.to_shortcut_string())
-                    .unwrap_or_else(|| "<disabled>".to_string()),
-                quick_ask_hold_hotkey
-                    .as_ref()
-                    .map(|h| h.to_shortcut_string())
-                    .unwrap_or_else(|| "<disabled>".to_string()),
-                quick_ask_toggle_hotkey
-                    .as_ref()
-                    .map(|h| h.to_shortcut_string())
-                    .unwrap_or_else(|| "<disabled>".to_string()),
+                action_hotkeys(HotkeyAction::Toggle),
+                action_hotkeys(HotkeyAction::Hold),
+                action_hotkeys(HotkeyAction::PasteLast),
+                action_hotkeys(HotkeyAction::Retry),
+                action_hotkeys(HotkeyAction::QuickAskHold),
+                action_hotkeys(HotkeyAction::QuickAskToggle),
             );
             emit_system_event(
                 app,
@@ -1468,63 +1481,17 @@ pub(crate) fn register_initial_shortcuts(
         hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight" | "Copilot")
     }
 
-    // Read hotkeys from store.
-    // - missing => default
-    // - null => disabled
-    // - invalid => default
-    let toggle_hotkey =
-        get_hotkey_from_store(app, "toggle_hotkey", HotkeyConfig::default_toggle_opt);
-    let hold_hotkey = get_hotkey_from_store(app, "hold_hotkey", HotkeyConfig::default_hold);
-    let paste_last_hotkey =
-        get_hotkey_from_store(app, "paste_last_hotkey", HotkeyConfig::default_paste_last);
-    let retry_hotkey = get_hotkey_from_store(app, "retry_hotkey", HotkeyConfig::default_retry);
-    let (quick_ask_hold_hotkey, quick_ask_toggle_hotkey) = {
-        use serde_json::Value;
-
-        let store = app.store("settings.json").ok();
-        let raw_hold = store.as_ref().and_then(|s| s.get("quick_ask_hold_hotkey"));
-        let hold = match raw_hold {
-            None => get_hotkey_from_store(app, "quick_ask_hotkey", HotkeyConfig::default_quick_ask),
-            Some(Value::Null) => None,
-            Some(v) => serde_json::from_value::<HotkeyConfig>(v)
-                .ok()
-                .or_else(HotkeyConfig::default_quick_ask),
-        };
-
-        let toggle = get_hotkey_from_store(
-            app,
-            "quick_ask_toggle_hotkey",
-            HotkeyConfig::default_quick_ask,
-        );
-
-        (hold, toggle)
-    };
+    let cards = get_hotkey_cards_from_store(app);
 
     // Keep Windows hook behavior in sync with settings at startup.
     #[cfg(target_os = "windows")]
     {
-        let matches_copilot = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "Copilot";
-        let matches_alt_right = |hk: &HotkeyConfig| hk.modifiers.is_empty() && hk.key == "AltRight";
-
-        let copilot_enabled = toggle_hotkey.as_ref().is_some_and(matches_copilot)
-            || hold_hotkey.as_ref().is_some_and(matches_copilot)
-            || paste_last_hotkey.as_ref().is_some_and(matches_copilot)
-            || retry_hotkey.as_ref().is_some_and(matches_copilot)
-            || quick_ask_hold_hotkey.as_ref().is_some_and(matches_copilot)
-            || quick_ask_toggle_hotkey
-                .as_ref()
-                .is_some_and(matches_copilot);
-
-        let alt_right_enabled = toggle_hotkey.as_ref().is_some_and(matches_alt_right)
-            || hold_hotkey.as_ref().is_some_and(matches_alt_right)
-            || paste_last_hotkey.as_ref().is_some_and(matches_alt_right)
-            || retry_hotkey.as_ref().is_some_and(matches_alt_right)
-            || quick_ask_hold_hotkey
-                .as_ref()
-                .is_some_and(matches_alt_right)
-            || quick_ask_toggle_hotkey
-                .as_ref()
-                .is_some_and(matches_alt_right);
+        let copilot_enabled = cards
+            .iter()
+            .any(|card| card_matches_modifier_only(card, "Copilot"));
+        let alt_right_enabled = cards
+            .iter()
+            .any(|card| card_matches_modifier_only(card, "AltRight"));
 
         crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
         crate::windows_modifier_hotkeys::set_alt_right_hotkey_enabled(alt_right_enabled);
@@ -1541,115 +1508,25 @@ pub(crate) fn register_initial_shortcuts(
     // otherwise both keys can end up toggling recording.
     // NOTE: We intentionally register each shortcut individually so that a conflict
     // (e.g. another app already using Ctrl+F3) doesn't prevent the app from starting.
-    let toggle_shortcut_str: Option<String> = toggle_hotkey.and_then(|hk| {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            return None;
-        }
-
-        match hk.to_shortcut() {
-            Ok(_) => Some(hk.to_shortcut_string()),
-            Err(e) => {
-                log::warn!(
-                    "Invalid toggle hotkey in settings store ({}); treating as disabled",
-                    e
-                );
-                None
-            }
-        }
-    });
-    let hold_shortcut_str: Option<String> = hold_hotkey.and_then(|hk| {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            return None;
-        }
-
-        hk.to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid hold hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-    let paste_last_shortcut_str: Option<String> = paste_last_hotkey.and_then(|hk| {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            return None;
-        }
-
-        hk.to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid paste-last hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-
-    let retry_shortcut_str: Option<String> = retry_hotkey.and_then(|hk| {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            return None;
-        }
-
-        hk.to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid retry hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-
-    let quick_ask_hold_shortcut_str: Option<String> = quick_ask_hold_hotkey.and_then(|hk| {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            return None;
-        }
-
-        hk.to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid quick ask hold hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-
-    let quick_ask_toggle_shortcut_str: Option<String> = quick_ask_toggle_hotkey.and_then(|hk| {
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(&hk) {
-            return None;
-        }
-
-        hk.to_shortcut()
-            .map(|_| hk.to_shortcut_string())
-            .map_err(|e| {
-                log::warn!(
-                    "Invalid quick ask toggle hotkey in settings store ({}); treating as disabled",
-                    e
-                )
-            })
-            .ok()
-    });
-
+    let mut hotkey_summaries: Vec<String> = Vec::new();
+    for card in &cards {
+        let Some(hotkey) = card.hotkey.as_ref() else {
+            continue;
+        };
+        hotkey_summaries.push(format!(
+            "{}: {}",
+            hotkey_action_label(card.kind),
+            hotkey.to_shortcut_string()
+        ));
+    }
     log::info!(
-        "Registering shortcuts - Toggle: {}, Hold: {}, PasteLast: {}, Retry: {}, QuickAskHold: {}, QuickAskToggle: {}",
-        toggle_shortcut_str.as_deref().unwrap_or("<disabled>"),
-        hold_shortcut_str.as_deref().unwrap_or("<disabled>"),
-        paste_last_shortcut_str.as_deref().unwrap_or("<disabled>"),
-        retry_shortcut_str.as_deref().unwrap_or("<disabled>"),
-        quick_ask_hold_shortcut_str.as_deref().unwrap_or("<disabled>"),
-        quick_ask_toggle_shortcut_str.as_deref().unwrap_or("<disabled>")
+        "Registering {} shortcut cards: {}",
+        hotkey_summaries.len(),
+        if hotkey_summaries.is_empty() {
+            "<disabled>".to_string()
+        } else {
+            hotkey_summaries.join(", ")
+        }
     );
 
     let shortcut_manager = app.global_shortcut();
@@ -1657,115 +1534,51 @@ pub(crate) fn register_initial_shortcuts(
     // Register each shortcut independently; on failure we log + emit a warning event.
     let mut failures: Vec<String> = Vec::new();
 
-    if let Some(toggle_shortcut_str) = &toggle_shortcut_str {
-        let toggle_shortcut = <Shortcut as std::str::FromStr>::from_str(toggle_shortcut_str)
-            .map_err(|e| {
-                failures.push(format!(
-                    "Toggle ({}) => failed to parse shortcut: {:?}",
-                    toggle_shortcut_str, e
-                ));
-            });
-        if let Ok(toggle_shortcut) = toggle_shortcut {
-            if let Err(e) = shortcut_manager.on_shortcut(toggle_shortcut, |app, shortcut, event| {
+    let mut registered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for card in &cards {
+        let Some(hotkey) = card.hotkey.as_ref() else {
+            continue;
+        };
+
+        #[cfg(all(desktop, target_os = "windows"))]
+        if is_windows_hook_handled_hotkey(hotkey) {
+            continue;
+        }
+
+        let shortcut_str = match hotkey.to_shortcut() {
+            Ok(_) => hotkey.to_shortcut_string(),
+            Err(e) => {
+                log::warn!(
+                    "Invalid {} hotkey in settings store ({}); treating as disabled",
+                    hotkey_action_label(card.kind),
+                    e
+                );
+                continue;
+            }
+        };
+
+        if !registered.insert(shortcut_str.clone()) {
+            log::warn!("Duplicate hotkey detected; skipping duplicate registration");
+            continue;
+        }
+
+        let shortcut = <Shortcut as std::str::FromStr>::from_str(&shortcut_str).map_err(|e| {
+            failures.push(format!(
+                "{} ({}) => failed to parse shortcut: {:?}",
+                hotkey_action_label(card.kind),
+                shortcut_str,
+                e
+            ));
+        });
+        if let Ok(shortcut) = shortcut {
+            if let Err(e) = shortcut_manager.on_shortcut(shortcut, |app, shortcut, event| {
                 handle_shortcut_event(app, shortcut, &event);
             }) {
-                failures.push(format!("Toggle ({}) => {}", toggle_shortcut_str, e));
-            }
-        }
-    }
-
-    if let Some(hold_shortcut_str) = &hold_shortcut_str {
-        let hold_shortcut =
-            <Shortcut as std::str::FromStr>::from_str(hold_shortcut_str).map_err(|e| {
                 failures.push(format!(
-                    "Hold ({}) => failed to parse shortcut: {:?}",
-                    hold_shortcut_str, e
-                ));
-            });
-        if let Ok(hold_shortcut) = hold_shortcut {
-            if let Err(e) = shortcut_manager.on_shortcut(hold_shortcut, |app, shortcut, event| {
-                handle_shortcut_event(app, shortcut, &event);
-            }) {
-                failures.push(format!("Hold ({}) => {}", hold_shortcut_str, e));
-            }
-        }
-    }
-
-    if let Some(paste_last_shortcut_str) = &paste_last_shortcut_str {
-        let paste_last_shortcut =
-            <Shortcut as std::str::FromStr>::from_str(paste_last_shortcut_str).map_err(|e| {
-                failures.push(format!(
-                    "PasteLast ({}) => failed to parse shortcut: {:?}",
-                    paste_last_shortcut_str, e
-                ));
-            });
-        if let Ok(paste_last_shortcut) = paste_last_shortcut {
-            if let Err(e) =
-                shortcut_manager.on_shortcut(paste_last_shortcut, |app, shortcut, event| {
-                    handle_shortcut_event(app, shortcut, &event);
-                })
-            {
-                failures.push(format!("PasteLast ({}) => {}", paste_last_shortcut_str, e));
-            }
-        }
-    }
-
-    if let Some(retry_shortcut_str) = &retry_shortcut_str {
-        let retry_shortcut =
-            <Shortcut as std::str::FromStr>::from_str(retry_shortcut_str).map_err(|e| {
-                failures.push(format!(
-                    "Retry ({}) => failed to parse shortcut: {:?}",
-                    retry_shortcut_str, e
-                ));
-            });
-        if let Ok(retry_shortcut) = retry_shortcut {
-            if let Err(e) = shortcut_manager.on_shortcut(retry_shortcut, |app, shortcut, event| {
-                handle_shortcut_event(app, shortcut, &event);
-            }) {
-                failures.push(format!("Retry ({}) => {}", retry_shortcut_str, e));
-            }
-        }
-    }
-
-    if let Some(quick_ask_hold_shortcut_str) = &quick_ask_hold_shortcut_str {
-        let quick_ask_hold_shortcut =
-            <Shortcut as std::str::FromStr>::from_str(quick_ask_hold_shortcut_str).map_err(|e| {
-                failures.push(format!(
-                    "QuickAskHold ({}) => failed to parse shortcut: {:?}",
-                    quick_ask_hold_shortcut_str, e
-                ));
-            });
-        if let Ok(quick_ask_hold_shortcut) = quick_ask_hold_shortcut {
-            if let Err(e) =
-                shortcut_manager.on_shortcut(quick_ask_hold_shortcut, |app, shortcut, event| {
-                    handle_shortcut_event(app, shortcut, &event);
-                })
-            {
-                failures.push(format!(
-                    "QuickAskHold ({}) => {}",
-                    quick_ask_hold_shortcut_str, e
-                ));
-            }
-        }
-    }
-
-    if let Some(quick_ask_toggle_shortcut_str) = &quick_ask_toggle_shortcut_str {
-        let quick_ask_toggle_shortcut =
-            <Shortcut as std::str::FromStr>::from_str(quick_ask_toggle_shortcut_str).map_err(|e| {
-                failures.push(format!(
-                    "QuickAskToggle ({}) => failed to parse shortcut: {:?}",
-                    quick_ask_toggle_shortcut_str, e
-                ));
-            });
-        if let Ok(quick_ask_toggle_shortcut) = quick_ask_toggle_shortcut {
-            if let Err(e) =
-                shortcut_manager.on_shortcut(quick_ask_toggle_shortcut, |app, shortcut, event| {
-                    handle_shortcut_event(app, shortcut, &event);
-                })
-            {
-                failures.push(format!(
-                    "QuickAskToggle ({}) => {}",
-                    quick_ask_toggle_shortcut_str, e
+                    "{} ({}) => {}",
+                    hotkey_action_label(card.kind),
+                    shortcut_str,
+                    e
                 ));
             }
         }

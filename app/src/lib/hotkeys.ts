@@ -31,7 +31,7 @@ export function hotkeyIsSameAs(a: HotkeyConfig, b: HotkeyConfig): boolean {
 	);
 }
 
-type HotkeyType =
+export type HotkeyType =
 	| "toggle"
 	| "hold"
 	| "paste_last"
@@ -47,6 +47,36 @@ const HOTKEY_LABELS: Record<HotkeyType, string> = {
 	quick_ask_hold: "Quick Ask hold",
 	quick_ask_toggle: "Quick Ask toggle",
 };
+
+export interface HotkeyShortcutCard {
+	id: string;
+	type: HotkeyType;
+	hotkey: HotkeyConfig | null;
+}
+
+export const HotkeyShortcutCardSchema = z.object({
+	id: z.string().min(1),
+	type: z.enum([
+		"toggle",
+		"hold",
+		"paste_last",
+		"retry",
+		"quick_ask_hold",
+		"quick_ask_toggle",
+	]),
+	hotkey: HotkeyConfigSchema.nullable(),
+});
+
+export const HotkeyShortcutCardsSchema = z.array(HotkeyShortcutCardSchema);
+
+export function createHotkeyShortcutId(): string {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return crypto.randomUUID();
+	}
+
+	const randomPart = Math.random().toString(36).slice(2, 10);
+	return `hotkey-${Date.now().toString(36)}-${randomPart}`;
+}
 
 /**
  * Create a Zod schema for validating a hotkey doesn't conflict with existing hotkeys

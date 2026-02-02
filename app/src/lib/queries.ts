@@ -8,7 +8,9 @@ import { invoke } from "@tauri-apps/api/core";
 import {
 	type HotkeyKind,
 	updateHotkeyAndReregisterShortcuts,
+	updateHotkeyShortcutCardWithValidation,
 } from "./hotkeyMutations";
+import type { HotkeyShortcutCard } from "./hotkeys";
 import {
 	createAudioMuteSupportedQueryFn,
 	createAvailableProvidersQueryFn,
@@ -346,6 +348,73 @@ export function useUpdateQuickAskToggleHotkey() {
 		update: (hotkey) => tauriAPI.updateQuickAskToggleHotkey(hotkey),
 		getPreviousHotkey: (settings) => settings.quick_ask_toggle_hotkey,
 		restoreErrorLabel: "quick ask toggle",
+	});
+}
+
+export function useCreateHotkeyShortcutCard() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (card: HotkeyShortcutCard) =>
+			tauriAPI.createHotkeyShortcutCard(card),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateHotkeyShortcutCard() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (params: {
+			cardId: string;
+			hotkey: HotkeyConfig | null;
+		}) => {
+			const settings =
+				queryClient.getQueryData<AppSettings>(["settings"]) ??
+				(await tauriAPI.getSettings());
+			const cards = settings?.hotkey_shortcuts ?? [];
+			await updateHotkeyShortcutCardWithValidation({
+				cardId: params.cardId,
+				nextHotkey: params.hotkey,
+				cards,
+				updateCard: async (cardId, hotkey) => {
+					await tauriAPI.updateHotkeyShortcutCard(cardId, hotkey);
+				},
+			});
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useDeleteHotkeyShortcutCard() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (cardId: string) => tauriAPI.deleteHotkeyShortcutCard(cardId),
+		onMutate: async (cardId: string) => {
+			await queryClient.cancelQueries({ queryKey: ["settings"] });
+
+			const previous = queryClient.getQueryData<AppSettings>(["settings"]);
+			if (previous) {
+				queryClient.setQueryData<AppSettings>(["settings"], {
+					...previous,
+					hotkey_shortcuts: previous.hotkey_shortcuts.filter(
+						(card) => card.id !== cardId,
+					),
+				});
+			}
+
+			return { previous };
+		},
+		onError: (_error, _cardId, context) => {
+			if (context?.previous) {
+				queryClient.setQueryData<AppSettings>(["settings"], context.previous);
+			}
+		},
+		onSettled: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
 	});
 }
 

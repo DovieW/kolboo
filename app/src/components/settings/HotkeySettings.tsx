@@ -1,38 +1,73 @@
-import { Alert, Button, Tooltip } from "@mantine/core";
+import { Alert, Button, Select, Tooltip } from "@mantine/core";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { formatErrorMessage } from "../../lib/formatError";
 import {
-	DEFAULT_HOLD_HOTKEY,
-	DEFAULT_PASTE_LAST_HOTKEY,
-	DEFAULT_QUICK_ASK_HOLD_HOTKEY,
-	DEFAULT_QUICK_ASK_TOGGLE_HOTKEY,
-	DEFAULT_RETRY_HOTKEY,
-	DEFAULT_TOGGLE_HOTKEY,
-} from "../../lib/hotkeyDefaults";
+	createHotkeyShortcutId,
+	type HotkeyConfig,
+	type HotkeyShortcutCard as HotkeyShortcutCardType,
+	type HotkeyType,
+} from "../../lib/hotkeys";
 import {
+	useCreateHotkeyShortcutCard,
+	useDeleteHotkeyShortcutCard,
 	useResetHotkeysToDefaults,
 	useSettings,
-	useUpdateHoldHotkey,
-	useUpdatePasteLastHotkey,
-	useUpdateQuickAskHoldHotkey,
-	useUpdateQuickAskToggleHotkey,
-	useUpdateRetryHotkey,
-	useUpdateToggleHotkey,
+	useUpdateHotkeyShortcutCard,
 } from "../../lib/queries";
-import type { HotkeyConfig } from "../../lib/tauri";
 import { HotkeyInput } from "../HotkeyInput";
+import { HotkeyShortcutCard } from "./HotkeyShortcutCard";
 
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
 
-type RecordingInput =
-	| "toggle"
-	| "hold"
-	| "paste_last"
-	| "retry"
-	| "quick_ask_hold"
-	| "quick_ask_toggle"
-	| null;
+type RecordingInput = string | null;
+
+const HOTKEY_TYPE_OPTIONS: Array<{
+	value: HotkeyType;
+	label: string;
+	description: string;
+}> = [
+	{
+		value: "toggle",
+		label: "Toggle Recording",
+		description: "Press once to start recording, press again to stop",
+	},
+	{
+		value: "hold",
+		label: "Hold to Record",
+		description: "Hold to record, release to stop",
+	},
+	{
+		value: "paste_last",
+		label: "Paste Last Transcription",
+		description: "Paste your last result",
+	},
+	{
+		value: "retry",
+		label: "Retry Last Recording",
+		description: "Re-run the most recent recording and paste the result",
+	},
+	{
+		value: "quick_ask_hold",
+		label: "Quick Ask Hold",
+		description: "Record a question and show an answer overlay (no auto-paste)",
+	},
+	{
+		value: "quick_ask_toggle",
+		label: "Quick Ask Toggle",
+		description:
+			"Press once to start recording a question, press again to stop (shows answer overlay)",
+	},
+];
+
+const HOTKEY_TYPE_META = HOTKEY_TYPE_OPTIONS.reduce(
+	(acc, option) => {
+		acc[option.value] = option;
+		return acc;
+	},
+	{} as Record<HotkeyType, (typeof HOTKEY_TYPE_OPTIONS)[number]>,
+);
 
 export function HotkeySettings({
 	editingProfileId,
@@ -41,36 +76,32 @@ export function HotkeySettings({
 }) {
 	const isProfileScope = editingProfileId && editingProfileId !== "default";
 	const { data: settings, isLoading } = useSettings();
-	const updateToggleHotkey = useUpdateToggleHotkey();
-	const updateHoldHotkey = useUpdateHoldHotkey();
-	const updatePasteLastHotkey = useUpdatePasteLastHotkey();
-	const updateRetryHotkey = useUpdateRetryHotkey();
-	const updateQuickAskHoldHotkey = useUpdateQuickAskHoldHotkey();
-	const updateQuickAskToggleHotkey = useUpdateQuickAskToggleHotkey();
+	const createHotkeyShortcutCard = useCreateHotkeyShortcutCard();
+	const updateHotkeyShortcutCard = useUpdateHotkeyShortcutCard();
+	const deleteHotkeyShortcutCard = useDeleteHotkeyShortcutCard();
 	const resetHotkeys = useResetHotkeysToDefaults();
 
 	// Track which input is currently recording (only one at a time)
 	const [recordingInput, setRecordingInput] = useState<RecordingInput>(null);
+	const [selectedType, setSelectedType] = useState<HotkeyType | null>("toggle");
+	const [pendingUpdateCardId, setPendingUpdateCardId] = useState<string | null>(
+		null,
+	);
+	const [pendingDeleteCardId, setPendingDeleteCardId] = useState<string | null>(
+		null,
+	);
 
 	// Track dismissed error to allow auto-dismiss
 	const [dismissedError, setDismissedError] = useState<string | null>(null);
 
 	// Collect any errors from mutations
 	const rawError =
-		updateToggleHotkey.error ||
-		updateHoldHotkey.error ||
-		updatePasteLastHotkey.error ||
-		updateRetryHotkey.error ||
-		updateQuickAskHoldHotkey.error ||
-		updateQuickAskToggleHotkey.error ||
+		createHotkeyShortcutCard.error ||
+		updateHotkeyShortcutCard.error ||
+		deleteHotkeyShortcutCard.error ||
 		resetHotkeys.error;
 
-	const errorMessage =
-		rawError instanceof Error
-			? rawError.message
-			: rawError
-				? String(rawError)
-				: null;
+	const errorMessage = rawError ? formatErrorMessage(rawError) : null;
 
 	// Only show error if not dismissed
 	const showError = errorMessage && errorMessage !== dismissedError;
@@ -94,29 +125,37 @@ export function HotkeySettings({
 		}
 	}, [errorMessage, dismissedError]);
 
-	const handleToggleHotkeyChange = (config: HotkeyConfig | null) => {
-		updateToggleHotkey.mutate(config);
+	const handleAddShortcutCard = () => {
+		if (!selectedType) return;
+		const nextCard: HotkeyShortcutCardType = {
+			id: createHotkeyShortcutId(),
+			type: selectedType,
+			hotkey: null,
+		};
+		createHotkeyShortcutCard.mutate(nextCard);
 	};
 
-	const handleHoldHotkeyChange = (config: HotkeyConfig | null) => {
-		updateHoldHotkey.mutate(config);
+	const handleHotkeyChange = (cardId: string, config: HotkeyConfig | null) => {
+		setPendingUpdateCardId(cardId);
+		updateHotkeyShortcutCard.mutate(
+			{ cardId, hotkey: config },
+			{
+				onSettled: () => setPendingUpdateCardId(null),
+			},
+		);
 	};
 
-	const handlePasteLastHotkeyChange = (config: HotkeyConfig | null) => {
-		updatePasteLastHotkey.mutate(config);
+	const handleDeleteCard = (cardId: string) => {
+		setPendingDeleteCardId(cardId);
+		deleteHotkeyShortcutCard.mutate(cardId, {
+			onSettled: () => setPendingDeleteCardId(null),
+		});
 	};
 
-	const handleRetryHotkeyChange = (config: HotkeyConfig | null) => {
-		updateRetryHotkey.mutate(config);
-	};
-
-	const handleQuickAskHoldHotkeyChange = (config: HotkeyConfig | null) => {
-		updateQuickAskHoldHotkey.mutate(config);
-	};
-
-	const handleQuickAskToggleHotkeyChange = (config: HotkeyConfig | null) => {
-		updateQuickAskToggleHotkey.mutate(config);
-	};
+	const cards = settings?.hotkey_shortcuts ?? [];
+	const visibleCards = pendingDeleteCardId
+		? cards.filter((card) => card.id !== pendingDeleteCardId)
+		: cards;
 
 	const content = (
 		<>
@@ -132,97 +171,83 @@ export function HotkeySettings({
 					{errorMessage}
 				</Alert>
 			)}
-			<HotkeyInput
-				label="Toggle Recording"
-				description="Press once to start recording, press again to stop"
-				value={settings ? settings.toggle_hotkey : DEFAULT_TOGGLE_HOTKEY}
-				onChange={handleToggleHotkeyChange}
-				disabled={isLoading || updateToggleHotkey.isPending}
-				isSaving={updateToggleHotkey.isPending}
-				isRecording={recordingInput === "toggle"}
-				onStartRecording={() => setRecordingInput("toggle")}
-				onStopRecording={() => setRecordingInput(null)}
-			/>
-
-			<div style={{ marginTop: 20 }}>
-				<HotkeyInput
-					label="Hold to Record"
-					description="Hold to record, release to stop"
-					value={settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY}
-					onChange={handleHoldHotkeyChange}
-					disabled={isLoading || updateHoldHotkey.isPending}
-					isSaving={updateHoldHotkey.isPending}
-					isRecording={recordingInput === "hold"}
-					onStartRecording={() => setRecordingInput("hold")}
-					onStopRecording={() => setRecordingInput(null)}
+			<div className="hotkey-shortcut-controls">
+				<Select
+					data={HOTKEY_TYPE_OPTIONS.map((option) => ({
+						value: option.value,
+						label: option.label,
+					}))}
+					value={selectedType}
+					onChange={(value) => setSelectedType(value as HotkeyType | null)}
+					placeholder="Choose shortcut type"
+					size="sm"
+					disabled={isLoading || createHotkeyShortcutCard.isPending}
+					className="hotkey-shortcut-controls__select"
 				/>
-			</div>
-
-			<div style={{ marginTop: 20 }}>
-				<HotkeyInput
-					label="Paste Last Transcription"
-					description="Paste your last result"
-					value={
-						settings ? settings.paste_last_hotkey : DEFAULT_PASTE_LAST_HOTKEY
+				<Button
+					variant="light"
+					size="sm"
+					onClick={handleAddShortcutCard}
+					disabled={
+						isLoading || createHotkeyShortcutCard.isPending || !selectedType
 					}
-					onChange={handlePasteLastHotkeyChange}
-					disabled={isLoading || updatePasteLastHotkey.isPending}
-					isSaving={updatePasteLastHotkey.isPending}
-					isRecording={recordingInput === "paste_last"}
-					onStartRecording={() => setRecordingInput("paste_last")}
-					onStopRecording={() => setRecordingInput(null)}
-				/>
+					loading={createHotkeyShortcutCard.isPending}
+				>
+					Add shortcut
+				</Button>
 			</div>
 
-			<div style={{ marginTop: 20 }}>
-				<HotkeyInput
-					label="Retry Last Recording"
-					description="Re-run the most recent recording and paste the result"
-					value={settings ? settings.retry_hotkey : DEFAULT_RETRY_HOTKEY}
-					onChange={handleRetryHotkeyChange}
-					disabled={isLoading || updateRetryHotkey.isPending}
-					isSaving={updateRetryHotkey.isPending}
-					isRecording={recordingInput === "retry"}
-					onStartRecording={() => setRecordingInput("retry")}
-					onStopRecording={() => setRecordingInput(null)}
-				/>
-			</div>
+			{visibleCards.length === 0 ? (
+				<div className="empty-state">
+					<div className="empty-state-title">No shortcuts yet</div>
+					<div className="empty-state-text">
+						Add a shortcut card to start configuring hotkeys.
+					</div>
+				</div>
+			) : (
+				<div className="hotkey-shortcut-list">
+					{visibleCards.map((card) => {
+						const meta = HOTKEY_TYPE_META[card.type];
+						const isSaving =
+							updateHotkeyShortcutCard.isPending &&
+							pendingUpdateCardId === card.id;
+						const isDeleting =
+							deleteHotkeyShortcutCard.isPending &&
+							pendingDeleteCardId === card.id;
 
-			<div style={{ marginTop: 20 }}>
-				<HotkeyInput
-					label="Quick Ask Hold"
-					description="Record a question and show an answer overlay (no auto-paste)"
-					value={
-						settings
-							? settings.quick_ask_hold_hotkey
-							: DEFAULT_QUICK_ASK_HOLD_HOTKEY
-					}
-					onChange={handleQuickAskHoldHotkeyChange}
-					disabled={isLoading || updateQuickAskHoldHotkey.isPending}
-					isSaving={updateQuickAskHoldHotkey.isPending}
-					isRecording={recordingInput === "quick_ask_hold"}
-					onStartRecording={() => setRecordingInput("quick_ask_hold")}
-					onStopRecording={() => setRecordingInput(null)}
-				/>
-			</div>
-
-			<div style={{ marginTop: 20 }}>
-				<HotkeyInput
-					label="Quick Ask Toggle"
-					description="Press once to start recording a question, press again to stop (shows answer overlay)"
-					value={
-						settings
-							? settings.quick_ask_toggle_hotkey
-							: DEFAULT_QUICK_ASK_TOGGLE_HOTKEY
-					}
-					onChange={handleQuickAskToggleHotkeyChange}
-					disabled={isLoading || updateQuickAskToggleHotkey.isPending}
-					isSaving={updateQuickAskToggleHotkey.isPending}
-					isRecording={recordingInput === "quick_ask_toggle"}
-					onStartRecording={() => setRecordingInput("quick_ask_toggle")}
-					onStopRecording={() => setRecordingInput(null)}
-				/>
-			</div>
+						return (
+							<HotkeyShortcutCard
+								key={card.id}
+								title={meta?.label ?? "Shortcut"}
+								description={meta?.description}
+								actions={
+									<Button
+										variant="subtle"
+										size="xs"
+										color="red"
+										onClick={() => handleDeleteCard(card.id)}
+										disabled={isLoading || isSaving || isDeleting}
+										loading={isDeleting}
+									>
+										Delete
+									</Button>
+								}
+							>
+								<HotkeyInput
+									label="Shortcut"
+									value={card.hotkey}
+									onChange={(config) => handleHotkeyChange(card.id, config)}
+									disabled={isLoading || isSaving || isDeleting}
+									isSaving={isSaving}
+									isRecording={recordingInput === card.id}
+									onStartRecording={() => setRecordingInput(card.id)}
+									onStopRecording={() => setRecordingInput(null)}
+								/>
+							</HotkeyShortcutCard>
+						);
+					})}
+				</div>
+			)}
 
 			<div
 				style={{
