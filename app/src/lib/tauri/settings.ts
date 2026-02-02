@@ -1303,6 +1303,8 @@ export const tauriSettingsAPI = {
 			output_hit_enter: (await store.get<boolean>("output_hit_enter")) ?? false,
 			output_clipboard_privacy_mode:
 				(await store.get<boolean>("output_clipboard_privacy_mode")) ?? false,
+			output_smart_paste_protection:
+				(await store.get<boolean>("output_smart_paste_protection")) ?? false,
 
 			main_window_close_behavior: normalizeMainWindowCloseBehavior(
 				await store.get("main_window_close_behavior"),
@@ -1928,6 +1930,12 @@ export const tauriSettingsAPI = {
 
 	async updateOutputHitEnter(enabled: boolean): Promise<void> {
 		await applySettingsPatch({ patch: { output_hit_enter: enabled } });
+	},
+
+	async updateOutputSmartPasteProtection(enabled: boolean): Promise<void> {
+		await applySettingsPatch({
+			patch: { output_smart_paste_protection: Boolean(enabled) },
+		});
 	},
 
 	async updateQuietAudioGateEnabled(enabled: boolean): Promise<void> {

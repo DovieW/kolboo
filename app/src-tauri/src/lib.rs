@@ -2006,6 +2006,11 @@ pub(crate) fn stop_recording(
                                     "output_clipboard_privacy_mode",
                                     false,
                                 );
+                                let output_smart_paste_protection: bool = get_setting_from_store(
+                                    &app_clone,
+                                    "output_smart_paste_protection",
+                                    false,
+                                );
 
                                 #[cfg(target_os = "windows")]
                                 {
@@ -2024,6 +2029,7 @@ pub(crate) fn stop_recording(
                                                 snapshot,
                                                 true,
                                                 true,
+                                                output_smart_paste_protection,
                                             )
                                         {
                                             log::error!(
@@ -2040,14 +2046,19 @@ pub(crate) fn stop_recording(
                                             }
                                         }
                                     } else {
-                                        let safe_to_insert =
-                                            crate::windows_uia::snapshot::capture_focused_snapshot(
-                                            )
-                                            .ok()
-                                            .map(|snapshot| {
-                                                crate::windows_uia::safety::allow_insert(&snapshot)
-                                            })
-                                            .unwrap_or(true);
+                                        let safe_to_insert = if output_smart_paste_protection {
+                                            crate::windows_uia::snapshot::capture_focused_snapshot()
+                                                .ok()
+                                                .map(|snapshot| {
+                                                    crate::windows_uia::safety::allow_insert_with_protection(
+                                                        &snapshot,
+                                                        output_smart_paste_protection,
+                                                    )
+                                                })
+                                                .unwrap_or(true)
+                                        } else {
+                                            true
+                                        };
 
                                         if !safe_to_insert {
                                             if let Err(e) =

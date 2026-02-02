@@ -682,6 +682,8 @@ export interface AppSettings {
 	output_hit_enter: boolean;
 	// When true, output injection will not read/restore the clipboard.
 	output_clipboard_privacy_mode: boolean;
+	// When true, avoid pasting into sensitive targets (e.g., password fields).
+	output_smart_paste_protection: boolean;
 
 	/** What the window close button does for the main/settings window. */
 	main_window_close_behavior: MainWindowCloseBehavior;

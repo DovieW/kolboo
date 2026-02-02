@@ -1,3 +1,4 @@
+import { notifications } from "@mantine/notifications";
 import {
 	keepPreviousData,
 	useMutation,
@@ -575,6 +576,26 @@ export function useUpdateOutputHitEnter() {
 		mutationFn: (enabled: boolean) => tauriAPI.updateOutputHitEnter(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateOutputSmartPasteProtection() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateOutputSmartPasteProtection(enabled),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+		onError: (error) => {
+			console.error("Update smart paste protection failed:", error);
+			notifications.show({
+				title: "Couldn't save setting",
+				message:
+					"Smart paste protection couldn't be saved. Your previous setting is still active.",
+				color: "red",
+			});
 		},
 	});
 }

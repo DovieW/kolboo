@@ -37,9 +37,18 @@ pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
         .lock()
         .ok()
         .and_then(|mut g| g.take());
+    let smart_paste_protection: bool =
+        crate::get_setting_from_store(&app, "output_smart_paste_protection", false);
 
-    crate::windows_uia::insert::insert_text_with_snapshot(&app, &text, snapshot, true, true)
-        .map_err(CommandError::from)?;
+    crate::windows_uia::insert::insert_text_with_snapshot(
+        &app,
+        &text,
+        snapshot,
+        true,
+        true,
+        smart_paste_protection,
+    )
+    .map_err(CommandError::from)?;
 
     Ok(())
 }

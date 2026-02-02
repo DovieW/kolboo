@@ -21,6 +21,7 @@ import {
 	useUpdateMainWindowCloseBehavior,
 	useUpdateOutputHitEnter,
 	useUpdateOutputMode,
+	useUpdateOutputSmartPasteProtection,
 	useUpdateOverlayMode,
 	useUpdateOverlayMonitorTarget,
 	useUpdateOverlayShowDetailedLoading,
@@ -126,6 +127,8 @@ export function UiSettings({
 	const updateOverlayMonitorTarget = useUpdateOverlayMonitorTarget();
 	const updateOutputMode = useUpdateOutputMode();
 	const updateOutputHitEnter = useUpdateOutputHitEnter();
+	const updateOutputSmartPasteProtection =
+		useUpdateOutputSmartPasteProtection();
 	const updateRewriteProgramPromptProfiles =
 		useUpdateRewriteProgramPromptProfiles();
 
@@ -235,6 +238,9 @@ export function UiSettings({
 		: globalOutputHitEnter;
 	const outputHitEnterInheriting =
 		isProfileScope && isInheriting(profile?.output_hit_enter);
+
+	const outputSmartPasteProtection =
+		settings?.output_smart_paste_protection ?? false;
 
 	const globalContextGrabMethod: ContextGrabMethod =
 		defaultProfile?.context_grab_method ?? "ctrl_c";
@@ -374,6 +380,11 @@ export function UiSettings({
 			return;
 		}
 		updateOutputMode.mutate(nextMode);
+	};
+
+	const handleOutputSmartPasteProtectionToggle = (checked: boolean) => {
+		if (isProfileScope) return;
+		updateOutputSmartPasteProtection.mutate(checked);
 	};
 
 	const handleContextGrabMethodChange = (value: string | null) => {
@@ -759,6 +770,33 @@ export function UiSettings({
 							/>
 						</div>
 					</>
+				}
+			/>
+
+			<SettingsRow
+				label="Smart paste protection"
+				description="Avoid pasting into sensitive fields (like password boxes)"
+				right={
+					<Tooltip
+						label={GLOBAL_ONLY_TOOLTIP}
+						disabled={!isProfileScope}
+						withArrow
+						position="top-start"
+					>
+						<div style={isProfileScope ? { opacity: 0.5 } : undefined}>
+							<Switch
+								checked={outputSmartPasteProtection}
+								onChange={(event) =>
+									handleOutputSmartPasteProtectionToggle(
+										event.currentTarget.checked,
+									)
+								}
+								disabled={isLoading || isProfileScope}
+								color="gray"
+								size="md"
+							/>
+						</div>
+					</Tooltip>
 				}
 			/>
 

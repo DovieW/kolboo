@@ -141,6 +141,18 @@ describe("tauri settings side effects", () => {
 		});
 	});
 
+	it("updateOutputSmartPasteProtection patches settings", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.updateOutputSmartPasteProtection(true);
+
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: { output_smart_paste_protection: true },
+			deleteKeys: [],
+		});
+	});
+
 	it("updateTranscriptionRetention keeps legacy days in sync", async () => {
 		vi.resetModules();
 		const { tauriSettingsAPI } = await import("./settings");

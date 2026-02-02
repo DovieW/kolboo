@@ -6,7 +6,7 @@ use crate::windows_uia::app_identity::app_identity_key;
 use crate::windows_uia::capability_memory::{
     load_capability_memory, record_insertion_result, save_capability_memory,
 };
-use crate::windows_uia::safety::insert_block_reason;
+use crate::windows_uia::safety::insert_block_reason_with_protection;
 
 #[cfg(target_os = "windows")]
 use crate::request_log::{LogLevel, RequestLogStore};
@@ -58,6 +58,7 @@ pub fn insert_text_with_snapshot(
     initial_snapshot: Option<WindowsTextTargetSnapshot>,
     allow_paste: bool,
     allow_typing: bool,
+    smart_paste_protection: bool,
 ) -> Result<WindowsInsertMethod, String> {
     let snapshot = if let Some(snapshot) = initial_snapshot {
         snapshot
@@ -109,7 +110,9 @@ pub fn insert_text_with_snapshot(
         ..current_snapshot.clone()
     };
 
-    if let Some(reason) = insert_block_reason(&safety_snapshot) {
+    if let Some(reason) =
+        insert_block_reason_with_protection(&safety_snapshot, smart_paste_protection)
+    {
         log::info!(
             "UIA insert: blocked by safety policy (reason={}, is_password={:?}, is_enabled={:?}, is_read_only={:?}), using safe fallback",
             reason.as_str(),
@@ -274,6 +277,7 @@ pub fn insert_text_with_snapshot(
     _initial_snapshot: Option<WindowsTextTargetSnapshot>,
     _allow_paste: bool,
     _allow_typing: bool,
+    _smart_paste_protection: bool,
 ) -> Result<WindowsInsertMethod, String> {
     Ok(WindowsInsertMethod::None)
 }

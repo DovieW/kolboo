@@ -31,6 +31,19 @@ pub fn allow_insert(snapshot: &WindowsTextTargetSnapshot) -> bool {
     insert_block_reason(snapshot).is_none()
 }
 
+/// Determine whether it is safe to insert text into the focused element, honoring
+/// the smart paste protection setting.
+pub fn allow_insert_with_protection(
+    snapshot: &WindowsTextTargetSnapshot,
+    protection_enabled: bool,
+) -> bool {
+    if !protection_enabled {
+        return true;
+    }
+
+    allow_insert(snapshot)
+}
+
 /// If insertion is blocked by policy, return a specific reason.
 ///
 /// This is safe to log (no user text). It is used to make logs more actionable.
@@ -50,9 +63,21 @@ pub fn insert_block_reason(snapshot: &WindowsTextTargetSnapshot) -> Option<Inser
     None
 }
 
+/// If smart paste protection is enabled, return the block reason; otherwise allow insert.
+pub fn insert_block_reason_with_protection(
+    snapshot: &WindowsTextTargetSnapshot,
+    protection_enabled: bool,
+) -> Option<InsertBlockReason> {
+    if !protection_enabled {
+        return None;
+    }
+
+    insert_block_reason(snapshot)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{allow_context_capture, allow_insert};
+    use super::{allow_context_capture, allow_insert, allow_insert_with_protection};
     use crate::windows_uia::types::WindowsTextTargetSnapshot;
 
     fn base_snapshot() -> WindowsTextTargetSnapshot {
@@ -102,5 +127,19 @@ mod tests {
     fn allows_insert_when_unknown() {
         let snapshot = base_snapshot();
         assert!(allow_insert(&snapshot));
+    }
+
+    #[test]
+    fn allows_insert_when_protection_disabled() {
+        let mut snapshot = base_snapshot();
+        snapshot.is_password = Some(true);
+        assert!(allow_insert_with_protection(&snapshot, false));
+    }
+
+    #[test]
+    fn blocks_insert_when_protection_enabled() {
+        let mut snapshot = base_snapshot();
+        snapshot.is_password = Some(true);
+        assert!(!allow_insert_with_protection(&snapshot, true));
     }
 }

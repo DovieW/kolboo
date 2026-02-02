@@ -205,6 +205,8 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // This reduces accidental exposure of clipboard contents at the cost of leaving output text
     // on the clipboard after paste.
     dirty |= set_default("output_clipboard_privacy_mode", json!(false), false);
+    // When true, avoid pasting into sensitive targets (e.g., password fields).
+    dirty |= set_default("output_smart_paste_protection", json!(false), false);
     dirty |= set_default("playing_audio_handling", json!("none"), false);
     dirty |= set_default("sound_enabled", json!(true), false);
     dirty |= set_default("rewrite_llm_enabled", json!(false), false);
