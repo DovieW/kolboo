@@ -141,6 +141,9 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("request_logs_retention_amount", json!(50), false);
     // Only used when mode == "time" (days; 0 = forever)
     dirty |= set_default("request_logs_retention_days", json!(7), false);
+    // When true, hide full request payloads in the UI (privacy mode).
+    // Default is false so payloads are visible unless explicitly hidden.
+    dirty |= set_default("request_logs_privacy_mode", json!(false), false);
     // Transcription retention mode (amount or time). Used by history capping.
     dirty |= set_default("transcription_retention_mode", json!("time"), false);
     dirty |= set_default("transcription_retention_amount", json!(1000), false);

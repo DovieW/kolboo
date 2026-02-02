@@ -826,8 +826,8 @@ function _SettingsView() {
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
 						<Tabs.Tab value="api-keys">Providers</Tabs.Tab>
 						<Tabs.Tab value="data">Data</Tabs.Tab>
-						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
+						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 					</Tabs.List>
 
 					<Tabs.Panel value="ai" pt="md">
@@ -866,6 +866,12 @@ function _SettingsView() {
 						</div>
 					</Tabs.Panel>
 
+					<Tabs.Panel value="network" pt="md">
+						<div className="settings-card">
+							<NetworkSettings editingProfileId={editingProfileId} />
+						</div>
+					</Tabs.Panel>
+
 					<Tabs.Panel value="privacy" pt="md">
 						<div className="settings-card">
 							<PrivacySettings
@@ -874,12 +880,6 @@ function _SettingsView() {
 									setActiveSettingsTab(tab);
 								}}
 							/>
-						</div>
-					</Tabs.Panel>
-
-					<Tabs.Panel value="network" pt="md">
-						<div className="settings-card">
-							<NetworkSettings editingProfileId={editingProfileId} />
 						</div>
 					</Tabs.Panel>
 				</Tabs>
@@ -1120,8 +1120,8 @@ function SettingsViewWithGuideLauncher({
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
 						<Tabs.Tab value="api-keys">Providers</Tabs.Tab>
 						<Tabs.Tab value="data">Data</Tabs.Tab>
-						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
+						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 					</Tabs.List>
 
 					<Tabs.Panel value="ai" pt="md">
@@ -1160,6 +1160,12 @@ function SettingsViewWithGuideLauncher({
 						</div>
 					</Tabs.Panel>
 
+					<Tabs.Panel value="network" pt="md">
+						<div className="settings-card">
+							<NetworkSettings editingProfileId={editingProfileId} />
+						</div>
+					</Tabs.Panel>
+
 					<Tabs.Panel value="privacy" pt="md">
 						<div className="settings-card">
 							<PrivacySettings
@@ -1168,12 +1174,6 @@ function SettingsViewWithGuideLauncher({
 									setActiveSettingsTab(tab);
 								}}
 							/>
-						</div>
-					</Tabs.Panel>
-
-					<Tabs.Panel value="network" pt="md">
-						<div className="settings-card">
-							<NetworkSettings editingProfileId={editingProfileId} />
 						</div>
 					</Tabs.Panel>
 				</Tabs>

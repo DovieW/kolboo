@@ -985,6 +985,12 @@ pub(crate) fn stop_recording(
                                 let quick_ask_conversation_history_count: usize =
                                     quick_ask_conversation_history_count_raw.clamp(1, 20) as usize;
 
+                                let request_logs_privacy_mode: bool = get_setting_from_store(
+                                    &app_clone,
+                                    "request_logs_privacy_mode",
+                                    false,
+                                );
+
                                 let global_qa_openai_reasoning_effort: Option<String> =
                                     get_setting_from_store(
                                         &app_clone,
@@ -1448,6 +1454,14 @@ pub(crate) fn stop_recording(
                                             if let Some(serde_json::Value::Object(map)) =
                                                 log.quick_ask_request_json.as_mut()
                                             {
+                                                if !request_logs_privacy_mode {
+                                                    map.insert(
+                                                        "user_message".to_string(),
+                                                        serde_json::Value::String(
+                                                            question_with_context.clone(),
+                                                        ),
+                                                    );
+                                                }
                                                 map.insert(
                                                     "context_present".to_string(),
                                                     serde_json::Value::Bool(

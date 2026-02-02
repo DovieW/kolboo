@@ -153,6 +153,18 @@ describe("tauri settings side effects", () => {
 		});
 	});
 
+	it("updateRequestLogsPrivacyMode patches settings", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.updateRequestLogsPrivacyMode(true);
+
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: { request_logs_privacy_mode: true },
+			deleteKeys: [],
+		});
+	});
+
 	it("updateTranscriptionRetention keeps legacy days in sync", async () => {
 		vi.resetModules();
 		const { tauriSettingsAPI } = await import("./settings");

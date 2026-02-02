@@ -1,6 +1,7 @@
 import { CodeHighlight } from "@mantine/code-highlight";
-import { Box, Modal, Stack, Tabs, Text } from "@mantine/core";
+import { Badge, Box, Modal, Stack, Tabs, Text } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
+import { useSettings } from "../lib/queries";
 import type { RequestLog } from "../lib/tauri";
 
 type TabKey =
@@ -84,6 +85,29 @@ function JsonPanel({ value }: { value: unknown }) {
 	);
 }
 
+function redactPayloadValue(
+	value: unknown,
+	redactedKeys: Set<string>,
+): unknown {
+	if (value == null) return value;
+	if (typeof value !== "object") return value;
+
+	if (Array.isArray(value)) {
+		return value.map((item) => redactPayloadValue(item, redactedKeys));
+	}
+
+	const record = value as Record<string, unknown>;
+	const next: Record<string, unknown> = {};
+	for (const [key, entry] of Object.entries(record)) {
+		if (redactedKeys.has(key)) {
+			next[key] = "<hidden due to privacy mode>";
+			continue;
+		}
+		next[key] = redactPayloadValue(entry, redactedKeys);
+	}
+	return next;
+}
+
 export function LogJsonModal({
 	opened,
 	onClose,
@@ -93,6 +117,109 @@ export function LogJsonModal({
 	onClose: () => void;
 	log: RequestLog;
 }) {
+	const { data: settings } = useSettings();
+	const privacyModeEnabled = settings?.request_logs_privacy_mode ?? false;
+	const redactedKeys = useMemo(
+		() =>
+			new Set([
+				"raw_transcript",
+				"final_text",
+				"formatted_transcript",
+				"transcript",
+				"text",
+				"content",
+				"output",
+				"messages",
+				"prompt",
+				"input",
+				"user_message",
+				"system_prompt",
+				"stt_transcription_prompt",
+				"question",
+				"answer",
+				"context",
+				"context_text",
+				"clipboard_context",
+				"ocr_context_text",
+				"rewrite_clipboard_context",
+				"quick_ask_question",
+				"quick_ask_answer",
+				"quick_ask_context_text",
+				"quick_ask_clipboard_context",
+				"quick_replace_instructions",
+				"quick_replace_selected_text",
+				"quick_replace_output_text",
+				"quick_replace_clipboard_context",
+				"selected_text",
+				"instructions",
+			]),
+		[],
+	);
+
+	const logForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log;
+		return redactPayloadValue(log, redactedKeys) as RequestLog;
+	}, [log, privacyModeEnabled, redactedKeys]);
+
+	const quickAskRequestForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.quick_ask_request_json;
+		return redactPayloadValue(log.quick_ask_request_json, redactedKeys);
+	}, [log.quick_ask_request_json, privacyModeEnabled, redactedKeys]);
+
+	const quickAskResponseForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.quick_ask_response_json;
+		return redactPayloadValue(log.quick_ask_response_json, redactedKeys);
+	}, [log.quick_ask_response_json, privacyModeEnabled, redactedKeys]);
+
+	const quickReplaceRequestForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.quick_replace_request_json;
+		return redactPayloadValue(log.quick_replace_request_json, redactedKeys);
+	}, [log.quick_replace_request_json, privacyModeEnabled, redactedKeys]);
+
+	const quickReplaceResponseForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.quick_replace_response_json;
+		return redactPayloadValue(log.quick_replace_response_json, redactedKeys);
+	}, [log.quick_replace_response_json, privacyModeEnabled, redactedKeys]);
+
+	const llmRequestForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.llm_request_json;
+		return redactPayloadValue(log.llm_request_json, redactedKeys);
+	}, [log.llm_request_json, privacyModeEnabled, redactedKeys]);
+
+	const llmResponseForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.llm_response_json;
+		return redactPayloadValue(log.llm_response_json, redactedKeys);
+	}, [log.llm_response_json, privacyModeEnabled, redactedKeys]);
+
+	const sttRequestForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.stt_request_json;
+		return redactPayloadValue(log.stt_request_json, redactedKeys);
+	}, [log.stt_request_json, privacyModeEnabled, redactedKeys]);
+
+	const sttResponseForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.stt_response_json;
+		return redactPayloadValue(log.stt_response_json, redactedKeys);
+	}, [log.stt_response_json, privacyModeEnabled, redactedKeys]);
+
+	const ocrRequestForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.ocr_request_json;
+		return redactPayloadValue(log.ocr_request_json, redactedKeys);
+	}, [log.ocr_request_json, privacyModeEnabled, redactedKeys]);
+
+	const ocrResponseForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.ocr_response_json;
+		return redactPayloadValue(log.ocr_response_json, redactedKeys);
+	}, [log.ocr_response_json, privacyModeEnabled, redactedKeys]);
+
+	const routerRequestForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.router_request_json;
+		return redactPayloadValue(log.router_request_json, redactedKeys);
+	}, [log.router_request_json, privacyModeEnabled, redactedKeys]);
+
+	const routerResponseForModal = useMemo(() => {
+		if (!privacyModeEnabled) return log.router_response_json;
+		return redactPayloadValue(log.router_response_json, redactedKeys);
+	}, [log.router_response_json, privacyModeEnabled, redactedKeys]);
 	const hasSttPayload =
 		log.stt_request_json !== undefined || log.stt_response_json !== undefined;
 	const hasLlmPayload =
@@ -142,6 +269,11 @@ export function LogJsonModal({
 			}}
 		>
 			<Stack gap="sm" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+				{privacyModeEnabled && (
+					<Badge color="yellow" variant="light" size="sm">
+						Privacy mode is on — some payload fields are hidden.
+					</Badge>
+				)}
 				<Text size="xs" c="dimmed">
 					Payloads are captured for debugging. STT requests often use a debug
 					preview with <code>&lt;binary audio omitted&gt;</code>
@@ -220,7 +352,7 @@ export function LogJsonModal({
 						pt="sm"
 						style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 					>
-						<JsonPanel value={log} />
+						<JsonPanel value={logForModal} />
 					</Tabs.Panel>
 
 					{hasSttPayload && (
@@ -230,14 +362,14 @@ export function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.stt_request_json} />
+								<JsonPanel value={sttRequestForModal} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="stt-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.stt_response_json} />
+								<JsonPanel value={sttResponseForModal} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -249,14 +381,14 @@ export function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.llm_request_json} />
+								<JsonPanel value={llmRequestForModal} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="llm-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.llm_response_json} />
+								<JsonPanel value={llmResponseForModal} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -268,14 +400,14 @@ export function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.ocr_request_json} />
+								<JsonPanel value={ocrRequestForModal} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="ocr-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.ocr_response_json} />
+								<JsonPanel value={ocrResponseForModal} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -287,14 +419,14 @@ export function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.quick_ask_request_json} />
+								<JsonPanel value={quickAskRequestForModal} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="quick-ask-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.quick_ask_response_json} />
+								<JsonPanel value={quickAskResponseForModal} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -306,14 +438,14 @@ export function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.quick_replace_request_json} />
+								<JsonPanel value={quickReplaceRequestForModal} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="quick-replace-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.quick_replace_response_json} />
+								<JsonPanel value={quickReplaceResponseForModal} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -325,14 +457,14 @@ export function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.router_request_json} />
+								<JsonPanel value={routerRequestForModal} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="router-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={log.router_response_json} />
+								<JsonPanel value={routerResponseForModal} />
 							</Tabs.Panel>
 						</>
 					)}

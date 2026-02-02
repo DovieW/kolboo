@@ -745,6 +745,8 @@ export interface AppSettings {
 	request_logs_retention_amount: number;
 	// Only used when mode === "time" (0 = forever)
 	request_logs_retention_days: number;
+	// When true, hide full request payloads in the UI (privacy mode).
+	request_logs_privacy_mode: boolean;
 
 	// Backups
 	// Optional: GitHub Gist id used for "push/pull" backups.

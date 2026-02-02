@@ -600,6 +600,18 @@ export function useUpdateOutputSmartPasteProtection() {
 	});
 }
 
+export function useUpdateRequestLogsPrivacyMode() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateRequestLogsPrivacyMode(enabled),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
+		},
+	});
+}
+
 export function useUpdateQuietAudioGateEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({

@@ -1366,6 +1366,8 @@ export const tauriSettingsAPI = {
 			request_logs_retention_days: normalizeRequestLogsRetentionDays(
 				await store.get("request_logs_retention_days"),
 			),
+			request_logs_privacy_mode:
+				(await store.get<boolean>("request_logs_privacy_mode")) ?? false,
 
 			transcription_retention_mode: transcriptionRetentionMode,
 			transcription_retention_amount: transcriptionRetentionAmount,
@@ -2068,6 +2070,12 @@ export const tauriSettingsAPI = {
 				request_logs_retention_amount: amount,
 				request_logs_retention_days: days,
 			},
+		});
+	},
+
+	async updateRequestLogsPrivacyMode(enabled: boolean): Promise<void> {
+		await applySettingsPatch({
+			patch: { request_logs_privacy_mode: Boolean(enabled) },
 		});
 	},
 
