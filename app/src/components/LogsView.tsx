@@ -1308,7 +1308,7 @@ export function LogsView(
 		<div style={{ width: "100%" }}>
 			<Stack gap="md" className="tv-page-header">
 				<Group justify="space-between" align="center">
-					<Title order={3}>Request Logs</Title>
+					<Title order={3}>Logs</Title>
 					<Group gap="xs">
 						<Popover
 							opened={exportOpened}
@@ -1326,7 +1326,7 @@ export function LogsView(
 									onClick={() => exportPopover.toggle()}
 									disabled={!logs || logs.length === 0}
 								>
-									Export…
+									Export
 								</Button>
 							</Popover.Target>
 							<Popover.Dropdown>
