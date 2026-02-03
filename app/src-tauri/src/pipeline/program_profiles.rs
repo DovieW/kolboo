@@ -303,6 +303,7 @@ mod tests {
             rewrite_llm_enabled: None,
             stt_provider: None,
             stt_model: None,
+            stt_language: None,
             stt_timeout_seconds: None,
             llm_provider: None,
             llm_model: None,

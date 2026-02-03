@@ -4,7 +4,7 @@
 //! - whisper-v3:       https://audio-prod.api.fireworks.ai/v1/audio/transcriptions
 //! - whisper-v3-turbo: https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions
 
-use super::{http, openai_compat};
+use super::{http, language, openai_compat};
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -15,6 +15,7 @@ pub struct FireworksSttProvider {
     api_key: String,
     model: String,
     default_prompt: Option<String>,
+    default_language: Option<String>,
     api_base_url: Option<String>,
     request_log_store: Option<RequestLogStore>,
 }
@@ -22,8 +23,19 @@ pub struct FireworksSttProvider {
 impl FireworksSttProvider {
     /// Create a new Fireworks STT provider.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
-        Self::with_client(reqwest::Client::new(), api_key, model, default_prompt)
+    pub fn new(
+        api_key: String,
+        model: Option<String>,
+        language: Option<String>,
+        default_prompt: Option<String>,
+    ) -> Self {
+        Self::with_client(
+            reqwest::Client::new(),
+            api_key,
+            model,
+            language,
+            default_prompt,
+        )
     }
 
     /// Create a new provider with a custom HTTP client.
@@ -32,6 +44,7 @@ impl FireworksSttProvider {
         client: reqwest::Client,
         api_key: String,
         model: Option<String>,
+        language: Option<String>,
         default_prompt: Option<String>,
     ) -> Self {
         Self {
@@ -43,6 +56,7 @@ impl FireworksSttProvider {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
+            default_language: Self::normalize_language(language),
             api_base_url: None,
             request_log_store: None,
         }
@@ -79,6 +93,10 @@ impl FireworksSttProvider {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
     }
+
+    fn normalize_language(language: Option<String>) -> Option<String> {
+        language::normalize_language_code(language)
+    }
 }
 
 #[async_trait]
@@ -93,6 +111,7 @@ impl SttProvider for FireworksSttProvider {
         let url = self.transcriptions_url();
 
         let prompt = self.prompt();
+        let language = self.default_language.as_deref();
         // Fireworks docs show `Authorization: <API_KEY>` for audio endpoints.
         // We pass the stored value through as-is to avoid double-prefixing.
         openai_compat::transcribe_wav_multipart_openai_compat(
@@ -103,6 +122,7 @@ impl SttProvider for FireworksSttProvider {
             audio,
             &self.model,
             prompt.as_deref(),
+            language,
             self.request_log_store.as_ref(),
             |rb| rb.header("Authorization", &self.api_key),
             SttError::Network,
@@ -121,25 +141,30 @@ mod tests {
 
     #[test]
     fn test_provider_name() {
-        let provider = FireworksSttProvider::new("test".to_string(), None, None);
+        let provider = FireworksSttProvider::new("test".to_string(), None, None, None);
         assert_eq!(provider.name(), "fireworks");
     }
 
     #[test]
     fn test_default_model() {
-        let provider = FireworksSttProvider::new("test".to_string(), None, None);
+        let provider = FireworksSttProvider::new("test".to_string(), None, None, None);
         assert_eq!(provider.model, "whisper-v3-turbo");
     }
 
     #[test]
     fn test_transcriptions_url_switches_on_turbo() {
-        let p1 =
-            FireworksSttProvider::new("test".to_string(), Some("whisper-v3".to_string()), None);
+        let p1 = FireworksSttProvider::new(
+            "test".to_string(),
+            Some("whisper-v3".to_string()),
+            None,
+            None,
+        );
         assert!(p1.transcriptions_url().contains("audio-prod"));
 
         let p2 = FireworksSttProvider::new(
             "test".to_string(),
             Some("whisper-v3-turbo".to_string()),
+            None,
             None,
         );
         assert!(p2.transcriptions_url().contains("audio-turbo"));

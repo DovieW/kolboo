@@ -258,7 +258,7 @@ mod provider_benchmarks {
         // Just measure a few iterations
         let start = Instant::now();
         for _ in 0..10 {
-            let _ = GroqSttProvider::new("test_key".to_string(), None, None);
+            let _ = GroqSttProvider::new("test_key".to_string(), None, None, None);
         }
         let stt_time = start.elapsed() / 10;
         println!("[BENCH] STT provider creation: {:?} per provider", stt_time);

@@ -19,6 +19,7 @@ pub(super) fn wav_transcription_form(
     audio: &[u8],
     model: &str,
     prompt: Option<&str>,
+    language: Option<&str>,
 ) -> Result<multipart::Form, SttError> {
     let part = multipart::Part::bytes(audio.to_vec())
         .file_name("audio.wav")
@@ -31,6 +32,10 @@ pub(super) fn wav_transcription_form(
 
     if let Some(prompt) = normalize_optional_text(prompt) {
         form = form.text("prompt", prompt);
+    }
+
+    if let Some(language) = normalize_optional_text(language) {
+        form = form.text("language", language);
     }
 
     Ok(form)
@@ -47,6 +52,7 @@ pub(super) async fn transcribe_wav_multipart_openai_compat<BuildRequest, MapNetw
     audio: &[u8],
     model: &str,
     prompt: Option<&str>,
+    language: Option<&str>,
     request_log_store: Option<&RequestLogStore>,
     build_request: BuildRequest,
     map_network_error: MapNetworkError,
@@ -63,6 +69,7 @@ where
             "fields": {
                 "model": model,
                 "prompt": prompt,
+                "language": language,
             },
             "file": {
                 "name": "audio.wav",
@@ -77,7 +84,7 @@ where
         });
     }
 
-    let form = wav_transcription_form(audio, model, prompt)?;
+    let form = wav_transcription_form(audio, model, prompt, language)?;
 
     let response = build_request(client.post(endpoint))
         .multipart(form)

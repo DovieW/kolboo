@@ -1,4 +1,5 @@
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
+import { DEFAULT_STT_LANGUAGE } from "../../../lib/sttLanguages";
 import type {
 	ActiveWindowOcrMode,
 	AppSettings,
@@ -23,6 +24,8 @@ type PromptSettingsProfileState = {
 	setLocalProfileSttProvider: Setter<string | null>;
 	localProfileSttModel: string | null;
 	setLocalProfileSttModel: Setter<string | null>;
+	localProfileSttLanguage: string;
+	setLocalProfileSttLanguage: Setter<string>;
 	localProfileLlmProvider: string | null;
 	setLocalProfileLlmProvider: Setter<string | null>;
 	localProfileLlmModel: string | null;
@@ -79,6 +82,8 @@ type PromptSettingsProfileState = {
 	setSttProviderInheriting: Setter<boolean>;
 	sttModelInheriting: boolean;
 	setSttModelInheriting: Setter<boolean>;
+	sttLanguageInheriting: boolean;
+	setSttLanguageInheriting: Setter<boolean>;
 	sttTimeoutInheriting: boolean;
 	setSttTimeoutInheriting: Setter<boolean>;
 	llmProviderInheriting: boolean;
@@ -148,6 +153,8 @@ export function usePromptSettingsProfileState({
 	const [localProfileSttModel, setLocalProfileSttModel] = useState<
 		string | null
 	>(null);
+	const [localProfileSttLanguage, setLocalProfileSttLanguage] =
+		useState<string>(DEFAULT_STT_LANGUAGE);
 	const [localProfileLlmProvider, setLocalProfileLlmProvider] = useState<
 		string | null
 	>(null);
@@ -244,6 +251,7 @@ export function usePromptSettingsProfileState({
 	// Track whether profile settings are inheriting (original value was null)
 	const [sttProviderInheriting, setSttProviderInheriting] = useState(false);
 	const [sttModelInheriting, setSttModelInheriting] = useState(false);
+	const [sttLanguageInheriting, setSttLanguageInheriting] = useState(false);
 	const [sttTimeoutInheriting, setSttTimeoutInheriting] = useState(false);
 	const [llmProviderInheriting, setLlmProviderInheriting] = useState(false);
 	const [llmModelInheriting, setLlmModelInheriting] = useState(false);
@@ -332,6 +340,9 @@ export function usePromptSettingsProfileState({
 			const sttModelIsNull =
 				activeProfile.stt_model === null ||
 				activeProfile.stt_model === undefined;
+			const sttLanguageIsNull =
+				activeProfile.stt_language === null ||
+				activeProfile.stt_language === undefined;
 			const sttTimeoutIsNull =
 				activeProfile.stt_timeout_seconds === null ||
 				activeProfile.stt_timeout_seconds === undefined;
@@ -473,6 +484,7 @@ export function usePromptSettingsProfileState({
 
 			setSttProviderInheriting(sttProviderIsNull);
 			setSttModelInheriting(sttModelIsNull);
+			setSttLanguageInheriting(sttLanguageIsNull);
 			setSttTimeoutInheriting(sttTimeoutIsNull);
 			setLlmProviderInheriting(llmProviderIsNull);
 			setLlmModelInheriting(llmModelIsNull);
@@ -530,6 +542,11 @@ export function usePromptSettingsProfileState({
 			);
 			setLocalProfileSttModel(
 				activeProfile.stt_model ?? settings?.stt_model ?? null,
+			);
+			setLocalProfileSttLanguage(
+				activeProfile.stt_language ??
+					settings?.stt_language ??
+					DEFAULT_STT_LANGUAGE,
 			);
 			setLocalProfileLlmProvider(
 				activeProfile.llm_provider ?? settings?.llm_provider ?? null,
@@ -689,6 +706,7 @@ export function usePromptSettingsProfileState({
 			// Default scope - not inheriting
 			setSttProviderInheriting(false);
 			setSttModelInheriting(false);
+			setSttLanguageInheriting(false);
 			setSttTimeoutInheriting(false);
 			setLlmProviderInheriting(false);
 			setLlmModelInheriting(false);
@@ -723,6 +741,9 @@ export function usePromptSettingsProfileState({
 
 			setLocalProfileSttProvider(null);
 			setLocalProfileSttModel(null);
+			setLocalProfileSttLanguage(
+				settings?.stt_language ?? DEFAULT_STT_LANGUAGE,
+			);
 			setLocalProfileLlmProvider(null);
 			setLocalProfileLlmModel(null);
 			setLocalProfileQuickAskProvider(null);
@@ -775,6 +796,7 @@ export function usePromptSettingsProfileState({
 		settings?.stt_timeout_seconds,
 		settings?.stt_provider,
 		settings?.stt_model,
+		settings?.stt_language,
 		settings?.llm_provider,
 		settings?.llm_model,
 		settings?.quick_ask_provider,
@@ -793,6 +815,8 @@ export function usePromptSettingsProfileState({
 		setLocalProfileSttProvider,
 		localProfileSttModel,
 		setLocalProfileSttModel,
+		localProfileSttLanguage,
+		setLocalProfileSttLanguage,
 		localProfileLlmProvider,
 		setLocalProfileLlmProvider,
 		localProfileLlmModel,
@@ -849,6 +873,8 @@ export function usePromptSettingsProfileState({
 		setSttProviderInheriting,
 		sttModelInheriting,
 		setSttModelInheriting,
+		sttLanguageInheriting,
+		setSttLanguageInheriting,
 		sttTimeoutInheriting,
 		setSttTimeoutInheriting,
 		llmProviderInheriting,

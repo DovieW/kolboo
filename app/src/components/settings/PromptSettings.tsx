@@ -33,11 +33,13 @@ import {
 	useUpdateQuickAskSystemPrompt,
 	useUpdateRewriteLlmEnabled,
 	useUpdateRewriteProgramPromptProfiles,
+	useUpdateSTTLanguage,
 	useUpdateSTTModel,
 	useUpdateSTTProvider,
 	useUpdateSTTTimeout,
 	useUpdateSTTTranscriptionPrompt,
 } from "../../lib/queries";
+import { STT_LANGUAGE_OPTIONS } from "../../lib/sttLanguages";
 import {
 	type ActiveWindowOcrMode,
 	type CleanupPromptSections,
@@ -139,6 +141,7 @@ export function PromptSettings({
 	// Default profile (global) provider settings
 	const updateSTTProvider = useUpdateSTTProvider();
 	const updateSTTModel = useUpdateSTTModel();
+	const updateSTTLanguage = useUpdateSTTLanguage();
 	const updateSTTTranscriptionPrompt = useUpdateSTTTranscriptionPrompt();
 	const updateLLMProvider = useUpdateLLMProvider();
 	const updateLLMModel = useUpdateLLMModel();
@@ -229,6 +232,8 @@ export function PromptSettings({
 		setLocalProfileSttProvider,
 		localProfileSttModel,
 		setLocalProfileSttModel,
+		localProfileSttLanguage,
+		setLocalProfileSttLanguage,
 		localProfileLlmProvider,
 		setLocalProfileLlmProvider,
 		localProfileLlmModel,
@@ -285,6 +290,8 @@ export function PromptSettings({
 		setSttProviderInheriting,
 		sttModelInheriting,
 		setSttModelInheriting,
+		sttLanguageInheriting,
+		setSttLanguageInheriting,
 		sttTimeoutInheriting,
 		setSttTimeoutInheriting,
 		llmProviderInheriting,
@@ -877,10 +884,12 @@ export function PromptSettings({
 		handleWhisperServerModelDraftBlur,
 		handleSttProviderChange,
 		handleSttModelChange,
+		handleSttLanguageChange,
 		handleSttTimeoutChange,
 		handleSttTimeoutBlur,
 		handleDisableSttProviderOverride,
 		handleDisableSttModelOverride,
+		handleDisableSttLanguageOverride,
 		handleDisableSttTimeoutOverride,
 	} = useSttSettingsHandlers({
 		isDefaultScope,
@@ -888,14 +897,18 @@ export function PromptSettings({
 		activeProfile,
 		whisperServerModelDraft,
 		localProfileSttTimeout,
+		localProfileSttLanguage,
 		setSttProviderInheriting,
 		setSttModelInheriting,
+		setSttLanguageInheriting,
 		setSttTimeoutInheriting,
 		setLocalProfileSttProvider,
 		setLocalProfileSttModel,
+		setLocalProfileSttLanguage,
 		setLocalProfileSttTimeout,
 		updateSTTProvider,
 		updateSTTModel,
+		updateSTTLanguage,
 		updateSTTTimeout: _updateSTTTimeout,
 		saveProfileMetadata,
 		openDisableOverrideDialog,
@@ -1177,6 +1190,7 @@ export function PromptSettings({
 				sttProviderInheriting={sttProviderInheriting}
 				sttModelInheriting={sttModelInheriting}
 				sttTimeoutInheriting={sttTimeoutInheriting}
+				sttLanguageInheriting={sttLanguageInheriting}
 				effectiveSttProvider={effectiveSttProvider}
 				sttProviderOptions={sttProviderOptions}
 				isSttProviderOptionsDisabled={
@@ -1186,13 +1200,17 @@ export function PromptSettings({
 				sttModelOptions={sttModelOptions}
 				selectedSttModelForUi={selectedSttModelForUi}
 				sttPricingLabel={sttPricingLabel}
+				sttLanguageOptions={STT_LANGUAGE_OPTIONS}
+				localProfileSttLanguage={localProfileSttLanguage}
 				whisperServerModelDraft={whisperServerModelDraft}
 				onWhisperServerModelDraftChange={setWhisperServerModelDraft}
 				onWhisperServerModelBlur={handleWhisperServerModelDraftBlur}
 				onSttProviderChange={handleSttProviderChange}
 				onSttModelChange={handleSttModelChange}
+				onSttLanguageChange={handleSttLanguageChange}
 				onDisableSttProviderOverride={handleDisableSttProviderOverride}
 				onDisableSttModelOverride={handleDisableSttModelOverride}
+				onDisableSttLanguageOverride={handleDisableSttLanguageOverride}
 				onDisableSttTimeoutOverride={handleDisableSttTimeoutOverride}
 				localProfileSttTimeout={localProfileSttTimeout}
 				onSttTimeoutChange={handleSttTimeoutChange}

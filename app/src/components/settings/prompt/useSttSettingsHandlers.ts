@@ -13,12 +13,15 @@ type UseSttSettingsHandlersOptions = {
 	activeProfile: RewriteProgramPromptProfile | null;
 	whisperServerModelDraft: string;
 	localProfileSttTimeout: string | number;
+	localProfileSttLanguage: string;
 	// State setters
 	setSttProviderInheriting: (v: boolean) => void;
 	setSttModelInheriting: (v: boolean) => void;
+	setSttLanguageInheriting: (v: boolean) => void;
 	setSttTimeoutInheriting: (v: boolean) => void;
 	setLocalProfileSttProvider: (v: string | null) => void;
 	setLocalProfileSttModel: (v: string | null) => void;
+	setLocalProfileSttLanguage: (v: string) => void;
 	setLocalProfileSttTimeout: (v: string | number) => void;
 	// Mutations
 	updateSTTProvider: {
@@ -26,6 +29,9 @@ type UseSttSettingsHandlersOptions = {
 	};
 	updateSTTModel: {
 		mutate: (v: string | null, opts?: { onSuccess?: () => void }) => void;
+	};
+	updateSTTLanguage: {
+		mutate: (v: string, opts?: { onSuccess?: () => void }) => void;
 	};
 	updateSTTTimeout: {
 		mutate: (v: number, opts?: { onSuccess?: () => void }) => void;
@@ -42,10 +48,12 @@ export type SttSettingsHandlers = {
 	handleWhisperServerModelDraftBlur: () => void;
 	handleSttProviderChange: (value: string | null) => void;
 	handleSttModelChange: (value: string | null) => void;
+	handleSttLanguageChange: (value: string | null) => void;
 	handleSttTimeoutChange: (value: number | string) => void;
 	handleSttTimeoutBlur: () => void;
 	handleDisableSttProviderOverride: () => void;
 	handleDisableSttModelOverride: () => void;
+	handleDisableSttLanguageOverride: () => void;
 	handleDisableSttTimeoutOverride: () => void;
 };
 
@@ -59,14 +67,18 @@ export function useSttSettingsHandlers({
 	activeProfile,
 	whisperServerModelDraft,
 	localProfileSttTimeout,
+	localProfileSttLanguage,
 	setSttProviderInheriting,
 	setSttModelInheriting,
+	setSttLanguageInheriting,
 	setSttTimeoutInheriting,
 	setLocalProfileSttProvider,
 	setLocalProfileSttModel,
+	setLocalProfileSttLanguage,
 	setLocalProfileSttTimeout,
 	updateSTTProvider,
 	updateSTTModel,
+	updateSTTLanguage,
 	updateSTTTimeout,
 	saveProfileMetadata,
 	openDisableOverrideDialog,
@@ -97,6 +109,14 @@ export function useSttSettingsHandlers({
 			updateSTTModel.mutate(value);
 		},
 		[updateSTTModel],
+	);
+
+	const handleDefaultSTTLanguageChange = useCallback(
+		(value: string | null) => {
+			if (!value) return;
+			updateSTTLanguage.mutate(value);
+		},
+		[updateSTTLanguage],
 	);
 
 	const handleDefaultSTTTimeoutChange = useCallback(
@@ -182,6 +202,27 @@ export function useSttSettingsHandlers({
 			saveProfileMetadata,
 			setLocalProfileSttModel,
 			setSttModelInheriting,
+		],
+	);
+
+	const handleSttLanguageChange = useCallback(
+		(value: string | null) => {
+			if (!value) return;
+			if (isDefaultScope) {
+				handleDefaultSTTLanguageChange(value);
+				return;
+			}
+
+			setSttLanguageInheriting(false);
+			setLocalProfileSttLanguage(value);
+			saveProfileMetadata({ stt_language: value });
+		},
+		[
+			handleDefaultSTTLanguageChange,
+			isDefaultScope,
+			saveProfileMetadata,
+			setLocalProfileSttLanguage,
+			setSttLanguageInheriting,
 		],
 	);
 
@@ -301,6 +342,26 @@ export function useSttSettingsHandlers({
 		settings?.stt_model,
 	]);
 
+	const handleDisableSttLanguageOverride = useCallback(() => {
+		openDisableOverrideDialog({
+			title: "Disable STT Language override?",
+			onConfirm: () => {
+				setSttLanguageInheriting(true);
+				setLocalProfileSttLanguage(
+					settings?.stt_language ?? localProfileSttLanguage,
+				);
+				saveProfileMetadata({ stt_language: null });
+			},
+		});
+	}, [
+		localProfileSttLanguage,
+		openDisableOverrideDialog,
+		saveProfileMetadata,
+		setLocalProfileSttLanguage,
+		setSttLanguageInheriting,
+		settings?.stt_language,
+	]);
+
 	const handleDisableSttTimeoutOverride = useCallback(() => {
 		openDisableOverrideDialog({
 			title: "Disable STT Timeout override?",
@@ -324,10 +385,12 @@ export function useSttSettingsHandlers({
 		handleWhisperServerModelDraftBlur,
 		handleSttProviderChange,
 		handleSttModelChange,
+		handleSttLanguageChange,
 		handleSttTimeoutChange,
 		handleSttTimeoutBlur,
 		handleDisableSttProviderOverride,
 		handleDisableSttModelOverride,
+		handleDisableSttLanguageOverride,
 		handleDisableSttTimeoutOverride,
 	};
 }

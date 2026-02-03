@@ -21,7 +21,7 @@ use crate::audio_capture::{
 };
 use crate::event_payloads::OverlayOcrContextUnavailablePayload;
 use crate::events;
-use crate::llm::LlmProvider;
+use crate::llm::{LlmProvider, ProgramPreset, ProgramPromptProfile};
 use crate::request_log::RequestLogStore;
 use crate::stt::{SttProvider, SttRegistry};
 use std::collections::{HashMap, HashSet};
@@ -46,6 +46,10 @@ mod utils;
 
 use config::canonicalize_stt_provider_id;
 pub use config::{OcrConfig, PipelineConfig};
+
+pub(crate) fn normalize_stt_language_setting(raw: Option<String>) -> Option<String> {
+    config::normalize_stt_language_setting(raw)
+}
 
 pub use state_machine::PipelineState;
 pub use types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionResult};
@@ -177,7 +181,49 @@ struct OcrTaskHandle {
     handle: tokio::task::JoinHandle<Result<crate::ocr::OcrResult, String>>,
 }
 
+struct EffectiveSttSettings {
+    provider_id: String,
+    model: Option<String>,
+    language: Option<String>,
+    timeout: Duration,
+}
+
 impl PipelineInner {
+    fn resolve_effective_stt_settings(
+        &self,
+        active_profile: Option<&ProgramPromptProfile>,
+        active_preset: Option<&ProgramPreset>,
+    ) -> EffectiveSttSettings {
+        let provider_id = canonicalize_stt_provider_id(
+            active_preset
+                .and_then(|p| p.stt_provider.as_deref())
+                .or_else(|| active_profile.and_then(|p| p.stt_provider.as_deref()))
+                .unwrap_or(self.config.stt_provider.as_str()),
+        );
+        let model = active_preset
+            .and_then(|p| p.stt_model.clone())
+            .or_else(|| active_profile.and_then(|p| p.stt_model.clone()))
+            .or_else(|| self.config.stt_model.clone());
+        let language = normalize_stt_language_setting(
+            active_preset
+                .and_then(|p| p.stt_language.clone())
+                .or_else(|| active_profile.and_then(|p| p.stt_language.clone()))
+                .or_else(|| self.config.stt_language.clone()),
+        );
+        let timeout = active_preset
+            .and_then(|p| p.stt_timeout_seconds)
+            .or_else(|| active_profile.and_then(|p| p.stt_timeout_seconds))
+            .map(|s| seconds_to_duration_or(s, self.config.transcription_timeout))
+            .unwrap_or(self.config.transcription_timeout);
+
+        EffectiveSttSettings {
+            provider_id,
+            model,
+            language,
+            timeout,
+        }
+    }
+
     fn cancel_ocr_task(&mut self, mark_cancelled: bool) {
         if let Some(task) = self.ocr_task.take() {
             log::debug!(
@@ -225,9 +271,15 @@ impl PipelineInner {
     }
 
     fn local_whisper_cache_key(&self) -> String {
+        let language_key = self
+            .config
+            .stt_language
+            .clone()
+            .unwrap_or_else(|| "<auto>".to_string());
         format!(
-            "local-whisper::{}",
-            self.local_whisper_model_key_for_cache()
+            "local-whisper::{}::{}",
+            self.local_whisper_model_key_for_cache(),
+            language_key
         )
     }
 
@@ -259,6 +311,7 @@ impl PipelineInner {
             let provider =
                 crate::stt::LocalWhisperProvider::with_config(crate::stt::LocalWhisperConfig {
                     model_path: model_path.clone(),
+                    language: self.config.stt_language.clone(),
                     transcription_prompt: self.config.stt_transcription_prompt.clone(),
                     ..Default::default()
                 })
@@ -323,19 +376,21 @@ impl PipelineInner {
         &mut self,
         provider_id: &str,
         model: Option<String>,
+        language: Option<String>,
     ) -> Result<Arc<dyn SttProvider>, PipelineError> {
         let provider_id = canonicalize_stt_provider_id(provider_id);
 
         // NOTE: for Local Whisper, the "model" setting is not meaningful (Whisper model is
         // selected via `whisper_model_path`). Using the global `stt_model` here can cause
         // unnecessary cache misses and, worse, repeated expensive model loads.
+        let language_key = language.clone().unwrap_or_else(|| "<auto>".to_string());
         let model_key = if provider_id == "local-whisper" {
             self.local_whisper_model_key_for_cache()
         } else {
             model.clone().unwrap_or_else(|| "<default>".to_string())
         };
 
-        let cache_key = format!("{}::{}", provider_id, model_key);
+        let cache_key = format!("{}::{}::{}", provider_id, model_key, language_key);
 
         if let Some(p) = self.stt_provider_cache.get(&cache_key) {
             return Ok(p.clone());
@@ -355,6 +410,7 @@ impl PipelineInner {
                 let provider =
                     crate::stt::LocalWhisperProvider::with_config(crate::stt::LocalWhisperConfig {
                         model_path: model_path.clone(),
+                        language: language.clone(),
                         transcription_prompt: self.config.stt_transcription_prompt.clone(),
                         ..Default::default()
                     })
@@ -382,6 +438,7 @@ impl PipelineInner {
                 stt_provider::build_stt_client(&self.config.proxy_settings)?,
                 base_url,
                 model,
+                language,
                 self.config.stt_transcription_prompt.clone(),
             )
             .map_err(|e| PipelineError::Config(format!("Whisper server init failed: {}", e)))?
@@ -407,6 +464,7 @@ impl PipelineInner {
             stt_provider::SttProviderParams {
                 provider_id,
                 model,
+                language,
                 api_key,
                 transcription_prompt: self.config.stt_transcription_prompt.clone(),
                 request_log_store: self.config.request_log_store.clone(),
@@ -524,7 +582,11 @@ impl PipelineInner {
             return;
         }
 
-        match self.get_or_create_stt_provider(&canonical, config.stt_model.clone()) {
+        match self.get_or_create_stt_provider(
+            &canonical,
+            config.stt_model.clone(),
+            config.stt_language.clone(),
+        ) {
             Ok(provider) => {
                 self.stt_registry.register(&canonical, provider);
                 let _ = self.stt_registry.set_current(&canonical);
@@ -681,6 +743,7 @@ impl SharedPipeline {
         &self,
         provider_id: &str,
         model: Option<&str>,
+        language: Option<&str>,
         provider: Arc<dyn SttProvider>,
     ) {
         let mut inner = self.inner.lock().expect("pipeline lock");
@@ -689,6 +752,9 @@ impl SharedPipeline {
         // Keep cache-key construction aligned with `PipelineInner::get_or_create_stt_provider`.
         // For Local Whisper this is special-cased; for tests we keep it simple and only
         // support a normal provider id.
+        let language_key = language
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "<auto>".to_string());
         let model_key = if provider_id == "local-whisper" {
             inner.local_whisper_model_key_for_cache()
         } else {
@@ -696,7 +762,7 @@ impl SharedPipeline {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "<default>".to_string())
         };
-        let cache_key = format!("{}::{}", provider_id, model_key);
+        let cache_key = format!("{}::{}::{}", provider_id, model_key, language_key);
 
         inner.stt_provider_cache.insert(cache_key, provider.clone());
         inner.stt_registry.register(&provider_id, provider);
@@ -1882,19 +1948,11 @@ impl SharedPipeline {
                         .cloned()
                 });
 
-            let desired_stt_provider = canonicalize_stt_provider_id(
-                profile
-                    .as_ref()
-                    .and_then(|p| p.stt_provider.as_deref())
-                    .unwrap_or(config.stt_provider.as_str()),
-            );
-            let desired_stt_model = profile
-                .as_ref()
-                .and_then(|p| p.stt_model.clone())
-                .or_else(|| config.stt_model.clone());
+            let effective_stt_settings =
+                inner.resolve_effective_stt_settings(profile.as_ref().map(|p| p), None);
 
-            let mut stt_provider_id_used = desired_stt_provider.clone();
-            let mut stt_model_used: Option<String> = desired_stt_model.clone();
+            let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
+            let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
 
             #[cfg(feature = "local-whisper")]
             if stt_provider_id_used == "local-whisper" {
@@ -1913,17 +1971,19 @@ impl SharedPipeline {
                 });
             }
 
-            let stt_provider = match inner
-                .get_or_create_stt_provider(&desired_stt_provider, desired_stt_model.clone())
-            {
+            let stt_provider = match inner.get_or_create_stt_provider(
+                &effective_stt_settings.provider_id,
+                effective_stt_settings.model.clone(),
+                effective_stt_settings.language.clone(),
+            ) {
                 Ok(p) => p,
                 Err(e) => {
                     // If the profile specified an override provider, fall back to global provider.
                     let global_provider = canonicalize_stt_provider_id(&config.stt_provider);
-                    if global_provider != desired_stt_provider {
+                    if global_provider != effective_stt_settings.provider_id {
                         log::warn!(
                             "Pipeline: Profile STT provider '{}' unavailable ({}), falling back to '{}'",
-                            desired_stt_provider,
+                            effective_stt_settings.provider_id,
                             e,
                             global_provider
                         );
@@ -1950,7 +2010,11 @@ impl SharedPipeline {
                         }
 
                         inner
-                            .get_or_create_stt_provider(&global_provider, global_model)
+                            .get_or_create_stt_provider(
+                                &global_provider,
+                                global_model,
+                                config.stt_language.clone(),
+                            )
                             .map_err(|err| {
                                 inner.set_error(&format!("No STT provider configured: {}", err));
                                 err
@@ -2136,28 +2200,11 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let desired_stt_provider = canonicalize_stt_provider_id(
-                active_preset
-                    .and_then(|p| p.stt_provider.as_deref())
-                    .or_else(|| {
-                        active_profile
-                            .as_ref()
-                            .and_then(|p| p.stt_provider.as_deref())
-                    })
-                    .unwrap_or(inner.config.stt_provider.as_str()),
-            );
-            let desired_stt_model = active_preset
-                .and_then(|p| p.stt_model.clone())
-                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_model.clone()))
-                .or_else(|| inner.config.stt_model.clone());
-            let desired_timeout = active_preset
-                .and_then(|p| p.stt_timeout_seconds)
-                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_timeout_seconds))
-                .map(|s| seconds_to_duration_or(s, inner.config.transcription_timeout))
-                .unwrap_or(inner.config.transcription_timeout);
+            let effective_stt_settings = inner
+                .resolve_effective_stt_settings(active_profile.as_ref().map(|p| p), active_preset);
 
-            let mut stt_provider_id_used = desired_stt_provider.clone();
-            let mut stt_model_used: Option<String> = desired_stt_model.clone();
+            let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
+            let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
 
             #[cfg(feature = "local-whisper")]
             if stt_provider_id_used == "local-whisper" {
@@ -2179,17 +2226,19 @@ impl SharedPipeline {
                 });
             }
 
-            let stt_provider = match inner
-                .get_or_create_stt_provider(&desired_stt_provider, desired_stt_model.clone())
-            {
+            let stt_provider = match inner.get_or_create_stt_provider(
+                &effective_stt_settings.provider_id,
+                effective_stt_settings.model.clone(),
+                effective_stt_settings.language.clone(),
+            ) {
                 Ok(p) => p,
                 Err(e) => {
                     // If the profile specified an override provider, fall back to global provider.
                     let global_provider = canonicalize_stt_provider_id(&inner.config.stt_provider);
-                    if global_provider != desired_stt_provider {
+                    if global_provider != effective_stt_settings.provider_id {
                         log::warn!(
                             "Pipeline: Profile STT provider '{}' unavailable ({}), falling back to '{}'",
-                            desired_stt_provider,
+                            effective_stt_settings.provider_id,
                             e,
                             global_provider
                         );
@@ -2213,13 +2262,17 @@ impl SharedPipeline {
                                 log.stt_model = stt_model_used.clone();
                             });
                         }
-
-                        inner
-                            .get_or_create_stt_provider(&global_provider, global_model)
-                            .map_err(|err| {
-                                inner.set_error(&format!("No STT provider configured: {}", err));
-                                err
-                            })?
+                        let fallback_provider = global_provider.clone();
+                        let fallback_language = inner.config.stt_language.clone();
+                        let provider_result = inner.get_or_create_stt_provider(
+                            &fallback_provider,
+                            global_model,
+                            fallback_language,
+                        );
+                        provider_result.map_err(|err| {
+                            inner.set_error(&format!("No STT provider configured: {}", err));
+                            err
+                        })?
                     } else {
                         // Preserve the real failure reason (e.g. missing API key, manual local-whisper not loaded)
                         // instead of collapsing into the generic NoProvider.
@@ -2246,7 +2299,7 @@ impl SharedPipeline {
                 outcome.wav_bytes,
                 stt_provider,
                 retry_config,
-                desired_timeout,
+                effective_stt_settings.timeout,
                 cancel_token,
                 active_profile,
                 default_rewrite_include_clipboard_context,
@@ -2491,28 +2544,11 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let desired_stt_provider = canonicalize_stt_provider_id(
-                active_preset
-                    .and_then(|p| p.stt_provider.as_deref())
-                    .or_else(|| {
-                        active_profile
-                            .as_ref()
-                            .and_then(|p| p.stt_provider.as_deref())
-                    })
-                    .unwrap_or(inner.config.stt_provider.as_str()),
-            );
-            let desired_stt_model = active_preset
-                .and_then(|p| p.stt_model.clone())
-                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_model.clone()))
-                .or_else(|| inner.config.stt_model.clone());
-            let desired_timeout = active_preset
-                .and_then(|p| p.stt_timeout_seconds)
-                .or_else(|| active_profile.as_ref().and_then(|p| p.stt_timeout_seconds))
-                .map(|s| seconds_to_duration_or(s, inner.config.transcription_timeout))
-                .unwrap_or(inner.config.transcription_timeout);
+            let effective_stt_settings = inner
+                .resolve_effective_stt_settings(active_profile.as_ref().map(|p| p), active_preset);
 
-            let mut stt_provider_id_used = desired_stt_provider.clone();
-            let mut stt_model_used: Option<String> = desired_stt_model.clone();
+            let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
+            let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
 
             #[cfg(feature = "local-whisper")]
             if stt_provider_id_used == "local-whisper" {
@@ -2531,17 +2567,19 @@ impl SharedPipeline {
                 });
             }
 
-            let stt_provider = match inner
-                .get_or_create_stt_provider(&desired_stt_provider, desired_stt_model.clone())
-            {
+            let stt_provider = match inner.get_or_create_stt_provider(
+                &effective_stt_settings.provider_id,
+                effective_stt_settings.model.clone(),
+                effective_stt_settings.language.clone(),
+            ) {
                 Ok(p) => p,
                 Err(e) => {
                     // If the profile specified an override provider, fall back to global provider.
                     let global_provider = canonicalize_stt_provider_id(&inner.config.stt_provider);
-                    if global_provider != desired_stt_provider {
+                    if global_provider != effective_stt_settings.provider_id {
                         log::warn!(
                             "Pipeline: Profile STT provider '{}' unavailable ({}), falling back to '{}'",
-                            desired_stt_provider,
+                            effective_stt_settings.provider_id,
                             e,
                             global_provider
                         );
@@ -2565,13 +2603,17 @@ impl SharedPipeline {
                                 log.stt_model = stt_model_used.clone();
                             });
                         }
-
-                        inner
-                            .get_or_create_stt_provider(&global_provider, global_model)
-                            .map_err(|err| {
-                                inner.set_error(&format!("No STT provider configured: {}", err));
-                                err
-                            })?
+                        let fallback_provider = global_provider.clone();
+                        let fallback_language = inner.config.stt_language.clone();
+                        let provider_result = inner.get_or_create_stt_provider(
+                            &fallback_provider,
+                            global_model,
+                            fallback_language,
+                        );
+                        provider_result.map_err(|err| {
+                            inner.set_error(&format!("No STT provider configured: {}", err));
+                            err
+                        })?
                     } else {
                         inner.set_error(&format!("STT provider init failed: {}", e));
                         return Err(e);
@@ -2591,7 +2633,7 @@ impl SharedPipeline {
             (
                 stt_provider,
                 retry_config,
-                desired_timeout,
+                effective_stt_settings.timeout,
                 cancel_token,
                 active_profile,
                 default_rewrite_include_clipboard_context,
@@ -3034,7 +3076,7 @@ impl SharedPipeline {
         #[cfg(feature = "local-whisper")]
         {
             // Phase 1: fast path + capture config while holding the lock briefly.
-            let (cache_key, model_path, transcription_prompt) = {
+            let (cache_key, model_path, transcription_prompt, stt_language) = {
                 let inner = self
                     .inner
                     .lock()
@@ -3059,6 +3101,7 @@ impl SharedPipeline {
                     cache_key,
                     model_path,
                     inner.config.stt_transcription_prompt.clone(),
+                    inner.config.stt_language.clone(),
                 )
             };
 
@@ -3067,6 +3110,7 @@ impl SharedPipeline {
                 crate::stt::LocalWhisperProvider::with_config(crate::stt::LocalWhisperConfig {
                     model_path,
                     transcription_prompt,
+                    language: stt_language,
                     ..Default::default()
                 })
                 .map_err(|e| PipelineError::Config(format!("Local Whisper init failed: {}", e)))?;

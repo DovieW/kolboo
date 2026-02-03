@@ -11,7 +11,7 @@
 //! - Streams audio as binary frames (`AddAudio`).
 //! - Collects `AddTranscript` final messages until `EndOfTranscript`.
 
-use super::{AudioEncoding, AudioFormat, SttError, SttProvider};
+use super::{language, AudioEncoding, AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -23,6 +23,7 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 pub struct SpeechmaticsSttProvider {
     api_key: String,
     operating_point: String,
+    language: String,
     request_log_store: Option<RequestLogStore>,
 }
 
@@ -36,10 +37,11 @@ impl SpeechmaticsSttProvider {
     /// Supported values:
     /// - "enhanced" (default)
     /// - "standard"
-    pub fn new(api_key: String, model: Option<String>) -> Self {
+    pub fn new(api_key: String, model: Option<String>, language: Option<String>) -> Self {
         Self {
             api_key,
             operating_point: model.unwrap_or_else(|| "enhanced".to_string()),
+            language: Self::normalize_language(language),
             request_log_store: None,
         }
     }
@@ -56,6 +58,10 @@ impl SpeechmaticsSttProvider {
         } else {
             "enhanced"
         }
+    }
+
+    fn normalize_language(language: Option<String>) -> String {
+        language::normalize_language_setting(language).unwrap_or_else(|| "en".to_string())
     }
 
     fn decode_to_pcm_s16le(
@@ -193,7 +199,7 @@ impl SpeechmaticsSttProvider {
             },
             "transcription_config": {
                 // TODO: consider making language configurable.
-                "language": "en",
+                "language": self.language.clone(),
                 "operating_point": self.operating_point_for_api(),
                 // Default: balance latency/accuracy.
                 "max_delay": 1.0,
@@ -391,7 +397,7 @@ impl SttProvider for SpeechmaticsSttProvider {
                 "auth": "Authorization: Bearer <redacted>",
                 "start_recognition": {
                     "transcription_config": {
-                        "language": "en",
+                        "language": self.language.clone(),
                         "operating_point": self.operating_point_for_api(),
                         "max_delay": 1.0,
                         "enable_partials": false,
@@ -438,15 +444,18 @@ mod tests {
 
     #[test]
     fn test_provider_creation_defaults() {
-        let provider = SpeechmaticsSttProvider::new("test-key".to_string(), None);
+        let provider = SpeechmaticsSttProvider::new("test-key".to_string(), None, None);
         assert_eq!(provider.name(), "speechmatics");
         assert_eq!(provider.operating_point, "enhanced");
     }
 
     #[test]
     fn test_provider_with_custom_model() {
-        let provider =
-            SpeechmaticsSttProvider::new("test-key".to_string(), Some("standard".to_string()));
+        let provider = SpeechmaticsSttProvider::new(
+            "test-key".to_string(),
+            Some("standard".to_string()),
+            None,
+        );
         assert_eq!(provider.operating_point, "standard");
     }
 }

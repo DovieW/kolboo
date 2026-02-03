@@ -7,6 +7,7 @@
 //! - https://elevenlabs.io/docs/api-reference/speech-to-text/convert
 
 use super::http;
+use super::language;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -24,6 +25,7 @@ pub struct ElevenLabsSttProvider {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    language_code: Option<String>,
     api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
@@ -37,13 +39,15 @@ impl ElevenLabsSttProvider {
     /// * `api_key` - ElevenLabs API key
     /// * `model` - Model to use (e.g., "scribe_v1")
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(api_key: String, model: Option<String>) -> Self {
+    pub fn new(api_key: String, model: Option<String>, language: Option<String>) -> Self {
         let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(60));
+        let language_code = Self::normalize_language(language);
 
         Self {
             client,
             api_key,
             model: model.unwrap_or_else(|| "scribe_v1".to_string()),
+            language_code,
             api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -51,11 +55,18 @@ impl ElevenLabsSttProvider {
 
     /// Create a new provider with a custom HTTP client.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn with_client(client: reqwest::Client, api_key: String, model: Option<String>) -> Self {
+    pub fn with_client(
+        client: reqwest::Client,
+        api_key: String,
+        model: Option<String>,
+        language: Option<String>,
+    ) -> Self {
+        let language_code = Self::normalize_language(language);
         Self {
             client,
             api_key,
             model: model.unwrap_or_else(|| "scribe_v1".to_string()),
+            language_code,
             api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -78,6 +89,10 @@ impl ElevenLabsSttProvider {
         http::join_base_url(self.api_base_url_trimmed(), "/v1/speech-to-text")
     }
 
+    fn normalize_language(language: Option<String>) -> Option<String> {
+        language::normalize_language_code(language)
+    }
+
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
         self
@@ -94,6 +109,7 @@ impl SttProvider for ElevenLabsSttProvider {
                 "content_type": "multipart/form-data",
                 "fields": {
                     "model_id": self.model,
+                    "language_code": self.language_code.clone(),
                     // We intentionally omit optional advanced fields (diarization, timestamps, etc.)
                     // until the app has UX for them.
                 },
@@ -115,9 +131,13 @@ impl SttProvider for ElevenLabsSttProvider {
             .mime_str("audio/wav")
             .map_err(|e| SttError::Audio(format!("Failed to create multipart: {}", e)))?;
 
-        let form = multipart::Form::new()
+        let mut form = multipart::Form::new()
             .part("file", part)
             .text("model_id", self.model.clone());
+
+        if let Some(language_code) = self.language_code.as_deref() {
+            form = form.text("language_code", language_code.to_string());
+        }
 
         let response = self
             .client
@@ -170,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_provider_creation() {
-        let provider = ElevenLabsSttProvider::new("test-key".to_string(), None);
+        let provider = ElevenLabsSttProvider::new("test-key".to_string(), None, None);
         assert_eq!(provider.name(), "elevenlabs");
         assert_eq!(provider.model, "scribe_v1");
     }
@@ -180,6 +200,7 @@ mod tests {
         let provider = ElevenLabsSttProvider::new(
             "test-key".to_string(),
             Some("scribe_v1_experimental".to_string()),
+            None,
         );
         assert_eq!(provider.model, "scribe_v1_experimental");
     }

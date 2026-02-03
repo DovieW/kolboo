@@ -9,6 +9,7 @@ use crate::events;
 use crate::history::HistoryStorage;
 use crate::llm;
 use crate::pipeline;
+use crate::pipeline::normalize_stt_language_setting;
 use crate::request_log::{RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
 use crate::settings;
 use crate::state::TrayKeepAlive;
@@ -176,6 +177,10 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
 
     // Read STT model from store
     let stt_model: Option<String> = get_setting_from_store(app, "stt_model", None);
+
+    // Read STT language from store ("auto" => None)
+    let stt_language_raw: Option<String> = get_setting_from_store(app, "stt_language", None);
+    let stt_language = normalize_stt_language_setting(stt_language_raw);
 
     // Read global STT transcription prompt from store
     let stt_transcription_prompt: Option<String> =
@@ -454,6 +459,7 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
                         rewrite_llm_enabled: preset.rewrite_llm_enabled,
                         stt_provider: preset.stt_provider,
                         stt_model: preset.stt_model,
+                        stt_language: preset.stt_language,
                         stt_timeout_seconds: preset.stt_timeout_seconds,
                         llm_provider: preset.llm_provider,
                         llm_model: preset.llm_model,
@@ -481,6 +487,7 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
                 rewrite_llm_enabled: p.rewrite_llm_enabled,
                 stt_provider: p.stt_provider,
                 stt_model: p.stt_model,
+                stt_language: p.stt_language,
                 stt_timeout_seconds: p.stt_timeout_seconds,
                 llm_provider: p.llm_provider,
                 llm_model: p.llm_model,
@@ -649,6 +656,7 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         stt_api_key,
         stt_api_keys,
         stt_model,
+        stt_language,
         stt_transcription_prompt,
         whisper_server_base_url,
         max_duration_secs: 300.0,

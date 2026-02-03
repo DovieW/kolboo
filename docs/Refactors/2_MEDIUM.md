@@ -70,3 +70,11 @@ Ideas:
 - `app/src-tauri/src/windows_modifier_hotkeys.rs` — WH_KEYBOARD_LL hook
 - `app/src-tauri/src/commands/settings.rs` — `is_windows_hook_handled_hotkey()` determines routing
 - `app/src/hooks/useModifierKeyForwarder.ts` — JavaScript key forwarder (already handles AltRight)
+
+## Centralize STT language normalization + mapping
+
+**Status:** Completed (2026-02-03)
+
+Notes:
+- Shared helpers now live in `app/src-tauri/src/stt/language.rs`.
+- Pipeline uses `PipelineInner::resolve_effective_stt_settings(...)` to avoid duplicated override logic.

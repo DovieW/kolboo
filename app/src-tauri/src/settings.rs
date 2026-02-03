@@ -428,6 +428,8 @@ pub struct RewriteProgramPromptProfile {
     #[serde(default)]
     pub stt_model: Option<String>,
     #[serde(default)]
+    pub stt_language: Option<String>,
+    #[serde(default)]
     pub stt_timeout_seconds: Option<f64>,
     #[serde(default)]
     pub llm_provider: Option<String>,
@@ -566,6 +568,8 @@ pub struct RewritePreset {
     pub stt_provider: Option<String>,
     #[serde(default)]
     pub stt_model: Option<String>,
+    #[serde(default)]
+    pub stt_language: Option<String>,
     #[serde(default)]
     pub stt_timeout_seconds: Option<f64>,
     #[serde(default)]

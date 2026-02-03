@@ -10,6 +10,7 @@ mod elevenlabs;
 mod fireworks;
 mod groq;
 mod http;
+pub(crate) mod language;
 mod openai;
 mod openai_compat;
 mod retry;

@@ -63,6 +63,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     );
 
     dirty |= set_default("stt_provider", json!("groq"), false);
+    dirty |= set_default("stt_language", json!("en"), false);
     // Cerebras free-tier toggle (used by stats filtering).
     dirty |= set_default("cerebras_free_tier", json!(true), false);
     // Groq-specific toggle used by the UI (and potentially future backend pricing logic).

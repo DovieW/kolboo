@@ -20,6 +20,7 @@ const STT_HTTP_CLIENT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 pub(super) struct SttProviderParams {
     pub provider_id: String,
     pub model: Option<String>,
+    pub language: Option<String>,
     pub api_key: String,
     pub transcription_prompt: Option<String>,
     pub request_log_store: Option<RequestLogStore>,
@@ -43,6 +44,7 @@ pub(super) fn create_cloud_stt_provider(
     let SttProviderParams {
         provider_id,
         model,
+        language,
         api_key,
         transcription_prompt,
         request_log_store,
@@ -61,6 +63,7 @@ pub(super) fn create_cloud_stt_provider(
                 client,
                 api_key,
                 model,
+                language,
                 transcription_prompt,
             )
             .with_request_log_store(request_log_store),
@@ -70,6 +73,7 @@ pub(super) fn create_cloud_stt_provider(
                 client,
                 api_key,
                 model,
+                language,
                 transcription_prompt,
             )
             .with_request_log_store(request_log_store),
@@ -79,28 +83,35 @@ pub(super) fn create_cloud_stt_provider(
                 client,
                 api_key,
                 model,
+                language,
                 transcription_prompt,
             )
             .with_request_log_store(request_log_store),
         ),
         "groq" => Arc::new(
-            crate::stt::GroqSttProvider::with_client(client, api_key, model, transcription_prompt)
-                .with_request_log_store(request_log_store),
+            crate::stt::GroqSttProvider::with_client(
+                client,
+                api_key,
+                model,
+                language,
+                transcription_prompt,
+            )
+            .with_request_log_store(request_log_store),
         ),
         "elevenlabs" => Arc::new(
-            crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model)
+            crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model, language)
                 .with_request_log_store(request_log_store),
         ),
         "assemblyai" => Arc::new(
-            crate::stt::AssemblyAiSttProvider::with_client(client, api_key, model)
+            crate::stt::AssemblyAiSttProvider::with_client(client, api_key, model, language)
                 .with_request_log_store(request_log_store),
         ),
         "speechmatics" => Arc::new(
-            crate::stt::SpeechmaticsSttProvider::new(api_key, model)
+            crate::stt::SpeechmaticsSttProvider::new(api_key, model, language)
                 .with_request_log_store(request_log_store),
         ),
         "deepgram" => Arc::new(
-            crate::stt::DeepgramSttProvider::with_client(client, api_key, model)
+            crate::stt::DeepgramSttProvider::with_client(client, api_key, model, language)
                 .with_request_log_store(request_log_store),
         ),
         other => {

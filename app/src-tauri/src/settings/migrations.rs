@@ -6,7 +6,7 @@ use tauri::Runtime;
 use tauri_plugin_store::Store;
 
 #[cfg(desktop)]
-pub(crate) const SETTINGS_VERSION_LATEST: u32 = 6;
+pub(crate) const SETTINGS_VERSION_LATEST: u32 = 7;
 
 // Version history:
 // 1 -> 2: quick ask hotkey key rename, retention key split, enum typo fixes, auto_mute_audio -> playing_audio_handling
@@ -14,6 +14,7 @@ pub(crate) const SETTINGS_VERSION_LATEST: u32 = 6;
 // 3 -> 4: rewrite profile rewrite_llm_enabled normalization (ensure explicit boolean for non-default profiles)
 // 4 -> 5: active-window OCR mode migration (legacy bool -> tri-state)
 // 5 -> 6: migrate legacy hotkey keys into hotkey_shortcuts array
+// 6 -> 7: normalize stt_language values (global + per-profile)
 
 #[cfg(desktop)]
 pub(crate) trait SettingsStore {
@@ -267,6 +268,24 @@ fn normalize_ocr_mode_value(raw: Option<Value>) -> Option<String> {
 }
 
 #[cfg(desktop)]
+fn normalize_stt_language_value(raw: &Value) -> Option<Value> {
+    match raw {
+        Value::String(s) => {
+            let trimmed = s.trim().to_lowercase();
+            if trimmed.is_empty() {
+                Some(Value::Null)
+            } else if *s == trimmed {
+                None
+            } else {
+                Some(json!(trimmed))
+            }
+        }
+        Value::Null => None,
+        _ => Some(Value::Null),
+    }
+}
+
+#[cfg(desktop)]
 fn migrate_v4_to_v5(store: &impl SettingsStore) -> bool {
     let mut dirty = false;
 
@@ -348,6 +367,47 @@ fn migrate_v5_to_v6(store: &impl SettingsStore) -> bool {
 }
 
 #[cfg(desktop)]
+fn migrate_v6_to_v7(store: &impl SettingsStore) -> bool {
+    let mut dirty = false;
+
+    if let Some(value) = store.get("stt_language") {
+        if let Some(normalized) = normalize_stt_language_value(&value) {
+            if normalized != value {
+                store.set("stt_language", normalized);
+                dirty = true;
+            }
+        }
+    }
+
+    if let Some(Value::Array(arr)) = store.get("rewrite_program_prompt_profiles") {
+        let mut changed = false;
+        let mut out = Vec::with_capacity(arr.len());
+
+        for profile in arr {
+            match profile {
+                Value::Object(mut obj) => {
+                    if let Some(raw) = obj.get("stt_language") {
+                        if let Some(normalized) = normalize_stt_language_value(raw) {
+                            obj.insert("stt_language".to_string(), normalized);
+                            changed = true;
+                        }
+                    }
+                    out.push(Value::Object(obj));
+                }
+                other => out.push(other),
+            }
+        }
+
+        if changed {
+            store.set("rewrite_program_prompt_profiles", Value::Array(out));
+            dirty = true;
+        }
+    }
+
+    dirty
+}
+
+#[cfg(desktop)]
 pub(crate) fn run_settings_migrations(
     store: &impl SettingsStore,
 ) -> Result<bool, Box<dyn std::error::Error>> {
@@ -383,6 +443,11 @@ pub(crate) fn run_settings_migrations(
     if version < 6 {
         dirty |= migrate_v5_to_v6(store);
         version = 6;
+    }
+
+    if version < 7 {
+        dirty |= migrate_v6_to_v7(store);
+        version = 7;
     }
 
     if version != current_version {
@@ -438,7 +503,7 @@ mod tests {
 
         assert!(dirty);
         assert!(store.get("quick_ask_hold_hotkey").is_some());
-        assert_eq!(store.get("settings_version"), Some(json!(6)));
+        assert_eq!(store.get("settings_version"), Some(json!(7)));
     }
 
     #[test]
@@ -473,7 +538,7 @@ mod tests {
             Some(&json!({"system": {"content": "P1"}}))
         );
 
-        assert_eq!(store.get("settings_version"), Some(json!(6)));
+        assert_eq!(store.get("settings_version"), Some(json!(7)));
     }
 
     #[test]
@@ -493,7 +558,7 @@ mod tests {
 
         let dirty = run_settings_migrations(&store).expect("migration failed");
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(6)));
+        assert_eq!(store.get("settings_version"), Some(json!(7)));
 
         let profiles = store.get("rewrite_program_prompt_profiles").unwrap();
         let arr = profiles.as_array().unwrap();
@@ -568,7 +633,7 @@ mod tests {
         let dirty = run_settings_migrations(&store).expect("migration failed");
 
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(6)));
+        assert_eq!(store.get("settings_version"), Some(json!(7)));
         let cards = store.get("hotkey_shortcuts").expect("missing cards");
         let arr = cards.as_array().expect("cards array");
         assert!(arr
@@ -593,7 +658,7 @@ mod tests {
         let dirty = run_settings_migrations(&store).expect("migration failed");
 
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(6)));
+        assert_eq!(store.get("settings_version"), Some(json!(7)));
         assert_eq!(
             store.get("rewrite_active_window_ocr_mode"),
             Some(json!("auto"))
@@ -604,5 +669,33 @@ mod tests {
         );
         // Unset legacy + no explicit value should leave missing (defaults will seed later).
         assert_eq!(store.get("quick_ask_active_window_ocr_mode"), None);
+    }
+
+    #[test]
+    fn normalizes_stt_language_values() {
+        let store = TestStore::with_entries(vec![
+            ("settings_version", json!(6)),
+            ("stt_language", json!(" EN ")),
+            (
+                "rewrite_program_prompt_profiles",
+                json!([
+                    {"id": "default", "stt_language": "Es"},
+                    {"id": "code", "stt_language": 123}
+                ]),
+            ),
+        ]);
+
+        let dirty = run_settings_migrations(&store).expect("migration failed");
+
+        assert!(dirty);
+        assert_eq!(store.get("settings_version"), Some(json!(7)));
+        assert_eq!(store.get("stt_language"), Some(json!("en")));
+
+        let profiles = store.get("rewrite_program_prompt_profiles").unwrap();
+        let arr = profiles.as_array().unwrap();
+        let default_profile = arr[0].as_object().unwrap();
+        assert_eq!(default_profile.get("stt_language"), Some(&json!("es")));
+        let code_profile = arr[1].as_object().unwrap();
+        assert_eq!(code_profile.get("stt_language"), Some(&Value::Null));
     }
 }

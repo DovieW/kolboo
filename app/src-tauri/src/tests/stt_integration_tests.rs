@@ -16,25 +16,25 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
 fn test_groq_provider_implements_trait() {
-    let provider = GroqSttProvider::new("test_key".to_string(), None, None);
+    let provider = GroqSttProvider::new("test_key".to_string(), None, None, None);
     assert_eq!(provider.name(), "groq");
 }
 
 #[test]
 fn test_openai_provider_implements_trait() {
-    let provider = OpenAiSttProvider::new("test_key".to_string(), None, None);
+    let provider = OpenAiSttProvider::new("test_key".to_string(), None, None, None);
     assert_eq!(provider.name(), "openai");
 }
 
 #[test]
 fn test_deepgram_provider_implements_trait() {
-    let provider = DeepgramSttProvider::new("test_key".to_string(), None);
+    let provider = DeepgramSttProvider::new("test_key".to_string(), None, None);
     assert_eq!(provider.name(), "deepgram");
 }
 
 #[test]
 fn test_speechmatics_provider_implements_trait() {
-    let provider = SpeechmaticsSttProvider::new("test_key".to_string(), None);
+    let provider = SpeechmaticsSttProvider::new("test_key".to_string(), None, None);
     assert_eq!(provider.name(), "speechmatics");
 }
 
@@ -44,20 +44,26 @@ fn test_groq_provider_with_custom_model() {
         "test_key".to_string(),
         Some("distil-whisper-large-v3-en".to_string()),
         None,
+        None,
     );
     assert_eq!(provider.name(), "groq");
 }
 
 #[test]
 fn test_openai_provider_with_custom_model() {
-    let provider =
-        OpenAiSttProvider::new("test_key".to_string(), Some("whisper-1".to_string()), None);
+    let provider = OpenAiSttProvider::new(
+        "test_key".to_string(),
+        Some("whisper-1".to_string()),
+        None,
+        None,
+    );
     assert_eq!(provider.name(), "openai");
 }
 
 #[test]
 fn test_deepgram_provider_with_custom_model() {
-    let provider = DeepgramSttProvider::new("test_key".to_string(), Some("nova-2".to_string()));
+    let provider =
+        DeepgramSttProvider::new("test_key".to_string(), Some("nova-2".to_string()), None);
     assert_eq!(provider.name(), "deepgram");
 }
 
@@ -73,7 +79,7 @@ async fn test_groq_transcription_integration() {
             return;
         }
     };
-    let provider = GroqSttProvider::new(api_key, None, None);
+    let provider = GroqSttProvider::new(api_key, None, None, None);
     let wav_data = create_test_wav_silence(1.0); // 1 second of silence
     let format = AudioFormat {
         sample_rate: 16000,
@@ -100,7 +106,7 @@ async fn test_openai_transcription_integration() {
         }
     };
 
-    let provider = OpenAiSttProvider::new(api_key, None, None);
+    let provider = OpenAiSttProvider::new(api_key, None, None, None);
     let wav_data = create_test_wav_silence(1.0);
     let format = AudioFormat {
         sample_rate: 16000,
@@ -125,7 +131,7 @@ async fn test_deepgram_transcription_integration() {
         }
     };
 
-    let provider = DeepgramSttProvider::new(api_key, None);
+    let provider = DeepgramSttProvider::new(api_key, None, None);
     let wav_data = create_test_wav_silence(1.0);
     let format = AudioFormat {
         sample_rate: 16000,
@@ -204,9 +210,13 @@ async fn test_deepgram_transcribe_sends_expected_request() {
         .mount_as_scoped(&mock_server)
         .await;
 
-    let provider =
-        DeepgramSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
-            .with_api_base_url(mock_server.uri());
+    let provider = DeepgramSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -241,9 +251,13 @@ async fn test_deepgram_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider =
-        DeepgramSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
-            .with_api_base_url(mock_server.uri());
+    let provider = DeepgramSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -304,9 +318,13 @@ async fn test_assemblyai_transcribe_sends_expected_requests() {
         .mount_as_scoped(&mock_server)
         .await;
 
-    let provider =
-        AssemblyAiSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
-            .with_api_base_url(mock_server.uri());
+    let provider = AssemblyAiSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -361,9 +379,13 @@ async fn test_assemblyai_upload_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider =
-        AssemblyAiSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
-            .with_api_base_url(mock_server.uri());
+    let provider = AssemblyAiSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -404,6 +426,7 @@ async fn test_groq_transcribe_sends_expected_request() {
         reqwest::Client::new(),
         "test_key".to_string(),
         Some("whisper-large-v3-turbo".to_string()),
+        None,
         Some("hello prompt".to_string()),
     )
     .with_api_base_url(mock_server.uri());
@@ -451,9 +474,14 @@ async fn test_groq_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider =
-        GroqSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None, None)
-            .with_api_base_url(mock_server.uri());
+    let provider = GroqSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -494,6 +522,7 @@ async fn test_fireworks_transcribe_sends_expected_request() {
         reqwest::Client::new(),
         "test_key".to_string(),
         Some("whisper-v3-turbo".to_string()),
+        None,
         Some("hello prompt".to_string()),
     )
     .with_api_base_url(mock_server.uri());
@@ -546,6 +575,7 @@ async fn test_fireworks_non_success_is_surface_as_api_error() {
         "test_key".to_string(),
         None,
         None,
+        None,
     )
     .with_api_base_url(mock_server.uri());
 
@@ -587,6 +617,7 @@ async fn test_aquavoice_transcribe_sends_expected_request() {
     let provider = AquavoiceSttProvider::with_client(
         reqwest::Client::new(),
         "test_key".to_string(),
+        None,
         None,
         Some("hello prompt".to_string()),
     )
@@ -640,6 +671,7 @@ async fn test_aquavoice_non_success_is_surface_as_api_error() {
         "test_key".to_string(),
         None,
         None,
+        None,
     )
     .with_api_base_url(format!("{}/api/v1", mock_server.uri()));
 
@@ -678,9 +710,13 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
         .mount_as_scoped(&mock_server)
         .await;
 
-    let provider =
-        ElevenLabsSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
-            .with_api_base_url(mock_server.uri());
+    let provider = ElevenLabsSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -725,9 +761,13 @@ async fn test_elevenlabs_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider =
-        ElevenLabsSttProvider::with_client(reqwest::Client::new(), "test_key".to_string(), None)
-            .with_api_base_url(mock_server.uri());
+    let provider = ElevenLabsSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        None,
+        None,
+    )
+    .with_api_base_url(mock_server.uri());
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -766,9 +806,13 @@ async fn test_whisper_server_transcribe_sends_expected_multipart_and_prompt_is_c
     let prompt_raw = format!("   {}   ", "a".repeat(300));
     let expected_prompt = "a".repeat(224);
 
-    let provider =
-        WhisperServerSttProvider::new(format!("{}/v1", mock_server.uri()), None, Some(prompt_raw))
-            .expect("provider should be constructible");
+    let provider = WhisperServerSttProvider::new(
+        format!("{}/v1", mock_server.uri()),
+        None,
+        None,
+        Some(prompt_raw),
+    )
+    .expect("provider should be constructible");
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -816,6 +860,7 @@ async fn test_whisper_server_transcribe_omits_prompt_when_empty_or_whitespace() 
     let provider = WhisperServerSttProvider::new(
         format!("{}/v1", mock_server.uri()),
         None,
+        None,
         Some("   ".to_string()),
     )
     .expect("provider should be constructible");
@@ -858,6 +903,7 @@ async fn test_openai_whisper_transcribe_sends_expected_multipart_and_prompt_is_c
         client,
         "test_key".to_string(),
         Some("whisper-1".to_string()),
+        None,
         Some(prompt_raw),
     )
     .with_api_base_url(mock_server.uri());
@@ -905,8 +951,9 @@ async fn test_whisper_server_non_success_is_surface_as_api_error() {
         .mount(&mock_server)
         .await;
 
-    let provider = WhisperServerSttProvider::new(format!("{}/v1", mock_server.uri()), None, None)
-        .expect("provider should be constructible");
+    let provider =
+        WhisperServerSttProvider::new(format!("{}/v1", mock_server.uri()), None, None, None)
+            .expect("provider should be constructible");
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {

@@ -5,6 +5,7 @@ use crate::ocr::{
 };
 use crate::request_log::RequestLogStore;
 use crate::settings::ProxySettings;
+use crate::stt::language;
 use crate::stt::RetryConfig;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -41,6 +42,8 @@ pub struct PipelineConfig {
     pub stt_api_keys: HashMap<String, String>,
     /// Optional model override for STT
     pub stt_model: Option<String>,
+    /// Optional language hint for STT (None = auto-detect)
+    pub stt_language: Option<String>,
 
     /// Optional global transcription prompt.
     ///
@@ -168,6 +171,7 @@ impl Default for PipelineConfig {
             stt_api_key: String::new(),
             stt_api_keys: HashMap::new(),
             stt_model: None,
+            stt_language: Some("en".to_string()),
             stt_transcription_prompt: None,
             whisper_server_base_url: None,
             retry_config: RetryConfig::default(),
@@ -256,6 +260,10 @@ pub(crate) fn canonicalize_stt_provider_id(id: &str) -> String {
     }
 }
 
+pub(crate) fn normalize_stt_language_setting(raw: Option<String>) -> Option<String> {
+    language::normalize_language_setting(raw)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +273,7 @@ mod tests {
         let config = PipelineConfig::default();
         assert_eq!(config.max_duration_secs, 300.0);
         assert_eq!(config.stt_provider, "groq");
+        assert_eq!(config.stt_language.as_deref(), Some("en"));
         assert_eq!(config.transcription_timeout, DEFAULT_TRANSCRIPTION_TIMEOUT);
         assert_eq!(config.max_recording_bytes, MAX_WAV_SIZE_BYTES);
     }

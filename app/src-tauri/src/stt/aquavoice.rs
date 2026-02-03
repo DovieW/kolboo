@@ -9,6 +9,7 @@
 //! - Model defaults to `avalon-v1-en`.
 
 use super::http;
+use super::language;
 use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
@@ -21,6 +22,7 @@ pub struct AquavoiceSttProvider {
     api_key: String,
     model: String,
     default_prompt: Option<String>,
+    default_language: Option<String>,
     api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
@@ -41,7 +43,12 @@ impl AquavoiceSttProvider {
     /// * `model` - Model to use (default: `avalon-v1-en`)
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
+    pub fn new(
+        api_key: String,
+        model: Option<String>,
+        language: Option<String>,
+        default_prompt: Option<String>,
+    ) -> Self {
         let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(60));
 
         Self {
@@ -49,6 +56,7 @@ impl AquavoiceSttProvider {
             api_key,
             model: Self::normalize_model(model).unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
+            default_language: Self::normalize_language(language),
             api_base_url: Self::DEFAULT_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -60,6 +68,7 @@ impl AquavoiceSttProvider {
         client: reqwest::Client,
         api_key: String,
         model: Option<String>,
+        language: Option<String>,
         default_prompt: Option<String>,
     ) -> Self {
         Self {
@@ -67,6 +76,7 @@ impl AquavoiceSttProvider {
             api_key,
             model: Self::normalize_model(model).unwrap_or_else(|| Self::DEFAULT_MODEL.to_string()),
             default_prompt,
+            default_language: Self::normalize_language(language),
             api_base_url: Self::DEFAULT_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -141,6 +151,10 @@ impl AquavoiceSttProvider {
         let clamped: String = trimmed.chars().take(Self::PROMPT_MAX_CHARS).collect();
         Some(clamped)
     }
+
+    fn normalize_language(language: Option<String>) -> Option<String> {
+        language::normalize_language_code(language)
+    }
 }
 
 #[async_trait]
@@ -149,6 +163,7 @@ impl SttProvider for AquavoiceSttProvider {
         let endpoint = self.endpoint();
 
         let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
+        let language = self.default_language.as_deref();
         openai_compat::transcribe_wav_multipart_openai_compat(
             &self.client,
             "aquavoice",
@@ -157,6 +172,7 @@ impl SttProvider for AquavoiceSttProvider {
             audio,
             &self.model,
             prompt.as_deref(),
+            language,
             self.request_log_store.as_ref(),
             |rb| rb.bearer_auth(&self.api_key),
             |e| SttError::NetworkMessage(Self::network_error_message(&endpoint, &e)),
@@ -175,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_provider_creation() {
-        let provider = AquavoiceSttProvider::new("test-key".to_string(), None, None);
+        let provider = AquavoiceSttProvider::new("test-key".to_string(), None, None, None);
         assert_eq!(provider.name(), "aquavoice");
         assert_eq!(provider.model, AquavoiceSttProvider::DEFAULT_MODEL);
     }
@@ -185,6 +201,7 @@ mod tests {
         let provider = AquavoiceSttProvider::new(
             "test-key".to_string(),
             Some("avalon-v1-en".to_string()),
+            None,
             None,
         );
         assert_eq!(provider.model, "avalon-v1-en");

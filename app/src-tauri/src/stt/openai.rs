@@ -5,6 +5,7 @@
 //! - Audio chat models (e.g., gpt-4o-audio-preview) - uses /v1/responses with audio input
 
 use super::http;
+use super::language;
 use super::openai_compat;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
@@ -18,6 +19,7 @@ pub struct OpenAiSttProvider {
     api_key: String,
     model: String,
     default_prompt: Option<String>,
+    default_language: Option<String>,
     api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
@@ -35,7 +37,12 @@ impl OpenAiSttProvider {
     ///   - "gpt-4o-mini-audio-preview" - Smaller/faster GPT-4o audio
     ///   - "whisper-1" - Legacy Whisper API
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(api_key: String, model: Option<String>, default_prompt: Option<String>) -> Self {
+    pub fn new(
+        api_key: String,
+        model: Option<String>,
+        language: Option<String>,
+        default_prompt: Option<String>,
+    ) -> Self {
         let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(120));
 
         Self {
@@ -47,6 +54,7 @@ impl OpenAiSttProvider {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
+            default_language: Self::normalize_language(language),
             api_base_url: Self::DEFAULT_OPENAI_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -58,6 +66,7 @@ impl OpenAiSttProvider {
         client: reqwest::Client,
         api_key: String,
         model: Option<String>,
+        language: Option<String>,
         default_prompt: Option<String>,
     ) -> Self {
         Self {
@@ -69,6 +78,7 @@ impl OpenAiSttProvider {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
+            default_language: Self::normalize_language(language),
             api_base_url: Self::DEFAULT_OPENAI_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -93,6 +103,10 @@ impl OpenAiSttProvider {
 
     fn responses_url(&self) -> String {
         http::join_base_url(self.api_base_url_trimmed(), "/v1/responses")
+    }
+
+    fn normalize_language(language: Option<String>) -> Option<String> {
+        language::normalize_language_code(language)
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
@@ -144,6 +158,7 @@ impl OpenAiSttProvider {
     ) -> Result<String, SttError> {
         let endpoint = self.transcriptions_url();
         let clamped_prompt = self.clamp_prompt_for_model(prompt);
+        let language = self.default_language.as_deref();
         openai_compat::transcribe_wav_multipart_openai_compat(
             &self.client,
             "openai",
@@ -152,6 +167,7 @@ impl OpenAiSttProvider {
             audio,
             &self.model,
             clamped_prompt.as_deref(),
+            language,
             self.request_log_store.as_ref(),
             |rb| rb.bearer_auth(&self.api_key),
             SttError::Network,
@@ -216,6 +232,10 @@ impl OpenAiSttProvider {
         if let Some(prompt) = self.clamp_prompt_for_model(prompt) {
             instruction.push_str("\n\nContext/prompt: ");
             instruction.push_str(&prompt);
+        }
+        if let Some(language) = self.default_language.as_deref() {
+            instruction.push_str("\n\nLanguage: ");
+            instruction.push_str(language);
         }
 
         let request_body = json!({
@@ -354,48 +374,63 @@ mod tests {
 
     #[test]
     fn test_provider_creation() {
-        let provider = OpenAiSttProvider::new("test-key".to_string(), None, None);
+        let provider = OpenAiSttProvider::new("test-key".to_string(), None, None, None);
         assert_eq!(provider.name(), "openai");
         assert_eq!(provider.model, "gpt-4o-audio-preview");
     }
 
     #[test]
     fn test_provider_with_custom_model() {
-        let provider =
-            OpenAiSttProvider::new("test-key".to_string(), Some("whisper-1".to_string()), None);
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("whisper-1".to_string()),
+            None,
+            None,
+        );
         assert_eq!(provider.model, "whisper-1");
     }
 
     #[test]
     fn test_is_chat_audio_model() {
-        let provider = OpenAiSttProvider::new("test-key".to_string(), None, None);
+        let provider = OpenAiSttProvider::new("test-key".to_string(), None, None, None);
         assert!(!provider.uses_transcriptions_endpoint());
 
         let provider = OpenAiSttProvider::new(
             "test-key".to_string(),
             Some("gpt-4o-mini-audio-preview".to_string()),
             None,
+            None,
         );
         assert!(!provider.uses_transcriptions_endpoint());
 
-        let provider =
-            OpenAiSttProvider::new("test-key".to_string(), Some("gpt-audio".to_string()), None);
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("gpt-audio".to_string()),
+            None,
+            None,
+        );
         assert!(!provider.uses_transcriptions_endpoint());
 
         let provider = OpenAiSttProvider::new(
             "test-key".to_string(),
             Some("gpt-audio-mini".to_string()),
             None,
+            None,
         );
         assert!(!provider.uses_transcriptions_endpoint());
 
-        let provider =
-            OpenAiSttProvider::new("test-key".to_string(), Some("whisper-1".to_string()), None);
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("whisper-1".to_string()),
+            None,
+            None,
+        );
         assert!(provider.uses_transcriptions_endpoint());
 
         let provider = OpenAiSttProvider::new(
             "test-key".to_string(),
             Some("gpt-4o-transcribe".to_string()),
+            None,
             None,
         );
         assert!(provider.uses_transcriptions_endpoint());

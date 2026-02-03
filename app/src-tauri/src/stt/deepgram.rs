@@ -1,6 +1,7 @@
 //! Deepgram STT provider implementation.
 
 use super::http;
+use super::language;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -14,6 +15,8 @@ pub struct DeepgramSttProvider {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    language: Option<String>,
+    detect_language: bool,
     api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
@@ -36,6 +39,12 @@ impl DeepgramSttProvider {
             .append_pair("smart_format", "true")
             .append_pair("punctuate", "true");
 
+        if self.detect_language {
+            url.query_pairs_mut().append_pair("detect_language", "true");
+        } else if let Some(language) = self.language.as_deref() {
+            url.query_pairs_mut().append_pair("language", language);
+        }
+
         Ok(url)
     }
 
@@ -45,13 +54,16 @@ impl DeepgramSttProvider {
     /// * `api_key` - Deepgram API key
     /// * `model` - Model to use (e.g., "nova-2")
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(api_key: String, model: Option<String>) -> Self {
+    pub fn new(api_key: String, model: Option<String>, language: Option<String>) -> Self {
         let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(60));
+        let (language, detect_language) = Self::normalize_language(language);
 
         Self {
             client,
             api_key,
             model: model.unwrap_or_else(|| "nova-2".to_string()),
+            language,
+            detect_language,
             api_base_url: Self::DEFAULT_DEEPGRAM_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -59,11 +71,19 @@ impl DeepgramSttProvider {
 
     /// Create a new provider with a custom HTTP client
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn with_client(client: reqwest::Client, api_key: String, model: Option<String>) -> Self {
+    pub fn with_client(
+        client: reqwest::Client,
+        api_key: String,
+        model: Option<String>,
+        language: Option<String>,
+    ) -> Self {
+        let (language, detect_language) = Self::normalize_language(language);
         Self {
             client,
             api_key,
             model: model.unwrap_or_else(|| "nova-2".to_string()),
+            language,
+            detect_language,
             api_base_url: Self::DEFAULT_DEEPGRAM_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -85,6 +105,10 @@ impl DeepgramSttProvider {
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
         self
+    }
+
+    fn normalize_language(language: Option<String>) -> (Option<String>, bool) {
+        language::normalize_language_with_detection(language)
     }
 }
 
@@ -180,15 +204,18 @@ mod tests {
 
     #[test]
     fn test_provider_creation() {
-        let provider = DeepgramSttProvider::new("test-key".to_string(), None);
+        let provider = DeepgramSttProvider::new("test-key".to_string(), None, None);
         assert_eq!(provider.name(), "deepgram");
         assert_eq!(provider.model, "nova-2");
     }
 
     #[test]
     fn test_provider_with_custom_model() {
-        let provider =
-            DeepgramSttProvider::new("test-key".to_string(), Some("nova-2-general".to_string()));
+        let provider = DeepgramSttProvider::new(
+            "test-key".to_string(),
+            Some("nova-2-general".to_string()),
+            None,
+        );
         assert_eq!(provider.model, "nova-2-general");
     }
 }

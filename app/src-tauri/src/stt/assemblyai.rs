@@ -11,6 +11,7 @@
 //! - https://www.assemblyai.com/docs/api-reference/transcripts/get
 
 use super::http;
+use super::language;
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -51,6 +52,8 @@ pub struct AssemblyAiSttProvider {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    language_code: Option<String>,
+    language_detection: bool,
     api_base_url: String,
     request_log_store: Option<RequestLogStore>,
 }
@@ -65,13 +68,16 @@ impl AssemblyAiSttProvider {
     /// - "slam-1"
     /// - "best" (legacy)
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(api_key: String, model: Option<String>) -> Self {
+    pub fn new(api_key: String, model: Option<String>, language: Option<String>) -> Self {
         let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(120));
+        let (language_code, language_detection) = Self::normalize_language(language);
 
         Self {
             client,
             api_key,
             model: model.unwrap_or_else(|| "universal".to_string()),
+            language_code,
+            language_detection,
             api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -79,11 +85,19 @@ impl AssemblyAiSttProvider {
 
     /// Create a new provider with a custom HTTP client.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub fn with_client(client: reqwest::Client, api_key: String, model: Option<String>) -> Self {
+    pub fn with_client(
+        client: reqwest::Client,
+        api_key: String,
+        model: Option<String>,
+        language: Option<String>,
+    ) -> Self {
+        let (language_code, language_detection) = Self::normalize_language(language);
         Self {
             client,
             api_key,
             model: model.unwrap_or_else(|| "universal".to_string()),
+            language_code,
+            language_detection,
             api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
         }
@@ -122,6 +136,30 @@ impl AssemblyAiSttProvider {
         )
     }
 
+    fn normalize_language(language: Option<String>) -> (Option<String>, bool) {
+        let Some(raw) = language::normalize_language_setting(language) else {
+            return (None, true);
+        };
+
+        let mapped = match raw.as_str() {
+            "en" => "en_us",
+            "es" => "es",
+            "fr" => "fr",
+            "de" => "de",
+            "it" => "it",
+            "pt" => "pt",
+            "zh" => "zh",
+            "ja" => "ja",
+            "ko" => "ko",
+            "hi" => "hi",
+            "ar" => "ar",
+            "ru" => "ru",
+            other => other,
+        };
+
+        (Some(mapped.to_string()), false)
+    }
+
     async fn upload_audio(&self, audio: &[u8]) -> Result<String, SttError> {
         let resp = self
             .client
@@ -158,13 +196,20 @@ impl AssemblyAiSttProvider {
     async fn submit_transcript(&self, upload_url: &str) -> Result<String, SttError> {
         // `speech_model` is deprecated; `speech_models` is the preferred param.
         // Supplying a single model is a direct selection.
-        let body = json!({
+        let mut body = json!({
             "audio_url": upload_url,
             "speech_models": [self.model.clone()],
             // Keep output consistent with other providers.
             "punctuate": true,
             "format_text": true,
         });
+
+        if let Some(language_code) = self.language_code.as_deref() {
+            body["language_code"] = json!(language_code);
+        }
+        if self.language_detection {
+            body["language_detection"] = json!(true);
+        }
 
         let resp = self
             .client
@@ -277,6 +322,8 @@ impl SttProvider for AssemblyAiSttProvider {
                             "speech_models": [self.model.clone()],
                             "punctuate": true,
                             "format_text": true,
+                            "language_code": self.language_code.clone(),
+                            "language_detection": self.language_detection,
                             "audio_url": "<upload_url from previous step>",
                         }
                     },
@@ -322,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_provider_creation_defaults() {
-        let provider = AssemblyAiSttProvider::new("test-key".to_string(), None);
+        let provider = AssemblyAiSttProvider::new("test-key".to_string(), None, None);
         assert_eq!(provider.name(), "assemblyai");
         assert_eq!(provider.model, "universal");
     }
@@ -330,7 +377,7 @@ mod tests {
     #[test]
     fn test_provider_with_custom_model() {
         let provider =
-            AssemblyAiSttProvider::new("test-key".to_string(), Some("slam-1".to_string()));
+            AssemblyAiSttProvider::new("test-key".to_string(), Some("slam-1".to_string()), None);
         assert_eq!(provider.model, "slam-1");
     }
 }

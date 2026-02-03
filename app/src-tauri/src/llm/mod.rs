@@ -232,6 +232,7 @@ pub struct ProgramPreset {
     // Optional per-preset overrides for the pipeline
     pub stt_provider: Option<String>,
     pub stt_model: Option<String>,
+    pub stt_language: Option<String>,
     pub stt_timeout_seconds: Option<f64>,
     pub llm_provider: Option<String>,
     pub llm_model: Option<String>,
@@ -281,6 +282,7 @@ pub struct ProgramPromptProfile {
     // Optional per-profile overrides for the pipeline
     pub stt_provider: Option<String>,
     pub stt_model: Option<String>,
+    pub stt_language: Option<String>,
     pub stt_timeout_seconds: Option<f64>,
     pub llm_provider: Option<String>,
     pub llm_model: Option<String>,

@@ -17,6 +17,7 @@ interface TranscribeSettingsSectionProps {
 	inheritTooltip: string;
 	sttProviderInheriting: boolean;
 	sttModelInheriting: boolean;
+	sttLanguageInheriting: boolean;
 	sttTimeoutInheriting: boolean;
 	effectiveSttProvider: string | null;
 	sttProviderOptions: Array<{
@@ -28,13 +29,17 @@ interface TranscribeSettingsSectionProps {
 	sttModelOptions: Array<{ value: string; label: string }>;
 	selectedSttModelForUi: string | null;
 	sttPricingLabel: string | null;
+	sttLanguageOptions: Array<{ value: string; label: string }>;
+	localProfileSttLanguage: string;
 	whisperServerModelDraft: string;
 	onWhisperServerModelDraftChange: (value: string) => void;
 	onWhisperServerModelBlur: () => void;
 	onSttProviderChange: (value: string | null) => void;
 	onSttModelChange: (value: string | null) => void;
+	onSttLanguageChange: (value: string | null) => void;
 	onDisableSttProviderOverride: () => void;
 	onDisableSttModelOverride: () => void;
+	onDisableSttLanguageOverride: () => void;
 	onDisableSttTimeoutOverride: () => void;
 	localProfileSttTimeout: number | string;
 	onSttTimeoutChange: (value: number | string) => void;
@@ -60,6 +65,7 @@ export function TranscribeSettingsSection({
 	inheritTooltip,
 	sttProviderInheriting,
 	sttModelInheriting,
+	sttLanguageInheriting,
 	sttTimeoutInheriting,
 	effectiveSttProvider,
 	sttProviderOptions,
@@ -68,13 +74,17 @@ export function TranscribeSettingsSection({
 	sttModelOptions,
 	selectedSttModelForUi,
 	sttPricingLabel,
+	sttLanguageOptions,
+	localProfileSttLanguage,
 	whisperServerModelDraft,
 	onWhisperServerModelDraftChange,
 	onWhisperServerModelBlur,
 	onSttProviderChange,
 	onSttModelChange,
+	onSttLanguageChange,
 	onDisableSttProviderOverride,
 	onDisableSttModelOverride,
+	onDisableSttLanguageOverride,
 	onDisableSttTimeoutOverride,
 	localProfileSttTimeout,
 	onSttTimeoutChange,
@@ -216,6 +226,49 @@ export function TranscribeSettingsSection({
 					</div>
 				</div>
 			) : null}
+
+			<div className="settings-row">
+				<div>
+					<p className="settings-label">STT Language</p>
+					<p className="settings-description">
+						Language hint for transcription (Auto-detect available)
+					</p>
+				</div>
+				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+					{!isDefaultScope && sttLanguageInheriting && (
+						<Tooltip label={inheritTooltip} withArrow>
+							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+						</Tooltip>
+					)}
+					{!isDefaultScope && !sttLanguageInheriting && (
+						<Tooltip label="Disable override (inherit from Default)" withArrow>
+							<ActionIcon
+								variant="subtle"
+								color="gray"
+								size="sm"
+								onClick={onDisableSttLanguageOverride}
+							>
+								<RotateCcw size={14} style={{ opacity: 0.65 }} />
+							</ActionIcon>
+						</Tooltip>
+					)}
+					<Select
+						data={sttLanguageOptions}
+						value={localProfileSttLanguage}
+						onChange={onSttLanguageChange}
+						placeholder="Auto-detect"
+						withCheckIcon={false}
+						styles={{
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								minWidth: 200,
+							},
+						}}
+					/>
+				</div>
+			</div>
 
 			<div className="settings-row no-divider">
 				<div>

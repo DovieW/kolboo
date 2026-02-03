@@ -165,6 +165,18 @@ describe("tauri settings side effects", () => {
 		});
 	});
 
+	it("updateSTTLanguage patches settings", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.updateSTTLanguage("es");
+
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: { stt_language: "es" },
+			deleteKeys: [],
+		});
+	});
+
 	it("updateTranscriptionRetention keeps legacy days in sync", async () => {
 		vi.resetModules();
 		const { tauriSettingsAPI } = await import("./settings");

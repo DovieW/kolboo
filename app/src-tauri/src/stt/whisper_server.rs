@@ -13,7 +13,7 @@
 //! - None (keyless). If your server requires authentication, use a provider
 //!   that supports API keys, or extend this provider accordingly.
 
-use super::{http, openai_compat, AudioFormat, SttError, SttProvider};
+use super::{http, language, openai_compat, AudioFormat, SttError, SttProvider};
 use crate::network::build_plain_http_client_with_timeout;
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
@@ -25,6 +25,7 @@ pub struct WhisperServerSttProvider {
     base_url: String,
     model: String,
     default_prompt: Option<String>,
+    default_language: Option<String>,
     request_log_store: Option<RequestLogStore>,
 }
 
@@ -68,17 +69,22 @@ impl WhisperServerSttProvider {
         Some(clamped)
     }
 
+    fn normalize_language(language: Option<String>) -> Option<String> {
+        language::normalize_language_code(language)
+    }
+
     /// Create a new provider.
     #[allow(dead_code)]
     pub fn new(
         base_url: String,
         model: Option<String>,
+        language: Option<String>,
         default_prompt: Option<String>,
     ) -> Result<Self, SttError> {
         // Whisper transcription can take a while on slower machines/servers.
         let client = build_plain_http_client_with_timeout(Duration::from_secs(120));
 
-        Self::with_client(client, base_url, model, default_prompt)
+        Self::with_client(client, base_url, model, language, default_prompt)
     }
 
     /// Create a new provider with a custom HTTP client.
@@ -86,6 +92,7 @@ impl WhisperServerSttProvider {
         client: reqwest::Client,
         base_url: String,
         model: Option<String>,
+        language: Option<String>,
         default_prompt: Option<String>,
     ) -> Result<Self, SttError> {
         Ok(Self {
@@ -93,6 +100,7 @@ impl WhisperServerSttProvider {
             base_url: Self::normalize_base_url(&base_url)?,
             model: Self::normalize_model(model),
             default_prompt,
+            default_language: Self::normalize_language(language),
             request_log_store: None,
         })
     }
@@ -113,6 +121,7 @@ impl SttProvider for WhisperServerSttProvider {
         let endpoint = self.endpoint();
 
         let prompt = self.default_prompt.as_deref().and_then(Self::clamp_prompt);
+        let language = self.default_language.as_deref();
         openai_compat::transcribe_wav_multipart_openai_compat(
             &self.client,
             "whisper-server",
@@ -121,6 +130,7 @@ impl SttProvider for WhisperServerSttProvider {
             audio,
             &self.model,
             prompt.as_deref(),
+            language,
             self.request_log_store.as_ref(),
             |rb| rb,
             SttError::Network,

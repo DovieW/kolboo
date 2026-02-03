@@ -128,6 +128,7 @@ export interface RewritePreset {
 	rewrite_llm_enabled: boolean;
 	stt_provider?: string | null;
 	stt_model?: string | null;
+	stt_language?: string | null;
 	stt_timeout_seconds?: number | null;
 	llm_provider?: string | null;
 	llm_model?: string | null;
@@ -174,6 +175,7 @@ export interface RewriteProgramPromptProfile {
 	// Per-profile overrides for the pipeline
 	stt_provider?: string | null;
 	stt_model?: string | null;
+	stt_language?: string | null;
 	stt_timeout_seconds?: number | null;
 	llm_provider?: string | null;
 	llm_model?: string | null;
@@ -598,6 +600,7 @@ export interface AppSettings {
 	rewrite_program_prompt_profiles: RewriteProgramPromptProfile[];
 	stt_provider: string | null;
 	stt_model: string | null;
+	stt_language: string;
 	// Global STT prompt (applies to all transcriptions when supported by the selected provider/model)
 	stt_transcription_prompt: string | null;
 	// AquaVoice server override (optional)

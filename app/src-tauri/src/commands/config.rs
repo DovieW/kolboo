@@ -10,6 +10,7 @@ use tauri::AppHandle;
 use crate::app_shared;
 use crate::commands::CommandResult;
 use crate::llm::SYSTEM_PROMPT_DEFAULT;
+use crate::pipeline::normalize_stt_language_setting;
 use crate::request_log::RequestLogStore;
 
 #[cfg(desktop)]
@@ -271,6 +272,13 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .and_then(|store| store.get("stt_model"))
         .and_then(|v| serde_json::from_value(v).ok());
 
+    let stt_language_raw: Option<String> = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("stt_language"))
+        .and_then(|v| serde_json::from_value(v).ok());
+    let stt_language = normalize_stt_language_setting(stt_language_raw);
+
     // Read global STT transcription prompt from store
     let stt_transcription_prompt: Option<String> = app
         .store("settings.json")
@@ -518,6 +526,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
                             rewrite_llm_enabled: preset.rewrite_llm_enabled,
                             stt_provider: preset.stt_provider,
                             stt_model: preset.stt_model,
+                            stt_language: preset.stt_language,
                             stt_timeout_seconds: preset.stt_timeout_seconds,
                             llm_provider: preset.llm_provider,
                             llm_model: preset.llm_model,
@@ -545,6 +554,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
                     rewrite_llm_enabled: p.rewrite_llm_enabled,
                     stt_provider: p.stt_provider,
                     stt_model: p.stt_model,
+                    stt_language: p.stt_language,
                     stt_timeout_seconds: p.stt_timeout_seconds,
                     llm_provider: p.llm_provider,
                     llm_model: p.llm_model,
@@ -890,6 +900,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         stt_api_key,
         stt_api_keys,
         stt_model: stt_model.clone(),
+        stt_language,
         stt_transcription_prompt,
         whisper_server_base_url,
         max_duration_secs: 300.0,

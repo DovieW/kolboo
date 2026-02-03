@@ -101,6 +101,7 @@ describe("legacy settings fixtures", () => {
 		expect(settings.rewrite_active_window_ocr_mode).toBe("off");
 		expect(settings.quick_replace_active_window_ocr_mode).toBe("off");
 		expect(settings.quick_ask_active_window_ocr_mode).toBe("off");
+		expect(settings.stt_language).toBe("en");
 
 		expect(settings.rewrite_program_prompt_profiles).toHaveLength(1);
 		const profile = settings.rewrite_program_prompt_profiles[0];

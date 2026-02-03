@@ -1027,6 +1027,19 @@ export function useUpdateSTTModel() {
 	});
 }
 
+export function useUpdateSTTLanguage() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (language: string) => {
+			await tauriAPI.updateSTTLanguage(language);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
 export function useUpdateSTTTranscriptionPrompt() {
 	const queryClient = useQueryClient();
 	return useMutation({

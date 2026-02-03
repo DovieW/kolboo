@@ -279,6 +279,7 @@ fn test_config_with_max_recording_bytes() -> PipelineConfig {
 fn test_config_for_transcription() -> PipelineConfig {
     let mut config = test_config_with_max_recording_bytes();
     config.stt_provider = MOCK_PROVIDER.to_string();
+    config.stt_language = None;
     config.quiet_audio_gate_enabled = false;
     config
 }
@@ -475,6 +476,7 @@ async fn pipeline_can_transcribe_without_network_or_hardware() {
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
         None,
+        None,
         Arc::new(MockSttProvider::new("hello from tests")),
     );
 
@@ -503,6 +505,7 @@ async fn pipeline_can_transcribe_and_rewrite_without_network_or_hardware() {
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
+        None,
         None,
         Arc::new(MockSttProvider::new("hello from stt")),
     );
@@ -538,6 +541,7 @@ async fn rewrite_disabled_falls_back_to_stt_text() {
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
         None,
+        None,
         Arc::new(MockSttProvider::new("raw stt transcript")),
     );
     // NOTE: we do NOT inject an LLM provider — rewrite should not be attempted.
@@ -569,6 +573,7 @@ async fn stt_error_propagates_correctly() {
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
+        None,
         None,
         Arc::new(MockSttProvider::new("unused").with_behavior(MockBehavior {
             error: Some("Simulated API failure".to_string()),
@@ -701,6 +706,7 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
             rewrite_llm_enabled: true,
             stt_provider: None,
             stt_model: None,
+            stt_language: None,
             stt_timeout_seconds: None,
             llm_provider: None,
             llm_model: None,
@@ -719,6 +725,7 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
         rewrite_include_clipboard_context: None,
         stt_provider: None,
         stt_model: None,
+        stt_language: None,
         stt_timeout_seconds: None,
         llm_provider: None,
         llm_model: None,
@@ -797,6 +804,7 @@ async fn routing_selects_preset_with_highest_similarity() {
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
         None,
+        None,
         Arc::new(MockSttProvider::new("send email")),
     );
     p.inject_llm_provider_for_tests(
@@ -842,7 +850,12 @@ async fn rewrite_consumes_manual_ocr_result_when_available() {
 
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     // STT produces any transcript (not important).
-    p.inject_stt_provider_for_tests(MOCK_PROVIDER, None, Arc::new(MockSttProvider::new("hello")));
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(MockSttProvider::new("hello")),
+    );
     // LLM returns a different string depending on whether OCR context made it into the prompt.
     p.inject_llm_provider_for_tests(
         MOCK_PROVIDER,
@@ -907,6 +920,7 @@ async fn routing_with_no_matching_preset_uses_default() {
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
         None,
+        None,
         Arc::new(MockSttProvider::new("random unrelated text")),
     );
     p.inject_llm_provider_for_tests(
@@ -957,6 +971,7 @@ async fn routing_respects_session_preset_lock() {
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
         None,
+        None,
         Arc::new(MockSttProvider::new("send email")), // Would normally route to email-preset
     );
     p.inject_llm_provider_for_tests(
@@ -1006,6 +1021,7 @@ async fn embeddings_provider_error_gracefully_falls_back() {
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
     p.inject_stt_provider_for_tests(
         MOCK_PROVIDER,
+        None,
         None,
         Arc::new(MockSttProvider::new("send email")),
     );

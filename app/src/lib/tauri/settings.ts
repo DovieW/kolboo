@@ -17,6 +17,11 @@ import {
 	type HotkeyType,
 	normalizeHotkeyConfig,
 } from "../hotkeys";
+import {
+	DEFAULT_STT_LANGUAGE,
+	normalizeSttLanguage,
+	normalizeSttLanguageOverride,
+} from "../sttLanguages";
 import { emitTyped } from "./events";
 import type {
 	ActiveWindowOcrMode,
@@ -186,6 +191,7 @@ function normalizeRewritePreset(value: unknown): RewritePreset | null {
 	const stt_provider =
 		typeof p.stt_provider === "string" ? p.stt_provider : null;
 	const stt_model = typeof p.stt_model === "string" ? p.stt_model : null;
+	const stt_language = normalizeSttLanguageOverride(p.stt_language);
 	const stt_timeout_seconds =
 		typeof p.stt_timeout_seconds === "number" &&
 		Number.isFinite(p.stt_timeout_seconds)
@@ -245,6 +251,7 @@ function normalizeRewritePreset(value: unknown): RewritePreset | null {
 		rewrite_llm_enabled,
 		stt_provider,
 		stt_model,
+		stt_language,
 		stt_timeout_seconds,
 		llm_provider,
 		llm_model,
@@ -626,7 +633,7 @@ let storeInstance: Store | null = null;
 const SETTINGS_GUIDE_STATE_KEY = "settings_guide_state";
 const SETTINGS_VERSION_KEY = "settings_version";
 // Bump when adding settings migrations; keep TS/Rust/tests in sync.
-const SETTINGS_VERSION_LATEST = 6;
+const SETTINGS_VERSION_LATEST = 7;
 // Legacy fixtures/settings files may predate `settings_version` being written.
 // For UI normalization and tests, treat a missing/invalid version as the last
 // pre-versioning schema we can reasonably assume.
@@ -852,6 +859,7 @@ export const tauriSettingsAPI = {
 			const stt_provider =
 				typeof p.stt_provider === "string" ? p.stt_provider : null;
 			const stt_model = typeof p.stt_model === "string" ? p.stt_model : null;
+			const stt_language = normalizeSttLanguageOverride(p.stt_language);
 			const stt_timeout_seconds =
 				typeof p.stt_timeout_seconds === "number"
 					? p.stt_timeout_seconds
@@ -1044,6 +1052,7 @@ export const tauriSettingsAPI = {
 				rewrite_llm_enabled,
 				stt_provider,
 				stt_model,
+				stt_language,
 				stt_timeout_seconds,
 				llm_provider,
 				llm_model,
@@ -1205,6 +1214,10 @@ export const tauriSettingsAPI = {
 			rewrite_program_prompt_profiles,
 			stt_provider: (await store.get<string | null>("stt_provider")) ?? null,
 			stt_model: (await store.get<string | null>("stt_model")) ?? null,
+			stt_language: normalizeSttLanguage(
+				await store.get("stt_language"),
+				DEFAULT_STT_LANGUAGE,
+			),
 			stt_transcription_prompt:
 				(await store.get<string | null>("stt_transcription_prompt")) ?? null,
 			aquavoice_base_url:
@@ -1768,6 +1781,11 @@ export const tauriSettingsAPI = {
 
 	async updateSTTModel(model: string | null): Promise<void> {
 		await applySettingsPatch({ patch: { stt_model: model } });
+	},
+
+	async updateSTTLanguage(language: string): Promise<void> {
+		const normalized = normalizeSttLanguage(language, DEFAULT_STT_LANGUAGE);
+		await applySettingsPatch({ patch: { stt_language: normalized } });
 	},
 
 	async updateSTTTranscriptionPrompt(prompt: string | null): Promise<void> {
