@@ -6,11 +6,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import {
-	type HotkeyKind,
-	updateHotkeyAndReregisterShortcuts,
-	updateHotkeyShortcutCardWithValidation,
-} from "./hotkeyMutations";
+import { updateHotkeyShortcutCardWithValidation } from "./hotkeyMutations";
 import type { HotkeyShortcutCard } from "./hotkeys";
 import {
 	createAudioMuteSupportedQueryFn,
@@ -264,91 +260,6 @@ export function useSetSettingsGuideState() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settingsGuideState"] });
 		},
-	});
-}
-
-function useUpdateHotkeyMutation(params: {
-	kind: HotkeyKind;
-	update: (hotkey: HotkeyConfig | null) => Promise<void>;
-	getPreviousHotkey: (settings: AppSettings) => HotkeyConfig | null;
-	restoreErrorLabel: string;
-}) {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: async (hotkey: HotkeyConfig | null) => {
-			await updateHotkeyAndReregisterShortcuts({
-				kind: params.kind,
-				nextHotkey: hotkey,
-				getSettings: () => tauriAPI.getSettings(),
-				getPreviousHotkey: params.getPreviousHotkey,
-				updateHotkey: params.update,
-				unregisterShortcuts: () => tauriAPI.unregisterShortcuts(),
-				registerShortcuts: () => tauriAPI.registerShortcuts(),
-				logRestoreError: (restoreError) => {
-					console.error(
-						`Failed to restore previous ${params.restoreErrorLabel} hotkey:`,
-						restoreError,
-					);
-				},
-			});
-		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
-}
-
-export function useUpdateToggleHotkey() {
-	return useUpdateHotkeyMutation({
-		kind: "toggle",
-		update: (hotkey) => tauriAPI.updateToggleHotkey(hotkey),
-		getPreviousHotkey: (settings) => settings.toggle_hotkey,
-		restoreErrorLabel: "toggle",
-	});
-}
-
-export function useUpdateHoldHotkey() {
-	return useUpdateHotkeyMutation({
-		kind: "hold",
-		update: (hotkey) => tauriAPI.updateHoldHotkey(hotkey),
-		getPreviousHotkey: (settings) => settings.hold_hotkey,
-		restoreErrorLabel: "hold",
-	});
-}
-
-export function useUpdatePasteLastHotkey() {
-	return useUpdateHotkeyMutation({
-		kind: "paste_last",
-		update: (hotkey) => tauriAPI.updatePasteLastHotkey(hotkey),
-		getPreviousHotkey: (settings) => settings.paste_last_hotkey,
-		restoreErrorLabel: "paste-last",
-	});
-}
-
-export function useUpdateRetryHotkey() {
-	return useUpdateHotkeyMutation({
-		kind: "retry",
-		update: (hotkey) => tauriAPI.updateRetryHotkey(hotkey),
-		getPreviousHotkey: (settings) => settings.retry_hotkey,
-		restoreErrorLabel: "retry",
-	});
-}
-
-export function useUpdateQuickAskHoldHotkey() {
-	return useUpdateHotkeyMutation({
-		kind: "quick_ask_hold",
-		update: (hotkey) => tauriAPI.updateQuickAskHoldHotkey(hotkey),
-		getPreviousHotkey: (settings) => settings.quick_ask_hold_hotkey,
-		restoreErrorLabel: "quick ask hold",
-	});
-}
-
-export function useUpdateQuickAskToggleHotkey() {
-	return useUpdateHotkeyMutation({
-		kind: "quick_ask_toggle",
-		update: (hotkey) => tauriAPI.updateQuickAskToggleHotkey(hotkey),
-		getPreviousHotkey: (settings) => settings.quick_ask_toggle_hotkey,
-		restoreErrorLabel: "quick ask toggle",
 	});
 }
 

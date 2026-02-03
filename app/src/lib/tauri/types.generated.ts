@@ -949,6 +949,7 @@ export interface RewriteProgramPromptProfile {
   program_paths?: string[];
   quick_ask_active_window_ocr_mode?: string | null;
   quick_ask_anthropic_thinking_budget?: number | null;
+  quick_ask_dismiss_mode?: string | null;
   quick_ask_gemini_thinking_budget?: number | null;
   quick_ask_gemini_thinking_level?: string | null;
   quick_ask_include_clipboard_context?: boolean | null;

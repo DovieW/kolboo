@@ -23,16 +23,14 @@ pub fn truncate_with_flag(value: &str, max_chars: usize) -> (String, bool) {
 
     let mut chars = value.chars();
     let mut out = String::new();
-    let mut count = 0usize;
     let mut truncated = false;
 
-    while let Some(ch) = chars.next() {
+    for (count, ch) in chars.by_ref().enumerate() {
         if count >= max_chars {
             truncated = true;
             break;
         }
         out.push(ch);
-        count += 1;
     }
 
     if chars.next().is_some() {

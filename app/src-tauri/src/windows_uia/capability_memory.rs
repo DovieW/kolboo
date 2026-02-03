@@ -36,10 +36,7 @@ pub fn record_insertion_result(
     success: bool,
     now_ms: u64,
 ) {
-    let entry = memory
-        .apps
-        .entry(app_key.to_string())
-        .or_insert_with(WindowsAppCapabilityEntry::default);
+    let entry = memory.apps.entry(app_key.to_string()).or_default();
 
     entry.last_seen_at_ms = now_ms;
     entry.prefer_method = Some(format!("{:?}", method).to_lowercase());

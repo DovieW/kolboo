@@ -205,52 +205,54 @@ pub fn insert_text_with_snapshot(
     );
 
     // Fallback ladder: attempt paste then typing before safe fallback.
-    if method_used != WindowsInsertMethod::Paste && allow_paste {
-        if type_text_blocking_with_options(text, false, true).is_ok() {
-            log::info!("UIA insert: fallback paste succeeded");
-            log_request_entry(
-                app,
-                LogLevel::Info,
-                "UIA insert: fallback paste succeeded".to_string(),
-            );
-            if let Some(app_key) = app_identity_key(snapshot.exe_path.as_deref()) {
-                if let Ok(mut memory) = load_capability_memory(app) {
-                    record_insertion_result(
-                        &mut memory,
-                        &app_key,
-                        WindowsInsertMethod::Paste,
-                        true,
-                        now_ms(),
-                    );
-                    let _ = save_capability_memory(app, &memory);
-                }
+    if method_used != WindowsInsertMethod::Paste
+        && allow_paste
+        && type_text_blocking_with_options(text, false, true).is_ok()
+    {
+        log::info!("UIA insert: fallback paste succeeded");
+        log_request_entry(
+            app,
+            LogLevel::Info,
+            "UIA insert: fallback paste succeeded".to_string(),
+        );
+        if let Some(app_key) = app_identity_key(snapshot.exe_path.as_deref()) {
+            if let Ok(mut memory) = load_capability_memory(app) {
+                record_insertion_result(
+                    &mut memory,
+                    &app_key,
+                    WindowsInsertMethod::Paste,
+                    true,
+                    now_ms(),
+                );
+                let _ = save_capability_memory(app, &memory);
             }
-            return Ok(WindowsInsertMethod::Paste);
         }
+        return Ok(WindowsInsertMethod::Paste);
     }
 
-    if method_used != WindowsInsertMethod::Typing && allow_typing {
-        if type_text_as_keystrokes(text).is_ok() {
-            log::info!("UIA insert: fallback typing succeeded");
-            log_request_entry(
-                app,
-                LogLevel::Info,
-                "UIA insert: fallback typing succeeded".to_string(),
-            );
-            if let Some(app_key) = app_identity_key(snapshot.exe_path.as_deref()) {
-                if let Ok(mut memory) = load_capability_memory(app) {
-                    record_insertion_result(
-                        &mut memory,
-                        &app_key,
-                        WindowsInsertMethod::Typing,
-                        true,
-                        now_ms(),
-                    );
-                    let _ = save_capability_memory(app, &memory);
-                }
+    if method_used != WindowsInsertMethod::Typing
+        && allow_typing
+        && type_text_as_keystrokes(text).is_ok()
+    {
+        log::info!("UIA insert: fallback typing succeeded");
+        log_request_entry(
+            app,
+            LogLevel::Info,
+            "UIA insert: fallback typing succeeded".to_string(),
+        );
+        if let Some(app_key) = app_identity_key(snapshot.exe_path.as_deref()) {
+            if let Ok(mut memory) = load_capability_memory(app) {
+                record_insertion_result(
+                    &mut memory,
+                    &app_key,
+                    WindowsInsertMethod::Typing,
+                    true,
+                    now_ms(),
+                );
+                let _ = save_capability_memory(app, &memory);
             }
-            return Ok(WindowsInsertMethod::Typing);
         }
+        return Ok(WindowsInsertMethod::Typing);
     }
 
     if let Some(app_key) = app_identity_key(snapshot.exe_path.as_deref()) {
