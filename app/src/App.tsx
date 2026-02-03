@@ -32,7 +32,7 @@ import {
 	Plus,
 	Settings,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import appPackageJson from "../package.json";
 import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
@@ -70,6 +70,7 @@ import {
 	useSettingsGuideState,
 } from "./lib/queries";
 import { type CostTimeframe, type HotkeyConfig, tauriAPI } from "./lib/tauri";
+import { listenTyped } from "./lib/tauri/events";
 import { compareSemver, fetchLatestGithubReleaseVersion } from "./lib/updates";
 import "./styles.css";
 
@@ -1223,6 +1224,7 @@ export default function App() {
 	const [settingsGuideOpen, setSettingsGuideOpen] = useState<boolean>(
 		() => bootShouldAutoOpenGuide,
 	);
+	const lastSingleInstanceToastAt = useRef(0);
 
 	const guideQuery = useSettingsGuideState();
 	const guideState = guideQuery.data;
@@ -1270,6 +1272,37 @@ export default function App() {
 			})
 			.catch((e) => {
 				console.warn("Failed to subscribe to clipboard fallback:", e);
+			});
+
+		return () => {
+			try {
+				unlisten?.();
+			} catch {
+				// ignore
+			}
+		};
+	}, []);
+
+	useEffect(() => {
+		let unlisten: (() => void) | null = null;
+
+		listenTyped("single-instance-activated", () => {
+			const now = Date.now();
+			if (now - lastSingleInstanceToastAt.current < 1500) {
+				return;
+			}
+			lastSingleInstanceToastAt.current = now;
+			notifications.show({
+				title: "Already running",
+				message: "Kolboo is already running.",
+				color: "blue",
+			});
+		})
+			.then((fn) => {
+				unlisten = fn;
+			})
+			.catch((e) => {
+				console.warn("Failed to subscribe to single-instance-activated:", e);
 			});
 
 		return () => {

@@ -24,6 +24,7 @@ export const BACKEND_EVENT_NAMES = [
 	"stats-changed",
 	"settings-changed",
 	"transcript-copied-to-clipboard",
+	"single-instance-activated",
 	"system-event",
 	"connection-state-changed",
 	"request-disconnect",

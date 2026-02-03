@@ -42,6 +42,7 @@ export type EventMap = {
 	"request-disconnect": EmptyEventPayload;
 	"settings-changed": SettingsChangedPayload;
 	"transcript-copied-to-clipboard": EmptyEventPayload;
+	"single-instance-activated": EmptyEventPayload;
 	"stats-changed": EmptyEventPayload;
 	"system-event": SystemEvent;
 	"whisper-model-download-progress": WhisperModelDownloadProgress;

@@ -2470,6 +2470,14 @@ pub fn run() {
     {
         builder = builder.plugin(shortcuts::build_global_shortcut_plugin());
         builder = builder.plugin(tauri_plugin_dialog::init());
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            log::info!("Single-instance: focusing existing app window");
+            bootstrap::show_main_window(
+                app,
+                "single-instance",
+                Some(events::EVENT_SINGLE_INSTANCE_ACTIVATED),
+            );
+        }));
     }
 
     #[cfg(target_os = "macos")]

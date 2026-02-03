@@ -15,69 +15,90 @@ use crate::state::TrayKeepAlive;
 use crate::stt;
 use crate::{get_setting_from_store, stats};
 
-/// Setup system tray
-pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    fn show_main_window(app: &AppHandle, source: &str) {
-        let Some(window) = app.get_webview_window("main") else {
-            log::error!("{source}: main window not found (was it closed?) - recreating");
+fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64]) {
+    let event = event.to_string();
+    for delay_ms in delays_ms {
+        let app_emit = app.clone();
+        let event = event.clone();
+        let delay_ms = *delay_ms;
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            let _ = app_emit.emit(event.as_str(), ());
+        });
+    }
+}
 
-            // Recreate main window if it was previously closed/destroyed.
-            // NOTE: Creating windows from synchronous event handlers can deadlock on Windows,
-            // so we do it on a separate thread.
-            let app_handle = app.clone();
-            let source = source.to_string();
-            std::thread::spawn(move || {
-                log::info!("{source}: creating main window");
-                match tauri::WebviewWindowBuilder::new(
-                    &app_handle,
-                    "main",
-                    tauri::WebviewUrl::App("index.html".into()),
-                )
-                .title("Kolboo")
-                .inner_size(1280.0, 720.0)
-                .resizable(true)
-                .center()
-                .build()
-                {
-                    Ok(w) => {
-                        let _ = w.unminimize();
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                        log::info!("{source}: main window created and shown");
+pub(crate) fn show_main_window(app: &AppHandle, source: &str, notify_event: Option<&str>) {
+    let Some(window) = app.get_webview_window("main") else {
+        log::error!("{source}: main window not found (was it closed?) - recreating");
+
+        // Recreate main window if it was previously closed/destroyed.
+        // NOTE: Creating windows from synchronous event handlers can deadlock on Windows,
+        // so we do it on a separate thread.
+        let app_handle = app.clone();
+        let source = source.to_string();
+        let notify_event = notify_event.map(|event| event.to_string());
+        std::thread::spawn(move || {
+            log::info!("{source}: creating main window");
+            match tauri::WebviewWindowBuilder::new(
+                &app_handle,
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("Kolboo")
+            .inner_size(1280.0, 720.0)
+            .resizable(true)
+            .center()
+            .build()
+            {
+                Ok(w) => {
+                    let _ = w.unminimize();
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                    if let Some(event) = notify_event.as_deref() {
+                        schedule_single_instance_emit(app_handle.clone(), event, &[300, 800, 1400]);
                     }
-                    Err(e) => {
-                        log::error!("{source}: failed to create main window: {e}");
-                    }
+                    log::info!("{source}: main window created and shown");
                 }
-            });
-            return;
-        };
+                Err(e) => {
+                    log::error!("{source}: failed to create main window: {e}");
+                }
+            }
+        });
+        return;
+    };
 
-        let visible_before = window.is_visible().ok();
-        log::info!("{source}: attempting to show main window (visible_before={visible_before:?})");
+    let visible_before = window.is_visible().ok();
+    log::info!("{source}: attempting to show main window (visible_before={visible_before:?})");
 
-        if let Err(e) = window.unminimize() {
-            log::warn!("{source}: window.unminimize() failed: {e}");
-        }
-        if let Err(e) = window.show() {
-            log::warn!("{source}: window.show() failed: {e}");
-        }
-        // If the window was previously on a disconnected monitor, showing/focusing may succeed
-        // but the window can still be effectively invisible. Centering is a good recovery.
-        if let Err(e) = window.center() {
-            log::warn!("{source}: window.center() failed: {e}");
-        }
-        // A brief always-on-top toggle can help bring the window above other windows on Windows.
-        let _ = window.set_always_on_top(true);
-        if let Err(e) = window.set_focus() {
-            log::warn!("{source}: window.set_focus() failed: {e}");
-        }
-        let _ = window.set_always_on_top(false);
+    if let Err(e) = window.unminimize() {
+        log::warn!("{source}: window.unminimize() failed: {e}");
+    }
+    if let Err(e) = window.show() {
+        log::warn!("{source}: window.show() failed: {e}");
+    }
+    // If the window was previously on a disconnected monitor, showing/focusing may succeed
+    // but the window can still be effectively invisible. Centering is a good recovery.
+    if let Err(e) = window.center() {
+        log::warn!("{source}: window.center() failed: {e}");
+    }
+    // A brief always-on-top toggle can help bring the window above other windows on Windows.
+    let _ = window.set_always_on_top(true);
+    if let Err(e) = window.set_focus() {
+        log::warn!("{source}: window.set_focus() failed: {e}");
+    }
+    let _ = window.set_always_on_top(false);
 
-        let visible_after = window.is_visible().ok();
-        log::info!("{source}: done (visible_after={visible_after:?})");
+    if let Some(event) = notify_event {
+        schedule_single_instance_emit(app.clone(), event, &[150]);
     }
 
+    let visible_after = window.is_visible().ok();
+    log::info!("{source}: done (visible_after={visible_after:?})");
+}
+
+/// Setup system tray
+pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
@@ -96,7 +117,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
                 log::info!("Tray menu: show");
-                show_main_window(app, "tray-menu-show");
+                show_main_window(app, "tray-menu-show", None);
             }
             "quit" => {
                 log::info!("Tray menu: quit");
@@ -126,7 +147,7 @@ pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
                 } => {
                     log::info!("Tray icon: activate (left click/double-click)");
                     let app = tray.app_handle();
-                    show_main_window(app, "tray-icon-activate");
+                    show_main_window(app, "tray-icon-activate", None);
                 }
                 _ => {}
             }
