@@ -67,8 +67,6 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     dirty |= set_default("cerebras_free_tier", json!(true), false);
     // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
     dirty |= set_default("groq_free_tier", json!(true), false);
-    // ElevenLabs free-tier toggle (used by stats filtering).
-    dirty |= set_default("elevenlabs_free_tier", json!(true), false);
     // Cohere toggle (used by stats filtering).
     dirty |= set_default("cohere_free_tier", json!(true), false);
     // AssemblyAI and Speechmatics toggles (used by stats filtering).

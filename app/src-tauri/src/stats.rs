@@ -122,7 +122,6 @@ fn is_free_tier_call(app: &AppHandle, provider: &str) -> bool {
         match provider {
             "cerebras" => crate::get_setting_from_store(app, "cerebras_free_tier", true),
             "groq" => crate::get_setting_from_store(app, "groq_free_tier", true),
-            "elevenlabs" => crate::get_setting_from_store(app, "elevenlabs_free_tier", true),
             "cohere" => crate::get_setting_from_store(app, "cohere_free_tier", true),
             "assemblyai" => crate::get_setting_from_store(app, "assemblyai_free_tier", true),
             "speechmatics" => crate::get_setting_from_store(app, "speechmatics_free_tier", true),

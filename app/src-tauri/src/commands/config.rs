@@ -63,12 +63,12 @@ pub struct AvailableProvidersResponse {
 /// STT provider definitions
 const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("groq", "Groq", false),
-    ("elevenlabs", "ElevenLabs", false),
     ("openai", "OpenAI", false),
     ("fireworks", "Fireworks", false),
     ("aquavoice", "Aquavoice", false),
     ("assemblyai", "AssemblyAI", false),
     ("speechmatics", "Speechmatics", false),
+    ("elevenlabs", "ElevenLabs", false),
     ("deepgram", "Deepgram", false),
     // Self-hosted/local network endpoint.
     ("whisper-server", "Whisper Server", true),

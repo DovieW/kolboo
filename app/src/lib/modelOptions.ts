@@ -29,6 +29,7 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 		{ value: "best", label: "Best (Legacy)" },
 	],
 	elevenlabs: [
+		{ value: "scribe_v2", label: "Scribe v2" },
 		{ value: "scribe_v1", label: "Scribe v1" },
 		{ value: "scribe_v1_experimental", label: "Scribe v1 Experimental" },
 	],

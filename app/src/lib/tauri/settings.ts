@@ -1262,8 +1262,6 @@ export const tauriSettingsAPI = {
 			cerebras_free_tier:
 				(await store.get<boolean>("cerebras_free_tier")) ?? true,
 			groq_free_tier: (await store.get<boolean>("groq_free_tier")) ?? true,
-			elevenlabs_free_tier:
-				(await store.get<boolean>("elevenlabs_free_tier")) ?? true,
 			cohere_free_tier: (await store.get<boolean>("cohere_free_tier")) ?? true,
 			assemblyai_free_tier:
 				(await store.get<boolean>("assemblyai_free_tier")) ?? true,
@@ -1754,10 +1752,6 @@ export const tauriSettingsAPI = {
 
 	async updateGroqFreeTier(enabled: boolean): Promise<void> {
 		await applySettingsPatch({ patch: { groq_free_tier: !!enabled } });
-	},
-
-	async updateElevenLabsFreeTier(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { elevenlabs_free_tier: !!enabled } });
 	},
 
 	async updateCohereFreeTier(enabled: boolean): Promise<void> {

@@ -100,10 +100,29 @@ export function ProvidersSettings() {
 	}, [currentTimeout]);
 
 	// Group providers by cloud/local for dropdown display
+	const sttCloudProviderOrder = [
+		"groq",
+		"openai",
+		"fireworks",
+		"aquavoice",
+		"assemblyai",
+		"speechmatics",
+		"elevenlabs",
+		"deepgram",
+	];
+	const sttCloudProviderOrderIndex = new Map(
+		sttCloudProviderOrder.map((value, index) => [value, index]),
+	);
 	const sttCloudProviders =
 		availableProviders?.stt
 			.filter((p) => !p.is_local)
-			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+			.map((p) => ({ value: p.value, label: p.label }))
+			.sort((a, b) => {
+				const aIndex = sttCloudProviderOrderIndex.get(a.value) ?? 999;
+				const bIndex = sttCloudProviderOrderIndex.get(b.value) ?? 999;
+				if (aIndex !== bIndex) return aIndex - bIndex;
+				return a.label.localeCompare(b.label);
+			}) ?? [];
 	const sttLocalProviders =
 		availableProviders?.stt
 			.filter((p) => p.is_local)

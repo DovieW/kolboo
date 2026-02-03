@@ -651,9 +651,6 @@ export interface AppSettings {
 	// When true, treat Groq usage as free-tier (UI-only for now; kept in settings for future backend usage).
 	groq_free_tier: boolean;
 
-	// When true, treat ElevenLabs usage as free-tier for stats filtering.
-	elevenlabs_free_tier: boolean;
-
 	// When true, treat Cohere usage as free-tier for stats filtering.
 	cohere_free_tier: boolean;
 

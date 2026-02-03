@@ -15,13 +15,6 @@ export const API_KEYS: ApiKeyConfig[] = [
 		getKeyUrl: "https://console.groq.com/keys",
 	},
 	{
-		id: "elevenlabs",
-		label: "ElevenLabs",
-		placeholder: "Enter API key",
-		storeKey: "elevenlabs_api_key",
-		getKeyUrl: "https://elevenlabs.io/app/settings/api-keys",
-	},
-	{
 		id: "cerebras",
 		label: "Cerebras",
 		placeholder: "Enter API key",
@@ -48,6 +41,13 @@ export const API_KEYS: ApiKeyConfig[] = [
 		placeholder: "Enter API key",
 		storeKey: "speechmatics_api_key",
 		getKeyUrl: "https://portal.speechmatics.com/settings/api-keys",
+	},
+	{
+		id: "elevenlabs",
+		label: "ElevenLabs",
+		placeholder: "Enter API key",
+		storeKey: "elevenlabs_api_key",
+		getKeyUrl: "https://elevenlabs.io/app/settings/api-keys",
 	},
 	{
 		id: "aquavoice",

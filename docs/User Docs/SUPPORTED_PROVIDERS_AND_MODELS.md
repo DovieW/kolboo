@@ -54,6 +54,12 @@ Notes:
 
 - No fixed list here (models are managed locally; the Settings picker does not enumerate Whisper models from `modelOptions.ts`).
 
+### `elevenlabs` (ElevenLabs)
+
+- `scribe_v2` — Scribe v2
+- `scribe_v1` — Scribe v1
+- `scribe_v1_experimental` — Scribe v1 Experimental
+
 ---
 
 ## Language Models (LLM)

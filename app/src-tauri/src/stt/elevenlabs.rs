@@ -17,6 +17,7 @@ use std::time::Duration;
 /// ElevenLabs STT provider for speech-to-text.
 ///
 /// Model ids currently supported by the endpoint include:
+/// - `scribe_v2`
 /// - `scribe_v1`
 /// - `scribe_v1_experimental`
 pub struct ElevenLabsSttProvider {
