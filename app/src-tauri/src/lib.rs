@@ -2525,6 +2525,8 @@ pub fn run() {
             commands::overlay::show_overlay,
             commands::overlay::hide_overlay,
             commands::overlay::overlay_frontend_ready,
+            commands::overlay::overlay_hover_frontend_ready,
+            commands::overlay::quick_ask_frontend_ready,
             commands::overlay::show_overlay_hover,
             commands::overlay::hide_overlay_hover,
             commands::overlay::schedule_hide_overlay_hover,

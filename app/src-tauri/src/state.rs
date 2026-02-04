@@ -27,6 +27,12 @@ pub struct AppState {
     /// Monotonic token bumped every time we show/refresh the overlay hover window.
     /// Used to cancel delayed-hide timers when the pointer moves between windows.
     pub overlay_hover_epoch: AtomicU64,
+    /// Unix millis when the overlay frontend last reported ready.
+    pub overlay_frontend_ready_at_ms: AtomicU64,
+    /// Unix millis when the overlay hover frontend last reported ready.
+    pub overlay_hover_frontend_ready_at_ms: AtomicU64,
+    /// Unix millis when the Quick Ask frontend last reported ready.
+    pub quick_ask_frontend_ready_at_ms: AtomicU64,
     /// Tracks whether we toggled MediaPlayPause when recording started.
     /// Used to restore playback when recording ends.
     pub play_pause_toggled: AtomicBool,

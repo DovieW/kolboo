@@ -1,4 +1,5 @@
 use std::sync::atomic::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -12,6 +13,42 @@ use crate::state::AppState;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
+
+#[cfg(desktop)]
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+#[cfg(desktop)]
+pub fn maybe_reload_overlay_webview(
+    app: &AppHandle,
+    label: &str,
+    last_ready_ms: u64,
+    stale_after_ms: u64,
+    reason: &str,
+) {
+    let age_ms = now_ms().saturating_sub(last_ready_ms);
+    let stale = last_ready_ms == 0 || age_ms > stale_after_ms;
+    if !stale {
+        return;
+    }
+
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+
+    log::warn!(
+        "[overlay] frontend stale, reloading (label={}, last_ready_ms={}, age_ms={}, reason={})",
+        label,
+        last_ready_ms,
+        age_ms,
+        reason
+    );
+    let _ = window.eval("window.location.reload()");
+}
 
 #[cfg(desktop)]
 fn get_setting_from_store<T: serde::de::DeserializeOwned>(
@@ -377,6 +414,12 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
             overlay_mode,
             visible_before
         );
+
+        let last_ready_ms = app
+            .state::<AppState>()
+            .overlay_frontend_ready_at_ms
+            .load(Ordering::SeqCst);
+        maybe_reload_overlay_webview(app, "overlay", last_ready_ms, 45_000, "show");
 
         window.show().map_err(|e| e.to_string())?;
 
@@ -832,6 +875,11 @@ pub async fn set_quick_ask_escape_enabled(app: AppHandle, enabled: bool) -> Comm
 pub async fn overlay_frontend_ready(app: AppHandle) -> CommandResult<()> {
     #[cfg(desktop)]
     {
+        let now_ms = now_ms();
+        app.state::<AppState>()
+            .overlay_frontend_ready_at_ms
+            .store(now_ms, Ordering::SeqCst);
+
         let overlay_mode: String =
             get_setting_from_store(&app, "overlay_mode", "recording_only".to_string());
         let pipeline_state = app
@@ -865,6 +913,36 @@ pub async fn overlay_frontend_ready(app: AppHandle) -> CommandResult<()> {
     Ok(())
 }
 
+/// Notify backend that the overlay hover frontend has mounted.
+#[tauri::command]
+pub async fn overlay_hover_frontend_ready(app: AppHandle) -> CommandResult<()> {
+    #[cfg(desktop)]
+    {
+        let now_ms = now_ms();
+        app.state::<AppState>()
+            .overlay_hover_frontend_ready_at_ms
+            .store(now_ms, Ordering::SeqCst);
+        log::debug!("[overlay_hover] frontend ready (ts={})", now_ms);
+    }
+
+    Ok(())
+}
+
+/// Notify backend that the Quick Ask frontend has mounted.
+#[tauri::command]
+pub async fn quick_ask_frontend_ready(app: AppHandle) -> CommandResult<()> {
+    #[cfg(desktop)]
+    {
+        let now_ms = now_ms();
+        app.state::<AppState>()
+            .quick_ask_frontend_ready_at_ms
+            .store(now_ms, Ordering::SeqCst);
+        log::debug!("[quick_ask] frontend ready (ts={})", now_ms);
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
     let Some(overlay) = app.get_webview_window("overlay") else {
@@ -879,6 +957,18 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
         .fetch_add(1, Ordering::SeqCst);
 
     log::debug!("[overlay_hover] show requested");
+
+    let last_ready_ms = app
+        .state::<AppState>()
+        .overlay_hover_frontend_ready_at_ms
+        .load(Ordering::SeqCst);
+    maybe_reload_overlay_webview(
+        &app,
+        "overlay_hover",
+        last_ready_ms,
+        45_000,
+        "show_overlay_hover",
+    );
 
     // Fixed hover panel size (logical).
     let hover_w = 320.0;

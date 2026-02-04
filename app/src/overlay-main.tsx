@@ -3,6 +3,7 @@ import { renderRoot } from "./lib/bootstrap/renderRoot";
 import "@mantine/core/styles.css";
 import "@fontsource/sora/index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import { Component } from "react";
 import OverlayApp from "./OverlayApp";
 
@@ -88,3 +89,20 @@ renderRoot(
 		</AppMantineProvider>
 	</QueryClientProvider>,
 );
+
+const notifyOverlayReady = () => {
+	invoke("overlay_frontend_ready").catch((error) => {
+		console.error("[Overlay] Failed to heartbeat frontend ready:", error);
+	});
+};
+notifyOverlayReady();
+
+const readyInterval = window.setInterval(notifyOverlayReady, 15_000);
+window.addEventListener("beforeunload", () => {
+	window.clearInterval(readyInterval);
+});
+
+const fallback = document.getElementById("overlay-fallback");
+if (fallback) {
+	fallback.remove();
+}

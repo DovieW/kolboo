@@ -6,6 +6,7 @@ import {
 	CodeHighlightAdapterProvider,
 	createHighlightJsAdapter,
 } from "@mantine/code-highlight";
+import { invoke } from "@tauri-apps/api/core";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -33,6 +34,18 @@ renderRoot(
 		</AppMantineProvider>
 	</CodeHighlightAdapterProvider>,
 );
+
+const notifyQuickAskReady = () => {
+	invoke("quick_ask_frontend_ready").catch((error) => {
+		console.error("[QuickAsk] Failed to heartbeat frontend ready:", error);
+	});
+};
+notifyQuickAskReady();
+
+const quickAskReadyInterval = window.setInterval(notifyQuickAskReady, 15_000);
+window.addEventListener("beforeunload", () => {
+	window.clearInterval(quickAskReadyInterval);
+});
 
 const fallback = document.getElementById("quick-ask-fallback");
 if (fallback) {

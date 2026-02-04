@@ -1,6 +1,9 @@
+use std::sync::atomic::Ordering;
+
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::events;
+use crate::state::AppState;
 
 pub(crate) const QUICK_ASK_WINDOW_LABEL: &str = "quick_ask";
 
@@ -30,6 +33,20 @@ pub(crate) fn emit_to_quick_ask<T: serde::Serialize>(app: &AppHandle, event: &st
 ///
 /// This is used when we want the user to actually see streaming/error states.
 pub(crate) fn ensure_quick_ask_window_visible(app: &AppHandle) {
+    let last_ready_ms = app
+        .state::<AppState>()
+        .quick_ask_frontend_ready_at_ms
+        .load(Ordering::SeqCst);
+    #[cfg(desktop)]
+    {
+        crate::commands::overlay::maybe_reload_overlay_webview(
+            app,
+            QUICK_ASK_WINDOW_LABEL,
+            last_ready_ms,
+            45_000,
+            "quick_ask_show",
+        );
+    }
     let _ = crate::commands::overlay::position_quick_ask_to_target_monitor(app);
     if let Some(win) = app.get_webview_window(QUICK_ASK_WINDOW_LABEL) {
         let _ = win.set_always_on_top(true);
