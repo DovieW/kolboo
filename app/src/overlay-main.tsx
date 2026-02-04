@@ -90,16 +90,8 @@ renderRoot(
 	</QueryClientProvider>,
 );
 
-const notifyOverlayReady = () => {
-	invoke("overlay_frontend_ready").catch((error) => {
-		console.error("[Overlay] Failed to heartbeat frontend ready:", error);
-	});
-};
-notifyOverlayReady();
-
-const readyInterval = window.setInterval(notifyOverlayReady, 15_000);
-window.addEventListener("beforeunload", () => {
-	window.clearInterval(readyInterval);
+invoke("overlay_frontend_ready").catch((error) => {
+	console.error("[Overlay] Failed to notify frontend ready:", error);
 });
 
 const fallback = document.getElementById("overlay-fallback");

@@ -498,35 +498,6 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
             raise_status
         );
 
-        // Post-show snap: ensure the overlay ends up at the saved position after any
-        // late resize/layout work (recording-only/never modes).
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let delay = std::time::Duration::from_millis(75);
-            tokio::time::sleep(delay).await;
-
-            let current_epoch = app_clone
-                .state::<AppState>()
-                .overlay_visibility_epoch
-                .load(Ordering::SeqCst);
-
-            if current_epoch != expected_epoch {
-                return;
-            }
-
-            let overlay_mode: String =
-                get_setting_from_store(&app_clone, "overlay_mode", "recording_only".to_string());
-            if overlay_mode == "always" {
-                return;
-            }
-
-            if let Err(e) = snap_overlay_to_saved_position(&app_clone) {
-                log::debug!("[overlay] post-show snap failed: {}", e);
-            } else {
-                log::debug!("[overlay] post-show snap applied (mode={})", overlay_mode);
-            }
-        });
-
         // Post-show verify/retry (guarded by epoch so stale shows don't fight).
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -1117,7 +1088,14 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> CommandResult<()>
     if let Some(window) = app.get_webview_window("overlay") {
         match mode.as_str() {
             "always" => {
-                window.show().map_err(|e| e.to_string())?;
+                #[cfg(desktop)]
+                {
+                    show_overlay_with_reset_if_not_always(&app)?;
+                }
+                #[cfg(not(desktop))]
+                {
+                    window.show().map_err(|e| e.to_string())?;
+                }
             }
             "never" => {
                 // Ask the frontend to animate out before we hide.

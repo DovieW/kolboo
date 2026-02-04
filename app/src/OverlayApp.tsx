@@ -28,13 +28,6 @@ export default function OverlayApp() {
 		void init();
 	}, []);
 
-	useEffect(() => {
-		// Let the backend know the overlay frontend is live so it can re-assert visibility.
-		invoke("overlay_frontend_ready").catch((error) => {
-			console.error("[Overlay] Failed to notify frontend ready:", error);
-		});
-	}, []);
-
 	if (!ready) {
 		return (
 			<div
