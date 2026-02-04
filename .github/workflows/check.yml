@@ -135,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
+          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
 
       - name: Setup Rust
         if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
