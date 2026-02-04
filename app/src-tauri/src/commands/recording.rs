@@ -489,11 +489,14 @@ pub fn pipeline_start_recording(
     #[cfg(not(desktop))]
     let foreground: Option<String> = None;
 
-    let matched_profile = crate::pipeline::select_profile_for_foreground_app(&config.llm_config);
-    if let Some(p) = matched_profile.as_ref() {
-        let _ = pipeline.set_session_profile_override(Some(p.id.clone()));
-    } else {
-        let _ = pipeline.set_session_profile_override(None);
+    if pipeline.peek_session_profile_override().is_none() {
+        let matched_profile =
+            crate::pipeline::select_profile_for_foreground_app(&config.llm_config);
+        if let Some(p) = matched_profile.as_ref() {
+            let _ = pipeline.set_session_profile_override(Some(p.id.clone()));
+        } else {
+            let _ = pipeline.set_session_profile_override(None);
+        }
     }
 
     // One-time per recording: log what we saw so we can debug "always Default" reports.

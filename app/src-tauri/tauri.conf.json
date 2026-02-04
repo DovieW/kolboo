@@ -30,6 +30,185 @@
 			"devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src 'self' asset: https: data: blob:; media-src 'self' asset: data: blob:; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173 https://api.github.com; form-action 'self'; frame-ancestors 'none';"
 		}
 	},
+	"plugins": {
+		"cli": {
+			"description": "Kolboo CLI",
+			"subcommands": {
+				"pipeline": {
+					"description": "Pipeline operations",
+					"subcommands": {
+						"run": {
+							"description": "Start a headless pipeline run",
+							"args": [
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								},
+								{
+									"name": "profile",
+									"short": "p",
+									"description": "Profile id to run with",
+									"takesValue": true
+								}
+							]
+						},
+						"stop": {
+							"description": "Stop recording and transcribe",
+							"args": [
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						},
+						"transcribe": {
+							"description": "Transcribe a WAV file",
+							"args": [
+								{
+									"name": "file",
+									"short": "f",
+									"description": "Path to WAV file",
+									"takesValue": true
+								},
+								{
+									"name": "profile",
+									"short": "p",
+									"description": "Profile id override",
+									"takesValue": true
+								},
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						},
+						"status": {
+							"description": "Get current pipeline status",
+							"args": [
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						}
+					}
+				},
+				"settings": {
+					"description": "Settings operations",
+					"subcommands": {
+						"get": {
+							"description": "Get a setting value",
+							"args": [
+								{
+									"name": "key",
+									"short": "k",
+									"description": "Setting key",
+									"takesValue": true
+								},
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						},
+						"set": {
+							"description": "Set a setting value",
+							"args": [
+								{
+									"name": "key",
+									"short": "k",
+									"description": "Setting key",
+									"takesValue": true
+								},
+								{
+									"name": "value",
+									"short": "v",
+									"description": "Setting value (string or JSON)",
+									"takesValue": true
+								},
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						}
+					}
+				},
+				"profiles": {
+					"description": "Profile operations",
+					"subcommands": {
+						"list": {
+							"description": "List available profiles",
+							"args": [
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						},
+						"use": {
+							"description": "Select an active profile",
+							"args": [
+								{
+									"name": "profile",
+									"short": "p",
+									"description": "Profile id",
+									"takesValue": true
+								},
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						}
+					}
+				},
+				"diagnostics": {
+					"description": "Run diagnostics",
+					"args": [
+						{
+							"name": "output",
+							"short": "o",
+							"description": "Output format (json|human)",
+							"takesValue": true
+						}
+					]
+				},
+				"config": {
+					"description": "Configuration commands",
+					"subcommands": {
+						"export": {
+							"description": "Export effective configuration",
+							"args": [
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
+									"takesValue": true
+								}
+							]
+						}
+					}
+				}
+			}
+		}
+	},
 	"bundle": {
 		"active": true,
 		"targets": "all",

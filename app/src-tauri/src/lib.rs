@@ -2,6 +2,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tauri_plugin_cli::CliExt;
 use tracing::Instrument;
 
 fn truncate_utf8_to_byte_cap(s: &str, cap_bytes: usize) -> &str {
@@ -33,6 +34,7 @@ mod audio;
 mod audio_capture;
 mod audio_mute;
 mod bootstrap;
+mod cli;
 mod clipboard_context;
 mod commands;
 mod cost;
@@ -2638,6 +2640,8 @@ pub fn run() {
             commands::windows::get_foreground_process_path,
         ])
         .setup(|app| {
+            app.handle().plugin(tauri_plugin_cli::init())?;
+
             // Seed defaults into settings.json so UI and backend agree on effective settings.
             // Must run before pipeline initialization and any settings reads.
             #[cfg(desktop)]
@@ -2852,6 +2856,46 @@ pub fn run() {
                 }
 
                 app.manage(pipeline);
+            }
+
+            let has_cli_args = std::env::args_os().len() > 1;
+            match app.cli().matches() {
+                Ok(matches) => {
+                    if matches.subcommand.is_some() {
+                        match cli::handle_cli(app.handle(), &matches) {
+                            Ok(Some(code)) => {
+                                std::process::exit(code);
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                let result = cli::CommandResult::<serde_json::Value>::failure(
+                                    err.exit_code(),
+                                    err.to_string(),
+                                );
+                                let _ = cli::write_json(&result);
+                                std::process::exit(err.exit_code());
+                            }
+                        }
+                    } else if has_cli_args {
+                        let result = cli::CommandResult::<serde_json::Value>::failure(
+                            2,
+                            "CLI arguments provided but no subcommand was recognized."
+                                .to_string(),
+                        );
+                        let _ = cli::write_json(&result);
+                        std::process::exit(2);
+                    }
+                }
+                Err(err) => {
+                    if has_cli_args {
+                        let result = cli::CommandResult::<serde_json::Value>::failure(
+                            2,
+                            format!("Failed to parse CLI arguments: {err}"),
+                        );
+                        let _ = cli::write_json(&result);
+                        std::process::exit(2);
+                    }
+                }
             }
 
             // Backend-driven overlay waveform: publish realtime mic levels to the overlay.

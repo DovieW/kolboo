@@ -1949,7 +1949,7 @@ impl SharedPipeline {
                 });
 
             let effective_stt_settings =
-                inner.resolve_effective_stt_settings(profile.as_ref().map(|p| p), None);
+                inner.resolve_effective_stt_settings(profile.as_ref(), None);
 
             let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
             let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
@@ -2200,8 +2200,8 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let effective_stt_settings = inner
-                .resolve_effective_stt_settings(active_profile.as_ref().map(|p| p), active_preset);
+            let effective_stt_settings =
+                inner.resolve_effective_stt_settings(active_profile.as_ref(), active_preset);
 
             let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
             let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
@@ -2544,8 +2544,8 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let effective_stt_settings = inner
-                .resolve_effective_stt_settings(active_profile.as_ref().map(|p| p), active_preset);
+            let effective_stt_settings =
+                inner.resolve_effective_stt_settings(active_profile.as_ref(), active_preset);
 
             let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
             let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();

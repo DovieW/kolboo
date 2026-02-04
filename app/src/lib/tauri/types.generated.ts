@@ -887,6 +887,7 @@ export interface RewritePreset {
    */
   routing_hints?: string[];
   sound_enabled?: boolean | null;
+  stt_language?: string | null;
   stt_model?: string | null;
   stt_provider?: string | null;
   stt_timeout_seconds?: number | null;
@@ -974,6 +975,7 @@ export interface RewriteProgramPromptProfile {
    */
   router?: IntentRouterSettings | null;
   sound_enabled?: boolean | null;
+  stt_language?: string | null;
   stt_model?: string | null;
   stt_provider?: string | null;
   stt_timeout_seconds?: number | null;
