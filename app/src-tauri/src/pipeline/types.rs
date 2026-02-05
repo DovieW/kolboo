@@ -3,6 +3,8 @@ use crate::llm::LlmError;
 use crate::stt::SttError;
 use std::time::Duration;
 
+use crate::stt::RetryTelemetry;
+
 /// Errors that can occur in the recording pipeline
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)]
@@ -162,6 +164,11 @@ pub struct TranscriptionResult {
     pub final_text: String,
     /// Duration of the STT phase (including retries), in milliseconds.
     pub stt_duration_ms: u64,
+    /// Structured retry/backoff telemetry for the STT phase (if available).
+    ///
+    /// This is primarily used for CLI diagnostics/benchmarks so we can tell whether
+    /// a slow STT duration was due to retries/backoff (e.g. rate limiting).
+    pub stt_retry: Option<RetryTelemetry>,
     /// Duration of the LLM phase (including timeout/fallback), in milliseconds.
     pub llm_duration_ms: Option<u64>,
     /// LLM provider id actually used for this transcription (if the LLM step was attempted).

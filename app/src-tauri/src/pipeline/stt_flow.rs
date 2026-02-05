@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::stt::{with_retry, AudioFormat, RetryConfig, SttProvider};
+use crate::stt::{with_retry_report, AudioFormat, RetryConfig, RetryTelemetry, SttProvider};
 
 use super::types::PipelineError;
 use super::utils::normalize_stt_text;
@@ -19,6 +19,8 @@ pub(super) struct SttResult {
     pub text: String,
     /// Duration of the STT request in milliseconds.
     pub duration_ms: u64,
+    /// Retry/backoff telemetry for this STT request.
+    pub retry: RetryTelemetry,
 }
 
 /// Run STT transcription with retry, optional timeout, and cancellation.
@@ -37,7 +39,7 @@ pub(super) async fn run_stt_transcription(
     let wav = Arc::new(wav_bytes.to_vec());
 
     let transcription_future = async {
-        with_retry(retry_config, || {
+        with_retry_report(retry_config, || {
             let provider = stt_provider.clone();
             let wav = wav.clone();
             let format = format.clone();
@@ -64,7 +66,7 @@ pub(super) async fn run_stt_transcription(
             }
 
             result = transcription_future => {
-                result.map_err(PipelineError::from)
+                Ok(result)
             }
         }
     } else {
@@ -78,7 +80,7 @@ pub(super) async fn run_stt_transcription(
             }
 
             result = transcription_future => {
-                result.map_err(PipelineError::from)
+                Ok(result)
             }
         }
     };
@@ -86,14 +88,18 @@ pub(super) async fn run_stt_transcription(
     let duration_ms = stt_start.elapsed().as_millis() as u64;
 
     match stt_result {
-        Ok(text) => {
-            let normalized = normalize_stt_text(text);
-            log::info!("{}: STT complete, {} chars", log_prefix, normalized.len());
-            Ok(SttResult {
-                text: normalized,
-                duration_ms,
-            })
-        }
+        Ok(outcome) => match outcome.result {
+            Ok(text) => {
+                let normalized = normalize_stt_text(text);
+                log::info!("{}: STT complete, {} chars", log_prefix, normalized.len());
+                Ok(SttResult {
+                    text: normalized,
+                    duration_ms,
+                    retry: outcome.telemetry,
+                })
+            }
+            Err(e) => Err(PipelineError::from(e)),
+        },
         Err(e) => Err(e),
     }
 }

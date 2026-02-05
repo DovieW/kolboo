@@ -31,3 +31,14 @@ pub(crate) fn arg_string(matches: &Matches, name: &str) -> Option<String> {
         _ => Some(value.to_string()),
     }
 }
+
+pub(crate) fn arg_u64(matches: &Matches, name: &str) -> Option<u64> {
+    let value = matches.args.get(name).map(|arg| &arg.value)?;
+    match value {
+        Value::Number(n) => n.as_u64(),
+        Value::String(s) => s.trim().parse::<u64>().ok(),
+        Value::Bool(b) => Some(if *b { 1 } else { 0 }),
+        Value::Null => None,
+        _ => None,
+    }
+}

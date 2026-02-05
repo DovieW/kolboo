@@ -81,9 +81,31 @@
 									"takesValue": true
 								},
 								{
+									"name": "llm_provider",
+									"description": "Force LLM provider for rewrite (per-run override)",
+									"takesValue": true
+								},
+								{
+									"name": "llm_model",
+									"description": "Force LLM model for rewrite (per-run override)",
+									"takesValue": true
+								},
+								{
 									"name": "output",
 									"short": "o",
 									"description": "Output format (json|human)",
+									"takesValue": true
+								},
+								{
+									"name": "repeat",
+									"short": "r",
+									"description": "Repeat transcription N times (benchmark)",
+									"takesValue": true
+								},
+								{
+									"name": "warmup",
+									"short": "w",
+									"description": "Warmup runs before measuring (benchmark)",
 									"takesValue": true
 								}
 							]

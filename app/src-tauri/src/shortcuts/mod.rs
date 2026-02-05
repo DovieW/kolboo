@@ -368,6 +368,23 @@ pub(crate) fn set_escape_cancel_shortcut_enabled(app: &AppHandle, enabled: bool)
 #[cfg(desktop)]
 async fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool) {
     let _guard = shortcuts_lock::global_shortcut_lock().lock().await;
+    // CLI invocations (and other headless-ish contexts) may build a minimal Tauri app
+    // without managing the global-shortcut plugin. In that case, calling
+    // `app.global_shortcut()` panics (tauri state() called before manage()).
+    //
+    // Escape-to-cancel is purely a UX affordance; if shortcuts aren't available, we can
+    // safely no-op.
+    if app
+        .try_state::<tauri_plugin_global_shortcut::GlobalShortcut<tauri::Wry>>()
+        .is_none()
+    {
+        log::debug!(
+            "Global shortcut plugin not managed; skipping Escape shortcut toggle (enabled={})",
+            enabled
+        );
+        return;
+    }
+
     let shortcut_manager = app.global_shortcut();
     let quick_ask_visible = is_quick_ask_visible(app);
     let pipeline_can_cancel = app

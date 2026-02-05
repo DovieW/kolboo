@@ -6,6 +6,7 @@ mod pipeline;
 mod profiles;
 mod settings;
 mod types;
+mod wav_info;
 
 pub(crate) use errors::*;
 pub(crate) use output::*;

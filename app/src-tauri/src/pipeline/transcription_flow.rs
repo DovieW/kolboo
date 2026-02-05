@@ -59,6 +59,16 @@ pub(super) struct TranscriptionContext<'a> {
     pub cancel_token: CancellationToken,
     /// Injected embeddings provider for testing (bypasses real API calls).
     pub injected_embeddings_provider: Option<Arc<dyn crate::embeddings::EmbeddingsProvider>>,
+
+    /// Optional CLI/debug override: force the LLM rewrite step on for this transcription,
+    /// ignoring the usual profile/preset gates.
+    pub force_llm_rewrite: bool,
+    /// Optional CLI/debug override: force a specific LLM provider for this transcription.
+    /// When set, this takes precedence over preset/profile/global selection.
+    pub forced_llm_provider: Option<String>,
+    /// Optional CLI/debug override: force a specific LLM model for this transcription.
+    /// When set, this takes precedence over preset/profile/global selection.
+    pub forced_llm_model: Option<String>,
 }
 
 /// Session preset lock state.
@@ -616,7 +626,9 @@ pub(super) fn resolve_llm_for_rewrite<C: TranscriptionCallbacks>(
         None => default_profile_enabled,
     };
 
-    let effective_llm_enabled = if let Some(preset) = selected_preset {
+    let effective_llm_enabled = if ctx.force_llm_rewrite {
+        true
+    } else if let Some(preset) = selected_preset {
         profile_enabled && preset.rewrite_llm_enabled
     } else {
         profile_enabled && default_target_rewrite_enabled
@@ -642,14 +654,18 @@ pub(super) fn resolve_llm_for_rewrite<C: TranscriptionCallbacks>(
     };
 
     let (llm_provider, not_attempted_reason) = if effective_llm_enabled {
-        let desired_llm_provider = selected_preset
-            .and_then(|p| p.llm_provider.clone())
-            .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
-            .unwrap_or_else(|| llm_config.provider.clone());
-        let desired_llm_model = selected_preset
-            .and_then(|p| p.llm_model.clone())
-            .or_else(|| selected_profile.and_then(|p| p.llm_model.clone()))
-            .or_else(|| llm_config.model.clone());
+        let desired_llm_provider = ctx.forced_llm_provider.clone().unwrap_or_else(|| {
+            selected_preset
+                .and_then(|p| p.llm_provider.clone())
+                .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
+                .unwrap_or_else(|| llm_config.provider.clone())
+        });
+        let desired_llm_model = ctx.forced_llm_model.clone().or_else(|| {
+            selected_preset
+                .and_then(|p| p.llm_model.clone())
+                .or_else(|| selected_profile.and_then(|p| p.llm_model.clone()))
+                .or_else(|| llm_config.model.clone())
+        });
 
         // Resolve effective provider-specific thinking knobs.
         let effective_openai_reasoning_effort = selected_preset
@@ -854,6 +870,7 @@ pub(super) async fn complete_transcription_flow<C: TranscriptionCallbacks>(
     callbacks: &C,
     stt_text: &str,
     stt_duration_ms: u64,
+    stt_retry: Option<crate::stt::RetryTelemetry>,
     llm_config: &crate::llm::LlmConfig,
 ) -> TranscriptionResult {
     // Phase 3a: Route preset
@@ -874,9 +891,123 @@ pub(super) async fn complete_transcription_flow<C: TranscriptionCallbacks>(
         stt_text: stt_text.to_string(),
         final_text,
         stt_duration_ms,
+        stt_retry,
         llm_duration_ms,
         llm_provider_used,
         llm_model_used,
         llm_outcome,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::{ProgramPromptProfile, PromptSections};
+    use crate::pipeline::llm_provider::LlmProviderParams;
+
+    struct RecordingCallbacks(std::sync::Mutex<Option<(String, Option<String>)>>);
+
+    impl TranscriptionCallbacks for RecordingCallbacks {
+        fn transition_to_routing(&self) {}
+        fn transition_from_routing(&self) {}
+        fn transition_to_rewriting(&self) {}
+
+        fn get_or_create_llm_provider(
+            &self,
+            provider_id: &str,
+            params: LlmProviderParams,
+        ) -> Result<std::sync::Arc<dyn crate::llm::LlmProvider>, crate::pipeline::PipelineError>
+        {
+            *self.0.lock().expect("lock") = Some((provider_id.to_string(), params.model.clone()));
+
+            // We don't need a real provider instance for this test; we only validate selection.
+            Err(crate::pipeline::PipelineError::Config(
+                "test: provider creation not needed".to_string(),
+            ))
+        }
+    }
+
+    fn minimal_profile_with_llm_overrides(
+        provider: Option<&str>,
+        model: Option<&str>,
+    ) -> ProgramPromptProfile {
+        ProgramPromptProfile {
+            id: "test-profile".to_string(),
+            name: "Test Profile".to_string(),
+            program_paths: vec![],
+            prompts: PromptSections::default(),
+            presets: vec![],
+            default_preset_id: None,
+            default_preset_description: None,
+            default_target_rewrite_llm_enabled: true,
+            active_preset_id: None,
+            router: None,
+            rewrite_llm_enabled: Some(true),
+            stt_provider: None,
+            stt_model: None,
+            stt_language: None,
+            stt_timeout_seconds: None,
+            llm_provider: provider.map(|s| s.to_string()),
+            llm_model: model.map(|s| s.to_string()),
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+            quick_ask_provider: None,
+            quick_ask_model: None,
+            quick_ask_system_prompt: None,
+            context_grab_method: None,
+            rewrite_include_clipboard_context: None,
+            quick_replace_include_clipboard_context: None,
+            quick_ask_include_clipboard_context: None,
+            rewrite_active_window_ocr_mode: None,
+            quick_replace_active_window_ocr_mode: None,
+            quick_ask_active_window_ocr_mode: None,
+            quick_replace_enabled: None,
+            quick_replace_provider: None,
+            quick_replace_model: None,
+            quick_replace_system_prompt: None,
+            quick_ask_openai_reasoning_effort: None,
+            quick_ask_gemini_thinking_budget: None,
+            quick_ask_gemini_thinking_level: None,
+            quick_ask_anthropic_thinking_budget: None,
+        }
+    }
+
+    #[test]
+    fn forced_llm_provider_model_take_precedence_over_profile() {
+        let profile = minimal_profile_with_llm_overrides(Some("ollama"), Some("some-model"));
+        let callbacks = RecordingCallbacks(std::sync::Mutex::new(None));
+
+        let embedding_cache: std::sync::Arc<
+            std::sync::Mutex<std::collections::HashMap<String, Vec<f32>>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+        let ctx = TranscriptionContext {
+            active_profile: Some(profile),
+            active_window_ocr_text: None,
+            llm_enabled_global: true,
+            default_rewrite_include_clipboard_context: false,
+            session_lock: None,
+            proxy_settings: crate::settings::ProxySettings::default(),
+            llm_api_keys: std::collections::HashMap::new(),
+            request_log_store: None,
+            embedding_cache: &embedding_cache,
+            persist_app: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            injected_embeddings_provider: None,
+            force_llm_rewrite: true,
+            forced_llm_provider: Some("groq".to_string()),
+            forced_llm_model: Some("llama-3.1-8b-instant".to_string()),
+        };
+
+        let llm_config = crate::llm::LlmConfig::default();
+        let _ = resolve_llm_for_rewrite(&ctx, &callbacks, &None, &llm_config);
+
+        let recorded = callbacks.0.lock().expect("lock").clone();
+        assert_eq!(
+            recorded,
+            Some(("groq".to_string(), Some("llama-3.1-8b-instant".to_string())))
+        );
     }
 }

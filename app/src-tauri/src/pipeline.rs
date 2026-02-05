@@ -2129,6 +2129,7 @@ impl SharedPipeline {
                         stt_text: String::new(),
                         final_text: String::new(),
                         stt_duration_ms: 0,
+                        stt_retry: None,
                         llm_duration_ms: None,
                         llm_provider_used: None,
                         llm_model_used: None,
@@ -2143,6 +2144,7 @@ impl SharedPipeline {
                         stt_text: String::new(),
                         final_text: String::new(),
                         stt_duration_ms: 0,
+                        stt_retry: None,
                         llm_duration_ms: None,
                         llm_provider_used: None,
                         llm_model_used: None,
@@ -2327,7 +2329,7 @@ impl SharedPipeline {
         )
         .await;
 
-        let (stt_text, stt_duration_ms) = match stt_result {
+        let (stt_text, stt_duration_ms, stt_retry) = match stt_result {
             Ok(result) => {
                 // STT portion is done. Mark this so the overlay can show "waiting for OCR"
                 // instead of "transcribing" if OCR is still running.
@@ -2335,7 +2337,7 @@ impl SharedPipeline {
                     inner.stt_complete = true;
                     log::debug!("stt_complete set to true (stop_and_transcribe_detailed)");
                 }
-                (result.text, result.duration_ms)
+                (result.text, result.duration_ms, Some(result.retry))
             }
             Err(e) => {
                 let mut inner = self
@@ -2408,15 +2410,24 @@ impl SharedPipeline {
             persist_app,
             cancel_token: cancel_token.clone(),
             injected_embeddings_provider,
+            force_llm_rewrite: false,
+            forced_llm_provider: None,
+            forced_llm_model: None,
         };
 
         let callbacks = PipelineCallbacks {
             inner: self.inner.clone(),
         };
 
-        let result =
-            complete_transcription_flow(&ctx, &callbacks, &stt_text, stt_duration_ms, &llm_config)
-                .await;
+        let result = complete_transcription_flow(
+            &ctx,
+            &callbacks,
+            &stt_text,
+            stt_duration_ms,
+            stt_retry,
+            &llm_config,
+        )
+        .await;
 
         // Phase 5: Update state to idle
         {
@@ -2454,6 +2465,27 @@ impl SharedPipeline {
         &self,
         wav_bytes: Vec<u8>,
         profile_id_override: Option<&str>,
+    ) -> Result<TranscriptionResult, PipelineError> {
+        self.transcribe_wav_bytes_detailed_for_profile_with_llm_overrides(
+            wav_bytes,
+            profile_id_override,
+            None,
+            None,
+        )
+        .await
+    }
+
+    /// Transcribe provided WAV bytes, optionally forcing a specific prompt profile,
+    /// and optionally forcing the LLM rewrite provider/model for this one transcription.
+    ///
+    /// This is intended for CLI benchmarking/diagnostics so we can measure rewrite latency
+    /// without changing persisted settings.
+    pub async fn transcribe_wav_bytes_detailed_for_profile_with_llm_overrides(
+        &self,
+        wav_bytes: Vec<u8>,
+        profile_id_override: Option<&str>,
+        forced_llm_provider: Option<&str>,
+        forced_llm_model: Option<&str>,
     ) -> Result<TranscriptionResult, PipelineError> {
         // Phase 1: Resolve providers/config under lock.
         let (
@@ -2661,7 +2693,7 @@ impl SharedPipeline {
         )
         .await;
 
-        let (stt_text, stt_duration_ms) = match stt_result {
+        let (stt_text, stt_duration_ms, stt_retry) = match stt_result {
             Ok(result) => {
                 // STT portion is done. Mark this so the overlay can show "waiting for OCR"
                 // instead of "transcribing" if OCR is still running.
@@ -2669,7 +2701,7 @@ impl SharedPipeline {
                     inner.stt_complete = true;
                     log::debug!("stt_complete set to true (retry_transcription)");
                 }
-                (result.text, result.duration_ms)
+                (result.text, result.duration_ms, Some(result.retry))
             }
             Err(e) => {
                 let mut inner = self
@@ -2723,7 +2755,9 @@ impl SharedPipeline {
         let ctx = TranscriptionContext {
             active_profile: active_profile.clone(),
             active_window_ocr_text: ocr_text,
-            llm_enabled_global,
+            llm_enabled_global: llm_enabled_global
+                || forced_llm_provider.is_some()
+                || forced_llm_model.is_some(),
             default_rewrite_include_clipboard_context,
             session_lock: session_lock.map(|l| transcription_flow::SessionPresetLock {
                 profile_id: l.profile_id,
@@ -2736,15 +2770,24 @@ impl SharedPipeline {
             persist_app,
             cancel_token: cancel_token.clone(),
             injected_embeddings_provider,
+            force_llm_rewrite: forced_llm_provider.is_some() || forced_llm_model.is_some(),
+            forced_llm_provider: forced_llm_provider.map(|s| s.to_string()),
+            forced_llm_model: forced_llm_model.map(|s| s.to_string()),
         };
 
         let callbacks = PipelineCallbacks {
             inner: self.inner.clone(),
         };
 
-        let result =
-            complete_transcription_flow(&ctx, &callbacks, &stt_text, stt_duration_ms, &llm_config)
-                .await;
+        let result = complete_transcription_flow(
+            &ctx,
+            &callbacks,
+            &stt_text,
+            stt_duration_ms,
+            stt_retry,
+            &llm_config,
+        )
+        .await;
 
         // Phase 5: Update state to idle
         {

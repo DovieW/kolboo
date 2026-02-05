@@ -78,3 +78,31 @@ Ideas:
 Notes:
 - Shared helpers now live in `app/src-tauri/src/stt/language.rs`.
 - Pipeline uses `PipelineInner::resolve_effective_stt_settings(...)` to avoid duplicated override logic.
+
+## Make CLI output reliably machine-readable
+
+**Problem:** CLI commands currently print a single JSON response, but runtime logs (including JSON-formatted tracing logs) may be written to the same stream. This makes it annoying to consume CLI output programmatically (you have to "find the last JSON object" instead of just parsing stdout).
+
+**Why it matters:** The CLI has become our best tool for latency diagnosis and benchmarking, and downstream tooling (PowerShell scripts, CI smoke checks, etc.) should be able to parse output deterministically.
+
+Ideas:
+
+- In CLI mode, route tracing/log output to **stderr** and reserve **stdout** for the final CLI response JSON.
+- Add a `--quiet` flag (or `KOLBOO_CLI_QUIET=1`) that suppresses non-essential logs.
+- Consider a `--jsonl` mode for streaming per-run benchmark results without mixing with logs.
+
+**Related pain point:** Some CLI benchmark output includes a `request_log` summary field, but it can be `null` if `RequestLogStore` isn't managed/available in the minimal CLI app setup. Either wire it up consistently for CLI runs or remove the field to avoid confusion.
+
+## Deduplicate STT transcription flow helpers
+
+There are currently two very similar implementations of `run_stt_transcription(...)`:
+
+- `app/src-tauri/src/pipeline/stt_flow.rs`
+- `app/src-tauri/src/pipeline/transcription_flow.rs`
+
+This duplication makes it easy for behavior/telemetry (retry handling, timeout semantics, new diagnostics fields) to drift.
+
+Ideas:
+
+- Keep a single STT flow helper (`pipeline/stt_flow.rs`) and have other modules call into it.
+- If `transcription_flow.rs` needs a specialized version, refactor it to wrap the shared helper rather than re-implementing.
