@@ -11,6 +11,41 @@ pub(crate) use errors::*;
 pub(crate) use output::*;
 pub(crate) use types::*;
 
+/// Returns true if the current process appears to be invoked in "CLI mode".
+///
+/// We use this to avoid installing desktop-only, global, or single-instance behavior
+/// when a user is running a CLI subcommand (e.g. `kolboo pipeline transcribe ...`).
+///
+/// Keep this intentionally conservative: only treat known subcommands and common
+/// help/version flags as CLI invocations.
+pub(crate) fn is_cli_invocation() -> bool {
+    is_cli_invocation_from_args(std::env::args().skip(1))
+}
+
+fn is_cli_invocation_from_args<I>(mut args: I) -> bool
+where
+    I: Iterator<Item = String>,
+{
+    let Some(first) = args.next() else {
+        return false;
+    };
+    let first = first.trim();
+    if first.is_empty() {
+        return false;
+    }
+
+    // Common flags that indicate a CLI run.
+    if matches!(first, "-h" | "--help" | "help" | "-V" | "--version") {
+        return true;
+    }
+
+    // Known top-level subcommands.
+    matches!(
+        first,
+        "pipeline" | "settings" | "profiles" | "diagnostics" | "config"
+    )
+}
+
 pub(crate) fn handle_cli(
     app: &tauri::AppHandle,
     matches: &tauri_plugin_cli::Matches,
@@ -47,4 +82,52 @@ pub(crate) fn handle_cli(
     }
 
     Ok(Some(result.code))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_cli_invocation_from_args;
+
+    #[test]
+    fn detects_known_subcommands() {
+        assert!(is_cli_invocation_from_args(
+            ["pipeline".to_string()].into_iter()
+        ));
+        assert!(is_cli_invocation_from_args(
+            ["settings".to_string()].into_iter()
+        ));
+        assert!(is_cli_invocation_from_args(
+            ["profiles".to_string()].into_iter()
+        ));
+        assert!(is_cli_invocation_from_args(
+            ["diagnostics".to_string()].into_iter()
+        ));
+        assert!(is_cli_invocation_from_args(
+            ["config".to_string()].into_iter()
+        ));
+    }
+
+    #[test]
+    fn detects_help_and_version_flags() {
+        assert!(is_cli_invocation_from_args(
+            ["--help".to_string()].into_iter()
+        ));
+        assert!(is_cli_invocation_from_args(["-h".to_string()].into_iter()));
+        assert!(is_cli_invocation_from_args(
+            ["--version".to_string()].into_iter()
+        ));
+        assert!(is_cli_invocation_from_args(["-V".to_string()].into_iter()));
+    }
+
+    #[test]
+    fn does_not_trigger_for_empty_or_unknown() {
+        assert!(!is_cli_invocation_from_args([].into_iter()));
+        assert!(!is_cli_invocation_from_args(["".to_string()].into_iter()));
+        assert!(!is_cli_invocation_from_args(
+            ["--some-flag".to_string()].into_iter()
+        ));
+        assert!(!is_cli_invocation_from_args(
+            ["open".to_string()].into_iter()
+        ));
+    }
 }

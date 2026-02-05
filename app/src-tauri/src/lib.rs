@@ -2466,20 +2466,28 @@ pub fn run() {
     // Initialize structured tracing (JSON logs + request spans).
     tracing_init::init();
 
+    // If we're invoked with a CLI subcommand, we want to behave like a normal CLI tool:
+    // - allow running even while the GUI app is already running
+    // - avoid global/singleton plugins (single-instance, global shortcuts) that can block
+    //   or interfere with a running instance.
+    let is_cli_invocation = crate::cli::is_cli_invocation();
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
     {
-        builder = builder.plugin(shortcuts::build_global_shortcut_plugin());
-        builder = builder.plugin(tauri_plugin_dialog::init());
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            log::info!("Single-instance: focusing existing app window");
-            bootstrap::show_main_window(
-                app,
-                "single-instance",
-                Some(events::EVENT_SINGLE_INSTANCE_ACTIVATED),
-            );
-        }));
+        if !is_cli_invocation {
+            builder = builder.plugin(shortcuts::build_global_shortcut_plugin());
+            builder = builder.plugin(tauri_plugin_dialog::init());
+            builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+                log::info!("Single-instance: focusing existing app window");
+                bootstrap::show_main_window(
+                    app,
+                    "single-instance",
+                    Some(events::EVENT_SINGLE_INSTANCE_ACTIVATED),
+                );
+            }));
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -2649,6 +2657,58 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 settings::defaults::ensure_default_settings(app.handle())?;
+            }
+
+            // If a CLI subcommand is present, run it and exit early.
+            // IMPORTANT: do this before setting up overlays/tray/shortcuts so a CLI invocation
+            // doesn't interfere with a currently running GUI instance.
+            let has_cli_args = std::env::args_os().len() > 1;
+            match app.cli().matches() {
+                Ok(matches) => {
+                    if matches.subcommand.is_some() {
+                        // CLI subcommands use pipeline-backed logic (pipeline/config/profiles/diagnostics).
+                        // Initialize the pipeline only for CLI runs, and exit before any UI setup.
+                        #[cfg(desktop)]
+                        {
+                            bootstrap::initialize_request_log_store(app.handle());
+                            let pipeline = bootstrap::initialize_pipeline_from_settings(app.handle());
+                            app.manage(pipeline);
+                        }
+
+                        match cli::handle_cli(app.handle(), &matches) {
+                            Ok(Some(code)) => {
+                                std::process::exit(code);
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                let result = cli::CommandResult::<serde_json::Value>::failure(
+                                    err.exit_code(),
+                                    err.to_string(),
+                                );
+                                let _ = cli::write_json(&result);
+                                std::process::exit(err.exit_code());
+                            }
+                        }
+                    } else if has_cli_args {
+                        let result = cli::CommandResult::<serde_json::Value>::failure(
+                            2,
+                            "CLI arguments provided but no subcommand was recognized."
+                                .to_string(),
+                        );
+                        let _ = cli::write_json(&result);
+                        std::process::exit(2);
+                    }
+                }
+                Err(err) => {
+                    if has_cli_args {
+                        let result = cli::CommandResult::<serde_json::Value>::failure(
+                            2,
+                            format!("Failed to parse CLI arguments: {err}"),
+                        );
+                        let _ = cli::write_json(&result);
+                        std::process::exit(2);
+                    }
+                }
             }
 
             // Dev-only: validate settings shape at startup and print issues to the terminal.
@@ -2858,46 +2918,6 @@ pub fn run() {
                 }
 
                 app.manage(pipeline);
-            }
-
-            let has_cli_args = std::env::args_os().len() > 1;
-            match app.cli().matches() {
-                Ok(matches) => {
-                    if matches.subcommand.is_some() {
-                        match cli::handle_cli(app.handle(), &matches) {
-                            Ok(Some(code)) => {
-                                std::process::exit(code);
-                            }
-                            Ok(None) => {}
-                            Err(err) => {
-                                let result = cli::CommandResult::<serde_json::Value>::failure(
-                                    err.exit_code(),
-                                    err.to_string(),
-                                );
-                                let _ = cli::write_json(&result);
-                                std::process::exit(err.exit_code());
-                            }
-                        }
-                    } else if has_cli_args {
-                        let result = cli::CommandResult::<serde_json::Value>::failure(
-                            2,
-                            "CLI arguments provided but no subcommand was recognized."
-                                .to_string(),
-                        );
-                        let _ = cli::write_json(&result);
-                        std::process::exit(2);
-                    }
-                }
-                Err(err) => {
-                    if has_cli_args {
-                        let result = cli::CommandResult::<serde_json::Value>::failure(
-                            2,
-                            format!("Failed to parse CLI arguments: {err}"),
-                        );
-                        let _ = cli::write_json(&result);
-                        std::process::exit(2);
-                    }
-                }
             }
 
             // Backend-driven overlay waveform: publish realtime mic levels to the overlay.
