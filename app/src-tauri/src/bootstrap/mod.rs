@@ -1,5 +1,5 @@
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager,
 };
@@ -15,6 +15,12 @@ use crate::settings;
 use crate::state::TrayKeepAlive;
 use crate::stt;
 use crate::{get_setting_from_store, stats};
+
+const TRAY_HISTORY_LIMIT: usize = 10;
+const TRAY_HISTORY_SCAN_LIMIT: usize = 50;
+const TRAY_HISTORY_MENU_ID: &str = "tray-history";
+const TRAY_HISTORY_EMPTY_ID: &str = "tray-history-empty";
+const TRAY_HISTORY_ITEM_ID_PREFIX: &str = "tray-history-copy::";
 
 fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64]) {
     let event = event.to_string();
@@ -98,11 +104,77 @@ pub(crate) fn show_main_window(app: &AppHandle, source: &str, notify_event: Opti
     log::info!("{source}: done (visible_after={visible_after:?})");
 }
 
+fn history_menu_preview(text: &str, max_chars: usize) -> Option<String> {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let mut chars = normalized.chars();
+    let prefix: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        Some(format!("{prefix}..."))
+    } else {
+        Some(prefix)
+    }
+}
+
+fn build_history_submenu(app: &AppHandle) -> tauri::Result<Submenu<tauri::Wry>> {
+    let submenu = Submenu::with_id(app, TRAY_HISTORY_MENU_ID, "History", true)?;
+
+    let entries = if let Some(history) = app.try_state::<HistoryStorage>() {
+        match history.get_all(Some(TRAY_HISTORY_SCAN_LIMIT)) {
+            Ok(items) => items,
+            Err(e) => {
+                log::warn!("Tray menu: failed to load history for submenu: {}", e);
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
+    let mut added = 0usize;
+    for entry in entries {
+        if added >= TRAY_HISTORY_LIMIT {
+            break;
+        }
+
+        let Some(preview) = history_menu_preview(&entry.text, 70) else {
+            continue;
+        };
+
+        let item_id = format!("{TRAY_HISTORY_ITEM_ID_PREFIX}{}", entry.id);
+        let label = format!("{}. {}", added + 1, preview);
+        let item = MenuItem::with_id(app, item_id, label, true, None::<&str>)?;
+        submenu.append(&item)?;
+        added += 1;
+    }
+
+    if added == 0 {
+        let empty_item = MenuItem::with_id(
+            app,
+            TRAY_HISTORY_EMPTY_ID,
+            "No history yet",
+            false,
+            None::<&str>,
+        )?;
+        submenu.append(&empty_item)?;
+    }
+
+    Ok(submenu)
+}
+
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+    let history_submenu = build_history_submenu(app)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    Menu::with_items(app, &[&show_item, &history_submenu, &quit_item])
+}
+
 /// Setup system tray
 pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+    let menu = build_tray_menu(app)?;
 
     // Use the same tray icon everywhere (full-color, brand-consistent).
     // NOTE: Some platforms (notably macOS) have UI conventions around template icons,
@@ -129,6 +201,44 @@ pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
                 // Give frontend time to disconnect gracefully
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 app.exit(0);
+            }
+            id if id.starts_with(TRAY_HISTORY_ITEM_ID_PREFIX) => {
+                let entry_id = &id[TRAY_HISTORY_ITEM_ID_PREFIX.len()..];
+                let Some(history) = app.try_state::<HistoryStorage>() else {
+                    log::warn!("Tray menu: history storage missing");
+                    return;
+                };
+
+                match history.get_by_id(entry_id) {
+                    Ok(Some(entry)) => {
+                        if entry.text.trim().is_empty() {
+                            log::info!("Tray menu: selected history item is empty ({entry_id})");
+                            return;
+                        }
+
+                        if let Err(e) =
+                            crate::text::inject::copy_to_clipboard_and_notify(app, &entry.text)
+                        {
+                            log::warn!(
+                                "Tray menu: failed to copy history item {} to clipboard: {}",
+                                entry_id,
+                                e
+                            );
+                        } else {
+                            log::info!("Tray menu: copied history item {} to clipboard", entry_id);
+                        }
+                    }
+                    Ok(None) => {
+                        log::warn!("Tray menu: history item not found: {}", entry_id);
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Tray menu: failed to fetch history item {}: {}",
+                            entry_id,
+                            e
+                        );
+                    }
+                }
             }
             _ => {}
         })
