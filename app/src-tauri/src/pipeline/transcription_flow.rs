@@ -896,6 +896,7 @@ pub(super) async fn complete_transcription_flow<C: TranscriptionCallbacks>(
         llm_provider_used,
         llm_model_used,
         llm_outcome,
+        live_output_completed: false,
     }
 }
 

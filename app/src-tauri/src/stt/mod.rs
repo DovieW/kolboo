@@ -14,7 +14,9 @@ pub(crate) mod language;
 mod openai;
 mod openai_compat;
 mod retry;
+pub(crate) mod simulated_streaming;
 mod speechmatics;
+pub(crate) mod streaming;
 mod whisper_server;
 
 #[cfg(feature = "local-whisper")]
@@ -31,6 +33,7 @@ pub use openai::OpenAiSttProvider;
 pub use retry::is_retryable_error;
 pub use retry::{with_retry, with_retry_report, RetryConfig, RetryTelemetry};
 pub use speechmatics::SpeechmaticsSttProvider;
+pub use streaming::StreamingSttSession;
 pub use whisper_server::WhisperServerSttProvider;
 
 #[cfg(feature = "local-whisper")]
@@ -111,6 +114,37 @@ pub trait SttProvider: Send + Sync {
     /// Get the name of this provider
     #[cfg_attr(not(test), allow(dead_code))]
     fn name(&self) -> &'static str;
+
+    /// Whether this provider supports concurrent streaming (audio sent during recording).
+    ///
+    /// When true, the pipeline can start a `StreamingSttSession` at recording start
+    /// and feed audio chunks in real-time, resulting in near-instant transcription
+    /// when recording stops.
+    fn supports_streaming(&self) -> bool {
+        false
+    }
+
+    /// Whether this provider *requires* streaming (i.e., has no batch fallback).
+    ///
+    /// When true and a streaming session fails, the pipeline should propagate the
+    /// error instead of falling back to batch transcription.  This is used by
+    /// realtime-only model entries (e.g., OpenAI's `gpt-4o-realtime-transcribe`).
+    fn requires_streaming(&self) -> bool {
+        false
+    }
+
+    /// Start a concurrent streaming session.
+    ///
+    /// Only valid when `supports_streaming()` returns true. The returned session
+    /// accepts audio chunks via `audio_tx` and produces partial transcripts via
+    /// `partial_rx`. Call `session.finalize()` to get the final transcript.
+    ///
+    /// `sample_rate` is the capture device's sample rate (e.g., 16000 or 44100).
+    async fn start_streaming(&self, _sample_rate: u32) -> Result<StreamingSttSession, SttError> {
+        Err(SttError::Config(
+            "Streaming not supported by this provider".into(),
+        ))
+    }
 }
 
 /// Registry for managing multiple STT providers

@@ -81,6 +81,16 @@
 									"takesValue": true
 								},
 								{
+									"name": "stt_provider",
+									"description": "Force STT provider for this run (per-run override)",
+									"takesValue": true
+								},
+								{
+									"name": "stt_model",
+									"description": "Force STT model for this run (per-run override)",
+									"takesValue": true
+								},
+								{
 									"name": "llm_provider",
 									"description": "Force LLM provider for rewrite (per-run override)",
 									"takesValue": true
@@ -106,6 +116,45 @@
 									"name": "warmup",
 									"short": "w",
 									"description": "Warmup runs before measuring (benchmark)",
+									"takesValue": true
+								}
+							]
+						},
+						"stream": {
+							"description": "Stream a WAV file through a streaming STT provider (for testing live output)",
+							"args": [
+								{
+									"name": "file",
+									"short": "f",
+									"description": "Path to WAV file",
+									"takesValue": true
+								},
+								{
+									"name": "stt_provider",
+									"description": "STT provider to use (e.g. speechmatics, fireworks, openai, elevenlabs, assemblyai)",
+									"takesValue": true
+								},
+								{
+									"name": "stt_model",
+									"description": "STT model to use (optional, uses provider default if not specified)",
+									"takesValue": true
+								},
+								{
+									"name": "language",
+									"short": "l",
+									"description": "Language code (e.g. en, es, de) for the STT provider",
+									"takesValue": true
+								},
+								{
+									"name": "speed",
+									"short": "s",
+									"description": "Playback speed multiplier (default: 1.0, use 0 for as-fast-as-possible)",
+									"takesValue": true
+								},
+								{
+									"name": "output",
+									"short": "o",
+									"description": "Output format (json|human)",
 									"takesValue": true
 								}
 							]

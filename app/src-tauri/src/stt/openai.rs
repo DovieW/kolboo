@@ -1,17 +1,45 @@
 //! OpenAI STT provider implementation.
 //!
-//! Supports two modes:
+//! Supports three modes:
 //! - Legacy Whisper API (whisper-1) - uses /v1/audio/transcriptions
 //! - Audio chat models (e.g., gpt-4o-audio-preview) - uses /v1/responses with audio input
+//! - Realtime transcription (gpt-4o-realtime-transcribe, gpt-4o-mini-realtime-transcribe) -
+//!   uses WebSocket wss://api.openai.com/v1/realtime for concurrent streaming.
+//!   These are separate model entries that map to OpenAI's transcription models
+//!   (gpt-4o-transcribe, gpt-4o-mini-transcribe) within the realtime session.
+//!
+//! Realtime transcription docs:
+//! - Guide: https://platform.openai.com/docs/guides/realtime-transcription
+//! - WebSocket: https://platform.openai.com/docs/guides/realtime-websocket
+//! - Client events: https://platform.openai.com/docs/api-reference/realtime-client-events
 
 use super::http;
 use super::language;
 use super::openai_compat;
+use super::streaming::{
+    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, is_ws_closed_error,
+    ws_next_with_timeout, PartialTranscript, StreamingSttSession,
+};
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use futures_util::SinkExt;
 use serde_json::json;
+use serde_json::Value as JsonValue;
 use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+/// Config bundle for the OpenAI realtime streaming background task.
+/// This exists to keep the argument count under clippy's threshold.
+struct StreamingTaskConfig {
+    capture_sample_rate: u32,
+    model: String,
+    language: Option<String>,
+    prompt: Option<String>,
+    request_log_store: Option<RequestLogStore>,
+}
 
 /// OpenAI STT provider for speech-to-text
 pub struct OpenAiSttProvider {
@@ -27,6 +55,14 @@ pub struct OpenAiSttProvider {
 impl OpenAiSttProvider {
     const WHISPER_PROMPT_MAX_CHARS: usize = 224;
     const DEFAULT_OPENAI_API_BASE_URL: &'static str = "https://api.openai.com";
+    /// WebSocket timeout for realtime transcription operations.
+    const DEFAULT_WS_TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(120);
+    /// Shorter timeout for waiting after the final commit (audio done).
+    /// If VAD already committed everything, the server may not send another
+    /// completed event, so we don't want to wait 120s.
+    const POST_COMMIT_TIMEOUT: Duration = Duration::from_secs(5);
+    /// OpenAI Realtime API requires audio at exactly 24 kHz.
+    const REALTIME_SAMPLE_RATE: u32 = 24_000;
 
     /// Create a new OpenAI STT provider
     ///
@@ -114,11 +150,586 @@ impl OpenAiSttProvider {
         self
     }
 
+    /// Whether this model uses the OpenAI Realtime Transcription API.
+    ///
+    /// Only our dedicated realtime model entries (`gpt-4o-realtime-transcribe`,
+    /// `gpt-4o-mini-realtime-transcribe`) use the realtime WebSocket path.
+    /// The underlying OpenAI transcription model is specified via
+    /// [`realtime_transcription_model`](Self::realtime_transcription_model).
+    fn supports_realtime_streaming(&self) -> bool {
+        self.model.contains("realtime")
+    }
+
+    /// Map our internal realtime model name to the OpenAI transcription model
+    /// used inside the `session.update` payload.
+    ///
+    /// - `gpt-4o-realtime-transcribe` → `gpt-4o-transcribe`
+    /// - `gpt-4o-mini-realtime-transcribe` → `gpt-4o-mini-transcribe`
+    fn realtime_transcription_model(&self) -> String {
+        self.model.replace("-realtime", "")
+    }
+
+    /// Build the WebSocket URL for the Realtime Transcription API.
+    ///
+    /// Format: `wss://api.openai.com/v1/realtime?intent=transcription`
+    ///
+    /// The transcription model (e.g. `gpt-4o-transcribe`) is sent in the
+    /// `transcription_session.update` payload, not in the URL.
+    fn realtime_ws_url(&self) -> Result<String, SttError> {
+        let base = http::trim_base_url(&self.api_base_url);
+        let ws_scheme = if base.starts_with("https") || base.starts_with("wss") {
+            "wss"
+        } else {
+            "ws"
+        };
+        let host = base
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_start_matches("wss://")
+            .trim_start_matches("ws://");
+        Ok(format!(
+            "{}://{}/v1/realtime?intent=transcription",
+            ws_scheme, host,
+        ))
+    }
+
+    /// Resample f32 mono samples from `input_rate` to `output_rate` using linear
+    /// interpolation. Perfectly adequate for STT.
+    fn resample_linear(input: &[f32], input_rate: u32, output_rate: u32) -> Vec<f32> {
+        if input_rate == output_rate || input.is_empty() {
+            return input.to_vec();
+        }
+        let ratio = input_rate as f64 / output_rate as f64;
+        let output_len = (input.len() as f64 / ratio).ceil() as usize;
+        let mut output = Vec::with_capacity(output_len);
+        for i in 0..output_len {
+            let src_idx = i as f64 * ratio;
+            let idx0 = src_idx.floor() as usize;
+            let idx1 = (idx0 + 1).min(input.len() - 1);
+            let frac = (src_idx - idx0 as f64) as f32;
+            output.push(input[idx0] * (1.0 - frac) + input[idx1] * frac);
+        }
+        output
+    }
+
+    /// Convert f32 mono samples to little-endian i16 bytes.
+    fn f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8> {
+        let mut pcm = Vec::with_capacity(samples.len() * 2);
+        for &s in samples {
+            let clamped = s.clamp(-1.0, 1.0);
+            let val = (clamped * i16::MAX as f32).round() as i16;
+            pcm.extend_from_slice(&val.to_le_bytes());
+        }
+        pcm
+    }
+
+    /// Start a concurrent streaming STT session via the OpenAI Realtime API.
+    ///
+    /// Audio is resampled to 24 kHz (the only rate supported by the Realtime API),
+    /// encoded as PCM s16le, and sent as `input_audio_buffer.append` events.
+    /// Server-side VAD detects speech turns and emits per-turn transcripts.
+    async fn start_streaming_session(
+        &self,
+        sample_rate: u32,
+    ) -> Result<StreamingSttSession, SttError> {
+        let ws_url = self.realtime_ws_url()?;
+
+        let mut request = ws_url
+            .clone()
+            .into_client_request()
+            .map_err(|e| SttError::NetworkMessage(format!("WS request build failed: {}", e)))?;
+
+        // OpenAI authenticates via Authorization header.
+        let auth_value = format!("Bearer {}", self.api_key);
+        request.headers_mut().insert(
+            "Authorization",
+            auth_value
+                .parse()
+                .map_err(|e| SttError::Config(format!("Invalid OpenAI API key header: {}", e)))?,
+        );
+        // Required by the Realtime API.
+        request.headers_mut().insert(
+            "OpenAI-Beta",
+            "realtime=v1"
+                .parse()
+                .map_err(|e| SttError::Config(format!("Invalid header: {}", e)))?,
+        );
+
+        let (ws_write, ws_read) =
+            connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TRANSCRIPTION_TIMEOUT).await?;
+
+        let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>(1024);
+        let (partial_tx, partial_rx) = mpsc::channel::<PartialTranscript>(256);
+
+        let request_log_store = self.request_log_store.clone();
+        let model = self.model.clone();
+        // The model sent to OpenAI in the session.update payload.
+        // For realtime entries this maps e.g. "gpt-4o-realtime-transcribe" → "gpt-4o-transcribe".
+        let transcription_model = self.realtime_transcription_model();
+        let language = self.default_language.clone();
+        let prompt = self.default_prompt.clone();
+        let ws_url_for_log = ws_url.to_string();
+
+        // Log the streaming session start.
+        if let Some(store) = &request_log_store {
+            let request_json = json!({
+                "provider": "openai",
+                "endpoint": ws_url_for_log,
+                "content_type": "websocket-json-streaming",
+                "mode": "concurrent",
+                "fields": {
+                    "model": model,
+                    "transcription_model": transcription_model,
+                    "language": language,
+                    "prompt": prompt,
+                },
+                "audio": {
+                    "encoding": "pcm_s16le_mono",
+                    "sample_rate": Self::REALTIME_SAMPLE_RATE,
+                    "capture_sample_rate": sample_rate,
+                }
+            });
+            store.with_current(|log| {
+                log.stt_request_json = Some(request_json);
+            });
+        }
+
+        let task = tokio::spawn(Self::run_streaming_task(
+            ws_write,
+            ws_read,
+            audio_rx,
+            partial_tx,
+            StreamingTaskConfig {
+                capture_sample_rate: sample_rate,
+                model: transcription_model,
+                language,
+                prompt,
+                request_log_store,
+            },
+        ));
+
+        Ok(StreamingSttSession::new(audio_tx, partial_rx, task))
+    }
+
+    /// Background task: receives f32 audio from `audio_rx`, resamples to 24 kHz,
+    /// sends PCM chunks over the WebSocket, collects per-turn transcripts, and
+    /// returns the final concatenated transcript.
+    async fn run_streaming_task(
+        mut ws_write: super::streaming::WsWrite,
+        mut ws_read: super::streaming::WsRead,
+        mut audio_rx: mpsc::Receiver<Vec<f32>>,
+        partial_tx: mpsc::Sender<PartialTranscript>,
+        config: StreamingTaskConfig,
+    ) -> Result<String, SttError> {
+        let StreamingTaskConfig {
+            capture_sample_rate,
+            model,
+            language,
+            prompt,
+            request_log_store,
+        } = config;
+        // Configure the transcription session.
+        // The Realtime Transcription API uses a flat structure with
+        // `transcription_session.update` (not `session.update`).
+        let mut transcription_config = json!({
+            "model": model
+        });
+        if let Some(lang) = &language {
+            transcription_config["language"] = serde_json::Value::String(lang.clone());
+        }
+        if let Some(p) = &prompt {
+            transcription_config["prompt"] = serde_json::Value::String(p.clone());
+        }
+
+        let session_update = json!({
+            "type": "transcription_session.update",
+            "session": {
+                "input_audio_format": "pcm16",
+                "input_audio_transcription": transcription_config,
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 300
+                },
+                "input_audio_noise_reduction": {
+                    "type": "near_field"
+                }
+            }
+        });
+
+        ws_write
+            .send(Message::Text(session_update.to_string().into()))
+            .await
+            .map_err(|e| {
+                SttError::NetworkMessage(format!(
+                    "WS send transcription_session.update failed: {}",
+                    e
+                ))
+            })?;
+
+        // Chunk size in 24 kHz PCM s16le bytes (50ms target for snappy partials).
+        let target_chunk_bytes =
+            chunk_size_bytes_for_pcm_s16le(Self::REALTIME_SAMPLE_RATE, 1, 50, 1_600, 32_768);
+
+        let session_start = std::time::Instant::now();
+        let mut pcm_buffer: Vec<u8> = Vec::new();
+        let mut num_chunks_sent: usize = 0;
+        let mut committed: Vec<String> = Vec::new();
+        let mut logged_partials: Vec<JsonValue> = Vec::new();
+        let mut current_partial_text = String::new();
+
+        let mut audio_done = false;
+        let mut ws_done = false;
+        // Track whether we've sent audio since the last VAD-triggered commit.
+        // If false when audio closes, there's no point sending a manual commit
+        // (the buffer is empty and the server will error).
+        let mut has_audio_since_last_commit = false;
+        // Whether we sent a manual commit on audio close and are waiting for its
+        // completed event.
+        let mut awaiting_final_commit = false;
+
+        loop {
+            if ws_done {
+                break;
+            }
+            if audio_done {
+                // Only the WS branch is active from here.
+            }
+
+            // After audio is done, use a shorter timeout so we don't block for
+            // 120s if the server has nothing left to send.
+            let ws_timeout = if audio_done {
+                Self::POST_COMMIT_TIMEOUT
+            } else {
+                Self::DEFAULT_WS_TRANSCRIPTION_TIMEOUT
+            };
+
+            tokio::select! {
+                // Read audio chunks from the capture thread.
+                audio_chunk = audio_rx.recv(), if !audio_done => {
+                    match audio_chunk {
+                        Some(f32_samples) => {
+                            // Resample to 24 kHz if needed.
+                            let resampled = Self::resample_linear(
+                                &f32_samples,
+                                capture_sample_rate,
+                                Self::REALTIME_SAMPLE_RATE,
+                            );
+                            let pcm = Self::f32_to_pcm_s16le(&resampled);
+                            pcm_buffer.extend_from_slice(&pcm);
+
+                            // Send chunks when we've accumulated enough.
+                            while pcm_buffer.len() >= target_chunk_bytes {
+                                let chunk: Vec<u8> = pcm_buffer.drain(..target_chunk_bytes).collect();
+                                let msg = json!({
+                                    "type": "input_audio_buffer.append",
+                                    "audio": STANDARD.encode(&chunk),
+                                });
+                                match ws_write.send(Message::Text(msg.to_string().into())).await {
+                                    Ok(()) => {
+                                        num_chunks_sent += 1;
+                                        has_audio_since_last_commit = true;
+                                    }
+                                    Err(e) if is_ws_closed_error(&e) => {
+                                        log::warn!("OpenAI realtime: WS closed while sending audio, finishing early");
+                                        ws_done = true;
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        return Err(SttError::NetworkMessage(format!("WS send failed: {}", e)));
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            // Audio channel closed (recording stopped).
+                            // Send any remaining buffered PCM.
+                            if !pcm_buffer.is_empty() {
+                                let msg = json!({
+                                    "type": "input_audio_buffer.append",
+                                    "audio": STANDARD.encode(&pcm_buffer),
+                                });
+                                match ws_write.send(Message::Text(msg.to_string().into())).await {
+                                    Ok(()) => {
+                                        num_chunks_sent += 1;
+                                        has_audio_since_last_commit = true;
+                                    }
+                                    Err(e) if is_ws_closed_error(&e) => {
+                                        log::warn!("OpenAI realtime: WS closed while sending final audio");
+                                        audio_done = true;
+                                        ws_done = true;
+                                        pcm_buffer.clear();
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        return Err(SttError::NetworkMessage(format!("WS send failed: {}", e)));
+                                    }
+                                }
+                                pcm_buffer.clear();
+                            }
+
+                            // Only commit if we've sent audio since the last
+                            // server-side VAD commit. Committing an empty buffer
+                            // causes the server to return an error.
+                            if has_audio_since_last_commit {
+                                let commit = json!({ "type": "input_audio_buffer.commit" });
+                                match ws_write.send(Message::Text(commit.to_string().into())).await {
+                                    Ok(()) => {
+                                        awaiting_final_commit = true;
+                                        log::debug!("OpenAI realtime: sent final commit (audio done)");
+                                    }
+                                    Err(e) if is_ws_closed_error(&e) => {
+                                        log::warn!("OpenAI realtime: WS closed while sending commit");
+                                        ws_done = true;
+                                    }
+                                    Err(e) => {
+                                        return Err(SttError::NetworkMessage(format!("WS send commit failed: {}", e)));
+                                    }
+                                }
+                            } else {
+                                log::debug!("OpenAI realtime: audio done, no pending audio to commit");
+                                ws_done = true;
+                            }
+
+                            audio_done = true;
+                        }
+                    }
+                }
+
+                // Read WS messages (session events, deltas, completions).
+                ws_msg = ws_next_with_timeout(&mut ws_read, ws_timeout), if !ws_done => {
+                    match ws_msg {
+                        Err(SttError::Timeout) if audio_done => {
+                            // Post-commit timeout expired. VAD likely already
+                            // committed everything — use what we have.
+                            log::debug!(
+                                "OpenAI realtime: post-commit timeout, finalizing with {} transcripts",
+                                committed.len()
+                            );
+                            ws_done = true;
+                        }
+                        Err(e) => return Err(e),
+                        Ok(msg) => {
+                    match msg {
+                        Some(Message::Text(text)) => {
+                            let v: JsonValue = serde_json::from_str(&text).map_err(|e| {
+                                SttError::Api(format!(
+                                    "OpenAI realtime: failed to parse JSON: {} (raw={})",
+                                    e, text
+                                ))
+                            })?;
+                            let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                            match event_type {
+                                "session.created" | "session.updated"
+                                | "transcription_session.created" | "transcription_session.updated" => {
+                                    log::debug!("OpenAI realtime: {}", event_type);
+                                    if event_type == "session.created" || event_type == "transcription_session.created" {
+                                        if let Some(store) = &request_log_store {
+                                            store.with_current(|log| {
+                                                log.info("Realtime transcription session connected");
+                                            });
+                                        }
+                                    }
+                                }
+
+                                "conversation.item.input_audio_transcription.delta" => {
+                                    if let Some(delta) = v.get("delta").and_then(|d| d.as_str()) {
+                                        if !delta.is_empty() {
+                                            current_partial_text.push_str(delta);
+                                            let elapsed = session_start.elapsed().as_millis() as u64;
+                                            logged_partials.push(json!({
+                                                "text": current_partial_text,
+                                                "delta": delta,
+                                                "elapsed_ms": elapsed,
+                                            }));
+                                            // Build the full text so far: all committed turns
+                                            // plus the current in-progress partial.
+                                            let full_text = if committed.is_empty() {
+                                                current_partial_text.clone()
+                                            } else {
+                                                let mut s = committed.join(" ");
+                                                s.push(' ');
+                                                s.push_str(&current_partial_text);
+                                                s
+                                            };
+                                            // Update raw_transcript live so the UI streams it.
+                                            if let Some(store) = &request_log_store {
+                                                store.with_current(|log| {
+                                                    log.raw_transcript = Some(full_text.clone());
+                                                });
+                                            }
+                                            let _ = partial_tx.try_send(PartialTranscript {
+                                                text: full_text,
+                                                committed_text: None,
+                                            });
+                                        }
+                                    }
+                                }
+
+                                "conversation.item.input_audio_transcription.completed" => {
+                                    let transcript_text = v.get("transcript")
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    let is_nonempty = !transcript_text.trim().is_empty();
+                                    if is_nonempty {
+                                        committed.push(transcript_text.clone());
+                                    }
+                                    // Reset partial accumulator for the next turn.
+                                    current_partial_text.clear();
+
+                                    // Send a partial with the committed flag so the
+                                    // live-output feature can paste this chunk.
+                                    if is_nonempty {
+                                        let full_text = committed.join(" ");
+                                        if let Some(store) = &request_log_store {
+                                            store.with_current(|log| {
+                                                log.raw_transcript = Some(full_text.clone());
+                                            });
+                                        }
+                                        let _ = partial_tx.try_send(PartialTranscript {
+                                            text: full_text,
+                                            committed_text: Some(transcript_text),
+                                        });
+                                    }
+
+                                    // If this was our final commit's completion, we're done.
+                                    if audio_done {
+                                        ws_done = true;
+                                    }
+                                }
+
+                                "input_audio_buffer.committed" => {
+                                    log::debug!("OpenAI realtime: audio buffer committed");
+                                }
+
+                                "input_audio_buffer.speech_started" => {
+                                    log::debug!("OpenAI realtime: speech started");
+                                    has_audio_since_last_commit = true;
+                                }
+
+                                "input_audio_buffer.speech_stopped" => {
+                                    log::debug!("OpenAI realtime: speech stopped (VAD)");
+                                    // VAD will auto-commit this turn. Reset the flag
+                                    // so we know whether new audio arrives after this.
+                                    has_audio_since_last_commit = false;
+                                }
+
+                                "error" => {
+                                    let error_obj = v.get("error");
+                                    let msg = error_obj
+                                        .and_then(|e| e.get("message"))
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("Unknown error");
+                                    let code = error_obj
+                                        .and_then(|e| e.get("code"))
+                                        .and_then(|c| c.as_str())
+                                        .unwrap_or("unknown");
+
+                                    if audio_done {
+                                        // After audio is done, errors are typically
+                                        // benign (e.g. "buffer is empty" from a
+                                        // redundant commit). Log and finish gracefully.
+                                        log::warn!(
+                                            "OpenAI realtime: non-fatal error after audio done ({}): {}",
+                                            code, msg
+                                        );
+                                        if awaiting_final_commit {
+                                            // Our commit was empty — nothing more to wait for.
+                                            ws_done = true;
+                                        }
+                                    } else {
+                                        return Err(SttError::Api(format!(
+                                            "OpenAI realtime error ({}): {}", code, msg
+                                        )));
+                                    }
+                                }
+
+                                _ => {
+                                    // Ignore unknown events.
+                                    log::trace!("OpenAI realtime: ignoring event '{}'", event_type);
+                                }
+                            }
+                        }
+                        Some(Message::Close(_)) => {
+                            ws_done = true;
+                        }
+                        None => {
+                            ws_done = true;
+                        }
+                        _ => {
+                            // Ignore binary/ping/pong.
+                        }
+                    }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Best-effort close with a short timeout.
+        match tokio::time::timeout(Duration::from_secs(3), ws_write.send(Message::Close(None)))
+            .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) if is_ws_closed_error(&e) => {}
+            Ok(Err(e)) => log::debug!("OpenAI realtime: WS close send error: {}", e),
+            Err(_) => log::debug!("OpenAI realtime: WS close send timed out"),
+        }
+
+        // Drop the write half explicitly so the TCP connection tears down cleanly.
+        drop(ws_write);
+
+        // Commit any remaining partial text that wasn't finalized by the server.
+        let current_partial = current_partial_text.trim().to_string();
+        if !current_partial.is_empty() {
+            committed.push(current_partial.clone());
+            let full_text = committed.join(" ");
+            let _ = partial_tx.try_send(PartialTranscript {
+                text: full_text,
+                committed_text: Some(current_partial),
+            });
+        }
+
+        let final_text = committed.join(" ");
+
+        if let Some(store) = &request_log_store {
+            let total_duration_ms = session_start.elapsed().as_millis() as u64;
+            let response_json = json!({
+                "committed_transcripts": committed,
+                "chunks_sent": num_chunks_sent,
+                "mode": "concurrent",
+                "session_duration_ms": total_duration_ms,
+                "partial_transcripts": logged_partials,
+                "capture_sample_rate": capture_sample_rate,
+                "target_sample_rate": Self::REALTIME_SAMPLE_RATE,
+            });
+            store.with_current(|log| {
+                log.raw_transcript = Some(final_text.clone());
+                log.stt_response_json = Some(response_json);
+            });
+        }
+
+        log::info!(
+            "OpenAI realtime: finalized, {} chars, {} chunks sent",
+            final_text.len(),
+            num_chunks_sent
+        );
+        Ok(final_text)
+    }
+
     /// Check if this model should use /v1/audio/transcriptions.
     ///
     /// Per OpenAI docs, `whisper-1` and the `*-transcribe` models are used via the
-    /// dedicated transcription endpoint.
+    /// dedicated transcription endpoint.  The realtime model entries also map to
+    /// transcription models but go through the WS path instead.
     fn uses_transcriptions_endpoint(&self) -> bool {
+        // Realtime-only models never go through the batch HTTP path.
+        if self.supports_realtime_streaming() {
+            return false;
+        }
         self.model == "whisper-1" || self.model.contains("transcribe")
     }
 
@@ -359,12 +970,30 @@ impl OpenAiSttProvider {
 #[async_trait]
 impl SttProvider for OpenAiSttProvider {
     async fn transcribe(&self, audio: &[u8], _format: &AudioFormat) -> Result<String, SttError> {
+        if self.supports_realtime_streaming() {
+            return Err(SttError::Config(format!(
+                "Model '{}' is realtime-only and cannot be used for batch transcription",
+                self.model
+            )));
+        }
         self.transcribe_with_prompt(audio, _format, self.default_prompt.as_deref())
             .await
     }
 
     fn name(&self) -> &'static str {
         "openai"
+    }
+
+    fn supports_streaming(&self) -> bool {
+        self.supports_realtime_streaming()
+    }
+
+    fn requires_streaming(&self) -> bool {
+        self.supports_realtime_streaming()
+    }
+
+    async fn start_streaming(&self, sample_rate: u32) -> Result<StreamingSttSession, SttError> {
+        self.start_streaming_session(sample_rate).await
     }
 }
 
@@ -419,6 +1048,7 @@ mod tests {
         );
         assert!(!provider.uses_transcriptions_endpoint());
 
+        // Batch transcription models use the transcriptions endpoint.
         let provider = OpenAiSttProvider::new(
             "test-key".to_string(),
             Some("whisper-1".to_string()),
@@ -434,5 +1064,139 @@ mod tests {
             None,
         );
         assert!(provider.uses_transcriptions_endpoint());
+
+        // Realtime models do NOT use the transcriptions endpoint
+        // (they go through the WebSocket path instead).
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("gpt-4o-realtime-transcribe".to_string()),
+            None,
+            None,
+        );
+        assert!(!provider.uses_transcriptions_endpoint());
+
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("gpt-4o-mini-realtime-transcribe".to_string()),
+            None,
+            None,
+        );
+        assert!(!provider.uses_transcriptions_endpoint());
+    }
+
+    #[test]
+    fn test_supports_realtime_streaming() {
+        // Models that support realtime streaming (dedicated realtime entries).
+        for model in &[
+            "gpt-4o-realtime-transcribe",
+            "gpt-4o-mini-realtime-transcribe",
+        ] {
+            let provider =
+                OpenAiSttProvider::new("test-key".to_string(), Some(model.to_string()), None, None);
+            assert!(
+                provider.supports_realtime_streaming(),
+                "Expected {} to support realtime streaming",
+                model
+            );
+            assert!(provider.supports_streaming());
+            assert!(provider.requires_streaming());
+        }
+
+        // Models that do NOT support realtime streaming (batch-only or non-transcription).
+        for model in &[
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "whisper-1",
+            "gpt-4o-audio-preview",
+            "gpt-4o-mini-audio-preview",
+            "gpt-audio",
+        ] {
+            let provider =
+                OpenAiSttProvider::new("test-key".to_string(), Some(model.to_string()), None, None);
+            assert!(
+                !provider.supports_realtime_streaming(),
+                "Expected {} to NOT support realtime streaming",
+                model
+            );
+            assert!(!provider.supports_streaming());
+            assert!(!provider.requires_streaming());
+        }
+    }
+
+    #[test]
+    fn test_realtime_transcription_model() {
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("gpt-4o-realtime-transcribe".to_string()),
+            None,
+            None,
+        );
+        assert_eq!(provider.realtime_transcription_model(), "gpt-4o-transcribe");
+
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("gpt-4o-mini-realtime-transcribe".to_string()),
+            None,
+            None,
+        );
+        assert_eq!(
+            provider.realtime_transcription_model(),
+            "gpt-4o-mini-transcribe"
+        );
+    }
+
+    #[test]
+    fn test_realtime_ws_url() {
+        // The URL uses intent=transcription, regardless of which
+        // transcription model the provider was configured with.
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("gpt-4o-realtime-transcribe".to_string()),
+            None,
+            None,
+        );
+        let url = provider.realtime_ws_url().unwrap();
+        assert_eq!(url, "wss://api.openai.com/v1/realtime?intent=transcription");
+
+        // Custom base URL
+        let provider = provider.with_api_base_url("http://localhost:8080".to_string());
+        let url = provider.realtime_ws_url().unwrap();
+        assert_eq!(url, "ws://localhost:8080/v1/realtime?intent=transcription");
+    }
+
+    #[test]
+    fn test_resample_linear_passthrough() {
+        let input = vec![0.0, 0.5, 1.0, -1.0];
+        let output = OpenAiSttProvider::resample_linear(&input, 24000, 24000);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_resample_linear_downsample() {
+        // 48 kHz → 24 kHz should roughly halve the sample count.
+        let input: Vec<f32> = (0..480).map(|i| (i as f32) / 480.0).collect();
+        let output = OpenAiSttProvider::resample_linear(&input, 48000, 24000);
+        assert_eq!(output.len(), 240);
+    }
+
+    #[test]
+    fn test_resample_linear_upsample() {
+        // 16 kHz → 24 kHz should increase sample count by 1.5x.
+        let input: Vec<f32> = (0..160).map(|i| (i as f32) / 160.0).collect();
+        let output = OpenAiSttProvider::resample_linear(&input, 16000, 24000);
+        assert_eq!(output.len(), 240);
+    }
+
+    #[test]
+    fn test_f32_to_pcm_s16le() {
+        let samples = vec![0.0_f32, 1.0, -1.0];
+        let pcm = OpenAiSttProvider::f32_to_pcm_s16le(&samples);
+        assert_eq!(pcm.len(), 6); // 3 samples × 2 bytes
+                                  // 0.0 → 0
+        assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 0);
+        // 1.0 → i16::MAX
+        assert_eq!(i16::from_le_bytes([pcm[2], pcm[3]]), i16::MAX);
+        // -1.0 → -i16::MAX (due to rounding)
+        assert_eq!(i16::from_le_bytes([pcm[4], pcm[5]]), -i16::MAX);
     }
 }

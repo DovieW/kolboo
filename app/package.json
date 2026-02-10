@@ -38,6 +38,7 @@
 		"cargo:clippy:all-features": "node scripts/run-with-timing.mjs cargo clippy --all-targets --all-features --manifest-path src-tauri/Cargo.toml",
 		"cargo:fmt": "node scripts/run-with-timing.mjs cargo fmt --manifest-path src-tauri/Cargo.toml",
 		"cargo:fmt:check": "node scripts/run-with-timing.mjs cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
+		"cargo:cli": "node scripts/run-with-timing.mjs cargo run --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-cli --bin kolboo --",
 		"cargo:test": "node scripts/run-with-timing.mjs cargo test --quiet --manifest-path src-tauri/Cargo.toml",
 		"cargo:test:ci": "node scripts/run-with-timing.mjs cargo test --quiet --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci",
 		"cargo": "node scripts/run-with-timing.mjs --shell \"pnpm run cargo:clippy && pnpm run cargo:fmt && pnpm run cargo:test\"",

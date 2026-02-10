@@ -79,6 +79,46 @@ Notes:
 - Shared helpers now live in `app/src-tauri/src/stt/language.rs`.
 - Pipeline uses `PipelineInner::resolve_effective_stt_settings(...)` to avoid duplicated override logic.
 
+## Centralize WebSocket connectivity (proxy + logging + timeouts)
+
+We now have (at least) two STT providers that use WebSockets:
+
+- `SpeechmaticsSttProvider` (realtime WS)
+- `ElevenLabsSttProvider` (Scribe v2 realtime WS)
+
+Each implementation currently handles:
+
+- URL construction
+- handshake headers
+- timeouts
+- error mapping
+- request logging
+
+And **neither** reliably honors our existing HTTP proxy settings path (we inject a configured `reqwest::Client` for HTTP STT providers, but WS uses direct TCP/WebSocket).
+
+Ideas:
+
+- Add a small shared `ws` helper module (e.g. `app/src-tauri/src/network/ws.rs`) for:
+	- consistent timeouts
+	- consistent error conversion to `SttError`
+	- optional proxy support (where feasible)
+	- shared request/response logging conventions
+- Standardize WS URL building (query params) + minimal percent-encoding rules.
+
+Progress (2026-02-05):
+
+- Added `app/src-tauri/src/stt/streaming.rs` with shared helpers for:
+	- WS connect + timeout/error mapping (`connect_ws_split_with_timeout`)
+	- timed receive (`ws_next_with_timeout`)
+	- PCM s16le chunk sizing (`chunk_size_bytes_for_pcm_s16le`)
+- `ElevenLabsSttProvider` now uses these helpers for its realtime WS path.
+- `SpeechmaticsSttProvider` now reuses the shared chunk sizing helper.
+
+Remaining gaps:
+
+- Proxy settings still aren’t consistently applied to WS connections.
+- We still have provider-specific request/response log JSON shapes; could standardize a small common subset (endpoint, transport, model_id, chunks_sent, etc.).
+
 ## Make CLI output reliably machine-readable
 
 **Problem:** CLI commands currently print a single JSON response, but runtime logs (including JSON-formatted tracing logs) may be written to the same stream. This makes it annoying to consume CLI output programmatically (you have to "find the last JSON object" instead of just parsing stdout).
@@ -106,3 +146,17 @@ Ideas:
 
 - Keep a single STT flow helper (`pipeline/stt_flow.rs`) and have other modules call into it.
 - If `transcription_flow.rs` needs a specialized version, refactor it to wrap the shared helper rather than re-implementing.
+
+## Deduplicate audio conversion utilities across STT streaming providers
+
+**Problem:** Several small helper functions are copy-pasted identically (or near-identically) across multiple STT provider files:
+
+- `f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8>` — duplicated in `elevenlabs.rs`, `fireworks.rs`, `openai.rs`, `assemblyai.rs`, `speechmatics.rs`, `deepgram.rs`
+- `resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32>` — duplicated in `fireworks.rs`, `openai.rs`
+- `decode_to_pcm_s16le_mono(wav_bytes: &[u8]) -> Result<Vec<u8>>` — in `elevenlabs.rs` (WAV decoding for batch path)
+
+**Why it matters:** Any bug fix or improvement (e.g. better resampling quality, clipping protection) needs to be applied to every copy individually. This already bit us during the code review when bugs were found in one provider but not another.
+
+**Suggested fix:** Move these into `app/src-tauri/src/stt/streaming.rs` (which already hosts shared WS and chunking helpers) and have all providers import from there.
+
+**Related:** The "Centralize WebSocket connectivity" refactor item above already added `streaming.rs` — this extends it with audio conversion helpers.

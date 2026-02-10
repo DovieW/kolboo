@@ -13,6 +13,7 @@ import type {
 	QuickAskAnswerPayload,
 	QuickAskStartedPayload,
 	SettingsChangedPayload,
+	SttPartialTranscriptPayload,
 	SystemEvent,
 	WhisperModelDownloadProgress,
 } from "./types";
@@ -40,6 +41,7 @@ export type EventMap = {
 	"recording-start": EmptyEventPayload;
 	"recording-stop": EmptyEventPayload;
 	"request-disconnect": EmptyEventPayload;
+	"stt-partial-transcript": SttPartialTranscriptPayload;
 	"settings-changed": SettingsChangedPayload;
 	"transcript-copied-to-clipboard": EmptyEventPayload;
 	"single-instance-activated": EmptyEventPayload;

@@ -132,6 +132,16 @@ pub struct PipelineConfig {
     /// - "on_transcribe": load when first needed
     /// - "on_launch": best-effort preload at startup
     pub local_whisper_load_mode: String,
+
+    /// When true, paste each committed streaming chunk live during recording
+    /// rather than waiting for the full transcript at the end.
+    pub stt_live_output: bool,
+
+    /// When true, simulate realtime streaming for batch-only STT models by
+    /// periodically sending accumulated audio chunks to the batch API during
+    /// recording.  This gives progressive overlay display and (when combined
+    /// with `stt_live_output`) progressive pasting.
+    pub stt_simulated_streaming: bool,
 }
 
 /// OCR provider configuration + per-tool modes.
@@ -226,6 +236,8 @@ impl Default for PipelineConfig {
             whisper_model_path: None,
 
             local_whisper_load_mode: "manual".to_string(),
+            stt_live_output: false,
+            stt_simulated_streaming: false,
         }
     }
 }

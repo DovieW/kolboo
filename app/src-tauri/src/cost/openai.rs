@@ -292,11 +292,15 @@ pub fn audio_token_rates(model: &str) -> Option<AudioTokenRates> {
 /// - Whisper / whisper-1: $0.006 / minute
 /// - gpt-4o-transcribe (+ diarize): $0.006 / minute
 /// - gpt-4o-mini-transcribe: $0.003 / minute
+/// - gpt-4o-realtime-transcribe: same as gpt-4o-transcribe ($0.006 / minute)
+/// - gpt-4o-mini-realtime-transcribe: same as gpt-4o-mini-transcribe ($0.003 / minute)
 pub fn transcription_usd_micros_per_minute(model: &str) -> Option<UsdMicros> {
     match model.trim() {
         "whisper" | "whisper-1" => Some(6_000),
-        "gpt-4o-transcribe" | "gpt-4o-transcribe-diarize" => Some(6_000),
-        "gpt-4o-mini-transcribe" => Some(3_000),
+        "gpt-4o-transcribe" | "gpt-4o-transcribe-diarize" | "gpt-4o-realtime-transcribe" => {
+            Some(6_000)
+        }
+        "gpt-4o-mini-transcribe" | "gpt-4o-mini-realtime-transcribe" => Some(3_000),
         _ => None,
     }
 }

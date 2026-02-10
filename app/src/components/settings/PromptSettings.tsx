@@ -2,7 +2,11 @@ import { Accordion, Button, Group, Loader, Select, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
-import { EMBEDDING_MODELS, type ModelOption } from "../../lib/modelOptions";
+import {
+	EMBEDDING_MODELS,
+	isRealtimeSttModel,
+	type ModelOption,
+} from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
 	useDefaultSections,
@@ -622,7 +626,15 @@ export function PromptSettings({
 
 	const sttPricingLabel = useMemo(() => {
 		const stt = sttPricing.data?.stt;
-		if (!stt) return null;
+		const isRealtime = isRealtimeSttModel(
+			effectiveSttProvider,
+			selectedSttModelForUi,
+		);
+
+		if (!stt) {
+			// No pricing data but still realtime — show just the tag.
+			return isRealtime ? "Realtime" : null;
+		}
 
 		const minSecs =
 			typeof stt.min_billed_secs === "number" ? stt.min_billed_secs : null;
@@ -630,9 +642,12 @@ export function PromptSettings({
 		const withMinBill = (base: string) =>
 			minSecs ? `${base} · min ${minSecs}s` : base;
 
+		const withRealtime = (label: string) =>
+			isRealtime ? `Realtime · ${label}` : label;
+
 		if (typeof stt.usd_micros_per_hour === "number") {
 			const base = `${formatUsdRateFromMicros(stt.usd_micros_per_hour)}/hr`;
-			return withMinBill(base);
+			return withRealtime(withMinBill(base));
 		}
 
 		// Some providers report pricing as USD/minute. For consistency in the UI,
@@ -640,11 +655,14 @@ export function PromptSettings({
 		if (typeof stt.usd_micros_per_minute === "number") {
 			const perHourMicros = Math.round(stt.usd_micros_per_minute * 60);
 			const base = `${formatUsdRateFromMicros(perHourMicros)}/hr`;
-			return withMinBill(base);
+			return withRealtime(withMinBill(base));
 		}
 
+		// No pricing but still realtime
+		if (isRealtime) return "Realtime";
+
 		return null;
-	}, [sttPricing.data]);
+	}, [sttPricing.data, effectiveSttProvider, selectedSttModelForUi]);
 
 	const llmPricingLabel = useMemo(() => {
 		const llm = llmPricing.data?.llm;

@@ -1220,6 +1220,9 @@ export const tauriSettingsAPI = {
 			),
 			stt_transcription_prompt:
 				(await store.get<string | null>("stt_transcription_prompt")) ?? null,
+			stt_live_output: (await store.get<boolean>("stt_live_output")) ?? false,
+			stt_simulated_streaming:
+				(await store.get<boolean>("stt_simulated_streaming")) ?? false,
 			aquavoice_base_url:
 				(await store.get<string | null>("aquavoice_base_url")) ?? null,
 			whisper_server_base_url:
@@ -1781,6 +1784,14 @@ export const tauriSettingsAPI = {
 
 	async updateSTTModel(model: string | null): Promise<void> {
 		await applySettingsPatch({ patch: { stt_model: model } });
+	},
+
+	async updateSTTLiveOutput(enabled: boolean): Promise<void> {
+		await applySettingsPatch({ patch: { stt_live_output: !!enabled } });
+	},
+
+	async updateSTTSimulatedStreaming(enabled: boolean): Promise<void> {
+		await applySettingsPatch({ patch: { stt_simulated_streaming: !!enabled } });
 	},
 
 	async updateSTTLanguage(language: string): Promise<void> {

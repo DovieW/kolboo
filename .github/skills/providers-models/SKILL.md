@@ -423,7 +423,7 @@ ElevenLabs supports file-based speech-to-text via:
 - `POST https://api.elevenlabs.io/v1/speech-to-text`
 - header: `xi-api-key: <key>`
 - multipart form fields:
-  - `model_id` (currently `scribe_v1` and `scribe_v1_experimental`)
+  - `model_id` (currently `scribe_v2` and `scribe_v1`; `scribe_v2` also supports realtime streaming)
   - `file=@audio.wav`
 
 The synchronous response includes a top-level `text` string.

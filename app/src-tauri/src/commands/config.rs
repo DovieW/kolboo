@@ -975,6 +975,19 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         whisper_model_path,
 
         local_whisper_load_mode,
+
+        stt_live_output: app
+            .store("settings.json")
+            .ok()
+            .and_then(|store| store.get("stt_live_output"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        stt_simulated_streaming: app
+            .store("settings.json")
+            .ok()
+            .and_then(|store| store.get("stt_simulated_streaming"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
     };
 
     // Update the pipeline

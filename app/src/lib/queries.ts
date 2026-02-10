@@ -1027,6 +1027,32 @@ export function useUpdateSTTModel() {
 	});
 }
 
+export function useUpdateSTTLiveOutput() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (enabled: boolean) => {
+			await tauriAPI.updateSTTLiveOutput(enabled);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
+export function useUpdateSTTSimulatedStreaming() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (enabled: boolean) => {
+			await tauriAPI.updateSTTSimulatedStreaming(enabled);
+			await configAPI.syncPipelineConfig();
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+}
+
 export function useUpdateSTTLanguage() {
 	const queryClient = useQueryClient();
 	return useMutation({

@@ -1034,6 +1034,12 @@ pub trait AudioCaptureBackend: Send {
 
     fn poll_vad_event(&self) -> Option<AudioCaptureEvent>;
     fn is_vad_auto_stop_enabled(&self) -> bool;
+
+    /// Set (or clear) the live audio sender for concurrent STT streaming.
+    fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>);
+
+    /// Current sample rate of the active capture session (or the default).
+    fn capture_sample_rate(&self) -> u32;
 }
 
 #[derive(Debug)]
@@ -1201,6 +1207,13 @@ pub struct AudioCapture {
 
     // Most recent realtime waveform buckets (for true waveform rendering).
     waveform_meter: Arc<AudioWaveformMeter>,
+
+    /// Optional sender for live mono f32 audio chunks (used by concurrent STT streaming).
+    ///
+    /// When set, the worker thread downmixes captured audio to mono and sends chunks
+    /// through this sender. The pipeline sets this at recording start when the STT
+    /// provider supports concurrent streaming, and clears it when recording stops.
+    live_audio_tx: Arc<StdMutex<Option<tokio::sync::mpsc::Sender<Vec<f32>>>>>,
 }
 
 impl AudioCapture {
@@ -1221,6 +1234,7 @@ impl AudioCapture {
             recording_active: Arc::new(AtomicBool::new(false)),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
+            live_audio_tx: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -1241,6 +1255,7 @@ impl AudioCapture {
             recording_active: Arc::new(AtomicBool::new(false)),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
+            live_audio_tx: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -1349,9 +1364,31 @@ impl AudioCapture {
     /// Stop recording. In Hot Mic mode, keeps the stream open.
     pub fn stop_recording(&mut self) {
         self.recording_active.store(false, Ordering::Relaxed);
+        // NOTE: We intentionally do NOT clear live_audio_tx here.
+        // The worker thread must be allowed to flush any remaining queued chunks
+        // (which have was_recording=true) through the live audio channel before
+        // it is closed. The pipeline takes ownership of the StreamingSttSession
+        // and its audio_tx is dropped during finalize(), which naturally signals
+        // end-of-audio. The pipeline clears live_audio_tx after the session is taken.
         if !self.hot_mic_enabled {
             self.stop();
         }
+    }
+
+    /// Set (or clear) the live audio sender for concurrent STT streaming.
+    ///
+    /// While set, the capture worker thread will send mono f32 chunks through
+    /// this sender for each audio callback during recording. Call with `None`
+    /// to stop streaming (also done automatically on `stop_recording`).
+    pub fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+        if let Ok(mut slot) = self.live_audio_tx.lock() {
+            *slot = tx;
+        }
+    }
+
+    /// Current sample rate of the active capture session (or the default).
+    pub fn capture_sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 
     fn ensure_stream_running(
@@ -1432,6 +1469,7 @@ impl AudioCapture {
         let pre_roll_ms = self.pre_roll_ms.clone();
         let auto_recover = self.mic_auto_recover_enabled.clone();
         let desired_device_name = self.desired_device_name.clone();
+        let live_audio_tx = self.live_audio_tx.clone();
 
         // Spawn capture thread
         let thread_handle = thread::spawn(move || {
@@ -1450,6 +1488,7 @@ impl AudioCapture {
                 vad_config,
                 auto_recover_enabled: auto_recover,
                 desired_device_name,
+                live_audio_tx,
             })
         });
 
@@ -1765,6 +1804,14 @@ impl AudioCaptureBackend for AudioCapture {
     fn is_vad_auto_stop_enabled(&self) -> bool {
         self.is_vad_auto_stop_enabled()
     }
+
+    fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+        self.set_live_audio_tx(tx);
+    }
+
+    fn capture_sample_rate(&self) -> u32 {
+        self.capture_sample_rate()
+    }
 }
 
 impl Default for AudioCapture {
@@ -1794,6 +1841,7 @@ struct CaptureThreadArgs {
     vad_config: VadAutoStopConfig,
     auto_recover_enabled: Arc<AtomicBool>,
     desired_device_name: Arc<StdMutex<Option<String>>>,
+    live_audio_tx: Arc<StdMutex<Option<tokio::sync::mpsc::Sender<Vec<f32>>>>>,
 }
 
 /// Run the audio capture in a dedicated thread
@@ -1815,6 +1863,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         vad_config,
         auto_recover_enabled,
         desired_device_name,
+        live_audio_tx,
     } = args;
     let sample_rate = config.sample_rate;
 
@@ -1889,6 +1938,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         let vad_pool = vad_pool.clone();
         let channels = config.channels.max(1) as usize;
         let sample_rate = config.sample_rate;
+        let live_audio_tx = live_audio_tx.clone();
 
         thread::spawn(move || {
             fn compute_rms_peak(data: &[f32]) -> (f32, f32) {
@@ -1956,6 +2006,18 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                                     let _ = pool.push(mono);
                                 }
                             }
+                        }
+                    }
+
+                    // Live audio streaming: send mono f32 chunks for concurrent STT.
+                    if let Ok(guard) = live_audio_tx.lock() {
+                        if let Some(ref sender) = *guard {
+                            let mono =
+                                downmix_interleaved_to_mono(chunk.samples.as_slice(), channels);
+                            // Use try_send to avoid blocking the capture worker.
+                            // If the channel is full the chunk is silently dropped;
+                            // the STT server still gets enough audio from other chunks.
+                            let _ = sender.try_send(mono);
                         }
                     }
                 }

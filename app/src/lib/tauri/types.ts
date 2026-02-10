@@ -379,6 +379,10 @@ export type PipelineTranscriptReadyPayload = string;
 
 export type EmptyEventPayload = null;
 
+export interface SttPartialTranscriptPayload {
+	text: string;
+}
+
 export type SettingsChangedPayload =
 	| ({ settings_revision?: number } & Record<string, unknown>)
 	| Record<string, unknown>;
@@ -603,6 +607,12 @@ export interface AppSettings {
 	stt_language: string;
 	// Global STT prompt (applies to all transcriptions when supported by the selected provider/model)
 	stt_transcription_prompt: string | null;
+	// When true and a realtime STT model is selected, committed chunks are pasted
+	// live during recording instead of waiting until the end.
+	stt_live_output: boolean;
+	// When true, simulate realtime streaming for batch-only models by periodically
+	// sending audio chunks to the batch API during recording.
+	stt_simulated_streaming: boolean;
 	// AquaVoice server override (optional)
 	aquavoice_base_url: string | null;
 	// Whisper server base URL (OpenAI-compatible API; optional)

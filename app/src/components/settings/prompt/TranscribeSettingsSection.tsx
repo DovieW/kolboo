@@ -4,12 +4,19 @@ import {
 	Button,
 	NumberInput,
 	Select,
+	Switch,
 	Text,
 	Textarea,
 	TextInput,
 	Tooltip,
 } from "@mantine/core";
 import { Info, RotateCcw } from "lucide-react";
+import { isRealtimeSttModel } from "../../../lib/modelOptions";
+import {
+	useSettings,
+	useUpdateSTTLiveOutput,
+	useUpdateSTTSimulatedStreaming,
+} from "../../../lib/queries";
 
 interface TranscribeSettingsSectionProps {
 	activeProfileId: string;
@@ -103,6 +110,20 @@ export function TranscribeSettingsSection({
 	onRunSttTest,
 	hasStoredTranscriptionPrompt,
 }: TranscribeSettingsSectionProps) {
+	const { data: globalSettings } = useSettings();
+	const updateSTTLiveOutput = useUpdateSTTLiveOutput();
+	const updateSTTSimulatedStreaming = useUpdateSTTSimulatedStreaming();
+
+	const isNativeRealtime = isRealtimeSttModel(
+		effectiveSttProvider,
+		selectedSttModelForUi,
+	);
+
+	const showSimulatedStreaming = !isNativeRealtime;
+	const simulatedStreamingEnabled =
+		globalSettings?.stt_simulated_streaming ?? false;
+	const showLiveOutput = isNativeRealtime || simulatedStreamingEnabled;
+
 	return (
 		<>
 			<div className="settings-mini-header settings-mini-header--first">
@@ -226,6 +247,56 @@ export function TranscribeSettingsSection({
 					</div>
 				</div>
 			) : null}
+
+			{/* Simulated Streaming — only for non-realtime STT models */}
+			{showSimulatedStreaming && (
+				<div className="settings-row">
+					<div>
+						<p className="settings-label">Simulated Streaming (experimental)</p>
+						<p className="settings-description">
+							Periodically transcribe audio chunks during recording for
+							progressive results
+						</p>
+					</div>
+					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+						<Switch
+							checked={simulatedStreamingEnabled}
+							onChange={(e) =>
+								updateSTTSimulatedStreaming.mutate(e.currentTarget.checked)
+							}
+							color="gray"
+							size="md"
+						/>
+					</div>
+				</div>
+			)}
+
+			{/* Live Output — for realtime or simulated streaming models */}
+			{showLiveOutput && (
+				<div className="settings-row">
+					<div>
+						<p className="settings-label">
+							Live Output{" "}
+							<span style={{ fontWeight: 400, opacity: 0.6 }}>
+								(experimental)
+							</span>
+						</p>
+						<p className="settings-description">
+							Paste each chunk as it arrives instead of waiting until the end
+						</p>
+					</div>
+					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+						<Switch
+							checked={globalSettings?.stt_live_output ?? false}
+							onChange={(e) =>
+								updateSTTLiveOutput.mutate(e.currentTarget.checked)
+							}
+							color="gray"
+							size="md"
+						/>
+					</div>
+				</div>
+			)}
 
 			<div className="settings-row">
 				<div>

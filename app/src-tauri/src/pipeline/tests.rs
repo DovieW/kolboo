@@ -118,6 +118,14 @@ impl AudioCaptureBackend for FakeAudioCapture {
     fn is_vad_auto_stop_enabled(&self) -> bool {
         self.vad_enabled && self.vad_auto_stop
     }
+
+    fn set_live_audio_tx(&mut self, _tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+        // No-op for tests.
+    }
+
+    fn capture_sample_rate(&self) -> u32 {
+        16000
+    }
 }
 
 /// Configurable behavior for mock providers.

@@ -24,6 +24,14 @@ export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
 export const STT_MODELS: Record<string, ModelOption[]> = {
 	aquavoice: [{ value: "avalon-v1-en", label: "Avalon v1" }],
 	assemblyai: [
+		{
+			value: "universal-streaming-english",
+			label: "Universal Streaming English (Realtime)",
+		},
+		{
+			value: "universal-streaming-multilingual",
+			label: "Universal Streaming Multilingual (Realtime)",
+		},
 		{ value: "universal", label: "Universal" },
 		{ value: "slam-1", label: "Slam-1" },
 		{ value: "best", label: "Best (Legacy)" },
@@ -31,13 +39,14 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 	elevenlabs: [
 		{ value: "scribe_v2", label: "Scribe v2" },
 		{ value: "scribe_v1", label: "Scribe v1" },
-		{ value: "scribe_v1_experimental", label: "Scribe v1 Experimental" },
 	],
 	groq: [
 		{ value: "whisper-large-v3-turbo", label: "Whisper Large V3 Turbo" },
 		{ value: "whisper-large-v3", label: "Whisper Large V3" },
 	],
 	fireworks: [
+		{ value: "fireworks-asr-v2", label: "ASR v2 (Realtime)" },
+		{ value: "fireworks-asr-large", label: "ASR Large (Realtime)" },
 		{ value: "whisper-v3", label: "Whisper v3" },
 		{ value: "whisper-v3-turbo", label: "Whisper v3 Turbo" },
 	],
@@ -46,6 +55,14 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 		// { value: "gpt-audio-mini", label: "GPT Audio Mini" },
 		// { value: "gpt-4o-audio-preview", label: "GPT-4o Audio Preview" },
 		// { value: "gpt-4o-mini-audio-preview", label: "GPT-4o Mini Audio Preview" },
+		{
+			value: "gpt-4o-realtime-transcribe",
+			label: "GPT-4o Realtime Transcribe",
+		},
+		{
+			value: "gpt-4o-mini-realtime-transcribe",
+			label: "GPT-4o Mini Realtime Transcribe",
+		},
 		{ value: "gpt-4o-transcribe", label: "GPT-4o Transcribe" },
 		{ value: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe" },
 		{ value: "whisper-1", label: "Whisper-1" },
@@ -180,6 +197,37 @@ function listAllModelKeys(
 	options.sort((a, b) => a.label.localeCompare(b.label));
 	return options;
 }
+
+/**
+ * Whether the given STT provider+model combination supports realtime
+ * concurrent streaming (audio is sent during recording for near-instant
+ * transcription when recording stops).
+ */
+export function isRealtimeSttModel(
+	provider: string | null | undefined,
+	model: string | null | undefined,
+): boolean {
+	if (!provider || !model) return false;
+	const key = `${provider}::${model}`;
+	return REALTIME_STT_MODELS.has(key);
+}
+
+const REALTIME_STT_MODELS = new Set([
+	"assemblyai::universal-streaming-english",
+	"assemblyai::universal-streaming-multilingual",
+	"deepgram::nova-3",
+	"deepgram::nova-2",
+	"deepgram::nova",
+	"deepgram::enhanced",
+	"deepgram::base",
+	"elevenlabs::scribe_v2",
+	"fireworks::fireworks-asr-large",
+	"fireworks::fireworks-asr-v2",
+	"openai::gpt-4o-realtime-transcribe",
+	"openai::gpt-4o-mini-realtime-transcribe",
+	"speechmatics::enhanced",
+	"speechmatics::standard",
+]);
 
 export function listAllSttModelKeys(): Array<{ key: string; label: string }> {
 	return listAllModelKeys(STT_MODELS);

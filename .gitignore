@@ -1,5 +1,6 @@
 # Other
 tmp/
+.github/hooks/
 
 # Python
 __pycache__/
@@ -23,6 +24,8 @@ artifacts/
 target/
 app/src-tauri/target/
 app/src-tauri/target-ci/
+app/src-tauri/target-cli/
+app/src-tauri/target-bench/
 release/
 dist/
 out/

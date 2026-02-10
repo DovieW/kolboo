@@ -17,17 +17,20 @@ use std::time::Duration;
 const STT_HTTP_CLIENT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Parameters needed to create an STT provider.
-pub(super) struct SttProviderParams {
+pub(crate) struct SttProviderParams {
     pub provider_id: String,
     pub model: Option<String>,
     pub language: Option<String>,
     pub api_key: String,
     pub transcription_prompt: Option<String>,
     pub request_log_store: Option<RequestLogStore>,
+    /// When true, streaming providers should use server-side VAD to auto-commit
+    /// speech segments during recording (enables live output).
+    pub stt_live_output: bool,
 }
 
 /// Create an HTTP client configured for STT requests.
-pub(super) fn build_stt_client(proxy_settings: &ProxySettings) -> Result<Client, PipelineError> {
+pub(crate) fn build_stt_client(proxy_settings: &ProxySettings) -> Result<Client, PipelineError> {
     crate::network::build_http_client_with_timeout(proxy_settings, STT_HTTP_CLIENT_TIMEOUT)
         .map_err(|e| PipelineError::Config(format!("Failed to create HTTP client: {}", e)))
 }
@@ -37,7 +40,7 @@ pub(super) fn build_stt_client(proxy_settings: &ProxySettings) -> Result<Client,
 /// Note: This does NOT handle local-whisper or whisper-server, which have special
 /// configuration requirements (model paths, base URLs). Those are handled separately
 /// in `PipelineInner::get_or_create_stt_provider`.
-pub(super) fn create_cloud_stt_provider(
+pub(crate) fn create_cloud_stt_provider(
     client: Client,
     params: SttProviderParams,
 ) -> Result<Arc<dyn SttProvider>, PipelineError> {
@@ -48,6 +51,7 @@ pub(super) fn create_cloud_stt_provider(
         api_key,
         transcription_prompt,
         request_log_store,
+        stt_live_output,
     } = params;
 
     if api_key.is_empty() {
@@ -100,6 +104,7 @@ pub(super) fn create_cloud_stt_provider(
         ),
         "elevenlabs" => Arc::new(
             crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model, language)
+                .with_vad_commit(stt_live_output)
                 .with_request_log_store(request_log_store),
         ),
         "assemblyai" => Arc::new(

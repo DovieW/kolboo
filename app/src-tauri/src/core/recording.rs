@@ -191,6 +191,19 @@ pub(crate) fn start_recording(
                 log.info(format!("Recording started ({})", source));
             });
         }
+
+        // Attempt to start concurrent streaming STT in the background.
+        // This is best-effort: if the provider doesn't support it, the
+        // pipeline will fall back to batch transcription at stop time.
+        // NOTE: We use `tauri::async_runtime::spawn` instead of `tokio::spawn`
+        // because this function is called from the global-shortcut handler which
+        // runs on the main OS thread — outside the Tokio runtime context.
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(pipeline) = app_handle.try_state::<pipeline::SharedPipeline>() {
+                pipeline.try_start_concurrent_streaming(&app_handle).await;
+            }
+        });
     }
 
     // While recording/transcribing, allow Escape to cancel without triggering transcription.

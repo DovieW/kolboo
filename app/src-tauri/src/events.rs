@@ -45,6 +45,14 @@ pub const EVENT_RECORDING_START: &str = "recording-start";
 pub const EVENT_RECORDING_STOP: &str = "recording-stop";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Streaming STT events
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Emitted when concurrent streaming STT produces a partial transcript
+/// during an active recording. Payload is `{ text: string }`.
+pub const EVENT_STT_PARTIAL_TRANSCRIPT: &str = "stt-partial-transcript";
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Overlay events
 // ─────────────────────────────────────────────────────────────────────────────
 

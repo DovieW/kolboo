@@ -203,6 +203,12 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     );
     dirty |= set_default("output_mode", json!("paste"), false);
     dirty |= set_default("output_hit_enter", json!(false), false);
+    // When true, paste each committed streaming chunk live during recording
+    // instead of waiting for the full transcript at the end.
+    dirty |= set_default("stt_live_output", json!(false), false);
+    // When true, simulate realtime streaming for batch-only STT models by
+    // periodically sending audio chunks to the batch API during recording.
+    dirty |= set_default("stt_simulated_streaming", json!(false), false);
     // When true, output injection will not read the clipboard and will not attempt to restore it.
     // This reduces accidental exposure of clipboard contents at the cost of leaving output text
     // on the clipboard after paste.

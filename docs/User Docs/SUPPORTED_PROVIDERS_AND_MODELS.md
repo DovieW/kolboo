@@ -18,9 +18,11 @@ Notes:
 
 ### `openai` (OpenAI)
 
+- `gpt-4o-realtime-transcribe` — GPT-4o Realtime Transcribe _(realtime streaming)_
+- `gpt-4o-mini-realtime-transcribe` — GPT-4o Mini Realtime Transcribe _(realtime streaming)_
 - `gpt-4o-transcribe` — GPT-4o Transcribe
 - `gpt-4o-mini-transcribe` — GPT-4o Mini Transcribe
-- `whisper-1` — Whisper-1
+- `whisper-1` — Whisper-1 _(realtime streaming)_
 
 ### `aquavoice` (Aquavoice)
 
@@ -56,9 +58,8 @@ Notes:
 
 ### `elevenlabs` (ElevenLabs)
 
-- `scribe_v2` — Scribe v2
+- `scribe_v2` — Scribe v2 _(realtime streaming)_
 - `scribe_v1` — Scribe v1
-- `scribe_v1_experimental` — Scribe v1 Experimental
 
 ---
 

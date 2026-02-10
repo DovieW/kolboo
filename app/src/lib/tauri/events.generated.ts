@@ -16,6 +16,7 @@ export const BACKEND_EVENT_NAMES = [
 	"pipeline-cancelled",
 	"recording-start",
 	"recording-stop",
+	"stt-partial-transcript",
 	"overlay-audio-level",
 	"overlay-hide-requested",
 	"overlay-ocr-context-unavailable",

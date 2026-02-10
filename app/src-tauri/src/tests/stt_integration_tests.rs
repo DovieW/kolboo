@@ -713,7 +713,8 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
     let provider = ElevenLabsSttProvider::with_client(
         reqwest::Client::new(),
         "test_key".to_string(),
-        None,
+        // Use a legacy model so the provider stays on the batch multipart endpoint.
+        Some("scribe_v1".to_string()),
         None,
     )
     .with_api_base_url(mock_server.uri());
@@ -751,6 +752,149 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
 }
 
 #[tokio::test]
+async fn test_elevenlabs_scribe_v2_uses_realtime_ws_and_commits_final_transcript() {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::Value as JsonValue;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::{accept_hdr_async, WebSocketStream};
+
+    #[derive(Debug, Default)]
+    struct Capture {
+        uri: Option<String>,
+        api_key: Option<String>,
+        received: Vec<JsonValue>,
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind ws listener");
+    let addr = listener.local_addr().expect("local addr");
+
+    let capture: Arc<Mutex<Capture>> = Arc::new(Mutex::new(Capture::default()));
+    let capture_for_server = capture.clone();
+
+    let server_task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept");
+
+        let capture_for_hdr = capture_for_server.clone();
+        let ws: WebSocketStream<_> =
+            accept_hdr_async(stream, move |req: &Request, resp: Response| {
+                let mut cap = capture_for_hdr.lock().expect("capture lock");
+                cap.uri = Some(req.uri().to_string());
+                cap.api_key = req
+                    .headers()
+                    .get("xi-api-key")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                Ok(resp)
+            })
+            .await
+            .expect("ws accept");
+
+        let (mut write, mut read) = ws.split();
+
+        // Optional, but makes the interaction look like the real API.
+        let session_started = json!({
+            "message_type": "session_started",
+            "session_id": "test",
+            "config": {
+                "model_id": "scribe_v2_realtime"
+            }
+        });
+        write
+            .send(Message::Text(session_started.to_string().into()))
+            .await
+            .expect("send session_started");
+
+        // Read audio chunk messages until we see a commit.
+        let mut saw_commit = false;
+        while let Some(msg) = read.next().await {
+            let msg = msg.expect("ws msg ok");
+            if let Message::Text(t) = msg {
+                let v: JsonValue = serde_json::from_str(&t).expect("valid json");
+                {
+                    let mut cap = capture_for_server.lock().expect("capture lock");
+                    cap.received.push(v.clone());
+                }
+
+                if v.get("message_type").and_then(|m| m.as_str()) == Some("input_audio_chunk")
+                    && v.get("commit").and_then(|c| c.as_bool()) == Some(true)
+                {
+                    saw_commit = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(saw_commit, "expected a committed final chunk");
+
+        let committed = json!({
+            "message_type": "committed_transcript",
+            "text": "hello realtime"
+        });
+        write
+            .send(Message::Text(committed.to_string().into()))
+            .await
+            .expect("send committed_transcript");
+
+        let _ = write.send(Message::Close(None)).await;
+    });
+
+    let provider = ElevenLabsSttProvider::with_client(
+        reqwest::Client::new(),
+        "test_key".to_string(),
+        Some("scribe_v2".to_string()),
+        Some("en".to_string()),
+    )
+    .with_api_base_url(format!("http://{}", addr));
+
+    let wav_data = create_test_wav_silence(0.2);
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+
+    let result = provider
+        .transcribe(&wav_data, &format)
+        .await
+        .expect("transcribe");
+    assert_eq!(result, "hello realtime");
+
+    server_task.await.expect("server task");
+
+    let cap = capture.lock().expect("capture lock");
+    assert_eq!(cap.api_key.as_deref(), Some("test_key"));
+    let uri = cap.uri.as_deref().unwrap_or("");
+    assert!(
+        uri.contains("/v1/speech-to-text/realtime"),
+        "expected realtime path in uri, got: {uri}"
+    );
+    assert!(
+        uri.contains("model_id=scribe_v2_realtime"),
+        "expected mapped model_id in uri, got: {uri}"
+    );
+    assert!(
+        uri.contains("commit_strategy=manual"),
+        "expected commit_strategy in uri, got: {uri}"
+    );
+    assert!(
+        uri.contains("audio_format=pcm_16000"),
+        "expected audio_format in uri, got: {uri}"
+    );
+
+    assert!(
+        cap.received
+            .iter()
+            .any(|v| v.get("message_type").and_then(|m| m.as_str()) == Some("input_audio_chunk")),
+        "expected at least one input_audio_chunk message"
+    );
+}
+
+#[tokio::test]
 async fn test_elevenlabs_non_success_is_surface_as_api_error() {
     let mock_server = MockServer::start().await;
 
@@ -764,7 +908,8 @@ async fn test_elevenlabs_non_success_is_surface_as_api_error() {
     let provider = ElevenLabsSttProvider::with_client(
         reqwest::Client::new(),
         "test_key".to_string(),
-        None,
+        // Force the legacy HTTP endpoint so we can deterministically assert status/body handling.
+        Some("scribe_v1".to_string()),
         None,
     )
     .with_api_base_url(mock_server.uri());
@@ -973,5 +1118,87 @@ async fn test_whisper_server_non_success_is_surface_as_api_error() {
             assert!(msg.contains("nope"), "expected body in message: {msg}");
         }
         other => panic!("expected SttError::Api, got: {other:?}"),
+    }
+}
+
+/// Integration test for OpenAI Realtime STT streaming.
+/// Only runs if OPENAI_API_KEY is set.
+///
+/// Connects to the real OpenAI Realtime API via WebSocket, sends a short sine
+/// tone (to verify actual audio processing), then finalizes and checks the result.
+///
+/// Run with: cargo test -- --ignored test_openai_realtime_streaming_integration
+#[tokio::test]
+#[ignore]
+async fn test_openai_realtime_streaming_integration() {
+    let api_key = match std::env::var("OPENAI_API_KEY") {
+        Ok(key) if !key.is_empty() => key,
+        _ => {
+            eprintln!("Skipping OpenAI realtime integration test: OPENAI_API_KEY not set");
+            return;
+        }
+    };
+
+    // Test both realtime model variants.
+    for model in [
+        "gpt-4o-realtime-transcribe",
+        "gpt-4o-mini-realtime-transcribe",
+    ] {
+        eprintln!("--- Testing model: {model} ---");
+
+        let provider = OpenAiSttProvider::new(
+            api_key.clone(),
+            Some(model.to_string()),
+            Some("en".to_string()),
+            None,
+        );
+
+        // Verify provider trait flags.
+        assert!(
+            provider.supports_streaming(),
+            "{model}: should support streaming"
+        );
+        assert!(
+            provider.requires_streaming(),
+            "{model}: should require streaming"
+        );
+
+        // Start streaming at a typical capture rate (48 kHz).
+        let capture_sample_rate = 48_000u32;
+        let session = provider
+            .start_streaming(capture_sample_rate)
+            .await
+            .unwrap_or_else(|e| panic!("{model}: start_streaming failed: {e}"));
+
+        // Send ~1 second of a 440 Hz sine tone so VAD has something to detect.
+        let duration_secs = 1.0f32;
+        let num_samples = (capture_sample_rate as f32 * duration_secs) as usize;
+        let mut samples = Vec::with_capacity(num_samples);
+        for i in 0..num_samples {
+            let t = i as f32 / capture_sample_rate as f32;
+            samples.push((t * 440.0 * 2.0 * std::f32::consts::PI).sin() * 0.5);
+        }
+
+        // Send in ~100ms chunks with small delays to allow server events to interleave.
+        let chunk_size = capture_sample_rate as usize / 10;
+        for chunk in samples.chunks(chunk_size) {
+            if session.audio_tx.send(chunk.to_vec()).await.is_err() {
+                break; // receiver might have closed
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        // Finalize — drops audio_tx and waits for the committed transcript.
+        let result = session.finalize().await;
+        match &result {
+            Ok(text) => {
+                eprintln!("{model}: transcript = {text:?}");
+                // Silence/tone may produce empty text — that's fine; we just
+                // need the WebSocket flow to succeed without errors.
+            }
+            Err(e) => {
+                panic!("{model}: finalize failed: {e}");
+            }
+        }
     }
 }

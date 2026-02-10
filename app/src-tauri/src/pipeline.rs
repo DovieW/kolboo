@@ -23,7 +23,7 @@ use crate::event_payloads::OverlayOcrContextUnavailablePayload;
 use crate::events;
 use crate::llm::{LlmProvider, ProgramPreset, ProgramPromptProfile};
 use crate::request_log::RequestLogStore;
-use crate::stt::{SttProvider, SttRegistry};
+use crate::stt::{StreamingSttSession, SttError, SttProvider, SttRegistry};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -37,7 +37,7 @@ mod recording;
 mod routing;
 mod state_machine;
 mod stt_flow;
-mod stt_provider;
+pub(crate) mod stt_provider;
 #[cfg(test)]
 mod tests;
 mod transcription_flow;
@@ -175,6 +175,19 @@ struct PipelineInner {
 
     /// Last recording diagnostics (raw stats + optional speech detection).
     last_recording_diagnostics: Option<AudioCaptureDiagnostics>,
+
+    /// Active concurrent STT streaming session (if the provider supports it).
+    ///
+    /// Created when recording starts with a streaming-capable provider.
+    /// Consumed when recording stops for near-instant transcription.
+    active_streaming_session: Option<StreamingSttSession>,
+
+    /// Whether live output (streaming paste) is actively pasting committed
+    /// chunks during the current recording session.
+    ///
+    /// Set to `true` when the partial consumer starts pasting committed chunks.
+    /// Read at stop-time to decide whether to skip the final paste step.
+    live_output_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 struct OcrTaskHandle {
@@ -360,6 +373,8 @@ impl PipelineInner {
             stt_complete: false,
             last_wav_bytes: None,
             last_recording_diagnostics: None,
+            active_streaming_session: None,
+            live_output_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         inner.initialize_providers(&config);
         inner
@@ -390,7 +405,10 @@ impl PipelineInner {
             model.clone().unwrap_or_else(|| "<default>".to_string())
         };
 
-        let cache_key = format!("{}::{}::{}", provider_id, model_key, language_key);
+        let cache_key = format!(
+            "{}::{}::{}::live={}",
+            provider_id, model_key, language_key, self.config.stt_live_output
+        );
 
         if let Some(p) = self.stt_provider_cache.get(&cache_key) {
             return Ok(p.clone());
@@ -468,6 +486,7 @@ impl PipelineInner {
                 api_key,
                 transcription_prompt: self.config.stt_transcription_prompt.clone(),
                 request_log_store: self.config.request_log_store.clone(),
+                stt_live_output: self.config.stt_live_output,
             },
         )?;
 
@@ -609,6 +628,9 @@ impl PipelineInner {
     fn reset_to_idle(&mut self) {
         self.transition_to(PipelineState::Idle, "reset_to_idle");
         self.cancel_token = None;
+        // Clean up any active streaming session (e.g. quiet audio gate, cancellation).
+        self.active_streaming_session.take();
+        self.audio_capture.set_live_audio_tx(None);
         // NOTE: Do NOT reset stt_complete here. OCR may still be running for Quick Ask / Quick Replace,
         // which need the UI to show "OCR..." while waiting. stt_complete is reset when starting a new recording.
         //
@@ -627,6 +649,9 @@ impl PipelineInner {
         self.state = PipelineState::Error;
         self.cancel_token = None;
         self.stt_complete = false;
+        // Clean up any active streaming session.
+        self.active_streaming_session.take();
+        self.audio_capture.set_live_audio_tx(None);
         self.cancel_ocr_task(false);
     }
 }
@@ -762,7 +787,10 @@ impl SharedPipeline {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "<default>".to_string())
         };
-        let cache_key = format!("{}::{}::{}", provider_id, model_key, language_key);
+        let cache_key = format!(
+            "{}::{}::{}::live={}",
+            provider_id, model_key, language_key, inner.config.stt_live_output
+        );
 
         inner.stt_provider_cache.insert(cache_key, provider.clone());
         inner.stt_registry.register(&provider_id, provider);
@@ -1813,6 +1841,227 @@ impl SharedPipeline {
         }
     }
 
+    /// Try to start a concurrent STT streaming session.
+    ///
+    /// If the current STT provider supports streaming (e.g. ElevenLabs Scribe v2),
+    /// this connects to the STT service and wires up the audio capture to send
+    /// chunks in real-time. When recording stops, the transcript will be
+    /// near-instant instead of waiting for a full batch upload.
+    ///
+    /// This is fire-and-forget: if streaming setup fails, the pipeline will fall
+    /// back to the normal batch path in `stop_and_transcribe_detailed`.
+    pub async fn try_start_concurrent_streaming(&self, app_handle: &AppHandle) {
+        // Helper: log to the request log store (if available) so the user can
+        // see streaming diagnostics in the UI.
+        let log_to_request = |app: &AppHandle, msg: String| {
+            if let Some(store) = app.try_state::<crate::request_log::RequestLogStore>() {
+                store.with_current(|log| {
+                    log.info(msg);
+                });
+            }
+        };
+
+        // 1. Resolve STT provider under the lock (brief).
+        let (stt_provider, sample_rate, use_simulated) = {
+            let mut inner = match self.inner.lock() {
+                Ok(inner) => inner,
+                Err(e) => {
+                    log::warn!("Concurrent streaming: lock failed: {}", e);
+                    return;
+                }
+            };
+
+            if inner.state != PipelineState::Recording {
+                log::debug!("Concurrent streaming: not recording, skipping");
+                return;
+            }
+
+            let effective = inner.resolve_effective_stt_settings(None, None);
+
+            // Create the provider on-demand if it's not cached yet (e.g. first
+            // recording after app start, or after a config sync that cleared the cache).
+            let provider = match inner.get_or_create_stt_provider(
+                &effective.provider_id,
+                effective.model.clone(),
+                effective.language.clone(),
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!(
+                        "Concurrent streaming: failed to create STT provider '{}': {}",
+                        effective.provider_id,
+                        e
+                    );
+                    return;
+                }
+            };
+
+            let use_simulated =
+                !provider.supports_streaming() && inner.config.stt_simulated_streaming;
+
+            if !provider.supports_streaming() && !use_simulated {
+                log::debug!(
+                    "Concurrent streaming: provider '{}' does not support streaming",
+                    effective.provider_id
+                );
+                return;
+            }
+
+            let sr = inner.audio_capture.capture_sample_rate();
+            (provider, sr, use_simulated)
+        };
+
+        // 2. Start the streaming session (async, outside the lock).
+        let mut session = if use_simulated {
+            log::info!(
+                "Simulated streaming: starting session (sample_rate={})",
+                sample_rate
+            );
+            log_to_request(
+                app_handle,
+                format!(
+                    "Simulated streaming: starting (sample_rate={})",
+                    sample_rate
+                ),
+            );
+            crate::stt::simulated_streaming::start_simulated_streaming(stt_provider, sample_rate)
+        } else {
+            log::info!(
+                "Concurrent streaming: starting session (sample_rate={})",
+                sample_rate
+            );
+            log_to_request(
+                app_handle,
+                format!(
+                    "Realtime streaming: connecting (sample_rate={})",
+                    sample_rate
+                ),
+            );
+            match stt_provider.start_streaming(sample_rate).await {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("Concurrent streaming: failed to start: {}", e);
+                    log_to_request(
+                        app_handle,
+                        format!("Realtime streaming: connection failed ({})", e),
+                    );
+                    return;
+                }
+            }
+        };
+
+        // 3. Wire up the audio channel and store the session (brief lock).
+        let audio_tx = session.audio_tx.clone();
+        let partial_rx = session.take_partial_rx();
+        {
+            let mut inner = match self.inner.lock() {
+                Ok(inner) => inner,
+                Err(e) => {
+                    log::warn!("Concurrent streaming: lock failed (post-connect): {}", e);
+                    return;
+                }
+            };
+
+            if inner.state != PipelineState::Recording {
+                log::info!(
+                    "Concurrent streaming: recording stopped before session ready, aborting"
+                );
+                return;
+            }
+
+            inner.audio_capture.set_live_audio_tx(Some(audio_tx));
+            inner.active_streaming_session = Some(session);
+            log::info!("Concurrent streaming: session active, audio channel wired");
+        }
+
+        // 4. Spawn a task to forward partial transcripts as Tauri events
+        //    and optionally paste committed chunks live.
+        if let Some(mut partial_rx) = partial_rx {
+            let app = app_handle.clone();
+
+            // Read live output config under a brief lock.
+            let (stt_live_output, live_output_flag) = {
+                let inner = match self.inner.lock() {
+                    Ok(inner) => inner,
+                    Err(_) => {
+                        log::warn!("Concurrent streaming: lock failed reading live output config");
+                        return;
+                    }
+                };
+                (
+                    inner.config.stt_live_output,
+                    inner.live_output_active.clone(),
+                )
+            };
+
+            // Reset the flag at the start of a new session.
+            live_output_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+
+            // Read output settings once (won't change mid-recording).
+            let (output_mode, output_hit_enter) = if stt_live_output {
+                #[cfg(desktop)]
+                {
+                    use crate::app_shared::get_setting_from_store;
+                    let mode_str: String =
+                        get_setting_from_store(&app, "output_mode", "paste".to_string());
+                    let mode = crate::text::inject::OutputMode::from_str(&mode_str);
+                    let hit_enter: bool = get_setting_from_store(&app, "output_hit_enter", false);
+                    (mode, hit_enter)
+                }
+                #[cfg(not(desktop))]
+                {
+                    (crate::text::inject::OutputMode::Paste, false)
+                }
+            } else {
+                (crate::text::inject::OutputMode::Paste, false)
+            };
+
+            tokio::spawn(async move {
+                let mut is_first_chunk = true;
+                while let Some(partial) = partial_rx.recv().await {
+                    // Always emit the partial transcript event for overlay display.
+                    let payload = serde_json::json!({ "text": partial.text });
+                    if let Err(e) = app.emit(crate::events::EVENT_STT_PARTIAL_TRANSCRIPT, payload) {
+                        log::warn!("Failed to emit partial transcript event: {}", e);
+                    }
+
+                    // Live output: paste committed chunks immediately.
+                    if stt_live_output {
+                        if let Some(committed) = partial.committed_text {
+                            live_output_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+
+                            // Add a leading space between chunks (not for the first one).
+                            let output_text = if is_first_chunk {
+                                is_first_chunk = false;
+                                committed
+                            } else {
+                                format!(" {}", committed)
+                            };
+
+                            // Paste on a blocking thread to avoid blocking the async runtime.
+                            // Never preserve clipboard during live output — the
+                            // save/restore cycle adds ~100-200ms of dead time
+                            // between every chunk, causing noticeable pauses.
+                            let text = output_text.clone();
+                            let mode = output_mode;
+                            let enter = output_hit_enter;
+                            tokio::task::spawn_blocking(move || {
+                                if let Err(e) = crate::text::inject::output_text_with_mode_options(
+                                    &text, mode, enter, false,
+                                ) {
+                                    log::error!("Live output: failed to paste chunk: {}", e);
+                                }
+                            })
+                            .await
+                            .ok();
+                        }
+                    }
+                }
+                log::debug!("Partial transcript consumer: channel closed");
+            });
+        }
+    }
+
     /// Stop recording and return the raw WAV audio
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn stop_recording(&self) -> Result<Vec<u8>, PipelineError> {
@@ -2078,6 +2327,7 @@ impl SharedPipeline {
             default_rewrite_include_clipboard_context,
             ocr_config,
             rewrite_ocr_mode,
+            mut streaming_session,
         ) = {
             let mut inner = self
                 .inner
@@ -2093,10 +2343,17 @@ impl SharedPipeline {
                 match recording::stop_recording_session(inner.audio_capture.as_mut(), encode_cfg) {
                     Ok(out) => out,
                     Err(e) => {
+                        // Clean up streaming on error path.
+                        inner.active_streaming_session.take();
+                        inner.audio_capture.set_live_audio_tx(None);
                         inner.set_error(&format!("Failed to stop recording: {}", e));
                         return Err(e);
                     }
                 };
+
+            // Worker thread has flushed all remaining audio chunks. Now clear the
+            // live audio sender so it won't leak into the next session.
+            inner.audio_capture.set_live_audio_tx(None);
 
             // Persist diagnostics for UI readout.
             inner.last_recording_diagnostics = Some(outcome.diagnostics);
@@ -2136,6 +2393,7 @@ impl SharedPipeline {
                         llm_outcome: LlmOutcome::NotAttempted(
                             LlmNotAttemptedReason::NoSpeechDetectedByVad,
                         ),
+                        live_output_completed: false,
                     });
                 }
                 recording::QuietAudioGateResult::Quiet => {
@@ -2151,6 +2409,7 @@ impl SharedPipeline {
                         llm_outcome: LlmOutcome::NotAttempted(
                             LlmNotAttemptedReason::QuietAudioGate,
                         ),
+                        live_output_completed: false,
                     });
                 }
                 recording::QuietAudioGateResult::NotQuiet => {}
@@ -2297,6 +2556,15 @@ impl SharedPipeline {
             )
             .to_string();
 
+            // Take the streaming session (if one was started during recording).
+            // live_audio_tx was already cleared right after stop_recording_session.
+            let streaming_session = inner.active_streaming_session.take();
+            log::debug!(
+                "Pipeline: streaming session taken={}, provider={}",
+                streaming_session.is_some(),
+                effective_stt_settings.provider_id
+            );
+
             (
                 outcome.wav_bytes,
                 stt_provider,
@@ -2307,49 +2575,174 @@ impl SharedPipeline {
                 default_rewrite_include_clipboard_context,
                 inner.config.ocr_config.clone(),
                 rewrite_ocr_mode,
+                streaming_session,
             )
         };
 
         self.start_ocr_task_if_auto(&ocr_config, rewrite_ocr_mode == "auto");
 
-        log::info!(
-            "Pipeline: Starting transcription ({} bytes, timeout {:?})",
-            wav_bytes.len(),
-            timeout
-        );
-
-        // Phase 2: Transcribe with retry logic (async, outside the lock)
-        let stt_result = run_stt_transcription(
-            stt_provider,
-            &wav_bytes,
-            &retry_config,
-            Some(timeout),
-            &cancel_token,
-            "Pipeline",
-        )
-        .await;
-
-        let (stt_text, stt_duration_ms, stt_retry) = match stt_result {
-            Ok(result) => {
-                // STT portion is done. Mark this so the overlay can show "waiting for OCR"
-                // instead of "transcribing" if OCR is still running.
+        // If the current model is realtime-only but the streaming session hasn't
+        // been stored yet (WebSocket still connecting in the spawned task), wait
+        // for it rather than immediately failing.
+        if streaming_session.is_none() && stt_provider.requires_streaming() {
+            log::info!(
+                "Pipeline: Realtime model with no streaming session yet — waiting for connection"
+            );
+            const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+            const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+            let wait_start = std::time::Instant::now();
+            while wait_start.elapsed() < MAX_WAIT {
+                tokio::time::sleep(POLL_INTERVAL).await;
                 if let Ok(mut inner) = self.inner.lock() {
-                    inner.stt_complete = true;
-                    log::debug!("stt_complete set to true (stop_and_transcribe_detailed)");
+                    if inner.active_streaming_session.is_some() {
+                        streaming_session = inner.active_streaming_session.take();
+                        log::info!(
+                            "Pipeline: Streaming session became available after {}ms",
+                            wait_start.elapsed().as_millis()
+                        );
+                        break;
+                    }
                 }
-                (result.text, result.duration_ms, Some(result.retry))
             }
-            Err(e) => {
+            if streaming_session.is_none() {
+                log::warn!(
+                    "Pipeline: Timed out after {}ms waiting for streaming connection",
+                    wait_start.elapsed().as_millis()
+                );
+            }
+        }
+
+        // Phase 2: Transcribe — use streaming session if available, otherwise batch.
+        let stt_start = std::time::Instant::now();
+        let (stt_text, stt_duration_ms, stt_retry) = if let Some(session) = streaming_session {
+            log::info!(
+                "Pipeline: Finalizing concurrent streaming session ({} bytes recorded)",
+                wav_bytes.len()
+            );
+            match session.finalize().await {
+                Ok(text) => {
+                    let duration_ms = stt_start.elapsed().as_millis() as u64;
+                    let normalized = utils::normalize_stt_text(text);
+                    log::info!(
+                        "Pipeline: Streaming STT finalized, {} chars in {}ms",
+                        normalized.len(),
+                        duration_ms
+                    );
+                    if let Ok(mut inner) = self.inner.lock() {
+                        inner.stt_complete = true;
+                        log::debug!("stt_complete set to true (streaming finalize)");
+                    }
+                    (normalized, duration_ms, None)
+                }
+                Err(e) => {
+                    // If the provider requires streaming (realtime-only model),
+                    // don't fall back to batch — propagate the error directly.
+                    if stt_provider.requires_streaming() {
+                        log::error!(
+                            "Pipeline: Realtime STT failed ({}) — no batch fallback for this model",
+                            e
+                        );
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                        inner.set_error(&e.to_string());
+                        return Err(PipelineError::Stt(e));
+                    }
+
+                    log::warn!(
+                        "Pipeline: Streaming STT failed ({}), falling back to batch",
+                        e
+                    );
+                    // Fall back to batch transcription.
+                    let stt_result = run_stt_transcription(
+                        stt_provider,
+                        &wav_bytes,
+                        &retry_config,
+                        Some(timeout),
+                        &cancel_token,
+                        "Pipeline (streaming-fallback)",
+                    )
+                    .await;
+                    match stt_result {
+                        Ok(result) => {
+                            if let Ok(mut inner) = self.inner.lock() {
+                                inner.stt_complete = true;
+                            }
+                            (result.text, result.duration_ms, Some(result.retry))
+                        }
+                        Err(e) => {
+                            let mut inner = self
+                                .inner
+                                .lock()
+                                .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                            if matches!(e, PipelineError::Cancelled) {
+                                inner.reset_to_idle();
+                            } else {
+                                inner.set_error(&e.to_string());
+                            }
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+        } else {
+            // If the provider requires streaming (realtime-only model) but no
+            // streaming session was started, we can't fall back to batch.
+            if stt_provider.requires_streaming() {
+                log::error!(
+                    "Pipeline: No streaming session for realtime-only model — cannot batch-transcribe"
+                );
                 let mut inner = self
                     .inner
                     .lock()
                     .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                if matches!(e, PipelineError::Cancelled) {
-                    inner.reset_to_idle();
-                } else {
-                    inner.set_error(&e.to_string());
+                inner.set_error("Realtime streaming session was not started. Please try again.");
+                return Err(PipelineError::Stt(SttError::Config(
+                    "Realtime streaming session was not started — no batch fallback available"
+                        .into(),
+                )));
+            }
+
+            log::info!(
+                "Pipeline: Starting batch transcription ({} bytes, timeout {:?})",
+                wav_bytes.len(),
+                timeout
+            );
+
+            // Phase 2: Transcribe with retry logic (async, outside the lock)
+            let stt_result = run_stt_transcription(
+                stt_provider,
+                &wav_bytes,
+                &retry_config,
+                Some(timeout),
+                &cancel_token,
+                "Pipeline",
+            )
+            .await;
+
+            match stt_result {
+                Ok(result) => {
+                    // STT portion is done. Mark this so the overlay can show "waiting for OCR"
+                    // instead of "transcribing" if OCR is still running.
+                    if let Ok(mut inner) = self.inner.lock() {
+                        inner.stt_complete = true;
+                        log::debug!("stt_complete set to true (stop_and_transcribe_detailed)");
+                    }
+                    (result.text, result.duration_ms, Some(result.retry))
                 }
-                return Err(e);
+                Err(e) => {
+                    let mut inner = self
+                        .inner
+                        .lock()
+                        .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                    if matches!(e, PipelineError::Cancelled) {
+                        inner.reset_to_idle();
+                    } else {
+                        inner.set_error(&e.to_string());
+                    }
+                    return Err(e);
+                }
             }
         };
 
@@ -2429,20 +2822,35 @@ impl SharedPipeline {
         )
         .await;
 
-        // Phase 5: Update state to idle
-        {
+        // Phase 5: Update state to idle and check live output flag
+        let live_output_completed = {
             let mut inner = self
                 .inner
                 .lock()
                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
+
+            let was_live = inner
+                .live_output_active
+                .load(std::sync::atomic::Ordering::SeqCst);
+
+            // Reset the flag for the next session.
+            inner
+                .live_output_active
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+
             inner.reset_to_idle();
             log::info!(
-                "Pipeline: Complete, {} chars output",
-                result.final_text.len()
+                "Pipeline: Complete, {} chars output (live_output={})",
+                result.final_text.len(),
+                was_live,
             );
-        }
+            was_live
+        };
 
-        Ok(result)
+        Ok(TranscriptionResult {
+            live_output_completed,
+            ..result
+        })
     }
 
     /// Transcribe provided WAV bytes using the same STT + optional LLM logic as the main pipeline.
@@ -2471,6 +2879,8 @@ impl SharedPipeline {
             profile_id_override,
             None,
             None,
+            None,
+            None,
         )
         .await
     }
@@ -2484,6 +2894,8 @@ impl SharedPipeline {
         &self,
         wav_bytes: Vec<u8>,
         profile_id_override: Option<&str>,
+        forced_stt_provider: Option<&str>,
+        forced_stt_model: Option<&str>,
         forced_llm_provider: Option<&str>,
         forced_llm_model: Option<&str>,
     ) -> Result<TranscriptionResult, PipelineError> {
@@ -2576,8 +2988,25 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let effective_stt_settings =
+            let mut effective_stt_settings =
                 inner.resolve_effective_stt_settings(active_profile.as_ref(), active_preset);
+
+            // CLI-only overrides: allow forcing provider/model for a single transcription
+            // without changing persisted settings or profiles.
+            if let Some(p) = forced_stt_provider {
+                let p = p.trim();
+                if !p.is_empty() {
+                    effective_stt_settings.provider_id = canonicalize_stt_provider_id(p);
+                }
+            }
+            if let Some(m) = forced_stt_model {
+                let m = m.trim();
+                effective_stt_settings.model = if m.is_empty() {
+                    None
+                } else {
+                    Some(m.to_string())
+                };
+            }
 
             let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
             let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();

@@ -2015,6 +2015,12 @@ pub(crate) fn stop_recording(
                                     events::EVENT_PIPELINE_STATE_CHANGED,
                                     PipelineStateEvent::Error,
                                 );
+                            } else if result.live_output_completed {
+                                // Live output already pasted committed chunks during
+                                // recording — skip the final paste to avoid duplication.
+                                log::info!(
+                                    "Pipeline: skipping final paste (live output completed)"
+                                );
                             } else {
                                 // Output using the selected output mode.
                                 let output_clipboard_privacy_mode: bool = get_setting_from_store(

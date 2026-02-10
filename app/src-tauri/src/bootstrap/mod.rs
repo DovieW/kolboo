@@ -837,6 +837,9 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         whisper_model_path,
 
         local_whisper_load_mode,
+
+        stt_live_output: get_setting_from_store(app, "stt_live_output", false),
+        stt_simulated_streaming: get_setting_from_store(app, "stt_simulated_streaming", false),
     };
 
     log::info!(

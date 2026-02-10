@@ -38,6 +38,28 @@ kolboo pipeline stop --output json
 kolboo pipeline transcribe --file "C:\path\to\sample.wav" --output json
 ```
 
+### Transcribe a WAV file with a forced STT provider/model (per-run override)
+
+This lets you test a provider/model without changing your saved settings.
+
+```
+kolboo pipeline transcribe --file "C:\path\to\sample.wav" --stt_provider elevenlabs --stt_model scribe_v2 --output json
+```
+
+### Running CLI during development (while the app is running)
+
+The Tauri app locks `kolboo.exe` in the default `target/` directory, so `cargo run` will fail with "Access is denied" on Windows. Use the `cargo:cli` script which builds to a separate `target-cli/` directory:
+
+```
+pnpm -C app cargo:cli pipeline transcribe --file "C:\path\to\sample.wav" --output json
+```
+
+This also works with STT overrides:
+
+```
+pnpm -C app cargo:cli pipeline transcribe --file "C:\path\to\sample.wav" --stt_provider elevenlabs --stt_model scribe_v2 --output json
+```
+
 ### Read or update a setting
 
 ```

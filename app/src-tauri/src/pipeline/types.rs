@@ -183,6 +183,9 @@ pub struct TranscriptionResult {
     pub llm_model_used: Option<String>,
     /// Outcome of the LLM phase.
     pub llm_outcome: LlmOutcome,
+    /// True when live output (streaming paste) already pasted the transcript
+    /// during recording, so the caller should skip the final paste step.
+    pub live_output_completed: bool,
 }
 
 impl TranscriptionResult {
