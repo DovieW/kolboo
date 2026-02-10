@@ -1,5 +1,5 @@
 ---
-name: Providers and Models
+name: providers-models
 description: Instructions on working with providers and models in this app
 ---
 
