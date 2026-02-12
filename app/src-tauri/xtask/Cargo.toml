@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 anyhow = "1"
 serde_json = "1"
-schemars = "0.8"
+schemars = "1.2"
 # The main app crate is package "kolboo", but the library crate name is "kolboo_lib".
 kolboo_lib = { package = "kolboo", path = ".." }
 

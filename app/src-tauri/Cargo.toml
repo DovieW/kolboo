@@ -48,11 +48,11 @@ tauri-plugin-cli = "~2.4.1"
 # and the Rust crate (tauri-plugin-dialog) match on major/minor. Cargo's default
 # caret requirement would allow 2.5.x, which can break CI when the JS side is
 # still 2.4.x.
-tauri-plugin-dialog = "~2.5.0"
+tauri-plugin-dialog = "~2.6.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 log = "0.4.29"
-schemars = { version = "0.8.22", features = ["derive", "chrono"] }
+schemars = { version = "1.2.1", features = ["derive", "chrono"] }
 
 # Structured tracing (spans + JSON logs). We keep `log` for third-party crates,
 # but route it into `tracing` so spans/fields can correlate everything.
