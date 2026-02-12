@@ -3,6 +3,7 @@ pub mod backup;
 pub mod command_error;
 pub mod config;
 pub mod data;
+pub mod diagnostics;
 pub mod event_sink;
 pub mod fireworks;
 pub mod history;

@@ -648,7 +648,7 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> CommandR
             .map(|p| p.state());
 
         let visible = window.is_visible().ok();
-        log::debug!(
+        log::trace!(
             "[overlay] resize requested (width={:.1}, height={:.1}, visible={:?}, overlay_mode={}, pipeline_state={:?})",
             width,
             height,
@@ -679,7 +679,7 @@ pub async fn resize_overlay(app: AppHandle, width: f64, height: f64) -> CommandR
 
         let outer_after = window.outer_size().ok();
         let pos_after = window.outer_position().ok();
-        log::debug!(
+        log::trace!(
             "[overlay] resize applied (pos={:?}, outer={:?})",
             pos_after,
             outer_after
@@ -893,7 +893,7 @@ pub async fn overlay_hover_frontend_ready(app: AppHandle) -> CommandResult<()> {
         app.state::<AppState>()
             .overlay_hover_frontend_ready_at_ms
             .store(now_ms, Ordering::SeqCst);
-        log::debug!("[overlay_hover] frontend ready (ts={})", now_ms);
+        log::trace!("[overlay_hover] frontend ready (ts={})", now_ms);
     }
 
     Ok(())
@@ -908,7 +908,7 @@ pub async fn quick_ask_frontend_ready(app: AppHandle) -> CommandResult<()> {
         app.state::<AppState>()
             .quick_ask_frontend_ready_at_ms
             .store(now_ms, Ordering::SeqCst);
-        log::debug!("[quick_ask] frontend ready (ts={})", now_ms);
+        log::trace!("[quick_ask] frontend ready (ts={})", now_ms);
     }
 
     Ok(())
@@ -1021,13 +1021,13 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
 pub async fn hide_overlay_hover(app: AppHandle) -> CommandResult<()> {
     if let Some(window) = app.get_webview_window("overlay_hover") {
         let visible_before = window.is_visible().ok();
-        log::debug!(
+        log::trace!(
             "[overlay_hover] hide requested (visible_before={:?})",
             visible_before
         );
         window.hide().map_err(|e| e.to_string())?;
         let visible_after = window.is_visible().ok();
-        log::debug!(
+        log::trace!(
             "[overlay_hover] hide complete (visible_after={:?})",
             visible_after
         );
@@ -1048,7 +1048,7 @@ pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Comma
         .overlay_hover_epoch
         .load(Ordering::SeqCst);
 
-    log::debug!(
+    log::trace!(
         "[overlay_hover] schedule hide requested (delay_ms={}, expected_epoch={})",
         delay_ms,
         expected_epoch

@@ -168,8 +168,18 @@ fn build_history_submenu(app: &AppHandle) -> tauri::Result<Submenu<tauri::Wry>> 
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
     let history_submenu = build_history_submenu(app)?;
+    let diagnostics_item = MenuItem::with_id(
+        app,
+        "export_diagnostics",
+        "Export Diagnostics",
+        true,
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    Menu::with_items(app, &[&show_item, &history_submenu, &quit_item])
+    Menu::with_items(
+        app,
+        &[&show_item, &history_submenu, &diagnostics_item, &quit_item],
+    )
 }
 
 /// Setup system tray
@@ -191,6 +201,24 @@ pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             "show" => {
                 log::info!("Tray menu: show");
                 show_main_window(app, "tray-menu-show", None);
+            }
+            "export_diagnostics" => {
+                log::info!("Tray menu: export diagnostics");
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    match crate::commands::diagnostics::export_diagnostics_zip(&app) {
+                        Ok(path) => {
+                            log::info!("Diagnostics exported to {}", path.display());
+                            // Open the containing folder so the user can find it
+                            if let Some(parent) = path.parent() {
+                                let _ = open::that(parent);
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to export diagnostics: {e}");
+                        }
+                    }
+                });
             }
             "quit" => {
                 log::info!("Tray menu: quit");

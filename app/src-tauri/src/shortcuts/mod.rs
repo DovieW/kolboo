@@ -394,7 +394,7 @@ async fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool
     let should_enable = enabled || pipeline_can_cancel || quick_ask_visible;
 
     let is_registered = shortcut_manager.is_registered(ESCAPE_CANCEL_SHORTCUT);
-    log::debug!(
+    log::trace!(
         "Escape shortcut toggle: enabled={} (currently registered={})",
         should_enable,
         is_registered

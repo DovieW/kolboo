@@ -176,7 +176,7 @@ pub fn set_copilot_hotkey_enabled(enabled: bool) {
         COPILOT_SUPPRESS_WIN_UP.store(false, Ordering::SeqCst);
     }
 
-    log::debug!(
+    log::trace!(
         "Copilot hotkey interception enabled changed: {}",
         if enabled { "true" } else { "false" }
     );
