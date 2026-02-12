@@ -1,6 +1,6 @@
 {
 	"name": "kolboo",
-	"version": "0.2.3",
+	"version": "0.2.4",
 	"description": "Customizable AI-powered voice dictation",
 	"engines": {
 		"node": ">=24"

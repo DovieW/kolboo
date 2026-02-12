@@ -775,6 +775,42 @@ export function DataSettings({
 			/>
 
 			<SettingsRow
+				label="App logs"
+				description="Daily-rotated trace logs for troubleshooting (7 day retention)."
+				right={
+					<Tooltip label="Open app logs folder" withArrow position="top">
+						<span>
+							<ActionIcon
+								variant="default"
+								size={36}
+								onClick={() => {
+									logsAPI.openAppLogsFolder().catch((e) => {
+										notifications.show({
+											title: "App logs",
+											message: formatErrorMessage(e),
+											color: "red",
+										});
+									});
+								}}
+								aria-label="Open app logs folder"
+								styles={{
+									root: {
+										backgroundColor: "var(--bg-elevated)",
+										borderColor: "var(--border-default)",
+										color: "var(--text-primary)",
+										height: 36,
+										width: 36,
+									},
+								}}
+							>
+								<FolderOpen size={14} style={{ opacity: 0.75 }} />
+							</ActionIcon>
+						</span>
+					</Tooltip>
+				}
+			/>
+
+			<SettingsRow
 				label="Max recordings to save"
 				description={`Keep at most this many recordings on disk.${
 					recordingsStats.isLoading

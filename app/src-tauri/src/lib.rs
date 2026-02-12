@@ -2641,7 +2641,9 @@ pub fn run() {
             commands::logs::get_request_logs,
             commands::logs::clear_request_logs,
             commands::logs::export_request_logs_to_file,
-            commands::logs::ui_debug_log,
+            commands::logs::frontend_log,
+            commands::logs::get_app_logs_dir,
+            commands::logs::open_app_logs_folder,
             // Fireworks helpers
             commands::fireworks::fireworks_list_models,
             // Ollama helpers

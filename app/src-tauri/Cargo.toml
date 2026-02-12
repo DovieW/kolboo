@@ -1,6 +1,6 @@
 [package]
 name = "kolboo"
-version = "0.2.3"
+version = "0.2.4"
 description = "Customizable AI-powered voice dictation tool"
 license = "AGPL-3.0"
 authors = ["kstonekuan"]
@@ -37,6 +37,7 @@ tauri = { version = "2.9.5", features = [
     "tray-icon",
     "macos-private-api",
     "image-png",
+    "devtools",
 ] }
 tauri-utils = "2.8.1"
 tauri-plugin-opener = "2.5.2"
@@ -58,6 +59,7 @@ schemars = { version = "0.8.22", features = ["derive", "chrono"] }
 tracing = "0.1"
 tracing-log = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
 
 # Keyboard automation
 enigo = "0.6.1"

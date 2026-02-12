@@ -11,6 +11,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { frontendLog } from "../../lib/frontendLog";
 import { useSettings } from "../../lib/queries";
 import { configAPI, type HotkeyConfig, tauriAPI } from "../../lib/tauri";
 import { Logo } from "../Logo";
@@ -117,13 +118,24 @@ export function SettingsGuideOverlay({
 	}, []);
 
 	const enterGuideAt = (nextStep: Step) => {
+		frontendLog.info("setup-guide", `enterGuide step=${nextStep}`);
 		clearWelcomeTimers();
 		setPhase("guide");
 		setStep(nextStep);
 		setSkipVisible(true);
 	};
 
+	// Use a ref so the opened-effect can call the latest version without
+	// re-triggering when `welcomeContinueSeen` changes (which would restart
+	// the welcome animation in an infinite loop).
+	const welcomeContinueSeenRef = useRef(false);
+	welcomeContinueSeenRef.current = welcomeContinueSeen;
+
 	const restartWelcomeSequence = useCallback(() => {
+		frontendLog.info(
+			"setup-guide",
+			`restartWelcomeSequence (continueSeen=${welcomeContinueSeenRef.current})`,
+		);
 		clearWelcomeTimers();
 
 		// Always restart the intro from scratch.
@@ -134,14 +146,14 @@ export function SettingsGuideOverlay({
 		setWelcomeIconVisible(false);
 		setWelcomeTextVisible(false);
 		setWelcomeFadingOut(false);
-		setWelcomeContinueVisible(welcomeContinueSeen);
+		setWelcomeContinueVisible(welcomeContinueSeenRef.current);
 
 		const timers: Array<number> = [];
 		timers.push(window.setTimeout(() => setWelcomeIconVisible(true), 150));
 		timers.push(window.setTimeout(() => setWelcomeTextVisible(true), 650));
 		// Reveal the Continue button after the title/subtext have faded in,
 		// then held on-screen briefly.
-		if (!welcomeContinueSeen) {
+		if (!welcomeContinueSeenRef.current) {
 			timers.push(
 				window.setTimeout(() => {
 					setWelcomeContinueSeen(true);
@@ -151,13 +163,12 @@ export function SettingsGuideOverlay({
 		}
 
 		welcomeTimersRef.current = timers;
-	}, [clearWelcomeTimers, welcomeContinueSeen]);
+	}, [clearWelcomeTimers]);
 
 	useEffect(() => {
 		if (!opened) return;
 
-		// Ensure we show the latest shortcut when the guide opens, even though
-		// the settings query is cached with an infinite stale time.
+		frontendLog.info("setup-guide", "overlay opened, initializing");
 		queryClient.invalidateQueries({ queryKey: ["settings"] });
 
 		// Reset guide state on open.

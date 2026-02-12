@@ -559,6 +559,12 @@ export const logsAPI = {
 			limit: params.limit,
 			stripTextAndPayloads: params.stripTextAndPayloads ?? true,
 		}),
+
+	/** Directory containing daily-rotated app trace logs, or `null` if unavailable. */
+	getAppLogsDir: () => invoke<string | null>("get_app_logs_dir"),
+
+	/** Open the app trace logs directory in the system file explorer. */
+	openAppLogsFolder: () => invoke<void>("open_app_logs_folder"),
 };
 
 export const dataAPI = {

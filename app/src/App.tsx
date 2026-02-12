@@ -58,6 +58,7 @@ import {
 	readBootGuideState,
 	setBootGuideState,
 } from "./lib/bootStorage";
+import { frontendLog } from "./lib/frontendLog";
 import {
 	DEFAULT_HOLD_HOTKEY,
 	DEFAULT_PASTE_LAST_HOTKEY,
@@ -1210,6 +1211,11 @@ export default function App() {
 	const bootGuideKnown = bootGuideState !== null;
 	const bootShouldAutoOpenGuide = bootGuideState === "pending";
 
+	frontendLog.info(
+		"boot",
+		`guideState=${bootGuideState} known=${bootGuideKnown} autoOpen=${bootShouldAutoOpenGuide}`,
+	);
+
 	// Safety valve: on some fresh installs, the first attempt to read the Tauri store
 	// (via plugin-store) can error or never resolve until the webview is reloaded.
 	// We should never show an infinite blank/black window; after a short grace
@@ -1321,6 +1327,10 @@ export default function App() {
 		if (bootGuideFallbackActivated) return;
 
 		const t = window.setTimeout(() => {
+			frontendLog.warn(
+				"boot",
+				"Boot guide fallback activated (Tauri store read timed out or failed)",
+			);
 			setBootGuideFallbackActivated(true);
 			// Also seed localStorage so subsequent reloads / first-paint logic can
 			// immediately decide to open the guide.

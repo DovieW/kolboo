@@ -111,13 +111,38 @@ pub fn export_request_logs_to_file(
     Ok(())
 }
 
-/// Dev-only: allow the frontend to write structured debug notes into the Rust log stream.
+/// Allow the frontend to write structured log entries into the Rust log stream.
 ///
-/// This is useful when diagnosing issues like overlay flicker where the window stays visible
-/// but the webview UI appears to blink (no Rust-side show/hide calls fire).
+/// This is the primary way to get frontend logs into the rolling log files
+/// (DevTools is unavailable in production builds). The level parameter accepts
+/// "error", "warn", "info", "debug" (default: "debug").
 #[tauri::command]
-pub fn ui_debug_log(scope: String, message: String) {
-    if cfg!(debug_assertions) {
-        log::debug!("[ui:{}] {}", scope, message);
+pub fn frontend_log(level: Option<String>, scope: String, message: String) {
+    let lvl = level.as_deref().unwrap_or("debug");
+    match lvl {
+        "error" => log::error!("[ui:{}] {}", scope, message),
+        "warn" => log::warn!("[ui:{}] {}", scope, message),
+        "info" => log::info!("[ui:{}] {}", scope, message),
+        _ => log::debug!("[ui:{}] {}", scope, message),
     }
+}
+
+// ---------------------------------------------------------------------------
+// App trace logs (file-based rolling logs written by tracing)
+// ---------------------------------------------------------------------------
+
+/// Return the directory containing rolling app log files, or `null` if file
+/// logging couldn't be initialised (missing `%APPDATA%`, etc.).
+#[tauri::command]
+pub fn get_app_logs_dir() -> Option<String> {
+    crate::tracing_init::log_dir().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Open the app logs directory in the system file explorer.
+#[tauri::command]
+pub fn open_app_logs_folder() -> Result<(), String> {
+    let dir = crate::tracing_init::log_dir()
+        .ok_or_else(|| "File logging is not active; log directory unavailable.".to_string())?;
+
+    open::that(dir).map_err(|e| format!("Failed to open logs folder: {e}"))
 }

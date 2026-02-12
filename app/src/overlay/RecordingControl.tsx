@@ -798,12 +798,10 @@ export default function RecordingControl() {
 
 	const requestAnimatedHideWithReason = useCallback(
 		(reason: string) => {
-			if (import.meta.env.DEV) {
-				invoke("ui_debug_log", {
-					scope: "overlay",
-					message: `requestAnimatedHide(${reason}) (pipeline=${pipelineState}, anim=${animState}, overlayMode=${settings?.overlay_mode ?? null})`,
-				}).catch(() => {});
-			}
+			invoke("frontend_log", {
+				scope: "overlay",
+				message: `requestAnimatedHide(${reason}) (pipeline=${pipelineState}, anim=${animState}, overlayMode=${settings?.overlay_mode ?? null})`,
+			}).catch(() => {});
 			requestAnimatedHide();
 		},
 		[animState, pipelineState, requestAnimatedHide, settings?.overlay_mode],
@@ -841,12 +839,11 @@ export default function RecordingControl() {
 			requestAnimatedHideWithReason("backend_hide_requested"),
 	});
 
-	// Dev-only diagnostics: forward key overlay UI state to the Rust log stream.
+	// Forward key overlay UI state to the Rust log stream.
 	// This helps diagnose flicker where the native window stays visible but the webview blinks.
 	useEffect(() => {
-		if (!import.meta.env.DEV) return;
 		const overlayMode = settings?.overlay_mode ?? null;
-		invoke("ui_debug_log", {
+		invoke("frontend_log", {
 			scope: "overlay",
 			message: `state pipeline=${pipelineState} anim=${animState} expanded=${expanded} renderExpanded=${renderExpanded} overlayMode=${overlayMode}`,
 		}).catch(() => {});
