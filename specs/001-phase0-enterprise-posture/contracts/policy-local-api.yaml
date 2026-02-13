@@ -1,0 +1,122 @@
+openapi: 3.0.3
+info:
+  title: Kolboo Phase 0 Policy Local API
+  version: 1.0.0
+paths:
+  /policy/state:
+    get:
+      summary: Get active policy state and enforcement summary
+      description: Returns source, validity, timing metadata, and high-level enforcement details used by the Policy screen.
+      responses:
+        "200":
+          description: Current policy state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                    enum: [none, file, cloud]
+                  is_valid:
+                    type: boolean
+                  last_updated:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  expires_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  version:
+                    type: string
+                    nullable: true
+                  enforced_fields:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        reason:
+                          type: string
+                      required: [path]
+                required: [source, is_valid, enforced_fields]
+  /settings:
+    patch:
+      summary: Patch user settings with policy enforcement
+      description: Applies settings updates. If a field is constrained by policy, effective value remains policy-compliant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Updated effective settings
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "409":
+          description: One or more attempted changes violated policy constraints
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [policy_constraint_violation]
+                  violations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        reason:
+                          type: string
+                      required: [path]
+                required: [code, violations]
+  /policy/diagnostics/export:
+    post:
+      summary: Export redacted policy diagnostics
+      description: Produces support-safe policy diagnostic output with enforcement metadata and redacted sensitive fields.
+      responses:
+        "200":
+          description: Diagnostics export generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generated_at:
+                    type: string
+                    format: date-time
+                  policy_state:
+                    type: object
+                    properties:
+                      source:
+                        type: string
+                        enum: [none, file, cloud]
+                      is_valid:
+                        type: boolean
+                  enforced_fields:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        effective_value:
+                          nullable: true
+                        reason:
+                          type: string
+                      required: [path]
+                  redaction_applied:
+                    type: boolean
+                required: [generated_at, policy_state, enforced_fields, redaction_applied]
