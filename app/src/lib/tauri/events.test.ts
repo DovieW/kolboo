@@ -48,6 +48,33 @@ describe("typed tauri events", () => {
 		expect(handler).toHaveBeenCalledWith(null);
 	});
 
+	it("listenTyped forwards settings-changed policy payload", async () => {
+		listenMock.mockImplementationOnce(async (_name, handler) => {
+			handler({
+				payload: {
+					policy_normalized: true,
+					policy_constraints_applied: true,
+					policy_violations: [{ path: "request_logs_privacy_mode" }],
+				},
+			});
+			return () => {
+				// no-op
+			};
+		});
+
+		const { listenTyped } = await import("./events");
+		const handler = vi.fn();
+
+		await listenTyped("settings-changed", handler);
+
+		expect(handler).toHaveBeenCalledWith(
+			expect.objectContaining({
+				policy_normalized: true,
+				policy_constraints_applied: true,
+			}),
+		);
+	});
+
 	it("EVENT_NAMES contains key events", async () => {
 		const { EVENT_NAMES } = await import("./events");
 

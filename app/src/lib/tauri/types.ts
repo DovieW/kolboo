@@ -383,8 +383,18 @@ export interface SttPartialTranscriptPayload {
 	text: string;
 }
 
+export interface PolicyConstraintViolation {
+	path: string;
+	reason?: string | null;
+}
+
 export type SettingsChangedPayload =
-	| ({ settings_revision?: number } & Record<string, unknown>)
+	| ({
+			settings_revision?: number;
+			policy_normalized?: boolean;
+			policy_constraints_applied?: boolean;
+			policy_violations?: PolicyConstraintViolation[];
+	  } & Record<string, unknown>)
 	| Record<string, unknown>;
 
 export interface ConnectionStateChangedPayload {
@@ -462,6 +472,36 @@ export type TranscriptionRetentionUnit = "days" | "hours";
 export type RequestLogsRetentionMode = "amount" | "time";
 
 export type SettingsGuideState = "pending" | "skipped" | "completed";
+
+export type PolicySource = "none" | "file" | "cloud";
+
+export interface PolicyEnforcedField {
+	path: string;
+	reason?: string | null;
+	effective_value?: unknown;
+}
+
+export interface PolicyState {
+	source: PolicySource;
+	is_valid: boolean;
+	last_updated: string | null;
+	expires_at: string | null;
+	version: string | null;
+	enforced_fields: PolicyEnforcedField[];
+}
+
+export interface PolicyDiagnosticField {
+	path: string;
+	effective_value?: unknown;
+	reason?: string | null;
+}
+
+export interface PolicyDiagnosticExport {
+	generated_at: string;
+	policy_state: PolicyState;
+	enforced_fields: PolicyDiagnosticField[];
+	redaction_applied: boolean;
+}
 
 // ============================================================================
 // Network / proxy settings
@@ -577,6 +617,7 @@ export type MainWindowCloseBehavior = "exit_program" | "minimize_to_tray";
 export interface AppSettings {
 	// Settings schema version (used for migrations).
 	settings_version: number;
+	policy_state: PolicyState;
 	toggle_hotkey: HotkeyConfig | null;
 	hold_hotkey: HotkeyConfig | null;
 	paste_last_hotkey: HotkeyConfig | null;
