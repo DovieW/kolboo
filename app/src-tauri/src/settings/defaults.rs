@@ -62,6 +62,20 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         false,
     );
 
+    // Enterprise policy posture (Phase 0 baseline): unmanaged by default.
+    dirty |= set_default(
+        "policy_state",
+        json!({
+            "source": "none",
+            "is_valid": true,
+            "last_updated": null,
+            "expires_at": null,
+            "version": null,
+            "enforced_fields": []
+        }),
+        false,
+    );
+
     dirty |= set_default("stt_provider", json!("groq"), false);
     dirty |= set_default("stt_language", json!("en"), false);
     // Cerebras free-tier toggle (used by stats filtering).

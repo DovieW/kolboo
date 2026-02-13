@@ -17,6 +17,7 @@ export {
 	llmAPI,
 	logsAPI,
 	ocrAPI,
+	policyAPI,
 	recordingsAPI,
 	sttAPI,
 } from "./tauri/commands";

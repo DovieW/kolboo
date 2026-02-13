@@ -48,6 +48,7 @@ mod network;
 mod ocr;
 mod overlay;
 mod pipeline;
+mod policy;
 mod recordings;
 mod request_log;
 mod router_embeddings_cache;
@@ -2524,6 +2525,8 @@ pub fn run() {
             commands::settings::forward_modifier_key_event,
             commands::settings::settings_doctor,
             commands::settings::settings_apply_patch,
+            commands::policy::policy_get_state,
+            commands::policy::policy_export_diagnostics,
             commands::settings::hotkey_shortcut_cards_create,
             commands::settings::hotkey_shortcut_cards_update,
             commands::settings::hotkey_shortcut_cards_delete,

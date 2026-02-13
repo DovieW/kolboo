@@ -13,6 +13,7 @@ pub mod network;
 pub mod ocr;
 pub mod ollama;
 pub mod overlay;
+pub mod policy;
 pub mod pricing;
 pub mod recording;
 pub mod router;

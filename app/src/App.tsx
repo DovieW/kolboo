@@ -43,6 +43,7 @@ import {
 	DataSettings,
 	HotkeySettings,
 	NetworkSettings,
+	PolicySettings,
 	PrivacySettings,
 	ProfileConfigModal,
 	PromptSettings,
@@ -830,6 +831,7 @@ function _SettingsView() {
 						<Tabs.Tab value="data">Data</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
+						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
 
 					<Tabs.Panel value="ai" pt="md">
@@ -882,6 +884,12 @@ function _SettingsView() {
 									setActiveSettingsTab(tab);
 								}}
 							/>
+						</div>
+					</Tabs.Panel>
+
+					<Tabs.Panel value="policy" pt="md">
+						<div className="settings-card">
+							<PolicySettings />
 						</div>
 					</Tabs.Panel>
 				</Tabs>
@@ -1124,6 +1132,7 @@ function SettingsViewWithGuideLauncher({
 						<Tabs.Tab value="data">Data</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
+						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
 
 					<Tabs.Panel value="ai" pt="md">
@@ -1176,6 +1185,12 @@ function SettingsViewWithGuideLauncher({
 									setActiveSettingsTab(tab);
 								}}
 							/>
+						</div>
+					</Tabs.Panel>
+
+					<Tabs.Panel value="policy" pt="md">
+						<div className="settings-card">
+							<PolicySettings />
 						</div>
 					</Tabs.Panel>
 				</Tabs>

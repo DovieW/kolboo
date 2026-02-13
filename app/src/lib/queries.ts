@@ -235,6 +235,15 @@ export function useSettings() {
 	});
 }
 
+export function usePolicyState() {
+	return useQuery({
+		queryKey: ["policyState"],
+		queryFn: () => tauriAPI.getPolicyState(),
+		staleTime: 0,
+		refetchOnWindowFocus: true,
+	});
+}
+
 export function useSystemProxyInfo() {
 	return useQuery({
 		queryKey: ["systemProxyInfo"],

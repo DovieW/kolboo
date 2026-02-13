@@ -5,6 +5,7 @@ export { HotkeySettings } from "./HotkeySettings";
 export { HotkeyShortcutCard } from "./HotkeyShortcutCard";
 export { NetworkSettings } from "./NetworkSettings";
 export { OcrProviderSettings } from "./OcrProviderSettings";
+export { PolicySettings } from "./PolicySettings";
 export { PrivacySettings } from "./PrivacySettings";
 export { ProfileConfigModal } from "./ProgramsModal";
 export type { PromptSectionEditorProps } from "./PromptSectionEditor";
