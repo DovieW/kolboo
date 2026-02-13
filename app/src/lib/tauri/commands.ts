@@ -3,6 +3,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { buildCostInvokeParams } from "../costParams";
 import { emitTyped, listenTyped } from "./events";
+import { tauriPolicyAPI } from "./policy";
 import type {
 	AudioCaptureDiagnostics,
 	AudioSettingsTestWavs,
@@ -28,6 +29,8 @@ import type {
 	ModelPricingKind,
 	OpenAiReasoningEffort,
 	OpenWindowInfo,
+	PolicyDiagnosticExport,
+	PolicyState,
 	RecordingsStats,
 	RequestLog,
 	SettingsChangedPayload,
@@ -342,6 +345,14 @@ export const tauriAPI = {
 		});
 	},
 
+	async getPolicyState(): Promise<PolicyState> {
+		return tauriPolicyAPI.getPolicyState();
+	},
+
+	async exportPolicyDiagnostics(): Promise<PolicyDiagnosticExport> {
+		return tauriPolicyAPI.exportPolicyDiagnostics();
+	},
+
 	async cacheRouterEmbeddings(params: {
 		profileId: string;
 		forceRefresh?: boolean;
@@ -541,6 +552,11 @@ export const ocrAPI = {
 		invoke<void>("pipeline_cancel_active_window_ocr"),
 	getOverlayState: () =>
 		invoke<OverlayPipelineState>("pipeline_get_overlay_state"),
+};
+
+export const policyAPI = {
+	getPolicyState: () => tauriPolicyAPI.getPolicyState(),
+	exportPolicyDiagnostics: () => tauriPolicyAPI.exportPolicyDiagnostics(),
 };
 
 export const logsAPI = {
