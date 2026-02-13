@@ -213,4 +213,20 @@ describe("tauri command wrappers", () => {
 
 		expect(invokeMock).toHaveBeenCalledWith("sync_pipeline_config");
 	});
+
+	it("getPolicyState invokes policy command", async () => {
+		const { tauriAPI } = await import("./commands");
+
+		await tauriAPI.getPolicyState();
+
+		expect(invokeMock).toHaveBeenCalledWith("policy_get_state");
+	});
+
+	it("exportPolicyDiagnostics invokes policy export command", async () => {
+		const { policyAPI } = await import("./commands");
+
+		await policyAPI.exportPolicyDiagnostics();
+
+		expect(invokeMock).toHaveBeenCalledWith("policy_export_diagnostics");
+	});
 });

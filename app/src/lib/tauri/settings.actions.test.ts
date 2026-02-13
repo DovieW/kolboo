@@ -254,4 +254,56 @@ describe("tauri settings side effects", () => {
 			deleteKeys: [],
 		});
 	});
+
+	it("blocks updates to policy-enforced fields", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			policy_state: {
+				source: "cloud",
+				is_valid: true,
+				enforced_fields: [
+					{
+						path: "request_logs_privacy_mode",
+						reason: "Managed by organization policy",
+					},
+				],
+			},
+		});
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.updateRequestLogsPrivacyMode(true);
+
+		expect(invokeMock).not.toHaveBeenCalledWith(
+			"settings_apply_patch",
+			expect.anything(),
+		);
+		expect(invokeMock).toHaveBeenCalledWith("sync_pipeline_config");
+	});
+
+	it("persists normalized policy validity when policy metadata is stale", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			policy_state: {
+				source: "cloud",
+				is_valid: true,
+				expires_at: "2000-01-01T00:00:00Z",
+				enforced_fields: [],
+			},
+		});
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.updateSoundEnabled(false);
+
+		expect(invokeMock).toHaveBeenNthCalledWith(1, "settings_apply_patch", {
+			patch: expect.objectContaining({
+				sound_enabled: false,
+				policy_state: expect.objectContaining({
+					source: "cloud",
+					is_valid: false,
+				}),
+			}),
+			deleteKeys: [],
+		});
+		expect(invokeMock).toHaveBeenNthCalledWith(2, "sync_pipeline_config");
+	});
 });

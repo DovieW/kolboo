@@ -80,6 +80,14 @@ describe("legacy settings fixtures", () => {
 		const settings = await tauriAPI.getSettings();
 
 		expect(settings.settings_version).toBe(3);
+		expect(settings.policy_state).toEqual({
+			source: "none",
+			is_valid: true,
+			last_updated: null,
+			expires_at: null,
+			version: null,
+			enforced_fields: [],
+		});
 		expect(settings.cleanup_prompt_sections).toEqual({
 			system: { content: "Legacy system prompt" },
 		});
@@ -127,5 +135,31 @@ describe("legacy settings fixtures", () => {
 		expect(preset.rewrite_llm_enabled).toBe(true);
 		expect(preset.output_mode).toBe("paste");
 		expect(preset.routing_hints).toEqual(["Use this"]);
+	});
+
+	it("marks expired policy state as invalid during normalization", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			settings_version: 7,
+			policy_state: {
+				source: "cloud",
+				is_valid: true,
+				expires_at: "2000-01-01T00:00:00Z",
+				last_updated: "2026-02-13T12:00:00Z",
+				version: "v1",
+				enforced_fields: [
+					{ path: "request_logs_privacy_mode", reason: "Org policy" },
+				],
+			},
+		});
+
+		const { tauriAPI } = await import("../tauri");
+		const settings = await tauriAPI.getSettings();
+
+		expect(settings.policy_state.source).toBe("cloud");
+		expect(settings.policy_state.is_valid).toBe(false);
+		expect(settings.policy_state.enforced_fields).toEqual([
+			{ path: "request_logs_privacy_mode", reason: "Org policy" },
+		]);
 	});
 });

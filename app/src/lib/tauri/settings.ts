@@ -41,6 +41,7 @@ import type {
 	OverlayMode,
 	OverlayMonitorTarget,
 	PlayingAudioHandling,
+	PolicyState,
 	ProxySettings,
 	QuickAskDismissMode,
 	RewritePreset,
@@ -53,6 +54,62 @@ import type {
 const isRecord = (value: unknown): value is Record<string, unknown> => {
 	return value != null && typeof value === "object" && !Array.isArray(value);
 };
+
+function normalizePolicySource(value: unknown): PolicyState["source"] {
+	if (value === "none" || value === "file" || value === "cloud") return value;
+	return "none";
+}
+
+function normalizePolicyTimestamp(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	const parsed = Date.parse(trimmed);
+	if (Number.isNaN(parsed)) return null;
+	return new Date(parsed).toISOString();
+}
+
+function normalizePolicyState(value: unknown): PolicyState {
+	const v = isRecord(value) ? value : {};
+	const source = normalizePolicySource(v.source);
+	const last_updated = normalizePolicyTimestamp(v.last_updated);
+	const expires_at = normalizePolicyTimestamp(v.expires_at);
+	const version = typeof v.version === "string" ? v.version : null;
+
+	const now = Date.now();
+	const expiresAtMs = expires_at == null ? null : Date.parse(expires_at);
+	const expired =
+		expiresAtMs != null && Number.isFinite(expiresAtMs) && expiresAtMs < now;
+
+	const baseValid = typeof v.is_valid === "boolean" ? v.is_valid : true;
+	const is_valid = source === "none" ? true : baseValid && !expired;
+
+	const enforced_fields: PolicyState["enforced_fields"] = Array.isArray(
+		v.enforced_fields,
+	)
+		? v.enforced_fields
+				.map((field): PolicyState["enforced_fields"][number] | null => {
+					if (!isRecord(field)) return null;
+					const path = typeof field.path === "string" ? field.path.trim() : "";
+					if (!path) return null;
+					const reason = typeof field.reason === "string" ? field.reason : null;
+					return { path, reason };
+				})
+				.filter(
+					(field): field is PolicyState["enforced_fields"][number] =>
+						field !== null,
+				)
+		: [];
+
+	return {
+		source,
+		is_valid,
+		last_updated,
+		expires_at,
+		version,
+		enforced_fields,
+	};
+}
 
 // ============================================================================
 // OCR normalization helpers
@@ -736,14 +793,187 @@ async function reloadSettingsStoreFromDisk(): Promise<void> {
 	storeInstance = await Store.load("settings.json");
 }
 
+type PolicyConstraintViolation = {
+	path: string;
+	reason: string | null;
+};
+
+const POLICY_PATH_ALIASES: Readonly<Record<string, string[]>> = {
+	quick_ask_hotkey: ["quick_ask_hold_hotkey"],
+	quick_ask_hold_hotkey: ["quick_ask_hotkey"],
+	transcription_retention_days: [
+		"transcription_retention_value",
+		"transcription_retention_unit",
+	],
+	transcription_retention_value: ["transcription_retention_days"],
+};
+
+function clonePatchRecord(
+	patch: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+	if (!patch) return {};
+	return { ...patch };
+}
+
+function canonicalPolicyPath(path: string): string {
+	return path.trim();
+}
+
+function patchTouchesPolicyPath(
+	patch: Record<string, unknown>,
+	deleteKeys: string[],
+	path: string,
+): boolean {
+	if (Object.hasOwn(patch, path)) return true;
+	if (deleteKeys.includes(path)) return true;
+
+	const aliases = POLICY_PATH_ALIASES[path] ?? [];
+	for (const alias of aliases) {
+		if (Object.hasOwn(patch, alias)) return true;
+		if (deleteKeys.includes(alias)) return true;
+	}
+
+	return false;
+}
+
+function removePolicyPathFromPatch(
+	patch: Record<string, unknown>,
+	deleteKeys: string[],
+	path: string,
+): void {
+	delete patch[path];
+	for (const alias of POLICY_PATH_ALIASES[path] ?? []) {
+		delete patch[alias];
+	}
+
+	const blocked = new Set([path, ...(POLICY_PATH_ALIASES[path] ?? [])]);
+	for (let i = deleteKeys.length - 1; i >= 0; i -= 1) {
+		const key = deleteKeys[i];
+		if (typeof key !== "string") continue;
+		if (blocked.has(key)) {
+			deleteKeys.splice(i, 1);
+		}
+	}
+}
+
+function didPolicyStateChangeRaw(
+	raw: unknown,
+	normalized: PolicyState,
+): boolean {
+	if (raw == null) return false;
+
+	const normalizedComparable = JSON.stringify(normalized);
+	if (!isRecord(raw)) return true;
+
+	const source = normalizePolicySource(raw.source);
+	const last_updated = normalizePolicyTimestamp(raw.last_updated);
+	const expires_at = normalizePolicyTimestamp(raw.expires_at);
+	const version = typeof raw.version === "string" ? raw.version : null;
+	const is_valid = typeof raw.is_valid === "boolean" ? raw.is_valid : true;
+	const enforced_fields: PolicyState["enforced_fields"] = Array.isArray(
+		raw.enforced_fields,
+	)
+		? raw.enforced_fields
+				.map((field): PolicyState["enforced_fields"][number] | null => {
+					if (!isRecord(field)) return null;
+					const path = typeof field.path === "string" ? field.path.trim() : "";
+					if (!path) return null;
+					const reason = typeof field.reason === "string" ? field.reason : null;
+					return { path, reason };
+				})
+				.filter(
+					(field): field is PolicyState["enforced_fields"][number] =>
+						field !== null,
+				)
+		: [];
+
+	const rawComparable = JSON.stringify({
+		source,
+		is_valid,
+		last_updated,
+		expires_at,
+		version,
+		enforced_fields,
+	});
+	return rawComparable !== normalizedComparable;
+}
+
+async function preparePolicyAwarePatch(params: {
+	patch?: Record<string, unknown>;
+	deleteKeys?: string[];
+}): Promise<{
+	patch: Record<string, unknown>;
+	deleteKeys: string[];
+	violations: PolicyConstraintViolation[];
+	policyNormalized: boolean;
+}> {
+	const store = await getStore();
+	const rawPolicyState = await store.get("policy_state");
+	const normalizedPolicyState = normalizePolicyState(rawPolicyState);
+
+	const patch = clonePatchRecord(params.patch);
+	const deleteKeys = [...(params.deleteKeys ?? [])];
+
+	const policyNormalized = didPolicyStateChangeRaw(
+		rawPolicyState,
+		normalizedPolicyState,
+	);
+	if (policyNormalized) {
+		patch.policy_state = normalizedPolicyState;
+	}
+
+	const policyIsEnforcing =
+		normalizedPolicyState.source !== "none" && normalizedPolicyState.is_valid;
+	const violations: PolicyConstraintViolation[] = [];
+
+	if (policyIsEnforcing) {
+		for (const field of normalizedPolicyState.enforced_fields) {
+			const path = canonicalPolicyPath(field.path);
+			if (!path) continue;
+			if (!patchTouchesPolicyPath(patch, deleteKeys, path)) continue;
+
+			violations.push({
+				path,
+				reason: field.reason ?? null,
+			});
+			removePolicyPathFromPatch(patch, deleteKeys, path);
+		}
+	}
+
+	return {
+		patch,
+		deleteKeys,
+		violations,
+		policyNormalized,
+	};
+}
+
 async function applySettingsPatch(params: {
 	patch?: Record<string, unknown>;
 	deleteKeys?: string[];
 }): Promise<void> {
-	await invoke("settings_apply_patch", {
-		patch: params.patch ?? {},
-		deleteKeys: params.deleteKeys ?? [],
-	});
+	const prepared = await preparePolicyAwarePatch(params);
+	const hasPatch = Object.keys(prepared.patch).length > 0;
+	const hasDeletes = prepared.deleteKeys.length > 0;
+
+	if (hasPatch || hasDeletes) {
+		await invoke("settings_apply_patch", {
+			patch: prepared.patch,
+			deleteKeys: prepared.deleteKeys,
+		});
+	}
+
+	if (prepared.policyNormalized || prepared.violations.length > 0) {
+		// Keep runtime behavior aligned whenever policy normalization/constraints
+		// affect effective settings.
+		await invoke("sync_pipeline_config");
+		await emitTyped("settings-changed", {
+			policy_normalized: prepared.policyNormalized,
+			policy_constraints_applied: prepared.violations.length > 0,
+			policy_violations: prepared.violations,
+		});
+	}
+
 	await reloadSettingsStoreFromDisk();
 }
 
@@ -1170,6 +1400,7 @@ export const tauriSettingsAPI = {
 
 		const settings: AppSettings = {
 			settings_version: settingsVersion,
+			policy_state: normalizePolicyState(await store.get("policy_state")),
 			toggle_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "toggle"),
 			hold_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "hold"),
 			paste_last_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "paste_last"),
