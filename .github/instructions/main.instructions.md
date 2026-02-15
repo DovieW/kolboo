@@ -16,3 +16,14 @@ applyTo: '**'
   - Don't create massive files that do many different things.
 
 - Always run the format commands before test/check commands.
+
+- Use the smallest validating command set first, then escalate only if needed.
+  - Docs-only or spec-only changes: no app test/check commands required.
+  - TS/UI-only changes under `app/src/**`: run `pnpm -C app lint` then `pnpm -C app test`.
+  - Rust-only changes under `app/src-tauri/**`: run `pnpm -C app cargo:fmt` then `pnpm -C app cargo:test`.
+  - TS + Rust changes (or uncertain impact): run `pnpm -C app test:all` after formatting.
+  - Run `pnpm -C app check:ci` once at the end (or when explicitly requested), not repeatedly during iteration.
+
+- Avoid duplicate heavy runs during iteration.
+  - If `pnpm dev` already surfaces live frontend issues, rely on VS Code Problems + targeted tests while iterating.
+  - Prefer one final full validation pass right before handoff.

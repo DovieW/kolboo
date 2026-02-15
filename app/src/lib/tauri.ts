@@ -14,6 +14,7 @@ export {
 	backupAPI,
 	configAPI,
 	dataAPI,
+	licenseAPI,
 	llmAPI,
 	logsAPI,
 	ocrAPI,

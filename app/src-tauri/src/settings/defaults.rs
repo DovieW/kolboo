@@ -76,6 +76,32 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         false,
     );
 
+    // License/account posture (Phase 1): signed out by default.
+    dirty |= set_default(
+        "license_state",
+        json!({
+            "tier": "community",
+            "status": "signed_out",
+            "user_id": null,
+            "email": null,
+            "org": null,
+            "expires_at": null,
+            "cached_at": null,
+            "last_validated_at": null,
+            "usage": {
+                "stt_seconds_used": 0,
+                "llm_tokens_used": 0,
+                "requests_today": 0
+            },
+            "limits": {
+                "stt_seconds_monthly": 0,
+                "llm_tokens_monthly": 0,
+                "requests_per_day": 0
+            }
+        }),
+        false,
+    );
+
     dirty |= set_default("stt_provider", json!("groq"), false);
     dirty |= set_default("stt_language", json!("en"), false);
     // Cerebras free-tier toggle (used by stats filtering).

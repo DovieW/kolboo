@@ -44,6 +44,7 @@ import {
 	type HistoryPageQuery,
 	type HotkeyConfig,
 	type IterateRewritePromptResponse,
+	licenseAPI,
 	llmAPI,
 	logsAPI,
 	type MainWindowCloseBehavior,
@@ -241,6 +242,58 @@ export function usePolicyState() {
 		queryFn: () => tauriAPI.getPolicyState(),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
+	});
+}
+
+export function createLicenseStateQueryFn(
+	api: Pick<typeof tauriAPI, "getLicenseState"> = tauriAPI,
+) {
+	return () => api.getLicenseState();
+}
+
+export function createRefreshLicenseEntitlementMutationFn(
+	api: Pick<typeof licenseAPI, "refreshEntitlement"> = licenseAPI,
+) {
+	return (simulateFailure?: boolean) => api.refreshEntitlement(simulateFailure);
+}
+
+export function useLicenseState() {
+	return useQuery({
+		queryKey: ["licenseState"],
+		queryFn: createLicenseStateQueryFn(),
+		staleTime: 0,
+		refetchOnWindowFocus: true,
+	});
+}
+
+export function useStartLicenseLogin() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (request?: { provider_hint?: string | null }) =>
+			licenseAPI.startLogin(request),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["licenseState"] });
+		},
+	});
+}
+
+export function useLogoutLicense() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () => licenseAPI.logout(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["licenseState"] });
+		},
+	});
+}
+
+export function useRefreshLicenseEntitlement() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: createRefreshLicenseEntitlementMutationFn(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["licenseState"] });
+		},
 	});
 }
 

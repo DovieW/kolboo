@@ -49,7 +49,11 @@ pub const API_KEY_SETTING_KEYS: &[&str] = &[
 const SERVICE_NAME: &str = "kolboo";
 
 #[cfg(desktop)]
-const EXTRA_SECRET_KEYS: &[&str] = &["github_gist_token"];
+const EXTRA_SECRET_KEYS: &[&str] = &[
+    "github_gist_token",
+    "license_access_token",
+    "license_refresh_token",
+];
 
 #[cfg(desktop)]
 fn validate_secret_store_key(store_key: &str) -> Result<(), String> {

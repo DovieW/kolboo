@@ -3,6 +3,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { buildCostInvokeParams } from "../costParams";
 import { emitTyped, listenTyped } from "./events";
+import { tauriLicenseAPI } from "./license";
 import { tauriPolicyAPI } from "./policy";
 import type {
 	AudioCaptureDiagnostics,
@@ -21,6 +22,7 @@ import type {
 	HistoryPageQuery,
 	HistoryPageResult,
 	IterateRewritePromptResponse,
+	LicenseState,
 	LlmCompleteResponse,
 	LlmProviderInfo,
 	LocalWhisperBackendStatus,
@@ -353,6 +355,30 @@ export const tauriAPI = {
 		return tauriPolicyAPI.exportPolicyDiagnostics();
 	},
 
+	async getLicenseState(): Promise<LicenseState> {
+		return tauriLicenseAPI.getState();
+	},
+
+	async startLicenseLogin(request?: {
+		provider_hint?: string | null;
+	}): Promise<LicenseState> {
+		return tauriLicenseAPI.startLogin(request);
+	},
+
+	async logoutLicense(): Promise<LicenseState> {
+		return tauriLicenseAPI.logout();
+	},
+
+	async refreshLicenseEntitlement(
+		simulateFailure?: boolean,
+	): Promise<LicenseState> {
+		return tauriLicenseAPI.refreshEntitlement(simulateFailure);
+	},
+
+	async getLicenseManagementUrl(): Promise<string> {
+		return tauriLicenseAPI.getManagementUrl();
+	},
+
 	async cacheRouterEmbeddings(params: {
 		profileId: string;
 		forceRefresh?: boolean;
@@ -559,6 +585,16 @@ export const policyAPI = {
 	exportPolicyDiagnostics: () => tauriPolicyAPI.exportPolicyDiagnostics(),
 };
 
+export const licenseAPI = {
+	getState: () => tauriLicenseAPI.getState(),
+	startLogin: (request?: { provider_hint?: string | null }) =>
+		tauriLicenseAPI.startLogin(request),
+	logout: () => tauriLicenseAPI.logout(),
+	refreshEntitlement: (simulateFailure?: boolean) =>
+		tauriLicenseAPI.refreshEntitlement(simulateFailure),
+	getManagementUrl: () => tauriLicenseAPI.getManagementUrl(),
+};
+
 export const logsAPI = {
 	getRequestLogs: (limit?: number) =>
 		invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 50 }),
@@ -581,6 +617,12 @@ export const logsAPI = {
 
 	/** Open the app trace logs directory in the system file explorer. */
 	openAppLogsFolder: () => invoke<void>("open_app_logs_folder"),
+
+	/** Trigger a deterministic backend Sentry smoke event. */
+	sentryBackendSmokeTest: (surface?: string) =>
+		invoke<boolean>("sentry_backend_smoke_test", {
+			surface: surface ?? "ui-manual",
+		}),
 };
 
 export const dataAPI = {

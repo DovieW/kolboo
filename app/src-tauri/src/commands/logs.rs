@@ -146,3 +146,11 @@ pub fn open_app_logs_folder() -> Result<(), String> {
 
     open::that(dir).map_err(|e| format!("Failed to open logs folder: {e}"))
 }
+
+/// Send a deterministic backend smoke event to Sentry.
+///
+/// Returns `true` when an event was queued (i.e., backend Sentry is configured).
+#[tauri::command]
+pub fn sentry_backend_smoke_test(surface: Option<String>) -> bool {
+    crate::sentry_init::capture_backend_smoke(surface.as_deref().unwrap_or("tauri-command"))
+}

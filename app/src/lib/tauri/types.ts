@@ -388,14 +388,57 @@ export interface PolicyConstraintViolation {
 	reason?: string | null;
 }
 
+export interface LicenseTransitionPayload {
+	from: LicenseStatus;
+	to: LicenseStatus;
+	occurred_at: string;
+	reason: string;
+}
+
 export type SettingsChangedPayload =
 	| ({
 			settings_revision?: number;
 			policy_normalized?: boolean;
 			policy_constraints_applied?: boolean;
+			license_state_changed?: boolean;
+			license_transition?: LicenseTransitionPayload;
 			policy_violations?: PolicyConstraintViolation[];
 	  } & Record<string, unknown>)
 	| Record<string, unknown>;
+
+export type LicenseTier = "community" | "personal" | "enterprise";
+
+export type LicenseStatus = "signed_out" | "active" | "grace" | "expired";
+
+export interface TierLimits {
+	stt_seconds_monthly: number;
+	llm_tokens_monthly: number;
+	requests_per_day: number;
+}
+
+export interface UsageStats {
+	stt_seconds_used: number;
+	llm_tokens_used: number;
+	requests_today: number;
+}
+
+export interface OrgContext {
+	org_id: string;
+	org_name: string;
+}
+
+export interface LicenseState {
+	tier: LicenseTier;
+	status: LicenseStatus;
+	user_id: string | null;
+	email: string | null;
+	org: OrgContext | null;
+	expires_at: string | null;
+	cached_at: string;
+	last_validated_at: string | null;
+	usage: UsageStats;
+	limits: TierLimits;
+}
 
 export interface ConnectionStateChangedPayload {
 	state: ConnectionState;
@@ -618,6 +661,7 @@ export interface AppSettings {
 	// Settings schema version (used for migrations).
 	settings_version: number;
 	policy_state: PolicyState;
+	license_state: LicenseState;
 	toggle_hotkey: HotkeyConfig | null;
 	hold_hotkey: HotkeyConfig | null;
 	paste_last_hotkey: HotkeyConfig | null;

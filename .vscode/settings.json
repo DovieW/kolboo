@@ -9,12 +9,14 @@
   "rust-analyzer.files.exclude": [
     "app/src-tauri/target-rust-analyzer",
     "app/src-tauri/target",
-    "app/src-tauri/target-ci"
+    "app/src-tauri/target-ci",
+    "app/src-tauri/target-cli"
   ],
   "files.watcherExclude": {
     "**/app/src-tauri/target-rust-analyzer/**": true,
     "**/app/src-tauri/target/**": true,
-    "**/app/src-tauri/target-ci/**": true
+    "**/app/src-tauri/target-ci/**": true,
+    "**/app/src-tauri/target-cli/**": true
   },
   "rust-analyzer.check.extraArgs": [
     "--target-dir",

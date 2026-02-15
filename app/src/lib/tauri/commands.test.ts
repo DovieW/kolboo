@@ -229,4 +229,40 @@ describe("tauri command wrappers", () => {
 
 		expect(invokeMock).toHaveBeenCalledWith("policy_export_diagnostics");
 	});
+
+	it("logsAPI.sentryBackendSmokeTest invokes backend smoke command", async () => {
+		const { logsAPI } = await import("./commands");
+
+		await logsAPI.sentryBackendSmokeTest("settings-panel");
+
+		expect(invokeMock).toHaveBeenCalledWith("sentry_backend_smoke_test", {
+			surface: "settings-panel",
+		});
+	});
+
+	it("license wrappers invoke backend commands", async () => {
+		const { tauriAPI, licenseAPI } = await import("./commands");
+
+		await tauriAPI.getLicenseState();
+		await tauriAPI.startLicenseLogin({ provider_hint: "enterprise" });
+		await tauriAPI.logoutLicense();
+		await tauriAPI.refreshLicenseEntitlement(true);
+		await tauriAPI.getLicenseManagementUrl();
+
+		await licenseAPI.getState();
+		await licenseAPI.startLogin();
+
+		expect(invokeMock).toHaveBeenCalledWith("license_get_state");
+		expect(invokeMock).toHaveBeenCalledWith("license_start_login", {
+			request: { provider_hint: "enterprise" },
+		});
+		expect(invokeMock).toHaveBeenCalledWith("license_logout");
+		expect(invokeMock).toHaveBeenCalledWith("license_refresh_entitlement", {
+			simulateFailure: true,
+		});
+		expect(invokeMock).toHaveBeenCalledWith("license_get_management_url");
+		expect(invokeMock).toHaveBeenCalledWith("license_start_login", {
+			request: { provider_hint: null },
+		});
+	});
 });

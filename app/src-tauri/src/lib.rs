@@ -43,6 +43,7 @@ pub mod events;
 mod fs;
 mod history;
 mod http;
+mod licensing;
 mod llm;
 mod network;
 mod ocr;
@@ -53,6 +54,7 @@ mod recordings;
 mod request_log;
 mod router_embeddings_cache;
 mod secrets;
+mod sentry_init;
 mod sessions;
 #[path = "settings.rs"]
 mod settings;
@@ -2472,6 +2474,7 @@ fn is_audio_mute_supported() -> bool {
 pub fn run() {
     // Initialize structured tracing (JSON logs + request spans).
     tracing_init::init();
+    sentry_init::init();
 
     // If we're invoked with a CLI subcommand, we want to behave like a normal CLI tool:
     // - allow running even while the GUI app is already running
@@ -2527,6 +2530,11 @@ pub fn run() {
             commands::settings::settings_apply_patch,
             commands::policy::policy_get_state,
             commands::policy::policy_export_diagnostics,
+            commands::licensing::license_get_state,
+            commands::licensing::license_start_login,
+            commands::licensing::license_logout,
+            commands::licensing::license_refresh_entitlement,
+            commands::licensing::license_get_management_url,
             commands::settings::hotkey_shortcut_cards_create,
             commands::settings::hotkey_shortcut_cards_update,
             commands::settings::hotkey_shortcut_cards_delete,
@@ -2647,6 +2655,7 @@ pub fn run() {
             commands::logs::frontend_log,
             commands::logs::get_app_logs_dir,
             commands::logs::open_app_logs_folder,
+            commands::logs::sentry_backend_smoke_test,
             // Fireworks helpers
             commands::fireworks::fireworks_list_models,
             // Ollama helpers

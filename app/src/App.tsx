@@ -38,6 +38,7 @@ import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
 import {
+	AccountSettings,
 	ApiKeysSettings,
 	AudioSettings,
 	DataSettings,
@@ -823,6 +824,7 @@ function _SettingsView() {
 					keepMounted={false}
 				>
 					<Tabs.List>
+						<Tabs.Tab value="account">Account</Tabs.Tab>
 						<Tabs.Tab value="ai">AI</Tabs.Tab>
 						<Tabs.Tab value="ui">UI</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
@@ -833,6 +835,12 @@ function _SettingsView() {
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
+
+					<Tabs.Panel value="account" pt="md">
+						<div className="settings-card">
+							<AccountSettings />
+						</div>
+					</Tabs.Panel>
 
 					<Tabs.Panel value="ai" pt="md">
 						<div className="settings-card">
@@ -1124,6 +1132,7 @@ function SettingsViewWithGuideLauncher({
 					keepMounted={false}
 				>
 					<Tabs.List>
+						<Tabs.Tab value="account">Account</Tabs.Tab>
 						<Tabs.Tab value="ai">AI</Tabs.Tab>
 						<Tabs.Tab value="ui">UI</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
@@ -1134,6 +1143,12 @@ function SettingsViewWithGuideLauncher({
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
+
+					<Tabs.Panel value="account" pt="md">
+						<div className="settings-card">
+							<AccountSettings />
+						</div>
+					</Tabs.Panel>
 
 					<Tabs.Panel value="ai" pt="md">
 						<div className="settings-card">

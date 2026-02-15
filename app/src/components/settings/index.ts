@@ -1,3 +1,4 @@
+export { AccountSettings } from "./AccountSettings";
 export { ApiKeysSettings } from "./ApiKeysSettings";
 export { AudioSettings } from "./AudioSettings";
 export { DataSettings } from "./DataSettings";

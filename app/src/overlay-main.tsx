@@ -5,6 +5,7 @@ import "@fontsource/sora/index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { Component } from "react";
+import { initSentry } from "./lib/telemetry/sentry";
 import OverlayApp from "./OverlayApp";
 
 // Styles are imported in OverlayApp.tsx via app.css
@@ -15,6 +16,8 @@ const queryClient = new QueryClient({
 		mutations: { retry: 1 },
 	},
 });
+
+initSentry("overlay");
 
 type ErrorBoundaryState = {
 	hasError: boolean;

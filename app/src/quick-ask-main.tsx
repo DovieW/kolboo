@@ -16,6 +16,7 @@ import rust from "highlight.js/lib/languages/rust";
 import typescript from "highlight.js/lib/languages/typescript";
 import "highlight.js/styles/github-dark.css";
 import "@fontsource/sora/index.css";
+import { initSentry } from "./lib/telemetry/sentry";
 
 import QuickAskApp from "./QuickAskApp";
 
@@ -26,6 +27,8 @@ hljs.registerLanguage("python", python);
 hljs.registerLanguage("rust", rust);
 hljs.registerLanguage("typescript", typescript);
 const highlightAdapter = createHighlightJsAdapter(hljs);
+
+initSentry("quick_ask");
 
 renderRoot(
 	<CodeHighlightAdapterProvider adapter={highlightAdapter}>

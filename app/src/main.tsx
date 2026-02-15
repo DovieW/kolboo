@@ -16,6 +16,7 @@ import "@mantine/notifications/styles.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Component, type ReactNode, useEffect, useState } from "react";
 import App from "./App";
+import { initSentry } from "./lib/telemetry/sentry";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -351,6 +352,7 @@ function PanicGate({ children }: { children: ReactNode }) {
 }
 
 installGlobalPanicHandlers();
+initSentry("main");
 
 renderRoot(
 	<QueryClientProvider client={queryClient}>

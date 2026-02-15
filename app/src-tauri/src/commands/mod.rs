@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod event_sink;
 pub mod fireworks;
 pub mod history;
+pub mod licensing;
 pub mod llm;
 pub mod logs;
 pub mod network;

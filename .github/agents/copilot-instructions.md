@@ -12,6 +12,8 @@ Auto-generated from all feature plans. Last updated: 2026-01-25
 - Tauri store (`settings.json`) for persisted settings and profiles (010-backend-cli)
 - TypeScript (strict) + Rust (Tauri) + React/Vite, TanStack Query, Mantine UI, Tauri, `@tauri-apps/plugin-store` (001-phase0-enterprise-posture)
 - Tauri store (`settings.json`) + local policy state/cache metadata (001-phase0-enterprise-posture)
+- TypeScript (strict) + Rust (Tauri) + React/Vite, Mantine, TanStack Query, `@tauri-apps/api`, Tauri Rust command/event system (011-login-org-enrollment)
+- Tauri store (`settings.json`) for non-secret cached state + OS secure storage for auth/session tokens (011-login-org-enrollment)
 
 
 
@@ -31,9 +33,9 @@ tests/
 General: Follow standard conventions
 
 ## Recent Changes
+- 011-login-org-enrollment: Added TypeScript (strict) + Rust (Tauri) + React/Vite, Mantine, TanStack Query, `@tauri-apps/api`, Tauri Rust command/event system
 - 001-phase0-enterprise-posture: Added TypeScript (strict) + Rust (Tauri) + React/Vite, TanStack Query, Mantine UI, Tauri, `@tauri-apps/plugin-store`
 - 010-backend-cli: Added Rust (Tauri v2 backend) + TypeScript (strict) UI + Tauri, tauri-plugin-cli, React/Vite
-- 008-hotkey-shortcut-cards: Added TypeScript (strict) + Rust (Tauri) + React/Vite, Tauri, TanStack Query
 
 
 
