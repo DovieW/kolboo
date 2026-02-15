@@ -45,3 +45,12 @@ Implement policy enforcement posture without requiring login/cloud inference:
 - Billing/subscription flows
 - Mandatory login/account enforcement
 - Enterprise SSO implementation
+
+## Validation results (2026-02-15)
+
+- ✅ `pnpm -C app lint`
+- ✅ `pnpm -C app test` (31 files: 30 passed, 1 skipped)
+- ✅ `pnpm -C app check:ci`
+
+Notes:
+- `cargo:clippy:ci` still reports the existing `clone_on_copy` warning in `app/src-tauri/src/cli/pipeline.rs`; CI gate remains successful.

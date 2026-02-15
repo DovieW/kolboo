@@ -105,8 +105,8 @@
 
 - [X] T029 [P] Update policy behavior and support guidance docs in `docs/How Tos/` and `docs/User Docs/`
 - [X] T030 Run formatting and lint gate, then apply fixes in `app/src/lib/tauri/settings.ts`, `app/src/components/settings/PolicySettings.tsx`, and `app/src-tauri/src/policy.rs`
-- [ ] T031 Run deterministic test suites and fix regressions in `app/src/lib/tauri/settings.actions.test.ts`, `app/src/components/settings/PolicySettings.test.tsx`, and `app/src-tauri/src/policy.rs`
-- [ ] T032 Run final CI gate and resolve remaining issues in `app/src/lib/tauri/commands.ts`, `app/src/lib/queries.ts`, and `app/src-tauri/src/lib.rs`
+- [X] T031 Run deterministic test suites and fix regressions in `app/src/lib/tauri/settings.actions.test.ts`, `app/src/components/settings/PolicySettings.test.tsx`, and `app/src-tauri/src/policy.rs`
+- [X] T032 Run final CI gate and resolve remaining issues in `app/src/lib/tauri/commands.ts`, `app/src/lib/queries.ts`, and `app/src-tauri/src/lib.rs`
 
 ---
 

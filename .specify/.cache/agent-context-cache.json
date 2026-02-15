@@ -1,0 +1,125 @@
+{
+  "version": 2,
+  "records": {
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\004-active-window-ocr\\plan.md": {
+      "projectType": "Desktop app (Tauri) with React UI",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\004-active-window-ocr\\plan.md",
+      "branch": "004-active-window-ocr",
+      "number": 4,
+      "language": "TypeScript (React/Vite, strict) + Rust (Tauri v2)",
+      "dependencies": "",
+      "storage": "",
+      "hash": "E70035070E776C48BBEFD664422D2C5692E50E53AB73BD6A982BAAF8016E18E3"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\006-active-window-ocr\\plan.md": {
+      "projectType": "",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\006-active-window-ocr\\plan.md",
+      "branch": "006-active-window-ocr",
+      "number": 6,
+      "language": "",
+      "dependencies": "",
+      "storage": "",
+      "hash": "0FCB637EB252EFEC04B843BEBBDD0D5DACA4F4D819829CEBF9E2B921BFB1609A"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\002-profile-disable-toggle\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\002-profile-disable-toggle\\plan.md",
+      "branch": "002-profile-disable-toggle",
+      "number": 2,
+      "language": "TypeScript (strict) + Rust (Tauri)",
+      "dependencies": "React/Vite UI, Mantine UI components, TanStack Query, Tauri commands/events, `@tauri-apps/plugin-store`",
+      "storage": "Tauri store `settings.json` (canonical persisted settings)",
+      "hash": "F487D9CB71B1D670520B90AE81406AC4D9403CEEF4F21619020E0BFC33C0D461"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\009-paste-smart-toggle\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\009-paste-smart-toggle\\plan.md",
+      "branch": "009-paste-smart-toggle",
+      "number": 9,
+      "language": "TypeScript (strict) + Rust (Tauri)",
+      "dependencies": "React/Vite, Mantine UI, TanStack Query, Tauri + @tauri-apps/plugin-store",
+      "storage": "Tauri store (`settings.json`)",
+      "hash": "0E888C18D07210AA8015F76D5DC25CFD0A9FFB7E89EBEEB4E7D09122D4536237"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\011-login-org-enrollment\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\011-login-org-enrollment\\plan.md",
+      "branch": "011-login-org-enrollment",
+      "number": 11,
+      "language": "TypeScript (strict) + Rust (Tauri)",
+      "dependencies": "React/Vite, Mantine, TanStack Query, `@tauri-apps/api`, Tauri Rust command/event system, Sentry SDKs used by desktop surfaces",
+      "storage": "Tauri store (`settings.json`) for non-secret cached state + OS secure storage for auth/session tokens",
+      "hash": "F98BD3E70BC56A10EEFAF55D4A56CD2F501FCC667CBD1C774850637974A8B718"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\003-uia-text-insertion\\plan.md": {
+      "projectType": "Desktop app (Tauri). UI lives in `app/src/**`. Backend lives in `app/src-tauri/src/**`.",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\003-uia-text-insertion\\plan.md",
+      "branch": "003-uia-text-insertion",
+      "number": 3,
+      "language": "TypeScript (strict) + React 19 + Vite 7 (UI); Rust 2021 + Tauri 2 (backend)",
+      "dependencies": "UI: `@tanstack/react-query`, Mantine; Backend: `windows` crate (Win32 bindings), `tokio`, `enigo`, `arboard`, `tauri-plugin-store`",
+      "storage": "Tauri store (`settings.json`) for settings and locally persisted “App Capability Memory”.",
+      "hash": "899D394699C74F245B7E940380A9679503F2D604661154974FC1C1E5227036E2"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\012-cloud-policy-packs\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\012-cloud-policy-packs\\plan.md",
+      "branch": "012-cloud-policy-packs",
+      "number": 12,
+      "language": "TypeScript (strict) + Rust (Tauri)",
+      "dependencies": "React/Vite, Mantine, TanStack Query, Tauri command/event system, store-backed settings layer",
+      "storage": "Tauri store (`settings.json`) for persisted policy cache and policy metadata (`policy_state` + effective policy payload)",
+      "hash": "CDE97A30D405299B005E8504DEA432EC77A2AB7ADE12FFBFF7AF25CC4E29654C"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\005-fix-overlay-visibility\\plan.md": {
+      "projectType": "Desktop app (Tauri) with separate overlay window(s)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\005-fix-overlay-visibility\\plan.md",
+      "branch": "005-fix-overlay-visibility",
+      "number": 5,
+      "language": "TypeScript (strict) + Rust (Tauri desktop app)",
+      "dependencies": "React/Vite (UI), Tauri (backend), `tauri-plugin-store` (settings), `tokio` (async), Windows APIs via `windows` crate (already used)",
+      "storage": "Tauri store (`settings.json`) for overlay settings (mode, widget position, monitor target)",
+      "hash": "F88D7A678020721750559A1154CEF75E95028CFA365BE80F615B2D3BF1E89F49"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\010-backend-cli\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\010-backend-cli\\plan.md",
+      "branch": "010-backend-cli",
+      "number": 10,
+      "language": "Rust (Tauri v2 backend) + TypeScript (strict) UI",
+      "dependencies": "Tauri, tauri-plugin-cli, React/Vite",
+      "storage": "Tauri store (`settings.json`) for persisted settings and profiles",
+      "hash": "289C68C859D3A34EAD3D75F2AACD3CCF62CF38C678F1B59DAB03E4D38C709936"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\001-phase0-enterprise-posture\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\001-phase0-enterprise-posture\\plan.md",
+      "branch": "001-phase0-enterprise-posture",
+      "number": 1,
+      "language": "TypeScript (strict) + Rust (Tauri)",
+      "dependencies": "React/Vite, TanStack Query, Mantine UI, Tauri, `@tauri-apps/plugin-store`",
+      "storage": "Tauri store (`settings.json`) + local policy state/cache metadata",
+      "hash": "507CA10207F3410E8D8829359FFF0B7A9E633AE75F9E58998AA2EA98FA4536BB"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\008-hotkey-shortcut-cards\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\008-hotkey-shortcut-cards\\plan.md",
+      "branch": "008-hotkey-shortcut-cards",
+      "number": 8,
+      "language": "TypeScript (strict) + Rust (Tauri)",
+      "dependencies": "React/Vite, Tauri, TanStack Query",
+      "storage": "Tauri store (`settings.json`)",
+      "hash": "DE925C82CF1D84B54DFF4C4806FE7CDD246D7BAB532BB64A873CA035550D647A"
+    },
+    "C:\\Users\\dovie\\repos\\kolboo\\specs\\007-quick-ask-dismiss\\plan.md": {
+      "projectType": "Desktop app (Tauri)",
+      "path": "C:\\Users\\dovie\\repos\\kolboo\\specs\\007-quick-ask-dismiss\\plan.md",
+      "branch": "007-quick-ask-dismiss",
+      "number": 7,
+      "language": "TypeScript (strict) + Rust (Tauri)",
+      "dependencies": "React/Vite, Tauri, TanStack Query",
+      "storage": "Tauri store (`settings.json`)",
+      "hash": "6E74D361D0341F495BC46C64BC3DFA979B2859DB1C173C5A02ACF5BAE416D41E"
+    }
+  }
+}

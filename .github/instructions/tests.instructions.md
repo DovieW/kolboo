@@ -2,10 +2,6 @@
 applyTo: '**'
 ---
 
-# Testing guidance for Kolboo (for Ralph)
-
-Dovie runs tickets through Ralph. Your goal: add tests quickly, keep them deterministic, and use the repo’s existing commands/patterns so you don’t have to “research” every time.
-
 ## Which test commands to run (use these exact ones)
 
 - For **TypeScript/React** unit tests:
