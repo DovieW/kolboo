@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createLicenseStateQueryFn,
 	createRefreshLicenseEntitlementMutationFn,
+	invalidatePolicyRelatedQueries,
 } from "./queries";
 
 describe("license query-layer function builders", () => {
@@ -42,5 +43,18 @@ describe("license query-layer function builders", () => {
 
 		await expect(mutationFn(true)).rejects.toThrow("refresh failed");
 		expect(refreshEntitlement).toHaveBeenCalledWith(true);
+	});
+
+	it("invalidates policy and settings queries when policy lock state changes", async () => {
+		const invalidateQueries = vi.fn(async () => undefined);
+
+		await invalidatePolicyRelatedQueries({ invalidateQueries });
+
+		expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+			queryKey: ["policyState"],
+		});
+		expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+			queryKey: ["settings"],
+		});
 	});
 });

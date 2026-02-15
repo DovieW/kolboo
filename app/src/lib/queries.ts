@@ -1,11 +1,13 @@
 import { notifications } from "@mantine/notifications";
 import {
 	keepPreviousData,
+	type QueryClient,
 	useMutation,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { useEffect } from "react";
 import { updateHotkeyShortcutCardWithValidation } from "./hotkeyMutations";
 import type { HotkeyShortcutCard } from "./hotkeys";
 import {
@@ -56,6 +58,7 @@ import {
 	type OverlayMonitorTarget,
 	type PlayingAudioHandling,
 	type ProxySettings,
+	policyAPI,
 	type QuickAskDismissMode,
 	type RewriteProgramPromptProfile,
 	recordingsAPI,
@@ -66,6 +69,7 @@ import {
 	tauriAPI,
 	type WhisperModelInfo,
 } from "./tauri";
+import { listenTyped } from "./tauri/events";
 
 const queryFnDeps = {
 	tauriAPI,
@@ -237,11 +241,68 @@ export function useSettings() {
 }
 
 export function usePolicyState() {
+	const queryClient = useQueryClient();
+
+	useEffect(() => {
+		let unlisten: (() => void) | null = null;
+
+		listenTyped("policy-state-changed", () => {
+			void invalidatePolicyRelatedQueries(queryClient);
+		})
+			.then((fn) => {
+				unlisten = fn;
+			})
+			.catch((error) => {
+				console.warn("Failed to subscribe to policy-state-changed:", error);
+			});
+
+		return () => {
+			try {
+				unlisten?.();
+			} catch {
+				// ignore
+			}
+		};
+	}, [queryClient]);
+
 	return useQuery({
 		queryKey: ["policyState"],
 		queryFn: () => tauriAPI.getPolicyState(),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
+	});
+}
+
+export async function invalidatePolicyRelatedQueries(
+	queryClient: Pick<QueryClient, "invalidateQueries">,
+): Promise<void> {
+	await Promise.all([
+		queryClient.invalidateQueries({ queryKey: ["policyState"] }),
+		queryClient.invalidateQueries({ queryKey: ["settings"] }),
+	]);
+}
+
+export function usePolicySync() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (request?: { policyPack?: unknown }) => {
+			const state = await tauriAPI.syncPolicy(request);
+			await configAPI.syncPipelineConfig();
+			return state;
+		},
+		onSuccess: () => {
+			void invalidatePolicyRelatedQueries(queryClient);
+		},
+	});
+}
+
+export function usePolicyDiagnosticsExport() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () => policyAPI.exportPolicyDiagnostics(),
+		onSuccess: () => {
+			void invalidatePolicyRelatedQueries(queryClient);
+		},
 	});
 }
 

@@ -24,6 +24,7 @@ export const BACKEND_EVENT_NAMES = [
 	"history-changed",
 	"stats-changed",
 	"settings-changed",
+	"policy-state-changed",
 	"transcript-copied-to-clipboard",
 	"single-instance-activated",
 	"system-event",

@@ -516,7 +516,12 @@ export type RequestLogsRetentionMode = "amount" | "time";
 
 export type SettingsGuideState = "pending" | "skipped" | "completed";
 
-export type PolicySource = "none" | "file" | "cloud";
+export type PolicySource =
+	| "none"
+	| "file"
+	| "cloud"
+	| "cached"
+	| "degraded_expired";
 
 export interface PolicyEnforcedField {
 	path: string;
@@ -526,9 +531,16 @@ export interface PolicyEnforcedField {
 
 export interface PolicyState {
 	source: PolicySource;
+	eligible?: boolean;
 	is_valid: boolean;
+	active_policy_id?: string | null;
+	active_version?: number | null;
+	last_sync_at?: string | null;
+	last_success_at?: string | null;
 	last_updated: string | null;
 	expires_at: string | null;
+	failure_reason?: string | null;
+	enforced_count?: number;
 	version: string | null;
 	enforced_fields: PolicyEnforcedField[];
 }

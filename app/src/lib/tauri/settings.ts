@@ -57,7 +57,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
 };
 
 function normalizePolicySource(value: unknown): PolicyState["source"] {
-	if (value === "none" || value === "file" || value === "cloud") return value;
+	if (
+		value === "none" ||
+		value === "file" ||
+		value === "cloud" ||
+		value === "cached" ||
+		value === "degraded_expired"
+	)
+		return value;
 	return "none";
 }
 
@@ -73,9 +80,29 @@ function normalizePolicyTimestamp(value: unknown): string | null {
 function normalizePolicyState(value: unknown): PolicyState {
 	const v = isRecord(value) ? value : {};
 	const source = normalizePolicySource(v.source);
+	const eligible = typeof v.eligible === "boolean" ? v.eligible : false;
+	const active_policy_id =
+		typeof v.active_policy_id === "string" ? v.active_policy_id : null;
+	const active_version =
+		typeof v.active_version === "number" && Number.isFinite(v.active_version)
+			? Math.max(0, Math.trunc(v.active_version))
+			: null;
+	const last_sync_at = normalizePolicyTimestamp(v.last_sync_at);
+	const last_success_at = normalizePolicyTimestamp(v.last_success_at);
 	const last_updated = normalizePolicyTimestamp(v.last_updated);
 	const expires_at = normalizePolicyTimestamp(v.expires_at);
-	const version = typeof v.version === "string" ? v.version : null;
+	const failure_reason =
+		typeof v.failure_reason === "string" ? v.failure_reason : null;
+	const enforced_count =
+		typeof v.enforced_count === "number" && Number.isFinite(v.enforced_count)
+			? Math.max(0, Math.trunc(v.enforced_count))
+			: null;
+	const version =
+		typeof v.version === "string"
+			? v.version
+			: typeof v.version === "number" && Number.isFinite(v.version)
+				? String(Math.trunc(v.version))
+				: null;
 
 	const now = Date.now();
 	const expiresAtMs = expires_at == null ? null : Date.parse(expires_at);
@@ -104,9 +131,16 @@ function normalizePolicyState(value: unknown): PolicyState {
 
 	return {
 		source,
+		eligible,
 		is_valid,
+		active_policy_id,
+		active_version,
+		last_sync_at,
+		last_success_at,
 		last_updated,
 		expires_at,
+		failure_reason,
+		enforced_count: enforced_count ?? enforced_fields.length,
 		version,
 		enforced_fields,
 	};
@@ -909,6 +943,12 @@ type PolicyConstraintViolation = {
 	reason: string | null;
 };
 
+export type PolicyPathEnforcement = {
+	path: string;
+	enforced: boolean;
+	reason: string | null;
+};
+
 const POLICY_PATH_ALIASES: Readonly<Record<string, string[]>> = {
 	quick_ask_hotkey: ["quick_ask_hold_hotkey"],
 	quick_ask_hold_hotkey: ["quick_ask_hotkey"],
@@ -928,6 +968,57 @@ function clonePatchRecord(
 
 function canonicalPolicyPath(path: string): string {
 	return path.trim();
+}
+
+export function getPolicyPathEnforcement(
+	policy: PolicyState | null | undefined,
+	path: string,
+): PolicyPathEnforcement {
+	const normalizedPath = canonicalPolicyPath(path);
+	if (!normalizedPath || !policy) {
+		return {
+			path: normalizedPath,
+			enforced: false,
+			reason: null,
+		};
+	}
+
+	if (policy.source === "none" || !policy.is_valid) {
+		return {
+			path: normalizedPath,
+			enforced: false,
+			reason: null,
+		};
+	}
+
+	const aliases = new Set<string>([
+		normalizedPath,
+		...(POLICY_PATH_ALIASES[normalizedPath] ?? []),
+	]);
+	for (const [canonical, linked] of Object.entries(POLICY_PATH_ALIASES)) {
+		if (linked.includes(normalizedPath)) {
+			aliases.add(canonical);
+			for (const alias of linked) aliases.add(alias);
+		}
+	}
+
+	for (const field of policy.enforced_fields) {
+		const fieldPath = canonicalPolicyPath(field.path);
+		if (!fieldPath) continue;
+		if (aliases.has(fieldPath)) {
+			return {
+				path: normalizedPath,
+				enforced: true,
+				reason: field.reason ?? null,
+			};
+		}
+	}
+
+	return {
+		path: normalizedPath,
+		enforced: false,
+		reason: null,
+	};
 }
 
 function patchTouchesPolicyPath(
@@ -977,8 +1068,25 @@ function didPolicyStateChangeRaw(
 	if (!isRecord(raw)) return true;
 
 	const source = normalizePolicySource(raw.source);
+	const eligible = typeof raw.eligible === "boolean" ? raw.eligible : false;
+	const active_policy_id =
+		typeof raw.active_policy_id === "string" ? raw.active_policy_id : null;
+	const active_version =
+		typeof raw.active_version === "number" &&
+		Number.isFinite(raw.active_version)
+			? Math.max(0, Math.trunc(raw.active_version))
+			: null;
+	const last_sync_at = normalizePolicyTimestamp(raw.last_sync_at);
+	const last_success_at = normalizePolicyTimestamp(raw.last_success_at);
 	const last_updated = normalizePolicyTimestamp(raw.last_updated);
 	const expires_at = normalizePolicyTimestamp(raw.expires_at);
+	const failure_reason =
+		typeof raw.failure_reason === "string" ? raw.failure_reason : null;
+	const enforced_count =
+		typeof raw.enforced_count === "number" &&
+		Number.isFinite(raw.enforced_count)
+			? Math.max(0, Math.trunc(raw.enforced_count))
+			: null;
 	const version = typeof raw.version === "string" ? raw.version : null;
 	const is_valid = typeof raw.is_valid === "boolean" ? raw.is_valid : true;
 	const enforced_fields: PolicyState["enforced_fields"] = Array.isArray(
@@ -1000,9 +1108,16 @@ function didPolicyStateChangeRaw(
 
 	const rawComparable = JSON.stringify({
 		source,
+		eligible,
 		is_valid,
+		active_policy_id,
+		active_version,
+		last_sync_at,
+		last_success_at,
 		last_updated,
 		expires_at,
+		failure_reason,
+		enforced_count: enforced_count ?? enforced_fields.length,
 		version,
 		enforced_fields,
 	});

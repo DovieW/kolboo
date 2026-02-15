@@ -10,6 +10,7 @@ import type {
 	PipelineErrorPayload,
 	PipelineStateEvent,
 	PipelineTranscriptReadyPayload,
+	PolicyState,
 	QuickAskAnswerPayload,
 	QuickAskStartedPayload,
 	SettingsChangedPayload,
@@ -33,6 +34,7 @@ export type EventMap = {
 	"pipeline-rewriting-started": EmptyEventPayload;
 	"pipeline-routing-started": EmptyEventPayload;
 	"pipeline-state-changed": PipelineStateEvent;
+	"policy-state-changed": PolicyState;
 	"pipeline-transcript-ready": PipelineTranscriptReadyPayload;
 	"pipeline-transcription-started": EmptyEventPayload;
 	"quick-ask-answer": QuickAskAnswerPayload;

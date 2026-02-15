@@ -82,9 +82,16 @@ describe("legacy settings fixtures", () => {
 		expect(settings.settings_version).toBe(3);
 		expect(settings.policy_state).toEqual({
 			source: "none",
+			eligible: false,
 			is_valid: true,
+			active_policy_id: null,
+			active_version: null,
+			last_sync_at: null,
+			last_success_at: null,
 			last_updated: null,
 			expires_at: null,
+			failure_reason: null,
+			enforced_count: 0,
 			version: null,
 			enforced_fields: [],
 		});

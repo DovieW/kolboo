@@ -306,4 +306,77 @@ describe("tauri settings side effects", () => {
 		});
 		expect(invokeMock).toHaveBeenNthCalledWith(2, "sync_pipeline_config");
 	});
+
+	it("derives per-path policy lock metadata", async () => {
+		vi.resetModules();
+		const { getPolicyPathEnforcement } = await import("./settings");
+
+		expect(
+			getPolicyPathEnforcement(undefined, "request_logs_privacy_mode"),
+		).toEqual({
+			path: "request_logs_privacy_mode",
+			enforced: false,
+			reason: null,
+		});
+
+		expect(
+			getPolicyPathEnforcement(
+				{
+					source: "cloud",
+					is_valid: true,
+					last_updated: null,
+					expires_at: null,
+					version: "1",
+					enforced_fields: [
+						{
+							path: "request_logs_privacy_mode",
+							reason: "Managed by organization policy",
+						},
+					],
+				},
+				"request_logs_privacy_mode",
+			),
+		).toEqual({
+			path: "request_logs_privacy_mode",
+			enforced: true,
+			reason: "Managed by organization policy",
+		});
+	});
+
+	it("unlocks aliased path after policy removal", async () => {
+		vi.resetModules();
+		const { getPolicyPathEnforcement } = await import("./settings");
+
+		const before = getPolicyPathEnforcement(
+			{
+				source: "cloud",
+				is_valid: true,
+				last_updated: null,
+				expires_at: null,
+				version: "1",
+				enforced_fields: [
+					{
+						path: "quick_ask_hotkey",
+						reason: "Managed by organization policy",
+					},
+				],
+			},
+			"quick_ask_hold_hotkey",
+		);
+		expect(before.enforced).toBe(true);
+
+		const after = getPolicyPathEnforcement(
+			{
+				source: "none",
+				is_valid: true,
+				last_updated: null,
+				expires_at: null,
+				version: null,
+				enforced_fields: [],
+			},
+			"quick_ask_hold_hotkey",
+		);
+		expect(after.enforced).toBe(false);
+		expect(after.reason).toBeNull();
+	});
 });

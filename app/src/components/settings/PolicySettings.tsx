@@ -1,30 +1,25 @@
 import { Badge, Button, Group, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useMutation } from "@tanstack/react-query";
-import { Download, Shield } from "lucide-react";
+import { Download, RefreshCw, Shield } from "lucide-react";
 import { formatErrorMessage } from "../../lib/formatError";
-import { usePolicyState } from "../../lib/queries";
-import { type PolicyState, policyAPI } from "../../lib/tauri";
+import {
+	usePolicyDiagnosticsExport,
+	usePolicyState,
+	usePolicySync,
+} from "../../lib/queries";
+import {
+	formatPolicySourceLabel,
+	formatPolicyTimestampLabel,
+	PolicyDiagnosticsCard,
+	policyStatusSummary,
+} from "./PolicyDiagnosticsCard";
 import { SettingsRow } from "./SettingsRow";
 
-export function formatPolicySourceLabel(source: PolicyState["source"]): string {
-	if (source === "cloud") return "Cloud";
-	if (source === "file") return "Local file";
-	return "Unmanaged";
-}
-
-export function formatPolicyTimestampLabel(value: string | null): string {
-	if (!value) return "—";
-	const parsed = Date.parse(value);
-	if (Number.isNaN(parsed)) return "—";
-	return new Date(parsed).toLocaleString();
-}
-
-export function policyStatusSummary(policy: PolicyState): string {
-	if (policy.source === "none") return "No active policy";
-	if (!policy.is_valid) return "Policy invalid";
-	return "Policy active";
-}
+export {
+	formatPolicySourceLabel,
+	formatPolicyTimestampLabel,
+	policyStatusSummary,
+};
 
 export function diagnosticsToJson(payload: unknown): string {
 	return JSON.stringify(payload, null, 2);
@@ -32,10 +27,29 @@ export function diagnosticsToJson(payload: unknown): string {
 
 export function PolicySettings() {
 	const policy = usePolicyState();
+	const syncPolicy = usePolicySync();
+	const exportDiagnostics = usePolicyDiagnosticsExport();
 
-	const exportDiagnostics = useMutation({
-		mutationFn: () => policyAPI.exportPolicyDiagnostics(),
-		onSuccess: async (payload) => {
+	const handleSyncPolicy = async () => {
+		try {
+			await syncPolicy.mutateAsync(undefined);
+			notifications.show({
+				title: "Policy sync complete",
+				message: "Policy state refreshed.",
+				color: "green",
+			});
+		} catch (error) {
+			notifications.show({
+				title: "Policy sync failed",
+				message: formatErrorMessage(error),
+				color: "red",
+			});
+		}
+	};
+
+	const handleExportDiagnostics = async () => {
+		try {
+			const payload = await exportDiagnostics.mutateAsync();
 			const json = diagnosticsToJson(payload);
 			try {
 				await navigator.clipboard.writeText(json);
@@ -52,20 +66,18 @@ export function PolicySettings() {
 					color: "yellow",
 				});
 			}
-		},
-		onError: (error) => {
+		} catch (error) {
 			notifications.show({
 				title: "Export failed",
 				message: formatErrorMessage(error),
 				color: "red",
 			});
-		},
-	});
+		}
+	};
 
 	const data = policy.data;
 	const source = data ? formatPolicySourceLabel(data.source) : "Loading…";
 	const status = data ? policyStatusSummary(data) : "Loading…";
-	const enforcedCount = data?.enforced_fields.length ?? 0;
 
 	return (
 		<Stack gap="md">
@@ -73,7 +85,18 @@ export function PolicySettings() {
 				label="Policy status"
 				description="Enterprise posture and enforcement metadata for this device."
 				right={
-					<Group gap="xs" align="center" justify="flex-end">
+					<Group gap="xs" align="center" justify="flex-end" wrap="wrap">
+						<Button
+							variant="default"
+							size="xs"
+							leftSection={<RefreshCw size={14} />}
+							loading={syncPolicy.isPending}
+							onClick={() => {
+								void handleSyncPolicy();
+							}}
+						>
+							Sync now
+						</Button>
 						<Badge color={data?.is_valid === false ? "red" : "green"}>
 							{status}
 						</Badge>
@@ -84,47 +107,7 @@ export function PolicySettings() {
 				}
 			/>
 
-			<SettingsRow
-				label="Policy metadata"
-				description="Version and timing details for the active policy state."
-				right={
-					<Stack gap={2} align="flex-end">
-						<Text size="xs" c="dimmed">
-							Version: {data?.version ?? "—"}
-						</Text>
-						<Text size="xs" c="dimmed">
-							Updated: {formatPolicyTimestampLabel(data?.last_updated ?? null)}
-						</Text>
-						<Text size="xs" c="dimmed">
-							Expires: {formatPolicyTimestampLabel(data?.expires_at ?? null)}
-						</Text>
-					</Stack>
-				}
-			/>
-
-			<SettingsRow
-				label="Enforced fields"
-				description="Settings currently controlled by policy."
-				right={
-					<Stack gap={4} align="flex-end" style={{ maxWidth: 520 }}>
-						<Text size="xs" c="dimmed">
-							{enforcedCount} enforced field{enforcedCount === 1 ? "" : "s"}
-						</Text>
-						{(data?.enforced_fields ?? []).map((field) => (
-							<Group key={field.path} gap={6} justify="flex-end" wrap="wrap">
-								<Badge variant="outline" color="orange">
-									{field.path}
-								</Badge>
-								{field.reason ? (
-									<Text size="xs" c="dimmed">
-										{field.reason}
-									</Text>
-								) : null}
-							</Group>
-						))}
-					</Stack>
-				}
-			/>
+			<PolicyDiagnosticsCard policy={data} />
 
 			<SettingsRow
 				label="Diagnostics export"
@@ -135,7 +118,9 @@ export function PolicySettings() {
 						size="xs"
 						leftSection={<Download size={14} />}
 						loading={exportDiagnostics.isPending}
-						onClick={() => exportDiagnostics.mutate()}
+						onClick={() => {
+							void handleExportDiagnostics();
+						}}
 					>
 						Export diagnostics
 					</Button>

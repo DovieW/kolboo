@@ -222,6 +222,30 @@ describe("tauri command wrappers", () => {
 		expect(invokeMock).toHaveBeenCalledWith("policy_get_state");
 	});
 
+	it("syncPolicy invokes policy sync command", async () => {
+		const { tauriAPI } = await import("./commands");
+
+		await tauriAPI.syncPolicy({
+			policyPack: { version: 1, constraints: { rewrite_llm_enabled: true } },
+		});
+
+		expect(invokeMock).toHaveBeenCalledWith("policy_sync", {
+			request: {
+				policyPack: { version: 1, constraints: { rewrite_llm_enabled: true } },
+			},
+		});
+	});
+
+	it("policyAPI.syncPolicy invokes policy sync command", async () => {
+		const { policyAPI } = await import("./commands");
+
+		await policyAPI.syncPolicy();
+
+		expect(invokeMock).toHaveBeenCalledWith("policy_sync", {
+			request: null,
+		});
+	});
+
 	it("exportPolicyDiagnostics invokes policy export command", async () => {
 		const { policyAPI } = await import("./commands");
 

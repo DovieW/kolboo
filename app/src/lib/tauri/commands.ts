@@ -351,6 +351,10 @@ export const tauriAPI = {
 		return tauriPolicyAPI.getPolicyState();
 	},
 
+	async syncPolicy(request?: { policyPack?: unknown }): Promise<PolicyState> {
+		return tauriPolicyAPI.syncPolicy(request);
+	},
+
 	async exportPolicyDiagnostics(): Promise<PolicyDiagnosticExport> {
 		return tauriPolicyAPI.exportPolicyDiagnostics();
 	},
@@ -581,6 +585,8 @@ export const ocrAPI = {
 };
 
 export const policyAPI = {
+	syncPolicy: (request?: { policyPack?: unknown }) =>
+		tauriPolicyAPI.syncPolicy(request),
 	getPolicyState: () => tauriPolicyAPI.getPolicyState(),
 	exportPolicyDiagnostics: () => tauriPolicyAPI.exportPolicyDiagnostics(),
 };

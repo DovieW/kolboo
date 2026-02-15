@@ -29,6 +29,7 @@ export {
 	defaultQuickAskToggleHotkey,
 	defaultRetryHotkey,
 	defaultToggleHotkey,
+	getPolicyPathEnforcement,
 	tauriSettingsAPI,
 } from "./tauri/settings";
 export * from "./tauri/types";

@@ -2528,6 +2528,7 @@ pub fn run() {
             commands::settings::forward_modifier_key_event,
             commands::settings::settings_doctor,
             commands::settings::settings_apply_patch,
+            commands::policy::policy_sync,
             commands::policy::policy_get_state,
             commands::policy::policy_export_diagnostics,
             commands::licensing::license_get_state,
