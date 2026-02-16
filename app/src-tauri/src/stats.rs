@@ -125,6 +125,8 @@ fn is_free_tier_call(app: &AppHandle, provider: &str) -> bool {
             "cohere" => crate::get_setting_from_store(app, "cohere_free_tier", true),
             "assemblyai" => crate::get_setting_from_store(app, "assemblyai_free_tier", true),
             "speechmatics" => crate::get_setting_from_store(app, "speechmatics_free_tier", true),
+            // Managed gateway usage is billable against managed quotas, not user free-tier toggles.
+            "kolboo_cloud" => false,
             _ => false,
         }
     }

@@ -220,6 +220,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Optional GitHub Gist id for push/pull backups. Null/absent means "not configured".
     dirty |= set_default("github_backup_gist_id", json!(null), true);
     dirty |= set_default("overlay_mode", json!("recording_only"), false);
+    dirty |= set_default("overlay_mode", json!("recording_only"), false);
     // Whether the overlay shows detailed phase text while processing
     // (e.g. "transcribing…", "routing…", "rewriting…"). When false, the overlay
     // uses a waveform animation instead.

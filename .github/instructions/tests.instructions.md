@@ -4,6 +4,12 @@ applyTo: '**'
 
 ## Which test commands to run (use these exact ones)
 
+### Rust cache setup for local runs
+
+- Before running any command below that invokes Cargo (`pnpm -C app cargo:test`, `pnpm -C app test:all`, `pnpm -C app check:ci`), set `RUSTC_WRAPPER=sccache` in the current shell when `sccache` is available.
+- If `sccache` is not installed, clear `RUSTC_WRAPPER` so commands run with plain `rustc`.
+- Also set `CARGO_BUILD_JOBS` to a conservative local value (recommended: ~half logical cores, capped at 8) so test/check runs do not monopolize the machine.
+
 - For **TypeScript/React** unit tests:
 	- `pnpm -C app test`
 	- Coverage: `pnpm -C app coverage`

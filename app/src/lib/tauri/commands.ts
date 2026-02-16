@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { buildCostInvokeParams } from "../costParams";
 import { emitTyped, listenTyped } from "./events";
 import { tauriLicenseAPI } from "./license";
+import { managedInferenceAPI } from "./managedInference";
 import { tauriPolicyAPI } from "./policy";
 import type {
 	AudioCaptureDiagnostics,
@@ -365,6 +366,8 @@ export const tauriAPI = {
 
 	async startLicenseLogin(request?: {
 		provider_hint?: string | null;
+		email?: string | null;
+		password?: string | null;
 	}): Promise<LicenseState> {
 		return tauriLicenseAPI.startLogin(request);
 	},
@@ -573,6 +576,9 @@ export const configAPI = {
 
 	// Sync pipeline config when settings change
 	syncPipelineConfig: () => invoke<void>("sync_pipeline_config"),
+
+	// Managed inference usage-state adapter
+	getManagedUsageState: () => managedInferenceAPI.getUsageState(),
 };
 
 export const ocrAPI = {
@@ -593,8 +599,11 @@ export const policyAPI = {
 
 export const licenseAPI = {
 	getState: () => tauriLicenseAPI.getState(),
-	startLogin: (request?: { provider_hint?: string | null }) =>
-		tauriLicenseAPI.startLogin(request),
+	startLogin: (request?: {
+		provider_hint?: string | null;
+		email?: string | null;
+		password?: string | null;
+	}) => tauriLicenseAPI.startLogin(request),
 	logout: () => tauriLicenseAPI.logout(),
 	refreshEntitlement: (simulateFailure?: boolean) =>
 		tauriLicenseAPI.refreshEntitlement(simulateFailure),

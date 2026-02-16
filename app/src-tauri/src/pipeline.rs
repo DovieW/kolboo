@@ -31,7 +31,16 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 
 mod config;
+#[cfg(test)]
+#[path = "pipeline/tests/enterprise_mode_tests.rs"]
+mod enterprise_mode_tests;
 mod llm_provider;
+#[cfg(test)]
+#[path = "pipeline/tests/managed_outage_tests.rs"]
+mod managed_outage_tests;
+#[cfg(test)]
+#[path = "pipeline/tests/managed_personal_tests.rs"]
+mod managed_personal_tests;
 mod program_profiles;
 mod recording;
 mod routing;
@@ -45,6 +54,7 @@ mod types;
 mod utils;
 
 use config::canonicalize_stt_provider_id;
+pub(crate) use config::{resolve_provider_mode, ProviderMode};
 pub use config::{OcrConfig, PipelineConfig};
 
 pub(crate) fn normalize_stt_language_setting(raw: Option<String>) -> Option<String> {
@@ -125,6 +135,88 @@ fn emit_overlay_ocr_context_unavailable(app: &AppHandle, reason: Option<String>)
     } else {
         let _ = app.emit(events::EVENT_OVERLAY_OCR_CONTEXT_UNAVAILABLE, payload);
     }
+}
+
+fn managed_gateway_ready(config: &PipelineConfig) -> bool {
+    let gateway_ready = config
+        .managed_inference_gateway_url
+        .as_deref()
+        .map(str::trim)
+        .map(|url| !url.is_empty())
+        .unwrap_or(false);
+    let token_ready = config
+        .managed_inference_access_token
+        .as_deref()
+        .map(str::trim)
+        .map(|token| !token.is_empty())
+        .unwrap_or(false);
+
+    gateway_ready && token_ready
+}
+
+fn resolve_stt_provider_for_runtime(
+    config: &PipelineConfig,
+    requested_provider_id: &str,
+) -> String {
+    let requested = canonicalize_stt_provider_id(requested_provider_id);
+    if !config.managed_inference_enabled {
+        return requested;
+    }
+
+    if managed_gateway_ready(config) {
+        return "kolboo_cloud".to_string();
+    }
+
+    let fallback = config
+        .managed_inference_fallback_stt_provider
+        .as_deref()
+        .map(canonicalize_stt_provider_id)
+        .filter(|provider| !provider.trim().is_empty())
+        .filter(|provider| provider != "kolboo_cloud")
+        .unwrap_or_else(|| requested.clone());
+
+    if fallback != requested {
+        log::warn!(
+            "Pipeline: managed gateway unavailable, falling back STT provider '{}' -> '{}'",
+            requested,
+            fallback
+        );
+    }
+
+    fallback
+}
+
+fn resolve_llm_provider_for_runtime(
+    config: &PipelineConfig,
+    requested_provider_id: &str,
+) -> String {
+    if !config.managed_inference_enabled {
+        return requested_provider_id.to_string();
+    }
+
+    if managed_gateway_ready(config) {
+        return "kolboo_cloud".to_string();
+    }
+
+    let requested = requested_provider_id.trim();
+    let fallback = config
+        .managed_inference_fallback_llm_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .filter(|provider| *provider != "kolboo_cloud")
+        .unwrap_or(requested)
+        .to_string();
+
+    if fallback != requested {
+        log::warn!(
+            "Pipeline: managed gateway unavailable, falling back LLM provider '{}' -> '{}'",
+            requested,
+            fallback
+        );
+    }
+
+    fallback
 }
 
 // Intent routing helpers live in `pipeline/routing.rs`.
@@ -393,7 +485,7 @@ impl PipelineInner {
         model: Option<String>,
         language: Option<String>,
     ) -> Result<Arc<dyn SttProvider>, PipelineError> {
-        let provider_id = canonicalize_stt_provider_id(provider_id);
+        let provider_id = resolve_stt_provider_for_runtime(&self.config, provider_id);
 
         // NOTE: for Local Whisper, the "model" setting is not meaningful (Whisper model is
         // selected via `whisper_model_path`). Using the global `stt_model` here can cause
@@ -468,12 +560,18 @@ impl PipelineInner {
         }
 
         // Cloud providers use the common factory
-        let api_key = self
-            .config
-            .stt_api_keys
-            .get(&provider_id)
-            .cloned()
-            .unwrap_or_default();
+        let api_key = if provider_id == "kolboo_cloud" {
+            self.config
+                .managed_inference_access_token
+                .clone()
+                .unwrap_or_default()
+        } else {
+            self.config
+                .stt_api_keys
+                .get(&provider_id)
+                .cloned()
+                .unwrap_or_default()
+        };
 
         let client = stt_provider::build_stt_client(&self.config.proxy_settings)?;
 
@@ -484,6 +582,7 @@ impl PipelineInner {
                 model,
                 language,
                 api_key,
+                managed_gateway_url: self.config.managed_inference_gateway_url.clone(),
                 transcription_prompt: self.config.stt_transcription_prompt.clone(),
                 request_log_store: self.config.request_log_store.clone(),
                 stt_live_output: self.config.stt_live_output,
@@ -499,6 +598,7 @@ impl PipelineInner {
         provider_id: &str,
         params: LlmProviderParams,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
+        let provider_id = resolve_llm_provider_for_runtime(&self.config, provider_id);
         let model_key = params
             .model
             .clone()
@@ -541,10 +641,15 @@ impl PipelineInner {
 
         let api_key = if provider_id == "ollama" {
             String::new()
+        } else if provider_id == "kolboo_cloud" {
+            self.config
+                .managed_inference_access_token
+                .clone()
+                .unwrap_or_default()
         } else {
             self.config
                 .llm_api_keys
-                .get(provider_id)
+                .get(&provider_id)
                 .cloned()
                 .unwrap_or_default()
         };
@@ -565,6 +670,7 @@ impl PipelineInner {
         cfg.model = params.model;
         cfg.ollama_url = params.ollama_url;
         cfg.timeout = params.timeout;
+        cfg.managed_gateway_url = self.config.managed_inference_gateway_url.clone();
         cfg.openai_reasoning_effort = params.openai_reasoning_effort;
         cfg.gemini_thinking_budget = params.gemini_thinking_budget;
         cfg.gemini_thinking_level = params.gemini_thinking_level;

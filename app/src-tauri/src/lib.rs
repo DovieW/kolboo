@@ -45,6 +45,7 @@ mod history;
 mod http;
 mod licensing;
 mod llm;
+mod managed_inference;
 mod network;
 mod ocr;
 mod overlay;
@@ -1142,6 +1143,10 @@ pub(crate) fn stop_recording(
                                         api_key,
                                         model: model.clone(),
                                         ollama_url: cfg.llm_config.ollama_url.clone(),
+                                        managed_gateway_url: cfg
+                                            .llm_config
+                                            .managed_gateway_url
+                                            .clone(),
                                         openai_reasoning_effort,
                                         gemini_thinking_budget,
                                         gemini_thinking_level,
@@ -1835,6 +1840,10 @@ pub(crate) fn stop_recording(
                                             api_key,
                                             model,
                                             ollama_url: cfg.llm_config.ollama_url.clone(),
+                                            managed_gateway_url: cfg
+                                                .llm_config
+                                                .managed_gateway_url
+                                                .clone(),
                                             openai_reasoning_effort: cfg
                                                 .llm_config
                                                 .openai_reasoning_effort
@@ -2536,6 +2545,7 @@ pub fn run() {
             commands::licensing::license_logout,
             commands::licensing::license_refresh_entitlement,
             commands::licensing::license_get_management_url,
+            managed_inference::managed_inference_get_usage_state,
             commands::settings::hotkey_shortcut_cards_create,
             commands::settings::hotkey_shortcut_cards_update,
             commands::settings::hotkey_shortcut_cards_delete,

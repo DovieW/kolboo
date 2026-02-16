@@ -22,6 +22,7 @@ pub(crate) struct SttProviderParams {
     pub model: Option<String>,
     pub language: Option<String>,
     pub api_key: String,
+    pub managed_gateway_url: Option<String>,
     pub transcription_prompt: Option<String>,
     pub request_log_store: Option<RequestLogStore>,
     /// When true, streaming providers should use server-side VAD to auto-commit
@@ -49,12 +50,13 @@ pub(crate) fn create_cloud_stt_provider(
         model,
         language,
         api_key,
+        managed_gateway_url,
         transcription_prompt,
         request_log_store,
         stt_live_output,
     } = params;
 
-    if api_key.is_empty() {
+    if api_key.trim().is_empty() {
         return Err(PipelineError::Config(format!(
             "STT provider '{}' requires an API key",
             provider_id
@@ -72,6 +74,28 @@ pub(crate) fn create_cloud_stt_provider(
             )
             .with_request_log_store(request_log_store),
         ),
+        "kolboo_cloud" => {
+            let gateway_url = managed_gateway_url
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty())
+                .ok_or_else(|| {
+                    PipelineError::Config(
+                        "STT provider 'kolboo_cloud' requires a managed gateway URL".to_string(),
+                    )
+                })?;
+
+            Arc::new(
+                crate::stt::OpenAiSttProvider::with_client(
+                    client,
+                    api_key,
+                    model,
+                    language,
+                    transcription_prompt,
+                )
+                .with_api_base_url(gateway_url)
+                .with_request_log_store(request_log_store),
+            )
+        }
         "fireworks" => Arc::new(
             crate::stt::FireworksSttProvider::with_client(
                 client,

@@ -86,7 +86,7 @@ fn sanitize_settings_for_backup(raw: serde_json::Value) -> serde_json::Value {
 }
 
 #[cfg(desktop)]
-fn build_backup_payload(app: &AppHandle) -> CommandResult<SettingsBackupPayload> {
+pub(crate) fn build_backup_payload(app: &AppHandle) -> CommandResult<SettingsBackupPayload> {
     let raw = load_settings_json_from_disk(app)?;
     let settings = sanitize_settings_for_backup(raw);
     Ok(SettingsBackupPayload {
@@ -134,7 +134,10 @@ pub fn export_settings_backup_to_file(_app: AppHandle, _path: String) -> Command
 }
 
 #[cfg(desktop)]
-fn import_settings_from_value(app: &AppHandle, value: serde_json::Value) -> CommandResult<()> {
+pub(crate) fn import_settings_from_value(
+    app: &AppHandle,
+    value: serde_json::Value,
+) -> CommandResult<()> {
     let settings_obj = match value {
         serde_json::Value::Object(o) => o,
         _ => return Err("Backup settings must be an object".to_string().into()),

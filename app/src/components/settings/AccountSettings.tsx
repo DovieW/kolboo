@@ -1,6 +1,16 @@
-import { Badge, Button, Group, Stack, Text } from "@mantine/core";
+import {
+	Badge,
+	Button,
+	Group,
+	PasswordInput,
+	Progress,
+	Stack,
+	Text,
+	TextInput,
+} from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ExternalLink, RefreshCcw, ShieldUser } from "lucide-react";
+import { useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
 import {
 	useLicenseState,
@@ -49,6 +59,8 @@ export function AccountSettings() {
 	const login = useStartLicenseLogin();
 	const logout = useLogoutLicense();
 	const refresh = useRefreshLicenseEntitlement();
+	const [email, setEmail] = useState("");
+	const [password, setPassword] = useState("");
 
 	const data = license.data;
 	const signedIn = data?.status !== "signed_out";
@@ -65,6 +77,32 @@ export function AccountSettings() {
 					? "red"
 					: "gray";
 
+	const monthlySttProgress = data
+		? data.limits.stt_seconds_monthly > 0
+			? Math.min(
+					100,
+					Math.round(
+						(data.usage.stt_seconds_used / data.limits.stt_seconds_monthly) *
+							100,
+					),
+				)
+			: 0
+		: 0;
+
+	const monthlyLlmProgress = data
+		? data.limits.llm_tokens_monthly > 0
+			? Math.min(
+					100,
+					Math.round(
+						(data.usage.llm_tokens_used / data.limits.llm_tokens_monthly) * 100,
+					),
+				)
+			: 0
+		: 0;
+
+	const canSubmitSignIn =
+		email.trim().length > 0 && password.trim().length > 0 && !signedIn;
+
 	const openManageSubscription = async () => {
 		try {
 			const url = await licenseAPI.getManagementUrl();
@@ -76,6 +114,37 @@ export function AccountSettings() {
 				color: "red",
 			});
 		}
+	};
+
+	const handleSignIn = () => {
+		if (!canSubmitSignIn) {
+			notifications.show({
+				title: "Enter your credentials",
+				message: "Email and password are required to sign in.",
+				color: "yellow",
+			});
+			return;
+		}
+
+		login.mutate(
+			{
+				provider_hint: "personal",
+				email: email.trim(),
+				password,
+			},
+			{
+				onSuccess: () => {
+					setPassword("");
+				},
+				onError: (error) => {
+					notifications.show({
+						title: "Sign in failed",
+						message: formatErrorMessage(error),
+						color: "red",
+					});
+				},
+			},
+		);
 	};
 
 	return (
@@ -113,50 +182,107 @@ export function AccountSettings() {
 				}
 			/>
 
+			{data?.tier === "personal" && signedIn ? (
+				<SettingsRow
+					label="Managed usage"
+					description="Current personal-tier usage against monthly managed limits."
+					right={
+						<Stack gap={6} w={240}>
+							<Text size="xs" c="dimmed">
+								STT: {data.usage.stt_seconds_used.toLocaleString()} /{" "}
+								{data.limits.stt_seconds_monthly.toLocaleString()} sec
+							</Text>
+							<Progress value={monthlySttProgress} size="sm" />
+							<Text size="xs" c="dimmed">
+								LLM: {data.usage.llm_tokens_used.toLocaleString()} /{" "}
+								{data.limits.llm_tokens_monthly.toLocaleString()} tokens
+							</Text>
+							<Progress value={monthlyLlmProgress} size="sm" />
+						</Stack>
+					}
+				/>
+			) : null}
+
+			{signedIn ? (
+				<SettingsRow
+					label="Managed recovery"
+					description="If managed inference is temporarily unavailable, you can continue by selecting BYOK providers in Speech and Rewrite settings."
+					right={
+						<Text size="xs" c="dimmed" ta="right" maw={260}>
+							Managed outages are usually short. Retry first, then switch to
+							BYOK if you need uninterrupted flow.
+						</Text>
+					}
+				/>
+			) : null}
+
 			<SettingsRow
 				label="Session actions"
-				description="Sign in, sign out, refresh entitlement, or open account management."
+				description="Sign in with your Supabase account, sign out, refresh entitlement, or open account management."
 				right={
-					<Group gap="xs" justify="flex-end">
-						<Button
-							variant="default"
-							size="xs"
-							leftSection={<ShieldUser size={14} />}
-							loading={login.isPending}
-							onClick={() => login.mutate({ provider_hint: "personal" })}
-							disabled={signedIn}
-						>
-							Sign in
-						</Button>
-						<Button
-							variant="default"
-							size="xs"
-							leftSection={<RefreshCcw size={14} />}
-							loading={refresh.isPending}
-							onClick={() => refresh.mutate(false)}
-							disabled={!signedIn}
-						>
-							Refresh
-						</Button>
-						<Button
-							variant="default"
-							size="xs"
-							leftSection={<ExternalLink size={14} />}
-							onClick={openManageSubscription}
-						>
-							Manage
-						</Button>
-						<Button
-							variant="light"
-							color="red"
-							size="xs"
-							loading={logout.isPending}
-							onClick={() => logout.mutate()}
-							disabled={!signedIn}
-						>
-							Sign out
-						</Button>
-					</Group>
+					<Stack gap="xs" w={360}>
+						{!signedIn ? (
+							<>
+								<TextInput
+									size="xs"
+									label="Email"
+									placeholder="you@example.com"
+									value={email}
+									onChange={(event) => setEmail(event.currentTarget.value)}
+									autoComplete="email"
+								/>
+								<PasswordInput
+									size="xs"
+									label="Password"
+									placeholder="Enter your password"
+									value={password}
+									onChange={(event) => setPassword(event.currentTarget.value)}
+									autoComplete="current-password"
+								/>
+							</>
+						) : null}
+
+						<Group gap="xs" justify="flex-end">
+							<Button
+								variant="default"
+								size="xs"
+								leftSection={<ShieldUser size={14} />}
+								loading={login.isPending}
+								onClick={handleSignIn}
+								disabled={!canSubmitSignIn}
+							>
+								Sign in
+							</Button>
+							<Button
+								variant="default"
+								size="xs"
+								leftSection={<RefreshCcw size={14} />}
+								loading={refresh.isPending}
+								onClick={() => refresh.mutate(false)}
+								disabled={!signedIn}
+							>
+								Refresh
+							</Button>
+							<Button
+								variant="default"
+								size="xs"
+								leftSection={<ExternalLink size={14} />}
+								onClick={openManageSubscription}
+							>
+								Manage
+							</Button>
+							<Button
+								variant="light"
+								color="red"
+								size="xs"
+								loading={logout.isPending}
+								onClick={() => logout.mutate()}
+								disabled={!signedIn}
+							>
+								Sign out
+							</Button>
+						</Group>
+					</Stack>
 				}
 			/>
 

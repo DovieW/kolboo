@@ -12,6 +12,13 @@
   - `pnpm -C app check` (aggregates Biome/tsc/knip/vitest + Rust helpers)
   - `pnpm -C app check:ci` (CI gate; preferred before merging)
 
+- Local Rust build cache (important for agent-run commands):
+
+  - Before running any command that invokes Cargo/Rust locally (`pnpm -C app dev`, `build`, `cargo:*`, `test:all`, `check`, `check:ci`), set `RUSTC_WRAPPER=sccache` in the current shell when `sccache` is available.
+  - PowerShell guard (preferred): if `sccache` exists, set wrapper; otherwise clear `RUSTC_WRAPPER` so Cargo falls back to plain `rustc`.
+  - To avoid saturating the whole machine, also set a conservative `CARGO_BUILD_JOBS` for local runs (recommended: about half logical cores, capped around 8).
+  - This improves incremental performance and reduces repeated recompilation cost across runs.
+
 - Repo layout:
 
   - UI (React/Vite/TS) lives in `app/src/**`.

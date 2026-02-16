@@ -14,8 +14,10 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Store } from "@tauri-apps/plugin-store";
 import {
 	BarChart2,
 	Download,
@@ -57,6 +59,42 @@ type RetentionUnit = "days" | "hours";
 
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
+
+type CloudSyncUiState = {
+	enabled: boolean;
+	autoPush: boolean;
+	lastPushedAt: string | null;
+	lastPulledAt: string | null;
+	lastError: string | null;
+	remoteRevision: string | null;
+	posthogAnalyticsEnabled: boolean;
+};
+
+async function readCloudSyncUiState(): Promise<CloudSyncUiState> {
+	const store = await Store.load("settings.json");
+	const enabled = (await store.get<boolean>("cloud_sync_enabled")) ?? false;
+	const autoPush = (await store.get<boolean>("cloud_sync_auto_push")) ?? true;
+	const lastPushedAt =
+		(await store.get<string | null>("cloud_sync_last_pushed_at")) ?? null;
+	const lastPulledAt =
+		(await store.get<string | null>("cloud_sync_last_pulled_at")) ?? null;
+	const lastError =
+		(await store.get<string | null>("cloud_sync_last_error")) ?? null;
+	const remoteRevision =
+		(await store.get<string | null>("cloud_sync_remote_revision")) ?? null;
+	const posthogAnalyticsEnabled =
+		(await store.get<boolean>("posthog_analytics_enabled")) ?? false;
+
+	return {
+		enabled,
+		autoPush,
+		lastPushedAt,
+		lastPulledAt,
+		lastError,
+		remoteRevision,
+		posthogAnalyticsEnabled,
+	};
+}
 
 export function DataSettings({
 	editingProfileId,
@@ -304,6 +342,85 @@ export function DataSettings({
 				message: formatErrorMessage(e),
 				color: "red",
 			});
+		},
+	});
+
+	const cloudSyncState = useQuery({
+		queryKey: ["cloudSyncUiState"],
+		queryFn: readCloudSyncUiState,
+		staleTime: 0,
+		refetchOnWindowFocus: true,
+	});
+
+	const refreshCloudSyncState = () => {
+		queryClient.invalidateQueries({ queryKey: ["cloudSyncUiState"] });
+	};
+
+	const runCloudSyncAction = useMutation({
+		mutationFn: async (action: "push" | "pull") => {
+			await invoke("settings_apply_patch", {
+				patch: { __cloud_sync_action: action },
+				deleteKeys: [],
+			});
+		},
+		onSuccess: (_value, action) => {
+			refreshCloudSyncState();
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			notifications.show({
+				title: action === "push" ? "Cloud sync pushed" : "Cloud sync pulled",
+				message:
+					action === "push"
+						? "Settings uploaded to cloud sync endpoint."
+						: "Settings pulled from cloud sync endpoint.",
+				color: "green",
+			});
+		},
+		onError: (e) => {
+			refreshCloudSyncState();
+			notifications.show({
+				title: "Cloud sync failed",
+				message: formatErrorMessage(e),
+				color: "red",
+			});
+		},
+	});
+
+	const updateCloudSyncEnabled = useMutation({
+		mutationFn: async (enabled: boolean) => {
+			await invoke("settings_apply_patch", {
+				patch: { cloud_sync_enabled: enabled },
+				deleteKeys: [],
+			});
+		},
+		onSuccess: () => {
+			refreshCloudSyncState();
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+
+	const updateCloudSyncAutoPush = useMutation({
+		mutationFn: async (enabled: boolean) => {
+			await invoke("settings_apply_patch", {
+				patch: { cloud_sync_auto_push: enabled },
+				deleteKeys: [],
+			});
+		},
+		onSuccess: () => {
+			refreshCloudSyncState();
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
+		},
+	});
+
+	const updatePosthogAnalyticsEnabled = useMutation({
+		mutationFn: async (enabled: boolean) => {
+			await invoke("settings_apply_patch", {
+				patch: { posthog_analytics_enabled: enabled },
+				deleteKeys: [],
+			});
+		},
+		onSuccess: () => {
+			refreshCloudSyncState();
+			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
 	});
 
@@ -1326,6 +1443,115 @@ export function DataSettings({
 							</Button>
 						</Group>
 					</Stack>
+				}
+			/>
+
+			<SettingsRow
+				label="Cloud sync (Personal+)"
+				description="Sync settings via the managed cloud endpoint using your signed-in account token."
+				right={
+					<Stack gap={8} style={{ width: "min(640px, 100%)" }}>
+						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
+							<Text size="xs" c="dimmed">
+								Last push: {cloudSyncState.data?.lastPushedAt ?? "never"}
+							</Text>
+							<Text size="xs" c="dimmed">
+								Last pull: {cloudSyncState.data?.lastPulledAt ?? "never"}
+							</Text>
+						</Group>
+
+						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
+							<Button
+								variant="default"
+								size="xs"
+								leftSection={<Upload size={14} />}
+								loading={runCloudSyncAction.isPending}
+								disabled={
+									isProfileScope ||
+									!cloudSyncState.data?.enabled ||
+									cloudSyncState.isLoading
+								}
+								onClick={() => runCloudSyncAction.mutate("push")}
+							>
+								Push now
+							</Button>
+
+							<Button
+								variant="default"
+								size="xs"
+								leftSection={<Download size={14} />}
+								loading={runCloudSyncAction.isPending}
+								disabled={
+									isProfileScope ||
+									!cloudSyncState.data?.enabled ||
+									cloudSyncState.isLoading
+								}
+								onClick={() => runCloudSyncAction.mutate("pull")}
+							>
+								Pull now
+							</Button>
+						</Group>
+
+						<Group gap="md" align="center" justify="flex-end">
+							<Checkbox
+								label="Enable cloud sync"
+								checked={cloudSyncState.data?.enabled ?? false}
+								disabled={isProfileScope || updateCloudSyncEnabled.isPending}
+								onChange={(event) => {
+									updateCloudSyncEnabled.mutate(event.currentTarget.checked);
+								}}
+							/>
+							<Checkbox
+								label="Auto-push changes"
+								checked={cloudSyncState.data?.autoPush ?? true}
+								disabled={
+									isProfileScope ||
+									updateCloudSyncAutoPush.isPending ||
+									!(cloudSyncState.data?.enabled ?? false)
+								}
+								onChange={(event) => {
+									updateCloudSyncAutoPush.mutate(event.currentTarget.checked);
+								}}
+							/>
+						</Group>
+
+						<Text
+							size="xs"
+							c={cloudSyncState.data?.lastError ? "red" : "dimmed"}
+							ta="right"
+						>
+							{cloudSyncState.data?.lastError
+								? `Last error: ${cloudSyncState.data.lastError}`
+								: `Revision: ${cloudSyncState.data?.remoteRevision ?? "n/a"}`}
+						</Text>
+
+						{isProfileScope ? (
+							<Text size="xs" c="dimmed" ta="right">
+								{GLOBAL_ONLY_TOOLTIP}
+							</Text>
+						) : null}
+					</Stack>
+				}
+			/>
+
+			<SettingsRow
+				label="Product analytics (PostHog)"
+				description="Disabled by default. Can be enforced by policy in managed enterprise environments."
+				right={
+					<Group gap="md" justify="flex-end" wrap="nowrap">
+						<Checkbox
+							label="Enable privacy-safe analytics"
+							checked={cloudSyncState.data?.posthogAnalyticsEnabled ?? false}
+							disabled={
+								isProfileScope || updatePosthogAnalyticsEnabled.isPending
+							}
+							onChange={(event) => {
+								updatePosthogAnalyticsEnabled.mutate(
+									event.currentTarget.checked,
+								);
+							}}
+						/>
+					</Group>
 				}
 			/>
 

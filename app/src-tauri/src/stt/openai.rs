@@ -730,7 +730,9 @@ impl OpenAiSttProvider {
         if self.supports_realtime_streaming() {
             return false;
         }
-        self.model == "whisper-1" || self.model.contains("transcribe")
+        self.model == "whisper-1"
+            || self.model.contains("transcribe")
+            || self.model.contains("whisper")
     }
 
     fn clamp_prompt_for_model(&self, prompt: Option<&str>) -> Option<String> {
@@ -933,8 +935,8 @@ impl OpenAiSttProvider {
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(SttError::Api(format!(
-                "OpenAI GPT-4o API error ({}): {}",
-                status, error_text
+                "OpenAI-compatible Responses API error (model={}, status={}): {}",
+                self.model, status, error_text
             )));
         }
 
@@ -1052,6 +1054,16 @@ mod tests {
         let provider = OpenAiSttProvider::new(
             "test-key".to_string(),
             Some("whisper-1".to_string()),
+            None,
+            None,
+        );
+        assert!(provider.uses_transcriptions_endpoint());
+
+        // Whisper-family model ids (used by some OpenAI-compatible gateways/providers)
+        // should also use the transcriptions endpoint.
+        let provider = OpenAiSttProvider::new(
+            "test-key".to_string(),
+            Some("whisper-large-v3-turbo".to_string()),
             None,
             None,
         );

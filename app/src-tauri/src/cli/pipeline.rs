@@ -529,6 +529,7 @@ fn handle_stream(
             model: model.clone(),
             language: language.clone(),
             api_key,
+            managed_gateway_url: None,
             transcription_prompt: None,
             request_log_store: request_log_store.clone(),
             stt_live_output: true,

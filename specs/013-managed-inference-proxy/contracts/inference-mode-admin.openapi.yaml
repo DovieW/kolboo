@@ -1,0 +1,156 @@
+openapi: 3.1.0
+info:
+  title: Enterprise Inference Mode Admin API
+  version: 0.1.0
+  description: Org-level mode and key-rotation continuity contract.
+servers:
+  - url: https://admin.kolboo.example
+security:
+  - bearerAuth: []
+paths:
+  /v1/orgs/{orgId}/inference-mode:
+    get:
+      operationId: getOrgInferenceMode
+      summary: Read org inference mode configuration
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      responses:
+        '200':
+          description: Current org inference mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgInferenceModeState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: updateOrgInferenceMode
+      summary: Update org inference mode
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInferenceModeRequest'
+      responses:
+        '200':
+          description: Updated inference mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgInferenceModeState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/orgs/{orgId}/byok-key-rotation:
+    post:
+      operationId: rotateOrgByokKey
+      summary: Start/complete BYOK key rotation continuity window
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ByokRotationRequest'
+      responses:
+        '200':
+          description: Rotation state updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgByokRotationState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    OrgId:
+      name: orgId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Missing/invalid auth
+    Forbidden:
+      description: Caller lacks org-admin permission
+  schemas:
+    UpdateInferenceModeRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [managed, byok]
+        reason:
+          type: string
+          maxLength: 256
+          nullable: true
+    OrgInferenceModeState:
+      type: object
+      required: [org_id, mode, version, updated_at]
+      properties:
+        org_id:
+          type: string
+        mode:
+          type: string
+          enum: [managed, byok]
+        version:
+          type: integer
+          minimum: 1
+        updated_at:
+          type: string
+          format: date-time
+        propagated_by:
+          type: string
+          nullable: true
+        propagation_deadline:
+          type: string
+          format: date-time
+          nullable: true
+    ByokRotationRequest:
+      type: object
+      required: [active_key_version]
+      properties:
+        active_key_version:
+          type: string
+        previous_key_version:
+          type: string
+          nullable: true
+        grace_period_minutes:
+          type: integer
+          minimum: 0
+          maximum: 1440
+          nullable: true
+    OrgByokRotationState:
+      type: object
+      required: [org_id, active_key_version, updated_at]
+      properties:
+        org_id:
+          type: string
+        active_key_version:
+          type: string
+        previous_key_version:
+          type: string
+          nullable: true
+        grace_period_until:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time

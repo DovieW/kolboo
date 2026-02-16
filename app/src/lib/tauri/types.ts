@@ -440,6 +440,36 @@ export interface LicenseState {
 	limits: TierLimits;
 }
 
+export type ManagedInferenceMode = "managed" | "byok";
+
+export type ManagedErrorCategory =
+	| "unauthorized"
+	| "ineligible"
+	| "over_quota"
+	| "temporarily_unavailable";
+
+export interface ManagedError {
+	category: ManagedErrorCategory;
+	code: string;
+	message: string;
+	request_id?: string | null;
+	retry_after_seconds?: number | null;
+}
+
+export interface ManagedUsageCounter {
+	metric: "stt_seconds" | "llm_tokens" | "managed_requests";
+	used: number;
+	limit: number;
+	warning_thresholds?: number[];
+	window: "daily" | "monthly";
+}
+
+export interface ManagedUsageState {
+	tier: LicenseTier;
+	mode: ManagedInferenceMode;
+	counters: ManagedUsageCounter[];
+}
+
 export interface ConnectionStateChangedPayload {
 	state: ConnectionState;
 }

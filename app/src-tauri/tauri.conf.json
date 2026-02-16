@@ -276,6 +276,131 @@
 							]
 						}
 					}
+				},
+				"logs": {
+					"description": "Access and export request/app logs",
+					"subcommands": {
+						"request": {
+							"description": "Request log operations",
+							"subcommands": {
+								"list": {
+									"description": "List in-memory request logs",
+									"args": [
+										{
+											"name": "limit",
+											"short": "n",
+											"description": "Max number of logs to return (1-200)",
+											"takesValue": true
+										},
+										{
+											"name": "strip_text",
+											"description": "Strip transcript/context text and payloads from output"
+										},
+										{
+											"name": "output",
+											"short": "o",
+											"description": "Output format (json|human)",
+											"takesValue": true
+										}
+									]
+								},
+								"clear": {
+									"description": "Clear all in-memory request logs",
+									"args": [
+										{
+											"name": "output",
+											"short": "o",
+											"description": "Output format (json|human)",
+											"takesValue": true
+										}
+									]
+								},
+								"export": {
+									"description": "Export request logs to a JSON file",
+									"args": [
+										{
+											"name": "file",
+											"short": "f",
+											"description": "Destination JSON file path",
+											"takesValue": true
+										},
+										{
+											"name": "limit",
+											"short": "n",
+											"description": "Max number of logs to export (1-200)",
+											"takesValue": true
+										},
+										{
+											"name": "strip_text",
+											"description": "Strip transcript/context text and payloads from export"
+										},
+										{
+											"name": "output",
+											"short": "o",
+											"description": "Output format (json|human)",
+											"takesValue": true
+										}
+									]
+								}
+							}
+						},
+						"app": {
+							"description": "Rolling app log file operations",
+							"subcommands": {
+								"dir": {
+									"description": "Print app logs directory",
+									"args": [
+										{
+											"name": "output",
+											"short": "o",
+											"description": "Output format (json|human)",
+											"takesValue": true
+										}
+									]
+								},
+								"list": {
+									"description": "List app log files in newest-first order",
+									"args": [
+										{
+											"name": "limit",
+											"short": "n",
+											"description": "Max number of files to return (1-200)",
+											"takesValue": true
+										},
+										{
+											"name": "output",
+											"short": "o",
+											"description": "Output format (json|human)",
+											"takesValue": true
+										}
+									]
+								},
+								"show": {
+									"description": "Show tail lines from an app log file (latest by default)",
+									"args": [
+										{
+											"name": "file",
+											"short": "f",
+											"description": "File path (absolute or relative to app logs dir)",
+											"takesValue": true
+										},
+										{
+											"name": "lines",
+											"short": "n",
+											"description": "Number of trailing lines to show (1-5000)",
+											"takesValue": true
+										},
+										{
+											"name": "output",
+											"short": "o",
+											"description": "Output format (json|human)",
+											"takesValue": true
+										}
+									]
+								}
+							}
+						}
+					}
 				}
 			}
 		}

@@ -577,6 +577,7 @@ pub async fn test_llm_rewrite(
         api_key,
         model: desired_model,
         ollama_url: config.llm_config.ollama_url.clone(),
+        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
         openai_reasoning_effort: effective_openai_reasoning_effort,
         gemini_thinking_budget: effective_gemini_thinking_budget,
         gemini_thinking_level: effective_gemini_thinking_level,
@@ -830,6 +831,7 @@ pub async fn iterate_rewrite_prompt(
         api_key,
         model: desired_model,
         ollama_url: config.llm_config.ollama_url.clone(),
+        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
         openai_reasoning_effort: effective_openai_reasoning_effort,
         gemini_thinking_budget: effective_gemini_thinking_budget,
         gemini_thinking_level: effective_gemini_thinking_level,
@@ -1098,6 +1100,7 @@ pub async fn test_rewrite_with_prompt(
         api_key,
         model: desired_model,
         ollama_url: config.llm_config.ollama_url.clone(),
+        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
         openai_reasoning_effort: effective_openai_reasoning_effort,
         gemini_thinking_budget: effective_gemini_thinking_budget,
         gemini_thinking_level: effective_gemini_thinking_level,
@@ -1224,6 +1227,7 @@ pub async fn llm_complete(
         api_key,
         model: desired_model,
         ollama_url: config.llm_config.ollama_url.clone(),
+        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
         openai_reasoning_effort: args
             .openai_reasoning_effort
             .clone()
@@ -1284,6 +1288,7 @@ pub fn update_llm_config(
         api_key: config.api_key.unwrap_or_default(),
         model: config.model,
         ollama_url: config.ollama_url,
+        managed_gateway_url: None,
         openai_reasoning_effort: None,
         gemini_thinking_budget: None,
         gemini_thinking_level: None,

@@ -14,6 +14,8 @@ import type {
 
 export type LicenseLoginRequest = {
 	provider_hint?: string | null;
+	email?: string | null;
+	password?: string | null;
 };
 
 export function buildLicenseSentryContext(
@@ -98,11 +100,14 @@ export const tauriLicenseAPI = {
 			return await invoke("license_start_login", {
 				request: {
 					provider_hint: request?.provider_hint ?? null,
+					email: request?.email ?? null,
+					password: request?.password ?? null,
 				},
 			});
 		} catch (error) {
 			reportLicenseSentryError("license_start_login", error, {
 				provider_hint: request?.provider_hint ?? null,
+				email: request?.email ?? null,
 			});
 			throw error;
 		}

@@ -96,6 +96,30 @@ pub(super) fn create_llm_provider(
             .with_timeout(config.timeout)
             .with_request_log_store(request_log_store.clone()),
         ),
+        "kolboo_cloud" => {
+            let managed_gateway_url = config
+                .managed_gateway_url
+                .clone()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| {
+                    crate::pipeline::PipelineError::Config(
+                        "LLM provider 'kolboo_cloud' requires managed gateway URL".to_string(),
+                    )
+                })?;
+
+            Arc::new(
+                OpenAiLlmProvider::with_client(
+                    client,
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_api_base_url(managed_gateway_url)
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone())
+                .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+            )
+        }
         _ => {
             // Default to OpenAI
             Arc::new(

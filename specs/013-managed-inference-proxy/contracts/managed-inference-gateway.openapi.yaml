@@ -1,0 +1,259 @@
+openapi: 3.1.0
+info:
+  title: Managed Inference Gateway API
+  version: 0.1.0
+  description: |
+    Contract for managed STT/LLM execution paths used by desktop clients.
+servers:
+  - url: https://api.kolboo.example
+security:
+  - bearerAuth: []
+paths:
+  /v1/stt/transcribe:
+    post:
+      operationId: managedSttTranscribe
+      summary: Execute managed STT transcription
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagedSttRequest'
+      responses:
+        '200':
+          description: Managed STT completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedSttResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/IneligibleError'
+        '429':
+          $ref: '#/components/responses/OverQuotaError'
+        '503':
+          $ref: '#/components/responses/TemporarilyUnavailableError'
+  /v1/llm/complete:
+    post:
+      operationId: managedLlmComplete
+      summary: Execute managed LLM completion/rewrite
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagedLlmRequest'
+      responses:
+        '200':
+          description: Managed LLM completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedLlmResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/IneligibleError'
+        '429':
+          $ref: '#/components/responses/OverQuotaError'
+        '503':
+          $ref: '#/components/responses/TemporarilyUnavailableError'
+  /v1/usage/state:
+    get:
+      operationId: getManagedUsageState
+      summary: Read managed usage and limit proximity for caller
+      responses:
+        '200':
+          description: Usage state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageStateResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+  responses:
+    UnauthorizedError:
+      description: Caller is unauthenticated or token invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ManagedError'
+          examples:
+            unauthorized:
+              value:
+                category: unauthorized
+                code: AUTH_INVALID
+                message: Please sign in again.
+    IneligibleError:
+      description: Caller is authenticated but not eligible for managed mode
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ManagedError'
+          examples:
+            ineligible:
+              value:
+                category: ineligible
+                code: ENTITLEMENT_INELIGIBLE
+                message: Managed inference is not available for this account.
+    OverQuotaError:
+      description: Caller exceeded managed quota limits
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ManagedError'
+          examples:
+            overQuota:
+              value:
+                category: over_quota
+                code: QUOTA_EXCEEDED
+                message: Managed usage limit reached. Upgrade or switch mode.
+    TemporarilyUnavailableError:
+      description: Managed path is temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ManagedError'
+          examples:
+            unavailable:
+              value:
+                category: temporarily_unavailable
+                code: UPSTREAM_UNAVAILABLE
+                message: Managed service is temporarily unavailable. Try again shortly.
+  schemas:
+    ManagedSttRequest:
+      type: object
+      required: [provider, model, audio_ref]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        audio_ref:
+          type: string
+          description: Opaque handle to uploaded audio object
+        metadata:
+          type: object
+          additionalProperties: true
+    ManagedSttResponse:
+      type: object
+      required: [request_id, transcript, usage]
+      properties:
+        request_id:
+          type: string
+        transcript:
+          type: string
+        usage:
+          $ref: '#/components/schemas/UsageDelta'
+    ManagedLlmRequest:
+      type: object
+      required: [provider, model, operation]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        operation:
+          type: string
+          enum: [rewrite, complete, quick_ask]
+        input_ref:
+          type: string
+          nullable: true
+          description: Opaque reference for input payload material
+        metadata:
+          type: object
+          additionalProperties: true
+    ManagedLlmResponse:
+      type: object
+      required: [request_id, output, usage]
+      properties:
+        request_id:
+          type: string
+        output:
+          type: string
+        usage:
+          $ref: '#/components/schemas/UsageDelta'
+    UsageDelta:
+      type: object
+      required: [metric, amount]
+      properties:
+        metric:
+          type: string
+          enum: [stt_seconds, llm_tokens, managed_requests]
+        amount:
+          type: integer
+          minimum: 0
+    UsageStateResponse:
+      type: object
+      required: [tier, mode, counters]
+      properties:
+        tier:
+          type: string
+          enum: [community, personal, enterprise]
+        mode:
+          type: string
+          enum: [managed, byok]
+        counters:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageCounterView'
+    UsageCounterView:
+      type: object
+      required: [metric, used, limit, window]
+      properties:
+        metric:
+          type: string
+          enum: [stt_seconds, llm_tokens, managed_requests]
+        used:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+        warning_thresholds:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 99
+        window:
+          type: string
+          enum: [daily, monthly]
+    ManagedError:
+      type: object
+      required: [category, code, message]
+      properties:
+        category:
+          type: string
+          enum: [unauthorized, ineligible, over_quota, temporarily_unavailable]
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+          nullable: true
+        retry_after_seconds:
+          type: integer
+          minimum: 1
+          nullable: true
