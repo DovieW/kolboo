@@ -591,6 +591,12 @@ export interface RequestLog {
     [k: string]: any | undefined;
   };
   /**
+   * True when this request used managed inference transport.
+   *
+   * This is stamped at runtime when provider creation resolves to managed gateway routing (not merely when managed mode is requested).
+   */
+  managed_inference?: boolean;
+  /**
    * Number of OCR characters included (if any).
    */
   ocr_context_chars?: number | null;

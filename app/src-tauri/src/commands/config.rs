@@ -496,43 +496,23 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         }
     });
 
-    let requested_stt_provider_for_mode = if managed_mode_requested {
-        "kolboo_cloud"
-    } else {
-        stt_provider.as_str()
-    };
-    let requested_llm_provider_for_mode = if managed_mode_requested {
-        Some("kolboo_cloud")
-    } else {
-        Some(llm_provider_effective.as_str())
-    };
-
     let provider_mode = resolve_provider_mode(
+        managed_mode_requested,
         license_state.tier,
         license_state.status,
-        requested_stt_provider_for_mode,
-        requested_llm_provider_for_mode,
         Some(policy_source),
         Some(policy_state.eligible),
         Some(policy_state.is_valid),
     );
 
     let managed_mode_active = matches!(provider_mode, ProviderMode::Managed);
-    let effective_stt_provider = if managed_mode_active {
-        "kolboo_cloud".to_string()
-    } else {
-        stt_provider.clone()
-    };
+    let effective_stt_provider = stt_provider.clone();
     let effective_stt_api_key = if managed_mode_active {
         managed_access_token.clone().unwrap_or_default()
     } else {
         stt_api_key.clone()
     };
-    let effective_llm_provider = if managed_mode_active {
-        "kolboo_cloud".to_string()
-    } else {
-        llm_provider_effective.clone()
-    };
+    let effective_llm_provider = llm_provider_effective.clone();
     let managed_inference_fallback_stt_provider = if managed_mode_active {
         Some(stt_provider.clone())
     } else {

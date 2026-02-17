@@ -2949,6 +2949,33 @@ pub fn run() {
                 }
 
                 app.manage(pipeline);
+
+                // Best-effort: silently refresh session material at startup so managed
+                // requests don't fail with stale access tokens after long idle periods.
+                if crate::licensing::load_session_material(app.handle()).is_some() {
+                    let app_handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        match commands::licensing::license_refresh_entitlement(
+                            app_handle.clone(),
+                            Some(false),
+                        )
+                        .await
+                        {
+                            Ok(state) => {
+                                log::info!(
+                                    "Startup silent entitlement refresh succeeded (status={:?})",
+                                    state.status
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Startup silent entitlement refresh failed: {}",
+                                    e
+                                );
+                            }
+                        }
+                    });
+                }
             }
 
             // Backend-driven overlay waveform: publish realtime mic levels to the overlay.

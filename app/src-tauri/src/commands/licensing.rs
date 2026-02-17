@@ -243,7 +243,7 @@ pub async fn license_start_login(
     let provider_hint = request.provider_hint.as_deref();
     let mut state = build_login_state(provider_hint, Utc::now());
     state.user_id = Some(auth.user.id);
-    state.email = auth.user.email.or_else(|| Some(email));
+    state.email = auth.user.email.or(Some(email));
     save_license_state(&app, &state, "login_success")?;
 
     if let Err(e) = crate::commands::config::sync_pipeline_config(app.clone()) {

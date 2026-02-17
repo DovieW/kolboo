@@ -154,6 +154,20 @@ fn managed_gateway_ready(config: &PipelineConfig) -> bool {
     gateway_ready && token_ready
 }
 
+fn is_managed_auth_token_error(err: &PipelineError) -> bool {
+    let message = match err {
+        PipelineError::Stt(SttError::Api(msg)) => msg,
+        PipelineError::Stt(SttError::NetworkMessage(msg)) => msg,
+        _ => return false,
+    };
+
+    let lower = message.to_lowercase();
+    lower.contains("auth_invalid_token")
+        || lower.contains("supabase auth user lookup rejected token")
+        || lower.contains("unauthorized")
+        || lower.contains("401")
+}
+
 fn resolve_stt_provider_for_runtime(
     config: &PipelineConfig,
     requested_provider_id: &str,
@@ -164,7 +178,7 @@ fn resolve_stt_provider_for_runtime(
     }
 
     if managed_gateway_ready(config) {
-        return "kolboo_cloud".to_string();
+        return requested;
     }
 
     let fallback = config
@@ -172,7 +186,7 @@ fn resolve_stt_provider_for_runtime(
         .as_deref()
         .map(canonicalize_stt_provider_id)
         .filter(|provider| !provider.trim().is_empty())
-        .filter(|provider| provider != "kolboo_cloud")
+        .filter(|provider| provider != &requested)
         .unwrap_or_else(|| requested.clone());
 
     if fallback != requested {
@@ -195,7 +209,7 @@ fn resolve_llm_provider_for_runtime(
     }
 
     if managed_gateway_ready(config) {
-        return "kolboo_cloud".to_string();
+        return requested_provider_id.to_string();
     }
 
     let requested = requested_provider_id.trim();
@@ -204,7 +218,7 @@ fn resolve_llm_provider_for_runtime(
         .as_deref()
         .map(str::trim)
         .filter(|provider| !provider.is_empty())
-        .filter(|provider| *provider != "kolboo_cloud")
+        .filter(|provider| *provider != requested)
         .unwrap_or(requested)
         .to_string();
 
@@ -486,6 +500,19 @@ impl PipelineInner {
         language: Option<String>,
     ) -> Result<Arc<dyn SttProvider>, PipelineError> {
         let provider_id = resolve_stt_provider_for_runtime(&self.config, provider_id);
+        let managed_ready =
+            self.config.managed_inference_enabled && managed_gateway_ready(&self.config);
+        // Local providers never use managed transport.
+        let managed_transport_active =
+            managed_ready && provider_id != "local-whisper" && provider_id != "whisper-server";
+
+        if managed_transport_active {
+            if let Some(store) = &self.config.request_log_store {
+                let _ = store.with_current(|log| {
+                    log.managed_inference = true;
+                });
+            }
+        }
 
         // NOTE: for Local Whisper, the "model" setting is not meaningful (Whisper model is
         // selected via `whisper_model_path`). Using the global `stt_model` here can cause
@@ -560,7 +587,7 @@ impl PipelineInner {
         }
 
         // Cloud providers use the common factory
-        let api_key = if provider_id == "kolboo_cloud" {
+        let api_key = if managed_transport_active {
             self.config
                 .managed_inference_access_token
                 .clone()
@@ -582,7 +609,11 @@ impl PipelineInner {
                 model,
                 language,
                 api_key,
-                managed_gateway_url: self.config.managed_inference_gateway_url.clone(),
+                managed_gateway_url: if managed_transport_active {
+                    self.config.managed_inference_gateway_url.clone()
+                } else {
+                    None
+                },
                 transcription_prompt: self.config.stt_transcription_prompt.clone(),
                 request_log_store: self.config.request_log_store.clone(),
                 stt_live_output: self.config.stt_live_output,
@@ -623,6 +654,18 @@ impl PipelineInner {
             .anthropic_thinking_budget
             .map(|b| b.to_string())
             .unwrap_or_else(|| "<default-budget>".to_string());
+        let managed_ready =
+            self.config.managed_inference_enabled && managed_gateway_ready(&self.config);
+        // Ollama is local and never uses managed transport.
+        let managed_transport_active = managed_ready && provider_id != "ollama";
+
+        if managed_transport_active {
+            if let Some(store) = &self.config.request_log_store {
+                let _ = store.with_current(|log| {
+                    log.managed_inference = true;
+                });
+            }
+        }
         let cache_key = format!(
             "{}::{}::{}::{}::{}::{}::{}::{}",
             provider_id,
@@ -641,7 +684,7 @@ impl PipelineInner {
 
         let api_key = if provider_id == "ollama" {
             String::new()
-        } else if provider_id == "kolboo_cloud" {
+        } else if managed_transport_active {
             self.config
                 .managed_inference_access_token
                 .clone()
@@ -670,7 +713,11 @@ impl PipelineInner {
         cfg.model = params.model;
         cfg.ollama_url = params.ollama_url;
         cfg.timeout = params.timeout;
-        cfg.managed_gateway_url = self.config.managed_inference_gateway_url.clone();
+        cfg.managed_gateway_url = if managed_transport_active {
+            self.config.managed_inference_gateway_url.clone()
+        } else {
+            None
+        };
         cfg.openai_reasoning_effort = params.openai_reasoning_effort;
         cfg.gemini_thinking_budget = params.gemini_thinking_budget;
         cfg.gemini_thinking_level = params.gemini_thinking_level;
@@ -831,6 +878,61 @@ pub struct SharedPipeline {
 }
 
 impl SharedPipeline {
+    async fn try_refresh_managed_auth_and_retry_stt(
+        &self,
+        stt_provider_id: &str,
+        stt_model: Option<String>,
+        stt_language: Option<String>,
+        wav_bytes: &[u8],
+        retry_config: &crate::stt::RetryConfig,
+        timeout: Duration,
+        cancel_token: &CancellationToken,
+        log_prefix: &str,
+    ) -> Result<stt_flow::SttResult, PipelineError> {
+        let app_handle = self
+            .app_handle
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .ok_or_else(|| {
+                PipelineError::Config(
+                    "Managed auth refresh unavailable: app handle missing".to_string(),
+                )
+            })?;
+
+        log::warn!(
+            "{}: Managed auth token appears expired; attempting one-shot session refresh",
+            log_prefix
+        );
+
+        crate::commands::licensing::license_refresh_entitlement(app_handle, Some(false))
+            .await
+            .map_err(|e| {
+                PipelineError::Stt(SttError::Api(format!(
+                    "Managed auth refresh failed: {}",
+                    e.message
+                )))
+            })?;
+
+        let refreshed_provider = {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            inner.get_or_create_stt_provider(stt_provider_id, stt_model, stt_language)?
+        };
+
+        run_stt_transcription(
+            refreshed_provider,
+            wav_bytes,
+            retry_config,
+            Some(timeout),
+            cancel_token,
+            &format!("{} (post-refresh)", log_prefix),
+        )
+        .await
+    }
+
     /// Create a new shared pipeline
     pub fn new(config: PipelineConfig) -> Self {
         let inner = PipelineInner::new(config);
@@ -2426,6 +2528,9 @@ impl SharedPipeline {
         let (
             wav_bytes,
             stt_provider,
+            stt_provider_id,
+            stt_model,
+            stt_language,
             retry_config,
             timeout,
             cancel_token,
@@ -2572,6 +2677,7 @@ impl SharedPipeline {
 
             let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
             let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
+            let mut stt_language_used: Option<String> = effective_stt_settings.language.clone();
 
             #[cfg(feature = "local-whisper")]
             if stt_provider_id_used == "local-whisper" {
@@ -2612,6 +2718,7 @@ impl SharedPipeline {
                         let global_model = inner.config.stt_model.clone();
                         stt_provider_id_used = global_provider.clone();
                         stt_model_used = global_model.clone();
+                        stt_language_used = inner.config.stt_language.clone();
 
                         #[cfg(feature = "local-whisper")]
                         if stt_provider_id_used == "local-whisper" {
@@ -2674,6 +2781,9 @@ impl SharedPipeline {
             (
                 outcome.wav_bytes,
                 stt_provider,
+                stt_provider_id_used,
+                stt_model_used,
+                stt_language_used,
                 retry_config,
                 effective_stt_settings.timeout,
                 cancel_token,
@@ -2778,16 +2888,60 @@ impl SharedPipeline {
                             (result.text, result.duration_ms, Some(result.retry))
                         }
                         Err(e) => {
-                            let mut inner = self
-                                .inner
-                                .lock()
-                                .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                            if matches!(e, PipelineError::Cancelled) {
-                                inner.reset_to_idle();
+                            let managed_auth_recovered = {
+                                let managed_enabled = self
+                                    .inner
+                                    .lock()
+                                    .map(|inner| inner.config.managed_inference_enabled)
+                                    .unwrap_or(false);
+                                managed_enabled && is_managed_auth_token_error(&e)
+                            };
+
+                            if managed_auth_recovered {
+                                match self
+                                    .try_refresh_managed_auth_and_retry_stt(
+                                        &stt_provider_id,
+                                        stt_model.clone(),
+                                        stt_language.clone(),
+                                        &wav_bytes,
+                                        &retry_config,
+                                        timeout,
+                                        &cancel_token,
+                                        "Pipeline (streaming-fallback)",
+                                    )
+                                    .await
+                                {
+                                    Ok(recovered) => {
+                                        if let Ok(mut inner) = self.inner.lock() {
+                                            inner.stt_complete = true;
+                                        }
+                                        (
+                                            recovered.text,
+                                            recovered.duration_ms,
+                                            Some(recovered.retry),
+                                        )
+                                    }
+                                    Err(retry_err) => {
+                                        let mut inner = self
+                                            .inner
+                                            .lock()
+                                            .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                                        inner.set_error(&retry_err.to_string());
+                                        return Err(retry_err);
+                                    }
+                                }
                             } else {
-                                inner.set_error(&e.to_string());
+                                let mut inner = self
+                                    .inner
+                                    .lock()
+                                    .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                                if matches!(e, PipelineError::Cancelled) {
+                                    inner.reset_to_idle();
+                                } else {
+                                    inner.set_error(&e.to_string());
+                                }
+                                return Err(e);
                             }
-                            return Err(e);
                         }
                     }
                 }
@@ -2838,16 +2992,59 @@ impl SharedPipeline {
                     (result.text, result.duration_ms, Some(result.retry))
                 }
                 Err(e) => {
-                    let mut inner = self
-                        .inner
-                        .lock()
-                        .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                    if matches!(e, PipelineError::Cancelled) {
-                        inner.reset_to_idle();
+                    let managed_auth_recovered = {
+                        let managed_enabled = self
+                            .inner
+                            .lock()
+                            .map(|inner| inner.config.managed_inference_enabled)
+                            .unwrap_or(false);
+                        managed_enabled && is_managed_auth_token_error(&e)
+                    };
+
+                    if managed_auth_recovered {
+                        match self
+                            .try_refresh_managed_auth_and_retry_stt(
+                                &stt_provider_id,
+                                stt_model.clone(),
+                                stt_language.clone(),
+                                &wav_bytes,
+                                &retry_config,
+                                timeout,
+                                &cancel_token,
+                                "Pipeline",
+                            )
+                            .await
+                        {
+                            Ok(recovered) => {
+                                if let Ok(mut inner) = self.inner.lock() {
+                                    inner.stt_complete = true;
+                                    log::debug!(
+                                        "stt_complete set to true (stop_and_transcribe_detailed post-refresh)"
+                                    );
+                                }
+                                (recovered.text, recovered.duration_ms, Some(recovered.retry))
+                            }
+                            Err(retry_err) => {
+                                let mut inner = self
+                                    .inner
+                                    .lock()
+                                    .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                                inner.set_error(&retry_err.to_string());
+                                return Err(retry_err);
+                            }
+                        }
                     } else {
-                        inner.set_error(&e.to_string());
+                        let mut inner = self
+                            .inner
+                            .lock()
+                            .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                        if matches!(e, PipelineError::Cancelled) {
+                            inner.reset_to_idle();
+                        } else {
+                            inner.set_error(&e.to_string());
+                        }
+                        return Err(e);
                     }
-                    return Err(e);
                 }
             }
         };
@@ -3008,6 +3205,9 @@ impl SharedPipeline {
         // Phase 1: Resolve providers/config under lock.
         let (
             stt_provider,
+            stt_provider_id,
+            stt_model,
+            stt_language,
             retry_config,
             timeout,
             cancel_token,
@@ -3116,6 +3316,7 @@ impl SharedPipeline {
 
             let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
             let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
+            let mut stt_language_used: Option<String> = effective_stt_settings.language.clone();
 
             #[cfg(feature = "local-whisper")]
             if stt_provider_id_used == "local-whisper" {
@@ -3153,6 +3354,7 @@ impl SharedPipeline {
                         let global_model = inner.config.stt_model.clone();
                         stt_provider_id_used = global_provider.clone();
                         stt_model_used = global_model.clone();
+                        stt_language_used = inner.config.stt_language.clone();
 
                         #[cfg(feature = "local-whisper")]
                         if stt_provider_id_used == "local-whisper" {
@@ -3199,6 +3401,9 @@ impl SharedPipeline {
 
             (
                 stt_provider,
+                stt_provider_id_used,
+                stt_model_used,
+                stt_language_used,
                 retry_config,
                 effective_stt_settings.timeout,
                 cancel_token,
@@ -3239,16 +3444,53 @@ impl SharedPipeline {
                 (result.text, result.duration_ms, Some(result.retry))
             }
             Err(e) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                if matches!(e, PipelineError::Cancelled) {
-                    inner.reset_to_idle();
+                let managed_auth_recovered = {
+                    let managed_enabled = self
+                        .inner
+                        .lock()
+                        .map(|inner| inner.config.managed_inference_enabled)
+                        .unwrap_or(false);
+                    managed_enabled && is_managed_auth_token_error(&e)
+                };
+
+                if managed_auth_recovered {
+                    match self
+                        .try_refresh_managed_auth_and_retry_stt(
+                            &stt_provider_id,
+                            stt_model.clone(),
+                            stt_language.clone(),
+                            &wav_bytes,
+                            &retry_config,
+                            timeout,
+                            &cancel_token,
+                            "Pipeline (retry)",
+                        )
+                        .await
+                    {
+                        Ok(recovered) => {
+                            (recovered.text, recovered.duration_ms, Some(recovered.retry))
+                        }
+                        Err(retry_err) => {
+                            let mut inner = self
+                                .inner
+                                .lock()
+                                .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                            inner.set_error(&retry_err.to_string());
+                            return Err(retry_err);
+                        }
+                    }
                 } else {
-                    inner.set_error(&e.to_string());
+                    let mut inner = self
+                        .inner
+                        .lock()
+                        .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                    if matches!(e, PipelineError::Cancelled) {
+                        inner.reset_to_idle();
+                    } else {
+                        inner.set_error(&e.to_string());
+                    }
+                    return Err(e);
                 }
-                return Err(e);
             }
         };
 

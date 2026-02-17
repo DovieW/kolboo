@@ -183,7 +183,7 @@ pub struct LlmConfig {
     pub model: Option<String>,
     /// Base URL for Ollama (default: http://localhost:11434)
     pub ollama_url: Option<String>,
-    /// Base URL for managed OpenAI-compatible gateway (kolboo_cloud).
+    /// Base URL for managed provider routing gateway.
     pub managed_gateway_url: Option<String>,
 
     /// OpenAI reasoning effort (gpt-5 and o-series models only).

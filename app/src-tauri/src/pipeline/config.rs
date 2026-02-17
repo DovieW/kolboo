@@ -42,9 +42,9 @@ pub struct PipelineConfig {
     pub stt_api_keys: HashMap<String, String>,
     /// True when managed inference routing is enabled for this runtime config.
     pub managed_inference_enabled: bool,
-    /// Optional managed gateway base URL used by the kolboo_cloud provider.
+    /// Optional managed gateway base URL used when managed routing is active.
     pub managed_inference_gateway_url: Option<String>,
-    /// Optional managed access token used as the kolboo_cloud provider key.
+    /// Optional managed access token used as the managed gateway bearer token.
     pub managed_inference_access_token: Option<String>,
     /// Optional fallback STT provider used when managed routing is enabled but
     /// the managed gateway is temporarily unavailable.
@@ -296,20 +296,14 @@ pub(crate) enum ProviderMode {
 }
 
 pub(crate) fn resolve_provider_mode(
+    managed_mode_requested: bool,
     tier: crate::licensing::LicenseTier,
     status: crate::licensing::LicenseStatus,
-    stt_provider: &str,
-    llm_provider: Option<&str>,
     policy_source: Option<&str>,
     policy_eligible: Option<bool>,
     policy_is_valid: Option<bool>,
 ) -> ProviderMode {
-    let managed_requested = stt_provider == "kolboo_cloud"
-        || llm_provider
-            .map(|provider| provider == "kolboo_cloud")
-            .unwrap_or(false);
-
-    if !managed_requested {
+    if !managed_mode_requested {
         return ProviderMode::Byok;
     }
 
@@ -366,10 +360,9 @@ mod tests {
     #[test]
     fn resolve_provider_mode_personal_active_managed() {
         let mode = resolve_provider_mode(
+            true,
             crate::licensing::LicenseTier::Personal,
             crate::licensing::LicenseStatus::Active,
-            "kolboo_cloud",
-            None,
             None,
             None,
             None,
@@ -380,10 +373,9 @@ mod tests {
     #[test]
     fn resolve_provider_mode_signed_out_falls_back_to_byok() {
         let mode = resolve_provider_mode(
+            true,
             crate::licensing::LicenseTier::Personal,
             crate::licensing::LicenseStatus::SignedOut,
-            "kolboo_cloud",
-            Some("kolboo_cloud"),
             None,
             None,
             None,
@@ -394,14 +386,26 @@ mod tests {
     #[test]
     fn resolve_provider_mode_enterprise_cloud_valid_eligible_managed() {
         let mode = resolve_provider_mode(
+            true,
             crate::licensing::LicenseTier::Enterprise,
             crate::licensing::LicenseStatus::Active,
-            "kolboo_cloud",
-            Some("kolboo_cloud"),
             Some("cloud"),
             Some(true),
             Some(true),
         );
         assert_eq!(mode, ProviderMode::Managed);
+    }
+
+    #[test]
+    fn resolve_provider_mode_disabled_flag_forces_byok() {
+        let mode = resolve_provider_mode(
+            false,
+            crate::licensing::LicenseTier::Personal,
+            crate::licensing::LicenseStatus::Active,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(mode, ProviderMode::Byok);
     }
 }

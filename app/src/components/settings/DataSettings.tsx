@@ -51,6 +51,7 @@ import {
 	type TranscriptionRetentionUnit,
 	tauriAPI,
 } from "../../lib/tauri";
+import { trackProductEvent } from "../../lib/telemetry/posthog";
 import { SettingsRow } from "./SettingsRow";
 
 type RequestLogsRetentionMode = "amount" | "time";
@@ -366,6 +367,9 @@ export function DataSettings({
 		onSuccess: (_value, action) => {
 			refreshCloudSyncState();
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			void trackProductEvent("cloud_sync_action_succeeded", {
+				action,
+			});
 			notifications.show({
 				title: action === "push" ? "Cloud sync pushed" : "Cloud sync pulled",
 				message:
@@ -375,8 +379,12 @@ export function DataSettings({
 				color: "green",
 			});
 		},
-		onError: (e) => {
+		onError: (e, action) => {
 			refreshCloudSyncState();
+			void trackProductEvent("cloud_sync_action_failed", {
+				action,
+				error_kind: e instanceof Error ? e.name : typeof e,
+			});
 			notifications.show({
 				title: "Cloud sync failed",
 				message: formatErrorMessage(e),
@@ -392,9 +400,12 @@ export function DataSettings({
 				deleteKeys: [],
 			});
 		},
-		onSuccess: () => {
+		onSuccess: (_value, enabled) => {
 			refreshCloudSyncState();
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			void trackProductEvent("cloud_sync_enabled_changed", {
+				enabled,
+			});
 		},
 	});
 
@@ -405,9 +416,12 @@ export function DataSettings({
 				deleteKeys: [],
 			});
 		},
-		onSuccess: () => {
+		onSuccess: (_value, enabled) => {
 			refreshCloudSyncState();
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			void trackProductEvent("cloud_sync_auto_push_changed", {
+				enabled,
+			});
 		},
 	});
 
@@ -418,9 +432,14 @@ export function DataSettings({
 				deleteKeys: [],
 			});
 		},
-		onSuccess: () => {
+		onSuccess: (_value, enabled) => {
 			refreshCloudSyncState();
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			if (enabled) {
+				void trackProductEvent("analytics_opted_in", {
+					surface: "settings",
+				});
+			}
 		},
 	});
 

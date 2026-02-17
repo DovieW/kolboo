@@ -63,86 +63,110 @@ pub(crate) fn create_cloud_stt_provider(
         )));
     }
 
-    let provider: Arc<dyn SttProvider> = match provider_id.as_str() {
-        "openai" => Arc::new(
-            crate::stt::OpenAiSttProvider::with_client(
-                client,
-                api_key,
-                model,
-                language,
-                transcription_prompt,
-            )
-            .with_request_log_store(request_log_store),
-        ),
-        "kolboo_cloud" => {
-            let gateway_url = managed_gateway_url
-                .map(|url| url.trim().to_string())
-                .filter(|url| !url.is_empty())
-                .ok_or_else(|| {
-                    PipelineError::Config(
-                        "STT provider 'kolboo_cloud' requires a managed gateway URL".to_string(),
-                    )
-                })?;
+    let managed_gateway_url = managed_gateway_url
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty());
 
-            Arc::new(
-                crate::stt::OpenAiSttProvider::with_client(
-                    client,
-                    api_key,
-                    model,
-                    language,
-                    transcription_prompt,
-                )
-                .with_api_base_url(gateway_url)
-                .with_request_log_store(request_log_store),
-            )
+    let provider: Arc<dyn SttProvider> = match provider_id.as_str() {
+        "openai" => {
+            let provider = crate::stt::OpenAiSttProvider::with_client(
+                client,
+                api_key,
+                model,
+                language,
+                transcription_prompt,
+            );
+            let provider = if let Some(url) = managed_gateway_url.clone() {
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+
+            Arc::new(provider.with_request_log_store(request_log_store))
         }
-        "fireworks" => Arc::new(
-            crate::stt::FireworksSttProvider::with_client(
+        "fireworks" => {
+            let provider = crate::stt::FireworksSttProvider::with_client(
                 client,
                 api_key,
                 model,
                 language,
                 transcription_prompt,
-            )
-            .with_request_log_store(request_log_store),
-        ),
-        "aquavoice" => Arc::new(
-            crate::stt::AquavoiceSttProvider::with_client(
+            );
+            let provider = if let Some(url) = managed_gateway_url.clone() {
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+
+            Arc::new(provider.with_request_log_store(request_log_store))
+        }
+        "aquavoice" => {
+            let provider = crate::stt::AquavoiceSttProvider::with_client(
                 client,
                 api_key,
                 model,
                 language,
                 transcription_prompt,
-            )
-            .with_request_log_store(request_log_store),
-        ),
-        "groq" => Arc::new(
-            crate::stt::GroqSttProvider::with_client(
+            );
+            let provider = if let Some(url) = managed_gateway_url.clone() {
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+
+            Arc::new(provider.with_request_log_store(request_log_store))
+        }
+        "groq" => {
+            let provider = crate::stt::GroqSttProvider::with_client(
                 client,
                 api_key,
                 model,
                 language,
                 transcription_prompt,
-            )
-            .with_request_log_store(request_log_store),
-        ),
-        "elevenlabs" => Arc::new(
-            crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model, language)
-                .with_vad_commit(stt_live_output)
-                .with_request_log_store(request_log_store),
-        ),
-        "assemblyai" => Arc::new(
-            crate::stt::AssemblyAiSttProvider::with_client(client, api_key, model, language)
-                .with_request_log_store(request_log_store),
-        ),
+            );
+            let provider = if let Some(url) = managed_gateway_url.clone() {
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+
+            Arc::new(provider.with_request_log_store(request_log_store))
+        }
+        "elevenlabs" => {
+            let provider =
+                crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model, language)
+                    .with_vad_commit(stt_live_output);
+            let provider = if let Some(url) = managed_gateway_url.clone() {
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+            Arc::new(provider.with_request_log_store(request_log_store))
+        }
+        "assemblyai" => {
+            let provider =
+                crate::stt::AssemblyAiSttProvider::with_client(client, api_key, model, language);
+            let provider = if let Some(url) = managed_gateway_url.clone() {
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+            Arc::new(provider.with_request_log_store(request_log_store))
+        }
         "speechmatics" => Arc::new(
             crate::stt::SpeechmaticsSttProvider::new(api_key, model, language)
                 .with_request_log_store(request_log_store),
         ),
-        "deepgram" => Arc::new(
-            crate::stt::DeepgramSttProvider::with_client(client, api_key, model, language)
-                .with_request_log_store(request_log_store),
-        ),
+        "deepgram" => {
+            let provider =
+                crate::stt::DeepgramSttProvider::with_client(client, api_key, model, language);
+            let provider = if let Some(url) = managed_gateway_url.clone() {
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+            Arc::new(provider.with_request_log_store(request_log_store))
+        }
         other => {
             return Err(PipelineError::Config(format!(
                 "Unknown STT provider: {}",

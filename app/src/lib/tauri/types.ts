@@ -1054,6 +1054,7 @@ export interface RequestLog {
 	stt_model: string | null;
 	llm_provider: string | null;
 	llm_model: string | null;
+	managed_inference?: boolean;
 
 	profile_id?: string | null;
 	profile_name?: string | null;
