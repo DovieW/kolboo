@@ -256,6 +256,28 @@ function normalizeLicenseState(value: unknown): LicenseState {
 	};
 }
 
+export function resolveManagedInferenceMode(state: {
+	license_state?: Pick<LicenseState, "tier" | "status"> | null;
+	policy_state?: Pick<PolicyState, "source" | "eligible" | "is_valid"> | null;
+}): "managed" | "byok" {
+	const tier = state.license_state?.tier ?? "community";
+	const status = state.license_state?.status ?? "signed_out";
+
+	if (tier === "personal") {
+		return status === "active" || status === "grace" ? "managed" : "byok";
+	}
+
+	if (tier === "enterprise") {
+		const policy = state.policy_state;
+		if (!policy) return "byok";
+		if (!policy.is_valid) return "byok";
+		if (policy.source === "none") return "byok";
+		return policy.eligible ? "managed" : "byok";
+	}
+
+	return "byok";
+}
+
 // ============================================================================
 // OCR normalization helpers
 // ============================================================================
@@ -1181,6 +1203,11 @@ async function applySettingsPatch(params: {
 	const prepared = await preparePolicyAwarePatch(params);
 	const hasPatch = Object.keys(prepared.patch).length > 0;
 	const hasDeletes = prepared.deleteKeys.length > 0;
+	const modeStateTouched =
+		Object.hasOwn(prepared.patch, "policy_state") ||
+		Object.hasOwn(prepared.patch, "license_state") ||
+		prepared.deleteKeys.includes("policy_state") ||
+		prepared.deleteKeys.includes("license_state");
 
 	if (hasPatch || hasDeletes) {
 		await invoke("settings_apply_patch", {
@@ -1189,11 +1216,17 @@ async function applySettingsPatch(params: {
 		});
 	}
 
-	if (prepared.policyNormalized || prepared.violations.length > 0) {
+	if (
+		modeStateTouched ||
+		prepared.policyNormalized ||
+		prepared.violations.length > 0
+	) {
 		// Keep runtime behavior aligned whenever policy normalization/constraints
-		// affect effective settings.
+		// affect effective settings (including managed mode transitions driven by
+		// policy/license state updates).
 		await invoke("sync_pipeline_config");
 		await emitTyped("settings-changed", {
+			managed_mode_updated: modeStateTouched,
 			policy_normalized: prepared.policyNormalized,
 			policy_constraints_applied: prepared.violations.length > 0,
 			policy_violations: prepared.violations,

@@ -88,6 +88,26 @@ Examples (Windows PowerShell):
 
 Tip: in debug builds, the overlay UI can also emit dev-only debug notes into the Rust log stream via the `ui_debug_log` command.
 
+## CLI log access
+
+Kolboo's CLI now includes a `logs` command group so you can grab logs quickly for troubleshooting and bug reports.
+
+- Request logs (in-memory, structured):
+  - `kolboo logs request list -n 50 -o json`
+  - `kolboo logs request export -f request-logs.json --strip_text -o json`
+  - `kolboo logs request clear -o human`
+- App logs (rolling file logs):
+  - `kolboo logs app dir -o human`
+  - `kolboo logs app list -n 20 -o json`
+  - `kolboo logs app show -n 200 -o json`
+  - `kolboo logs app show -f kolboo.2026-02-16.log -n 500 -o json`
+
+Notes:
+
+- Use `--strip_text` when sharing logs externally to reduce transcript/context leakage.
+- `logs app show` defaults to the latest log file when `--file` is omitted.
+- For script-friendly output, prefer `-o json`.
+
 > CI note: we do **not** build CUDA artifacts in GitHub Actions. Build CUDA locally (on a machine
 > with CUDA Toolkit installed) and upload the resulting artifacts to Releases.
 

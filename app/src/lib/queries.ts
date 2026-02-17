@@ -71,6 +71,25 @@ import {
 } from "./tauri";
 import { listenTyped } from "./tauri/events";
 
+export function toManagedInferenceMessage(error: unknown): string {
+	if (!(error && typeof error === "object")) {
+		return "Managed inference is temporarily unavailable right now. You can retry, or switch to BYOK providers in Settings.";
+	}
+
+	const category = (error as { category?: string }).category;
+	if (category === "unauthorized") {
+		return "Your session expired. Please sign in again to continue.";
+	}
+	if (category === "ineligible") {
+		return "Your account or org is not eligible for managed inference right now.";
+	}
+	if (category === "over_quota") {
+		return "You've reached your managed usage limit. Please wait for reset or switch to BYOK.";
+	}
+
+	return "Managed inference is temporarily unavailable right now. You can retry, or switch to BYOK providers in Settings.";
+}
+
 const queryFnDeps = {
 	tauriAPI,
 	sttAPI,
@@ -330,8 +349,11 @@ export function useLicenseState() {
 export function useStartLicenseLogin() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (request?: { provider_hint?: string | null }) =>
-			licenseAPI.startLogin(request),
+		mutationFn: (request?: {
+			provider_hint?: string | null;
+			email?: string | null;
+			password?: string | null;
+		}) => licenseAPI.startLogin(request),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["licenseState"] });
 		},

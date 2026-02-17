@@ -21,6 +21,7 @@ pub mod router;
 pub mod secrets;
 pub mod settings;
 pub mod stats;
+pub mod sync;
 pub mod text;
 pub mod whisper;
 pub mod windows;

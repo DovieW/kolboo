@@ -254,6 +254,13 @@ pub struct RequestLog {
     /// LLM model used
     pub llm_model: Option<String>,
 
+    /// True when this request used managed inference transport.
+    ///
+    /// This is stamped at runtime when provider creation resolves to managed
+    /// gateway routing (not merely when managed mode is requested).
+    #[serde(default)]
+    pub managed_inference: bool,
+
     /// Prompt profile id used for this request.
     ///
     /// "default" means no per-program profile matched.
@@ -527,6 +534,7 @@ impl RequestLog {
             stt_model,
             llm_provider: None,
             llm_model: None,
+            managed_inference: false,
             profile_id: None,
             profile_name: None,
             preset_id: None,

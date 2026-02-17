@@ -253,7 +253,7 @@ pub fn get_available_providers(_app: AppHandle) -> AvailableProvidersResponse {
 #[cfg(desktop)]
 #[tauri::command]
 pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
-    use crate::pipeline::{PipelineConfig, SharedPipeline};
+    use crate::pipeline::{resolve_provider_mode, PipelineConfig, ProviderMode, SharedPipeline};
     use crate::stt::RetryConfig;
     use tauri::Manager;
 
@@ -264,6 +264,56 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .and_then(|store| store.get("stt_provider"))
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_else(|| "groq".to_string());
+
+    let managed_gateway_url: Option<String> = std::env::var("VITE_MANAGED_INFERENCE_GATEWAY_URL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+
+    let managed_access_token =
+        crate::secrets::get_secret(&app, crate::licensing::SECRET_ACCESS_TOKEN_KEY);
+
+    let license_state = app
+        .store("settings.json")
+        .ok()
+        .map(|store| {
+            crate::licensing::normalize_license_state(
+                store.get("license_state"),
+                chrono::Utc::now(),
+            )
+        })
+        .unwrap_or_else(|| crate::licensing::LicenseState::signed_out(chrono::Utc::now()));
+
+    let policy_state = app
+        .store("settings.json")
+        .ok()
+        .map(|store| {
+            crate::policy::normalize_policy_state(store.get("policy_state"), chrono::Utc::now())
+        })
+        .unwrap_or_default();
+
+    let managed_mode_requested = match license_state.tier {
+        crate::licensing::LicenseTier::Personal => {
+            matches!(
+                license_state.status,
+                crate::licensing::LicenseStatus::Active | crate::licensing::LicenseStatus::Grace
+            )
+        }
+        crate::licensing::LicenseTier::Enterprise => {
+            !matches!(policy_state.source, crate::policy::PolicySource::None)
+                && policy_state.is_valid
+                && policy_state.eligible
+        }
+        crate::licensing::LicenseTier::Community => false,
+    };
+
+    let policy_source = match policy_state.source {
+        crate::policy::PolicySource::None => "none",
+        crate::policy::PolicySource::File => "file",
+        crate::policy::PolicySource::Cloud => "cloud",
+        crate::policy::PolicySource::Cached => "cached",
+        crate::policy::PolicySource::DegradedExpired => "degraded_expired",
+    };
 
     // Read STT model from store
     let stt_model: Option<String> = app
@@ -446,6 +496,34 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         }
     });
 
+    let provider_mode = resolve_provider_mode(
+        managed_mode_requested,
+        license_state.tier,
+        license_state.status,
+        Some(policy_source),
+        Some(policy_state.eligible),
+        Some(policy_state.is_valid),
+    );
+
+    let managed_mode_active = matches!(provider_mode, ProviderMode::Managed);
+    let effective_stt_provider = stt_provider.clone();
+    let effective_stt_api_key = if managed_mode_active {
+        managed_access_token.clone().unwrap_or_default()
+    } else {
+        stt_api_key.clone()
+    };
+    let effective_llm_provider = llm_provider_effective.clone();
+    let managed_inference_fallback_stt_provider = if managed_mode_active {
+        Some(stt_provider.clone())
+    } else {
+        None
+    };
+    let managed_inference_fallback_llm_provider = if managed_mode_active {
+        Some(llm_provider_effective.clone())
+    } else {
+        None
+    };
+
     let llm_api_key: String = llm_provider_setting
         .as_deref()
         .map(|provider| {
@@ -453,6 +531,11 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
             get_api_key(&app, &key_name)
         })
         .unwrap_or_default();
+    let effective_llm_api_key = if managed_mode_active {
+        managed_access_token.clone().unwrap_or_default()
+    } else {
+        llm_api_key
+    };
 
     // IMPORTANT: `enabled` is only the global toggle. The effective provider/key is resolved
     // per transcription based on the active profile.
@@ -896,9 +979,14 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
 
     let config = PipelineConfig {
         input_device_name,
-        stt_provider: stt_provider.clone(),
-        stt_api_key,
+        stt_provider: effective_stt_provider.clone(),
+        stt_api_key: effective_stt_api_key,
         stt_api_keys,
+        managed_inference_enabled: managed_mode_active,
+        managed_inference_gateway_url: managed_gateway_url.clone(),
+        managed_inference_access_token: managed_access_token.clone(),
+        managed_inference_fallback_stt_provider,
+        managed_inference_fallback_llm_provider,
         stt_model: stt_model.clone(),
         stt_language,
         stt_transcription_prompt,
@@ -932,10 +1020,11 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
 
         llm_config: crate::llm::LlmConfig {
             enabled: llm_enabled,
-            provider: llm_provider_effective,
-            api_key: llm_api_key,
+            provider: effective_llm_provider.clone(),
+            api_key: effective_llm_api_key,
             model: llm_model_effective.clone(),
             ollama_url,
+            managed_gateway_url: managed_gateway_url.clone(),
             openai_reasoning_effort,
             gemini_thinking_budget,
             gemini_thinking_level,
@@ -998,11 +1087,9 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
 
         log::info!(
             "Pipeline config synced - STT: {} ({}), LLM: {} ({}), VAD: {}, program_profiles: {}",
-            stt_provider,
+            effective_stt_provider,
             stt_model.as_deref().unwrap_or("default"),
-            llm_provider_setting
-                .clone()
-                .unwrap_or_else(|| "disabled".to_string()),
+            effective_llm_provider,
             llm_model_effective.as_deref().unwrap_or("default"),
             vad_settings.enabled,
             pipeline.config().llm_config.program_prompt_profiles.len()

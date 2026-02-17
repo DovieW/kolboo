@@ -8,6 +8,22 @@ use crate::settings::ProxySettings;
 use std::sync::Arc;
 use std::time::Duration;
 
+fn managed_llm_api_base_url(provider: &str, gateway_url: &str) -> Option<String> {
+    let gateway = gateway_url.trim().trim_end_matches('/');
+    if gateway.is_empty() {
+        return None;
+    }
+
+    match provider {
+        // OpenAI provider appends /v1/responses internally.
+        "openai" => Some(gateway.to_string()),
+        // Provider adapters that expect a full endpoint URL.
+        "groq" => Some(format!("{gateway}/groq/openai/v1/chat/completions")),
+        "fireworks" => Some(format!("{gateway}/fireworks/inference/v1/chat/completions")),
+        _ => None,
+    }
+}
+
 pub(super) struct LlmProviderParams {
     pub model: Option<String>,
     pub timeout: Duration,
@@ -39,36 +55,65 @@ pub(super) fn create_llm_provider(
             .with_request_log_store(request_log_store.clone())
             .with_reasoning_effort(config.openai_reasoning_effort.clone()),
         ),
-        "anthropic" => Arc::new(
-            AnthropicLlmProvider::with_client(
+        "anthropic" => {
+            if config.managed_gateway_url.as_deref().is_some() {
+                return Err(crate::pipeline::PipelineError::Config(
+                    "Managed mode does not yet support Anthropic LLM provider routing".to_string(),
+                ));
+            }
+
+            Arc::new(
+                AnthropicLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone())
+                .with_thinking_budget(config.anthropic_thinking_budget),
+            )
+        }
+        "groq" => {
+            let provider = GroqLlmProvider::with_client(
                 client.clone(),
                 config.api_key.clone(),
                 config.model.clone(),
             )
             .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone())
-            .with_thinking_budget(config.anthropic_thinking_budget),
-        ),
-        "groq" => Arc::new(
-            GroqLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
+            .with_request_log_store(request_log_store.clone());
+
+            let provider = if let Some(gateway) = config.managed_gateway_url.as_deref() {
+                let url = managed_llm_api_base_url("groq", gateway).ok_or_else(|| {
+                    crate::pipeline::PipelineError::Config(
+                        "Managed mode could not resolve Groq gateway URL".to_string(),
+                    )
+                })?;
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+
+            Arc::new(provider)
+        }
+        "gemini" => {
+            if config.managed_gateway_url.as_deref().is_some() {
+                return Err(crate::pipeline::PipelineError::Config(
+                    "Managed mode does not yet support Gemini LLM provider routing".to_string(),
+                ));
+            }
+
+            Arc::new(
+                GeminiLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone())
+                .with_thinking_budget(config.gemini_thinking_budget)
+                .with_thinking_level(config.gemini_thinking_level.clone()),
             )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone()),
-        ),
-        "gemini" => Arc::new(
-            GeminiLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone())
-            .with_thinking_budget(config.gemini_thinking_budget)
-            .with_thinking_level(config.gemini_thinking_level.clone()),
-        ),
+        }
         "ollama" => Arc::new(
             OllamaLlmProvider::with_client(
                 client.clone(),
@@ -78,36 +123,68 @@ pub(super) fn create_llm_provider(
             .with_timeout(config.timeout)
             .with_request_log_store(request_log_store.clone()),
         ),
-        "cohere" => Arc::new(
-            CohereLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone()),
-        ),
-        "fireworks" => Arc::new(
-            FireworksLlmProvider::with_client(
-                client.clone(),
-                config.api_key.clone(),
-                config.model.clone(),
-            )
-            .with_timeout(config.timeout)
-            .with_request_log_store(request_log_store.clone()),
-        ),
-        _ => {
-            // Default to OpenAI
+        "cohere" => {
+            if config.managed_gateway_url.as_deref().is_some() {
+                return Err(crate::pipeline::PipelineError::Config(
+                    "Managed mode does not yet support Cohere LLM provider routing".to_string(),
+                ));
+            }
+
             Arc::new(
-                OpenAiLlmProvider::with_client(
-                    client,
+                CohereLlmProvider::with_client(
+                    client.clone(),
                     config.api_key.clone(),
                     config.model.clone(),
                 )
                 .with_timeout(config.timeout)
-                .with_request_log_store(request_log_store.clone())
-                .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+                .with_request_log_store(request_log_store.clone()),
             )
+        }
+        "fireworks" => {
+            let provider = FireworksLlmProvider::with_client(
+                client.clone(),
+                config.api_key.clone(),
+                config.model.clone(),
+            )
+            .with_timeout(config.timeout)
+            .with_request_log_store(request_log_store.clone());
+
+            let provider = if let Some(gateway) = config.managed_gateway_url.as_deref() {
+                let url = managed_llm_api_base_url("fireworks", gateway).ok_or_else(|| {
+                    crate::pipeline::PipelineError::Config(
+                        "Managed mode could not resolve Fireworks gateway URL".to_string(),
+                    )
+                })?;
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+
+            Arc::new(provider)
+        }
+        _ => {
+            // Default to OpenAI
+            let provider = OpenAiLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            )
+            .with_timeout(config.timeout)
+            .with_request_log_store(request_log_store.clone())
+            .with_reasoning_effort(config.openai_reasoning_effort.clone());
+
+            let provider = if let Some(gateway) = config.managed_gateway_url.as_deref() {
+                let url = managed_llm_api_base_url("openai", gateway).ok_or_else(|| {
+                    crate::pipeline::PipelineError::Config(
+                        "Managed mode could not resolve OpenAI gateway URL".to_string(),
+                    )
+                })?;
+                provider.with_api_base_url(url)
+            } else {
+                provider
+            };
+
+            Arc::new(provider)
         }
     };
 

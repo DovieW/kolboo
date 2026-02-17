@@ -1,6 +1,7 @@
 mod config_export;
 mod diagnostics;
 mod errors;
+mod logs;
 mod output;
 mod pipeline;
 mod profiles;
@@ -43,7 +44,7 @@ where
     // Known top-level subcommands.
     matches!(
         first,
-        "pipeline" | "settings" | "profiles" | "diagnostics" | "config"
+        "pipeline" | "settings" | "profiles" | "diagnostics" | "config" | "logs"
     )
 }
 
@@ -61,6 +62,7 @@ pub(crate) fn handle_cli(
         "profiles" => profiles::handle_profiles(app, &subcommand.matches)?,
         "diagnostics" => diagnostics::handle_diagnostics(app, &subcommand.matches)?,
         "config" => config_export::handle_config(app, &subcommand.matches)?,
+        "logs" => logs::handle_logs(app, &subcommand.matches)?,
         _ => {
             return Err(CliError::Validation(format!(
                 "Unsupported CLI command: {}",
@@ -105,6 +107,9 @@ mod tests {
         ));
         assert!(is_cli_invocation_from_args(
             ["config".to_string()].into_iter()
+        ));
+        assert!(is_cli_invocation_from_args(
+            ["logs".to_string()].into_iter()
         ));
     }
 

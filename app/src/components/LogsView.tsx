@@ -251,6 +251,7 @@ function RequestLogItem({
 	const isQuickAsk = kind === "quick_ask";
 	const isQuickReplace = kind === "quick_replace";
 	const isTranscription = kind === "transcription";
+	const isManagedRequest = log.managed_inference ?? false;
 
 	// NOTE: `llm_provider`/`llm_model` can reflect configured defaults.
 	// Use `llm_duration_ms` to indicate whether an LLM rewrite was actually attempted.
@@ -501,6 +502,11 @@ function RequestLogItem({
 								leftSection={<Zap size={12} />}
 							>
 								Quick Replace
+							</Badge>
+						) : null}
+						{isManagedRequest ? (
+							<Badge variant="light" size="sm" color="blue">
+								Managed
 							</Badge>
 						) : null}
 						{totalDurationMs !== null && (

@@ -83,6 +83,8 @@ impl LicenseState {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct LoginRequest {
     pub provider_hint: Option<String>,
+    pub email: Option<String>,
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,26 +143,18 @@ pub fn telemetry_context_for_state(state: &LicenseState) -> Value {
 }
 
 #[cfg(desktop)]
-pub fn persist_session_material(app: &AppHandle) -> Result<SessionMaterial, String> {
-    let now = Utc::now().timestamp_millis();
-    let access = format!("access-local-{now}");
-    let refresh = format!("refresh-local-{now}");
-
-    crate::secrets::set_secret(app, SECRET_ACCESS_TOKEN_KEY, &access)?;
-    crate::secrets::set_secret(app, SECRET_REFRESH_TOKEN_KEY, &refresh)?;
-
-    Ok(SessionMaterial {
-        access_token: access,
-        refresh_token: refresh,
-    })
+pub fn persist_session_material(app: &AppHandle, session: &SessionMaterial) -> Result<(), String> {
+    crate::secrets::set_secret(app, SECRET_ACCESS_TOKEN_KEY, &session.access_token)?;
+    crate::secrets::set_secret(app, SECRET_REFRESH_TOKEN_KEY, &session.refresh_token)?;
+    Ok(())
 }
 
 #[cfg(not(desktop))]
-pub fn persist_session_material(_app: &tauri::AppHandle) -> Result<SessionMaterial, String> {
-    Ok(SessionMaterial {
-        access_token: "stub-access".to_string(),
-        refresh_token: "stub-refresh".to_string(),
-    })
+pub fn persist_session_material(
+    _app: &tauri::AppHandle,
+    _session: &SessionMaterial,
+) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(desktop)]

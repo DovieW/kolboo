@@ -15,12 +15,15 @@ applyTo: '**'
 
 - Always run the format commands before test/check commands.
 
+- For local commands that invoke Rust/Cargo, set `RUSTC_WRAPPER=sccache` in the current shell first (when `sccache` is installed). If `sccache` is unavailable, clear `RUSTC_WRAPPER` and continue with plain `rustc`.
+- To keep local runs responsive, also set `CARGO_BUILD_JOBS` to a conservative value (recommended: ~half logical cores, capped at 8) before Rust/Cargo commands.
+
 - Use the smallest validating command set first, then escalate only if needed.
   - Docs-only or spec-only changes: no app test/check commands required.
   - TS/UI-only changes under `app/src/**`: run `pnpm -C app lint` then `pnpm -C app test`.
-  - Rust-only changes under `app/src-tauri/**`: run `pnpm -C app cargo:fmt` then `pnpm -C app cargo:test`.
-  - TS + Rust changes (or uncertain impact): run `pnpm -C app test:all` after formatting.
-  - Run `pnpm -C app check:ci` once at the end (or when explicitly requested), not repeatedly during iteration.
+  - Rust-only changes under `app/src-tauri/**`: after setting `RUSTC_WRAPPER`/`CARGO_BUILD_JOBS` as above, run `pnpm -C app cargo:fmt` then `pnpm -C app cargo:test`.
+  - TS + Rust changes (or uncertain impact): after setting `RUSTC_WRAPPER`/`CARGO_BUILD_JOBS` as above, run `pnpm -C app test:all` after formatting.
+  - Run `pnpm -C app check:ci` once at the end (or when explicitly requested), not repeatedly during iteration. Set `RUSTC_WRAPPER` and `CARGO_BUILD_JOBS` first because this command runs Cargo steps.
 
 - Avoid duplicate heavy runs during iteration.
   - If `pnpm dev` already surfaces live frontend issues, rely on VS Code Problems + targeted tests while iterating.

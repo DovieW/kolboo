@@ -302,6 +302,7 @@ fn mock_llm_config(
         api_key: String::new(),
         model: None,
         ollama_url: None,
+        managed_gateway_url: None,
         openai_reasoning_effort: None,
         gemini_thinking_budget: None,
         gemini_thinking_level: None,

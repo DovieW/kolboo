@@ -40,6 +40,18 @@ pub struct PipelineConfig {
     pub stt_api_key: String,
     /// API keys for all configured STT providers (provider id -> key)
     pub stt_api_keys: HashMap<String, String>,
+    /// True when managed inference routing is enabled for this runtime config.
+    pub managed_inference_enabled: bool,
+    /// Optional managed gateway base URL used when managed routing is active.
+    pub managed_inference_gateway_url: Option<String>,
+    /// Optional managed access token used as the managed gateway bearer token.
+    pub managed_inference_access_token: Option<String>,
+    /// Optional fallback STT provider used when managed routing is enabled but
+    /// the managed gateway is temporarily unavailable.
+    pub managed_inference_fallback_stt_provider: Option<String>,
+    /// Optional fallback LLM provider used when managed routing is enabled but
+    /// the managed gateway is temporarily unavailable.
+    pub managed_inference_fallback_llm_provider: Option<String>,
     /// Optional model override for STT
     pub stt_model: Option<String>,
     /// Optional language hint for STT (None = auto-detect)
@@ -180,6 +192,11 @@ impl Default for PipelineConfig {
             stt_provider: "groq".to_string(),
             stt_api_key: String::new(),
             stt_api_keys: HashMap::new(),
+            managed_inference_enabled: false,
+            managed_inference_gateway_url: None,
+            managed_inference_access_token: None,
+            managed_inference_fallback_stt_provider: None,
+            managed_inference_fallback_llm_provider: None,
             stt_model: None,
             stt_language: Some("en".to_string()),
             stt_transcription_prompt: None,
@@ -272,6 +289,46 @@ pub(crate) fn canonicalize_stt_provider_id(id: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProviderMode {
+    Managed,
+    Byok,
+}
+
+pub(crate) fn resolve_provider_mode(
+    managed_mode_requested: bool,
+    tier: crate::licensing::LicenseTier,
+    status: crate::licensing::LicenseStatus,
+    policy_source: Option<&str>,
+    policy_eligible: Option<bool>,
+    policy_is_valid: Option<bool>,
+) -> ProviderMode {
+    if !managed_mode_requested {
+        return ProviderMode::Byok;
+    }
+
+    match tier {
+        crate::licensing::LicenseTier::Personal
+            if matches!(
+                status,
+                crate::licensing::LicenseStatus::Active | crate::licensing::LicenseStatus::Grace
+            ) =>
+        {
+            ProviderMode::Managed
+        }
+        crate::licensing::LicenseTier::Enterprise
+            if policy_source
+                .map(|source| source != "none")
+                .unwrap_or(false)
+                && policy_is_valid == Some(true)
+                && policy_eligible == Some(true) =>
+        {
+            ProviderMode::Managed
+        }
+        _ => ProviderMode::Byok,
+    }
+}
+
 pub(crate) fn normalize_stt_language_setting(raw: Option<String>) -> Option<String> {
     language::normalize_language_setting(raw)
 }
@@ -298,5 +355,57 @@ mod tests {
         } else {
             assert_eq!(result, "groq");
         }
+    }
+
+    #[test]
+    fn resolve_provider_mode_personal_active_managed() {
+        let mode = resolve_provider_mode(
+            true,
+            crate::licensing::LicenseTier::Personal,
+            crate::licensing::LicenseStatus::Active,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(mode, ProviderMode::Managed);
+    }
+
+    #[test]
+    fn resolve_provider_mode_signed_out_falls_back_to_byok() {
+        let mode = resolve_provider_mode(
+            true,
+            crate::licensing::LicenseTier::Personal,
+            crate::licensing::LicenseStatus::SignedOut,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(mode, ProviderMode::Byok);
+    }
+
+    #[test]
+    fn resolve_provider_mode_enterprise_cloud_valid_eligible_managed() {
+        let mode = resolve_provider_mode(
+            true,
+            crate::licensing::LicenseTier::Enterprise,
+            crate::licensing::LicenseStatus::Active,
+            Some("cloud"),
+            Some(true),
+            Some(true),
+        );
+        assert_eq!(mode, ProviderMode::Managed);
+    }
+
+    #[test]
+    fn resolve_provider_mode_disabled_flag_forces_byok() {
+        let mode = resolve_provider_mode(
+            false,
+            crate::licensing::LicenseTier::Personal,
+            crate::licensing::LicenseStatus::Active,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(mode, ProviderMode::Byok);
     }
 }

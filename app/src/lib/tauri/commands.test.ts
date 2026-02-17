@@ -268,7 +268,11 @@ describe("tauri command wrappers", () => {
 		const { tauriAPI, licenseAPI } = await import("./commands");
 
 		await tauriAPI.getLicenseState();
-		await tauriAPI.startLicenseLogin({ provider_hint: "enterprise" });
+		await tauriAPI.startLicenseLogin({
+			provider_hint: "enterprise",
+			email: "user@example.com",
+			password: "password123",
+		});
 		await tauriAPI.logoutLicense();
 		await tauriAPI.refreshLicenseEntitlement(true);
 		await tauriAPI.getLicenseManagementUrl();
@@ -278,7 +282,11 @@ describe("tauri command wrappers", () => {
 
 		expect(invokeMock).toHaveBeenCalledWith("license_get_state");
 		expect(invokeMock).toHaveBeenCalledWith("license_start_login", {
-			request: { provider_hint: "enterprise" },
+			request: {
+				provider_hint: "enterprise",
+				email: "user@example.com",
+				password: "password123",
+			},
 		});
 		expect(invokeMock).toHaveBeenCalledWith("license_logout");
 		expect(invokeMock).toHaveBeenCalledWith("license_refresh_entitlement", {
@@ -286,7 +294,7 @@ describe("tauri command wrappers", () => {
 		});
 		expect(invokeMock).toHaveBeenCalledWith("license_get_management_url");
 		expect(invokeMock).toHaveBeenCalledWith("license_start_login", {
-			request: { provider_hint: null },
+			request: { provider_hint: null, email: null, password: null },
 		});
 	});
 });

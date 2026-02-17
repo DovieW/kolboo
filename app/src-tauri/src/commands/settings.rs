@@ -503,9 +503,26 @@ pub async fn settings_doctor(app: AppHandle) -> CommandResult<SettingsDoctorRepo
 #[tauri::command]
 pub async fn settings_apply_patch(
     app: AppHandle,
-    patch: Map<String, Value>,
+    mut patch: Map<String, Value>,
     delete_keys: Vec<String>,
 ) -> CommandResult<()> {
+    let sync_action = patch
+        .remove("__cloud_sync_action")
+        .and_then(|value| value.as_str().map(|s| s.to_string()));
+
+    let sync_metadata_keys: [&str; 5] = [
+        "cloud_sync_last_pushed_at",
+        "cloud_sync_last_pulled_at",
+        "cloud_sync_last_error",
+        "cloud_sync_remote_revision",
+        "__cloud_sync_action",
+    ];
+
+    let patch_touches_sync_metadata = patch
+        .keys()
+        .any(|key| sync_metadata_keys.iter().any(|k| *k == key));
+    let has_patch_changes = !patch.is_empty() || !delete_keys.is_empty();
+
     let store = app
         .store("settings.json")
         .map_err(|e| CommandError::unknown(format!("Failed to open settings store: {}", e)))?;
@@ -517,6 +534,44 @@ pub async fn settings_apply_patch(
         .map_err(|e| CommandError::unknown(format!("Failed to save settings store: {}", e)))?;
 
     crate::app_shared::emit_settings_changed(&app, payload);
+
+    if let Some(action) = sync_action.as_deref() {
+        match action {
+            "push" => {
+                crate::commands::sync::sync_push_settings_inner(&app).await?;
+            }
+            "pull" => {
+                crate::commands::sync::sync_pull_settings_inner(&app).await?;
+            }
+            other => {
+                return Err(CommandError::new(
+                    format!("Unknown cloud sync action: {other}"),
+                    "sync",
+                )
+                .with_code("sync_invalid_action"));
+            }
+        }
+    } else {
+        let cloud_sync_enabled = store
+            .get("cloud_sync_enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let cloud_sync_auto_push = store
+            .get("cloud_sync_auto_push")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        if cloud_sync_enabled
+            && cloud_sync_auto_push
+            && has_patch_changes
+            && !patch_touches_sync_metadata
+        {
+            if let Err(error) = crate::commands::sync::sync_push_settings_inner(&app).await {
+                log::warn!("Cloud sync auto-push failed after settings patch: {error}");
+            }
+        }
+    }
+
     Ok(())
 }
 
