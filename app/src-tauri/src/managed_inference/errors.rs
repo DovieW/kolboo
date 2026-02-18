@@ -1,5 +1,6 @@
 use super::{ManagedError, ManagedErrorCategory};
 
+#[allow(dead_code)]
 pub fn map_http_status_to_managed_error(status: u16, message: impl Into<String>) -> ManagedError {
     let category = match status {
         401 | 403 => ManagedErrorCategory::Unauthorized,

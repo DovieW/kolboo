@@ -6,8 +6,11 @@
 
 pub mod errors;
 
+#[allow(dead_code)]
 pub const CMD_STT_TRANSCRIBE: &str = "managed_inference_stt_transcribe";
+#[allow(dead_code)]
 pub const CMD_LLM_COMPLETE: &str = "managed_inference_llm_complete";
+#[allow(dead_code)]
 pub const CMD_USAGE_STATE: &str = "managed_inference_get_usage_state";
 
 #[derive(
@@ -19,6 +22,7 @@ pub enum ManagedInferenceMode {
     Byok,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagedErrorCategory {
     Unauthorized,
@@ -27,6 +31,7 @@ pub enum ManagedErrorCategory {
     TemporarilyUnavailable,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ManagedError {
     pub category: ManagedErrorCategory,
