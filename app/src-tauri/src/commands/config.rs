@@ -26,11 +26,61 @@ pub struct DefaultSectionsResponse {
     pub system: String,
 }
 
+/// Runtime configuration consumed by frontend windows.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RuntimeConfigResponse {
+    pub app_version: Option<String>,
+    pub api_base_url: Option<String>,
+    pub managed_inference_gateway_url: Option<String>,
+    pub sentry_dsn: Option<String>,
+    pub sentry_env: Option<String>,
+    pub sentry_release: Option<String>,
+    pub posthog_api_key: Option<String>,
+    pub posthog_host: Option<String>,
+}
+
+pub(crate) fn read_first_non_empty_env(keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn normalize_optional_base_url(value: Option<String>) -> Option<String> {
+    value.map(|v| v.trim_end_matches('/').to_string())
+}
+
 /// Get default prompts for each section
 #[tauri::command]
 pub fn get_default_sections() -> DefaultSectionsResponse {
     DefaultSectionsResponse {
         system: SYSTEM_PROMPT_DEFAULT.to_string(),
+    }
+}
+
+/// Get backend-provided runtime configuration for renderer windows.
+#[tauri::command]
+pub fn get_runtime_config() -> RuntimeConfigResponse {
+    RuntimeConfigResponse {
+        app_version: read_first_non_empty_env(&["TAURI_APP_VERSION"]),
+        api_base_url: normalize_optional_base_url(read_first_non_empty_env(&[
+            "TAURI_API_BASE_URL",
+        ])),
+        managed_inference_gateway_url: normalize_optional_base_url(read_first_non_empty_env(&[
+            "TAURI_MANAGED_INFERENCE_GATEWAY_URL",
+        ])),
+        sentry_dsn: read_first_non_empty_env(&["TAURI_SENTRY_DSN"]),
+        sentry_env: read_first_non_empty_env(&["TAURI_SENTRY_ENV"]),
+        sentry_release: read_first_non_empty_env(&["TAURI_SENTRY_RELEASE"]),
+        posthog_api_key: read_first_non_empty_env(&["TAURI_POSTHOG_API_KEY"]),
+        posthog_host: normalize_optional_base_url(read_first_non_empty_env(&[
+            "TAURI_POSTHOG_HOST",
+        ])),
     }
 }
 
@@ -265,10 +315,10 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_else(|| "groq".to_string());
 
-    let managed_gateway_url: Option<String> = std::env::var("VITE_MANAGED_INFERENCE_GATEWAY_URL")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
+    let managed_gateway_url: Option<String> =
+        normalize_optional_base_url(read_first_non_empty_env(&[
+            "TAURI_MANAGED_INFERENCE_GATEWAY_URL",
+        ]));
 
     let managed_access_token =
         crate::secrets::get_secret(&app, crate::licensing::SECRET_ACCESS_TOKEN_KEY);

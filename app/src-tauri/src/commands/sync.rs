@@ -32,17 +32,10 @@ pub struct SyncStatus {
 }
 
 #[cfg(desktop)]
-fn sync_base_url() -> Option<String> {
-    let env_value = std::env::var("KOLBOO_SYNC_BASE_URL")
-        .ok()
-        .or_else(|| std::env::var("VITE_SYNC_BASE_URL").ok())?;
+fn api_base_url() -> Option<String> {
+    let env_value = crate::commands::config::read_first_non_empty_env(&["TAURI_API_BASE_URL"])?;
 
-    let trimmed = env_value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    Some(trimmed.trim_end_matches('/').to_string())
+    Some(env_value.trim_end_matches('/').to_string())
 }
 
 #[cfg(desktop)]
@@ -75,7 +68,7 @@ fn read_sync_status(app: &AppHandle) -> CommandResult<SyncStatus> {
     Ok(SyncStatus {
         enabled,
         auto_push_enabled,
-        endpoint_configured: sync_base_url().is_some(),
+        endpoint_configured: api_base_url().is_some(),
         signed_in: crate::licensing::load_session_material(app).is_some(),
         remote_revision,
         last_pushed_at,
@@ -145,7 +138,7 @@ fn sync_client() -> reqwest::Client {
 }
 
 #[cfg(desktop)]
-fn sync_url(base: &str) -> String {
+fn sync_endpoint_url(base: &str) -> String {
     format!("{base}/v1/sync/settings")
 }
 
@@ -157,7 +150,7 @@ pub(crate) async fn sync_push_settings_inner(app: &AppHandle) -> CommandResult<S
         return Ok(status);
     }
 
-    let base_url = sync_base_url().ok_or_else(|| {
+    let base_url = api_base_url().ok_or_else(|| {
         CommandError::new("Cloud sync endpoint is not configured", "sync")
             .with_code("sync_not_configured")
     })?;
@@ -168,7 +161,7 @@ pub(crate) async fn sync_push_settings_inner(app: &AppHandle) -> CommandResult<S
     })?;
 
     let payload = crate::commands::backup::build_backup_payload(app)?;
-    let url = sync_url(base_url.as_str());
+    let url = sync_endpoint_url(base_url.as_str());
 
     let resp = sync_client()
         .put(url)
@@ -208,7 +201,7 @@ pub(crate) async fn sync_pull_settings_inner(app: &AppHandle) -> CommandResult<S
         return Ok(status);
     }
 
-    let base_url = sync_base_url().ok_or_else(|| {
+    let base_url = api_base_url().ok_or_else(|| {
         CommandError::new("Cloud sync endpoint is not configured", "sync")
             .with_code("sync_not_configured")
     })?;
@@ -218,7 +211,7 @@ pub(crate) async fn sync_pull_settings_inner(app: &AppHandle) -> CommandResult<S
             .with_code("sync_requires_sign_in")
     })?;
 
-    let url = sync_url(base_url.as_str());
+    let url = sync_endpoint_url(base_url.as_str());
     let resp = sync_client()
         .get(url)
         .bearer_auth(session.access_token)

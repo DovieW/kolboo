@@ -18,32 +18,65 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 	},
 }));
 
+const { loadRuntimeConfigMock } = vi.hoisted(() => ({
+	loadRuntimeConfigMock: vi.fn(async () => ({
+		app_version: "0.2.4-test",
+		api_base_url: null,
+		managed_inference_gateway_url: null,
+		sentry_dsn: null,
+		sentry_env: null,
+		sentry_release: null,
+		posthog_api_key: "phc_test_key",
+		posthog_host: "https://us.i.posthog.com",
+	})),
+}));
+
+vi.mock("../tauri/runtimeConfig", () => ({
+	loadRuntimeConfig: loadRuntimeConfigMock,
+}));
+
 import { isPosthogConfigured, trackProductEvent } from "./posthog";
 
 describe("posthog telemetry", () => {
 	beforeEach(() => {
-		vi.stubEnv("VITE_POSTHOG_API_KEY", "phc_test_key");
-		vi.stubEnv("VITE_POSTHOG_HOST", "https://us.i.posthog.com");
-		vi.stubEnv("VITE_APP_VERSION", "0.2.4-test");
 		storeGetMock.mockReset();
 		storeGetMock.mockResolvedValue(true);
 		storeLoadMock.mockClear();
+		loadRuntimeConfigMock.mockClear();
+		loadRuntimeConfigMock.mockResolvedValue({
+			app_version: "0.2.4-test",
+			api_base_url: null,
+			managed_inference_gateway_url: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			posthog_api_key: "phc_test_key",
+			posthog_host: "https://us.i.posthog.com",
+		});
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response(null, { status: 200 }),
 		);
 	});
 
 	afterEach(() => {
-		vi.unstubAllEnvs();
 		vi.restoreAllMocks();
 		globalThis.localStorage?.clear();
 	});
 
-	it("returns configured only when host and key are present", () => {
-		expect(isPosthogConfigured()).toBe(true);
+	it("returns configured only when host and key are present", async () => {
+		await expect(isPosthogConfigured()).resolves.toBe(true);
 
-		vi.stubEnv("VITE_POSTHOG_API_KEY", "");
-		expect(isPosthogConfigured()).toBe(false);
+		loadRuntimeConfigMock.mockResolvedValueOnce({
+			app_version: "0.2.4-test",
+			api_base_url: null,
+			managed_inference_gateway_url: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			posthog_api_key: "",
+			posthog_host: "https://us.i.posthog.com",
+		});
+		await expect(isPosthogConfigured()).resolves.toBe(false);
 	});
 
 	it("captures event when configured and consent enabled", async () => {
@@ -73,6 +106,26 @@ describe("posthog telemetry", () => {
 		});
 
 		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it("captures when consent key is unset (default enabled)", async () => {
+		storeGetMock.mockResolvedValue(undefined as unknown as boolean);
+
+		await trackProductEvent("cloud_sync_action_succeeded", {
+			action: "push",
+		});
+
+		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it("captures when settings store read fails (default enabled)", async () => {
+		storeLoadMock.mockRejectedValueOnce(new Error("store unavailable"));
+
+		await trackProductEvent("cloud_sync_action_succeeded", {
+			action: "push",
+		});
+
+		expect(fetch).toHaveBeenCalledTimes(1);
 	});
 
 	it("redacts sensitive fields in properties", async () => {

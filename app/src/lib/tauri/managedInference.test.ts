@@ -1,4 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("./runtimeConfig", () => ({
+	loadRuntimeConfig: vi.fn(async () => ({
+		app_version: null,
+		api_base_url: null,
+		managed_inference_gateway_url: null,
+		sentry_dsn: null,
+		sentry_env: null,
+		sentry_release: null,
+		posthog_api_key: null,
+		posthog_host: null,
+	})),
+}));
+
 import { createIdempotencyKey, postManagedJson } from "./managedInference";
 
 describe("managedInference", () => {

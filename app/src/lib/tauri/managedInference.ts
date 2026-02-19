@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { loadRuntimeConfig } from "./runtimeConfig";
 import type {
 	ManagedError,
 	ManagedErrorCategory,
@@ -20,12 +21,9 @@ export interface ManagedLlmRequest {
 	metadata?: Record<string, unknown>;
 }
 
-const GATEWAY_BASE_URL =
-	(import.meta.env.VITE_MANAGED_INFERENCE_GATEWAY_URL as string | undefined) ??
-	"";
-
-function resolveManagedGatewayBaseUrl(): string | null {
-	const trimmed = GATEWAY_BASE_URL.trim();
+async function resolveManagedGatewayBaseUrl(): Promise<string | null> {
+	const config = await loadRuntimeConfig();
+	const trimmed = config.managed_inference_gateway_url?.trim() ?? "";
 	return trimmed.length > 0 ? trimmed.replace(/\/$/, "") : null;
 }
 
@@ -61,7 +59,7 @@ export async function postManagedJson<TReq, TRes>(params: {
 	request: TReq;
 	idempotencyKey: string;
 }): Promise<TRes> {
-	const baseUrl = resolveManagedGatewayBaseUrl();
+	const baseUrl = await resolveManagedGatewayBaseUrl();
 	const isAbsolutePath = /^https?:\/\//i.test(params.path);
 	if (!baseUrl && !isAbsolutePath) {
 		throw {
@@ -102,7 +100,7 @@ export function createIdempotencyKey(prefix = "kolboo"): string {
 
 export const managedInferenceAPI = {
 	transcribe: async (request: ManagedSttRequest, idempotencyKey: string) => {
-		if (!resolveManagedGatewayBaseUrl()) {
+		if (!(await resolveManagedGatewayBaseUrl())) {
 			return invoke("managed_inference_stt_transcribe", {
 				request,
 				idempotencyKey,
@@ -117,7 +115,7 @@ export const managedInferenceAPI = {
 	},
 
 	complete: async (request: ManagedLlmRequest, idempotencyKey: string) => {
-		if (!resolveManagedGatewayBaseUrl()) {
+		if (!(await resolveManagedGatewayBaseUrl())) {
 			return invoke("managed_inference_llm_complete", {
 				request,
 				idempotencyKey,
@@ -132,7 +130,7 @@ export const managedInferenceAPI = {
 	},
 
 	getUsageState: async (): Promise<ManagedUsageState> => {
-		const baseUrl = resolveManagedGatewayBaseUrl();
+		const baseUrl = await resolveManagedGatewayBaseUrl();
 		if (!baseUrl) {
 			return invoke("managed_inference_get_usage_state");
 		}

@@ -15,15 +15,15 @@ const queryClient = new QueryClient({
 	},
 });
 
-initSentry("overlay_hover");
-
-renderRoot(
-	<QueryClientProvider client={queryClient}>
-		<AppMantineProvider>
-			<OverlayHoverApp />
-		</AppMantineProvider>
-	</QueryClientProvider>,
-);
+void initSentry("overlay_hover").finally(() => {
+	renderRoot(
+		<QueryClientProvider client={queryClient}>
+			<AppMantineProvider>
+				<OverlayHoverApp />
+			</AppMantineProvider>
+		</QueryClientProvider>,
+	);
+});
 
 const notifyHoverReady = () => {
 	invoke("overlay_hover_frontend_ready").catch((error) => {

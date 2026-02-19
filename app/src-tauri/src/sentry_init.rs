@@ -68,15 +68,13 @@ fn scrub_event(
 }
 
 fn sentry_environment() -> String {
-    env_non_empty("SENTRY_ENV")
-        .or_else(|| env_non_empty("VITE_SENTRY_ENV"))
-        .unwrap_or_else(|| {
-            if cfg!(debug_assertions) {
-                "development".to_string()
-            } else {
-                "production".to_string()
-            }
-        })
+    env_non_empty("TAURI_SENTRY_ENV").unwrap_or_else(|| {
+        if cfg!(debug_assertions) {
+            "development".to_string()
+        } else {
+            "production".to_string()
+        }
+    })
 }
 
 pub fn init() {
@@ -84,9 +82,8 @@ pub fn init() {
         return;
     }
 
-    let Some(dsn_raw) = env_non_empty("SENTRY_DSN").or_else(|| env_non_empty("VITE_SENTRY_DSN"))
-    else {
-        log::info!("Backend Sentry disabled (no SENTRY_DSN/VITE_SENTRY_DSN)");
+    let Some(dsn_raw) = env_non_empty("TAURI_SENTRY_DSN") else {
+        log::info!("Backend Sentry disabled (no TAURI_SENTRY_DSN)");
         return;
     };
 
@@ -98,8 +95,8 @@ pub fn init() {
         }
     };
 
-    let release = env_non_empty("SENTRY_RELEASE")
-        .or_else(|| env_non_empty("VITE_APP_VERSION"))
+    let release = env_non_empty("TAURI_SENTRY_RELEASE")
+        .or_else(|| env_non_empty("TAURI_APP_VERSION"))
         .map(Cow::Owned);
 
     let options = sentry::ClientOptions {

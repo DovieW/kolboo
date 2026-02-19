@@ -28,15 +28,15 @@ hljs.registerLanguage("rust", rust);
 hljs.registerLanguage("typescript", typescript);
 const highlightAdapter = createHighlightJsAdapter(hljs);
 
-initSentry("quick_ask");
-
-renderRoot(
-	<CodeHighlightAdapterProvider adapter={highlightAdapter}>
-		<AppMantineProvider>
-			<QuickAskApp />
-		</AppMantineProvider>
-	</CodeHighlightAdapterProvider>,
-);
+void initSentry("quick_ask").finally(() => {
+	renderRoot(
+		<CodeHighlightAdapterProvider adapter={highlightAdapter}>
+			<AppMantineProvider>
+				<QuickAskApp />
+			</AppMantineProvider>
+		</CodeHighlightAdapterProvider>,
+	);
+});
 
 const notifyQuickAskReady = () => {
 	invoke("quick_ask_frontend_ready").catch((error) => {

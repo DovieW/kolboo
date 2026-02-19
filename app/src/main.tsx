@@ -352,19 +352,20 @@ function PanicGate({ children }: { children: ReactNode }) {
 }
 
 installGlobalPanicHandlers();
-initSentry("main");
 
-renderRoot(
-	<QueryClientProvider client={queryClient}>
-		<CodeHighlightAdapterProvider adapter={highlightAdapter}>
-			<AppMantineProvider>
-				<Notifications position="top-right" />
-				<PanicGate>
-					<AppErrorBoundary>
-						<App />
-					</AppErrorBoundary>
-				</PanicGate>
-			</AppMantineProvider>
-		</CodeHighlightAdapterProvider>
-	</QueryClientProvider>,
-);
+void initSentry("main").finally(() => {
+	renderRoot(
+		<QueryClientProvider client={queryClient}>
+			<CodeHighlightAdapterProvider adapter={highlightAdapter}>
+				<AppMantineProvider>
+					<Notifications position="top-right" />
+					<PanicGate>
+						<AppErrorBoundary>
+							<App />
+						</AppErrorBoundary>
+					</PanicGate>
+				</AppMantineProvider>
+			</CodeHighlightAdapterProvider>
+		</QueryClientProvider>,
+	);
+});

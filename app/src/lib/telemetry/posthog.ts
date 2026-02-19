@@ -1,4 +1,5 @@
 import { Store } from "@tauri-apps/plugin-store";
+import { loadRuntimeConfig } from "../tauri/runtimeConfig";
 
 const SENSITIVE_KEY_PATTERN =
 	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|text|transcript|prompt|completion|audio|wav|ocr)/i;
@@ -74,18 +75,19 @@ function sanitizeTelemetryValue(value: unknown): unknown {
 	return String(value);
 }
 
-export function isPosthogConfigured(): boolean {
-	const apiKey = trimOrEmpty(import.meta.env.VITE_POSTHOG_API_KEY);
-	const host = trimOrEmpty(import.meta.env.VITE_POSTHOG_HOST);
+export async function isPosthogConfigured(): Promise<boolean> {
+	const config = await loadRuntimeConfig();
+	const apiKey = trimOrEmpty(config.posthog_api_key ?? undefined);
+	const host = trimOrEmpty(config.posthog_host ?? undefined);
 	return apiKey.length > 0 && host.length > 0;
 }
 
 async function isAnalyticsEnabled(): Promise<boolean> {
 	try {
 		const store = await Store.load("settings.json");
-		return (await store.get<boolean>(ANALYTICS_ENABLED_KEY)) ?? false;
+		return (await store.get<boolean>(ANALYTICS_ENABLED_KEY)) ?? true;
 	} catch {
-		return false;
+		return true;
 	}
 }
 
@@ -95,13 +97,15 @@ export async function trackProductEvent(
 ): Promise<void> {
 	const eventName = event.trim();
 	if (!eventName) return;
-	if (!isPosthogConfigured()) return;
+	if (!(await isPosthogConfigured())) return;
 	if (!(await isAnalyticsEnabled())) return;
 	if (typeof fetch !== "function") return;
 
-	const apiKey = trimOrEmpty(import.meta.env.VITE_POSTHOG_API_KEY);
+	const config = await loadRuntimeConfig();
+
+	const apiKey = trimOrEmpty(config.posthog_api_key ?? undefined);
 	const host = normalizePosthogHost(
-		trimOrEmpty(import.meta.env.VITE_POSTHOG_HOST),
+		trimOrEmpty(config.posthog_host ?? undefined),
 	);
 	if (!apiKey || !host) return;
 
@@ -119,7 +123,7 @@ export async function trackProductEvent(
 		properties: {
 			distinct_id: getDistinctId(),
 			$lib: "kolboo-desktop",
-			$lib_version: trimOrEmpty(import.meta.env.VITE_APP_VERSION) || "dev",
+			$lib_version: trimOrEmpty(config.app_version ?? undefined) || "dev",
 			...safeProperties,
 		},
 	};

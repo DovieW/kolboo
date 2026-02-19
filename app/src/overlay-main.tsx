@@ -17,8 +17,6 @@ const queryClient = new QueryClient({
 	},
 });
 
-initSentry("overlay");
-
 type ErrorBoundaryState = {
 	hasError: boolean;
 	message: string;
@@ -83,15 +81,17 @@ class OverlayErrorBoundary extends Component<
 	}
 }
 
-renderRoot(
-	<QueryClientProvider client={queryClient}>
-		<AppMantineProvider>
-			<OverlayErrorBoundary>
-				<OverlayApp />
-			</OverlayErrorBoundary>
-		</AppMantineProvider>
-	</QueryClientProvider>,
-);
+void initSentry("overlay").finally(() => {
+	renderRoot(
+		<QueryClientProvider client={queryClient}>
+			<AppMantineProvider>
+				<OverlayErrorBoundary>
+					<OverlayApp />
+				</OverlayErrorBoundary>
+			</AppMantineProvider>
+		</QueryClientProvider>,
+	);
+});
 
 invoke("overlay_frontend_ready").catch((error) => {
 	console.error("[Overlay] Failed to notify frontend ready:", error);

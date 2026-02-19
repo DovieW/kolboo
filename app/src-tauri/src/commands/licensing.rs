@@ -37,37 +37,19 @@ struct SupabaseRefreshAuthResponse {
     user: Option<SupabaseAuthUser>,
 }
 
-fn read_first_non_empty_env(keys: &[&str]) -> Option<String> {
-    for key in keys {
-        if let Ok(value) = std::env::var(key) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
-}
-
 fn supabase_auth_config() -> Result<(String, String), CommandError> {
-    let supabase_url =
-        read_first_non_empty_env(&["KOLBOO_SUPABASE_URL", "SUPABASE_URL", "VITE_SUPABASE_URL"])
-            .ok_or_else(|| {
-                CommandError::new("Supabase auth is not configured", "auth")
-                    .with_code("auth_not_configured")
-            })?;
-
-    let publishable_key = read_first_non_empty_env(&[
-        "KOLBOO_SUPABASE_PUBLISHABLE_KEY",
-        "SUPABASE_PUBLISHABLE_KEY",
-        "VITE_SUPABASE_PUBLISHABLE_KEY",
-        "SUPABASE_ANON_KEY",
-        "VITE_SUPABASE_ANON_KEY",
-    ])
-    .ok_or_else(|| {
-        CommandError::new("Supabase publishable key is not configured", "auth")
+    let supabase_url = crate::commands::config::read_first_non_empty_env(&["TAURI_SUPABASE_URL"])
+        .ok_or_else(|| {
+        CommandError::new("Supabase auth is not configured", "auth")
             .with_code("auth_not_configured")
     })?;
+
+    let publishable_key =
+        crate::commands::config::read_first_non_empty_env(&["TAURI_SUPABASE_PUBLISHABLE_KEY"])
+            .ok_or_else(|| {
+                CommandError::new("Supabase publishable key is not configured", "auth")
+                    .with_code("auth_not_configured")
+            })?;
 
     Ok((
         supabase_url.trim_end_matches('/').to_string(),

@@ -2628,6 +2628,7 @@ pub fn run() {
             commands::secrets::secrets_clear_api_key,
             // Config commands (replacing Python server)
             commands::config::get_default_sections,
+            commands::config::get_runtime_config,
             commands::config::get_available_providers,
             commands::config::sync_pipeline_config,
             // Network commands
