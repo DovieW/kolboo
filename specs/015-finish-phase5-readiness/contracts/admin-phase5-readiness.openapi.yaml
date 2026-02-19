@@ -1,0 +1,291 @@
+openapi: 3.1.0
+info:
+  title: Phase 5/5A Remaining Readiness API Contract
+  version: 0.1.0
+  summary: Remaining enterprise admin, testing-path, and release-evidence contract.
+servers:
+  - url: https://api-preview.example.com
+    description: Preview
+  - url: https://api.example.com
+    description: Production
+security:
+  - bearerAuth: []
+paths:
+  /v1/orgs/{orgId}/shared-profiles:
+    get:
+      summary: List shared profiles for an organization
+      parameters:
+        - $ref: '#/components/parameters/orgId'
+      responses:
+        '200':
+          description: Shared profiles list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SharedProfile'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Create shared profile
+      parameters:
+        - $ref: '#/components/parameters/orgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SharedProfileInput'
+      responses:
+        '201':
+          description: Shared profile created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedProfile'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/orgs/{orgId}/shared-profiles/{profileId}:
+    patch:
+      summary: Update shared profile
+      parameters:
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/profileId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SharedProfilePatch'
+      responses:
+        '200':
+          description: Shared profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedProfile'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/orgs/{orgId}/billing/access:
+    get:
+      summary: Get billing access state for organization
+      parameters:
+        - $ref: '#/components/parameters/orgId'
+      responses:
+        '200':
+          description: Billing access state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingAccessState'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/test-access/session:
+    post:
+      summary: Start non-production test-access session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestAccessSessionInput'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestAccessSession'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NonProdOnly' }
+
+  /v1/platform-admin/actions:
+    get:
+      summary: List recorded platform admin action audits
+      responses:
+        '200':
+          description: Platform admin actions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlatformAdminActionRecord'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Record a platform admin action audit event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformAdminActionInput'
+      responses:
+        '201':
+          description: Action audit record created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAdminActionRecord'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    orgId:
+      name: orgId
+      in: path
+      required: true
+      schema: { type: string }
+    profileId:
+      name: profileId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NonProdOnly:
+      description: Endpoint unavailable in production
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        requestId: { type: string }
+
+    SharedProfileInput:
+      type: object
+      required: [name, config]
+      properties:
+        name: { type: string }
+        config: { type: object, additionalProperties: true }
+
+    SharedProfilePatch:
+      type: object
+      properties:
+        name: { type: string }
+        config: { type: object, additionalProperties: true }
+        status: { type: string, enum: [active, archived] }
+
+    SharedProfile:
+      type: object
+      required: [id, orgId, name, status, config]
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [active, archived] }
+        config: { type: object, additionalProperties: true }
+        updatedAt: { type: string, format: date-time }
+
+    BillingAccessState:
+      type: object
+      required: [orgId, planTier, billingStatus]
+      properties:
+        orgId: { type: string }
+        planTier: { type: string }
+        billingStatus: { type: string }
+        seatCount: { type: integer, minimum: 0 }
+        portalUrl: { type: string, format: uri, nullable: true }
+        lastSyncedAt: { type: string, format: date-time }
+
+    TestAccessSessionInput:
+      type: object
+      required: [environment, scope, ttlMinutes]
+      properties:
+        environment: { type: string, enum: [dev, preview, staging] }
+        scope: { type: string }
+        ttlMinutes: { type: integer, minimum: 1, maximum: 120 }
+
+    TestAccessSession:
+      type: object
+      required: [id, environment, scope, issuedAt, expiresAt, status]
+      properties:
+        id: { type: string }
+        environment: { type: string, enum: [dev, preview, staging] }
+        scope: { type: string }
+        issuedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        status: { type: string, enum: [active, expired, revoked] }
+
+    PlatformAdminActionInput:
+      type: object
+      required:
+        [
+          commandGroup,
+          actionName,
+          targetScope,
+          requestPayload,
+          resultStatus,
+          resultMessage,
+          executedAt,
+        ]
+      properties:
+        commandGroup:
+          type: string
+          enum: [org, policy, keys, entitlement, usage, audit]
+        actionName: { type: string }
+        targetScope: { type: string }
+        requestPayload: { type: object, additionalProperties: true }
+        resultStatus: { type: string, enum: [success, failed] }
+        resultMessage: { type: string }
+        executedAt: { type: string, format: date-time }
+
+    PlatformAdminActionRecord:
+      allOf:
+        - $ref: '#/components/schemas/PlatformAdminActionInput'
+        - type: object
+          required: [id, actorUserId, requestPayloadDigest]
+          properties:
+            id: { type: string, format: uuid }
+            actorUserId: { type: string }
+            requestPayloadDigest: { type: string }

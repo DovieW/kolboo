@@ -18,4 +18,5 @@ export {
 	SettingsRow,
 	SettingsTooltipIcon,
 } from "./SettingsRow";
+export { TestPersonaIndicator } from "./TestPersonaIndicator";
 export { UiSettings } from "./UiSettings";

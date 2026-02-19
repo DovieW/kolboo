@@ -440,6 +440,24 @@ export interface LicenseState {
 	limits: TierLimits;
 }
 
+export type EnterprisePersonaType = "byok" | "managed" | "mixed-policy";
+
+export type EnterprisePersonaEnvironment =
+  | "local"
+  | "preview"
+  | "staging"
+  | "production";
+
+export interface EnterprisePersonaState {
+  context_key: string | null;
+  persona_type: EnterprisePersonaType | null;
+  test_access_active: boolean;
+  test_access_expires_at: string | null;
+  environment: EnterprisePersonaEnvironment;
+  source: "storage" | "event" | "none";
+  updated_at: string | null;
+}
+
 export type ManagedInferenceMode = "managed" | "byok";
 
 export type ManagedErrorCategory =

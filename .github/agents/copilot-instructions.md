@@ -1,10 +1,12 @@
-# kolboo Development Guidelines
+﻿# kolboo Development Guidelines
 
 Auto-generated from all feature plans. Last updated: 2026-02-14
 
 ## Active Technologies
 - TypeScript (strict) + Rust (Tauri) for desktop; TypeScript runtime contracts for cloud gateway/control-plane scaffolding + React/Vite, TanStack Query, `@tauri-apps/api`, Tauri Rust backend pipeline/state-machine, Cloudflare Worker patterns (JWT + rate limit + deterministic status) (013-managed-inference-proxy)
 - Tauri store (`settings.json`) for local settings/cache, Supabase Postgres-backed entitlement/usage counters in cloud, request-log metadata surfaces (013-managed-inference-proxy)
+- TypeScript (strict), Rust (Tauri), Node.js scripts (workspace standard) + React/Vite, TanStack Query, Supabase auth/data access, Cloudflare Workers routes, Tauri command wrappers, `kolops` CLI app runtime (015-finish-phase5-readiness)
+- Supabase Postgres for org/admin data; Tauri store (`settings.json`) and secure storage for desktop integration touchpoints (015-finish-phase5-readiness)
 
 - TypeScript (strict) + Rust (Tauri) + React/Vite, Mantine, TanStack Query, Tauri command/event system, store-backed settings layer (012-cloud-policy-packs)
 - Tauri store (`settings.json`) for persisted policy cache and policy metadata (`policy_state` + effective policy payload) (012-cloud-policy-packs)
@@ -64,10 +66,10 @@ pnpm -C app check:ci
 - TypeScript (strict) + React 19 + Vite 7 (UI); Rust 2021 + Tauri 2 (backend): Follow existing project conventions
 
 ## Recent Changes
+- 015-finish-phase5-readiness: Added TypeScript (strict), Rust (Tauri), Node.js scripts (workspace standard) + React/Vite, TanStack Query, Supabase auth/data access, Cloudflare Workers routes, Tauri command wrappers, `kolops` CLI app runtime
 - 013-managed-inference-proxy: Added TypeScript (strict) + Rust (Tauri) for desktop; TypeScript runtime contracts for cloud gateway/control-plane scaffolding + React/Vite, TanStack Query, `@tauri-apps/api`, Tauri Rust backend pipeline/state-machine, Cloudflare Worker patterns (JWT + rate limit + deterministic status)
 
 - 012-cloud-policy-packs: Added TypeScript (strict) + Rust (Tauri) + React/Vite, Mantine, TanStack Query, Tauri command/event system, store-backed settings layer
-- 011-login-org-enrollment: Added TypeScript (strict) + Rust (Tauri) + React/Vite, Mantine, TanStack Query, `@tauri-apps/api`, Tauri Rust command/event system, Sentry SDKs used by desktop surfaces
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

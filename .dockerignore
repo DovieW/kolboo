@@ -1,0 +1,31 @@
+# VCS
+.git/
+.gitignore
+
+# Node
+node_modules/
+
+# Rust/Tauri builds
+target/
+app/src-tauri/target/
+app/src-tauri/target-*/
+
+# Build outputs
+dist/
+build/
+out/
+coverage/
+
+# Environment / secrets
+.env*
+
+# Tooling artifacts
+*.log*
+Dockerfile*
+.dockerignore
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
