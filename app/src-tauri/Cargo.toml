@@ -111,7 +111,7 @@ base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Zip archive creation (diagnostics export)
-zip = { version = "7.4", default-features = false, features = ["deflate"] }
+zip = { version = "8.1", default-features = false, features = ["deflate"] }
 
 # Async utilities
 async-trait = "0.1"
@@ -128,7 +128,7 @@ open = "5.3.2"
 
 # Windows audio control (WASAPI)
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61.3", features = [
+windows = { version = "0.62.2", features = [
     "Win32",
     "ApplicationModel_DataTransfer",
     "Foundation",
