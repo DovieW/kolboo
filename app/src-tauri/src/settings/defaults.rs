@@ -102,6 +102,19 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         false,
     );
 
+    dirty |= set_default(
+        "token_exchange_trigger_set",
+        json!({
+            "multi_idp_required": false,
+            "kill_switch_required": false,
+            "embedded_claims_required": false,
+            "desktop_idp_agnostic_required": false,
+            "reviewed_at": null,
+            "decision": "direct_idp_token"
+        }),
+        false,
+    );
+
     dirty |= set_default("stt_provider", json!("groq"), false);
     dirty |= set_default("stt_language", json!("en"), false);
     // Cerebras free-tier toggle (used by stats filtering).

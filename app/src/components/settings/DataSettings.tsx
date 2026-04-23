@@ -84,7 +84,7 @@ async function readCloudSyncUiState(): Promise<CloudSyncUiState> {
 	const remoteRevision =
 		(await store.get<string | null>("cloud_sync_remote_revision")) ?? null;
 	const posthogAnalyticsEnabled =
-		(await store.get<boolean>("posthog_analytics_enabled")) ?? false;
+		(await store.get<boolean>("posthog_analytics_enabled")) ?? true;
 
 	return {
 		enabled,
@@ -1555,12 +1555,12 @@ export function DataSettings({
 
 			<SettingsRow
 				label="Product analytics (PostHog)"
-				description="Disabled by default. Can be enforced by policy in managed enterprise environments."
+				description="Enabled by default (privacy-safe). Can be enforced by policy in managed enterprise environments."
 				right={
 					<Group gap="md" justify="flex-end" wrap="nowrap">
 						<Checkbox
 							label="Enable privacy-safe analytics"
-							checked={cloudSyncState.data?.posthogAnalyticsEnabled ?? false}
+							checked={cloudSyncState.data?.posthogAnalyticsEnabled ?? true}
 							disabled={
 								isProfileScope || updatePosthogAnalyticsEnabled.isPending
 							}

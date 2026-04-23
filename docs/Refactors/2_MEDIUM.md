@@ -147,6 +147,23 @@ Ideas:
 - Keep a single STT flow helper (`pipeline/stt_flow.rs`) and have other modules call into it.
 - If `transcription_flow.rs` needs a specialized version, refactor it to wrap the shared helper rather than re-implementing.
 
+## Consolidate duplicated Settings shell components
+
+`app/src/App.tsx` currently contains both `_SettingsView` and `SettingsViewWithGuideLauncher`, and they each reimplement nearly the same:
+
+- profile picker state
+- modal wiring
+- settings tab list
+- per-tab panel rendering
+
+This duplication is easy to miss because one of the components is effectively legacy-ish, but every time we add/remove/relabel a settings tab we have to update both copies. The new standalone Account page work touched both just to remove the old Account tab.
+
+Ideas:
+
+- Extract a single shared `SettingsShell` component that owns the tab list and panel rendering.
+- Pass optional header actions (like the setup-guide launcher) via props instead of duplicating the whole screen.
+- Keep the profile-picker state in one place so tab/view changes do not need mirrored updates.
+
 ## Deduplicate audio conversion utilities across STT streaming providers
 
 **Problem:** Several small helper functions are copy-pasted identically (or near-identically) across multiple STT provider files:

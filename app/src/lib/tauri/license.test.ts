@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+	authReasonCodeToMessage,
 	buildLicenseSentryContext,
 	getLicenseErrorMessage,
 	getLicenseTransitionFromSettingsPayload,
+	normalizeAuthReasonCode,
 } from "./license";
 
 describe("license helpers", () => {
@@ -66,5 +68,20 @@ describe("license helpers", () => {
 				ok: true,
 			},
 		});
+	});
+
+	it("normalizes auth reason codes", () => {
+		expect(normalizeAuthReasonCode("reauth_required")).toBe("reauth_required");
+		expect(normalizeAuthReasonCode("policy_denied")).toBe("policy_denied");
+		expect(normalizeAuthReasonCode("definitely_not_real")).toBeNull();
+		expect(normalizeAuthReasonCode(null)).toBeNull();
+	});
+
+	it("maps auth reason codes to actionable messages", () => {
+		expect(authReasonCodeToMessage("insufficient_tier")).toContain("tier");
+		expect(authReasonCodeToMessage("auth_not_configured")).toContain(
+			"not configured",
+		);
+		expect(authReasonCodeToMessage(null)).toBeNull();
 	});
 });

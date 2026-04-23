@@ -4,6 +4,7 @@ import {
 	formatLicenseTierLabel,
 	getOrgDisplayName,
 	isLicenseStatusDegraded,
+	isReauthRequiredReason,
 	shouldShowOrgId,
 } from "./AccountSettings";
 
@@ -75,5 +76,12 @@ describe("AccountSettings helpers", () => {
 				},
 			}),
 		).toBe(true);
+	});
+
+	it("identifies reasons that require re-authentication", () => {
+		expect(isReauthRequiredReason("reauth_required")).toBe(true);
+		expect(isReauthRequiredReason("token_invalid")).toBe(true);
+		expect(isReauthRequiredReason("policy_denied")).toBe(false);
+		expect(isReauthRequiredReason(null)).toBe(false);
 	});
 });

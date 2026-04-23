@@ -31,14 +31,15 @@ import {
 	Home,
 	Plus,
 	Settings,
+	UserRound,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import appPackageJson from "../package.json";
+import { AccountView } from "./components/account";
 import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
 import {
-	AccountSettings,
 	ApiKeysSettings,
 	AudioSettings,
 	DataSettings,
@@ -77,7 +78,7 @@ import { listenTyped } from "./lib/tauri/events";
 import { compareSemver, fetchLatestGithubReleaseVersion } from "./lib/updates";
 import "./styles.css";
 
-type View = "home" | "settings" | "logs" | "usage-stats";
+type View = "home" | "settings" | "logs" | "usage-stats" | "account";
 
 function Sidebar({
 	activeView,
@@ -135,6 +136,15 @@ function Sidebar({
 						leftSection={<BarChart2 size={20} />}
 						active={activeView === "usage-stats"}
 						onClick={() => onViewChange("usage-stats")}
+						variant="filled"
+						className="sidebar-nav-link"
+					/>
+				</Tooltip>
+				<Tooltip label="Account" position="right" withArrow>
+					<NavLink
+						leftSection={<UserRound size={20} />}
+						active={activeView === "account"}
+						onClick={() => onViewChange("account")}
 						variant="filled"
 						className="sidebar-nav-link"
 					/>
@@ -824,7 +834,6 @@ function _SettingsView() {
 					keepMounted={false}
 				>
 					<Tabs.List>
-						<Tabs.Tab value="account">Account</Tabs.Tab>
 						<Tabs.Tab value="ai">AI</Tabs.Tab>
 						<Tabs.Tab value="ui">UI</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
@@ -835,12 +844,6 @@ function _SettingsView() {
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
-
-					<Tabs.Panel value="account" pt="md">
-						<div className="settings-card">
-							<AccountSettings />
-						</div>
-					</Tabs.Panel>
 
 					<Tabs.Panel value="ai" pt="md">
 						<div className="settings-card">
@@ -1132,7 +1135,6 @@ function SettingsViewWithGuideLauncher({
 					keepMounted={false}
 				>
 					<Tabs.List>
-						<Tabs.Tab value="account">Account</Tabs.Tab>
 						<Tabs.Tab value="ai">AI</Tabs.Tab>
 						<Tabs.Tab value="ui">UI</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
@@ -1143,12 +1145,6 @@ function SettingsViewWithGuideLauncher({
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
-
-					<Tabs.Panel value="account" pt="md">
-						<div className="settings-card">
-							<AccountSettings />
-						</div>
-					</Tabs.Panel>
 
 					<Tabs.Panel value="ai" pt="md">
 						<div className="settings-card">
@@ -1439,6 +1435,8 @@ export default function App() {
 				);
 			case "usage-stats":
 				return <UsageStatsView />;
+			case "account":
+				return <AccountView />;
 			default:
 				return (
 					<HomeView

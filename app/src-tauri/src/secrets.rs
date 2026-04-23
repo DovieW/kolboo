@@ -49,11 +49,24 @@ pub const API_KEY_SETTING_KEYS: &[&str] = &[
 const SERVICE_NAME: &str = "kolboo";
 
 #[cfg(desktop)]
+pub const AUTH_SESSION_ACCESS_TOKEN_KEY: &str = "license_access_token";
+
+#[cfg(desktop)]
+pub const AUTH_SESSION_REFRESH_TOKEN_KEY: &str = "license_refresh_token";
+
+#[cfg(desktop)]
 const EXTRA_SECRET_KEYS: &[&str] = &[
     "github_gist_token",
-    "license_access_token",
-    "license_refresh_token",
+    AUTH_SESSION_ACCESS_TOKEN_KEY,
+    AUTH_SESSION_REFRESH_TOKEN_KEY,
 ];
+
+#[cfg(desktop)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthSessionMaterial {
+    pub access_token: String,
+    pub refresh_token: String,
+}
 
 #[cfg(desktop)]
 fn validate_secret_store_key(store_key: &str) -> Result<(), String> {
@@ -137,6 +150,72 @@ pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Persist desktop auth session material (access + refresh) in secure storage.
+///
+/// This helper keeps lifecycle behavior centralized and attempts rollback if one
+/// credential write succeeds while the other fails.
+#[cfg(desktop)]
+pub fn persist_auth_session_material(
+    app: &AppHandle,
+    access_token: &str,
+    refresh_token: &str,
+) -> Result<(), String> {
+    set_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY, access_token)?;
+    if let Err(e) = set_secret(app, AUTH_SESSION_REFRESH_TOKEN_KEY, refresh_token) {
+        if let Err(clear_err) = clear_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY) {
+            log::warn!(
+                "Auth session rollback failed after refresh write error: {}",
+                clear_err
+            );
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Load desktop auth session material from secure storage.
+///
+/// If one token is present and the other is missing, the helper clears both to
+/// avoid leaving a partial/inconsistent session footprint.
+#[cfg(desktop)]
+pub fn load_auth_session_material(app: &AppHandle) -> Option<AuthSessionMaterial> {
+    let access = get_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY);
+    let refresh = get_secret(app, AUTH_SESSION_REFRESH_TOKEN_KEY);
+
+    match (access, refresh) {
+        (Some(access_token), Some(refresh_token)) => Some(AuthSessionMaterial {
+            access_token,
+            refresh_token,
+        }),
+        (None, None) => None,
+        _ => {
+            log::warn!(
+                "Detected partial auth session material; clearing secure storage auth session keys"
+            );
+            let _ = clear_auth_session_material(app);
+            None
+        }
+    }
+}
+
+#[cfg(desktop)]
+pub fn clear_auth_session_material(app: &AppHandle) -> Result<(), String> {
+    let mut errors: Vec<String> = Vec::new();
+
+    if let Err(e) = clear_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY) {
+        errors.push(e);
+    }
+    if let Err(e) = clear_secret(app, AUTH_SESSION_REFRESH_TOKEN_KEY) {
+        errors.push(e);
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
     }
 }
 
@@ -335,5 +414,19 @@ pub fn clear_api_key(_app: &tauri::AppHandle, _store_key: &str) -> Result<(), St
 pub fn migrate_api_keys_from_store(
     _app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+pub fn persist_auth_session_material(
+    _app: &tauri::AppHandle,
+    _access_token: &str,
+    _refresh_token: &str,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+pub fn clear_auth_session_material(_app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }

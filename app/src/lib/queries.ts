@@ -70,10 +70,25 @@ import {
 	type WhisperModelInfo,
 } from "./tauri";
 import { listenTyped } from "./tauri/events";
+import {
+	authReasonCodeToMessage,
+	normalizeAuthReasonCode,
+} from "./tauri/license";
 
 export function toManagedInferenceMessage(error: unknown): string {
 	if (!(error && typeof error === "object")) {
 		return "Managed inference is temporarily unavailable right now. You can retry, or switch to BYOK providers in Settings.";
+	}
+
+	const reasonCode = normalizeAuthReasonCode(
+		(error as { reason_code?: unknown }).reason_code,
+	);
+	const reasonCodeMessage = authReasonCodeToMessage(reasonCode);
+	if (reasonCodeMessage) {
+		if (reasonCode === "insufficient_tier") {
+			return `${reasonCodeMessage} You can continue with BYOK providers in Settings.`;
+		}
+		return reasonCodeMessage;
 	}
 
 	const category = (error as { category?: string }).category;
@@ -301,6 +316,57 @@ export async function invalidatePolicyRelatedQueries(
 	]);
 }
 
+export async function invalidateLicenseRelatedQueries(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["licenseState"] }),
+    queryClient.invalidateQueries({ queryKey: ["licenseAuthContext"] }),
+  ]);
+}
+
+export async function invalidateLogoutRelatedQueries(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+): Promise<void> {
+  await Promise.all([
+    invalidateLicenseRelatedQueries(queryClient),
+    invalidatePolicyRelatedQueries(queryClient),
+  ]);
+}
+
+export function useLicenseQueryBootstrap() {
+  const queryClient = useQueryClient();
+
+  useLicenseState();
+  useLicenseAuthContext();
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    licenseAPI
+      .onTransition(() => {
+        void invalidateLicenseRelatedQueries(queryClient);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((error) => {
+        console.warn(
+          "Failed to subscribe to license transition events:",
+          error,
+        );
+      });
+
+    return () => {
+      try {
+        unlisten?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, [queryClient]);
+}
+
 export function usePolicySync() {
 	const queryClient = useQueryClient();
 	return useMutation({
@@ -331,6 +397,12 @@ export function createLicenseStateQueryFn(
 	return () => api.getLicenseState();
 }
 
+export function createLicenseAuthContextQueryFn(
+	api: Pick<typeof tauriAPI, "getLicenseAuthContext"> = tauriAPI,
+) {
+	return () => api.getLicenseAuthContext();
+}
+
 export function createRefreshLicenseEntitlementMutationFn(
 	api: Pick<typeof licenseAPI, "refreshEntitlement"> = licenseAPI,
 ) {
@@ -346,18 +418,28 @@ export function useLicenseState() {
 	});
 }
 
+export function useLicenseAuthContext() {
+	return useQuery({
+		queryKey: ["licenseAuthContext"],
+		queryFn: createLicenseAuthContextQueryFn(),
+		staleTime: 0,
+		refetchOnWindowFocus: true,
+	});
+}
+
 export function useStartLicenseLogin() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (request?: {
-			provider_hint?: string | null;
-			email?: string | null;
-			password?: string | null;
-		}) => licenseAPI.startLogin(request),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["licenseState"] });
-		},
-	});
+    mutationFn: (request?: {
+      provider_hint?: string | null;
+      auth_provider?: string | null;
+      email?: string | null;
+      password?: string | null;
+    }) => licenseAPI.startLogin(request),
+    onSuccess: () => {
+      void invalidateLicenseRelatedQueries(queryClient);
+    },
+  });
 }
 
 export function useLogoutLicense() {
@@ -365,7 +447,7 @@ export function useLogoutLicense() {
 	return useMutation({
 		mutationFn: () => licenseAPI.logout(),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["licenseState"] });
+			void invalidateLogoutRelatedQueries(queryClient);
 		},
 	});
 }
@@ -375,7 +457,7 @@ export function useRefreshLicenseEntitlement() {
 	return useMutation({
 		mutationFn: createRefreshLicenseEntitlementMutationFn(),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["licenseState"] });
+			void invalidateLicenseRelatedQueries(queryClient);
 		},
 	});
 }

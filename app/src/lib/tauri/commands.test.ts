@@ -266,35 +266,61 @@ describe("tauri command wrappers", () => {
 
 	it("license wrappers invoke backend commands", async () => {
 		const { tauriAPI, licenseAPI } = await import("./commands");
+		const transitionHandler = vi.fn();
 
 		await tauriAPI.getLicenseState();
 		await tauriAPI.startLicenseLogin({
-			provider_hint: "enterprise",
-			email: "user@example.com",
-			password: "password123",
-		});
+      provider_hint: "enterprise",
+      auth_provider: "google",
+      email: "user@example.com",
+      password: "password123",
+    });
+		await tauriAPI.exchangeLicenseSession("upstream-token-123");
 		await tauriAPI.logoutLicense();
 		await tauriAPI.refreshLicenseEntitlement(true);
 		await tauriAPI.getLicenseManagementUrl();
 
 		await licenseAPI.getState();
 		await licenseAPI.startLogin();
+		await licenseAPI.exchangeSession("upstream-token-456");
+    await licenseAPI.onTransition(transitionHandler);
 
 		expect(invokeMock).toHaveBeenCalledWith("license_get_state");
 		expect(invokeMock).toHaveBeenCalledWith("license_start_login", {
-			request: {
-				provider_hint: "enterprise",
-				email: "user@example.com",
-				password: "password123",
-			},
-		});
+      request: {
+        provider_hint: "enterprise",
+        auth_provider: "google",
+        email: "user@example.com",
+        password: "password123",
+      },
+    });
 		expect(invokeMock).toHaveBeenCalledWith("license_logout");
+		expect(invokeMock).toHaveBeenCalledWith("license_exchange_session", {
+      request: {
+        upstream_access_token: "upstream-token-123",
+      },
+    });
 		expect(invokeMock).toHaveBeenCalledWith("license_refresh_entitlement", {
 			simulateFailure: true,
 		});
 		expect(invokeMock).toHaveBeenCalledWith("license_get_management_url");
 		expect(invokeMock).toHaveBeenCalledWith("license_start_login", {
-			request: { provider_hint: null, email: null, password: null },
-		});
+      request: {
+        provider_hint: null,
+        auth_provider: null,
+        email: null,
+        password: null,
+      },
+    });
+		expect(invokeMock).toHaveBeenCalledWith("license_exchange_session", {
+      request: {
+        upstream_access_token: "upstream-token-456",
+      },
+    });
+    expect(listenTypedMock).toHaveBeenCalledWith(
+      "settings-changed",
+      expect.any(Function),
+    );
+    expect(transitionHandler).not.toHaveBeenCalled();
 	});
 });

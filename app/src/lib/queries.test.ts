@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createLicenseStateQueryFn,
 	createRefreshLicenseEntitlementMutationFn,
+	invalidateLicenseRelatedQueries,
+	invalidateLogoutRelatedQueries,
 	invalidatePolicyRelatedQueries,
 } from "./queries";
 
@@ -54,6 +56,38 @@ describe("license query-layer function builders", () => {
 			queryKey: ["policyState"],
 		});
 		expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+			queryKey: ["settings"],
+		});
+	});
+
+	it("invalidates license queries when auth state changes", async () => {
+		const invalidateQueries = vi.fn(async () => undefined);
+
+		await invalidateLicenseRelatedQueries({ invalidateQueries });
+
+		expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+			queryKey: ["licenseState"],
+		});
+		expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+			queryKey: ["licenseAuthContext"],
+		});
+	});
+
+	it("invalidates auth and policy queries on logout", async () => {
+		const invalidateQueries = vi.fn(async () => undefined);
+
+		await invalidateLogoutRelatedQueries({ invalidateQueries });
+
+		expect(invalidateQueries).toHaveBeenCalledWith({
+			queryKey: ["licenseState"],
+		});
+		expect(invalidateQueries).toHaveBeenCalledWith({
+			queryKey: ["licenseAuthContext"],
+		});
+		expect(invalidateQueries).toHaveBeenCalledWith({
+			queryKey: ["policyState"],
+		});
+		expect(invalidateQueries).toHaveBeenCalledWith({
 			queryKey: ["settings"],
 		});
 	});

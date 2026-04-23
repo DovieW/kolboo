@@ -2,7 +2,11 @@ import { Store } from "@tauri-apps/plugin-store";
 import { loadRuntimeConfig } from "../tauri/runtimeConfig";
 
 const SENSITIVE_KEY_PATTERN =
-	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|text|transcript|prompt|completion|audio|wav|ocr)/i;
+	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code|text|transcript|prompt|completion|audio|wav|ocr)/i;
+
+const JWT_LIKE_PATTERN =
+	/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9._~+\-/=]+$/;
+const BEARER_TOKEN_PATTERN = /^bearer\s+[A-Za-z0-9._~+\-/=]+$/i;
 
 const ANALYTICS_ENABLED_KEY = "posthog_analytics_enabled";
 const DISTINCT_ID_STORAGE_KEY = "kolboo_posthog_distinct_id_v1";
@@ -58,6 +62,12 @@ function sanitizeTelemetryValue(value: unknown): unknown {
 
 	if (typeof value === "string") {
 		const trimmed = value.trim();
+		if (
+			BEARER_TOKEN_PATTERN.test(trimmed) ||
+			(JWT_LIKE_PATTERN.test(trimmed) && trimmed.length >= 24)
+		) {
+			return "[REDACTED]";
+		}
 		if (trimmed.length > 256) {
 			return `${trimmed.slice(0, 256)}…`;
 		}

@@ -6,7 +6,7 @@ use tauri::Runtime;
 use tauri_plugin_store::Store;
 
 #[cfg(desktop)]
-pub(crate) const SETTINGS_VERSION_LATEST: u32 = 7;
+pub(crate) const SETTINGS_VERSION_LATEST: u32 = 8;
 
 // Version history:
 // 1 -> 2: quick ask hotkey key rename, retention key split, enum typo fixes, auto_mute_audio -> playing_audio_handling
@@ -15,6 +15,7 @@ pub(crate) const SETTINGS_VERSION_LATEST: u32 = 7;
 // 4 -> 5: active-window OCR mode migration (legacy bool -> tri-state)
 // 5 -> 6: migrate legacy hotkey keys into hotkey_shortcuts array
 // 6 -> 7: normalize stt_language values (global + per-profile)
+// 7 -> 8: normalize token_exchange_trigger_set and persist explicit decision
 
 #[cfg(desktop)]
 pub(crate) trait SettingsStore {
@@ -408,6 +409,65 @@ fn migrate_v6_to_v7(store: &impl SettingsStore) -> bool {
 }
 
 #[cfg(desktop)]
+fn normalize_token_exchange_trigger_set_value(raw: &Value) -> Value {
+    let obj = raw.as_object();
+    let multi_idp_required = obj
+        .and_then(|value| value.get("multi_idp_required"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let kill_switch_required = obj
+        .and_then(|value| value.get("kill_switch_required"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let embedded_claims_required = obj
+        .and_then(|value| value.get("embedded_claims_required"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let desktop_idp_agnostic_required = obj
+        .and_then(|value| value.get("desktop_idp_agnostic_required"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let reviewed_at = obj
+        .and_then(|value| value.get("reviewed_at"))
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    let decision = if multi_idp_required
+        || kill_switch_required
+        || embedded_claims_required
+        || desktop_idp_agnostic_required
+    {
+        "adopt_token_exchange"
+    } else {
+        "direct_idp_token"
+    };
+
+    json!({
+        "multi_idp_required": multi_idp_required,
+        "kill_switch_required": kill_switch_required,
+        "embedded_claims_required": embedded_claims_required,
+        "desktop_idp_agnostic_required": desktop_idp_agnostic_required,
+        "reviewed_at": reviewed_at,
+        "decision": decision,
+    })
+}
+
+#[cfg(desktop)]
+fn migrate_v7_to_v8(store: &impl SettingsStore) -> bool {
+    let Some(raw) = store.get("token_exchange_trigger_set") else {
+        return false;
+    };
+
+    let normalized = normalize_token_exchange_trigger_set_value(&raw);
+    if normalized == raw {
+        return false;
+    }
+
+    store.set("token_exchange_trigger_set", normalized);
+    true
+}
+
+#[cfg(desktop)]
 pub(crate) fn run_settings_migrations(
     store: &impl SettingsStore,
 ) -> Result<bool, Box<dyn std::error::Error>> {
@@ -448,6 +508,11 @@ pub(crate) fn run_settings_migrations(
     if version < 7 {
         dirty |= migrate_v6_to_v7(store);
         version = 7;
+    }
+
+    if version < 8 {
+        dirty |= migrate_v7_to_v8(store);
+        version = 8;
     }
 
     if version != current_version {
@@ -503,7 +568,7 @@ mod tests {
 
         assert!(dirty);
         assert!(store.get("quick_ask_hold_hotkey").is_some());
-        assert_eq!(store.get("settings_version"), Some(json!(7)));
+        assert_eq!(store.get("settings_version"), Some(json!(8)));
     }
 
     #[test]
@@ -538,7 +603,7 @@ mod tests {
             Some(&json!({"system": {"content": "P1"}}))
         );
 
-        assert_eq!(store.get("settings_version"), Some(json!(7)));
+        assert_eq!(store.get("settings_version"), Some(json!(8)));
     }
 
     #[test]
@@ -558,7 +623,7 @@ mod tests {
 
         let dirty = run_settings_migrations(&store).expect("migration failed");
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(7)));
+        assert_eq!(store.get("settings_version"), Some(json!(8)));
 
         let profiles = store.get("rewrite_program_prompt_profiles").unwrap();
         let arr = profiles.as_array().unwrap();
@@ -633,7 +698,7 @@ mod tests {
         let dirty = run_settings_migrations(&store).expect("migration failed");
 
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(7)));
+        assert_eq!(store.get("settings_version"), Some(json!(8)));
         let cards = store.get("hotkey_shortcuts").expect("missing cards");
         let arr = cards.as_array().expect("cards array");
         assert!(arr
@@ -658,7 +723,7 @@ mod tests {
         let dirty = run_settings_migrations(&store).expect("migration failed");
 
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(7)));
+        assert_eq!(store.get("settings_version"), Some(json!(8)));
         assert_eq!(
             store.get("rewrite_active_window_ocr_mode"),
             Some(json!("auto"))
@@ -688,7 +753,7 @@ mod tests {
         let dirty = run_settings_migrations(&store).expect("migration failed");
 
         assert!(dirty);
-        assert_eq!(store.get("settings_version"), Some(json!(7)));
+        assert_eq!(store.get("settings_version"), Some(json!(8)));
         assert_eq!(store.get("stt_language"), Some(json!("en")));
 
         let profiles = store.get("rewrite_program_prompt_profiles").unwrap();
@@ -697,5 +762,39 @@ mod tests {
         assert_eq!(default_profile.get("stt_language"), Some(&json!("es")));
         let code_profile = arr[1].as_object().unwrap();
         assert_eq!(code_profile.get("stt_language"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn normalizes_token_exchange_trigger_set_and_version() {
+        let store = TestStore::with_entries(vec![
+            ("settings_version", json!(7)),
+            (
+                "token_exchange_trigger_set",
+                json!({
+                    "multi_idp_required": false,
+                    "kill_switch_required": true,
+                    "embedded_claims_required": false,
+                    "desktop_idp_agnostic_required": false,
+                    "reviewed_at": "2026-02-20T10:00:00Z",
+                    "decision": "direct_idp_token"
+                }),
+            ),
+        ]);
+
+        let dirty = run_settings_migrations(&store).expect("migration failed");
+
+        assert!(dirty);
+        assert_eq!(store.get("settings_version"), Some(json!(8)));
+        assert_eq!(
+            store.get("token_exchange_trigger_set"),
+            Some(json!({
+                "multi_idp_required": false,
+                "kill_switch_required": true,
+                "embedded_claims_required": false,
+                "desktop_idp_agnostic_required": false,
+                "reviewed_at": "2026-02-20T10:00:00Z",
+                "decision": "adopt_token_exchange"
+            }))
+        );
     }
 }

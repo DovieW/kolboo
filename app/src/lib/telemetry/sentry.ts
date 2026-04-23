@@ -4,7 +4,11 @@ import { loadRuntimeConfig } from "../tauri/runtimeConfig";
 export type SentrySurface = "main" | "overlay" | "overlay_hover" | "quick_ask";
 
 const SENSITIVE_KEY_PATTERN =
-	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie)/i;
+	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code)/i;
+
+const JWT_LIKE_PATTERN =
+	/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9._~+\-/=]+$/;
+const BEARER_TOKEN_PATTERN = /^bearer\s+[A-Za-z0-9._~+\-/=]+$/i;
 
 let initialized = false;
 let sentryConfigured = false;
@@ -55,7 +59,24 @@ export function redactTelemetryValue(value: unknown): unknown {
 	}
 
 	if (typeof value === "string" && value.length > 512) {
+		const trimmed = value.trim();
+		if (
+			BEARER_TOKEN_PATTERN.test(trimmed) ||
+			(JWT_LIKE_PATTERN.test(trimmed) && trimmed.length >= 24)
+		) {
+			return "[REDACTED]";
+		}
 		return `${value.slice(0, 512)}…`;
+	}
+
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (
+			BEARER_TOKEN_PATTERN.test(trimmed) ||
+			(JWT_LIKE_PATTERN.test(trimmed) && trimmed.length >= 24)
+		) {
+			return "[REDACTED]";
+		}
 	}
 
 	return value;

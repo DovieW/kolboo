@@ -14,6 +14,22 @@ describe("toManagedInferenceMessage", () => {
 		);
 	});
 
+	it("prefers explicit auth reason codes when present", () => {
+		expect(
+			toManagedInferenceMessage({
+				category: "unauthorized",
+				reason_code: "policy_denied",
+			}),
+		).toContain("organization policy");
+
+		expect(
+			toManagedInferenceMessage({
+				category: "ineligible",
+				reason_code: "insufficient_tier",
+			}),
+		).toContain("BYOK providers");
+	});
+
 	it("falls back to temporary-unavailable guidance for unknown errors", () => {
 		expect(toManagedInferenceMessage(new Error("boom"))).toContain(
 			"temporarily unavailable",

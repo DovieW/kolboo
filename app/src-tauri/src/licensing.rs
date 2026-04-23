@@ -7,8 +7,6 @@ use serde_json::Value;
 use tauri::AppHandle;
 
 pub const DEFAULT_GRACE_DAYS: i64 = 7;
-pub const SECRET_ACCESS_TOKEN_KEY: &str = "license_access_token";
-pub const SECRET_REFRESH_TOKEN_KEY: &str = "license_refresh_token";
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +61,72 @@ pub struct LicenseState {
     pub limits: TierLimits,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthReasonCode {
+    ReauthRequired,
+    TokenInvalid,
+    MembershipMissing,
+    InsufficientTier,
+    PolicyDenied,
+    AuthNotConfigured,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyStatus {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct LicenseAuthContext {
+    pub authenticated: bool,
+    pub secure_session_present: bool,
+    pub subject_id: Option<String>,
+    pub issuer: Option<String>,
+    pub mode: LicenseTier,
+    pub org_id: Option<String>,
+    pub entitlements: Vec<String>,
+    pub policy_status: PolicyStatus,
+    pub reason_code: Option<AuthReasonCode>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenExchangeDecision {
+    DirectIdpToken,
+    AdoptTokenExchange,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct TokenExchangeTriggerSet {
+    pub multi_idp_required: bool,
+    pub kill_switch_required: bool,
+    pub embedded_claims_required: bool,
+    pub desktop_idp_agnostic_required: bool,
+    pub reviewed_at: Option<DateTime<Utc>>,
+    pub decision: TokenExchangeDecision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct SessionExchangeRequest {
+    pub upstream_access_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SessionExchangeResponse {
+    pub enabled: bool,
+    pub decision: TokenExchangeDecision,
+    pub trigger_set: TokenExchangeTriggerSet,
+    pub session_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub claims: Value,
+    pub reason: String,
+}
+
 impl LicenseState {
     pub fn signed_out(now: DateTime<Utc>) -> Self {
         Self {
@@ -83,6 +147,7 @@ impl LicenseState {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct LoginRequest {
     pub provider_hint: Option<String>,
+    pub auth_provider: Option<String>,
     pub email: Option<String>,
     pub password: Option<String>,
 }
@@ -144,9 +209,11 @@ pub fn telemetry_context_for_state(state: &LicenseState) -> Value {
 
 #[cfg(desktop)]
 pub fn persist_session_material(app: &AppHandle, session: &SessionMaterial) -> Result<(), String> {
-    crate::secrets::set_secret(app, SECRET_ACCESS_TOKEN_KEY, &session.access_token)?;
-    crate::secrets::set_secret(app, SECRET_REFRESH_TOKEN_KEY, &session.refresh_token)?;
-    Ok(())
+    crate::secrets::persist_auth_session_material(
+        app,
+        &session.access_token,
+        &session.refresh_token,
+    )
 }
 
 #[cfg(not(desktop))]
@@ -159,12 +226,69 @@ pub fn persist_session_material(
 
 #[cfg(desktop)]
 pub fn load_session_material(app: &AppHandle) -> Option<SessionMaterial> {
-    let access = crate::secrets::get_secret(app, SECRET_ACCESS_TOKEN_KEY)?;
-    let refresh = crate::secrets::get_secret(app, SECRET_REFRESH_TOKEN_KEY)?;
+    let session = crate::secrets::load_auth_session_material(app)?;
     Some(SessionMaterial {
-        access_token: access,
-        refresh_token: refresh,
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
     })
+}
+
+pub fn evaluate_token_exchange_decision(
+    trigger_set: &TokenExchangeTriggerSet,
+) -> TokenExchangeDecision {
+    if trigger_set.multi_idp_required
+        || trigger_set.kill_switch_required
+        || trigger_set.embedded_claims_required
+        || trigger_set.desktop_idp_agnostic_required
+    {
+        TokenExchangeDecision::AdoptTokenExchange
+    } else {
+        TokenExchangeDecision::DirectIdpToken
+    }
+}
+
+pub fn normalize_token_exchange_trigger_set(
+    raw: Option<Value>,
+    now: DateTime<Utc>,
+) -> TokenExchangeTriggerSet {
+    let Some(Value::Object(map)) = raw else {
+        return TokenExchangeTriggerSet {
+            multi_idp_required: false,
+            kill_switch_required: false,
+            embedded_claims_required: false,
+            desktop_idp_agnostic_required: false,
+            reviewed_at: None,
+            decision: TokenExchangeDecision::DirectIdpToken,
+        };
+    };
+
+    let mut trigger_set = TokenExchangeTriggerSet {
+        multi_idp_required: map
+            .get("multi_idp_required")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        kill_switch_required: map
+            .get("kill_switch_required")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        embedded_claims_required: map
+            .get("embedded_claims_required")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        desktop_idp_agnostic_required: map
+            .get("desktop_idp_agnostic_required")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        reviewed_at: parse_datetime(map.get("reviewed_at")),
+        decision: TokenExchangeDecision::DirectIdpToken,
+    };
+
+    if trigger_set.reviewed_at.is_none() && map.contains_key("reviewed_at") {
+        trigger_set.reviewed_at = Some(now);
+    }
+
+    trigger_set.decision = evaluate_token_exchange_decision(&trigger_set);
+    trigger_set
 }
 
 #[cfg(not(desktop))]
@@ -174,9 +298,7 @@ pub fn load_session_material(_app: &tauri::AppHandle) -> Option<SessionMaterial>
 
 #[cfg(desktop)]
 pub fn clear_session_material(app: &AppHandle) -> Result<(), String> {
-    crate::secrets::clear_secret(app, SECRET_ACCESS_TOKEN_KEY)?;
-    crate::secrets::clear_secret(app, SECRET_REFRESH_TOKEN_KEY)?;
-    Ok(())
+    crate::secrets::clear_auth_session_material(app)
 }
 
 #[cfg(not(desktop))]
@@ -338,8 +460,8 @@ pub fn build_login_state(provider_hint: Option<&str>, now: DateTime<Utc>) -> Lic
     LicenseState {
         tier,
         status: LicenseStatus::Active,
-        user_id: Some("user-local-1".to_string()),
-        email: Some("user@kolboo.local".to_string()),
+        user_id: None,
+        email: None,
         org: if wants_enterprise {
             Some(OrgContext {
                 org_id: "org-kolboo-enterprise".to_string(),
@@ -479,5 +601,38 @@ mod tests {
             Some("present:16")
         );
         assert_eq!(payload.get("has_org").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn token_exchange_decision_stays_direct_when_no_triggers_are_active() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
+        let trigger_set = normalize_token_exchange_trigger_set(None, now);
+
+        assert_eq!(trigger_set.decision, TokenExchangeDecision::DirectIdpToken);
+    }
+
+    #[test]
+    fn token_exchange_decision_adopts_when_any_trigger_is_active() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
+        let trigger_set = normalize_token_exchange_trigger_set(
+            Some(json!({
+                "multi_idp_required": false,
+                "kill_switch_required": true,
+                "embedded_claims_required": false,
+                "desktop_idp_agnostic_required": false,
+                "reviewed_at": "2026-02-12T09:30:00Z",
+                "decision": "direct_idp_token"
+            })),
+            now,
+        );
+
+        assert_eq!(
+            trigger_set.decision,
+            TokenExchangeDecision::AdoptTokenExchange
+        );
+        assert_eq!(
+            trigger_set.reviewed_at,
+            Some(Utc.with_ymd_and_hms(2026, 2, 12, 9, 30, 0).unwrap())
+        );
     }
 }

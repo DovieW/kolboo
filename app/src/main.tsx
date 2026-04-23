@@ -16,6 +16,7 @@ import "@mantine/notifications/styles.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Component, type ReactNode, useEffect, useState } from "react";
 import App from "./App";
+import { useLicenseQueryBootstrap } from "./lib/queries";
 import { initSentry } from "./lib/telemetry/sentry";
 import "./styles.css";
 
@@ -351,11 +352,17 @@ function PanicGate({ children }: { children: ReactNode }) {
 	);
 }
 
+function LicenseQueryBootstrap() {
+	useLicenseQueryBootstrap();
+	return null;
+}
+
 installGlobalPanicHandlers();
 
 void initSentry("main").finally(() => {
 	renderRoot(
 		<QueryClientProvider client={queryClient}>
+			<LicenseQueryBootstrap />
 			<CodeHighlightAdapterProvider adapter={highlightAdapter}>
 				<AppMantineProvider>
 					<Notifications position="top-right" />

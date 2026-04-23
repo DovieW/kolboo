@@ -56,7 +56,3 @@ export function loadRuntimeConfig(): Promise<RuntimeConfig> {
 
 	return runtimeConfigPromise;
 }
-
-export function resetRuntimeConfigForTests(): void {
-	runtimeConfigPromise = null;
-}

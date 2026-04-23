@@ -321,7 +321,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         ]));
 
     let managed_access_token =
-        crate::secrets::get_secret(&app, crate::licensing::SECRET_ACCESS_TOKEN_KEY);
+        crate::secrets::get_secret(&app, crate::secrets::AUTH_SESSION_ACCESS_TOKEN_KEY);
 
     let license_state = app
         .store("settings.json")

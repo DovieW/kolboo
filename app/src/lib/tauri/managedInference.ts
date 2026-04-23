@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import { authReasonCodeToMessage, normalizeAuthReasonCode } from "./license";
 import { loadRuntimeConfig } from "./runtimeConfig";
 import type {
+	AuthReasonCode,
 	ManagedError,
 	ManagedErrorCategory,
 	ManagedUsageState,
@@ -27,6 +29,67 @@ async function resolveManagedGatewayBaseUrl(): Promise<string | null> {
 	return trimmed.length > 0 ? trimmed.replace(/\/$/, "") : null;
 }
 
+function normalizeOptionalToken(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : null;
+}
+
+function codeForReason(reasonCode: AuthReasonCode | null): string {
+	if (!reasonCode) return "MANAGED_AUTH_REQUIRED";
+	return reasonCode.toUpperCase();
+}
+
+async function resolveManagedSessionAccessToken(): Promise<string | null> {
+	try {
+		return normalizeOptionalToken(
+			await invoke<string | null>("license_get_session_access_token"),
+		);
+	} catch {
+		return null;
+	}
+}
+
+function createManagedAuthError(
+	reasonCode: AuthReasonCode | null,
+): ManagedError {
+	return {
+		category:
+			reasonCode === "auth_not_configured"
+				? "temporarily_unavailable"
+				: "unauthorized",
+		code: codeForReason(reasonCode),
+		message:
+			authReasonCodeToMessage(reasonCode) ??
+			"Managed authentication is unavailable right now.",
+		reason_code: reasonCode,
+		request_id: null,
+		retry_after_seconds: null,
+	};
+}
+
+type ManagedInvokeFallback = {
+	command: string;
+	args?: Record<string, unknown>;
+};
+
+async function invokeManagedFallback<TRes>(
+	fallbackInvoke: ManagedInvokeFallback,
+): Promise<TRes> {
+	return invoke<TRes>(fallbackInvoke.command, fallbackInvoke.args ?? {});
+}
+
+async function resolveManagedAuthUnavailableReason(): Promise<AuthReasonCode | null> {
+	try {
+		const context = await invoke<{ reason_code?: unknown }>(
+			"license_get_auth_context",
+		);
+		return normalizeAuthReasonCode(context?.reason_code);
+	} catch {
+		return "reauth_required";
+	}
+}
+
 function categoryForStatus(status: number): ManagedErrorCategory {
 	if (status === 401 || status === 403) return "unauthorized";
 	if (status === 409 || status === 412) return "ineligible";
@@ -48,20 +111,27 @@ function normalizeManagedError(payload: unknown, status: number): ManagedError {
 			typeof p?.message === "string"
 				? p.message
 				: "Managed inference request failed",
+		reason_code: normalizeAuthReasonCode(p?.reason_code),
 		request_id: typeof p?.request_id === "string" ? p.request_id : null,
 		retry_after_seconds:
 			typeof p?.retry_after_seconds === "number" ? p.retry_after_seconds : null,
 	};
 }
 
-export async function postManagedJson<TReq, TRes>(params: {
+async function requestManagedJson<TReq, TRes>(params: {
+	method: "GET" | "POST";
 	path: string;
-	request: TReq;
-	idempotencyKey: string;
+	request?: TReq;
+	idempotencyKey?: string;
+	fallbackInvoke?: ManagedInvokeFallback;
 }): Promise<TRes> {
 	const baseUrl = await resolveManagedGatewayBaseUrl();
 	const isAbsolutePath = /^https?:\/\//i.test(params.path);
 	if (!baseUrl && !isAbsolutePath) {
+		if (params.fallbackInvoke) {
+			return invokeManagedFallback(params.fallbackInvoke);
+		}
+
 		throw {
 			category: "temporarily_unavailable",
 			code: "MANAGED_GATEWAY_NOT_CONFIGURED",
@@ -70,14 +140,34 @@ export async function postManagedJson<TReq, TRes>(params: {
 	}
 
 	const url = isAbsolutePath ? params.path : `${baseUrl}${params.path}`;
+	const headers: Record<string, string> = {
+		"content-type": "application/json",
+	};
+
+	if (params.idempotencyKey) {
+		headers["x-idempotency-key"] = params.idempotencyKey;
+	}
+
+	if (!isAbsolutePath) {
+		const accessToken = await resolveManagedSessionAccessToken();
+		if (!accessToken) {
+			if (params.fallbackInvoke) {
+				return invokeManagedFallback(params.fallbackInvoke);
+			}
+
+			throw createManagedAuthError(await resolveManagedAuthUnavailableReason());
+		}
+
+		headers.authorization = `Bearer ${accessToken}`;
+	}
 
 	const response = await fetch(url, {
-		method: "POST",
-		headers: {
-			"content-type": "application/json",
-			"x-idempotency-key": params.idempotencyKey,
-		},
-		body: JSON.stringify(params.request),
+		method: params.method,
+		headers,
+		body:
+			params.method === "POST"
+				? JSON.stringify(params.request ?? null)
+				: undefined,
 	});
 
 	if (!response.ok) {
@@ -90,6 +180,32 @@ export async function postManagedJson<TReq, TRes>(params: {
 	return (await response.json()) as TRes;
 }
 
+export async function postManagedJson<TReq, TRes>(params: {
+	path: string;
+	request: TReq;
+	idempotencyKey: string;
+	fallbackInvoke?: ManagedInvokeFallback;
+}): Promise<TRes> {
+	return requestManagedJson<TReq, TRes>({
+		method: "POST",
+		path: params.path,
+		request: params.request,
+		idempotencyKey: params.idempotencyKey,
+		fallbackInvoke: params.fallbackInvoke,
+	});
+}
+
+async function getManagedJson<TRes>(params: {
+	path: string;
+	fallbackInvoke?: ManagedInvokeFallback;
+}): Promise<TRes> {
+	return requestManagedJson<never, TRes>({
+		method: "GET",
+		path: params.path,
+		fallbackInvoke: params.fallbackInvoke,
+	});
+}
+
 export function createIdempotencyKey(prefix = "kolboo"): string {
 	const random =
 		typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -100,49 +216,41 @@ export function createIdempotencyKey(prefix = "kolboo"): string {
 
 export const managedInferenceAPI = {
 	transcribe: async (request: ManagedSttRequest, idempotencyKey: string) => {
-		if (!(await resolveManagedGatewayBaseUrl())) {
-			return invoke("managed_inference_stt_transcribe", {
-				request,
-				idempotencyKey,
-			});
-		}
-
 		return postManagedJson<ManagedSttRequest, unknown>({
 			path: "/v1/stt/transcribe",
 			request,
 			idempotencyKey,
+			fallbackInvoke: {
+				command: "managed_inference_stt_transcribe",
+				args: {
+					request,
+					idempotencyKey,
+				},
+			},
 		});
 	},
 
 	complete: async (request: ManagedLlmRequest, idempotencyKey: string) => {
-		if (!(await resolveManagedGatewayBaseUrl())) {
-			return invoke("managed_inference_llm_complete", {
-				request,
-				idempotencyKey,
-			});
-		}
-
 		return postManagedJson<ManagedLlmRequest, unknown>({
 			path: "/v1/llm/complete",
 			request,
 			idempotencyKey,
+			fallbackInvoke: {
+				command: "managed_inference_llm_complete",
+				args: {
+					request,
+					idempotencyKey,
+				},
+			},
 		});
 	},
 
 	getUsageState: async (): Promise<ManagedUsageState> => {
-		const baseUrl = await resolveManagedGatewayBaseUrl();
-		if (!baseUrl) {
-			return invoke("managed_inference_get_usage_state");
-		}
-
-		const response = await fetch(`${baseUrl}/v1/usage/state`);
-		if (!response.ok) {
-			const payload = await response
-				.json()
-				.catch(() => ({ message: response.statusText }));
-			throw normalizeManagedError(payload, response.status);
-		}
-
-		return response.json();
+		return getManagedJson<ManagedUsageState>({
+			path: "/v1/usage/state",
+			fallbackInvoke: {
+				command: "managed_inference_get_usage_state",
+			},
+		});
 	},
 };

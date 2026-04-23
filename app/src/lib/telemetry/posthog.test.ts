@@ -132,11 +132,13 @@ describe("posthog telemetry", () => {
 		await trackProductEvent("cloud_sync_action_failed", {
 			access_token: "secret-token",
 			provider: "groq",
+			session_blob: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyJ9.signature",
 		});
 
 		const [, request] = vi.mocked(fetch).mock.calls[0] ?? [];
 		const payload = JSON.parse(String((request as RequestInit).body));
 		expect(payload.properties.access_token).toBe("[REDACTED]");
+		expect(payload.properties.session_blob).toBe("[REDACTED]");
 		expect(payload.properties.provider).toBe("groq");
 	});
 });

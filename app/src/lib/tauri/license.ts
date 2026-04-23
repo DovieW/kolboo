@@ -3,19 +3,24 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
 	captureSentryException,
 	redactTelemetryValue,
+	setSentryLicenseIdentityTags,
 } from "../telemetry/sentry";
 import { listenTyped } from "./events";
 import type {
-	LicenseState,
-	LicenseStatus,
-	LicenseTransitionPayload,
-	SettingsChangedPayload,
+  AuthReasonCode,
+  LicenseAuthContext,
+  LicenseState,
+  LicenseStatus,
+  LicenseTransitionPayload,
+  SessionExchangeResponse,
+  SettingsChangedPayload,
 } from "./types";
 
 export type LicenseLoginRequest = {
-	provider_hint?: string | null;
-	email?: string | null;
-	password?: string | null;
+  provider_hint?: string | null;
+  auth_provider?: string | null;
+  email?: string | null;
+  password?: string | null;
 };
 
 export function buildLicenseSentryContext(
@@ -45,6 +50,46 @@ export function getLicenseErrorMessage(error: unknown): string {
 		return error.trim();
 	}
 	return "Something went wrong while updating account status.";
+}
+
+const VALID_AUTH_REASON_CODES = new Set<AuthReasonCode>([
+	"reauth_required",
+	"token_invalid",
+	"membership_missing",
+	"insufficient_tier",
+	"policy_denied",
+	"auth_not_configured",
+	"unknown",
+]);
+
+export function normalizeAuthReasonCode(value: unknown): AuthReasonCode | null {
+	if (typeof value !== "string") return null;
+	return VALID_AUTH_REASON_CODES.has(value as AuthReasonCode)
+		? (value as AuthReasonCode)
+		: null;
+}
+
+export function authReasonCodeToMessage(
+	code: AuthReasonCode | null,
+): string | null {
+	if (!code) return null;
+	if (code === "reauth_required") return "Please sign in again.";
+	if (code === "token_invalid") {
+		return "Your token is no longer valid. Please sign in again.";
+	}
+	if (code === "membership_missing") {
+		return "No active organization membership was found.";
+	}
+	if (code === "insufficient_tier") {
+		return "Your current tier does not allow this managed action.";
+	}
+	if (code === "policy_denied") {
+		return "This action was denied by your organization policy.";
+	}
+	if (code === "auth_not_configured") {
+		return "Managed authentication is not configured in this environment.";
+	}
+	return "Authentication context could not be resolved.";
 }
 
 export function getLicenseTransitionFromSettingsPayload(
@@ -88,26 +133,63 @@ export function getLicenseTransitionFromSettingsPayload(
 export const tauriLicenseAPI = {
 	getState: async (): Promise<LicenseState> => {
 		try {
-			return await invoke("license_get_state");
+			const state = await invoke<LicenseState>("license_get_state");
+			await setSentryLicenseIdentityTags(state);
+			return state;
 		} catch (error) {
 			reportLicenseSentryError("license_get_state", error);
 			throw error;
 		}
 	},
 
+	getAuthContext: async (): Promise<LicenseAuthContext> => {
+		try {
+			const context = await invoke<LicenseAuthContext>(
+				"license_get_auth_context",
+			);
+			return {
+				...context,
+				reason_code: normalizeAuthReasonCode(context.reason_code),
+			};
+		} catch (error) {
+			reportLicenseSentryError("license_get_auth_context", error);
+			throw error;
+		}
+	},
+
 	startLogin: async (request?: LicenseLoginRequest): Promise<LicenseState> => {
 		try {
-			return await invoke("license_start_login", {
-				request: {
-					provider_hint: request?.provider_hint ?? null,
-					email: request?.email ?? null,
-					password: request?.password ?? null,
-				},
-			});
+			const state = await invoke<LicenseState>("license_start_login", {
+        request: {
+          provider_hint: request?.provider_hint ?? null,
+          auth_provider: request?.auth_provider ?? null,
+          email: request?.email ?? null,
+          password: request?.password ?? null,
+        },
+      });
+			await setSentryLicenseIdentityTags(state);
+			return state;
 		} catch (error) {
 			reportLicenseSentryError("license_start_login", error, {
 				provider_hint: request?.provider_hint ?? null,
-				email: request?.email ?? null,
+				auth_provider: request?.auth_provider ?? null,
+			});
+			throw error;
+		}
+	},
+
+	exchangeSession: async (
+		upstreamAccessToken: string,
+	): Promise<SessionExchangeResponse> => {
+		try {
+			return await invoke<SessionExchangeResponse>("license_exchange_session", {
+				request: {
+					upstream_access_token: upstreamAccessToken,
+				},
+			});
+		} catch (error) {
+			reportLicenseSentryError("license_exchange_session", error, {
+				upstream_token_present: upstreamAccessToken.trim().length > 0,
 			});
 			throw error;
 		}
@@ -115,7 +197,9 @@ export const tauriLicenseAPI = {
 
 	logout: async (): Promise<LicenseState> => {
 		try {
-			return await invoke("license_logout");
+			const state = await invoke<LicenseState>("license_logout");
+			await setSentryLicenseIdentityTags(state);
+			return state;
 		} catch (error) {
 			reportLicenseSentryError("license_logout", error);
 			throw error;
@@ -126,9 +210,11 @@ export const tauriLicenseAPI = {
 		simulateFailure?: boolean,
 	): Promise<LicenseState> => {
 		try {
-			return await invoke("license_refresh_entitlement", {
+			const state = await invoke<LicenseState>("license_refresh_entitlement", {
 				simulateFailure: simulateFailure ?? null,
 			});
+			await setSentryLicenseIdentityTags(state);
+			return state;
 		} catch (error) {
 			reportLicenseSentryError("license_refresh_entitlement", error, {
 				simulateFailure: simulateFailure ?? null,

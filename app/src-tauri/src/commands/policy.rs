@@ -92,6 +92,36 @@ fn persist_policy(
 }
 
 #[cfg(desktop)]
+pub(crate) fn clear_cached_policy_state(app: &AppHandle) -> CommandResult<()> {
+    let store = app
+        .store("settings.json")
+        .map_err(|e| CommandError::unknown(format!("Failed to open settings store: {e}")))?;
+
+    let _ = store.delete(POLICY_STATE_KEY);
+    let _ = store.delete(POLICY_EFFECTIVE_VALUES_KEY);
+    let _ = store.delete(POLICY_CLOUD_CANDIDATE_KEY);
+
+    store
+        .save()
+        .map_err(|e| CommandError::unknown(format!("Failed to save settings store: {e}")))?;
+
+    let cleared = crate::policy::PolicyState::default();
+    let mut payload = crate::SettingsChangedPayload::new();
+    payload.insert("policy_state_changed".to_string(), json!(true));
+    payload.insert("policy_constraints_applied".to_string(), json!(false));
+    payload.insert("policy_enforced_count".to_string(), json!(0));
+    let _ = app.emit(events::EVENT_SETTINGS_CHANGED, payload);
+    let _ = app.emit(events::EVENT_POLICY_STATE_CHANGED, cleared);
+
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+pub(crate) fn clear_cached_policy_state(_app: &AppHandle) -> CommandResult<()> {
+    Ok(())
+}
+
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn policy_get_state(app: AppHandle) -> CommandResult<crate::policy::PolicyState> {
     load_policy_state(&app)

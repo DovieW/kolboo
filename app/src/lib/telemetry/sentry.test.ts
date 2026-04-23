@@ -25,7 +25,11 @@ vi.mock("../tauri/runtimeConfig", () => ({
 	})),
 }));
 
-import { initSentry, setSentryLicenseIdentityTags } from "./sentry";
+import {
+	initSentry,
+	redactTelemetryValue,
+	setSentryLicenseIdentityTags,
+} from "./sentry";
 
 describe("sentry identity tags", () => {
 	beforeEach(() => {
@@ -76,5 +80,24 @@ describe("sentry identity tags", () => {
 		expect(sentryMock.setTag).toHaveBeenCalledWith("tier", "community");
 		expect(sentryMock.setTag).toHaveBeenCalledWith("user_hash", "none");
 		expect(sentryMock.setTag).toHaveBeenCalledWith("org_hash", "none");
+	});
+
+	it("redacts token-like strings in telemetry payload values", () => {
+		const sample = {
+			context: {
+				authorization: "Bearer abc.def.ghi",
+				nested: {
+					session_blob:
+						"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyJ9.signature",
+				},
+			},
+		};
+
+		const redacted = redactTelemetryValue(sample) as {
+			context: { authorization: string; nested: { session_blob: string } };
+		};
+
+		expect(redacted.context.authorization).toBe("[REDACTED]");
+		expect(redacted.context.nested.session_blob).toBe("[REDACTED]");
 	});
 });
