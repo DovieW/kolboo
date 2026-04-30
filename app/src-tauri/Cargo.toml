@@ -111,7 +111,7 @@ base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Zip archive creation (diagnostics export)
-zip = { version = "7.4", default-features = false, features = ["deflate"] }
+zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
 
 # Async utilities
 async-trait = "0.1"

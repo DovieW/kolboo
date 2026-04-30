@@ -13,8 +13,8 @@ export { PromptSectionEditor } from "./PromptSectionEditor";
 export { PromptSettings } from "./PromptSettings";
 export { ProvidersSettings } from "./ProvidersSettings";
 export {
-  SettingsIconButton,
-  SettingsRow,
-  SettingsTooltipIcon,
+	SettingsIconButton,
+	SettingsRow,
+	SettingsTooltipIcon,
 } from "./SettingsRow";
 export { UiSettings } from "./UiSettings";

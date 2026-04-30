@@ -125,3 +125,12 @@ Use this review whenever auth architecture changes are proposed or before enabli
 - 2026-04-22/23 — `pnpm -C app check:ci`
    - Result: ✅ passed
    - Summary: lint, typecheck, knip, schema/event/type generation checks, Vitest, Cargo fmt check, and Cargo test CI all passed; Clippy reported non-fatal warnings in pre-existing untouched Rust paths.
+- 2026-04-23 — `pnpm -C apps/api-edge fmt`
+   - Result: ✅ passed
+- 2026-04-23 — `pnpm -C apps/api-edge test`
+   - Result: ✅ passed
+   - Summary: `19 passed` test files; `64 passed` tests
+- 2026-04-23 — `pnpm -C apps/api-edge typecheck`
+   - Result: ✅ passed
+- 2026-04-23 — `pnpm -C apps/api-edge lint`
+   - Result: ✅ passed

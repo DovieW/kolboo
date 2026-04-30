@@ -75,10 +75,10 @@
 - [x] T022 [US2] Map deny reason codes to user-actionable UI outcomes in `app/src/lib/queries.ts` and `app/src/components/settings/AccountSettings.tsx`
 - [x] T023 [US2] Preserve BYOK/non-managed behavior when managed auth path is unavailable in `app/src/lib/tauri/managedInference.ts` and `app/src/lib/tauri/managedInference.test.ts`
 - [x] T024 [US2] Extend contract examples for 401/402/403 + reason-code coverage in `specs/016-auth-boundary-plan/contracts/auth-boundary.openapi.yaml`
-- [ ] T037 [US2] Implement edge JWT verification (`iss`/`aud`/`exp`/`nbf`) and JWKS rotation handling in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/middleware/auth.ts`
-- [ ] T038 [US2] Implement edge org membership + entitlement + policy evaluation in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/middleware/rbac.ts` and `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/services/policy.service.ts`
-- [ ] T039 [US2] Implement edge metering enforcement/write path for managed requests in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/services/metering-ledger.ts` and `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/routes/managed-inference.ts`
-- [ ] T040 [US2] Categorize and emit authz denial reason codes for observability in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/routes/managed-inference.ts` and `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/index.ts`
+- [x] T037 [US2] Implement edge JWT verification (`iss`/`aud`/`exp`/`nbf`) and JWKS rotation handling in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/middleware/auth.ts`
+- [x] T038 [US2] Implement edge org membership + entitlement + policy evaluation in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/middleware/rbac.ts` and `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/services/policy.service.ts`
+- [x] T039 [US2] Implement edge metering enforcement/write path for managed requests in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/services/metering-ledger.ts` and `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/routes/managed-inference.ts`
+- [x] T040 [US2] Categorize and emit authz denial reason codes for observability in `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/routes/managed-inference.ts` and `c:/Users/dovie/repos/kolboo-private/apps/api-edge/src/index.ts`
 
 **Checkpoint**: US1 and US2 both work independently and together.
 
