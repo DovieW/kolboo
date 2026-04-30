@@ -59,7 +59,7 @@ export function formatErrorMessage(error: unknown): string {
 }
 
 const SENSITIVE_KEY_PATTERN =
-	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|authorization|bearer)/i;
+  /(?:api[-_]?key|access[-_]?client[-_]?id|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|authorization|bearer)/i;
 
 function hasSensitiveKeys(
 	value: unknown,

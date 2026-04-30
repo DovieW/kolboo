@@ -115,6 +115,69 @@ async fn exchange_supabase_auth_code(
         })
 }
 
+async fn sign_in_supabase_with_password(
+    email: &str,
+    password: &str,
+) -> CommandResult<SupabaseSessionAuthResponse> {
+    let (supabase_url, publishable_key) = supabase_auth_config()?;
+    let url = format!("{supabase_url}/auth/v1/token?grant_type=password");
+
+    let response = crate::network::build_plain_http_client_with_user_agent("kolboo-auth")
+        .post(url)
+        .header("apikey", publishable_key)
+        .header("content-type", "application/json")
+        .json(&json!({
+            "email": email,
+            "password": password,
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            CommandError::new(format!("Email sign-in request failed: {e}"), "auth")
+                .with_code("auth_sign_in_failed")
+        })?;
+
+    if !response.status().is_success() {
+        let (status, text) = crate::http::status_and_text(response).await;
+        return Err(
+            CommandError::new(format!("Email sign-in failed ({status}): {text}"), "auth")
+                .with_code("auth_sign_in_failed"),
+        );
+    }
+
+    response
+        .json::<SupabaseSessionAuthResponse>()
+        .await
+        .map_err(|e| {
+            CommandError::new(format!("Failed to parse sign in response: {e}"), "auth")
+                .with_code("auth_response_parse_failed")
+        })
+}
+
+fn resolve_password_login_credentials(
+    request: &LoginRequest,
+) -> CommandResult<Option<(String, String)>> {
+    let email = request
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let password = request
+        .password
+        .as_deref()
+        .filter(|value| !value.is_empty());
+
+    match (email, password) {
+        (Some(email), Some(password)) => Ok(Some((email.to_string(), password.to_string()))),
+        (None, None) => Ok(None),
+        _ => Err(CommandError::new(
+            "Email and password are both required for email sign-in.",
+            "auth",
+        )
+        .with_code("auth_credentials_missing")),
+    }
+}
+
 fn resolve_supabase_auth_provider(requested: Option<&str>) -> Result<String, CommandError> {
     requested
         .map(str::trim)
@@ -545,6 +608,34 @@ pub async fn license_start_login(
         password: None,
     });
 
+    if let Some((email, password)) = resolve_password_login_credentials(&request)? {
+        let auth = sign_in_supabase_with_password(email.as_str(), password.as_str()).await?;
+
+        persist_session_material(
+            &app,
+            &SessionMaterial {
+                access_token: auth.access_token,
+                refresh_token: auth.refresh_token,
+            },
+        )
+        .map_err(|e| CommandError::new("Failed to persist session", "auth").with_code(e))?;
+
+        let provider_hint = request.provider_hint.as_deref();
+        let mut state = build_login_state(provider_hint, Utc::now());
+        state.user_id = Some(auth.user.id);
+        state.email = auth.user.email;
+        save_license_state(&app, &state, "password_login_success")?;
+
+        if let Err(e) = crate::commands::config::sync_pipeline_config(app.clone()) {
+            log::warn!(
+                "Login updated session but failed to sync pipeline config: {}",
+                e
+            );
+        }
+
+        return Ok(state);
+    }
+
     let (supabase_url, _) = supabase_auth_config()?;
     let auth_provider = resolve_supabase_auth_provider(request.auth_provider.as_deref())?;
     let code_verifier = generate_pkce_code_verifier();
@@ -719,6 +810,7 @@ mod tests {
     use super::{
         build_auth_context, build_pkce_code_challenge, build_session_exchange_placeholder_response,
         build_supabase_authorize_url, extract_auth_code_from_callback_target,
+        resolve_password_login_credentials,
     };
 
     #[test]
@@ -839,6 +931,53 @@ mod tests {
         assert!(params.contains(&("code_challenge".to_string(), "challenge-456".to_string(),)));
         assert!(params.contains(&("code_challenge_method".to_string(), "s256".to_string(),)));
         assert!(params.contains(&("state".to_string(), "state-123".to_string())));
+    }
+
+    #[test]
+    fn password_login_credentials_trim_email_and_preserve_password() {
+        let request = crate::licensing::LoginRequest {
+            provider_hint: None,
+            auth_provider: None,
+            email: Some(" user@example.com ".to_string()),
+            password: Some(" secret-with-space ".to_string()),
+        };
+
+        let credentials = resolve_password_login_credentials(&request)
+            .expect("valid credentials")
+            .expect("password login");
+
+        assert_eq!(credentials.0, "user@example.com");
+        assert_eq!(credentials.1, " secret-with-space ");
+    }
+
+    #[test]
+    fn password_login_credentials_absent_allows_oauth_fallback() {
+        let request = crate::licensing::LoginRequest {
+            provider_hint: None,
+            auth_provider: Some("google".to_string()),
+            email: None,
+            password: None,
+        };
+
+        let credentials =
+            resolve_password_login_credentials(&request).expect("missing credentials are ok");
+
+        assert_eq!(credentials, None);
+    }
+
+    #[test]
+    fn password_login_credentials_reject_partial_input() {
+        let request = crate::licensing::LoginRequest {
+            provider_hint: None,
+            auth_provider: None,
+            email: Some("user@example.com".to_string()),
+            password: None,
+        };
+
+        let error = resolve_password_login_credentials(&request)
+            .expect_err("partial credentials should fail");
+
+        assert_eq!(error.code.as_deref(), Some("auth_credentials_missing"));
     }
 
     #[test]

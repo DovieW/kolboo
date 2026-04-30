@@ -52,6 +52,7 @@ where
     } else {
         req
     };
+    let req = crate::http::with_cloudflare_access_headers_from_request_url(req);
 
     let response = req.send().await.map_err(|e| {
         if e.is_timeout() {

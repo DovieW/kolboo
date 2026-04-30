@@ -913,20 +913,23 @@ impl OpenAiSttProvider {
             });
         }
 
-        let response = self
-            .client
-            .post(self.responses_url())
-            .bearer_auth(&self.api_key)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    SttError::Timeout
-                } else {
-                    SttError::Network(e)
-                }
-            })?;
+        let responses_url = self.responses_url();
+        let response = crate::http::with_cloudflare_access_headers_if_target(
+            self.client
+                .post(&responses_url)
+                .bearer_auth(&self.api_key)
+                .json(&request_body),
+            &responses_url,
+        )
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                SttError::Timeout
+            } else {
+                SttError::Network(e)
+            }
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();

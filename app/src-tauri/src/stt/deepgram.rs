@@ -231,6 +231,25 @@ impl DeepgramSttProvider {
             HeaderValue::from_str(&format!("Token {}", self.api_key))
                 .map_err(|e| SttError::Config(format!("Invalid Deepgram API key header: {}", e)))?,
         );
+        if let Some((client_id, client_secret)) =
+            crate::http::cloudflare_access_headers_for_url(&ws_url)
+        {
+            request.headers_mut().insert(
+                "CF-Access-Client-Id",
+                HeaderValue::from_str(&client_id).map_err(|e| {
+                    SttError::Config(format!("Invalid Cloudflare Access client id header: {}", e))
+                })?,
+            );
+            request.headers_mut().insert(
+                "CF-Access-Client-Secret",
+                HeaderValue::from_str(&client_secret).map_err(|e| {
+                    SttError::Config(format!(
+                        "Invalid Cloudflare Access client secret header: {}",
+                        e
+                    ))
+                })?,
+            );
+        }
 
         let (ws_write, ws_read) =
             connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TIMEOUT).await?;
@@ -608,20 +627,20 @@ impl SttProvider for DeepgramSttProvider {
 
         let url = self.listen_url()?;
 
-        let response = self
-            .client
-            .post(url)
-            .headers(headers)
-            .body(audio.to_vec())
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    SttError::Timeout
-                } else {
-                    SttError::Network(e)
-                }
-            })?;
+        let response = crate::http::with_cloudflare_access_headers_if_target(
+            self.client.post(url.clone()).headers(headers),
+            url.as_str(),
+        )
+        .body(audio.to_vec())
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                SttError::Timeout
+            } else {
+                SttError::Network(e)
+            }
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();

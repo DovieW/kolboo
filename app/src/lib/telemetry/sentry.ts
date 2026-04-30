@@ -4,7 +4,7 @@ import { loadRuntimeConfig } from "../tauri/runtimeConfig";
 export type SentrySurface = "main" | "overlay" | "overlay_hover" | "quick_ask";
 
 const SENSITIVE_KEY_PATTERN =
-	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code)/i;
+  /(?:api[-_]?key|access[-_]?client[-_]?id|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code)/i;
 
 const JWT_LIKE_PATTERN =
 	/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9._~+\-/=]+$/;

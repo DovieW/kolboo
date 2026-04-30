@@ -7,20 +7,20 @@ import {
 } from "../telemetry/sentry";
 import { listenTyped } from "./events";
 import type {
-  AuthReasonCode,
-  LicenseAuthContext,
-  LicenseState,
-  LicenseStatus,
-  LicenseTransitionPayload,
-  SessionExchangeResponse,
-  SettingsChangedPayload,
+	AuthReasonCode,
+	LicenseAuthContext,
+	LicenseState,
+	LicenseStatus,
+	LicenseTransitionPayload,
+	SessionExchangeResponse,
+	SettingsChangedPayload,
 } from "./types";
 
 export type LicenseLoginRequest = {
-  provider_hint?: string | null;
-  auth_provider?: string | null;
-  email?: string | null;
-  password?: string | null;
+	provider_hint?: string | null;
+	auth_provider?: string | null;
+	email?: string | null;
+	password?: string | null;
 };
 
 export function buildLicenseSentryContext(
@@ -160,13 +160,13 @@ export const tauriLicenseAPI = {
 	startLogin: async (request?: LicenseLoginRequest): Promise<LicenseState> => {
 		try {
 			const state = await invoke<LicenseState>("license_start_login", {
-        request: {
-          provider_hint: request?.provider_hint ?? null,
-          auth_provider: request?.auth_provider ?? null,
-          email: request?.email ?? null,
-          password: request?.password ?? null,
-        },
-      });
+				request: {
+					provider_hint: request?.provider_hint ?? null,
+					auth_provider: request?.auth_provider ?? null,
+					email: request?.email ?? null,
+					password: request?.password ?? null,
+				},
+			});
 			await setSentryLicenseIdentityTags(state);
 			return state;
 		} catch (error) {

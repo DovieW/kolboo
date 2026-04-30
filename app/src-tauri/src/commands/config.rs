@@ -32,6 +32,8 @@ pub struct RuntimeConfigResponse {
     pub app_version: Option<String>,
     pub api_base_url: Option<String>,
     pub managed_inference_gateway_url: Option<String>,
+    pub cloudflare_access_client_id: Option<String>,
+    pub cloudflare_access_client_secret: Option<String>,
     pub sentry_dsn: Option<String>,
     pub sentry_env: Option<String>,
     pub sentry_release: Option<String>,
@@ -55,6 +57,14 @@ fn normalize_optional_base_url(value: Option<String>) -> Option<String> {
     value.map(|v| v.trim_end_matches('/').to_string())
 }
 
+fn renderer_dev_only_env(keys: &[&str]) -> Option<String> {
+    if cfg!(debug_assertions) {
+        read_first_non_empty_env(keys)
+    } else {
+        None
+    }
+}
+
 /// Get default prompts for each section
 #[tauri::command]
 pub fn get_default_sections() -> DefaultSectionsResponse {
@@ -74,6 +84,12 @@ pub fn get_runtime_config() -> RuntimeConfigResponse {
         managed_inference_gateway_url: normalize_optional_base_url(read_first_non_empty_env(&[
             "TAURI_MANAGED_INFERENCE_GATEWAY_URL",
         ])),
+        // Dev-only Cloudflare Access service tokens must stay in the backend.
+        // Release builds intentionally do not surface them to renderer windows.
+        cloudflare_access_client_id: renderer_dev_only_env(&["TAURI_CLOUDFLARE_ACCESS_CLIENT_ID"]),
+        cloudflare_access_client_secret: renderer_dev_only_env(&[
+            "TAURI_CLOUDFLARE_ACCESS_CLIENT_SECRET",
+        ]),
         sentry_dsn: read_first_non_empty_env(&["TAURI_SENTRY_DSN"]),
         sentry_env: read_first_non_empty_env(&["TAURI_SENTRY_ENV"]),
         sentry_release: read_first_non_empty_env(&["TAURI_SENTRY_RELEASE"]),

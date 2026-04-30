@@ -26,6 +26,13 @@ export function isReauthRequiredReason(
 	return reasonCode === "reauth_required" || reasonCode === "token_invalid";
 }
 
+export function isReauthRequiredForSession(
+	signedIn: boolean,
+	reasonCode: AuthReasonCode | null | undefined,
+): boolean {
+	return signedIn && isReauthRequiredReason(reasonCode);
+}
+
 export function isManagedAccountContext(
 	licenseState: LicenseState | null | undefined,
 	authContext: LicenseAuthContext | null | undefined,
@@ -59,6 +66,9 @@ export function getAccountModeDescription(params: {
 	signedIn: boolean;
 	reauthRequired: boolean;
 }): string {
+	if (!params.signedIn) {
+		return "Sign in to connect managed Personal or Business access. Until then, Kolboo uses your own provider keys.";
+	}
 	if (params.reauthRequired) {
 		return "Your managed session needs attention. Re-authenticate to restore managed access.";
 	}
@@ -67,9 +77,6 @@ export function getAccountModeDescription(params: {
 	}
 	if (params.modeLabel === "Personal") {
 		return "Managed personal access is active for this account.";
-	}
-	if (!params.signedIn) {
-		return "This device is currently using BYOK mode. Sign in if you want managed features.";
 	}
 	return "You're currently running in BYOK mode using your own providers and keys.";
 }

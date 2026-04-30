@@ -163,16 +163,19 @@ pub(crate) async fn sync_push_settings_inner(app: &AppHandle) -> CommandResult<S
     let payload = crate::commands::backup::build_backup_payload(app)?;
     let url = sync_endpoint_url(base_url.as_str());
 
-    let resp = sync_client()
-        .put(url)
-        .bearer_auth(session.access_token)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| {
-            CommandError::new(format!("Cloud sync push failed: {e}"), "sync")
-                .with_code("sync_push_failed")
-        })?;
+    let resp = crate::http::with_cloudflare_access_headers_if_target(
+        sync_client()
+            .put(&url)
+            .bearer_auth(session.access_token)
+            .json(&payload),
+        &url,
+    )
+    .send()
+    .await
+    .map_err(|e| {
+        CommandError::new(format!("Cloud sync push failed: {e}"), "sync")
+            .with_code("sync_push_failed")
+    })?;
 
     if !resp.status().is_success() {
         let (status_code, text) = crate::http::status_and_text(resp).await;
@@ -212,15 +215,16 @@ pub(crate) async fn sync_pull_settings_inner(app: &AppHandle) -> CommandResult<S
     })?;
 
     let url = sync_endpoint_url(base_url.as_str());
-    let resp = sync_client()
-        .get(url)
-        .bearer_auth(session.access_token)
-        .send()
-        .await
-        .map_err(|e| {
-            CommandError::new(format!("Cloud sync pull failed: {e}"), "sync")
-                .with_code("sync_pull_failed")
-        })?;
+    let resp = crate::http::with_cloudflare_access_headers_if_target(
+        sync_client().get(&url).bearer_auth(session.access_token),
+        &url,
+    )
+    .send()
+    .await
+    .map_err(|e| {
+        CommandError::new(format!("Cloud sync pull failed: {e}"), "sync")
+            .with_code("sync_pull_failed")
+    })?;
 
     if !resp.status().is_success() {
         let (status_code, text) = crate::http::status_and_text(resp).await;

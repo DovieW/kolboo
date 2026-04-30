@@ -23,10 +23,46 @@ export interface ManagedLlmRequest {
 	metadata?: Record<string, unknown>;
 }
 
-async function resolveManagedGatewayBaseUrl(): Promise<string | null> {
-	const config = await loadRuntimeConfig();
-	const trimmed = config.managed_inference_gateway_url?.trim() ?? "";
-	return trimmed.length > 0 ? trimmed.replace(/\/$/, "") : null;
+function hostnameForUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function shouldAttachCloudflareAccessHeaders(
+  url: string,
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+): boolean {
+  const targetHost = hostnameForUrl(url);
+  if (!targetHost) return false;
+
+  const allowedHosts = [
+    hostnameForUrl(config.api_base_url),
+    hostnameForUrl(config.managed_inference_gateway_url),
+  ].filter((host): host is string => Boolean(host));
+
+  return allowedHosts.includes(targetHost);
+}
+
+function attachCloudflareAccessHeaders(
+  headers: Record<string, string>,
+  url: string,
+  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+): void {
+  if (!shouldAttachCloudflareAccessHeaders(url, config)) return;
+
+  const clientId = normalizeOptionalToken(config.cloudflare_access_client_id);
+  const clientSecret = normalizeOptionalToken(
+    config.cloudflare_access_client_secret,
+  );
+
+  if (!clientId || !clientSecret) return;
+
+  headers["CF-Access-Client-Id"] = clientId;
+  headers["CF-Access-Client-Secret"] = clientSecret;
 }
 
 function normalizeOptionalToken(value: unknown): string | null {
@@ -125,7 +161,10 @@ async function requestManagedJson<TReq, TRes>(params: {
 	idempotencyKey?: string;
 	fallbackInvoke?: ManagedInvokeFallback;
 }): Promise<TRes> {
-	const baseUrl = await resolveManagedGatewayBaseUrl();
+	const config = await loadRuntimeConfig();
+  const trimmedBaseUrl = config.managed_inference_gateway_url?.trim() ?? "";
+  const baseUrl =
+    trimmedBaseUrl.length > 0 ? trimmedBaseUrl.replace(/\/$/, "") : null;
 	const isAbsolutePath = /^https?:\/\//i.test(params.path);
 	if (!baseUrl && !isAbsolutePath) {
 		if (params.fallbackInvoke) {
@@ -160,6 +199,8 @@ async function requestManagedJson<TReq, TRes>(params: {
 
 		headers.authorization = `Bearer ${accessToken}`;
 	}
+
+	attachCloudflareAccessHeaders(headers, url, config);
 
 	const response = await fetch(url, {
 		method: params.method,

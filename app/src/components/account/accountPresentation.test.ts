@@ -5,6 +5,7 @@ import {
 	getAccountModeDescription,
 	getAccountModeLabel,
 	getAccountStatusColor,
+	isReauthRequiredForSession,
 	isReauthRequiredReason,
 } from "./accountPresentation";
 
@@ -71,6 +72,17 @@ describe("accountPresentation", () => {
 		expect(isReauthRequiredReason("reauth_required")).toBe(true);
 		expect(isReauthRequiredReason("token_invalid")).toBe(true);
 		expect(isReauthRequiredReason("membership_missing")).toBe(false);
+	});
+
+	it("does not show reauthentication copy when the device is signed out", () => {
+		expect(isReauthRequiredForSession(false, "token_invalid")).toBe(false);
+		expect(
+			getAccountModeDescription({
+				modeLabel: "BYOK",
+				signedIn: false,
+				reauthRequired: true,
+			}),
+		).toContain("Sign in");
 	});
 
 	it("returns a warning description when reauthentication is needed", () => {

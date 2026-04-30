@@ -5,7 +5,11 @@ info:
   description: |
     Contract for managed STT/LLM execution paths used by desktop clients.
 servers:
-  - url: https://api.kolboo.example
+  - url: https://{apiEdgeOrigin}
+    variables:
+      apiEdgeOrigin:
+        default: kolboo-api-edge-dev.<your-workers-subdomain>.workers.dev
+        description: Deployed api-edge Worker origin without protocol.
 security:
   - bearerAuth: []
 paths:

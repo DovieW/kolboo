@@ -17,6 +17,7 @@ export function AccountSummaryCard(props: {
 	statusColor: string;
 	email: string | null;
 	organizationLabel: string | null;
+	signedIn: boolean;
 	reauthRequired: boolean;
 }) {
 	const {
@@ -27,8 +28,10 @@ export function AccountSummaryCard(props: {
 		statusColor,
 		email,
 		organizationLabel,
+		signedIn,
 		reauthRequired,
 	} = props;
+	const summaryTitle = signedIn ? modeLabel : "Sign in to use managed access";
 
 	if (loading) {
 		return (
@@ -54,7 +57,7 @@ export function AccountSummaryCard(props: {
 					<Stack gap={6}>
 						<Text className="account-panel-kicker">Current setup</Text>
 						<Title order={2} className="account-summary-title">
-							{modeLabel}
+							{summaryTitle}
 						</Title>
 						<Text c="dimmed" size="sm" maw={620}>
 							{modeDescription}
@@ -79,11 +82,11 @@ export function AccountSummaryCard(props: {
 						</Text>
 					</div>
 					<div className="account-meta-pill">
-						<Text className="account-meta-label">Access</Text>
+						<Text className="account-meta-label">Current mode</Text>
 						<Text className="account-meta-value">{modeLabel}</Text>
 					</div>
 					<div className="account-meta-pill">
-						<Text className="account-meta-label">Status</Text>
+						<Text className="account-meta-label">Managed access</Text>
 						<Text className="account-meta-value">{statusLabel}</Text>
 					</div>
 				</div>

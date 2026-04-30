@@ -317,54 +317,54 @@ export async function invalidatePolicyRelatedQueries(
 }
 
 export async function invalidateLicenseRelatedQueries(
-  queryClient: Pick<QueryClient, "invalidateQueries">,
+	queryClient: Pick<QueryClient, "invalidateQueries">,
 ): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["licenseState"] }),
-    queryClient.invalidateQueries({ queryKey: ["licenseAuthContext"] }),
-  ]);
+	await Promise.all([
+		queryClient.invalidateQueries({ queryKey: ["licenseState"] }),
+		queryClient.invalidateQueries({ queryKey: ["licenseAuthContext"] }),
+	]);
 }
 
 export async function invalidateLogoutRelatedQueries(
-  queryClient: Pick<QueryClient, "invalidateQueries">,
+	queryClient: Pick<QueryClient, "invalidateQueries">,
 ): Promise<void> {
-  await Promise.all([
-    invalidateLicenseRelatedQueries(queryClient),
-    invalidatePolicyRelatedQueries(queryClient),
-  ]);
+	await Promise.all([
+		invalidateLicenseRelatedQueries(queryClient),
+		invalidatePolicyRelatedQueries(queryClient),
+	]);
 }
 
 export function useLicenseQueryBootstrap() {
-  const queryClient = useQueryClient();
+	const queryClient = useQueryClient();
 
-  useLicenseState();
-  useLicenseAuthContext();
+	useLicenseState();
+	useLicenseAuthContext();
 
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
+	useEffect(() => {
+		let unlisten: (() => void) | null = null;
 
-    licenseAPI
-      .onTransition(() => {
-        void invalidateLicenseRelatedQueries(queryClient);
-      })
-      .then((fn) => {
-        unlisten = fn;
-      })
-      .catch((error) => {
-        console.warn(
-          "Failed to subscribe to license transition events:",
-          error,
-        );
-      });
+		licenseAPI
+			.onTransition(() => {
+				void invalidateLicenseRelatedQueries(queryClient);
+			})
+			.then((fn) => {
+				unlisten = fn;
+			})
+			.catch((error) => {
+				console.warn(
+					"Failed to subscribe to license transition events:",
+					error,
+				);
+			});
 
-    return () => {
-      try {
-        unlisten?.();
-      } catch {
-        // ignore
-      }
-    };
-  }, [queryClient]);
+		return () => {
+			try {
+				unlisten?.();
+			} catch {
+				// ignore
+			}
+		};
+	}, [queryClient]);
 }
 
 export function usePolicySync() {
@@ -430,16 +430,16 @@ export function useLicenseAuthContext() {
 export function useStartLicenseLogin() {
 	const queryClient = useQueryClient();
 	return useMutation({
-    mutationFn: (request?: {
-      provider_hint?: string | null;
-      auth_provider?: string | null;
-      email?: string | null;
-      password?: string | null;
-    }) => licenseAPI.startLogin(request),
-    onSuccess: () => {
-      void invalidateLicenseRelatedQueries(queryClient);
-    },
-  });
+		mutationFn: (request?: {
+			provider_hint?: string | null;
+			auth_provider?: string | null;
+			email?: string | null;
+			password?: string | null;
+		}) => licenseAPI.startLogin(request),
+		onSuccess: () => {
+			void invalidateLicenseRelatedQueries(queryClient);
+		},
+	});
 }
 
 export function useLogoutLicense() {

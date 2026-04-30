@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const appDir = path.resolve(__dirname, "..", "..");
+const appDir = path.resolve(__dirname, "..");
 
 function commandExists(command) {
 	const probe = process.platform === "win32" ? "where" : "which";
@@ -37,6 +37,17 @@ const env = { ...process.env };
 // Docs: https://github.com/mozilla/sccache/blob/main/docs/Rust.md
 if (!env.RUSTC_WRAPPER) {
 	env.RUSTC_WRAPPER = "sccache";
+}
+
+if (!env.CARGO_BUILD_JOBS) {
+	const logicalCores = Number.parseInt(
+		process.env.NUMBER_OF_PROCESSORS ?? "",
+		10,
+	);
+	const halfCores = Number.isFinite(logicalCores)
+		? Math.floor(logicalCores / 2)
+		: 4;
+	env.CARGO_BUILD_JOBS = String(Math.max(1, Math.min(8, halfCores)));
 }
 
 // Optional knobs (leave unset unless you know you want them):

@@ -86,17 +86,20 @@ where
 
     let form = wav_transcription_form(audio, model, prompt, language)?;
 
-    let response = build_request(client.post(endpoint))
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                SttError::Timeout
-            } else {
-                map_network_error(e)
-            }
-        })?;
+    let response = crate::http::with_cloudflare_access_headers_if_target(
+        build_request(client.post(endpoint)),
+        endpoint,
+    )
+    .multipart(form)
+    .send()
+    .await
+    .map_err(|e| {
+        if e.is_timeout() {
+            SttError::Timeout
+        } else {
+            map_network_error(e)
+        }
+    })?;
 
     if !response.status().is_success() {
         let status = response.status();

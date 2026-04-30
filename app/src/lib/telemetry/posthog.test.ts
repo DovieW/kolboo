@@ -19,16 +19,18 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 }));
 
 const { loadRuntimeConfigMock } = vi.hoisted(() => ({
-	loadRuntimeConfigMock: vi.fn(async () => ({
-		app_version: "0.2.4-test",
-		api_base_url: null,
-		managed_inference_gateway_url: null,
-		sentry_dsn: null,
-		sentry_env: null,
-		sentry_release: null,
-		posthog_api_key: "phc_test_key",
-		posthog_host: "https://us.i.posthog.com",
-	})),
+  loadRuntimeConfigMock: vi.fn(async () => ({
+    app_version: "0.2.4-test",
+    api_base_url: null,
+    managed_inference_gateway_url: null,
+    cloudflare_access_client_id: null,
+    cloudflare_access_client_secret: null,
+    sentry_dsn: null,
+    sentry_env: null,
+    sentry_release: null,
+    posthog_api_key: "phc_test_key",
+    posthog_host: "https://us.i.posthog.com",
+  })),
 }));
 
 vi.mock("../tauri/runtimeConfig", () => ({
@@ -44,15 +46,17 @@ describe("posthog telemetry", () => {
 		storeLoadMock.mockClear();
 		loadRuntimeConfigMock.mockClear();
 		loadRuntimeConfigMock.mockResolvedValue({
-			app_version: "0.2.4-test",
-			api_base_url: null,
-			managed_inference_gateway_url: null,
-			sentry_dsn: null,
-			sentry_env: null,
-			sentry_release: null,
-			posthog_api_key: "phc_test_key",
-			posthog_host: "https://us.i.posthog.com",
-		});
+      app_version: "0.2.4-test",
+      api_base_url: null,
+      managed_inference_gateway_url: null,
+      cloudflare_access_client_id: null,
+      cloudflare_access_client_secret: null,
+      sentry_dsn: null,
+      sentry_env: null,
+      sentry_release: null,
+      posthog_api_key: "phc_test_key",
+      posthog_host: "https://us.i.posthog.com",
+    });
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response(null, { status: 200 }),
 		);
@@ -67,15 +71,17 @@ describe("posthog telemetry", () => {
 		await expect(isPosthogConfigured()).resolves.toBe(true);
 
 		loadRuntimeConfigMock.mockResolvedValueOnce({
-			app_version: "0.2.4-test",
-			api_base_url: null,
-			managed_inference_gateway_url: null,
-			sentry_dsn: null,
-			sentry_env: null,
-			sentry_release: null,
-			posthog_api_key: "",
-			posthog_host: "https://us.i.posthog.com",
-		});
+      app_version: "0.2.4-test",
+      api_base_url: null,
+      managed_inference_gateway_url: null,
+      cloudflare_access_client_id: null,
+      cloudflare_access_client_secret: null,
+      sentry_dsn: null,
+      sentry_env: null,
+      sentry_release: null,
+      posthog_api_key: "",
+      posthog_host: "https://us.i.posthog.com",
+    });
 		await expect(isPosthogConfigured()).resolves.toBe(false);
 	});
 

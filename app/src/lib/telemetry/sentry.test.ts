@@ -13,16 +13,18 @@ const sentryMock = vi.hoisted(() => {
 vi.mock("@sentry/react", () => sentryMock);
 
 vi.mock("../tauri/runtimeConfig", () => ({
-	loadRuntimeConfig: vi.fn(async () => ({
-		app_version: "0.2.4-test",
-		api_base_url: null,
-		managed_inference_gateway_url: null,
-		sentry_dsn: "https://dsn.example/123",
-		sentry_env: "test",
-		sentry_release: "kolboo-frontend@test",
-		posthog_api_key: null,
-		posthog_host: null,
-	})),
+  loadRuntimeConfig: vi.fn(async () => ({
+    app_version: "0.2.4-test",
+    api_base_url: null,
+    managed_inference_gateway_url: null,
+    cloudflare_access_client_id: null,
+    cloudflare_access_client_secret: null,
+    sentry_dsn: "https://dsn.example/123",
+    sentry_env: "test",
+    sentry_release: "kolboo-frontend@test",
+    posthog_api_key: null,
+    posthog_host: null,
+  })),
 }));
 
 import {
