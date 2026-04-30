@@ -308,7 +308,7 @@ Add an entry to `API_KEYS`:
 
 This automatically:
 
-- saves the key to the Store via `tauriAPI.setApiKey`
+- saves the key through `tauriAPI.setApiKey` to OS secure storage (legacy `settings.json` fallback is read/migration-only)
 - invalidates `availableProviders`
 - calls `configAPI.syncPipelineConfig()`
 

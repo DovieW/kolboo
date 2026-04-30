@@ -8,11 +8,7 @@ description: "Task list template for feature implementation"
 **Input**: Design documents from `/specs/[###-feature-name]/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: Include tests when they are the fastest, most reliable way to lock in behavior.
-
-- Tests MUST be deterministic.
-- Tests MUST NOT make real network calls.
-- Tests MUST NOT require real API keys by default.
+**Tests**: Behavior changes MUST include focused deterministic validation unless the plan documents why the change is docs-only, wiring-only, or already covered. Tests MUST NOT require real network calls, API keys, paid accounts, audio devices, or timing sleeps by default.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -24,9 +20,12 @@ description: "Task list template for feature implementation"
 
 ## Path Conventions
 
-- **Kolboo UI (TypeScript)**: `app/src/**`
-- **Kolboo backend (Rust/Tauri)**: `app/src-tauri/src/**`
-- If a task touches both UI and backend, call out both paths explicitly
+- **UI**: `app/src/**` with Vitest tests next to relevant code where practical
+- **Tauri/backend**: `app/src-tauri/src/**` with Rust unit tests inline or under `app/src-tauri/src/tests/**`
+- **Generated contracts**: `app/src-tauri/gen/**`, `app/src/lib/tauri/*.generated.ts`
+- **Scripts/tooling**: `app/scripts/**`
+- **Docs/refactors/user docs**: `docs/**`
+- **Specs**: `specs/[###-feature-name]/**`
 
 <!--
   ============================================================================
@@ -52,7 +51,7 @@ description: "Task list template for feature implementation"
 **Purpose**: Project initialization and basic structure
 
 - [ ] T001 Create project structure per implementation plan
-- [ ] T002 Add/update dependencies as needed (`app/package.json`, `app/src-tauri/Cargo.toml`)
+- [ ] T002 Initialize [language] project with [framework] dependencies
 - [ ] T003 [P] Configure linting and formatting tools
 
 ---
@@ -65,12 +64,12 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T004 Setup database schema and migrations framework
-- [ ] T005 [P] Implement authentication/authorization framework
-- [ ] T006 [P] Setup API routing and middleware structure
-- [ ] T007 Create base models/entities that all stories depend on
-- [ ] T008 Configure error handling and logging infrastructure
-- [ ] T009 Setup environment configuration management
+- [ ] T004 Identify sensitive data/storage/network impacts from spec.md and plan.md
+- [ ] T005 [P] Update shared Tauri command/event/type contracts needed by all stories
+- [ ] T006 [P] Add or update settings defaults, migrations, and normalization shared by all stories
+- [ ] T007 Create shared pipeline/state-machine guard or background-task plumbing
+- [ ] T008 Configure deterministic fake inputs for tests without real providers, API keys, audio devices, or sleeps
+- [ ] T009 Update docs/refactor notes for cross-cutting behavior or known deferred work
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -82,25 +81,21 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 1 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 1 (REQUIRED for behavior changes) ⚠️
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-### Tests for User Story 1 (recommended) ⚠️
-
-> **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
-
-- [ ] T010 [P] [US1] TypeScript unit/contract test in `app/src/**/[name].test.ts`
-- [ ] T011 [P] [US1] Rust unit/integration test in `app/src-tauri/src/tests/[name]_tests.rs` (or inline `mod tests`)
+- [ ] T010 [P] [US1] Deterministic UI/unit test for [behavior] in app/src/[path]/[name].test.ts
+- [ ] T011 [P] [US1] Rust unit test for [backend behavior] in app/src-tauri/src/[path].rs
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] Implement UI changes in `app/src/[path]/[file].ts(x)`
-- [ ] T013 [P] [US1] Implement backend changes in `app/src-tauri/src/[path]/[file].rs`
-- [ ] T014 [US1] Wire UI ↔ backend contract (command/event/types) in both TS + Rust (depends on T012, T013)
-- [ ] T015 [US1] Add/adjust settings/migrations if behavior is settings-driven (`app/src/lib/tauri/settings.ts`, `app/src-tauri/src/**`)
-- [ ] T016 [US1] Add validation and error handling
-- [ ] T017 [US1] Add logging for user story 1 operations
+- [ ] T012 [P] [US1] Implement UI state or component changes in app/src/[path]/[file].tsx
+- [ ] T013 [P] [US1] Implement TypeScript wrapper/type changes in app/src/lib/tauri/[file].ts
+- [ ] T014 [US1] Implement Rust command/event/pipeline behavior in app/src-tauri/src/[path].rs
+- [ ] T015 [US1] Regenerate/check schemas or generated Tauri event/type files if contracts changed
+- [ ] T016 [US1] Add validation, error handling, and redacted logging
+- [ ] T017 [US1] Update relevant user/dev docs for visible behavior or setting changes
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -112,18 +107,16 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 2 (REQUIRED for behavior changes) ⚠️
 
-### Tests for User Story 2 (recommended) ⚠️
-
-- [ ] T018 [P] [US2] TypeScript unit/contract test in `app/src/**/[name].test.ts`
-- [ ] T019 [P] [US2] Rust unit/integration test in `app/src-tauri/src/tests/[name]_tests.rs` (or inline `mod tests`)
+- [ ] T018 [P] [US2] Deterministic UI/unit test for [behavior] in app/src/[path]/[name].test.ts
+- [ ] T019 [P] [US2] Rust unit test for [backend behavior] in app/src-tauri/src/[path].rs
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] Implement UI changes in `app/src/[path]/[file].ts(x)`
-- [ ] T021 [P] [US2] Implement backend changes in `app/src-tauri/src/[path]/[file].rs`
-- [ ] T022 [US2] Wire UI ↔ backend contract (command/event/types) in both TS + Rust
+- [ ] T020 [P] [US2] Implement UI/settings changes in app/src/[path]/[file].tsx
+- [ ] T021 [US2] Implement TypeScript orchestration or wrapper changes in app/src/lib/[path].ts
+- [ ] T022 [US2] Implement Rust backend behavior in app/src-tauri/src/[path].rs
 - [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
@@ -136,18 +129,16 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 3 (REQUIRED for behavior changes) ⚠️
 
-### Tests for User Story 3 (recommended) ⚠️
-
-- [ ] T024 [P] [US3] TypeScript unit/contract test in `app/src/**/[name].test.ts`
-- [ ] T025 [P] [US3] Rust unit/integration test in `app/src-tauri/src/tests/[name]_tests.rs` (or inline `mod tests`)
+- [ ] T024 [P] [US3] Deterministic UI/unit test for [behavior] in app/src/[path]/[name].test.ts
+- [ ] T025 [P] [US3] Rust unit test for [backend behavior] in app/src-tauri/src/[path].rs
 
 ### Implementation for User Story 3
 
-- [ ] T026 [P] [US3] Implement UI changes in `app/src/[path]/[file].ts(x)`
-- [ ] T027 [P] [US3] Implement backend changes in `app/src-tauri/src/[path]/[file].rs`
-- [ ] T028 [US3] Wire UI ↔ backend contract (command/event/types) in both TS + Rust
+- [ ] T026 [P] [US3] Implement UI changes in app/src/[path]/[file].tsx
+- [ ] T027 [US3] Implement TypeScript orchestration or wrapper changes in app/src/lib/[path].ts
+- [ ] T028 [US3] Implement Rust backend behavior in app/src-tauri/src/[path].rs
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -162,10 +153,11 @@ Examples of foundational tasks (adjust based on your project):
 **Purpose**: Improvements that affect multiple user stories
 
 - [ ] TXXX [P] Documentation updates in docs/
-- [ ] TXXX Code cleanup and refactoring
+- [ ] TXXX Record out-of-scope refactors in docs/Refactors/ instead of drive-by refactoring
 - [ ] TXXX Performance optimization across all stories
-- [ ] TXXX [P] Additional unit tests (as needed) in `app/src/**/[name].test.ts` and/or `app/src-tauri/src/**` tests
-- [ ] TXXX Security hardening
+- [ ] TXXX [P] Additional deterministic tests for edge cases in app/src/** or app/src-tauri/src/**
+- [ ] TXXX Security/privacy hardening and log redaction review
+- [ ] TXXX Run formatting before the smallest relevant validation command set
 - [ ] TXXX Run quickstart.md validation
 
 ---
@@ -189,10 +181,11 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Within Each User Story
 
-- Tests (when included) MUST be written and FAIL before implementation
-- Models before services
-- Services before endpoints
-- Core implementation before integration
+- Tests for behavior changes MUST be written and FAIL before implementation
+- Shared types/contracts before wrappers and call sites
+- Settings migrations/defaults before UI that relies on them
+- Rust state transitions before UI assumes new backend state/event behavior
+- Core implementation before integration and documentation updates
 - Story complete before moving to next priority
 
 ### Parallel Opportunities
@@ -201,7 +194,7 @@ Examples of foundational tasks (adjust based on your project):
 - All Foundational tasks marked [P] can run in parallel (within Phase 2)
 - Once Foundational phase completes, all user stories can start in parallel (if team capacity allows)
 - All tests for a user story marked [P] can run in parallel
-- Models within a story marked [P] can run in parallel
+- Independent UI, Rust, docs, and test tasks within a story marked [P] can run in parallel
 - Different user stories can be worked on in parallel by different team members
 
 ---
@@ -209,13 +202,13 @@ Examples of foundational tasks (adjust based on your project):
 ## Parallel Example: User Story 1
 
 ```bash
-# Launch all tests for User Story 1 together:
-Task: "TypeScript unit/contract test in app/src/**/[name].test.ts"
-Task: "Rust unit/integration test in app/src-tauri/src/tests/[name]_tests.rs"
+# Launch all deterministic tests for User Story 1 together:
+Task: "UI/unit test for [behavior] in app/src/[path]/[name].test.ts"
+Task: "Rust unit test for [backend behavior] in app/src-tauri/src/[path].rs"
 
-# Launch UI + backend work in parallel when it touches different files:
-Task: "Implement UI changes in app/src/[path]/[file].ts(x)"
-Task: "Implement backend changes in app/src-tauri/src/[path]/[file].rs"
+# Launch independent implementation work for User Story 1 together:
+Task: "Implement UI state/component changes in app/src/[path]/[file].tsx"
+Task: "Implement Rust command/event behavior in app/src-tauri/src/[path].rs"
 ```
 
 ---

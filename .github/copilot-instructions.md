@@ -38,7 +38,8 @@
 
 - Settings conventions (very important):
 
-  - `settings.json` is the canonical persisted store (`@tauri-apps/plugin-store`).
+  - `settings.json` is the canonical persisted store for non-secret settings/cache (`@tauri-apps/plugin-store`).
+  - API keys and session/refresh secrets belong in OS secure storage via `app/src-tauri/src/secrets.rs`; legacy `settings.json` API-key fallback exists only for migration/backward compatibility.
   - `null` often means “explicitly disabled”; missing/invalid values should fall back to defaults.
   - If you add/rename a setting, update BOTH:
     - Rust default seeding/migrations (see `ensure_default_settings(...)` in `app/src-tauri/src/lib.rs`)
@@ -60,10 +61,19 @@
   - The backend pipeline is a state machine; prefer explicit guard methods/transitions over ad-hoc flags.
   - Cancellation is part of the UX (escape-to-cancel is registered only while active). Avoid re-entrant shortcut registration; follow the existing lock/async pattern in `app/src-tauri/src/lib.rs`.
 
+- Spec Kit/git workflow:
+
+  - Do not auto-run branch-changing Spec Kit hooks/scripts unless the user explicitly accepts. The active `before_specify` hook is optional because `speckit.git.feature` creates/switches branches internally.
+
 - Formatting/tooling:
 
   - TypeScript is strict (see `app/tsconfig.json`). Keep types accurate; prefer narrow unions for state/event strings.
   - Biome formats with **tabs** and double quotes (see `app/biome.json`). Avoid drive-by reformatting.
 
 - Security/telemetry:
-  - API keys are stored via the store (UI uses `tauriAPI.setApiKey(...)`). Never log secrets; redact request logs where needed.
+  - API keys are written through `tauriAPI.setApiKey(...)` to OS secure storage, with legacy `settings.json` fallback only when reading/migrating old installs. Never log secrets; redact request logs where needed.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
