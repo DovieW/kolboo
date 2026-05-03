@@ -815,6 +815,24 @@ impl RequestLogStore {
         current.as_mut().map(f)
     }
 
+    /// Modify the current request log only when it still matches `request_id`.
+    ///
+    /// This is intentionally narrower than `with_current`: async background work can keep
+    /// running after a newer request has become current, and must not stamp late telemetry onto
+    /// the wrong request log.
+    pub fn with_current_id<F, R>(&self, request_id: &str, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut RequestLog) -> R,
+    {
+        let mut current = lock_or_recover(&self.current);
+        let log = current.as_mut()?;
+        if log.id == request_id {
+            Some(f(log))
+        } else {
+            None
+        }
+    }
+
     /// Complete the current request and store it
     pub fn complete_current(&self) {
         let mut current = lock_or_recover(&self.current);
@@ -929,6 +947,32 @@ mod tests {
         assert_eq!(logs.len(), 2);
         assert_eq!(logs[0].id, id2); // Most recent first
         assert_eq!(logs[1].id, id1);
+    }
+
+    #[test]
+    fn with_current_id_only_mutates_matching_current_request() {
+        let store = RequestLogStore::new();
+
+        let old_id = store.start_request("groq".to_string(), None);
+        let new_id = store.start_request("openai".to_string(), None);
+
+        assert_eq!(
+            store.with_current_id(&old_id, |log| {
+                log.ocr_status = Some("failed".to_string());
+            }),
+            None
+        );
+
+        assert!(store
+            .with_current_id(&new_id, |log| {
+                log.ocr_status = Some("running".to_string());
+            })
+            .is_some());
+
+        store.with_current(|log| {
+            assert_eq!(log.id, new_id);
+            assert_eq!(log.ocr_status.as_deref(), Some("running"));
+        });
     }
 
     #[test]

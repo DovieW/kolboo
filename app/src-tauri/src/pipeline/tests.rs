@@ -442,6 +442,190 @@ fn end_ocr_session_clears_ocr_state() {
     assert_eq!(p.get_ocr_status(), "not_started");
 }
 
+#[tokio::test]
+async fn get_ocr_result_without_task_keeps_status_not_started() {
+    let config = test_config_with_max_recording_bytes();
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+
+    p.begin_ocr_session("req-no-task".to_string());
+
+    let result = p
+        .get_ocr_result_with_timeout(std::time::Duration::from_millis(1))
+        .await;
+
+    assert!(result.is_none());
+    assert_eq!(p.ocr_session_id().as_deref(), Some("req-no-task"));
+    assert_eq!(p.get_ocr_status(), "not_started");
+    assert!(!p.inner.lock().unwrap().ocr_awaiting);
+}
+
+#[tokio::test]
+async fn awaited_ocr_task_cannot_publish_after_session_superseded() {
+    let config = test_config_with_max_recording_bytes();
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+
+    p.begin_ocr_session("req-old".to_string());
+
+    let (finish_tx, finish_rx) = tokio::sync::oneshot::channel::<()>();
+    let handle = tokio::spawn(async move {
+        let _ = finish_rx.await;
+        Ok(crate::ocr::OcrResult {
+            text: "stale OCR text".to_string(),
+            provider: "test".to_string(),
+            model: "test".to_string(),
+        })
+    });
+    let abort_handle = handle.abort_handle();
+    {
+        let mut inner = p.inner.lock().unwrap();
+        inner.ocr_abort_handle = Some(abort_handle);
+        inner.ocr_task = Some(OcrTaskHandle::new(
+            Some("req-old".to_string()),
+            Some("req-old".to_string()),
+            handle,
+        ));
+    }
+
+    let waiter_pipeline = p.clone();
+    let waiter = tokio::spawn(async move {
+        waiter_pipeline
+            .get_ocr_result_with_timeout(std::time::Duration::from_secs(30))
+            .await
+    });
+
+    for _ in 0..16 {
+        if p.inner.lock().unwrap().ocr_awaiting {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(p.inner.lock().unwrap().ocr_awaiting);
+
+    p.begin_ocr_session("req-new".to_string());
+    let _ = finish_tx.send(());
+
+    let result = waiter.await.expect("OCR waiter task should not panic");
+    assert!(result.is_none());
+    assert_eq!(p.ocr_session_id().as_deref(), Some("req-new"));
+    assert_eq!(p.get_ocr_status(), "not_started");
+}
+
+#[tokio::test]
+async fn force_reset_aborts_in_flight_ocr_task() {
+    struct NotifyOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
+
+    impl Drop for NotifyOnDrop {
+        fn drop(&mut self) {
+            if let Some(tx) = self.0.take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+
+    let config = test_config_with_max_recording_bytes();
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.begin_ocr_session("req-reset".to_string());
+
+    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
+    let drop_guard = NotifyOnDrop(Some(dropped_tx));
+    let handle = tokio::spawn(async move {
+        let _drop_guard = drop_guard;
+        std::future::pending::<Result<crate::ocr::OcrResult, String>>().await
+    });
+    let abort_handle = handle.abort_handle();
+    {
+        let mut inner = p.inner.lock().unwrap();
+        inner.ocr_abort_handle = Some(abort_handle);
+        inner.ocr_task = Some(OcrTaskHandle::new(
+            Some("req-reset".to_string()),
+            Some("req-reset".to_string()),
+            handle,
+        ));
+    }
+
+    p.force_reset();
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), dropped_rx)
+        .await
+        .expect("OCR task should be dropped after abort")
+        .expect("drop notification should be sent");
+    let inner = p.inner.lock().unwrap();
+    assert_eq!(inner.ocr_session_id, None);
+    assert!(inner.ocr_task.is_none());
+    assert!(inner.ocr_abort_handle.is_none());
+    assert!(inner.ocr_result.is_none());
+}
+
+#[tokio::test]
+async fn force_reset_aborts_awaited_ocr_task() {
+    struct NotifyOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
+
+    impl Drop for NotifyOnDrop {
+        fn drop(&mut self) {
+            if let Some(tx) = self.0.take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+
+    let config = test_config_with_max_recording_bytes();
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.begin_ocr_session("req-awaiting-reset".to_string());
+
+    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel::<()>();
+    let drop_guard = NotifyOnDrop(Some(dropped_tx));
+    let handle = tokio::spawn(async move {
+        let _drop_guard = drop_guard;
+        std::future::pending::<Result<crate::ocr::OcrResult, String>>().await
+    });
+    let abort_handle = handle.abort_handle();
+    {
+        let mut inner = p.inner.lock().unwrap();
+        inner.ocr_abort_handle = Some(abort_handle);
+        inner.ocr_task = Some(OcrTaskHandle::new(
+            Some("req-awaiting-reset".to_string()),
+            Some("req-awaiting-reset".to_string()),
+            handle,
+        ));
+    }
+
+    let waiter_pipeline = p.clone();
+    let waiter = tokio::spawn(async move {
+        waiter_pipeline
+            .get_ocr_result_with_timeout(std::time::Duration::from_secs(30))
+            .await
+    });
+
+    for _ in 0..16 {
+        if p.inner.lock().unwrap().ocr_awaiting {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    {
+        let inner = p.inner.lock().unwrap();
+        assert!(inner.ocr_awaiting);
+        assert!(inner.ocr_task.is_none());
+        assert!(inner.ocr_abort_handle.is_some());
+    }
+
+    p.force_reset();
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), dropped_rx)
+        .await
+        .expect("awaited OCR task should be dropped after abort")
+        .expect("drop notification should be sent");
+    let result = waiter.await.expect("OCR waiter task should not panic");
+    assert!(result.is_none());
+
+    let inner = p.inner.lock().unwrap();
+    assert_eq!(inner.ocr_session_id, None);
+    assert!(inner.ocr_task.is_none());
+    assert!(inner.ocr_abort_handle.is_none());
+    assert!(inner.ocr_result.is_none());
+    assert!(!inner.ocr_awaiting);
+}
+
 #[test]
 fn pipeline_can_start_and_stop_without_cpal() {
     let config = test_config_with_max_recording_bytes();

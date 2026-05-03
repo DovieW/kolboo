@@ -19,3 +19,9 @@ STT execution includes retry policy, timeout behavior, and cancellation priority
 The post-STT flow that turns raw transcript text into final output text.
 
 This includes preset routing and optional LLM rewrite. It starts after STT execution has produced transcript text.
+
+### OCR Session
+
+The best-effort active-window OCR lifecycle tied to a user-visible request id.
+
+OCR Session includes runtime readiness validation, screenshot task ownership, result reuse, cancellation, overlay status, and request-log correlation across internal pipeline transitions. Its core invariant is that OCR task results and telemetry belong only to the session that started them, even if the pipeline returns to idle or a newer request supersedes the old one.
