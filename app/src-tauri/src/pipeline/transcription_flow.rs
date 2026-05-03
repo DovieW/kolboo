@@ -5,19 +5,17 @@
 //! - `transcribe_wav_bytes_detailed_for_profile` (for retry/replay)
 //!
 //! The flow consists of:
-//! 1. STT transcription with retries and timeout
-//! 2. Preset routing (embeddings or LLM-based)
-//! 3. LLM rewrite with fallback to raw transcript
+//! 1. Preset routing (embeddings or LLM-based)
+//! 2. LLM rewrite with fallback to raw transcript
 //!
-//! NOTE: This module is currently not fully integrated with the main pipeline methods.
-//! See `docs/Refactors/1_HIGH.md` for the remaining work to wire this up.
+//! STT execution itself is centralized in `stt_flow.rs` so retry telemetry,
+//! optional timeout behavior, cancellation priority, and log context stay in one place.
 
 #![allow(dead_code)]
 
 use crate::llm::{format_text, LlmProvider, ProgramPromptProfile};
 use crate::request_log::RequestLogStore;
 use crate::settings::{IntentRouterStrategy, ProxySettings};
-use crate::stt::{with_retry, AudioFormat, RetryConfig, SttProvider};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,7 +26,6 @@ use super::llm_provider::LlmProviderParams;
 use super::program_profiles::{find_preset_by_id, router_enabled};
 use super::routing::{route_preset_id_with_embeddings, route_preset_id_with_llm};
 use super::types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionResult};
-use super::utils::normalize_stt_text;
 
 /// Context needed for transcription flow.
 ///
@@ -107,57 +104,6 @@ pub(super) struct LlmResolution {
     prompts: crate::llm::PromptSections,
     timeout: Duration,
     not_attempted_reason: Option<LlmNotAttemptedReason>,
-}
-
-/// Run STT transcription with retry and timeout.
-pub(super) async fn run_stt_transcription(
-    wav_bytes: Arc<Vec<u8>>,
-    stt_provider: Arc<dyn SttProvider>,
-    retry_config: &RetryConfig,
-    timeout: Duration,
-    cancel_token: &CancellationToken,
-) -> Result<(String, u64), PipelineError> {
-    let format = AudioFormat::default();
-
-    let transcription_future = async {
-        with_retry(retry_config, || {
-            let provider = stt_provider.clone();
-            let wav = wav_bytes.clone();
-            let format = format.clone();
-            async move { provider.transcribe(wav.as_slice(), &format).await }
-        })
-        .await
-    };
-
-    let stt_start = std::time::Instant::now();
-
-    // Race between transcription, timeout, and cancellation
-    let stt_result = tokio::select! {
-        biased;
-
-        // Cancellation takes priority
-        _ = cancel_token.cancelled() => {
-            log::info!("Pipeline: Transcription cancelled");
-            Err(PipelineError::Cancelled)
-        }
-
-        // Timeout
-        _ = tokio::time::sleep(timeout) => {
-            log::warn!("Pipeline: Transcription timed out after {:?}", timeout);
-            Err(PipelineError::Timeout(timeout))
-        }
-
-        // Actual transcription
-        result = transcription_future => {
-            result.map_err(PipelineError::from)
-        }
-    };
-
-    let stt_text = stt_result.map(normalize_stt_text)?;
-    let stt_duration_ms = stt_start.elapsed().as_millis() as u64;
-
-    log::info!("Pipeline: STT complete, {} chars", stt_text.len());
-    Ok((stt_text, stt_duration_ms))
 }
 
 /// Route to a preset based on the transcript.

@@ -135,17 +135,27 @@ Ideas:
 
 ## Deduplicate STT transcription flow helpers
 
-There are currently two very similar implementations of `run_stt_transcription(...)`:
+**Status:** Phase 2 completed (2026-05-01)
+
+There used to be two very similar implementations of `run_stt_transcription(...)`:
 
 - `app/src-tauri/src/pipeline/stt_flow.rs`
 - `app/src-tauri/src/pipeline/transcription_flow.rs`
 
-This duplication makes it easy for behavior/telemetry (retry handling, timeout semantics, new diagnostics fields) to drift.
+This duplication made it easy for behavior/telemetry (retry handling, timeout semantics, new diagnostics fields) to drift.
 
-Ideas:
+Current state:
 
-- Keep a single STT flow helper (`pipeline/stt_flow.rs`) and have other modules call into it.
-- If `transcription_flow.rs` needs a specialized version, refactor it to wrap the shared helper rather than re-implementing.
+- `app/src-tauri/src/pipeline/stt_flow.rs` is the canonical STT execution module.
+- The unused duplicate helper in `transcription_flow.rs` has been removed.
+- Characterization tests cover retry telemetry, optional timeout behavior, non-retryable errors, and cancellation priority.
+- `app/src-tauri/src/pipeline/stt_provider_resolver.rs` centralizes transcription-time STT Provider Resolution: profile/preset/global settings, per-run CLI overrides, request-log provider/model metadata, provider cache creation, managed inference routing, Local Whisper/Whisper Server special cases, and global-provider fallback.
+- `pipeline.rs` now asks for a resolved STT provider instead of repeating fallback/logging/cache setup in the last-audio test endpoint, main stop/transcribe path, and retry/CLI transcription path.
+
+Remaining ideas:
+
+- If `pipeline.rs` still has too much repeated batch STT → routing → rewrite choreography, consider a follow-up wrapper in `transcription_flow.rs` that composes `stt_flow::run_stt_transcription(...)` with `complete_transcription_flow(...)`.
+- Keep streaming finalization and managed-auth retry behavior explicit unless characterization tests make it safe to consolidate them.
 
 ## Consolidate duplicated Settings shell components
 

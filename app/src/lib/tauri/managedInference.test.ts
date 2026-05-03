@@ -2,21 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import type { RuntimeConfig } from "./runtimeConfig";
 
 const { invokeMock, loadRuntimeConfigMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(),
-  loadRuntimeConfigMock: vi.fn(
-    async (): Promise<RuntimeConfig> => ({
-      app_version: null,
-      api_base_url: null,
-      managed_inference_gateway_url: null,
-      cloudflare_access_client_id: null,
-      cloudflare_access_client_secret: null,
-      sentry_dsn: null,
-      sentry_env: null,
-      sentry_release: null,
-      posthog_api_key: null,
-      posthog_host: null,
-    }),
-  ),
+	invokeMock: vi.fn(),
+	loadRuntimeConfigMock: vi.fn(
+		async (): Promise<RuntimeConfig> => ({
+			app_version: null,
+			api_base_url: null,
+			managed_inference_gateway_url: null,
+			cloudflare_access_client_id: null,
+			cloudflare_access_client_secret: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		}),
+	),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -36,17 +36,17 @@ import {
 describe("managedInference", () => {
 	it("attaches bearer auth for relative managed gateway requests", async () => {
 		loadRuntimeConfigMock.mockResolvedValueOnce({
-      app_version: null,
-      api_base_url: null,
-      managed_inference_gateway_url: "https://gateway.example/",
-      cloudflare_access_client_id: null,
-      cloudflare_access_client_secret: null,
-      sentry_dsn: null,
-      sentry_env: null,
-      sentry_release: null,
-      posthog_api_key: null,
-      posthog_host: null,
-    });
+			app_version: null,
+			api_base_url: null,
+			managed_inference_gateway_url: "https://gateway.example/",
+			cloudflare_access_client_id: null,
+			cloudflare_access_client_secret: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		});
 		invokeMock.mockImplementation(async (command) => {
 			if (command === "license_get_session_access_token") {
 				return "session-token";
@@ -79,46 +79,46 @@ describe("managedInference", () => {
 	});
 
 	it("attaches Cloudflare Access headers only for configured edge hosts", async () => {
-    loadRuntimeConfigMock.mockResolvedValueOnce({
-      app_version: null,
-      api_base_url: "https://kolboo.dovie.dev",
-      managed_inference_gateway_url: "https://kolboo.dovie.dev/",
-      cloudflare_access_client_id: "cf-client-id",
-      cloudflare_access_client_secret: "cf-client-secret",
-      sentry_dsn: null,
-      sentry_env: null,
-      sentry_release: null,
-      posthog_api_key: null,
-      posthog_host: null,
-    });
-    invokeMock.mockImplementation(async (command) => {
-      if (command === "license_get_session_access_token") {
-        return "session-token";
-      }
-      throw new Error(`Unexpected invoke command: ${command}`);
-    });
+		loadRuntimeConfigMock.mockResolvedValueOnce({
+			app_version: null,
+			api_base_url: "https://kolboo.dovie.dev",
+			managed_inference_gateway_url: "https://kolboo.dovie.dev/",
+			cloudflare_access_client_id: "cf-client-id",
+			cloudflare_access_client_secret: "cf-client-secret",
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		});
+		invokeMock.mockImplementation(async (command) => {
+			if (command === "license_get_session_access_token") {
+				return "session-token";
+			}
+			throw new Error(`Unexpected invoke command: ${command}`);
+		});
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({ ok: true }),
+		});
+		vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      postManagedJson({
-        path: "/v1/llm/complete",
-        request: { foo: "bar" },
-        idempotencyKey: "idem-cf",
-      }),
-    ).resolves.toEqual({ ok: true });
+		await expect(
+			postManagedJson({
+				path: "/v1/llm/complete",
+				request: { foo: "bar" },
+				idempotencyKey: "idem-cf",
+			}),
+		).resolves.toEqual({ ok: true });
 
-    const [, init] = fetchMock.mock.calls[0] as [
-      string,
-      { headers: Record<string, string> },
-    ];
-    expect(init.headers["CF-Access-Client-Id"]).toBe("cf-client-id");
-    expect(init.headers["CF-Access-Client-Secret"]).toBe("cf-client-secret");
-  });
+		const [, init] = fetchMock.mock.calls[0] as [
+			string,
+			{ headers: Record<string, string> },
+		];
+		expect(init.headers["CF-Access-Client-Id"]).toBe("cf-client-id");
+		expect(init.headers["CF-Access-Client-Secret"]).toBe("cf-client-secret");
+	});
 
 	it("createIdempotencyKey creates prefixed unique keys", () => {
 		const a = createIdempotencyKey("test");
@@ -201,17 +201,17 @@ describe("managedInference", () => {
 
 	it("falls back to tauri transport when managed auth token is unavailable", async () => {
 		loadRuntimeConfigMock.mockResolvedValueOnce({
-      app_version: null,
-      api_base_url: null,
-      managed_inference_gateway_url: "https://gateway.example",
-      cloudflare_access_client_id: null,
-      cloudflare_access_client_secret: null,
-      sentry_dsn: null,
-      sentry_env: null,
-      sentry_release: null,
-      posthog_api_key: null,
-      posthog_host: null,
-    });
+			app_version: null,
+			api_base_url: null,
+			managed_inference_gateway_url: "https://gateway.example",
+			cloudflare_access_client_id: null,
+			cloudflare_access_client_secret: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		});
 		invokeMock.mockImplementation(async (command, args) => {
 			if (command === "license_get_session_access_token") {
 				return null;
@@ -251,17 +251,17 @@ describe("managedInference", () => {
 
 	it("falls back to tauri usage-state when managed auth token is unavailable", async () => {
 		loadRuntimeConfigMock.mockResolvedValueOnce({
-      app_version: null,
-      api_base_url: null,
-      managed_inference_gateway_url: "https://gateway.example",
-      cloudflare_access_client_id: null,
-      cloudflare_access_client_secret: null,
-      sentry_dsn: null,
-      sentry_env: null,
-      sentry_release: null,
-      posthog_api_key: null,
-      posthog_host: null,
-    });
+			app_version: null,
+			api_base_url: null,
+			managed_inference_gateway_url: "https://gateway.example",
+			cloudflare_access_client_id: null,
+			cloudflare_access_client_secret: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		});
 		invokeMock.mockImplementation(async (command) => {
 			if (command === "license_get_session_access_token") {
 				return null;

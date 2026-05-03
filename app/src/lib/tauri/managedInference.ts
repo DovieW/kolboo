@@ -24,45 +24,45 @@ export interface ManagedLlmRequest {
 }
 
 function hostnameForUrl(value: string | null): string | null {
-  if (!value) return null;
-  try {
-    return new URL(value).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
+	if (!value) return null;
+	try {
+		return new URL(value).hostname.toLowerCase();
+	} catch {
+		return null;
+	}
 }
 
 function shouldAttachCloudflareAccessHeaders(
-  url: string,
-  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+	url: string,
+	config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
 ): boolean {
-  const targetHost = hostnameForUrl(url);
-  if (!targetHost) return false;
+	const targetHost = hostnameForUrl(url);
+	if (!targetHost) return false;
 
-  const allowedHosts = [
-    hostnameForUrl(config.api_base_url),
-    hostnameForUrl(config.managed_inference_gateway_url),
-  ].filter((host): host is string => Boolean(host));
+	const allowedHosts = [
+		hostnameForUrl(config.api_base_url),
+		hostnameForUrl(config.managed_inference_gateway_url),
+	].filter((host): host is string => Boolean(host));
 
-  return allowedHosts.includes(targetHost);
+	return allowedHosts.includes(targetHost);
 }
 
 function attachCloudflareAccessHeaders(
-  headers: Record<string, string>,
-  url: string,
-  config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
+	headers: Record<string, string>,
+	url: string,
+	config: Awaited<ReturnType<typeof loadRuntimeConfig>>,
 ): void {
-  if (!shouldAttachCloudflareAccessHeaders(url, config)) return;
+	if (!shouldAttachCloudflareAccessHeaders(url, config)) return;
 
-  const clientId = normalizeOptionalToken(config.cloudflare_access_client_id);
-  const clientSecret = normalizeOptionalToken(
-    config.cloudflare_access_client_secret,
-  );
+	const clientId = normalizeOptionalToken(config.cloudflare_access_client_id);
+	const clientSecret = normalizeOptionalToken(
+		config.cloudflare_access_client_secret,
+	);
 
-  if (!clientId || !clientSecret) return;
+	if (!clientId || !clientSecret) return;
 
-  headers["CF-Access-Client-Id"] = clientId;
-  headers["CF-Access-Client-Secret"] = clientSecret;
+	headers["CF-Access-Client-Id"] = clientId;
+	headers["CF-Access-Client-Secret"] = clientSecret;
 }
 
 function normalizeOptionalToken(value: unknown): string | null {
@@ -162,9 +162,9 @@ async function requestManagedJson<TReq, TRes>(params: {
 	fallbackInvoke?: ManagedInvokeFallback;
 }): Promise<TRes> {
 	const config = await loadRuntimeConfig();
-  const trimmedBaseUrl = config.managed_inference_gateway_url?.trim() ?? "";
-  const baseUrl =
-    trimmedBaseUrl.length > 0 ? trimmedBaseUrl.replace(/\/$/, "") : null;
+	const trimmedBaseUrl = config.managed_inference_gateway_url?.trim() ?? "";
+	const baseUrl =
+		trimmedBaseUrl.length > 0 ? trimmedBaseUrl.replace(/\/$/, "") : null;
 	const isAbsolutePath = /^https?:\/\//i.test(params.path);
 	if (!baseUrl && !isAbsolutePath) {
 		if (params.fallbackInvoke) {

@@ -47,6 +47,7 @@ mod routing;
 mod state_machine;
 mod stt_flow;
 pub(crate) mod stt_provider;
+mod stt_provider_resolver;
 #[cfg(test)]
 mod tests;
 mod transcription_flow;
@@ -86,6 +87,7 @@ pub(crate) fn should_auto_start_active_window_ocr(
 
 use llm_provider::{create_llm_provider, LlmProviderParams};
 use stt_flow::run_stt_transcription;
+use stt_provider_resolver::SttProviderResolutionRequest;
 use utils::seconds_to_duration_or;
 
 fn truncate_overlay_reason(reason: &str) -> String {
@@ -499,129 +501,7 @@ impl PipelineInner {
         model: Option<String>,
         language: Option<String>,
     ) -> Result<Arc<dyn SttProvider>, PipelineError> {
-        let provider_id = resolve_stt_provider_for_runtime(&self.config, provider_id);
-        let managed_ready =
-            self.config.managed_inference_enabled && managed_gateway_ready(&self.config);
-        // Local providers never use managed transport.
-        let managed_transport_active =
-            managed_ready && provider_id != "local-whisper" && provider_id != "whisper-server";
-
-        if managed_transport_active {
-            if let Some(store) = &self.config.request_log_store {
-                let _ = store.with_current(|log| {
-                    log.managed_inference = true;
-                });
-            }
-        }
-
-        // NOTE: for Local Whisper, the "model" setting is not meaningful (Whisper model is
-        // selected via `whisper_model_path`). Using the global `stt_model` here can cause
-        // unnecessary cache misses and, worse, repeated expensive model loads.
-        let language_key = language.clone().unwrap_or_else(|| "<auto>".to_string());
-        let model_key = if provider_id == "local-whisper" {
-            self.local_whisper_model_key_for_cache()
-        } else {
-            model.clone().unwrap_or_else(|| "<default>".to_string())
-        };
-
-        let cache_key = format!(
-            "{}::{}::{}::live={}",
-            provider_id, model_key, language_key, self.config.stt_live_output
-        );
-
-        if let Some(p) = self.stt_provider_cache.get(&cache_key) {
-            return Ok(p.clone());
-        }
-
-        // Manual local-whisper mode: require explicit preload to avoid surprise UI stalls
-        // during stop/transcribe.
-        if provider_id == "local-whisper" && self.config.local_whisper_load_mode == "manual" {
-            return Err(PipelineError::Config(
-                "Local Whisper is set to Manual load. Click 'Load model' in Settings (or switch load mode to 'On transcribe').".to_string(),
-            ));
-        }
-
-        #[cfg(feature = "local-whisper")]
-        if provider_id == "local-whisper" {
-            if let Some(model_path) = &self.config.whisper_model_path {
-                let provider =
-                    crate::stt::LocalWhisperProvider::with_config(crate::stt::LocalWhisperConfig {
-                        model_path: model_path.clone(),
-                        language: language.clone(),
-                        transcription_prompt: self.config.stt_transcription_prompt.clone(),
-                        ..Default::default()
-                    })
-                    .map_err(|e| {
-                        PipelineError::Config(format!("Local Whisper init failed: {}", e))
-                    })?;
-                let provider = Arc::new(provider);
-                self.stt_provider_cache.insert(cache_key, provider.clone());
-                return Ok(provider);
-            }
-
-            return Err(PipelineError::Config(
-                "Local Whisper selected but no model path configured".to_string(),
-            ));
-        }
-
-        if provider_id == "whisper-server" {
-            let base_url = self
-                .config
-                .whisper_server_base_url
-                .clone()
-                .unwrap_or_default();
-
-            let provider = crate::stt::WhisperServerSttProvider::with_client(
-                stt_provider::build_stt_client(&self.config.proxy_settings)?,
-                base_url,
-                model,
-                language,
-                self.config.stt_transcription_prompt.clone(),
-            )
-            .map_err(|e| PipelineError::Config(format!("Whisper server init failed: {}", e)))?
-            .with_request_log_store(self.config.request_log_store.clone());
-
-            let provider = Arc::new(provider);
-            self.stt_provider_cache.insert(cache_key, provider.clone());
-            return Ok(provider);
-        }
-
-        // Cloud providers use the common factory
-        let api_key = if managed_transport_active {
-            self.config
-                .managed_inference_access_token
-                .clone()
-                .unwrap_or_default()
-        } else {
-            self.config
-                .stt_api_keys
-                .get(&provider_id)
-                .cloned()
-                .unwrap_or_default()
-        };
-
-        let client = stt_provider::build_stt_client(&self.config.proxy_settings)?;
-
-        let provider = stt_provider::create_cloud_stt_provider(
-            client,
-            stt_provider::SttProviderParams {
-                provider_id,
-                model,
-                language,
-                api_key,
-                managed_gateway_url: if managed_transport_active {
-                    self.config.managed_inference_gateway_url.clone()
-                } else {
-                    None
-                },
-                transcription_prompt: self.config.stt_transcription_prompt.clone(),
-                request_log_store: self.config.request_log_store.clone(),
-                stt_live_output: self.config.stt_live_output,
-            },
-        )?;
-
-        self.stt_provider_cache.insert(cache_key, provider.clone());
-        Ok(provider)
+        stt_provider_resolver::get_or_create_stt_provider(self, provider_id, model, language)
     }
 
     fn get_or_create_llm_provider(
@@ -982,22 +862,11 @@ impl SharedPipeline {
         let mut inner = self.inner.lock().expect("pipeline lock");
         let provider_id = canonicalize_stt_provider_id(provider_id);
 
-        // Keep cache-key construction aligned with `PipelineInner::get_or_create_stt_provider`.
-        // For Local Whisper this is special-cased; for tests we keep it simple and only
-        // support a normal provider id.
-        let language_key = language
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "<auto>".to_string());
-        let model_key = if provider_id == "local-whisper" {
-            inner.local_whisper_model_key_for_cache()
-        } else {
-            model
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "<default>".to_string())
-        };
-        let cache_key = format!(
-            "{}::{}::{}::live={}",
-            provider_id, model_key, language_key, inner.config.stt_live_output
+        let cache_key = stt_provider_resolver::stt_provider_cache_key(
+            &inner,
+            &provider_id,
+            model.map(|s| s.to_string()),
+            language.map(|s| s.to_string()),
         );
 
         inner.stt_provider_cache.insert(cache_key, provider.clone());
@@ -2405,83 +2274,15 @@ impl SharedPipeline {
                         .cloned()
                 });
 
-            let effective_stt_settings =
-                inner.resolve_effective_stt_settings(profile.as_ref(), None);
-
-            let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
-            let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
-
-            #[cfg(feature = "local-whisper")]
-            if stt_provider_id_used == "local-whisper" {
-                stt_model_used = inner
-                    .config
-                    .whisper_model_path
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .map(|f| f.to_string_lossy().to_string());
-            }
-
-            if let Some(store) = inner.config.request_log_store.as_ref() {
-                store.with_current(|log| {
-                    log.stt_provider = stt_provider_id_used.clone();
-                    log.stt_model = stt_model_used.clone();
-                });
-            }
-
-            let stt_provider = match inner.get_or_create_stt_provider(
-                &effective_stt_settings.provider_id,
-                effective_stt_settings.model.clone(),
-                effective_stt_settings.language.clone(),
-            ) {
-                Ok(p) => p,
-                Err(e) => {
-                    // If the profile specified an override provider, fall back to global provider.
-                    let global_provider = canonicalize_stt_provider_id(&config.stt_provider);
-                    if global_provider != effective_stt_settings.provider_id {
-                        log::warn!(
-                            "Pipeline: Profile STT provider '{}' unavailable ({}), falling back to '{}'",
-                            effective_stt_settings.provider_id,
-                            e,
-                            global_provider
-                        );
-
-                        let global_model = config.stt_model.clone();
-                        stt_provider_id_used = global_provider.clone();
-                        stt_model_used = global_model.clone();
-
-                        #[cfg(feature = "local-whisper")]
-                        if stt_provider_id_used == "local-whisper" {
-                            stt_model_used = inner
-                                .config
-                                .whisper_model_path
-                                .as_ref()
-                                .and_then(|p| p.file_name())
-                                .map(|f| f.to_string_lossy().to_string());
-                        }
-
-                        if let Some(store) = inner.config.request_log_store.as_ref() {
-                            store.with_current(|log| {
-                                log.stt_provider = stt_provider_id_used.clone();
-                                log.stt_model = stt_model_used.clone();
-                            });
-                        }
-
-                        inner
-                            .get_or_create_stt_provider(
-                                &global_provider,
-                                global_model,
-                                config.stt_language.clone(),
-                            )
-                            .map_err(|err| {
-                                inner.set_error(&format!("No STT provider configured: {}", err));
-                                err
-                            })?
-                    } else {
-                        inner.set_error(&format!("STT provider init failed: {}", e));
-                        return Err(e);
-                    }
-                }
-            };
+            let resolved_stt = stt_provider_resolver::resolve_stt_provider_for_transcription(
+                &mut inner,
+                SttProviderResolutionRequest {
+                    active_profile: profile.as_ref(),
+                    active_preset: None,
+                    forced_provider: None,
+                    forced_model: None,
+                },
+            )?;
 
             let cancel_token = inner
                 .cancel_token
@@ -2490,7 +2291,7 @@ impl SharedPipeline {
 
             (
                 wav_bytes,
-                stt_provider,
+                resolved_stt.provider,
                 config.retry_config.clone(),
                 cancel_token,
             )
@@ -2672,89 +2473,15 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let effective_stt_settings =
-                inner.resolve_effective_stt_settings(active_profile.as_ref(), active_preset);
-
-            let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
-            let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
-            let mut stt_language_used: Option<String> = effective_stt_settings.language.clone();
-
-            #[cfg(feature = "local-whisper")]
-            if stt_provider_id_used == "local-whisper" {
-                stt_model_used = inner
-                    .config
-                    .whisper_model_path
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .map(|f| f.to_string_lossy().to_string());
-            }
-
-            // Persist the *intended/effective* provider/model into the request log before
-            // provider initialization. This keeps logs accurate even when provider creation
-            // fails (e.g., Local Whisper manual mode without preload).
-            if let Some(store) = inner.config.request_log_store.as_ref() {
-                store.with_current(|log| {
-                    log.stt_provider = stt_provider_id_used.clone();
-                    log.stt_model = stt_model_used.clone();
-                });
-            }
-
-            let stt_provider = match inner.get_or_create_stt_provider(
-                &effective_stt_settings.provider_id,
-                effective_stt_settings.model.clone(),
-                effective_stt_settings.language.clone(),
-            ) {
-                Ok(p) => p,
-                Err(e) => {
-                    // If the profile specified an override provider, fall back to global provider.
-                    let global_provider = canonicalize_stt_provider_id(&inner.config.stt_provider);
-                    if global_provider != effective_stt_settings.provider_id {
-                        log::warn!(
-                            "Pipeline: Profile STT provider '{}' unavailable ({}), falling back to '{}'",
-                            effective_stt_settings.provider_id,
-                            e,
-                            global_provider
-                        );
-                        let global_model = inner.config.stt_model.clone();
-                        stt_provider_id_used = global_provider.clone();
-                        stt_model_used = global_model.clone();
-                        stt_language_used = inner.config.stt_language.clone();
-
-                        #[cfg(feature = "local-whisper")]
-                        if stt_provider_id_used == "local-whisper" {
-                            stt_model_used = inner
-                                .config
-                                .whisper_model_path
-                                .as_ref()
-                                .and_then(|p| p.file_name())
-                                .map(|f| f.to_string_lossy().to_string());
-                        }
-
-                        if let Some(store) = inner.config.request_log_store.as_ref() {
-                            store.with_current(|log| {
-                                log.stt_provider = stt_provider_id_used.clone();
-                                log.stt_model = stt_model_used.clone();
-                            });
-                        }
-                        let fallback_provider = global_provider.clone();
-                        let fallback_language = inner.config.stt_language.clone();
-                        let provider_result = inner.get_or_create_stt_provider(
-                            &fallback_provider,
-                            global_model,
-                            fallback_language,
-                        );
-                        provider_result.map_err(|err| {
-                            inner.set_error(&format!("No STT provider configured: {}", err));
-                            err
-                        })?
-                    } else {
-                        // Preserve the real failure reason (e.g. missing API key, manual local-whisper not loaded)
-                        // instead of collapsing into the generic NoProvider.
-                        inner.set_error(&format!("STT provider init failed: {}", e));
-                        return Err(e);
-                    }
-                }
-            };
+            let resolved_stt = stt_provider_resolver::resolve_stt_provider_for_transcription(
+                &mut inner,
+                SttProviderResolutionRequest {
+                    active_profile: active_profile.as_ref(),
+                    active_preset,
+                    forced_provider: None,
+                    forced_model: None,
+                },
+            )?;
 
             let retry_config = inner.config.retry_config.clone();
             let cancel_token = inner
@@ -2775,17 +2502,17 @@ impl SharedPipeline {
             log::debug!(
                 "Pipeline: streaming session taken={}, provider={}",
                 streaming_session.is_some(),
-                effective_stt_settings.provider_id
+                resolved_stt.provider_id
             );
 
             (
                 outcome.wav_bytes,
-                stt_provider,
-                stt_provider_id_used,
-                stt_model_used,
-                stt_language_used,
+                resolved_stt.provider,
+                resolved_stt.provider_id,
+                resolved_stt.model,
+                resolved_stt.language,
                 retry_config,
-                effective_stt_settings.timeout,
+                resolved_stt.timeout,
                 cancel_token,
                 active_profile,
                 default_rewrite_include_clipboard_context,
@@ -3294,101 +3021,15 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let mut effective_stt_settings =
-                inner.resolve_effective_stt_settings(active_profile.as_ref(), active_preset);
-
-            // CLI-only overrides: allow forcing provider/model for a single transcription
-            // without changing persisted settings or profiles.
-            if let Some(p) = forced_stt_provider {
-                let p = p.trim();
-                if !p.is_empty() {
-                    effective_stt_settings.provider_id = canonicalize_stt_provider_id(p);
-                }
-            }
-            if let Some(m) = forced_stt_model {
-                let m = m.trim();
-                effective_stt_settings.model = if m.is_empty() {
-                    None
-                } else {
-                    Some(m.to_string())
-                };
-            }
-
-            let mut stt_provider_id_used = effective_stt_settings.provider_id.clone();
-            let mut stt_model_used: Option<String> = effective_stt_settings.model.clone();
-            let mut stt_language_used: Option<String> = effective_stt_settings.language.clone();
-
-            #[cfg(feature = "local-whisper")]
-            if stt_provider_id_used == "local-whisper" {
-                stt_model_used = inner
-                    .config
-                    .whisper_model_path
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .map(|f| f.to_string_lossy().to_string());
-            }
-
-            if let Some(store) = inner.config.request_log_store.as_ref() {
-                store.with_current(|log| {
-                    log.stt_provider = stt_provider_id_used.clone();
-                    log.stt_model = stt_model_used.clone();
-                });
-            }
-
-            let stt_provider = match inner.get_or_create_stt_provider(
-                &effective_stt_settings.provider_id,
-                effective_stt_settings.model.clone(),
-                effective_stt_settings.language.clone(),
-            ) {
-                Ok(p) => p,
-                Err(e) => {
-                    // If the profile specified an override provider, fall back to global provider.
-                    let global_provider = canonicalize_stt_provider_id(&inner.config.stt_provider);
-                    if global_provider != effective_stt_settings.provider_id {
-                        log::warn!(
-                            "Pipeline: Profile STT provider '{}' unavailable ({}), falling back to '{}'",
-                            effective_stt_settings.provider_id,
-                            e,
-                            global_provider
-                        );
-                        let global_model = inner.config.stt_model.clone();
-                        stt_provider_id_used = global_provider.clone();
-                        stt_model_used = global_model.clone();
-                        stt_language_used = inner.config.stt_language.clone();
-
-                        #[cfg(feature = "local-whisper")]
-                        if stt_provider_id_used == "local-whisper" {
-                            stt_model_used = inner
-                                .config
-                                .whisper_model_path
-                                .as_ref()
-                                .and_then(|p| p.file_name())
-                                .map(|f| f.to_string_lossy().to_string());
-                        }
-
-                        if let Some(store) = inner.config.request_log_store.as_ref() {
-                            store.with_current(|log| {
-                                log.stt_provider = stt_provider_id_used.clone();
-                                log.stt_model = stt_model_used.clone();
-                            });
-                        }
-                        let fallback_provider = global_provider.clone();
-                        let fallback_language = inner.config.stt_language.clone();
-                        let provider_result = inner.get_or_create_stt_provider(
-                            &fallback_provider,
-                            global_model,
-                            fallback_language,
-                        );
-                        provider_result.map_err(|err| {
-                            inner.set_error(&format!("No STT provider configured: {}", err));
-                            err
-                        })?
-                    } else {
-                        inner.set_error(&format!("STT provider init failed: {}", e));
-                        return Err(e);
-                    }
-                }
-            };
+            let resolved_stt = stt_provider_resolver::resolve_stt_provider_for_transcription(
+                &mut inner,
+                SttProviderResolutionRequest {
+                    active_profile: active_profile.as_ref(),
+                    active_preset,
+                    forced_provider: forced_stt_provider,
+                    forced_model: forced_stt_model,
+                },
+            )?;
 
             let retry_config = inner.config.retry_config.clone();
 
@@ -3400,12 +3041,12 @@ impl SharedPipeline {
             .to_string();
 
             (
-                stt_provider,
-                stt_provider_id_used,
-                stt_model_used,
-                stt_language_used,
+                resolved_stt.provider,
+                resolved_stt.provider_id,
+                resolved_stt.model,
+                resolved_stt.language,
                 retry_config,
-                effective_stt_settings.timeout,
+                resolved_stt.timeout,
                 cancel_token,
                 active_profile,
                 default_rewrite_include_clipboard_context,

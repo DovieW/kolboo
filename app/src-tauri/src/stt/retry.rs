@@ -93,20 +93,9 @@ fn is_retryable_error_with_config(error: &SttError, config: &RetryConfig) -> boo
 /// Determines if an error is retryable.
 ///
 /// Note: this uses a default policy (including retrying rate-limit errors).
-/// If you need to respect a specific `RetryConfig`, use `with_retry`.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn is_retryable_error(error: &SttError) -> bool {
     is_retryable_error_with_config(error, &RetryConfig::default())
-}
-
-/// Execute an async function with retry logic
-pub async fn with_retry<F, Fut, T>(config: &RetryConfig, operation: F) -> Result<T, SttError>
-where
-    F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, SttError>>,
-{
-    let outcome = with_retry_report(config, operation).await;
-    outcome.result
 }
 
 /// Execute an async function with retry logic and return structured telemetry.

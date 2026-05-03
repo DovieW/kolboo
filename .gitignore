@@ -23,6 +23,7 @@ node_modules/
 artifacts/
 target/
 app/src-tauri/target/
+app/src-tauri/target-agent/
 app/src-tauri/target-ci/
 app/src-tauri/target-cli/
 app/src-tauri/target-bench/

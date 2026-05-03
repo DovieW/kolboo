@@ -31,7 +31,7 @@ pub use groq::GroqSttProvider;
 pub use openai::OpenAiSttProvider;
 #[allow(unused_imports)]
 pub use retry::is_retryable_error;
-pub use retry::{with_retry, with_retry_report, RetryConfig, RetryTelemetry};
+pub use retry::{with_retry_report, RetryConfig, RetryTelemetry};
 pub use speechmatics::SpeechmaticsSttProvider;
 pub use streaming::StreamingSttSession;
 pub use whisper_server::WhisperServerSttProvider;

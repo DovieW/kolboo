@@ -103,3 +103,223 @@ pub(super) async fn run_stt_transcription(
         Err(e) => Err(e),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stt::SttError;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    struct FlakyProvider {
+        calls: AtomicU32,
+        succeed_on_call: u32,
+    }
+
+    impl FlakyProvider {
+        fn new(succeed_on_call: u32) -> Self {
+            Self {
+                calls: AtomicU32::new(0),
+                succeed_on_call,
+            }
+        }
+
+        fn calls(&self) -> u32 {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl SttProvider for FlakyProvider {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+            _format: &AudioFormat,
+        ) -> Result<String, SttError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if call < self.succeed_on_call {
+                Err(SttError::Timeout)
+            } else {
+                Ok("  hello from stt  ".to_string())
+            }
+        }
+
+        fn name(&self) -> &'static str {
+            "flaky"
+        }
+    }
+
+    struct ConfigErrorProvider {
+        calls: AtomicU32,
+    }
+
+    impl ConfigErrorProvider {
+        fn new() -> Self {
+            Self {
+                calls: AtomicU32::new(0),
+            }
+        }
+
+        fn calls(&self) -> u32 {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl SttProvider for ConfigErrorProvider {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+            _format: &AudioFormat,
+        ) -> Result<String, SttError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(SttError::Config("missing test config".to_string()))
+        }
+
+        fn name(&self) -> &'static str {
+            "config-error"
+        }
+    }
+
+    struct DelayedProvider {
+        delay: Duration,
+    }
+
+    #[async_trait]
+    impl SttProvider for DelayedProvider {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+            _format: &AudioFormat,
+        ) -> Result<String, SttError> {
+            tokio::time::sleep(self.delay).await;
+            Ok("eventual transcript".to_string())
+        }
+
+        fn name(&self) -> &'static str {
+            "delayed"
+        }
+    }
+
+    fn no_delay_retry_config(max_retries: u32) -> RetryConfig {
+        RetryConfig {
+            max_retries,
+            initial_delay: Duration::ZERO,
+            max_delay: Duration::ZERO,
+            retry_on_rate_limit: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn returns_retry_telemetry_after_successful_retry() {
+        let provider = Arc::new(FlakyProvider::new(3));
+        let retry_config = no_delay_retry_config(3);
+        let cancel_token = CancellationToken::new();
+
+        let result = run_stt_transcription(
+            provider.clone(),
+            b"fake wav",
+            &retry_config,
+            Some(Duration::from_secs(1)),
+            &cancel_token,
+            "test retry telemetry",
+        )
+        .await
+        .expect("STT should eventually succeed");
+
+        assert_eq!(result.text, "hello from stt  ");
+        assert_eq!(provider.calls(), 3);
+        assert_eq!(result.retry.attempts, 3);
+        assert_eq!(result.retry.retries, 2);
+        assert_eq!(result.retry.total_delay_ms, 0);
+        assert!(result.retry.last_error.is_some());
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_non_retryable_config_errors() {
+        let provider = Arc::new(ConfigErrorProvider::new());
+        let retry_config = no_delay_retry_config(3);
+        let cancel_token = CancellationToken::new();
+
+        let result = run_stt_transcription(
+            provider.clone(),
+            b"fake wav",
+            &retry_config,
+            Some(Duration::from_secs(1)),
+            &cancel_token,
+            "test non retryable",
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(PipelineError::Stt(SttError::Config(_)))
+        ));
+        assert_eq!(provider.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn none_timeout_allows_slow_test_transcription_to_complete() {
+        let provider = Arc::new(DelayedProvider {
+            delay: Duration::from_millis(10),
+        });
+        let retry_config = no_delay_retry_config(0);
+        let cancel_token = CancellationToken::new();
+
+        let result = run_stt_transcription(
+            provider,
+            b"fake wav",
+            &retry_config,
+            None,
+            &cancel_token,
+            "test no timeout",
+        )
+        .await
+        .expect("no-timeout STT should complete");
+
+        assert_eq!(result.text, "eventual transcript");
+    }
+
+    #[tokio::test]
+    async fn configured_timeout_fails_slow_transcription() {
+        let provider = Arc::new(DelayedProvider {
+            delay: Duration::from_millis(50),
+        });
+        let retry_config = no_delay_retry_config(0);
+        let cancel_token = CancellationToken::new();
+
+        let result = run_stt_transcription(
+            provider,
+            b"fake wav",
+            &retry_config,
+            Some(Duration::from_millis(1)),
+            &cancel_token,
+            "test timeout",
+        )
+        .await;
+
+        assert!(matches!(result, Err(PipelineError::Timeout(_))));
+    }
+
+    #[tokio::test]
+    async fn cancellation_wins_when_already_cancelled() {
+        let provider = Arc::new(DelayedProvider {
+            delay: Duration::from_millis(50),
+        });
+        let retry_config = no_delay_retry_config(0);
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+
+        let result = run_stt_transcription(
+            provider,
+            b"fake wav",
+            &retry_config,
+            Some(Duration::ZERO),
+            &cancel_token,
+            "test cancellation",
+        )
+        .await;
+
+        assert!(matches!(result, Err(PipelineError::Cancelled)));
+    }
+}
