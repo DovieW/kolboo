@@ -1,80 +1,75 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, vi } from "vitest";
+import { itWithImportTimeout } from "../testTimeouts";
 import legacySettingsFixture from "./__fixtures__/legacy-settings.v0.json";
 
 type StoreLike = {
-	get<T = unknown>(key: string): Promise<T | undefined>;
-	set<T = unknown>(key: string, value: T): Promise<void>;
-	delete(key: string): Promise<void>;
-	save(): Promise<void>;
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  set<T = unknown>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<void>;
+  save(): Promise<void>;
 };
 
 class FakeStore implements StoreLike {
-	public readonly data = new Map<string, unknown>();
-	public saveCalls = 0;
+  public readonly data = new Map<string, unknown>();
+  public saveCalls = 0;
 
-	constructor(initial: Record<string, unknown>) {
-		for (const [k, v] of Object.entries(initial)) {
-			this.data.set(k, v);
-		}
-	}
+  constructor(initial: Record<string, unknown>) {
+    for (const [k, v] of Object.entries(initial)) {
+      this.data.set(k, v);
+    }
+  }
 
-	async get<T = unknown>(key: string): Promise<T | undefined> {
-		return this.data.get(key) as T | undefined;
-	}
+  async get<T = unknown>(key: string): Promise<T | undefined> {
+    return this.data.get(key) as T | undefined;
+  }
 
-	async set<T = unknown>(key: string, value: T): Promise<void> {
-		this.data.set(key, value);
-	}
+  async set<T = unknown>(key: string, value: T): Promise<void> {
+    this.data.set(key, value);
+  }
 
-	async delete(key: string): Promise<void> {
-		this.data.delete(key);
-	}
+  async delete(key: string): Promise<void> {
+    this.data.delete(key);
+  }
 
-	async save(): Promise<void> {
-		this.saveCalls += 1;
-	}
+  async save(): Promise<void> {
+    this.saveCalls += 1;
+  }
 }
 
 let currentStore: FakeStore;
 
 vi.mock("@tauri-apps/api/core", () => ({
-	convertFileSrc: (x: string) => x,
-	invoke: vi.fn(async () => {
-		throw new Error("invoke() not implemented in unit tests");
-	}),
+  convertFileSrc: (x: string) => x,
+  invoke: vi.fn(async () => {
+    throw new Error("invoke() not implemented in unit tests");
+  }),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
-	emit: vi.fn(async () => {
-		// no-op
-	}),
-	listen: vi.fn(async () => {
-		return () => {
-			// no-op
-		};
-	}),
+  emit: vi.fn(async () => {
+    // no-op
+  }),
+  listen: vi.fn(async () => {
+    return () => {
+      // no-op
+    };
+  }),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
-	getCurrentWindow: vi.fn(() => ({
-		// minimal stub
-	})),
+  getCurrentWindow: vi.fn(() => ({
+    // minimal stub
+  })),
 }));
 
 vi.mock("@tauri-apps/plugin-store", () => ({
-	Store: {
-		load: vi.fn(async () => currentStore),
-	},
+  Store: {
+    load: vi.fn(async () => currentStore),
+  },
 }));
 
-const IMPORT_HEAVY_TEST_TIMEOUT_MS = 15_000;
-const itWithImportTimeout = (
-  name: string,
-  testFn: () => Promise<void> | void,
-) => it(name, { timeout: IMPORT_HEAVY_TEST_TIMEOUT_MS }, testFn);
-
 describe("legacy settings fixtures", () => {
-	itWithImportTimeout("normalizes a legacy settings.json shape", async () => {
+  itWithImportTimeout("normalizes a legacy settings.json shape", async () => {
     vi.resetModules();
     const fixture = JSON.parse(JSON.stringify(legacySettingsFixture)) as Record<
       string,
@@ -150,7 +145,7 @@ describe("legacy settings fixtures", () => {
     expect(preset.routing_hints).toEqual(["Use this"]);
   });
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "marks expired policy state as invalid during normalization",
     async () => {
       vi.resetModules();

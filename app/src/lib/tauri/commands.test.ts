@@ -1,54 +1,49 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, vi } from "vitest";
+import { itWithImportTimeout } from "../testTimeouts";
 
 const invokeMock = vi.fn();
 const convertFileSrcMock = vi.fn((path: string) => `converted:${path}`);
 const startDraggingMock = vi.fn();
 const getCurrentWindowMock = vi.fn(() => ({
-	startDragging: startDraggingMock,
+  startDragging: startDraggingMock,
 }));
 
 const emitTypedMock = vi.fn();
 const listenTypedMock = vi.fn(
-	async (_name: string, handler: (payload: unknown) => void) => {
-		handler(null);
-		return () => {
-			// no-op
-		};
-	},
+  async (_name: string, handler: (payload: unknown) => void) => {
+    handler(null);
+    return () => {
+      // no-op
+    };
+  },
 );
 
 vi.mock("@tauri-apps/api/core", () => ({
-	invoke: invokeMock,
-	convertFileSrc: convertFileSrcMock,
+  invoke: invokeMock,
+  convertFileSrc: convertFileSrcMock,
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
-	getCurrentWindow: getCurrentWindowMock,
+  getCurrentWindow: getCurrentWindowMock,
 }));
 
 vi.mock("./events", () => ({
-	emitTyped: emitTypedMock,
-	listenTyped: listenTypedMock,
+  emitTyped: emitTypedMock,
+  listenTyped: listenTypedMock,
 }));
 
-const IMPORT_HEAVY_TEST_TIMEOUT_MS = 15_000;
-const itWithImportTimeout = (
-  name: string,
-  testFn: () => Promise<void> | void,
-) => it(name, { timeout: IMPORT_HEAVY_TEST_TIMEOUT_MS }, testFn);
-
 describe("tauri command wrappers", () => {
-	beforeEach(() => {
-		invokeMock.mockReset();
-		invokeMock.mockResolvedValue(undefined);
-		convertFileSrcMock.mockClear();
-		startDraggingMock.mockClear();
-		getCurrentWindowMock.mockClear();
-		emitTypedMock.mockClear();
-		listenTypedMock.mockClear();
-	});
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    convertFileSrcMock.mockClear();
+    startDraggingMock.mockClear();
+    getCurrentWindowMock.mockClear();
+    emitTypedMock.mockClear();
+    listenTypedMock.mockClear();
+  });
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "typeText returns success false when invoke fails",
     async () => {
       invokeMock.mockRejectedValueOnce(new Error("boom"));
@@ -62,7 +57,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout("getCostSummary maps kind=all to undefined", async () => {
+  itWithImportTimeout("getCostSummary maps kind=all to undefined", async () => {
     const { tauriAPI } = await import("./commands");
 
     await tauriAPI.getCostSummary({ timeframe: "7d", kind: "all" });
@@ -78,7 +73,7 @@ describe("tauri command wrappers", () => {
     });
   });
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "getCostByProvider maps kind=all to undefined",
     async () => {
       const { tauriAPI } = await import("./commands");
@@ -97,7 +92,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "listOpenWindows includes includeTitles when requested",
     async () => {
       const { tauriAPI } = await import("./commands");
@@ -112,7 +107,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout("startDragging uses the current window API", async () => {
+  itWithImportTimeout("startDragging uses the current window API", async () => {
     const { tauriAPI } = await import("./commands");
 
     await tauriAPI.startDragging();
@@ -121,7 +116,7 @@ describe("tauri command wrappers", () => {
     expect(startDraggingMock).toHaveBeenCalled();
   });
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "emitSettingsChanged forwards payload to emitTyped",
     async () => {
       const { tauriAPI } = await import("./commands");
@@ -134,7 +129,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "onSettingsChanged normalizes null payloads",
     async () => {
       const { tauriAPI } = await import("./commands");
@@ -150,7 +145,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "cacheRouterEmbeddings defaults forceRefresh to null",
     async () => {
       const { tauriAPI } = await import("./commands");
@@ -164,7 +159,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "llmAPI.complete maps optional args and nulls",
     async () => {
       const { llmAPI } = await import("./commands");
@@ -195,7 +190,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "sttAPI.testTranscribeLastAudio passes profileId mapping",
     async () => {
       const { sttAPI } = await import("./commands");
@@ -209,7 +204,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "getRecordingAssetUrl converts the file path",
     async () => {
       invokeMock.mockResolvedValueOnce("C:\\temp\\audio.wav");
@@ -227,7 +222,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "getRecordingAssetUrl returns null when no path",
     async () => {
       invokeMock.mockResolvedValueOnce(null);
@@ -242,7 +237,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "configAPI.syncPipelineConfig invokes the backend",
     async () => {
       const { configAPI } = await import("./commands");
@@ -253,7 +248,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout("getPolicyState invokes policy command", async () => {
+  itWithImportTimeout("getPolicyState invokes policy command", async () => {
     const { tauriAPI } = await import("./commands");
 
     await tauriAPI.getPolicyState();
@@ -261,7 +256,7 @@ describe("tauri command wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("policy_get_state");
   });
 
-	itWithImportTimeout("syncPolicy invokes policy sync command", async () => {
+  itWithImportTimeout("syncPolicy invokes policy sync command", async () => {
     const { tauriAPI } = await import("./commands");
 
     await tauriAPI.syncPolicy({
@@ -275,7 +270,7 @@ describe("tauri command wrappers", () => {
     });
   });
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "policyAPI.syncPolicy invokes policy sync command",
     async () => {
       const { policyAPI } = await import("./commands");
@@ -288,7 +283,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "exportPolicyDiagnostics invokes policy export command",
     async () => {
       const { policyAPI } = await import("./commands");
@@ -299,7 +294,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "logsAPI.sentryBackendSmokeTest invokes backend smoke command",
     async () => {
       const { logsAPI } = await import("./commands");
@@ -312,7 +307,7 @@ describe("tauri command wrappers", () => {
     },
   );
 
-	itWithImportTimeout("license wrappers invoke backend commands", async () => {
+  itWithImportTimeout("license wrappers invoke backend commands", async () => {
     const { tauriAPI, licenseAPI } = await import("./commands");
     const transitionHandler = vi.fn();
 

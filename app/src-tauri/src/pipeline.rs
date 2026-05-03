@@ -391,17 +391,17 @@ impl PipelineInner {
         }
     }
 
-    fn local_whisper_cache_key(&self) -> String {
-        let language_key = self
-            .config
-            .stt_language
-            .clone()
-            .unwrap_or_else(|| "<auto>".to_string());
+    fn local_whisper_cache_key_for_language(&self, language: Option<&str>) -> String {
+        let language_key = language.unwrap_or("<auto>");
         format!(
             "local-whisper::{}::{}",
             self.local_whisper_model_key_for_cache(),
             language_key
         )
+    }
+
+    fn local_whisper_cache_key(&self) -> String {
+        self.local_whisper_cache_key_for_language(self.config.stt_language.as_deref())
     }
 
     fn is_local_whisper_loaded(&self) -> bool {

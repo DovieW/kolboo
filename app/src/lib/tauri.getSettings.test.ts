@@ -1,83 +1,78 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, vi } from "vitest";
+import { itWithImportTimeout } from "./testTimeouts";
 
 type StoreLike = {
-	get<T = unknown>(key: string): Promise<T | undefined>;
-	set<T = unknown>(key: string, value: T): Promise<void>;
-	delete(key: string): Promise<void>;
-	save(): Promise<void>;
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  set<T = unknown>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<void>;
+  save(): Promise<void>;
 };
 
 class FakeStore implements StoreLike {
-	public readonly data = new Map<string, unknown>();
-	public readonly setCalls: Array<{ key: string; value: unknown }> = [];
-	public readonly deleteCalls: string[] = [];
-	public saveCalls = 0;
+  public readonly data = new Map<string, unknown>();
+  public readonly setCalls: Array<{ key: string; value: unknown }> = [];
+  public readonly deleteCalls: string[] = [];
+  public saveCalls = 0;
 
-	constructor(initial: Record<string, unknown>) {
-		for (const [k, v] of Object.entries(initial)) {
-			this.data.set(k, v);
-		}
-	}
+  constructor(initial: Record<string, unknown>) {
+    for (const [k, v] of Object.entries(initial)) {
+      this.data.set(k, v);
+    }
+  }
 
-	async get<T = unknown>(key: string): Promise<T | undefined> {
-		return this.data.get(key) as T | undefined;
-	}
+  async get<T = unknown>(key: string): Promise<T | undefined> {
+    return this.data.get(key) as T | undefined;
+  }
 
-	async set<T = unknown>(key: string, value: T): Promise<void> {
-		this.data.set(key, value);
-		this.setCalls.push({ key, value });
-	}
+  async set<T = unknown>(key: string, value: T): Promise<void> {
+    this.data.set(key, value);
+    this.setCalls.push({ key, value });
+  }
 
-	async delete(key: string): Promise<void> {
-		this.data.delete(key);
-		this.deleteCalls.push(key);
-	}
+  async delete(key: string): Promise<void> {
+    this.data.delete(key);
+    this.deleteCalls.push(key);
+  }
 
-	async save(): Promise<void> {
-		this.saveCalls += 1;
-	}
+  async save(): Promise<void> {
+    this.saveCalls += 1;
+  }
 }
 
 let currentStore: FakeStore;
 
 vi.mock("@tauri-apps/api/core", () => ({
-	convertFileSrc: (x: string) => x,
-	invoke: vi.fn(async () => {
-		throw new Error("invoke() not implemented in unit tests");
-	}),
+  convertFileSrc: (x: string) => x,
+  invoke: vi.fn(async () => {
+    throw new Error("invoke() not implemented in unit tests");
+  }),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
-	emit: vi.fn(async () => {
-		// no-op
-	}),
-	listen: vi.fn(async () => {
-		return () => {
-			// no-op
-		};
-	}),
+  emit: vi.fn(async () => {
+    // no-op
+  }),
+  listen: vi.fn(async () => {
+    return () => {
+      // no-op
+    };
+  }),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
-	getCurrentWindow: vi.fn(() => ({
-		// minimal stub
-	})),
+  getCurrentWindow: vi.fn(() => ({
+    // minimal stub
+  })),
 }));
 
 vi.mock("@tauri-apps/plugin-store", () => ({
-	Store: {
-		load: vi.fn(async () => currentStore),
-	},
+  Store: {
+    load: vi.fn(async () => currentStore),
+  },
 }));
 
-const IMPORT_HEAVY_TEST_TIMEOUT_MS = 15_000;
-const itWithImportTimeout = (
-  name: string,
-  testFn: () => Promise<void> | void,
-) => it(name, { timeout: IMPORT_HEAVY_TEST_TIMEOUT_MS }, testFn);
-
 describe("tauriAPI.getSettings() normalization", () => {
-	itWithImportTimeout(
+  itWithImportTimeout(
     "migrates legacy cleanup_prompt_sections.main -> cleanup_prompt_sections.system (read-only)",
     async () => {
       vi.resetModules();
@@ -100,7 +95,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "defaults invalid accent_color to DEFAULT_ACCENT_HEX (read-only)",
     async () => {
       vi.resetModules();
@@ -119,7 +114,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "migrates legacy profile program_path -> program_paths[]",
     async () => {
       vi.resetModules();
@@ -143,7 +138,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "uses legacy quick_ask_hotkey as fallback when quick_ask_hold_hotkey is missing",
     async () => {
       vi.resetModules();
@@ -162,7 +157,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "does NOT fall back to legacy quick_ask_hotkey when quick_ask_hold_hotkey is explicitly null",
     async () => {
       vi.resetModules();
@@ -178,7 +173,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "normalizes quick_ask_dismiss_mode (invalid -> manual)",
     async () => {
       vi.resetModules();
@@ -193,7 +188,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "normalizes quick_ask_conversation_history_count (invalid/missing -> default, clamps range)",
     async () => {
       vi.resetModules();
@@ -223,7 +218,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "normalizes malformed cleanup_prompt_sections.system (read-only)",
     async () => {
       vi.resetModules();
@@ -245,7 +240,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "migrates legacy auto_mute_audio boolean into playing_audio_handling",
     async () => {
       vi.resetModules();
@@ -268,7 +263,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "uses legacy noise_gate_strength when noise_gate_threshold_dbfs is missing",
     async () => {
       vi.resetModules();
@@ -286,7 +281,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "uses legacy transcription_retention_days when unit+value are missing",
     async () => {
       vi.resetModules();
@@ -302,7 +297,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "normalizes profile.disabled (missing -> false, preserves true/false)",
     async () => {
       vi.resetModules();
@@ -339,7 +334,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-	itWithImportTimeout(
+  itWithImportTimeout(
     "normalizes legacy/typo enum values (overlay_monitor_target, main_window_close_behavior, output_mode)",
     async () => {
       vi.resetModules();

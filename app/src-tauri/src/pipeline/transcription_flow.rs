@@ -11,8 +11,6 @@
 //! STT execution itself is centralized in `stt_flow.rs` so retry telemetry,
 //! optional timeout behavior, cancellation priority, and log context stay in one place.
 
-#![allow(dead_code)]
-
 use crate::llm::{format_text, LlmProvider, ProgramPromptProfile};
 use crate::request_log::RequestLogStore;
 use crate::settings::{IntentRouterStrategy, ProxySettings};

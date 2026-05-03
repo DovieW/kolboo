@@ -55,7 +55,8 @@ pub(super) fn resolve_stt_provider_for_transcription(
         request.forced_model,
     );
 
-    let mut provider_id_used = effective.provider_id.clone();
+    let mut provider_id_used =
+        resolve_stt_provider_for_runtime(&inner.config, &effective.provider_id);
     let mut model_used = model_for_log(inner, provider_id_used.as_str(), effective.model.clone());
     let mut language_used = effective.language.clone();
 
@@ -63,14 +64,15 @@ pub(super) fn resolve_stt_provider_for_transcription(
 
     let provider = match get_or_create_stt_provider(
         inner,
-        &effective.provider_id,
+        &provider_id_used,
         effective.model.clone(),
         effective.language.clone(),
     ) {
         Ok(provider) => provider,
         Err(err) => {
             let global_provider = canonicalize_stt_provider_id(&inner.config.stt_provider);
-            if global_provider == effective.provider_id {
+            let global_provider = resolve_stt_provider_for_runtime(&inner.config, &global_provider);
+            if global_provider == provider_id_used {
                 inner.set_error(&format!("STT provider init failed: {}", err));
                 return Err(err);
             }
@@ -164,14 +166,14 @@ pub(super) fn stt_provider_cache_key(
     language: Option<String>,
 ) -> String {
     // NOTE: for Local Whisper, the "model" setting is not meaningful (Whisper model is
-    // selected via `whisper_model_path`). Using the global `stt_model` here can cause
-    // unnecessary cache misses and, worse, repeated expensive model loads.
+    // selected via `whisper_model_path`). It also does not use cloud live-output
+    // provider construction, so keep this key aligned with manual preload/status checks.
+    if provider_id == "local-whisper" {
+        return inner.local_whisper_cache_key_for_language(language.as_deref());
+    }
+
     let language_key = language.unwrap_or_else(|| "<auto>".to_string());
-    let model_key = if provider_id == "local-whisper" {
-        inner.local_whisper_model_key_for_cache()
-    } else {
-        model.unwrap_or_else(|| "<default>".to_string())
-    };
+    let model_key = model.unwrap_or_else(|| "<default>".to_string());
 
     format!(
         "{}::{}::{}::live={}",
@@ -300,7 +302,131 @@ pub(super) fn get_or_create_stt_provider(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_forced_overrides;
+    use super::*;
+    use crate::llm::{ProgramPreset, ProgramPromptProfile, PromptSections};
+    use crate::pipeline::config::PipelineConfig;
+    use crate::request_log::RequestLogStore;
+    use crate::settings::{IntentRouterSettings, IntentRouterStrategy};
+    use crate::stt::{AudioFormat, SttError};
+    use async_trait::async_trait;
+
+    struct FakeSttProvider;
+
+    #[async_trait]
+    impl SttProvider for FakeSttProvider {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+            _format: &AudioFormat,
+        ) -> Result<String, SttError> {
+            Ok("fake transcript".to_string())
+        }
+
+        fn name(&self) -> &'static str {
+            "fake"
+        }
+    }
+
+    fn insert_cached_fake_provider(
+        inner: &mut PipelineInner,
+        provider_id: &str,
+        model: Option<String>,
+        language: Option<String>,
+    ) {
+        let cache_key = stt_provider_cache_key(inner, provider_id, model, language);
+        inner
+            .stt_provider_cache
+            .insert(cache_key, Arc::new(FakeSttProvider));
+    }
+
+    fn profile_with_stt(
+        provider: Option<&str>,
+        model: Option<&str>,
+        language: Option<&str>,
+        timeout_seconds: Option<f64>,
+    ) -> ProgramPromptProfile {
+        ProgramPromptProfile {
+            id: "profile".to_string(),
+            name: "Profile".to_string(),
+            program_paths: vec![],
+            rewrite_llm_enabled: Some(true),
+            rewrite_include_clipboard_context: None,
+            stt_provider: provider.map(str::to_string),
+            stt_model: model.map(str::to_string),
+            stt_language: language.map(str::to_string),
+            stt_timeout_seconds: timeout_seconds,
+            llm_provider: None,
+            llm_model: None,
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+            prompts: PromptSections::default(),
+            presets: vec![],
+            default_preset_id: None,
+            default_preset_description: None,
+            default_target_rewrite_llm_enabled: true,
+            active_preset_id: None,
+            router: Some(IntentRouterSettings {
+                enabled: false,
+                strategy: IntentRouterStrategy::Embeddings,
+                embedding_provider: None,
+                embedding_model: None,
+                pick_highest_score: false,
+                similarity_threshold: None,
+                similarity_margin: None,
+                llm_provider: None,
+                llm_model: None,
+                llm_system_prompt: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            }),
+            quick_ask_provider: None,
+            quick_ask_model: None,
+            quick_ask_system_prompt: None,
+            context_grab_method: None,
+            quick_replace_include_clipboard_context: None,
+            quick_ask_include_clipboard_context: None,
+            quick_replace_enabled: None,
+            quick_replace_provider: None,
+            quick_replace_model: None,
+            quick_replace_system_prompt: None,
+            quick_ask_openai_reasoning_effort: None,
+            quick_ask_gemini_thinking_budget: None,
+            quick_ask_gemini_thinking_level: None,
+            quick_ask_anthropic_thinking_budget: None,
+            rewrite_active_window_ocr_mode: None,
+            quick_replace_active_window_ocr_mode: None,
+            quick_ask_active_window_ocr_mode: None,
+        }
+    }
+
+    fn preset_with_stt(
+        provider: Option<&str>,
+        model: Option<&str>,
+        language: Option<&str>,
+        timeout_seconds: Option<f64>,
+    ) -> ProgramPreset {
+        ProgramPreset {
+            id: "preset".to_string(),
+            name: "Preset".to_string(),
+            routing_hints: vec![],
+            prompts: PromptSections::default(),
+            rewrite_llm_enabled: true,
+            stt_provider: provider.map(str::to_string),
+            stt_model: model.map(str::to_string),
+            stt_language: language.map(str::to_string),
+            stt_timeout_seconds: timeout_seconds,
+            llm_provider: None,
+            llm_model: None,
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+        }
+    }
 
     #[test]
     fn forced_provider_is_trimmed_and_canonicalized() {
@@ -322,5 +448,168 @@ mod tests {
 
         assert_eq!(provider_id, "openai");
         assert_eq!(model, None);
+    }
+
+    #[test]
+    fn local_whisper_cache_key_matches_manual_load_key_and_ignores_live_output() {
+        let mut inner = PipelineInner::new(PipelineConfig {
+            stt_provider: "local-whisper".to_string(),
+            stt_language: Some("en".to_string()),
+            stt_live_output: false,
+            ..Default::default()
+        });
+
+        let manual_key = inner.local_whisper_cache_key();
+        let resolver_key = stt_provider_cache_key(
+            &inner,
+            "local-whisper",
+            Some("ignored-cloud-model".to_string()),
+            Some("en".to_string()),
+        );
+        assert_eq!(resolver_key, manual_key);
+
+        inner.config.stt_live_output = true;
+        let live_output_key = stt_provider_cache_key(
+            &inner,
+            "local-whisper",
+            Some("ignored-cloud-model".to_string()),
+            Some("en".to_string()),
+        );
+        assert_eq!(live_output_key, manual_key);
+    }
+
+    #[test]
+    fn preset_overrides_profile_and_global_settings() {
+        let mut inner = PipelineInner::new(PipelineConfig {
+            stt_provider: "openai".to_string(),
+            stt_model: Some("global-model".to_string()),
+            stt_language: Some("en".to_string()),
+            transcription_timeout: Duration::from_secs(30),
+            ..Default::default()
+        });
+        insert_cached_fake_provider(
+            &mut inner,
+            "groq",
+            Some("preset-model".to_string()),
+            Some("es".to_string()),
+        );
+
+        let profile = profile_with_stt(
+            Some("deepgram"),
+            Some("profile-model"),
+            Some("fr"),
+            Some(11.0),
+        );
+        let preset = preset_with_stt(Some("groq"), Some("preset-model"), Some("es"), Some(7.0));
+
+        let resolved = resolve_stt_provider_for_transcription(
+            &mut inner,
+            SttProviderResolutionRequest {
+                active_profile: Some(&profile),
+                active_preset: Some(&preset),
+                forced_provider: None,
+                forced_model: None,
+            },
+        )
+        .expect("preset provider should resolve from cache");
+
+        assert_eq!(resolved.provider_id, "groq");
+        assert_eq!(resolved.model.as_deref(), Some("preset-model"));
+        assert_eq!(resolved.language.as_deref(), Some("es"));
+        assert_eq!(resolved.timeout, Duration::from_secs(7));
+    }
+
+    #[test]
+    fn forced_provider_and_model_override_profile_and_preset_settings() {
+        let mut inner = PipelineInner::new(PipelineConfig {
+            stt_provider: "groq".to_string(),
+            stt_language: Some("en".to_string()),
+            ..Default::default()
+        });
+        insert_cached_fake_provider(
+            &mut inner,
+            "openai",
+            Some("forced-model".to_string()),
+            Some("es".to_string()),
+        );
+
+        let profile = profile_with_stt(Some("deepgram"), Some("profile-model"), Some("fr"), None);
+        let preset = preset_with_stt(Some("groq"), Some("preset-model"), Some("es"), None);
+
+        let resolved = resolve_stt_provider_for_transcription(
+            &mut inner,
+            SttProviderResolutionRequest {
+                active_profile: Some(&profile),
+                active_preset: Some(&preset),
+                forced_provider: Some(" OpenAI "),
+                forced_model: Some(" forced-model "),
+            },
+        )
+        .expect("forced provider should resolve from cache");
+
+        assert_eq!(resolved.provider_id, "openai");
+        assert_eq!(resolved.model.as_deref(), Some("forced-model"));
+        assert_eq!(resolved.language.as_deref(), Some("es"));
+    }
+
+    #[test]
+    fn profile_provider_failure_falls_back_to_global_provider() {
+        let store = RequestLogStore::new();
+        store.start_request("initial".to_string(), None);
+
+        let mut inner = PipelineInner::new(PipelineConfig {
+            stt_provider: "groq".to_string(),
+            stt_language: Some("en".to_string()),
+            request_log_store: Some(store.clone()),
+            ..Default::default()
+        });
+        insert_cached_fake_provider(&mut inner, "groq", None, Some("en".to_string()));
+
+        let profile = profile_with_stt(Some("openai"), None, Some("en"), None);
+        let resolved = resolve_stt_provider_for_transcription(
+            &mut inner,
+            SttProviderResolutionRequest {
+                active_profile: Some(&profile),
+                active_preset: None,
+                forced_provider: None,
+                forced_model: None,
+            },
+        )
+        .expect("global provider should resolve from cache");
+
+        assert_eq!(resolved.provider_id, "groq");
+        let logged_provider = store.with_current(|log| log.stt_provider.clone());
+        assert_eq!(logged_provider.as_deref(), Some("groq"));
+    }
+
+    #[test]
+    fn managed_runtime_fallback_reports_and_logs_actual_provider() {
+        let store = RequestLogStore::new();
+        store.start_request("initial".to_string(), None);
+
+        let mut inner = PipelineInner::new(PipelineConfig {
+            stt_provider: "openai".to_string(),
+            stt_language: Some("en".to_string()),
+            managed_inference_enabled: true,
+            managed_inference_fallback_stt_provider: Some("groq".to_string()),
+            request_log_store: Some(store.clone()),
+            ..Default::default()
+        });
+        insert_cached_fake_provider(&mut inner, "groq", None, Some("en".to_string()));
+
+        let resolved = resolve_stt_provider_for_transcription(
+            &mut inner,
+            SttProviderResolutionRequest {
+                active_profile: None,
+                active_preset: None,
+                forced_provider: None,
+                forced_model: None,
+            },
+        )
+        .expect("managed fallback provider should resolve from cache");
+
+        assert_eq!(resolved.provider_id, "groq");
+        let logged = store.with_current(|log| (log.stt_provider.clone(), log.managed_inference));
+        assert_eq!(logged, Some(("groq".to_string(), false)));
     }
 }
