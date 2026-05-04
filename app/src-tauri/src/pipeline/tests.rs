@@ -3,6 +3,7 @@
 //! These tests exercise the recording pipeline without requiring real hardware (CPAL audio
 //! devices) or network (STT/LLM API calls) by injecting fake/mock implementations.
 
+use super::ocr_session_state::OcrTaskHandle;
 use super::*;
 use crate::audio_capture::{
     AudioCaptureBackend, AudioCaptureDiagnostics, AudioCaptureError, AudioCaptureEvent,
@@ -405,15 +406,15 @@ fn ocr_session_survives_reset_to_idle() {
     {
         let mut inner = p.inner.lock().unwrap();
         inner.state = PipelineState::Recording;
-        inner.ocr_result = Some(crate::ocr::OcrResult {
+        inner.ocr.result = Some(crate::ocr::OcrResult {
             text: "hello".to_string(),
             provider: "test".to_string(),
             model: "test".to_string(),
         });
         inner.reset_to_idle();
         assert_eq!(inner.state, PipelineState::Idle);
-        assert_eq!(inner.ocr_session_id.as_deref(), Some("req-1"));
-        assert!(inner.ocr_result.is_some());
+        assert_eq!(inner.ocr.session_id.as_deref(), Some("req-1"));
+        assert!(inner.ocr.result.is_some());
     }
 
     assert_eq!(p.get_ocr_status(), "done");
@@ -428,7 +429,7 @@ fn end_ocr_session_clears_ocr_state() {
     p.begin_ocr_session("req-2".to_string());
     {
         let mut inner = p.inner.lock().unwrap();
-        inner.ocr_result = Some(crate::ocr::OcrResult {
+        inner.ocr.result = Some(crate::ocr::OcrResult {
             text: "hello".to_string(),
             provider: "test".to_string(),
             model: "test".to_string(),
@@ -456,7 +457,7 @@ async fn get_ocr_result_without_task_keeps_status_not_started() {
     assert!(result.is_none());
     assert_eq!(p.ocr_session_id().as_deref(), Some("req-no-task"));
     assert_eq!(p.get_ocr_status(), "not_started");
-    assert!(!p.inner.lock().unwrap().ocr_awaiting);
+    assert!(!p.inner.lock().unwrap().ocr.awaiting);
 }
 
 #[tokio::test]
@@ -478,8 +479,8 @@ async fn awaited_ocr_task_cannot_publish_after_session_superseded() {
     let abort_handle = handle.abort_handle();
     {
         let mut inner = p.inner.lock().unwrap();
-        inner.ocr_abort_handle = Some(abort_handle);
-        inner.ocr_task = Some(OcrTaskHandle::new(
+        inner.ocr.abort_handle = Some(abort_handle);
+        inner.ocr.task = Some(OcrTaskHandle::new(
             Some("req-old".to_string()),
             Some("req-old".to_string()),
             handle,
@@ -494,12 +495,12 @@ async fn awaited_ocr_task_cannot_publish_after_session_superseded() {
     });
 
     for _ in 0..16 {
-        if p.inner.lock().unwrap().ocr_awaiting {
+        if p.inner.lock().unwrap().ocr.awaiting {
             break;
         }
         tokio::task::yield_now().await;
     }
-    assert!(p.inner.lock().unwrap().ocr_awaiting);
+    assert!(p.inner.lock().unwrap().ocr.awaiting);
 
     p.begin_ocr_session("req-new".to_string());
     let _ = finish_tx.send(());
@@ -535,8 +536,8 @@ async fn force_reset_aborts_in_flight_ocr_task() {
     let abort_handle = handle.abort_handle();
     {
         let mut inner = p.inner.lock().unwrap();
-        inner.ocr_abort_handle = Some(abort_handle);
-        inner.ocr_task = Some(OcrTaskHandle::new(
+        inner.ocr.abort_handle = Some(abort_handle);
+        inner.ocr.task = Some(OcrTaskHandle::new(
             Some("req-reset".to_string()),
             Some("req-reset".to_string()),
             handle,
@@ -550,10 +551,10 @@ async fn force_reset_aborts_in_flight_ocr_task() {
         .expect("OCR task should be dropped after abort")
         .expect("drop notification should be sent");
     let inner = p.inner.lock().unwrap();
-    assert_eq!(inner.ocr_session_id, None);
-    assert!(inner.ocr_task.is_none());
-    assert!(inner.ocr_abort_handle.is_none());
-    assert!(inner.ocr_result.is_none());
+    assert_eq!(inner.ocr.session_id, None);
+    assert!(inner.ocr.task.is_none());
+    assert!(inner.ocr.abort_handle.is_none());
+    assert!(inner.ocr.result.is_none());
 }
 
 #[tokio::test]
@@ -581,8 +582,8 @@ async fn force_reset_aborts_awaited_ocr_task() {
     let abort_handle = handle.abort_handle();
     {
         let mut inner = p.inner.lock().unwrap();
-        inner.ocr_abort_handle = Some(abort_handle);
-        inner.ocr_task = Some(OcrTaskHandle::new(
+        inner.ocr.abort_handle = Some(abort_handle);
+        inner.ocr.task = Some(OcrTaskHandle::new(
             Some("req-awaiting-reset".to_string()),
             Some("req-awaiting-reset".to_string()),
             handle,
@@ -597,16 +598,16 @@ async fn force_reset_aborts_awaited_ocr_task() {
     });
 
     for _ in 0..16 {
-        if p.inner.lock().unwrap().ocr_awaiting {
+        if p.inner.lock().unwrap().ocr.awaiting {
             break;
         }
         tokio::task::yield_now().await;
     }
     {
         let inner = p.inner.lock().unwrap();
-        assert!(inner.ocr_awaiting);
-        assert!(inner.ocr_task.is_none());
-        assert!(inner.ocr_abort_handle.is_some());
+        assert!(inner.ocr.awaiting);
+        assert!(inner.ocr.task.is_none());
+        assert!(inner.ocr.abort_handle.is_some());
     }
 
     p.force_reset();
@@ -619,11 +620,11 @@ async fn force_reset_aborts_awaited_ocr_task() {
     assert!(result.is_none());
 
     let inner = p.inner.lock().unwrap();
-    assert_eq!(inner.ocr_session_id, None);
-    assert!(inner.ocr_task.is_none());
-    assert!(inner.ocr_abort_handle.is_none());
-    assert!(inner.ocr_result.is_none());
-    assert!(!inner.ocr_awaiting);
+    assert_eq!(inner.ocr.session_id, None);
+    assert!(inner.ocr.task.is_none());
+    assert!(inner.ocr.abort_handle.is_none());
+    assert!(inner.ocr.result.is_none());
+    assert!(!inner.ocr.awaiting);
 }
 
 #[test]
@@ -1066,7 +1067,7 @@ async fn rewrite_consumes_manual_ocr_result_when_available() {
     // Simulate: OCR already finished before we hit rewrite.
     {
         let mut inner = p.inner.lock().expect("pipeline lock");
-        inner.ocr_result = Some(crate::ocr::OcrResult {
+        inner.ocr.result = Some(crate::ocr::OcrResult {
             text: "some ocr text".to_string(),
             provider: "mock".to_string(),
             model: "mock-model".to_string(),

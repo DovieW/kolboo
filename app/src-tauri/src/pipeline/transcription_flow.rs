@@ -21,8 +21,8 @@ use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::llm_provider::LlmProviderParams;
-use super::program_profiles::{find_preset_by_id, router_enabled};
-use super::routing::{route_preset_id_with_embeddings, route_preset_id_with_llm};
+use super::profile_resolution::{find_preset_by_id, router_enabled};
+use super::routing::{route_preset_id_with_embeddings, route_preset_id_with_llm, RoutingDecision};
 use super::types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionResult};
 
 /// Context needed for transcription flow.
@@ -219,18 +219,9 @@ async fn run_llm_router<C: TranscriptionCallbacks>(
     let router_start = std::time::Instant::now();
     let llm_out = route_preset_id_with_llm(profile, stt_text, provider.as_ref()).await;
 
-    let routed_preset_id = if let Some((selected, router_req, router_resp)) = llm_out {
-        if let Some(store) = ctx.request_log_store.as_ref() {
-            store.with_current(|log| {
-                log.router_request_json = Some(router_req);
-                log.router_response_json = Some(router_resp);
-            });
-        }
-
+    let routed_preset_id = if let Some(decision) = llm_out {
         let router_duration_ms = router_start.elapsed().as_millis() as u64;
-        log_router_scores(ctx, profile, &selected, router_duration_ms, "llm", &[]);
-
-        selected
+        record_routing_decision(ctx, profile, "llm", router_duration_ms, decision)
     } else {
         None
     };
@@ -263,37 +254,66 @@ async fn run_embeddings_router<C: TranscriptionCallbacks>(
     )
     .await;
 
-    let routed_preset_id =
-        if let Some((selected, scores_raw, threshold, margin, router_req, router_resp)) =
-            embeddings_out
-        {
-            if let Some(store) = ctx.request_log_store.as_ref() {
-                store.with_current(|log| {
-                    log.router_request_json = Some(router_req);
-                    log.router_response_json = Some(router_resp);
-                });
-            }
-
-            let router_duration_ms = router_start.elapsed().as_millis() as u64;
-            log_embeddings_router_scores(
-                ctx,
-                profile,
-                &selected,
-                router_duration_ms,
-                &scores_raw,
-                threshold,
-                margin,
-            );
-
-            selected
-        } else {
-            None
-        };
+    let routed_preset_id = if let Some(decision) = embeddings_out {
+        let router_duration_ms = router_start.elapsed().as_millis() as u64;
+        record_routing_decision(ctx, profile, "embeddings", router_duration_ms, decision)
+    } else {
+        None
+    };
 
     // Restore the phase from routing.
     callbacks.transition_from_routing();
 
     routed_preset_id
+}
+
+/// Persist one strategy-independent routing decision into request logs and legacy score fields.
+fn record_routing_decision(
+    ctx: &TranscriptionContext<'_>,
+    profile: &ProgramPromptProfile,
+    strategy: &str,
+    router_duration_ms: u64,
+    decision: RoutingDecision,
+) -> Option<String> {
+    let RoutingDecision {
+        selected_preset_id,
+        scores,
+        threshold,
+        margin,
+        request_json,
+        response_json,
+        ..
+    } = decision;
+
+    if let Some(store) = ctx.request_log_store.as_ref() {
+        store.with_current(|log| {
+            log.router_request_json = Some(request_json);
+            log.router_response_json = Some(response_json);
+        });
+    }
+
+    if strategy == "embeddings" {
+        log_embeddings_router_scores(
+            ctx,
+            profile,
+            &selected_preset_id,
+            router_duration_ms,
+            &scores,
+            threshold.unwrap_or(0.0),
+            margin.unwrap_or(0.0),
+        );
+    } else {
+        log_router_scores(
+            ctx,
+            profile,
+            &selected_preset_id,
+            router_duration_ms,
+            strategy,
+            &[],
+        );
+    }
+
+    selected_preset_id
 }
 
 /// Log router scores for LLM-based routing.
@@ -847,8 +867,11 @@ pub(super) async fn complete_transcription_flow<C: TranscriptionCallbacks>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::{ProgramPromptProfile, PromptSections};
+    use crate::embeddings::EmbeddingsError;
+    use crate::llm::{LlmError, ProgramPromptProfile, PromptSections};
     use crate::pipeline::llm_provider::LlmProviderParams;
+    use crate::settings::IntentRouterSettings;
+    use async_trait::async_trait;
 
     struct RecordingCallbacks(std::sync::Mutex<Option<(String, Option<String>)>>);
 
@@ -869,6 +892,88 @@ mod tests {
             Err(crate::pipeline::PipelineError::Config(
                 "test: provider creation not needed".to_string(),
             ))
+        }
+    }
+
+    struct RoutingCallbacks {
+        transitions: std::sync::Mutex<Vec<&'static str>>,
+    }
+
+    impl RoutingCallbacks {
+        fn new() -> Self {
+            Self {
+                transitions: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl TranscriptionCallbacks for RoutingCallbacks {
+        fn transition_to_routing(&self) {
+            self.transitions.lock().expect("lock").push("to_routing");
+        }
+
+        fn transition_from_routing(&self) {
+            self.transitions.lock().expect("lock").push("from_routing");
+        }
+
+        fn transition_to_rewriting(&self) {}
+
+        fn get_or_create_llm_provider(
+            &self,
+            _provider_id: &str,
+            _params: LlmProviderParams,
+        ) -> Result<std::sync::Arc<dyn crate::llm::LlmProvider>, crate::pipeline::PipelineError>
+        {
+            Err(crate::pipeline::PipelineError::Config(
+                "test: provider creation not needed".to_string(),
+            ))
+        }
+    }
+
+    struct FlowEmbeddingsProvider(std::collections::HashMap<String, Vec<f32>>);
+
+    #[async_trait]
+    impl crate::embeddings::EmbeddingsProvider for FlowEmbeddingsProvider {
+        async fn embed_text(
+            &self,
+            text: &str,
+            _input_type: Option<&str>,
+        ) -> Result<(Vec<f32>, serde_json::Value, serde_json::Value), EmbeddingsError> {
+            let embedding = self.0.get(text).cloned().unwrap_or_else(|| vec![0.0, 0.0]);
+            Ok((
+                embedding.clone(),
+                serde_json::json!({ "text": text }),
+                serde_json::json!({ "embedding_len": embedding.len() }),
+            ))
+        }
+
+        fn name(&self) -> &'static str {
+            "openai"
+        }
+
+        fn model(&self) -> &str {
+            "fake-embedding-model"
+        }
+    }
+
+    struct PanicLlmProvider;
+
+    #[async_trait]
+    impl crate::llm::LlmProvider for PanicLlmProvider {
+        async fn complete(
+            &self,
+            _system_prompt: &str,
+            _user_message: &str,
+        ) -> Result<String, LlmError> {
+            panic!("cancelled rewrite should not call provider");
+        }
+
+        fn name(&self) -> &'static str {
+            "panic"
+        }
+
+        fn model(&self) -> &str {
+            "panic-model"
         }
     }
 
@@ -919,6 +1024,63 @@ mod tests {
         }
     }
 
+    fn embeddings_router_profile() -> ProgramPromptProfile {
+        let mut profile = minimal_profile_with_llm_overrides(None, None);
+        profile.presets = vec![
+            crate::llm::ProgramPreset {
+                id: "email".to_string(),
+                name: "Email".to_string(),
+                routing_hints: vec!["email hint".to_string()],
+                prompts: PromptSections::default(),
+                rewrite_llm_enabled: true,
+                stt_provider: None,
+                stt_model: None,
+                stt_language: None,
+                stt_timeout_seconds: None,
+                llm_provider: None,
+                llm_model: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+            crate::llm::ProgramPreset {
+                id: "calendar".to_string(),
+                name: "Calendar".to_string(),
+                routing_hints: vec!["calendar hint".to_string()],
+                prompts: PromptSections::default(),
+                rewrite_llm_enabled: true,
+                stt_provider: None,
+                stt_model: None,
+                stt_language: None,
+                stt_timeout_seconds: None,
+                llm_provider: None,
+                llm_model: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+        ];
+        profile.router = Some(IntentRouterSettings {
+            enabled: true,
+            strategy: IntentRouterStrategy::Embeddings,
+            embedding_provider: Some("openai".to_string()),
+            embedding_model: Some("fake-embedding-model".to_string()),
+            pick_highest_score: false,
+            similarity_threshold: Some(0.75),
+            similarity_margin: Some(0.10),
+            llm_provider: None,
+            llm_model: None,
+            llm_system_prompt: None,
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+        });
+        profile
+    }
+
     #[test]
     fn forced_llm_provider_model_take_precedence_over_profile() {
         let profile = minimal_profile_with_llm_overrides(Some("ollama"), Some("some-model"));
@@ -954,5 +1116,104 @@ mod tests {
             recorded,
             Some(("groq".to_string(), Some("llama-3.1-8b-instant".to_string())))
         );
+    }
+
+    #[tokio::test]
+    async fn route_preset_consumes_routing_decision_and_records_outcome() {
+        let profile = embeddings_router_profile();
+        let callbacks = RoutingCallbacks::new();
+        let request_log_store = RequestLogStore::new();
+        request_log_store.start_request("mock-stt".to_string(), None);
+        let embedding_cache: std::sync::Arc<
+            std::sync::Mutex<std::collections::HashMap<String, Vec<f32>>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let provider = std::sync::Arc::new(FlowEmbeddingsProvider(
+            [
+                ("send email".to_string(), vec![1.0, 0.0]),
+                ("email hint".to_string(), vec![0.95, 0.05]),
+                ("calendar hint".to_string(), vec![0.0, 1.0]),
+            ]
+            .into_iter()
+            .collect(),
+        ));
+
+        let ctx = TranscriptionContext {
+            active_profile: Some(profile),
+            active_window_ocr_text: None,
+            llm_enabled_global: true,
+            default_rewrite_include_clipboard_context: false,
+            session_lock: None,
+            proxy_settings: crate::settings::ProxySettings::default(),
+            llm_api_keys: std::collections::HashMap::new(),
+            request_log_store: Some(request_log_store.clone()),
+            embedding_cache: &embedding_cache,
+            persist_app: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            injected_embeddings_provider: Some(provider),
+            force_llm_rewrite: false,
+            forced_llm_provider: None,
+            forced_llm_model: None,
+        };
+
+        let result = route_preset(&ctx, &callbacks, "send email").await;
+
+        assert_eq!(result.routed_preset_id.as_deref(), Some("email"));
+        assert_eq!(
+            callbacks.transitions.lock().expect("lock").as_slice(),
+            ["to_routing", "from_routing"]
+        );
+        let response = request_log_store
+            .with_current(|log| log.router_response_json.clone())
+            .flatten()
+            .expect("router response should be recorded");
+        assert_eq!(response["outcome"], "selected_preset");
+        assert_eq!(response["type"], "embeddings");
+    }
+
+    #[tokio::test]
+    async fn cancellation_outranks_provider_work_in_rewrite_step() {
+        let profile = minimal_profile_with_llm_overrides(None, None);
+        let callbacks = RecordingCallbacks(std::sync::Mutex::new(None));
+        let embedding_cache: std::sync::Arc<
+            std::sync::Mutex<std::collections::HashMap<String, Vec<f32>>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        cancel_token.cancel();
+        let ctx = TranscriptionContext {
+            active_profile: Some(profile),
+            active_window_ocr_text: None,
+            llm_enabled_global: true,
+            default_rewrite_include_clipboard_context: false,
+            session_lock: None,
+            proxy_settings: crate::settings::ProxySettings::default(),
+            llm_api_keys: std::collections::HashMap::new(),
+            request_log_store: None,
+            embedding_cache: &embedding_cache,
+            persist_app: None,
+            cancel_token,
+            injected_embeddings_provider: None,
+            force_llm_rewrite: true,
+            forced_llm_provider: None,
+            forced_llm_model: None,
+        };
+
+        let resolution = LlmResolution {
+            provider: Some(std::sync::Arc::new(PanicLlmProvider)),
+            prompts: PromptSections::default(),
+            timeout: Duration::from_secs(30),
+            not_attempted_reason: None,
+        };
+
+        let (final_text, duration, outcome, provider, model) =
+            run_llm_rewrite(&ctx, &callbacks, "raw transcript", resolution).await;
+
+        assert_eq!(final_text, "raw transcript");
+        assert!(duration.is_some());
+        assert!(matches!(
+            outcome,
+            LlmOutcome::NotAttempted(LlmNotAttemptedReason::Unknown)
+        ));
+        assert_eq!(provider.as_deref(), Some("panic"));
+        assert_eq!(model.as_deref(), Some("panic-model"));
     }
 }

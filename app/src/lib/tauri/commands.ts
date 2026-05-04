@@ -6,6 +6,7 @@ import { emitTyped, listenTyped } from "./events";
 import { tauriLicenseAPI } from "./license";
 import { managedInferenceAPI } from "./managedInference";
 import { tauriPolicyAPI } from "./policy";
+import { applySettingsRuntimeSyncPolicy } from "./settingsSync";
 import type {
 	AudioCaptureDiagnostics,
 	AudioSettingsTestWavs,
@@ -208,13 +209,22 @@ export const tauriAPI = {
 
 	async setApiKey(storeKey: string, apiKey: string): Promise<void> {
 		await invoke("secrets_set_api_key", { storeKey, apiKey });
-		// API keys affect available provider lists and runtime behavior; notify other windows.
-		await emitTyped("settings-changed", { api_keys_changed: true });
+		await applySettingsRuntimeSyncPolicy({
+			apiKeysChanged: true,
+			backendEventEmitted: false,
+			invoke,
+			emitSettingsChanged: (payload) => emitTyped("settings-changed", payload),
+		});
 	},
 
 	async clearApiKey(storeKey: string): Promise<void> {
 		await invoke("secrets_clear_api_key", { storeKey });
-		await emitTyped("settings-changed", { api_keys_changed: true });
+		await applySettingsRuntimeSyncPolicy({
+			apiKeysChanged: true,
+			backendEventEmitted: false,
+			invoke,
+			emitSettingsChanged: (payload) => emitTyped("settings-changed", payload),
+		});
 	},
 
 	async registerShortcuts(): Promise<void> {
@@ -668,10 +678,7 @@ export const dataAPI = {
 	deleteAllTranscriptsKeepRecordings: () =>
 		invoke<number>("delete_all_transcripts_keep_recordings"),
 
-	deleteAllApiKeys: async () => {
-		await invoke<void>("delete_all_api_keys");
-		await emitTyped("settings-changed", { api_keys_changed: true });
-	},
+	deleteAllApiKeys: () => invoke<void>("delete_all_api_keys"),
 
 	deleteAllSettings: () => invoke<void>("delete_all_settings"),
 

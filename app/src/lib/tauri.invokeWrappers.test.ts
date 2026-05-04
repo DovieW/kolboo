@@ -90,13 +90,17 @@ describe("tauri invoke wrappers", () => {
 		});
 	});
 
-	it("tauriAPI.updateOverlayMode invokes set_overlay_mode and emits settings-changed", async () => {
+	it("tauriAPI.updateOverlayMode persists mode and invokes set_overlay_mode", async () => {
 		await tauriAPI.updateOverlayMode("always");
 
-		expect(invokeMock).toHaveBeenCalledWith("set_overlay_mode", {
+		expect(invokeMock).toHaveBeenNthCalledWith(1, "settings_apply_patch", {
+			patch: { overlay_mode: "always" },
+			deleteKeys: [],
+		});
+		expect(invokeMock).toHaveBeenNthCalledWith(2, "set_overlay_mode", {
 			mode: "always",
 		});
-		expect(emitMock).toHaveBeenCalledWith("settings-changed", {});
+		expect(emitMock).not.toHaveBeenCalled();
 	});
 
 	it("configAPI.getAvailableProviders uses get_available_providers", async () => {

@@ -6,32 +6,12 @@
 //! - preserving OCR session state across internal pipeline transitions
 //! - translating OCR task state into overlay/request-log status
 
-use super::{OcrConfig, SharedPipeline};
+use super::{ocr_session_state::OcrTaskHandle, OcrConfig, SharedPipeline};
 use crate::event_payloads::OverlayOcrContextUnavailablePayload;
 use crate::events;
 use crate::request_log::{RequestLog, RequestLogStore};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-
-pub(super) struct OcrTaskHandle {
-    pub(super) session_id: Option<String>,
-    pub(super) request_log_id: Option<String>,
-    pub(super) handle: tokio::task::JoinHandle<Result<crate::ocr::OcrResult, String>>,
-}
-
-impl OcrTaskHandle {
-    pub(super) fn new(
-        session_id: Option<String>,
-        request_log_id: Option<String>,
-        handle: tokio::task::JoinHandle<Result<crate::ocr::OcrResult, String>>,
-    ) -> Self {
-        Self {
-            session_id,
-            request_log_id,
-            handle,
-        }
-    }
-}
 
 #[derive(Clone, Default)]
 struct OcrRequestLog {
@@ -72,10 +52,6 @@ impl OcrRequestLog {
     fn request_id(&self) -> Option<String> {
         self.request_id.clone()
     }
-}
-
-fn session_matches(current: Option<&str>, expected: Option<&str>) -> bool {
-    current == expected
 }
 
 fn truncate_overlay_reason(reason: &str) -> String {
@@ -236,18 +212,13 @@ impl SharedPipeline {
         }
 
         if let Ok(mut inner) = self.inner.lock() {
-            if inner.ocr_session_id.is_none() {
-                inner.ocr_session_id = request_id_for_session.clone();
-            }
+            inner.ocr.ensure_session(request_id_for_session.clone());
 
-            if inner.ocr_task.is_some() || inner.ocr_result.is_some() || inner.ocr_awaiting {
+            if !inner.ocr.can_start_task() {
                 return;
             }
 
-            inner.ocr_failed_reason = None;
-            inner.ocr_cancelled = false;
-
-            let task_session_id = inner.ocr_session_id.clone();
+            let task_session_id = inner.ocr.prepare_task_start();
             let request_log = OcrRequestLog {
                 store: request_log.store.clone(),
                 request_id: task_session_id
@@ -552,8 +523,7 @@ impl SharedPipeline {
                 })
             });
 
-            inner.ocr_abort_handle = Some(handle.abort_handle());
-            inner.ocr_task = Some(OcrTaskHandle::new(
+            inner.ocr.install_task(OcrTaskHandle::new(
                 task_session_id,
                 task_request_log_id,
                 handle,
@@ -562,13 +532,11 @@ impl SharedPipeline {
     }
 
     pub(crate) fn cancel_ocr_task(&self) {
-        let request_log_id = self.inner.lock().ok().and_then(|inner| {
-            inner
-                .ocr_task
-                .as_ref()
-                .and_then(|task| task.request_log_id.clone())
-                .or_else(|| inner.ocr_session_id.clone())
-        });
+        let request_log_id = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.ocr.request_log_id_for_cancel());
 
         if let Ok(mut inner) = self.inner.lock() {
             inner.cancel_ocr_task(true);
@@ -591,22 +559,13 @@ impl SharedPipeline {
                 Err(_) => return,
             };
 
-            let Some(task) = inner.ocr_task.as_ref() else {
-                return;
-            };
-
-            if !task.handle.is_finished() {
-                return;
-            }
-
-            log::debug!("finalize_ocr_task_if_finished: task finished, taking handle");
-            // Task is finished: take ownership so we can await and store the outcome.
-            inner.ocr_task.take()
+            inner.ocr.take_finished_task()
         };
 
         let Some(task) = task else {
             return;
         };
+        log::debug!("finalize_ocr_task_if_finished: task finished, taking handle");
         let task_session_id = task.session_id.clone();
         let request_log_id = task.request_log_id.clone();
         let request_log = self
@@ -620,19 +579,17 @@ impl SharedPipeline {
         match task.handle.await {
             Ok(Ok(result)) => {
                 if let Ok(mut inner) = self.inner.lock() {
-                    if !session_matches(inner.ocr_session_id.as_deref(), task_session_id.as_deref())
+                    if !inner
+                        .ocr
+                        .complete_success(task_session_id.as_deref(), result)
                     {
                         log::debug!(
                             "finalize_ocr_task_if_finished: ignoring stale OCR result for session {:?}; current={:?}",
                             task_session_id,
-                            inner.ocr_session_id
+                            inner.ocr.session_id_owned()
                         );
                         return;
                     }
-                    inner.ocr_result = Some(result);
-                    inner.ocr_failed_reason = None;
-                    inner.ocr_cancelled = false;
-                    inner.ocr_abort_handle = None;
                 }
 
                 request_log.with_request(|log| {
@@ -643,19 +600,17 @@ impl SharedPipeline {
             Ok(Err(err)) => {
                 let reason = err.clone();
                 if let Ok(mut inner) = self.inner.lock() {
-                    if !session_matches(inner.ocr_session_id.as_deref(), task_session_id.as_deref())
+                    if !inner
+                        .ocr
+                        .complete_failure(task_session_id.as_deref(), reason.clone())
                     {
                         log::debug!(
                             "finalize_ocr_task_if_finished: ignoring stale OCR failure for session {:?}; current={:?}",
                             task_session_id,
-                            inner.ocr_session_id
+                            inner.ocr.session_id_owned()
                         );
                         return;
                     }
-                    inner.ocr_failed_reason = Some(reason.clone());
-                    inner.ocr_result = None;
-                    inner.ocr_cancelled = false;
-                    inner.ocr_abort_handle = None;
                 }
 
                 if let Ok(app_guard) = self.app_handle.lock() {
@@ -676,19 +631,17 @@ impl SharedPipeline {
             Err(join_err) => {
                 // Aborted/cancelled tasks surface as a JoinError.
                 if let Ok(mut inner) = self.inner.lock() {
-                    if !session_matches(inner.ocr_session_id.as_deref(), task_session_id.as_deref())
+                    if !inner
+                        .ocr
+                        .complete_join_error(task_session_id.as_deref(), &join_err)
                     {
                         log::debug!(
                             "finalize_ocr_task_if_finished: ignoring stale OCR join error for session {:?}; current={:?}",
                             task_session_id,
-                            inner.ocr_session_id
+                            inner.ocr.session_id_owned()
                         );
                         return;
                     }
-                    inner.ocr_result = None;
-                    inner.ocr_failed_reason = Some(join_err.to_string());
-                    inner.ocr_cancelled = join_err.is_cancelled();
-                    inner.ocr_abort_handle = None;
                 }
 
                 if let Ok(app_guard) = self.app_handle.lock() {
@@ -720,23 +673,7 @@ impl SharedPipeline {
             Err(_) => return "failed".to_string(),
         };
 
-        if inner.ocr_cancelled {
-            return "cancelled".to_string();
-        }
-
-        if inner.ocr_result.is_some() {
-            return "done".to_string();
-        }
-
-        if inner.ocr_task.is_some() || inner.ocr_awaiting {
-            return "running".to_string();
-        }
-
-        if inner.ocr_failed_reason.is_some() {
-            return "failed".to_string();
-        }
-
-        "not_started".to_string()
+        inner.ocr.status().to_string()
     }
 
     pub(crate) async fn get_ocr_result_with_timeout(
@@ -749,15 +686,13 @@ impl SharedPipeline {
         // the result.
         let mut task = {
             let mut inner = self.inner.lock().ok()?;
-            if let Some(result) = inner.ocr_result.as_ref() {
-                return Some(result.clone());
+            if let Some(result) = inner.ocr.cached_result() {
+                return Some(result);
             }
-            let Some(task) = inner.ocr_task.take() else {
-                inner.ocr_awaiting = false;
+            let Some(task) = inner.ocr.take_task_for_await() else {
+                inner.ocr.clear_awaiting_without_task();
                 return None;
             };
-            // Mark that we're awaiting the OCR result so get_ocr_status() still returns "running".
-            inner.ocr_awaiting = true;
             task
         };
         let task_session_id = task.session_id.clone();
@@ -776,19 +711,19 @@ impl SharedPipeline {
                 let mut restore_task = Some(task);
                 // Put the handle back so future callers (or overlay polling) can still consume it.
                 if let Ok(mut inner) = self.inner.lock() {
-                    if session_matches(inner.ocr_session_id.as_deref(), task_session_id.as_deref()) {
-                        // Only restore if we didn't end up with a result while waiting and no new
-                        // task was installed for the same session.
-                        if inner.ocr_result.is_none() && inner.ocr_task.is_none() {
-                            inner.ocr_task = restore_task.take();
-                        }
-                        inner.ocr_awaiting = false;
-                    } else {
+                    let task_to_restore = restore_task
+                        .take()
+                        .expect("restore task should still be available");
+                    if let Err(stale_task) = inner
+                        .ocr
+                        .restore_task_after_timeout(task_session_id.as_deref(), task_to_restore)
+                    {
                         log::debug!(
                             "get_ocr_result_with_timeout: dropping stale OCR task for session {:?}; current={:?}",
                             task_session_id,
-                            inner.ocr_session_id
+                            inner.ocr.session_id_owned()
                         );
+                        restore_task = Some(stale_task);
                     }
                 }
 
@@ -814,20 +749,17 @@ impl SharedPipeline {
         match res {
             Ok(Ok(result)) => {
                 if let Ok(mut inner) = self.inner.lock() {
-                    if !session_matches(inner.ocr_session_id.as_deref(), task_session_id.as_deref())
+                    if !inner
+                        .ocr
+                        .complete_success(task_session_id.as_deref(), result.clone())
                     {
                         log::debug!(
                             "get_ocr_result_with_timeout: ignoring stale OCR result for session {:?}; current={:?}",
                             task_session_id,
-                            inner.ocr_session_id
+                            inner.ocr.session_id_owned()
                         );
                         return None;
                     }
-                    inner.ocr_result = Some(result.clone());
-                    inner.ocr_failed_reason = None;
-                    inner.ocr_cancelled = false;
-                    inner.ocr_awaiting = false;
-                    inner.ocr_abort_handle = None;
                 }
 
                 request_log.with_request(|log| {
@@ -838,19 +770,17 @@ impl SharedPipeline {
             }
             Ok(Err(err)) => {
                 if let Ok(mut inner) = self.inner.lock() {
-                    if !session_matches(inner.ocr_session_id.as_deref(), task_session_id.as_deref())
+                    if !inner
+                        .ocr
+                        .complete_failure(task_session_id.as_deref(), err.clone())
                     {
                         log::debug!(
                             "get_ocr_result_with_timeout: ignoring stale OCR failure for session {:?}; current={:?}",
                             task_session_id,
-                            inner.ocr_session_id
+                            inner.ocr.session_id_owned()
                         );
                         return None;
                     }
-                    inner.ocr_failed_reason = Some(err.clone());
-                    inner.ocr_cancelled = false;
-                    inner.ocr_awaiting = false;
-                    inner.ocr_abort_handle = None;
                 }
 
                 if let Ok(app_guard) = self.app_handle.lock() {
@@ -871,19 +801,17 @@ impl SharedPipeline {
             }
             Err(err) => {
                 if let Ok(mut inner) = self.inner.lock() {
-                    if !session_matches(inner.ocr_session_id.as_deref(), task_session_id.as_deref())
+                    if !inner
+                        .ocr
+                        .complete_join_error(task_session_id.as_deref(), &err)
                     {
                         log::debug!(
                             "get_ocr_result_with_timeout: ignoring stale OCR join error for session {:?}; current={:?}",
                             task_session_id,
-                            inner.ocr_session_id
+                            inner.ocr.session_id_owned()
                         );
                         return None;
                     }
-                    inner.ocr_failed_reason = Some(err.to_string());
-                    inner.ocr_cancelled = err.is_cancelled();
-                    inner.ocr_awaiting = false;
-                    inner.ocr_abort_handle = None;
                 }
 
                 if let Ok(app_guard) = self.app_handle.lock() {
@@ -918,7 +846,7 @@ impl SharedPipeline {
         self.inner
             .lock()
             .ok()
-            .and_then(|inner| inner.ocr_failed_reason.clone())
+            .and_then(|inner| inner.ocr.failed_reason())
     }
 
     /// Begin (or switch) the OCR session associated with the current user request.
@@ -933,7 +861,7 @@ impl SharedPipeline {
         };
 
         // If we're already on this session id, do nothing.
-        if inner.ocr_session_id.as_deref() == Some(session_id.as_str()) {
+        if inner.ocr.session_id() == Some(session_id.as_str()) {
             log::debug!(
                 "begin_ocr_session: already on session {}, skipping",
                 session_id
@@ -941,18 +869,14 @@ impl SharedPipeline {
             return;
         }
 
-        // Supersede any previous session.
-        if inner.ocr_task.is_some()
-            || inner.ocr_abort_handle.is_some()
-            || inner.ocr_result.is_some()
-            || inner.ocr_awaiting
-        {
+        let current_session_id = inner.ocr.session_id_owned();
+        let previous_status = inner.ocr.status();
+        if previous_status != "not_started" {
             log::debug!(
                 "begin_ocr_session: superseding previous session {:?} with {}",
-                inner.ocr_session_id,
+                current_session_id,
                 session_id
             );
-            inner.cancel_ocr_task(true);
         } else {
             log::debug!(
                 "begin_ocr_session: starting new session {} (no previous)",
@@ -960,12 +884,7 @@ impl SharedPipeline {
             );
         }
 
-        inner.ocr_session_id = Some(session_id);
-        inner.ocr_cancelled = false;
-        inner.ocr_failed_reason = None;
-        inner.ocr_result = None;
-        inner.ocr_task = None;
-        inner.ocr_awaiting = false;
+        inner.ocr.begin_session(session_id);
     }
 
     /// End the OCR session if it matches the provided session id.
@@ -978,11 +897,11 @@ impl SharedPipeline {
             Err(_) => return,
         };
 
-        if inner.ocr_session_id.as_deref() != Some(session_id) {
+        if !inner.ocr.end_session_if_matches(session_id) {
             log::debug!(
                 "end_ocr_session_if_matches: session_id={} does not match current {:?}",
                 session_id,
-                inner.ocr_session_id
+                inner.ocr.session_id_owned()
             );
             return;
         }
@@ -991,8 +910,6 @@ impl SharedPipeline {
             "end_ocr_session_if_matches: session_id={} matches, clearing OCR",
             session_id
         );
-        inner.cancel_ocr_task(false);
-        inner.ocr_session_id = None;
     }
 
     /// Read the current OCR session id (if any).
@@ -1000,13 +917,34 @@ impl SharedPipeline {
         self.inner
             .lock()
             .ok()
-            .and_then(|g| g.ocr_session_id.clone())
+            .and_then(|g| g.ocr.session_id_owned())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::truncate_overlay_reason;
+    use crate::pipeline::{PipelineConfig, SharedPipeline};
+
+    #[test]
+    fn begin_and_end_session_only_clear_matching_request_owner() {
+        let pipeline = SharedPipeline::new(PipelineConfig::default());
+
+        pipeline.begin_ocr_session("req-owned".to_string());
+
+        assert_eq!(pipeline.ocr_session_id().as_deref(), Some("req-owned"));
+        assert_eq!(pipeline.get_ocr_status(), "not_started");
+
+        pipeline.end_ocr_session_if_matches("different-req");
+
+        assert_eq!(pipeline.ocr_session_id().as_deref(), Some("req-owned"));
+        assert_eq!(pipeline.get_ocr_status(), "not_started");
+
+        pipeline.end_ocr_session_if_matches("req-owned");
+
+        assert_eq!(pipeline.ocr_session_id(), None);
+        assert_eq!(pipeline.get_ocr_status(), "not_started");
+    }
 
     #[test]
     fn truncate_overlay_reason_trims_empty_reason() {

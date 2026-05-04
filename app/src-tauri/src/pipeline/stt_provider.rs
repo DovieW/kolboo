@@ -38,9 +38,9 @@ pub(crate) fn build_stt_client(proxy_settings: &ProxySettings) -> Result<Client,
 
 /// Create an STT provider based on the provider ID and parameters.
 ///
-/// Note: This does NOT handle local-whisper or whisper-server, which have special
-/// configuration requirements (model paths, base URLs). Those are handled separately
-/// in `PipelineInner::get_or_create_stt_provider`.
+/// Note: This does NOT handle local-whisper or whisper-server. Local-provider
+/// lifecycle/readiness decisions live in `pipeline::local_provider_lifecycle`,
+/// and provider-specific construction remains in STT provider resolution.
 pub(crate) fn create_cloud_stt_provider(
     client: Client,
     params: SttProviderParams,

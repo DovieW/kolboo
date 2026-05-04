@@ -43,7 +43,6 @@ import {
 } from "../../lib/queries";
 import {
 	backupAPI,
-	configAPI,
 	dataAPI,
 	logsAPI,
 	type RewriteProgramPromptProfile,
@@ -1790,7 +1789,6 @@ export function DataSettings({
 										confirmLabel: "Delete API keys",
 										action: async () => {
 											await dataAPI.deleteAllApiKeys();
-											await configAPI.syncPipelineConfig();
 										},
 									});
 								}}
@@ -1811,7 +1809,6 @@ export function DataSettings({
 										confirmLabel: "Reset settings",
 										action: async () => {
 											await dataAPI.deleteAllSettings();
-											await configAPI.syncPipelineConfig();
 											await tauriAPI.unregisterShortcuts();
 											await tauriAPI.registerShortcuts();
 										},
@@ -1841,7 +1838,6 @@ export function DataSettings({
 										action: async () => {
 											await dataAPI.deleteAllData();
 											await logsAPI.clearRequestLogs();
-											await configAPI.syncPipelineConfig();
 											await tauriAPI.unregisterShortcuts();
 											await tauriAPI.registerShortcuts();
 										},

@@ -13,8 +13,9 @@ use crate::llm::{ProgramPreset, ProgramPromptProfile};
 use crate::stt::SttProvider;
 
 use super::{
-    canonicalize_stt_provider_id, managed_gateway_ready, resolve_stt_provider_for_runtime,
-    stt_provider, PipelineError, PipelineInner,
+    canonicalize_stt_provider_id, local_provider_lifecycle as local_provider,
+    managed_gateway_ready, resolve_stt_provider_for_runtime, stt_provider, PipelineError,
+    PipelineInner,
 };
 
 /// Request to resolve the STT provider for a transcription attempt.
@@ -168,7 +169,7 @@ pub(super) fn stt_provider_cache_key(
     // NOTE: for Local Whisper, the "model" setting is not meaningful (Whisper model is
     // selected via `whisper_model_path`). It also does not use cloud live-output
     // provider construction, so keep this key aligned with manual preload/status checks.
-    if provider_id == "local-whisper" {
+    if provider_id == local_provider::LOCAL_WHISPER_PROVIDER_ID {
         return inner.local_whisper_cache_key_for_language(language.as_deref());
     }
 
@@ -190,9 +191,8 @@ pub(super) fn get_or_create_stt_provider(
     let provider_id = resolve_stt_provider_for_runtime(&inner.config, provider_id);
     let managed_ready =
         inner.config.managed_inference_enabled && managed_gateway_ready(&inner.config);
-    // Local providers never use managed transport.
     let managed_transport_active =
-        managed_ready && provider_id != "local-whisper" && provider_id != "whisper-server";
+        managed_ready && !local_provider::bypasses_managed_transport(provider_id.as_str());
 
     if managed_transport_active {
         if let Some(store) = &inner.config.request_log_store {
@@ -211,14 +211,24 @@ pub(super) fn get_or_create_stt_provider(
 
     // Manual local-whisper mode: require explicit preload to avoid surprise UI stalls
     // during stop/transcribe.
-    if provider_id == "local-whisper" && inner.config.local_whisper_load_mode == "manual" {
-        return Err(PipelineError::Config(
-            "Local Whisper is set to Manual load. Click 'Load model' in Settings (or switch load mode to 'On transcribe').".to_string(),
-        ));
+    if let Some(message) = local_provider::manual_unloaded_error(
+        provider_id.as_str(),
+        &inner.config.local_whisper_load_mode,
+        false,
+    ) {
+        return Err(PipelineError::Config(message.to_string()));
     }
 
     #[cfg(feature = "local-whisper")]
-    if provider_id == "local-whisper" {
+    if provider_id == local_provider::LOCAL_WHISPER_PROVIDER_ID {
+        if let Some(message) = local_provider::local_whisper_model_unavailable_error(
+            provider_id.as_str(),
+            true,
+            inner.config.whisper_model_path.is_some(),
+        ) {
+            return Err(PipelineError::Config(message.to_string()));
+        }
+
         if let Some(model_path) = &inner.config.whisper_model_path {
             let provider =
                 crate::stt::LocalWhisperProvider::with_config(crate::stt::LocalWhisperConfig {
@@ -238,7 +248,7 @@ pub(super) fn get_or_create_stt_provider(
         ));
     }
 
-    if provider_id == "whisper-server" {
+    if provider_id == local_provider::WHISPER_SERVER_PROVIDER_ID {
         let base_url = inner
             .config
             .whisper_server_base_url

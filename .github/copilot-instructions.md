@@ -35,6 +35,7 @@
   - UI state is mostly TanStack Query hooks in `app/src/lib/queries.ts`.
   - When changing any setting that affects runtime behavior, persist to the Tauri store **and** call `configAPI.syncPipelineConfig()` so the Rust `PipelineConfig` updates immediately.
   - After changing settings that overlays depend on (accent, widget position, overlay mode, etc.), emit `settings-changed` so secondary windows refresh cached settings (see `tauriAPI.update*` helpers).
+  - Secondary windows should respond to `settings-changed` by reloading/invalidation only; do **not** call `sync_pipeline_config` from overlay listeners because the owning settings mutation path already applies the Runtime Sync Policy.
 
 - Settings conventions (very important):
 
@@ -74,6 +75,17 @@
   - API keys are written through `tauriAPI.setApiKey(...)` to OS secure storage, with legacy `settings.json` fallback only when reading/migrating old installs. Never log secrets; redact request logs where needed.
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+For the active Spec Kit architecture-deepening initiative, read
+`specs/017-architecture-deepening-plan/plan.md` for technologies, project
+structure, validation commands, sequencing, and quality gates.
+
+Implemented slice conventions from this initiative:
+
+- OCR session ownership is centralized in `app/src-tauri/src/pipeline/ocr_session_state.rs`.
+- Settings runtime side effects are classified by `app/src/lib/tauri/settingsSync.ts`.
+- Overlay settings-change refresh behavior lives in `app/src/lib/overlay/overlaySettings.ts` and intentionally does not perform runtime pipeline sync.
+- Routing strategy outputs flow through the strategy-independent `RoutingDecision` type in `app/src-tauri/src/pipeline/routing.rs`.
+- Profile behavior is split between `app/src-tauri/src/pipeline/profile_matcher.rs` and `app/src-tauri/src/pipeline/profile_resolution.rs`.
+- Local provider cache/readiness/bypass decisions live in `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`.
+- Do not add provider-family seams unless `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` records a two-adapter proof and deletion-test pass.
 <!-- SPECKIT END -->

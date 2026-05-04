@@ -21,6 +21,28 @@ Ideas:
 - For TypeScript, generate a `defaults.generated.ts` from the Rust constants (similar to how we generate types from schemas), or define them once in `types.ts` and import everywhere.
 - UI components should reference the normalize function's output rather than inline `?? "..."` fallbacks.
 
+## Broaden Settings View adoption for inherited/preset callers
+
+**Status:** Partially addressed by architecture-deepening work (2026-05-04)
+
+`app/src/lib/tauri/settingsViews.ts` is now used in production for flat persisted settings via `settingValueView(...)`, so the seam is no longer test-only.
+
+Remaining gap:
+
+- `inheritedSettingView(...)`
+- `presetSettingView(...)`
+
+still appear to be used mainly by tests rather than by production callers that resolve effective profile/preset settings.
+
+This is **not** a blocker for the recent review fix, because the main issue was that the Settings View seam had no production leverage at all. That part is now resolved.
+
+Future deepening could route effective profile/preset setting reads through these helpers so the UI and settings layer share one source-aware inheritance path for:
+
+- global → profile fallback
+- preset → profile → global fallback
+- explicit-null/inherit semantics
+- future user-facing "where did this value come from?" explanations
+
 ## Reduce maintenance cost of schema registry
 
 `app/src-tauri/xtask/src/schema_registry.rs` is currently a hand-maintained list of all JSON Schemas we export.
@@ -187,3 +209,37 @@ Ideas:
 **Suggested fix:** Move these into `app/src-tauri/src/stt/streaming.rs` (which already hosts shared WS and chunking helpers) and have all providers import from there.
 
 **Related:** The "Centralize WebSocket connectivity" refactor item above already added `streaming.rs` — this extends it with audio conversion helpers.
+
+## Revisit provider-family seams only with a real two-adapter proof
+
+**Status:** Deferred by Spec Kit architecture-deepening work (2026-05-03)
+
+The provider-family pre-flight reviewed four possible seams and intentionally did **not** add new production abstractions where they would be pass-through or lossy:
+
+- Managed-mode adaptation already has a load-bearing seam in `pipeline/config.rs::resolve_provider_mode(...)`.
+- STT error classification already centralizes retry policy in `stt/retry.rs`, while adapters still need provider-specific response parsing.
+- Request metadata/redaction already centralizes sanitization and stripping in `request_log.rs`.
+- Cost reporting shares aggregation in `stats.rs` / `commands/stats.rs`, while pricing tables and formulas remain provider-specific.
+
+Reopen a provider-family seam only when at least two concrete adapters can share behavior without erasing provider-specific semantics, and when deleting the seam would clearly reintroduce duplicated caller complexity.
+
+Reference: `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md`.
+
+## Deepen Local Provider Lifecycle ownership beyond helper rules
+
+The Spec Kit architecture-deepening slice extracted deterministic Local Whisper rules into `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`, but `pipeline.rs` still owns the mutable cache operations and UI-facing load/unload commands because those operations need `PipelineInner` state and provider construction.
+
+Future cleanup could introduce a small cache-controller seam around:
+
+- loaded-cache checks
+- explicit unload/retain behavior
+- force-load provider construction
+- config-change eviction decisions
+
+Keep actual model loading explicit and command-driven; do not hide heavy local model loads behind generic provider resolution.
+
+## Narrow Profile Resolution's OCR-mode interface
+
+`app/src-tauri/src/pipeline/profile_resolution.rs` now owns profile matching and effective behavior, but callers still request rewrite, Quick Replace, and Quick Ask OCR modes separately in a few places.
+
+Future cleanup could return a single `ResolvedActiveWindowOcrModes` value for an active/default/global profile context, so callers do not repeat the same precedence wiring and can ask flow-specific questions like "should this session auto-start OCR?" from one resolved object.

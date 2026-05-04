@@ -59,7 +59,7 @@ import type {
 	WhisperModelDownloadProgress,
 	WhisperModelInfo,
 } from "../../lib/tauri";
-import { configAPI, tauriAPI } from "../../lib/tauri";
+import { tauriAPI } from "../../lib/tauri";
 import { OcrProviderSettings } from "./OcrProviderSettings";
 import { SettingsRow } from "./SettingsRow";
 
@@ -169,8 +169,6 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 				queryKey: ["apiKeyValue", config.storeKey],
 			});
 			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
-			// Sync pipeline config when API keys change
-			void configAPI.syncPipelineConfig();
 			// Keep the saved value in the field so the button disables when unchanged.
 			setValue((prev) => prev.trim());
 			hasHydratedRef.current = true;

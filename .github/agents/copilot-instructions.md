@@ -9,6 +9,8 @@ Auto-generated from all feature plans. Last updated: 2026-02-14
 - Supabase Postgres for org/admin data; Tauri store (`settings.json`) and secure storage for desktop integration touchpoints (015-finish-phase5-readiness)
 - TypeScript (strict) + Rust (Tauri) + Edge API contracts (OpenAPI) + React/Vite frontend, Tauri backend, secure secret storage module, cloud `api-edge` auth middleware (016-auth-boundary-plan)
 - OS secure storage for session/refresh material; Tauri store (`settings.json`) for non-secret auth/policy state (016-auth-boundary-plan)
+- TypeScript 5.9.3 with React 19.2.3/Vite 7.3.1; Rust 2021 edition Tauri backend; Node >=24; pnpm 10.26.2. + Tauri 2.9.x, `@tauri-apps/api` 2.9.x, `@tauri-apps/plugin-store` 2.4.x, TanStack Query 5.90.x, Mantine 8.3.x, Vitest 4.0.x, Biome 2.3.x, Tokio 1.48, reqwest 0.13, schemars, keyring, cpal/hound, provider-specific STT/LLM modules. (master)
+- Local `settings.json` via Tauri store for non-secret settings/cache; OS secure storage for API keys/session secrets via backend secrets module; request logs/history/recordings/stats under app data; no new persistent storage format required by the plan unless a slice explicitly changes settings/contracts. (master)
 
 - TypeScript (strict) + Rust (Tauri) + React/Vite, Mantine, TanStack Query, Tauri command/event system, store-backed settings layer (012-cloud-policy-packs)
 - Tauri store (`settings.json`) for persisted policy cache and policy metadata (`policy_state` + effective policy payload) (012-cloud-policy-packs)
@@ -68,9 +70,9 @@ pnpm -C app check:ci
 - TypeScript (strict) + React 19 + Vite 7 (UI); Rust 2021 + Tauri 2 (backend): Follow existing project conventions
 
 ## Recent Changes
+- master: Added TypeScript 5.9.3 with React 19.2.3/Vite 7.3.1; Rust 2021 edition Tauri backend; Node >=24; pnpm 10.26.2. + Tauri 2.9.x, `@tauri-apps/api` 2.9.x, `@tauri-apps/plugin-store` 2.4.x, TanStack Query 5.90.x, Mantine 8.3.x, Vitest 4.0.x, Biome 2.3.x, Tokio 1.48, reqwest 0.13, schemars, keyring, cpal/hound, provider-specific STT/LLM modules.
+- master: Added TypeScript 5.9.3 with React 19.2.3/Vite 7.3.1; Rust 2021 edition Tauri backend; Node >=24; pnpm 10.26.2. + Tauri 2.9.x, `@tauri-apps/api` 2.9.x, `@tauri-apps/plugin-store` 2.4.x, TanStack Query 5.90.x, Mantine 8.3.x, Vitest 4.0.x, Biome 2.3.x, Tokio 1.48, reqwest 0.13, schemars, keyring, cpal/hound, provider-specific STT/LLM modules.
 - 016-auth-boundary-plan: Added TypeScript (strict) + Rust (Tauri) + Edge API contracts (OpenAPI) + React/Vite frontend, Tauri backend, secure secret storage module, cloud `api-edge` auth middleware
-- 015-finish-phase5-readiness: Added TypeScript (strict), Rust (Tauri), Node.js scripts (workspace standard) + React/Vite, TanStack Query, Supabase auth/data access, Cloudflare Workers routes, Tauri command wrappers, `kolops` CLI app runtime
-- 013-managed-inference-proxy: Added TypeScript (strict) + Rust (Tauri) for desktop; TypeScript runtime contracts for cloud gateway/control-plane scaffolding + React/Vite, TanStack Query, `@tauri-apps/api`, Tauri Rust backend pipeline/state-machine, Cloudflare Worker patterns (JWT + rate limit + deterministic status)
 
 
 <!-- MANUAL ADDITIONS START -->

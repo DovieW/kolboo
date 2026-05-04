@@ -13,7 +13,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { frontendLog } from "../../lib/frontendLog";
 import { useSettings } from "../../lib/queries";
-import { configAPI, type HotkeyConfig, tauriAPI } from "../../lib/tauri";
+import { type HotkeyConfig, tauriAPI } from "../../lib/tauri";
 import { Logo } from "../Logo";
 
 type Phase = "welcome" | "guide";
@@ -295,7 +295,6 @@ export function SettingsGuideOverlay({
 		setIsSavingGroqKey(true);
 		try {
 			await tauriAPI.setApiKey("groq_api_key", trimmed);
-			await configAPI.syncPipelineConfig();
 			await queryClient.invalidateQueries({
 				queryKey: ["apiKey", "groq_api_key"],
 			});

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
 	createLicenseStateQueryFn,
+	createPolicySyncMutationFn,
 	createRefreshLicenseEntitlementMutationFn,
 	invalidateLicenseRelatedQueries,
 	invalidateLogoutRelatedQueries,
@@ -90,5 +91,27 @@ describe("license query-layer function builders", () => {
 		expect(invalidateQueries).toHaveBeenCalledWith({
 			queryKey: ["settings"],
 		});
+	});
+
+	it("policy sync mutation routes runtime side effects through sync policy", async () => {
+		const syncPolicy = vi.fn(async () => ({ source: "cloud" }));
+		const invoke = vi.fn(async () => undefined);
+		const emitSettingsChanged = vi.fn(async () => undefined);
+		const mutationFn = createPolicySyncMutationFn({
+			syncPolicy,
+			invoke,
+			emitSettingsChanged,
+		});
+
+		await expect(
+			mutationFn({ policyPack: { enforced_fields: [] } }),
+		).resolves.toEqual({ source: "cloud" });
+
+		expect(syncPolicy).toHaveBeenCalledWith({
+			policyPack: { enforced_fields: [] },
+		});
+		expect(invoke).toHaveBeenCalledTimes(1);
+		expect(invoke).toHaveBeenCalledWith("sync_pipeline_config");
+		expect(emitSettingsChanged).not.toHaveBeenCalled();
 	});
 });

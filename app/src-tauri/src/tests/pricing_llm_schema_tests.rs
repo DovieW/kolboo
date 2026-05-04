@@ -207,3 +207,40 @@ fn llm_complete_response_schema_matches_checked_in_file() {
 		"LlmCompleteResponse schema changed. Regenerate llm-complete-response.schema.json using the export_llm_complete_response_schema bin.",
 	);
 }
+
+#[test]
+fn provider_family_cost_estimators_preserve_provider_specific_rates() {
+    let usage = crate::cost::openai::OpenAiUsage {
+        input_tokens: 1_000,
+        output_tokens: 500,
+        cached_input_tokens: 0,
+        input_audio_tokens: 0,
+        output_audio_tokens: 0,
+    };
+
+    let openai = crate::cost::openai::estimate_cost_from_usage("gpt-4o-mini", usage)
+        .expect("openai estimate")
+        .total_usd_micros;
+    let groq = crate::cost::groq::estimate_llm_cost_from_usage("llama-3.1-8b-instant", usage)
+        .expect("groq estimate");
+    let fireworks = crate::cost::fireworks::estimate_llm_cost_from_usage(
+        "accounts/fireworks/models/llama-v3p1-8b-instruct",
+        usage,
+    )
+    .expect("fireworks estimate");
+
+    assert!(openai > 0);
+    assert!(groq > 0);
+    assert!(fireworks > 0);
+    assert_ne!(openai, groq);
+    assert_ne!(groq, fireworks);
+
+    assert!(
+        crate::cost::openai::estimate_transcription_cost_from_audio_secs("whisper-1", 60.0)
+            .is_some()
+    );
+    assert!(
+        crate::cost::groq::estimate_stt_cost_from_audio_secs("whisper-large-v3-turbo", 60.0)
+            .is_some()
+    );
+}

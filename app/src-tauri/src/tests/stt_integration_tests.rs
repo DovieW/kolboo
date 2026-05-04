@@ -5,9 +5,9 @@
 //! when you have `GROQ_API_KEY`, `OPENAI_API_KEY`, or `DEEPGRAM_API_KEY` set.
 
 use crate::stt::{
-    AquavoiceSttProvider, AssemblyAiSttProvider, AudioEncoding, AudioFormat, DeepgramSttProvider,
-    ElevenLabsSttProvider, FireworksSttProvider, GroqSttProvider, OpenAiSttProvider,
-    SpeechmaticsSttProvider, SttError, SttProvider, WhisperServerSttProvider,
+    is_retryable_error, AquavoiceSttProvider, AssemblyAiSttProvider, AudioEncoding, AudioFormat,
+    DeepgramSttProvider, ElevenLabsSttProvider, FireworksSttProvider, GroqSttProvider,
+    OpenAiSttProvider, SpeechmaticsSttProvider, SttError, SttProvider, WhisperServerSttProvider,
 };
 
 use serde_json::json;
@@ -65,6 +65,22 @@ fn test_deepgram_provider_with_custom_model() {
     let provider =
         DeepgramSttProvider::new("test_key".to_string(), Some("nova-2".to_string()), None);
     assert_eq!(provider.name(), "deepgram");
+}
+
+#[test]
+fn provider_error_classification_preserves_retryable_status_semantics() {
+    assert!(is_retryable_error(&SttError::Api(
+        "Groq API error 429: rate limit".to_string()
+    )));
+    assert!(is_retryable_error(&SttError::Api(
+        "Deepgram API error 503: upstream unavailable".to_string()
+    )));
+    assert!(!is_retryable_error(&SttError::Api(
+        "OpenAI API error 401: unauthorized".to_string()
+    )));
+    assert!(!is_retryable_error(&SttError::Config(
+        "missing provider API key".to_string()
+    )));
 }
 
 /// Integration test for Groq STT provider.

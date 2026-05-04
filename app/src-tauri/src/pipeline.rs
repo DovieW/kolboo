@@ -19,7 +19,7 @@ use crate::audio_capture::{
     AudioCapture, AudioCaptureBackend, AudioCaptureDiagnostics, AudioCaptureEvent,
     AudioLevelSnapshot,
 };
-use crate::llm::{LlmProvider, ProgramPreset, ProgramPromptProfile};
+use crate::llm::{LlmConfig, LlmProvider, ProgramPreset, ProgramPromptProfile};
 use crate::stt::{StreamingSttSession, SttError, SttProvider, SttRegistry};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -32,6 +32,7 @@ mod config;
 #[path = "pipeline/tests/enterprise_mode_tests.rs"]
 mod enterprise_mode_tests;
 mod llm_provider;
+mod local_provider_lifecycle;
 #[cfg(test)]
 #[path = "pipeline/tests/managed_outage_tests.rs"]
 mod managed_outage_tests;
@@ -39,7 +40,9 @@ mod managed_outage_tests;
 #[path = "pipeline/tests/managed_personal_tests.rs"]
 mod managed_personal_tests;
 mod ocr_session;
-mod program_profiles;
+mod ocr_session_state;
+mod profile_matcher;
+mod profile_resolution;
 mod recording;
 mod routing;
 mod state_machine;
@@ -63,11 +66,12 @@ pub(crate) fn normalize_stt_language_setting(raw: Option<String>) -> Option<Stri
 pub use state_machine::PipelineState;
 pub use types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionResult};
 
-pub(crate) use program_profiles::{
+use profile_matcher::select_profile_for_program_path;
+pub(crate) use profile_resolution::{
     resolve_quick_ask_active_window_ocr_mode, resolve_quick_replace_active_window_ocr_mode,
-    resolve_rewrite_active_window_ocr_mode, select_profile_for_foreground_app,
+    resolve_rewrite_active_window_ocr_mode,
 };
-use program_profiles::{select_default_profile, select_effective_preset};
+use profile_resolution::{select_default_profile, select_effective_preset};
 
 pub(crate) fn should_auto_start_active_window_ocr(
     is_quick_ask_session: bool,
@@ -75,7 +79,7 @@ pub(crate) fn should_auto_start_active_window_ocr(
     quick_ask_ocr_mode: &str,
     quick_replace_ocr_mode: &str,
 ) -> bool {
-    program_profiles::should_auto_start_active_window_ocr(
+    profile_resolution::should_auto_start_active_window_ocr(
         is_quick_ask_session,
         rewrite_ocr_mode,
         quick_ask_ocr_mode,
@@ -83,8 +87,24 @@ pub(crate) fn should_auto_start_active_window_ocr(
     )
 }
 
+pub(crate) fn select_profile_for_foreground_app(
+    llm_config: &LlmConfig,
+) -> Option<ProgramPromptProfile> {
+    let foreground = crate::windows_apps::get_foreground_process_path();
+    let Some(foreground) = foreground else {
+        log::debug!(
+            "Pipeline: Foreground process path unavailable; cannot select per-program profile (profiles={})",
+            llm_config.program_prompt_profiles.len()
+        );
+        return None;
+    };
+
+    select_profile_for_program_path(llm_config, &foreground)
+}
+
 use llm_provider::{create_llm_provider, LlmProviderParams};
-use ocr_session::OcrTaskHandle;
+use local_provider_lifecycle as local_provider;
+use ocr_session_state::OcrSessionState;
 use stt_flow::run_stt_transcription;
 use stt_provider_resolver::SttProviderResolutionRequest;
 use utils::seconds_to_duration_or;
@@ -200,29 +220,11 @@ struct PipelineInner {
     /// Cancellation token for the current operation
     cancel_token: Option<CancellationToken>,
 
-    /// Identifier for the current user-visible request/session.
+    /// Request-owned active-window OCR session state.
     ///
     /// This is intentionally decoupled from the pipeline's internal state machine so that
     /// best-effort OCR can remain consumable across internal transitions like `reset_to_idle()`.
-    ///
-    /// For now we reuse the Request Log id (UUID string) as the session id.
-    ocr_session_id: Option<String>,
-
-    /// In-flight OCR task for the current session (best-effort).
-    ocr_task: Option<OcrTaskHandle>,
-    /// Abort handle for the in-flight OCR task, retained even while another flow awaits the task.
-    ocr_abort_handle: Option<tokio::task::AbortHandle>,
-    /// Completed OCR result for reuse within the session.
-    ocr_result: Option<crate::ocr::OcrResult>,
-    /// Best-effort OCR failure reason (sanitized).
-    ocr_failed_reason: Option<String>,
-    /// Whether OCR was explicitly cancelled for this session.
-    ocr_cancelled: bool,
-    /// Whether the OCR task is currently being awaited by `get_ocr_result_with_timeout`.
-    ///
-    /// This flag is needed because `get_ocr_result_with_timeout` temporarily "takes" the
-    /// task handle to await it, making `ocr_task` appear `None` even though OCR is still running.
-    ocr_awaiting: bool,
+    ocr: OcrSessionState,
 
     /// True after STT portion completes but before LLM / output.
     ///
@@ -294,29 +296,7 @@ impl PipelineInner {
     }
 
     fn cancel_ocr_task(&mut self, mark_cancelled: bool) {
-        if let Some(task) = self.ocr_task.take() {
-            log::debug!(
-                "cancel_ocr_task called: mark_cancelled={}, aborting task",
-                mark_cancelled
-            );
-            task.handle.abort();
-        } else if let Some(abort_handle) = self.ocr_abort_handle.take() {
-            log::debug!(
-                "cancel_ocr_task called: mark_cancelled={}, aborting awaited task",
-                mark_cancelled
-            );
-            abort_handle.abort();
-        } else {
-            log::debug!(
-                "cancel_ocr_task called: mark_cancelled={}, no task to abort",
-                mark_cancelled
-            );
-        }
-        self.ocr_abort_handle = None;
-        self.ocr_result = None;
-        self.ocr_failed_reason = None;
-        self.ocr_cancelled = mark_cancelled;
-        self.ocr_awaiting = false;
+        self.ocr.cancel_task(mark_cancelled);
     }
 
     fn transition_to(&mut self, next: PipelineState, context: &str) {
@@ -332,26 +312,21 @@ impl PipelineInner {
     }
     fn local_whisper_model_key_for_cache(&self) -> String {
         #[cfg(feature = "local-whisper")]
-        {
-            self.config
-                .whisper_model_path
-                .as_ref()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| "<missing-model-path>".to_string())
-        }
+        let model_path = self.config.whisper_model_path.as_deref();
 
         #[cfg(not(feature = "local-whisper"))]
-        {
-            "<local-whisper-disabled>".to_string()
-        }
+        let model_path = None;
+
+        local_provider::local_whisper_model_key_for_cache(
+            model_path,
+            cfg!(feature = "local-whisper"),
+        )
     }
 
     fn local_whisper_cache_key_for_language(&self, language: Option<&str>) -> String {
-        let language_key = language.unwrap_or("<auto>");
-        format!(
-            "local-whisper::{}::{}",
-            self.local_whisper_model_key_for_cache(),
-            language_key
+        local_provider::local_whisper_cache_key_for_language(
+            &self.local_whisper_model_key_for_cache(),
+            language,
         )
     }
 
@@ -366,7 +341,7 @@ impl PipelineInner {
 
     fn unload_local_whisper(&mut self) {
         self.stt_provider_cache
-            .retain(|k, _| !k.starts_with("local-whisper::"));
+            .retain(|k, _| local_provider::should_keep_after_local_whisper_unload(k));
     }
 
     fn force_load_local_whisper(&mut self) -> Result<(), PipelineError> {
@@ -427,13 +402,7 @@ impl PipelineInner {
             state: PipelineState::Idle,
             config: config.clone(),
             cancel_token: None,
-            ocr_session_id: None,
-            ocr_task: None,
-            ocr_abort_handle: None,
-            ocr_result: None,
-            ocr_failed_reason: None,
-            ocr_cancelled: false,
-            ocr_awaiting: false,
+            ocr: OcrSessionState::default(),
             stt_complete: false,
             last_wav_bytes: None,
             last_recording_diagnostics: None,
@@ -2442,13 +2411,15 @@ impl SharedPipeline {
         }
 
         let new_local_whisper_key = inner.local_whisper_model_key_for_cache();
-        if old_local_whisper_key != new_local_whisper_key {
-            inner.unload_local_whisper();
-        }
-
-        // If the transcription prompt changed, the model should be reloaded so the new
-        // prompt is applied. We unload only (no auto-load) to respect the user's load mode.
-        if old_stt_prompt != inner.config.stt_transcription_prompt {
+        // If the Local Whisper model identity or transcription prompt changed, evict cached
+        // models so stale local providers do not keep large GGML files resident or reuse old
+        // prompt state. We unload only (no auto-load) to respect the user's load mode.
+        if local_provider::should_evict_local_whisper_cache(
+            &old_local_whisper_key,
+            &new_local_whisper_key,
+            old_stt_prompt.as_deref(),
+            inner.config.stt_transcription_prompt.as_deref(),
+        ) {
             inner.unload_local_whisper();
         }
 
@@ -2622,7 +2593,7 @@ impl SharedPipeline {
             }
 
             inner.cancel_ocr_task(true);
-            inner.ocr_session_id = None;
+            inner.ocr.session_id = None;
 
             // Force stop audio capture
             inner.audio_capture.stop();

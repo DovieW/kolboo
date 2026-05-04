@@ -4,7 +4,7 @@ use crate::ocr::{
     OCR_MAX_TOKENS_DEFAULT, OCR_PROMPT_DEFAULT, OCR_TEMPERATURE_DEFAULT, OCR_TOP_P_DEFAULT,
 };
 use crate::request_log::RequestLogStore;
-use crate::settings::ProxySettings;
+use crate::settings::{default_values, ProxySettings};
 use crate::stt::language;
 use crate::stt::RetryConfig;
 use std::collections::HashMap;
@@ -15,13 +15,6 @@ const DEFAULT_TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Maximum WAV file size in bytes (50MB) to prevent memory issues
 const MAX_WAV_SIZE_BYTES: usize = 50 * 1024 * 1024;
-
-/// Default values for the quiet-audio gate.
-///
-/// Thresholds are in dBFS (decibels relative to full scale, where 0 dBFS is max amplitude).
-const DEFAULT_QUIET_AUDIO_MIN_DURATION_SECS: f32 = 0.15;
-const DEFAULT_QUIET_AUDIO_RMS_DBFS_THRESHOLD: f32 = -60.0;
-const DEFAULT_QUIET_AUDIO_PEAK_DBFS_THRESHOLD: f32 = -50.0;
 
 /// Configuration for the recording pipeline
 #[derive(Debug, Clone)]
@@ -189,7 +182,7 @@ impl Default for PipelineConfig {
         Self {
             input_device_name: None,
             max_duration_secs: 300.0, // 5 minutes max
-            stt_provider: "groq".to_string(),
+            stt_provider: default_values::DEFAULT_STT_PROVIDER.to_string(),
             stt_api_key: String::new(),
             stt_api_keys: HashMap::new(),
             managed_inference_enabled: false,
@@ -198,7 +191,7 @@ impl Default for PipelineConfig {
             managed_inference_fallback_stt_provider: None,
             managed_inference_fallback_llm_provider: None,
             stt_model: None,
-            stt_language: Some("en".to_string()),
+            stt_language: Some(default_values::DEFAULT_STT_LANGUAGE.to_string()),
             stt_transcription_prompt: None,
             whisper_server_base_url: None,
             retry_config: RetryConfig::default(),
@@ -208,53 +201,55 @@ impl Default for PipelineConfig {
 
             proxy_settings: ProxySettings::default(),
 
-            quiet_audio_gate_enabled: true,
-            quiet_audio_min_duration_secs: DEFAULT_QUIET_AUDIO_MIN_DURATION_SECS,
-            quiet_audio_rms_dbfs_threshold: DEFAULT_QUIET_AUDIO_RMS_DBFS_THRESHOLD,
-            quiet_audio_peak_dbfs_threshold: DEFAULT_QUIET_AUDIO_PEAK_DBFS_THRESHOLD,
+            quiet_audio_gate_enabled: default_values::DEFAULT_QUIET_AUDIO_GATE_ENABLED,
+            quiet_audio_min_duration_secs: default_values::DEFAULT_QUIET_AUDIO_MIN_DURATION_SECS,
+            quiet_audio_rms_dbfs_threshold: default_values::DEFAULT_QUIET_AUDIO_RMS_DBFS_THRESHOLD,
+            quiet_audio_peak_dbfs_threshold:
+                default_values::DEFAULT_QUIET_AUDIO_PEAK_DBFS_THRESHOLD,
 
             noise_gate_threshold_dbfs: None,
 
-            audio_downmix_to_mono: true,
-            audio_resample_to_16khz: false,
-            audio_highpass_enabled: true,
-            audio_agc_enabled: false,
-            audio_noise_suppression_enabled: false,
+            audio_downmix_to_mono: default_values::DEFAULT_AUDIO_DOWNMIX_TO_MONO,
+            audio_resample_to_16khz: default_values::DEFAULT_AUDIO_RESAMPLE_TO_16KHZ,
+            audio_highpass_enabled: default_values::DEFAULT_AUDIO_HIGHPASS_ENABLED,
+            audio_agc_enabled: default_values::DEFAULT_AUDIO_AGC_ENABLED,
+            audio_noise_suppression_enabled:
+                default_values::DEFAULT_AUDIO_NOISE_SUPPRESSION_ENABLED,
 
-            quiet_audio_require_speech: false,
+            quiet_audio_require_speech: default_values::DEFAULT_QUIET_AUDIO_REQUIRE_SPEECH,
 
-            hot_mic_enabled: false,
-            hot_mic_pre_roll_ms: 1500,
-            mic_auto_recover_enabled: false,
+            hot_mic_enabled: default_values::DEFAULT_HOT_MIC_ENABLED,
+            hot_mic_pre_roll_ms: default_values::DEFAULT_HOT_MIC_PRE_ROLL_MS,
+            mic_auto_recover_enabled: default_values::DEFAULT_MIC_AUTO_RECOVER_ENABLED,
 
             llm_config: LlmConfig::default(),
             llm_api_keys: HashMap::new(),
             ocr_config: OcrConfig {
                 base_url: None,
-                model: "lightonai/LightOnOCR-1B-1025".to_string(),
-                auth_mode: "none".to_string(),
+                model: default_values::DEFAULT_OCR_MODEL.to_string(),
+                auth_mode: default_values::DEFAULT_OCR_AUTH_MODE.to_string(),
                 prompt: OCR_PROMPT_DEFAULT.to_string(),
                 max_tokens: OCR_MAX_TOKENS_DEFAULT,
                 temperature: OCR_TEMPERATURE_DEFAULT,
                 top_p: OCR_TOP_P_DEFAULT,
-                request_timeout_ms: 2000,
-                context_max_chars: 8000,
-                rewrite_mode: "off".to_string(),
-                quick_replace_mode: "off".to_string(),
-                quick_ask_mode: "off".to_string(),
-                auto_capture_timing: "on_start".to_string(),
-                hallucination_protection: true,
-                hallucination_threshold: 2000,
-                resize_max_dimension: 0,
-                resize_filter: "nearest".to_string(),
+                request_timeout_ms: default_values::DEFAULT_OCR_REQUEST_TIMEOUT_MS,
+                context_max_chars: default_values::DEFAULT_OCR_CONTEXT_MAX_CHARS as usize,
+                rewrite_mode: default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE.to_string(),
+                quick_replace_mode: default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE.to_string(),
+                quick_ask_mode: default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE.to_string(),
+                auto_capture_timing: default_values::DEFAULT_OCR_AUTO_CAPTURE_TIMING.to_string(),
+                hallucination_protection: default_values::DEFAULT_OCR_HALLUCINATION_PROTECTION,
+                hallucination_threshold: default_values::DEFAULT_OCR_HALLUCINATION_THRESHOLD,
+                resize_max_dimension: default_values::DEFAULT_OCR_RESIZE_MAX_DIMENSION,
+                resize_filter: default_values::DEFAULT_OCR_RESIZE_FILTER.to_string(),
             },
             request_log_store: None,
             #[cfg(feature = "local-whisper")]
             whisper_model_path: None,
 
-            local_whisper_load_mode: "manual".to_string(),
-            stt_live_output: false,
-            stt_simulated_streaming: false,
+            local_whisper_load_mode: default_values::DEFAULT_LOCAL_WHISPER_LOAD_MODE.to_string(),
+            stt_live_output: default_values::DEFAULT_STT_LIVE_OUTPUT,
+            stt_simulated_streaming: default_values::DEFAULT_STT_SIMULATED_STREAMING,
         }
     }
 }

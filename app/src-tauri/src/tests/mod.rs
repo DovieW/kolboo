@@ -1,3 +1,4 @@
+mod architecture_fixtures;
 mod benchmarks;
 mod commands_event_sink_tests;
 mod config_history_schema_tests;
@@ -10,6 +11,7 @@ mod hotkey_config_schema_tests;
 mod hotkey_config_tests;
 mod intent_router_schema_tests;
 mod llm_integration_tests;
+mod managed_personal_tests;
 mod network_recording_whisper_schema_tests;
 mod pipeline_edge_case_tests;
 mod pricing_llm_schema_tests;

@@ -74,6 +74,7 @@ import {
 	authReasonCodeToMessage,
 	normalizeAuthReasonCode,
 } from "./tauri/license";
+import { applySettingsRuntimeSyncPolicy } from "./tauri/settingsSync";
 
 export function toManagedInferenceMessage(error: unknown): string {
 	if (!(error && typeof error === "object")) {
@@ -367,14 +368,30 @@ export function useLicenseQueryBootstrap() {
 	}, [queryClient]);
 }
 
+export function createPolicySyncMutationFn(deps: {
+	syncPolicy: (request?: { policyPack?: unknown }) => Promise<unknown>;
+	invoke: (command: string) => Promise<unknown>;
+	emitSettingsChanged?: () => Promise<unknown>;
+}) {
+	return async (request?: { policyPack?: unknown }) => {
+		const state = await deps.syncPolicy(request);
+		await applySettingsRuntimeSyncPolicy({
+			policyNormalized: true,
+			backendEventEmitted: true,
+			invoke: deps.invoke,
+			emitSettingsChanged: deps.emitSettingsChanged ?? (async () => undefined),
+		});
+		return state;
+	};
+}
+
 export function usePolicySync() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (request?: { policyPack?: unknown }) => {
-			const state = await tauriAPI.syncPolicy(request);
-			await configAPI.syncPipelineConfig();
-			return state;
-		},
+		mutationFn: createPolicySyncMutationFn({
+			syncPolicy: tauriAPI.syncPolicy,
+			invoke,
+		}),
 		onSuccess: () => {
 			void invalidatePolicyRelatedQueries(queryClient);
 		},
@@ -643,11 +660,7 @@ export function useUpdateMainWindowCloseBehavior() {
 export function useUpdateRewriteLlmEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateRewriteLlmEnabled(enabled);
-			// Gate the pipeline's LLM rewrite step immediately.
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) => tauriAPI.updateRewriteLlmEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -753,10 +766,8 @@ export function useUpdateRequestLogsPrivacyMode() {
 export function useUpdateQuietAudioGateEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateQuietAudioGateEnabled(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateQuietAudioGateEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -766,10 +777,8 @@ export function useUpdateQuietAudioGateEnabled() {
 export function useUpdateQuietAudioMinDurationSecs() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (seconds: number) => {
-			await tauriAPI.updateQuietAudioMinDurationSecs(seconds);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (seconds: number) =>
+			tauriAPI.updateQuietAudioMinDurationSecs(seconds),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -779,10 +788,8 @@ export function useUpdateQuietAudioMinDurationSecs() {
 export function useUpdateQuietAudioRmsDbfsThreshold() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (dbfs: number) => {
-			await tauriAPI.updateQuietAudioRmsDbfsThreshold(dbfs);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (dbfs: number) =>
+			tauriAPI.updateQuietAudioRmsDbfsThreshold(dbfs),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -792,10 +799,8 @@ export function useUpdateQuietAudioRmsDbfsThreshold() {
 export function useUpdateQuietAudioPeakDbfsThreshold() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (dbfs: number) => {
-			await tauriAPI.updateQuietAudioPeakDbfsThreshold(dbfs);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (dbfs: number) =>
+			tauriAPI.updateQuietAudioPeakDbfsThreshold(dbfs),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -805,10 +810,8 @@ export function useUpdateQuietAudioPeakDbfsThreshold() {
 export function useUpdateNoiseGateThresholdDbfs() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (thresholdDbfs: number | null) => {
-			await tauriAPI.updateNoiseGateThresholdDbfs(thresholdDbfs);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (thresholdDbfs: number | null) =>
+			tauriAPI.updateNoiseGateThresholdDbfs(thresholdDbfs),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -818,10 +821,8 @@ export function useUpdateNoiseGateThresholdDbfs() {
 export function useUpdateQuietAudioRequireSpeech() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateQuietAudioRequireSpeech(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateQuietAudioRequireSpeech(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -831,10 +832,7 @@ export function useUpdateQuietAudioRequireSpeech() {
 export function useUpdateHotMicEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateHotMicEnabled(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) => tauriAPI.updateHotMicEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -844,10 +842,7 @@ export function useUpdateHotMicEnabled() {
 export function useUpdateHotMicPreRollMs() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (ms: number) => {
-			await tauriAPI.updateHotMicPreRollMs(ms);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (ms: number) => tauriAPI.updateHotMicPreRollMs(ms),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -857,10 +852,8 @@ export function useUpdateHotMicPreRollMs() {
 export function useUpdateMicAutoRecoverEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateMicAutoRecoverEnabled(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateMicAutoRecoverEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -870,10 +863,8 @@ export function useUpdateMicAutoRecoverEnabled() {
 export function useUpdateAudioDownmixToMono() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateAudioDownmixToMono(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateAudioDownmixToMono(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -883,10 +874,8 @@ export function useUpdateAudioDownmixToMono() {
 export function useUpdateAudioResampleTo16khz() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateAudioResampleTo16khz(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateAudioResampleTo16khz(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -896,10 +885,8 @@ export function useUpdateAudioResampleTo16khz() {
 export function useUpdateAudioHighpassEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateAudioHighpassEnabled(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateAudioHighpassEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -909,10 +896,7 @@ export function useUpdateAudioHighpassEnabled() {
 export function useUpdateAudioAgcEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateAudioAgcEnabled(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) => tauriAPI.updateAudioAgcEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -922,10 +906,8 @@ export function useUpdateAudioAgcEnabled() {
 export function useUpdateAudioNoiseSuppressionEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateAudioNoiseSuppressionEnabled(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateAudioNoiseSuppressionEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1007,11 +989,8 @@ export function useIsAudioMuteSupported() {
 export function useUpdateCleanupPromptSections() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (sections: CleanupPromptSections | null) => {
-			await tauriAPI.updateCleanupPromptSections(sections);
-			// Apply prompt changes immediately (LLM step reads prompts from pipeline config).
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (sections: CleanupPromptSections | null) =>
+			tauriAPI.updateCleanupPromptSections(sections),
 		onMutate: async (sections: CleanupPromptSections | null) => {
 			// Optimistically update the settings cache so the UI doesn't snap back
 			// if the user navigates away before the mutation settles.
@@ -1053,10 +1032,8 @@ export function useUpdateCleanupPromptSections() {
 export function useUpdateRewriteProgramPromptProfiles() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (profiles: RewriteProgramPromptProfile[]) => {
-			await tauriAPI.updateRewriteProgramPromptProfiles(profiles);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (profiles: RewriteProgramPromptProfile[]) =>
+			tauriAPI.updateRewriteProgramPromptProfiles(profiles),
 		onMutate: async (nextProfiles: RewriteProgramPromptProfile[]) => {
 			// Optimistically update the settings cache so toggles/selects don't
 			// "snap back" while the write + pipeline sync is running.
@@ -1163,11 +1140,7 @@ export function useAvailableProviders() {
 export function useUpdateGroqFreeTier() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateGroqFreeTier(enabled);
-			// Keep the pipeline in sync in case Groq configuration depends on this.
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) => tauriAPI.updateGroqFreeTier(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1177,10 +1150,7 @@ export function useUpdateGroqFreeTier() {
 export function useUpdateCerebrasFreeTier() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateCerebrasFreeTier(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) => tauriAPI.updateCerebrasFreeTier(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1190,10 +1160,7 @@ export function useUpdateCerebrasFreeTier() {
 export function useUpdateCohereFreeTier() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateCohereFreeTier(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) => tauriAPI.updateCohereFreeTier(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1203,10 +1170,8 @@ export function useUpdateCohereFreeTier() {
 export function useUpdateAssemblyAiFreeTier() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateAssemblyAiFreeTier(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateAssemblyAiFreeTier(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1216,10 +1181,8 @@ export function useUpdateAssemblyAiFreeTier() {
 export function useUpdateSpeechmaticsFreeTier() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateSpeechmaticsFreeTier(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateSpeechmaticsFreeTier(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1229,11 +1192,8 @@ export function useUpdateSpeechmaticsFreeTier() {
 export function useUpdateSTTProvider() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (provider: string | null) => {
-			await tauriAPI.updateSTTProvider(provider);
-			// Sync the pipeline configuration when STT provider changes
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (provider: string | null) =>
+			tauriAPI.updateSTTProvider(provider),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1243,11 +1203,7 @@ export function useUpdateSTTProvider() {
 export function useUpdateSTTModel() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (model: string | null) => {
-			await tauriAPI.updateSTTModel(model);
-			// Sync the pipeline configuration when STT model changes
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (model: string | null) => tauriAPI.updateSTTModel(model),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1257,10 +1213,7 @@ export function useUpdateSTTModel() {
 export function useUpdateSTTLiveOutput() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateSTTLiveOutput(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) => tauriAPI.updateSTTLiveOutput(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1270,10 +1223,8 @@ export function useUpdateSTTLiveOutput() {
 export function useUpdateSTTSimulatedStreaming() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateSTTSimulatedStreaming(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateSTTSimulatedStreaming(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1283,10 +1234,7 @@ export function useUpdateSTTSimulatedStreaming() {
 export function useUpdateSTTLanguage() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (language: string) => {
-			await tauriAPI.updateSTTLanguage(language);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (language: string) => tauriAPI.updateSTTLanguage(language),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1296,10 +1244,8 @@ export function useUpdateSTTLanguage() {
 export function useUpdateSTTTranscriptionPrompt() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (prompt: string | null) => {
-			await tauriAPI.updateSTTTranscriptionPrompt(prompt);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (prompt: string | null) =>
+			tauriAPI.updateSTTTranscriptionPrompt(prompt),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1309,10 +1255,8 @@ export function useUpdateSTTTranscriptionPrompt() {
 export function useUpdateWhisperServerBaseUrl() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (baseUrl: string | null) => {
-			await tauriAPI.updateWhisperServerBaseUrl(baseUrl);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (baseUrl: string | null) =>
+			tauriAPI.updateWhisperServerBaseUrl(baseUrl),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1322,10 +1266,7 @@ export function useUpdateWhisperServerBaseUrl() {
 export function useUpdateOllamaUrl() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (baseUrl: string | null) => {
-			await tauriAPI.updateOllamaUrl(baseUrl);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (baseUrl: string | null) => tauriAPI.updateOllamaUrl(baseUrl),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1335,10 +1276,7 @@ export function useUpdateOllamaUrl() {
 export function useUpdateOcrBaseUrl() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (baseUrl: string | null) => {
-			await tauriAPI.updateOcrBaseUrl(baseUrl);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (baseUrl: string | null) => tauriAPI.updateOcrBaseUrl(baseUrl),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1348,10 +1286,7 @@ export function useUpdateOcrBaseUrl() {
 export function useUpdateOcrModel() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (model: string | null) => {
-			await tauriAPI.updateOcrModel(model);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (model: string | null) => tauriAPI.updateOcrModel(model),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1361,10 +1296,7 @@ export function useUpdateOcrModel() {
 export function useUpdateOcrAuthMode() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (mode: OcrAuthMode) => {
-			await tauriAPI.updateOcrAuthMode(mode);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (mode: OcrAuthMode) => tauriAPI.updateOcrAuthMode(mode),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1374,10 +1306,7 @@ export function useUpdateOcrAuthMode() {
 export function useUpdateOcrPrompt() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (prompt: string) => {
-			await tauriAPI.updateOcrPrompt(prompt);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (prompt: string) => tauriAPI.updateOcrPrompt(prompt),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1387,10 +1316,7 @@ export function useUpdateOcrPrompt() {
 export function useUpdateOcrMaxTokens() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (maxTokens: number) => {
-			await tauriAPI.updateOcrMaxTokens(maxTokens);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (maxTokens: number) => tauriAPI.updateOcrMaxTokens(maxTokens),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1400,10 +1326,8 @@ export function useUpdateOcrMaxTokens() {
 export function useUpdateOcrTemperature() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (temperature: number) => {
-			await tauriAPI.updateOcrTemperature(temperature);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (temperature: number) =>
+			tauriAPI.updateOcrTemperature(temperature),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1413,10 +1337,7 @@ export function useUpdateOcrTemperature() {
 export function useUpdateOcrTopP() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (topP: number) => {
-			await tauriAPI.updateOcrTopP(topP);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (topP: number) => tauriAPI.updateOcrTopP(topP),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1426,10 +1347,8 @@ export function useUpdateOcrTopP() {
 export function useUpdateOcrRequestTimeoutMs() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (timeoutMs: number) => {
-			await tauriAPI.updateOcrRequestTimeoutMs(timeoutMs);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (timeoutMs: number) =>
+			tauriAPI.updateOcrRequestTimeoutMs(timeoutMs),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1439,10 +1358,8 @@ export function useUpdateOcrRequestTimeoutMs() {
 export function useUpdateOcrContextMaxChars() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (maxChars: number) => {
-			await tauriAPI.updateOcrContextMaxChars(maxChars);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (maxChars: number) =>
+			tauriAPI.updateOcrContextMaxChars(maxChars),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1452,10 +1369,8 @@ export function useUpdateOcrContextMaxChars() {
 export function useUpdateOcrAutoCaptureTiming() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (timing: OcrAutoCaptureTiming) => {
-			await tauriAPI.updateOcrAutoCaptureTiming(timing);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (timing: OcrAutoCaptureTiming) =>
+			tauriAPI.updateOcrAutoCaptureTiming(timing),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1465,10 +1380,8 @@ export function useUpdateOcrAutoCaptureTiming() {
 export function useUpdateOcrHallucinationProtection() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateOcrHallucinationProtection(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateOcrHallucinationProtection(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1478,10 +1391,8 @@ export function useUpdateOcrHallucinationProtection() {
 export function useUpdateOcrHallucinationThreshold() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (value: number) => {
-			await tauriAPI.updateOcrHallucinationThreshold(value);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (value: number) =>
+			tauriAPI.updateOcrHallucinationThreshold(value),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1491,10 +1402,7 @@ export function useUpdateOcrHallucinationThreshold() {
 export function useUpdateOcrResizeMaxDimension() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (value: number) => {
-			await tauriAPI.updateOcrResizeMaxDimension(value);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (value: number) => tauriAPI.updateOcrResizeMaxDimension(value),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1504,12 +1412,8 @@ export function useUpdateOcrResizeMaxDimension() {
 export function useUpdateOcrResizeFilter() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (
-			filter: "nearest" | "triangle" | "catmullrom" | "lanczos3",
-		) => {
-			await tauriAPI.updateOcrResizeFilter(filter);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (filter: "nearest" | "triangle" | "catmullrom" | "lanczos3") =>
+			tauriAPI.updateOcrResizeFilter(filter),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1519,10 +1423,7 @@ export function useUpdateOcrResizeFilter() {
 export function useSetOcrApiKey() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (apiKey: string) => {
-			await tauriAPI.setApiKey("ocr_api_key", apiKey);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (apiKey: string) => tauriAPI.setApiKey("ocr_api_key", apiKey),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
 		},
@@ -1532,10 +1433,7 @@ export function useSetOcrApiKey() {
 export function useClearOcrApiKey() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async () => {
-			await tauriAPI.clearApiKey("ocr_api_key");
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: () => tauriAPI.clearApiKey("ocr_api_key"),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
 		},
@@ -1545,10 +1443,8 @@ export function useClearOcrApiKey() {
 export function useUpdateLocalWhisperModelId() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (modelId: string | null) => {
-			await tauriAPI.updateLocalWhisperModelId(modelId);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (modelId: string | null) =>
+			tauriAPI.updateLocalWhisperModelId(modelId),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1558,10 +1454,8 @@ export function useUpdateLocalWhisperModelId() {
 export function useUpdateLocalWhisperLoadMode() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (mode: "manual" | "on_transcribe" | "on_launch") => {
-			await tauriAPI.updateLocalWhisperLoadMode(mode);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (mode: "manual" | "on_transcribe" | "on_launch") =>
+			tauriAPI.updateLocalWhisperLoadMode(mode),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 			queryClient.invalidateQueries({ queryKey: ["localWhisperModelLoaded"] });
@@ -1698,10 +1592,8 @@ export function useValidateWhisperModel() {
 export function useUpdateProxySettings() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (proxySettings: ProxySettings) => {
-			await tauriAPI.updateProxySettings(proxySettings);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (proxySettings: ProxySettings) =>
+			tauriAPI.updateProxySettings(proxySettings),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1725,11 +1617,8 @@ export function useSaveProxySettings() {
 export function useUpdateLLMProvider() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (provider: string | null) => {
-			await tauriAPI.updateLLMProvider(provider);
-			// Sync the pipeline configuration when LLM provider changes
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (provider: string | null) =>
+			tauriAPI.updateLLMProvider(provider),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1739,11 +1628,7 @@ export function useUpdateLLMProvider() {
 export function useUpdateLLMModel() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (model: string | null) => {
-			await tauriAPI.updateLLMModel(model);
-			// Sync the pipeline configuration when LLM model changes
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (model: string | null) => tauriAPI.updateLLMModel(model),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1753,10 +1638,8 @@ export function useUpdateLLMModel() {
 export function useUpdateQuickAskProvider() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (provider: string | null) => {
-			await tauriAPI.updateQuickAskProvider(provider);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (provider: string | null) =>
+			tauriAPI.updateQuickAskProvider(provider),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1766,10 +1649,7 @@ export function useUpdateQuickAskProvider() {
 export function useUpdateQuickAskModel() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (model: string | null) => {
-			await tauriAPI.updateQuickAskModel(model);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (model: string | null) => tauriAPI.updateQuickAskModel(model),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1779,10 +1659,8 @@ export function useUpdateQuickAskModel() {
 export function useUpdateQuickAskSystemPrompt() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (prompt: string | null) => {
-			await tauriAPI.updateQuickAskSystemPrompt(prompt);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (prompt: string | null) =>
+			tauriAPI.updateQuickAskSystemPrompt(prompt),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1792,10 +1670,8 @@ export function useUpdateQuickAskSystemPrompt() {
 export function useUpdateQuickAskDismissMode() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (mode: QuickAskDismissMode) => {
-			await tauriAPI.updateQuickAskDismissMode(mode);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (mode: QuickAskDismissMode) =>
+			tauriAPI.updateQuickAskDismissMode(mode),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1805,10 +1681,8 @@ export function useUpdateQuickAskDismissMode() {
 export function useUpdateQuickAskIncludeSelectedText() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateQuickAskIncludeSelectedText(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateQuickAskIncludeSelectedText(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1818,10 +1692,8 @@ export function useUpdateQuickAskIncludeSelectedText() {
 export function useUpdateQuickAskConversationHistoryEnabled() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (enabled: boolean) => {
-			await tauriAPI.updateQuickAskConversationHistoryEnabled(enabled);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (enabled: boolean) =>
+			tauriAPI.updateQuickAskConversationHistoryEnabled(enabled),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1831,10 +1703,8 @@ export function useUpdateQuickAskConversationHistoryEnabled() {
 export function useUpdateQuickAskConversationHistoryCount() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (count: number) => {
-			await tauriAPI.updateQuickAskConversationHistoryCount(count);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (count: number) =>
+			tauriAPI.updateQuickAskConversationHistoryCount(count),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1844,10 +1714,8 @@ export function useUpdateQuickAskConversationHistoryCount() {
 export function useUpdateQuickAskOpenAiReasoningEffort() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (effort: OpenAiReasoningEffort | null) => {
-			await tauriAPI.updateQuickAskOpenAiReasoningEffort(effort);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (effort: OpenAiReasoningEffort | null) =>
+			tauriAPI.updateQuickAskOpenAiReasoningEffort(effort),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1857,10 +1725,8 @@ export function useUpdateQuickAskOpenAiReasoningEffort() {
 export function useUpdateQuickAskAnthropicThinkingBudget() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (budget: number | null) => {
-			await tauriAPI.updateQuickAskAnthropicThinkingBudget(budget);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (budget: number | null) =>
+			tauriAPI.updateQuickAskAnthropicThinkingBudget(budget),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1870,10 +1736,8 @@ export function useUpdateQuickAskAnthropicThinkingBudget() {
 export function useUpdateQuickAskGeminiThinkingBudget() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (budget: number | null) => {
-			await tauriAPI.updateQuickAskGeminiThinkingBudget(budget);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (budget: number | null) =>
+			tauriAPI.updateQuickAskGeminiThinkingBudget(budget),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1883,10 +1747,8 @@ export function useUpdateQuickAskGeminiThinkingBudget() {
 export function useUpdateQuickAskGeminiThinkingLevel() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (level: "minimal" | "low" | "medium" | "high" | null) => {
-			await tauriAPI.updateQuickAskGeminiThinkingLevel(level);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (level: "minimal" | "low" | "medium" | "high" | null) =>
+			tauriAPI.updateQuickAskGeminiThinkingLevel(level),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1896,10 +1758,8 @@ export function useUpdateQuickAskGeminiThinkingLevel() {
 export function useUpdateOpenAiReasoningEffort() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (effort: OpenAiReasoningEffort | null) => {
-			await tauriAPI.updateOpenAiReasoningEffort(effort);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (effort: OpenAiReasoningEffort | null) =>
+			tauriAPI.updateOpenAiReasoningEffort(effort),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1909,10 +1769,8 @@ export function useUpdateOpenAiReasoningEffort() {
 export function useUpdateAnthropicThinkingBudget() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (budget: number | null) => {
-			await tauriAPI.updateAnthropicThinkingBudget(budget);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (budget: number | null) =>
+			tauriAPI.updateAnthropicThinkingBudget(budget),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1922,10 +1780,8 @@ export function useUpdateAnthropicThinkingBudget() {
 export function useUpdateGeminiThinkingBudget() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (budget: number | null) => {
-			await tauriAPI.updateGeminiThinkingBudget(budget);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (budget: number | null) =>
+			tauriAPI.updateGeminiThinkingBudget(budget),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1935,10 +1791,8 @@ export function useUpdateGeminiThinkingBudget() {
 export function useUpdateGeminiThinkingLevel() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (level: "minimal" | "low" | "medium" | "high" | null) => {
-			await tauriAPI.updateGeminiThinkingLevel(level);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (level: "minimal" | "low" | "medium" | "high" | null) =>
+			tauriAPI.updateGeminiThinkingLevel(level),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},
@@ -1949,10 +1803,8 @@ export function useUpdateGeminiThinkingLevel() {
 export function useUpdateSTTTimeout() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async (timeoutSeconds: number | null) => {
-			await tauriAPI.updateSTTTimeout(timeoutSeconds);
-			await configAPI.syncPipelineConfig();
-		},
+		mutationFn: (timeoutSeconds: number | null) =>
+			tauriAPI.updateSTTTimeout(timeoutSeconds),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["settings"] });
 		},

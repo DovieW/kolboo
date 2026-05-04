@@ -72,7 +72,7 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 }));
 
 describe("tauriAPI.getSettings() normalization", () => {
-  itWithImportTimeout(
+	itWithImportTimeout(
     "migrates legacy cleanup_prompt_sections.main -> cleanup_prompt_sections.system (read-only)",
     async () => {
       vi.resetModules();
@@ -95,7 +95,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "defaults invalid accent_color to DEFAULT_ACCENT_HEX (read-only)",
     async () => {
       vi.resetModules();
@@ -114,7 +114,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "migrates legacy profile program_path -> program_paths[]",
     async () => {
       vi.resetModules();
@@ -138,7 +138,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "uses legacy quick_ask_hotkey as fallback when quick_ask_hold_hotkey is missing",
     async () => {
       vi.resetModules();
@@ -157,7 +157,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "does NOT fall back to legacy quick_ask_hotkey when quick_ask_hold_hotkey is explicitly null",
     async () => {
       vi.resetModules();
@@ -173,7 +173,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "normalizes quick_ask_dismiss_mode (invalid -> manual)",
     async () => {
       vi.resetModules();
@@ -188,7 +188,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "normalizes quick_ask_conversation_history_count (invalid/missing -> default, clamps range)",
     async () => {
       vi.resetModules();
@@ -218,7 +218,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "normalizes malformed cleanup_prompt_sections.system (read-only)",
     async () => {
       vi.resetModules();
@@ -240,7 +240,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "migrates legacy auto_mute_audio boolean into playing_audio_handling",
     async () => {
       vi.resetModules();
@@ -263,7 +263,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "uses legacy noise_gate_strength when noise_gate_threshold_dbfs is missing",
     async () => {
       vi.resetModules();
@@ -281,7 +281,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "uses legacy transcription_retention_days when unit+value are missing",
     async () => {
       vi.resetModules();
@@ -297,7 +297,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "normalizes profile.disabled (missing -> false, preserves true/false)",
     async () => {
       vi.resetModules();
@@ -334,7 +334,7 @@ describe("tauriAPI.getSettings() normalization", () => {
     },
   );
 
-  itWithImportTimeout(
+	itWithImportTimeout(
     "normalizes legacy/typo enum values (overlay_monitor_target, main_window_close_behavior, output_mode)",
     async () => {
       vi.resetModules();
@@ -350,6 +350,33 @@ describe("tauriAPI.getSettings() normalization", () => {
       expect(settings.overlay_monitor_target).toBe("active_window");
       expect(settings.main_window_close_behavior).toBe("minimize_to_tray");
       expect(settings.output_mode).toBe("paste");
+    },
+  );
+
+	itWithImportTimeout(
+    "uses Settings View defaults for malformed flat settings without mutating the store",
+    async () => {
+      vi.resetModules();
+      currentStore = new FakeStore({
+        sound_enabled: "yes please",
+        overlay_mode: "sideways",
+        output_hit_enter: "true",
+      });
+
+      const { tauriAPI } = await import("./tauri");
+      const { DEFAULT_SETTINGS_VALUES } =
+        await import("./tauri/settingsDefaults");
+      const settings = await tauriAPI.getSettings();
+
+      expect(settings.sound_enabled).toBe(
+        DEFAULT_SETTINGS_VALUES.sound_enabled,
+      );
+      expect(settings.overlay_mode).toBe(DEFAULT_SETTINGS_VALUES.overlay_mode);
+      expect(settings.output_hit_enter).toBe(
+        DEFAULT_SETTINGS_VALUES.output_hit_enter,
+      );
+      expect(currentStore.setCalls).toHaveLength(0);
+      expect(currentStore.saveCalls).toBe(0);
     },
   );
 });

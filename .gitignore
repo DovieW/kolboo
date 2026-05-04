@@ -34,6 +34,7 @@ build/
 
 # Environment
 .env
+.env*
 .env.local
 .env.*.local
 
@@ -52,6 +53,12 @@ Desktop.ini
 # Logs
 *.log
 logs/
+
+# Temporary/profiling artifacts
+*.tmp
+*.rs.bk
+*.rlib
+*.prof*
 
 # Local debugging artifacts
 cdb-*.txt
