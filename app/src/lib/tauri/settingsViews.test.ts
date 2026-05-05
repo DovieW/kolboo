@@ -196,15 +196,15 @@ describe("settings view helpers", () => {
 			}),
 		).toEqual({ value: "always", source: "preset", explicitNull: false });
 		expect(
-			presetSettingView({
-				globalValue: "recording_only" as const,
-				profile,
-				preset: findPresetById(profile, "inherit"),
-				key: "overlay_mode",
-				defaultValue: "recording_only" as const,
-				normalize: normalizeOverlayMode,
-			}),
-		).toEqual({ value: "never", source: "profile", explicitNull: false });
+      presetSettingView({
+        globalValue: "recording_only" as const,
+        profile,
+        preset: findPresetById(profile, "inherit"),
+        key: "overlay_mode",
+        defaultValue: "recording_only" as const,
+        normalize: normalizeOverlayMode,
+      }),
+    ).toEqual({ value: "never", source: "profile", explicitNull: true });
 		expect(
 			presetSettingView({
 				globalValue: "recording_only" as const,

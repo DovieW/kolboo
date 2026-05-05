@@ -107,7 +107,7 @@ describe("legacy settings fixtures", () => {
 		expect(settings.overlay_show_detailed_loading).toBe(false);
 		expect(settings.ocr_auth_mode).toBe("none");
 		expect(settings.ocr_base_url).toBeNull();
-		expect(settings.ocr_model).toBeNull();
+		expect(settings.ocr_model).toBe("lightonai/LightOnOCR-1B-1025");
 		expect(settings.ocr_prompt).toBe("");
 		expect(settings.ocr_max_tokens).toBe(512);
 		expect(settings.ocr_temperature).toBe(0);

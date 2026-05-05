@@ -137,6 +137,21 @@ export function presetSettingView<T>(params: {
 				};
 			}
 		}
+
+		if (preset[params.key] === null) {
+      const inherited = inheritedSettingView({
+        globalValue: params.globalValue,
+        profile: params.profile,
+        key: params.key,
+        defaultValue: params.defaultValue,
+        normalize: params.normalize,
+      });
+
+      // A preset-level explicit null means “inherit from profile/global/default”.
+      // Preserve that provenance so the Settings View interface can explain the
+      // difference between “missing” and “intentionally inherited”.
+      return { ...inherited, explicitNull: true };
+    }
 	}
 
 	return inheritedSettingView({

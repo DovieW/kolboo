@@ -550,18 +550,24 @@ function normalizeOutputMode(value: unknown): OutputMode {
 }
 
 function normalizeOverlayModeValue(value: unknown): OverlayMode | null {
-  if (value === "always" || value === "never" || value === "recording_only") {
+	if (value === "always" || value === "never" || value === "recording_only") {
     return value;
   }
   return null;
 }
 
 function normalizeOverlayMode(value: unknown): OverlayMode {
-  return normalizeOverlayModeValue(value) ?? "recording_only";
+	return normalizeOverlayModeValue(value) ?? "recording_only";
 }
 
 function normalizeBooleanSetting(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
+	return typeof value === "boolean" ? value : null;
+}
+
+function normalizeNonEmptyStringSetting(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function normalizeOverlayMonitorTarget(value: unknown): OverlayMonitorTarget {
@@ -1768,7 +1774,11 @@ export const tauriSettingsAPI = {
         return normalized;
       })(),
       rewrite_program_prompt_profiles,
-      stt_provider: (await store.get<string | null>("stt_provider")) ?? null,
+      stt_provider: await readSettingValue(
+        "stt_provider",
+        DEFAULT_SETTINGS_VALUES.stt_provider,
+        normalizeNonEmptyStringSetting,
+      ),
       stt_model: (await store.get<string | null>("stt_model")) ?? null,
       stt_language: normalizeSttLanguage(
         await store.get("stt_language"),
@@ -2056,9 +2066,11 @@ export const tauriSettingsAPI = {
       ocr_base_url:
         (await store.get<string | null>("ocr_base_url")) ??
         DEFAULT_SETTINGS_VALUES.ocr_base_url,
-      ocr_model:
-        (await store.get<string | null>("ocr_model")) ??
+      ocr_model: await readSettingValue(
+        "ocr_model",
         DEFAULT_SETTINGS_VALUES.ocr_model,
+        normalizeNonEmptyStringSetting,
+      ),
       ocr_auth_mode: normalizeOcrAuthMode(await store.get("ocr_auth_mode")),
       ocr_prompt:
         (await store.get<string | null>("ocr_prompt")) ??

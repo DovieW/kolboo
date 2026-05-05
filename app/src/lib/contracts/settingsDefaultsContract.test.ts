@@ -43,41 +43,165 @@ function parseRustBooleanConst(name: string): boolean {
 
 describe("settings defaults cross-layer contract", () => {
 	it("keeps shared string defaults aligned between TypeScript and Rust", () => {
-		expect(parseRustStringConst("DEFAULT_STT_LANGUAGE")).toBe(
-			DEFAULT_SETTINGS_VALUES.stt_language,
-		);
-		expect(parseRustStringConst("DEFAULT_OVERLAY_MODE")).toBe(
-			DEFAULT_SETTINGS_VALUES.overlay_mode,
-		);
-		expect(parseRustStringConst("DEFAULT_OUTPUT_MODE")).toBe(
-			DEFAULT_SETTINGS_VALUES.output_mode,
-		);
-		expect(parseRustStringConst("DEFAULT_OCR_AUTH_MODE")).toBe(
-			DEFAULT_SETTINGS_VALUES.ocr_auth_mode,
-		);
-		expect(parseRustStringConst("DEFAULT_OCR_RESIZE_FILTER")).toBe(
-			DEFAULT_SETTINGS_VALUES.ocr_resize_filter,
-		);
+		const stringDefaults = [
+      ["DEFAULT_STT_PROVIDER", DEFAULT_SETTINGS_VALUES.stt_provider],
+      ["DEFAULT_STT_LANGUAGE", DEFAULT_SETTINGS_VALUES.stt_language],
+      [
+        "DEFAULT_LOCAL_WHISPER_LOAD_MODE",
+        DEFAULT_SETTINGS_VALUES.local_whisper_load_mode,
+      ],
+      ["DEFAULT_OVERLAY_MODE", DEFAULT_SETTINGS_VALUES.overlay_mode],
+      [
+        "DEFAULT_OVERLAY_MONITOR_TARGET",
+        DEFAULT_SETTINGS_VALUES.overlay_monitor_target,
+      ],
+      ["DEFAULT_WIDGET_POSITION", DEFAULT_SETTINGS_VALUES.widget_position],
+      ["DEFAULT_OUTPUT_MODE", DEFAULT_SETTINGS_VALUES.output_mode],
+      [
+        "DEFAULT_MAIN_WINDOW_CLOSE_BEHAVIOR",
+        DEFAULT_SETTINGS_VALUES.main_window_close_behavior,
+      ],
+      [
+        "DEFAULT_PLAYING_AUDIO_HANDLING",
+        DEFAULT_SETTINGS_VALUES.playing_audio_handling,
+      ],
+      ["DEFAULT_OCR_MODEL", DEFAULT_SETTINGS_VALUES.ocr_model],
+      ["DEFAULT_OCR_AUTH_MODE", DEFAULT_SETTINGS_VALUES.ocr_auth_mode],
+      [
+        "DEFAULT_OCR_AUTO_CAPTURE_TIMING",
+        DEFAULT_SETTINGS_VALUES.ocr_auto_capture_timing,
+      ],
+      ["DEFAULT_OCR_RESIZE_FILTER", DEFAULT_SETTINGS_VALUES.ocr_resize_filter],
+      [
+        "DEFAULT_ACTIVE_WINDOW_OCR_MODE",
+        DEFAULT_SETTINGS_VALUES.rewrite_active_window_ocr_mode,
+      ],
+      [
+        "DEFAULT_ACTIVE_WINDOW_OCR_MODE",
+        DEFAULT_SETTINGS_VALUES.quick_replace_active_window_ocr_mode,
+      ],
+      [
+        "DEFAULT_ACTIVE_WINDOW_OCR_MODE",
+        DEFAULT_SETTINGS_VALUES.quick_ask_active_window_ocr_mode,
+      ],
+    ] as const;
+
+    for (const [rustConst, tsValue] of stringDefaults) {
+      // This table is deliberately broad: the Settings View defaults are an
+      // interface contract, so adding a Rust runtime default without updating the
+      // TypeScript effective default should fail loudly here.
+      expect(parseRustStringConst(rustConst)).toBe(tsValue);
+    }
 	});
 
 	it("keeps shared numeric and boolean defaults aligned between TypeScript and Rust", () => {
-		expect(parseRustNumberConst("DEFAULT_OCR_REQUEST_TIMEOUT_MS")).toBe(
-			DEFAULT_SETTINGS_VALUES.ocr_request_timeout_ms,
-		);
-		expect(parseRustNumberConst("DEFAULT_OCR_CONTEXT_MAX_CHARS")).toBe(
-			DEFAULT_SETTINGS_VALUES.ocr_context_max_chars,
-		);
-		expect(parseRustNumberConst("DEFAULT_REQUEST_LOGS_RETENTION_AMOUNT")).toBe(
-			DEFAULT_SETTINGS_VALUES.request_logs_retention_amount,
-		);
-		expect(parseRustNumberConst("DEFAULT_STATS_RETENTION_MAX_BYTES")).toBe(
-			DEFAULT_SETTINGS_VALUES.stats_retention_max_bytes,
-		);
-		expect(parseRustBooleanConst("DEFAULT_SOUND_ENABLED")).toBe(
-			DEFAULT_SETTINGS_VALUES.sound_enabled,
-		);
-		expect(parseRustBooleanConst("DEFAULT_REWRITE_LLM_ENABLED")).toBe(
-			DEFAULT_SETTINGS_VALUES.rewrite_llm_enabled,
-		);
+		const numberDefaults = [
+      [
+        "DEFAULT_REQUEST_LOGS_RETENTION_AMOUNT",
+        DEFAULT_SETTINGS_VALUES.request_logs_retention_amount,
+      ],
+      [
+        "DEFAULT_REQUEST_LOGS_RETENTION_DAYS",
+        DEFAULT_SETTINGS_VALUES.request_logs_retention_days,
+      ],
+      [
+        "DEFAULT_STATS_RETENTION_VALUE",
+        DEFAULT_SETTINGS_VALUES.stats_retention_value,
+      ],
+      [
+        "DEFAULT_STATS_RETENTION_MAX_BYTES",
+        DEFAULT_SETTINGS_VALUES.stats_retention_max_bytes,
+      ],
+      [
+        "DEFAULT_OCR_REQUEST_TIMEOUT_MS",
+        DEFAULT_SETTINGS_VALUES.ocr_request_timeout_ms,
+      ],
+      [
+        "DEFAULT_OCR_CONTEXT_MAX_CHARS",
+        DEFAULT_SETTINGS_VALUES.ocr_context_max_chars,
+      ],
+      [
+        "DEFAULT_OCR_HALLUCINATION_THRESHOLD",
+        DEFAULT_SETTINGS_VALUES.ocr_hallucination_threshold,
+      ],
+      [
+        "DEFAULT_OCR_RESIZE_MAX_DIMENSION",
+        DEFAULT_SETTINGS_VALUES.ocr_resize_max_dimension,
+      ],
+      [
+        "DEFAULT_HOT_MIC_PRE_ROLL_MS",
+        DEFAULT_SETTINGS_VALUES.hot_mic_pre_roll_ms,
+      ],
+      [
+        "DEFAULT_QUIET_AUDIO_MIN_DURATION_SECS",
+        DEFAULT_SETTINGS_VALUES.quiet_audio_min_duration_secs,
+      ],
+      [
+        "DEFAULT_QUIET_AUDIO_RMS_DBFS_THRESHOLD",
+        DEFAULT_SETTINGS_VALUES.quiet_audio_rms_dbfs_threshold,
+      ],
+      [
+        "DEFAULT_QUIET_AUDIO_PEAK_DBFS_THRESHOLD",
+        DEFAULT_SETTINGS_VALUES.quiet_audio_peak_dbfs_threshold,
+      ],
+    ] as const;
+    const booleanDefaults = [
+      ["DEFAULT_STT_LIVE_OUTPUT", DEFAULT_SETTINGS_VALUES.stt_live_output],
+      [
+        "DEFAULT_STT_SIMULATED_STREAMING",
+        DEFAULT_SETTINGS_VALUES.stt_simulated_streaming,
+      ],
+      ["DEFAULT_SOUND_ENABLED", DEFAULT_SETTINGS_VALUES.sound_enabled],
+      [
+        "DEFAULT_REWRITE_LLM_ENABLED",
+        DEFAULT_SETTINGS_VALUES.rewrite_llm_enabled,
+      ],
+      [
+        "DEFAULT_QUICK_REPLACE_ENABLED",
+        DEFAULT_SETTINGS_VALUES.quick_replace_enabled,
+      ],
+      [
+        "DEFAULT_OCR_HALLUCINATION_PROTECTION",
+        DEFAULT_SETTINGS_VALUES.ocr_hallucination_protection,
+      ],
+      ["DEFAULT_HOT_MIC_ENABLED", DEFAULT_SETTINGS_VALUES.hot_mic_enabled],
+      [
+        "DEFAULT_MIC_AUTO_RECOVER_ENABLED",
+        DEFAULT_SETTINGS_VALUES.mic_auto_recover_enabled,
+      ],
+      [
+        "DEFAULT_QUIET_AUDIO_GATE_ENABLED",
+        DEFAULT_SETTINGS_VALUES.quiet_audio_gate_enabled,
+      ],
+      [
+        "DEFAULT_QUIET_AUDIO_REQUIRE_SPEECH",
+        DEFAULT_SETTINGS_VALUES.quiet_audio_require_speech,
+      ],
+      [
+        "DEFAULT_AUDIO_DOWNMIX_TO_MONO",
+        DEFAULT_SETTINGS_VALUES.audio_downmix_to_mono,
+      ],
+      [
+        "DEFAULT_AUDIO_RESAMPLE_TO_16KHZ",
+        DEFAULT_SETTINGS_VALUES.audio_resample_to_16khz,
+      ],
+      [
+        "DEFAULT_AUDIO_HIGHPASS_ENABLED",
+        DEFAULT_SETTINGS_VALUES.audio_highpass_enabled,
+      ],
+      ["DEFAULT_AUDIO_AGC_ENABLED", DEFAULT_SETTINGS_VALUES.audio_agc_enabled],
+      [
+        "DEFAULT_AUDIO_NOISE_SUPPRESSION_ENABLED",
+        DEFAULT_SETTINGS_VALUES.audio_noise_suppression_enabled,
+      ],
+    ] as const;
+
+    for (const [rustConst, tsValue] of numberDefaults) {
+      expect(parseRustNumberConst(rustConst)).toBe(tsValue);
+    }
+
+    for (const [rustConst, tsValue] of booleanDefaults) {
+      expect(parseRustBooleanConst(rustConst)).toBe(tsValue);
+    }
 	});
 });
