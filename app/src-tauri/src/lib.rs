@@ -1,25 +1,8 @@
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_cli::CliExt;
 use tracing::Instrument;
-
-fn truncate_utf8_to_byte_cap(s: &str, cap_bytes: usize) -> &str {
-    // Conversation-history snippets use a compact trailing ellipsis rather than
-    // the multi-line "… (truncated)" context marker used by prompt context blocks.
-    // Keep this tiny helper local until conversation history joins Context Capture.
-    if s.len() <= cap_bytes {
-        return s;
-    }
-
-    let mut idx = cap_bytes;
-    while idx > 0 && !s.is_char_boundary(idx) {
-        idx -= 1;
-    }
-
-    &s[..idx]
-}
 
 // Extraction buckets: settings defaults, overlay wiring, shortcuts lifecycle, bootstrap wiring.
 
@@ -54,6 +37,7 @@ mod ocr;
 mod overlay;
 mod pipeline;
 mod policy;
+mod prompt_builders;
 mod recordings;
 mod request_log;
 mod router_embeddings_cache;
@@ -140,7 +124,7 @@ mod tests;
 use audio_mute::AudioMuteManager;
 use history::{HistoryStorage, RequestModelInfo};
 use recordings::RecordingStore;
-use request_log::{RequestKind, RequestLogStore};
+use request_log::RequestLogStore;
 use state::{AppState, MicTestMeterState, QuickAskConversationMemory, TrayKeepAlive};
 
 #[cfg(desktop)]
@@ -391,149 +375,73 @@ pub(crate) fn stop_recording(
             pipeline_clone.start_ocr_task_if_auto(&ocr_config, should_auto_ocr);
         }
 
-        #[derive(Clone, Debug, Default)]
-        struct QuickAskProfileConfig {
-            provider: Option<String>,
-            model: Option<String>,
-            system_prompt: Option<String>,
-            openai_reasoning_effort: Option<String>,
-            gemini_thinking_budget: Option<i64>,
-            gemini_thinking_level: Option<String>,
-            anthropic_thinking_budget: Option<i64>,
-            include_clipboard_context: bool,
-        }
-
-        let quick_ask_profile_cfg: QuickAskProfileConfig = {
-            let include_clipboard_context = profile
-                .as_ref()
-                .and_then(|p| p.quick_ask_include_clipboard_context)
-                .or_else(|| default_profile.and_then(|p| p.quick_ask_include_clipboard_context))
-                .unwrap_or(false);
-
-            profile
-                .as_ref()
-                .map(|p| QuickAskProfileConfig {
-                    provider: p.quick_ask_provider.clone(),
-                    model: p.quick_ask_model.clone(),
-                    system_prompt: p.quick_ask_system_prompt.clone(),
-                    openai_reasoning_effort: p.quick_ask_openai_reasoning_effort.clone(),
-                    gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
-                    gemini_thinking_level: p.quick_ask_gemini_thinking_level.clone(),
-                    anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
-                    include_clipboard_context,
-                })
-                .unwrap_or(QuickAskProfileConfig {
-                    include_clipboard_context,
-                    ..Default::default()
-                })
-        };
-
-        const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT: &str =
-            "You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
-
-        #[derive(Clone, Debug, Default)]
-        struct QuickReplaceProfileConfig {
-            enabled: bool,
-            provider: Option<String>,
-            model: Option<String>,
-            system_prompt: String,
-            include_clipboard_context: bool,
-        }
+        let quick_ask_profile_cfg =
+            sessions::quick_action_lifecycle::QuickAskProfileConfig::from_profiles(
+                profile.as_ref(),
+                default_profile,
+            );
 
         // Context grabbing method (highlighted selection capture).
         // This is a per-profile setting; when unset, we default to Ctrl+C.
-        let context_grab_method: crate::commands::text::ContextGrabMethod = {
-            let method_str = profile
-                .as_ref()
-                .and_then(|p| p.context_grab_method.clone())
-                .or_else(|| default_profile.and_then(|p| p.context_grab_method.clone()));
+        let context_grab_method = sessions::quick_action_lifecycle::resolve_context_grab_method(
+            profile.as_ref(),
+            default_profile,
+        );
 
-            match method_str.as_deref() {
-                Some("none") => crate::commands::text::ContextGrabMethod::None,
-                Some("ctrl_shift_c") => crate::commands::text::ContextGrabMethod::CtrlShiftC,
-                Some("ctrl_insert") => crate::commands::text::ContextGrabMethod::CtrlInsert,
-                _ => crate::commands::text::ContextGrabMethod::CtrlC,
-            }
-        };
+        // Backward-compatible fallback to the legacy global key (pre per-profile settings).
+        let quick_replace_enabled_legacy: bool =
+            get_setting_from_store(app, "quick_replace_enabled", false);
 
-        let quick_replace_cfg: QuickReplaceProfileConfig = {
-            let enabled_opt = profile
-                .as_ref()
-                .and_then(|p| p.quick_replace_enabled)
-                .or_else(|| default_profile.and_then(|p| p.quick_replace_enabled));
+        let quick_replace_cfg = sessions::quick_action_lifecycle::QuickReplaceConfig::resolve(
+            profile.as_ref(),
+            default_profile,
+            &config.llm_config,
+            is_quick_ask_session,
+            quick_replace_enabled_legacy,
+        );
 
-            // Backward-compatible fallback to the legacy global key (pre per-profile settings).
-            let enabled_legacy: bool = get_setting_from_store(app, "quick_replace_enabled", false);
-
-            let enabled = !is_quick_ask_session && enabled_opt.unwrap_or(enabled_legacy);
-
-            let provider = profile
-                .as_ref()
-                .and_then(|p| p.quick_replace_provider.clone())
-                .or_else(|| default_profile.and_then(|p| p.quick_replace_provider.clone()))
-                .or_else(|| profile.as_ref().and_then(|p| p.llm_provider.clone()))
-                .or_else(|| default_profile.and_then(|p| p.llm_provider.clone()))
-                .or(Some(config.llm_config.provider.clone()));
-
-            let provider_for_default_model = provider.as_deref().unwrap_or("openai");
-
-            let model = profile
-                .as_ref()
-                .and_then(|p| p.quick_replace_model.clone())
-                .or_else(|| default_profile.and_then(|p| p.quick_replace_model.clone()))
-                .or_else(|| profile.as_ref().and_then(|p| p.llm_model.clone()))
-                .or_else(|| default_profile.and_then(|p| p.llm_model.clone()))
-                .or_else(|| config.llm_config.model.clone())
-                .or_else(|| {
-                    llm::default_llm_model_for_provider(provider_for_default_model)
-                        .map(|m| m.to_string())
-                });
-
-            let system_prompt = profile
-                .as_ref()
-                .and_then(|p| p.quick_replace_system_prompt.clone())
-                .or_else(|| default_profile.and_then(|p| p.quick_replace_system_prompt.clone()))
-                .unwrap_or_else(|| DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT.to_string());
-
-            let include_clipboard_context = profile
-                .as_ref()
-                .and_then(|p| p.quick_replace_include_clipboard_context)
-                .or_else(|| default_profile.and_then(|p| p.quick_replace_include_clipboard_context))
-                .unwrap_or(false);
-
-            QuickReplaceProfileConfig {
-                enabled,
-                provider,
-                model,
-                system_prompt,
-                include_clipboard_context,
-            }
-        };
+        let recording_intent = sessions::quick_action_lifecycle::RecordingIntent::from_flags(
+            is_quick_ask_session,
+            quick_replace_cfg.enabled,
+        );
 
         // Quick Replace: probe for currently highlighted text while transcription runs.
-        let quick_replace_epoch: u64 = if quick_replace_cfg.enabled {
+        let quick_replace_epoch: u64 = if recording_intent.may_attempt_quick_replace() {
             sessions::selection_probe::spawn_probe(
                 app,
-                sessions::selection_probe::ProbeKind::QuickReplace,
+                sessions::quick_action_lifecycle::QuickActionKind::QuickReplace.probe_kind(),
                 context_grab_method,
             )
         } else {
             0
         };
+        let quick_replace_probe_plan = sessions::quick_action_lifecycle::QuickActionProbePlan::new(
+            sessions::quick_action_lifecycle::QuickActionKind::QuickReplace,
+            quick_replace_epoch,
+            context_grab_method,
+            sessions::quick_action_lifecycle::DEFAULT_QUICK_ACTION_PROBE_TIMEOUT_MS,
+        );
 
         // Quick Ask: probe for currently highlighted text to use as additional context.
         let quick_ask_include_selected_text: bool =
             get_setting_from_store(app, "quick_ask_include_selected_text", false);
 
-        let quick_ask_epoch: u64 = if is_quick_ask_session && quick_ask_include_selected_text {
-            sessions::selection_probe::spawn_probe(
-                app,
-                sessions::selection_probe::ProbeKind::QuickAsk,
-                context_grab_method,
-            )
-        } else {
-            0
-        };
+        let quick_ask_epoch: u64 =
+            if recording_intent.is_quick_ask() && quick_ask_include_selected_text {
+                sessions::selection_probe::spawn_probe(
+                    app,
+                    sessions::quick_action_lifecycle::QuickActionKind::QuickAsk.probe_kind(),
+                    context_grab_method,
+                )
+            } else {
+                0
+            };
+        let quick_ask_probe_plan = sessions::quick_action_lifecycle::QuickActionProbePlan::new(
+            sessions::quick_action_lifecycle::QuickActionKind::QuickAsk,
+            quick_ask_epoch,
+            context_grab_method,
+            sessions::quick_action_lifecycle::DEFAULT_QUICK_ACTION_PROBE_TIMEOUT_MS,
+        );
 
         // Capture current request id (for history + retry audio).
         //
@@ -739,7 +647,8 @@ pub(crate) fn stop_recording(
                         // until the extra LLM step completes, otherwise the UI won't capture
                         // the additional diagnostics.
                         let should_complete_now = !(is_quick_ask_session
-                            || (quick_replace_cfg.enabled && quick_replace_epoch != 0));
+                            || (quick_replace_cfg.enabled
+                                && quick_replace_probe_plan.should_await()));
 
                         log_store.with_current(|log| {
                             // Raw STT output (pre-LLM)
@@ -889,1266 +798,77 @@ pub(crate) fn stop_recording(
                         // Quick Replace may overwrite this when a selection is present.
                         let mut output_value = text.clone();
 
-                        // If Quick Replace was intended (selection present) but the rewrite failed,
-                        // capture the error here so we can:
-                        // - mark the request log + history as error
-                        // - show the overlay error state with retry
-                        // - avoid pasting the plain transcript into the selection
-                        let mut quick_replace_failure: Option<String> = None;
-
                         // Quick Ask: instead of outputting/pasting the transcript, send it to an LLM
                         // for an answer and show it in a dedicated overlay.
                         if is_quick_ask_session {
-                            let question = sanitize_transcript(&result.stt_text)
-                                .unwrap_or_else(|| text.clone())
-                                .trim()
-                                .to_string();
+                            sessions::quick_action_execution::answer_quick_ask(
+                                sessions::quick_action_execution::QuickAskExecution {
+                                    app: &app_clone,
+                                    pipeline: &pipeline_clone,
+                                    request_id: request_id.as_deref(),
+                                    result: &result,
+                                    fallback_text: text,
+                                    profile_config: &quick_ask_profile_cfg,
+                                    probe_plan: quick_ask_probe_plan,
+                                    ocr_mode: quick_ask_ocr_mode.as_str(),
+                                    ocr_config: &ocr_config,
+                                },
+                            )
+                            .await;
 
-                            if question.is_empty() {
-                                // Quick Ask is considered the "request" here, so mark the request log
-                                // accordingly and finalize it.
-                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                    log_store.with_current(|log| {
-                                        log.kind = RequestKind::QuickAsk;
-                                        log.quick_ask_question = Some(String::new());
-                                        log.quick_ask_answer = None;
-                                        log.error(
-                                            "Quick Ask failed: no transcript to answer (empty)",
-                                        );
-                                        log.complete_error("No transcript to answer (empty)");
-                                    });
-
-                                    if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                                        stats::emit_cost_events_for_current_request(
-                                            &app_clone,
-                                            stats::EventStatus::Error,
-                                            Some(&wav),
-                                        );
-                                    }
-
-                                    log_store.complete_current();
-                                }
-
-                                crate::sessions::quick_ask::emit_to_quick_ask(
-                                    &app_clone,
-                                    crate::sessions::quick_ask::EVENT_QUICK_ASK_STARTED,
-                                    QuickAskStartedPayload {
-                                        question: Some(String::new()),
-                                        provider: None,
-                                        model: None,
-                                    },
-                                );
-
-                                crate::sessions::quick_ask::emit_to_quick_ask(
-                                    &app_clone,
-                                    crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
-                                    QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
-                                        ok: false,
-                                        error: "No transcript to answer (empty)".to_string(),
-                                    }),
-                                );
-                            } else {
-                                // Resolve effective Quick Ask configuration:
-                                // per-profile override -> global Quick Ask defaults -> global rewrite provider -> fallback.
-                                let global_quick_ask_provider: Option<String> =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_provider",
-                                        Option::<String>::None,
-                                    );
-                                let global_quick_ask_model: Option<String> = get_setting_from_store(
-                                    &app_clone,
-                                    "quick_ask_model",
-                                    Option::<String>::None,
-                                );
-                                let global_quick_ask_system_prompt: Option<String> =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_system_prompt",
-                                        Option::<String>::None,
-                                    );
-
-                                // Quick Ask conversation history (in-memory only).
-                                let quick_ask_conversation_history_enabled: bool =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_conversation_history_enabled",
-                                        true,
-                                    );
-                                let quick_ask_conversation_history_count_raw: u64 =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_conversation_history_count",
-                                        3u64,
-                                    );
-                                let quick_ask_conversation_history_count: usize =
-                                    quick_ask_conversation_history_count_raw.clamp(1, 20) as usize;
-
-                                let request_logs_privacy_mode: bool = get_setting_from_store(
-                                    &app_clone,
-                                    "request_logs_privacy_mode",
-                                    false,
-                                );
-
-                                let global_qa_openai_reasoning_effort: Option<String> =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_openai_reasoning_effort",
-                                        Option::<String>::None,
-                                    );
-                                let global_qa_gemini_thinking_budget: Option<i64> =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_gemini_thinking_budget",
-                                        Option::<i64>::None,
-                                    );
-                                let global_qa_gemini_thinking_level: Option<String> =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_gemini_thinking_level",
-                                        Option::<String>::None,
-                                    );
-                                let global_qa_anthropic_thinking_budget: Option<i64> =
-                                    get_setting_from_store(
-                                        &app_clone,
-                                        "quick_ask_anthropic_thinking_budget",
-                                        Option::<i64>::None,
-                                    );
-
-                                let fallback_provider: Option<String> = get_setting_from_store(
-                                    &app_clone,
-                                    "llm_provider",
-                                    Option::<String>::None,
-                                );
-
-                                let provider = quick_ask_profile_cfg
-                                    .provider
-                                    .clone()
-                                    .or(global_quick_ask_provider)
-                                    .or(fallback_provider)
-                                    .unwrap_or_else(|| "openai".to_string());
-                                let model = quick_ask_profile_cfg
-                                    .model
-                                    .clone()
-                                    .or(global_quick_ask_model);
-
-                                let system_prompt = quick_ask_profile_cfg
-                                    .system_prompt
-                                    .clone()
-                                    .or(global_quick_ask_system_prompt)
-                                    .unwrap_or_else(|| {
-                                        "You are a helpful assistant. Answer the user's question based on the transcript.".to_string()
-                                    });
-
-                                let openai_reasoning_effort = quick_ask_profile_cfg
-                                    .openai_reasoning_effort
-                                    .clone()
-                                    .or(global_qa_openai_reasoning_effort);
-                                let gemini_thinking_budget = quick_ask_profile_cfg
-                                    .gemini_thinking_budget
-                                    .or(global_qa_gemini_thinking_budget);
-                                let gemini_thinking_level = quick_ask_profile_cfg
-                                    .gemini_thinking_level
-                                    .clone()
-                                    .or(global_qa_gemini_thinking_level);
-                                let anthropic_thinking_budget = quick_ask_profile_cfg
-                                    .anthropic_thinking_budget
-                                    .or(global_qa_anthropic_thinking_budget);
-
-                                // Attach Quick Ask metadata to the current request log so it shows up
-                                // as a distinct type in the UI.
-                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                    log_store.with_current(|log| {
-                                        log.kind = RequestKind::QuickAsk;
-                                        log.quick_ask_question = Some(question.clone());
-                                        log.quick_ask_provider = Some(provider.clone());
-                                        log.quick_ask_model = model.clone();
-                                        log.quick_ask_request_json = Some(serde_json::json!({
-                                                "system_prompt": system_prompt.clone(),
-                                                "question": question.clone(),
-                                                "ocr_mode": quick_ask_ocr_mode.clone(),
-                                                "provider": provider.clone(),
-                                                "model": model.clone(),
-                                        }));
-                                        log.info("Quick Ask: starting answer generation");
-                                    });
-                                }
-
-                                crate::sessions::quick_ask::emit_to_quick_ask(
-                                    &app_clone,
-                                    crate::sessions::quick_ask::EVENT_QUICK_ASK_STARTED,
-                                    QuickAskStartedPayload {
-                                        question: Some(question.clone()),
-                                        provider: Some(provider.clone()),
-                                        model: model.clone(),
-                                    },
-                                );
-
-                                let cfg = pipeline_clone.config();
-                                let api_key = if provider == "ollama" {
-                                    String::new()
-                                } else {
-                                    cfg.llm_api_keys
-                                        .get(provider.as_str())
-                                        .cloned()
-                                        .unwrap_or_default()
-                                };
-
-                                if provider != "ollama" && api_key.trim().is_empty() {
-                                    let err =
-                                        format!("No API key configured for provider: {}", provider);
-                                    if let Some(log_store) =
-                                        app_clone.try_state::<RequestLogStore>()
-                                    {
-                                        log_store.with_current(|log| {
-                                            log.kind = RequestKind::QuickAsk;
-                                            log.error(format!("Quick Ask failed: {}", err));
-                                            log.complete_error(err.clone());
-                                        });
-
-                                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                                            stats::emit_cost_events_for_current_request(
-                                                &app_clone,
-                                                stats::EventStatus::Error,
-                                                Some(&wav),
-                                            );
-                                        }
-
-                                        log_store.complete_current();
-                                    }
-
-                                    if let Some(req_id) = request_id.as_deref() {
-                                        pipeline_clone.end_ocr_session_if_matches(req_id);
-                                    }
-
-                                    crate::sessions::quick_ask::emit_to_quick_ask(
-                                        &app_clone,
-                                        crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
-                                        QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
-                                            ok: false,
-                                            error: err,
-                                        }),
-                                    );
-                                } else {
-                                    let provider_cfg = crate::llm::LlmConfig {
-                                        enabled: true,
-                                        provider: provider.clone(),
-                                        api_key,
-                                        model: model.clone(),
-                                        ollama_url: cfg.llm_config.ollama_url.clone(),
-                                        managed_gateway_url: cfg
-                                            .llm_config
-                                            .managed_gateway_url
-                                            .clone(),
-                                        openai_reasoning_effort,
-                                        gemini_thinking_budget,
-                                        gemini_thinking_level,
-                                        anthropic_thinking_budget,
-                                        prompts: crate::llm::PromptSections::default(),
-                                        program_prompt_profiles: Vec::new(),
-                                        timeout: cfg.llm_config.timeout,
-                                    };
-
-                                    let provider_impl =
-                                        crate::commands::llm::create_llm_provider_unstructured(
-                                            &provider_cfg,
-                                        );
-
-                                    // Best-effort: attach any highlighted text captured at recording stop.
-                                    // We keep this bounded so we don't blow up token usage.
-                                    let selection_context =
-                                        sessions::selection_probe::await_probe_result(
-                                            &app_clone,
-                                            sessions::selection_probe::ProbeKind::QuickAsk,
-                                            quick_ask_epoch,
-                                            700,
-                                        )
-                                        .await;
-
-                                    let selected_context_trimmed = selection_context
-                                        .as_ref()
-                                        .and_then(|ctx| ctx.selection_text.as_deref())
-                                        .map(str::trim)
-                                        .filter(|s| !s.is_empty());
-
-                                    let surrounding_context_trimmed = selection_context
-                                        .as_ref()
-                                        .and_then(|ctx| ctx.surrounding_text.as_deref())
-                                        .map(str::trim)
-                                        .filter(|s| !s.is_empty());
-
-                                    // Read clipboard context if enabled for this profile.
-                                    let clipboard_text: Option<String> = if quick_ask_profile_cfg
-                                        .include_clipboard_context
-                                    {
-                                        // The selection probe may temporarily write a sentinel token into the clipboard
-                                        // while it waits for the target app to copy the selection.
-                                        // If we read clipboard context during that window, request logs can end up with
-                                        // "__kolboo_selection_probe__..." as the clipboard context.
-                                        // Wait for probe to finish first.
-                                        let _ = sessions::selection_probe::await_probe_result(
-                                            &app_clone,
-                                            sessions::selection_probe::ProbeKind::QuickAsk,
-                                            quick_ask_epoch,
-                                            350,
-                                        )
-                                        .await;
-
-                                        let is_probe_sentinel = |s: &str| {
-                                            s.trim_start().starts_with("__kolboo_selection_probe__")
-                                        };
-
-                                        let v_first =
-                                            clipboard_context::read_clipboard_text_best_effort_async(8000).await;
-
-                                        // If we still see the sentinel, wait a beat and retry once.
-                                        let v = if v_first.as_deref().is_some_and(is_probe_sentinel)
-                                        {
-                                            tokio::time::sleep(Duration::from_millis(120)).await;
-                                            clipboard_context::read_clipboard_text_best_effort_async(8000).await
-                                        } else {
-                                            v_first
-                                        };
-
-                                        if v.as_deref().is_some_and(is_probe_sentinel) {
-                                            None
-                                        } else {
-                                            v
-                                        }
-                                    } else {
-                                        None
-                                    };
-                                    let clipboard_trimmed = clipboard_text
-                                        .as_deref()
-                                        .map(str::trim)
-                                        .filter(|s| !s.is_empty());
-
-                                    // Keep the two context sources distinct:
-                                    // - highlighted selection (grab shortcut)
-                                    // - clipboard text (optional)
-                                    // Both are independently optional.
-                                    let cap = 8_000usize;
-
-                                    let selected_context_capped =
-                                        clipboard_context::cap_optional_context_text_for_prompt(
-                                            selected_context_trimmed,
-                                            cap,
-                                        );
-
-                                    let surrounding_context_capped =
-                                        clipboard_context::cap_optional_context_text_for_prompt(
-                                            surrounding_context_trimmed,
-                                            cap,
-                                        );
-
-                                    let clipboard_context_capped =
-                                        clipboard_context::cap_optional_context_text_for_prompt(
-                                            clipboard_trimmed,
-                                            cap,
-                                        );
-
-                                    // This is the *exact* context text (if any) we attached to the question.
-                                    // Stored for request logs/UI.
-                                    let quick_ask_context_text_for_log: Option<String> =
-                                        selected_context_capped
-                                            .clone()
-                                            .or_else(|| surrounding_context_capped.clone());
-                                    let quick_ask_clipboard_context_for_log: Option<String> =
-                                        clipboard_context_capped.clone();
-
-                                    // In "manual" mode, the overlay may have already started OCR.
-                                    // If so, we should consume it here (without auto-starting).
-                                    let ocr_text = if quick_ask_ocr_mode != "off" {
-                                        pipeline_clone
-                                            .get_ocr_result_with_timeout(Duration::from_millis(
-                                                ocr_config.request_timeout_ms,
-                                            ))
-                                            .await
-                                            .map(|r| r.text)
-                                    } else {
-                                        None
-                                    };
-
-                                    // Explicit breadcrumbs so it's obvious whether OCR was actually attached.
-                                    if let Some(log_store) =
-                                        app_clone.try_state::<RequestLogStore>()
-                                    {
-                                        let ocr_status = pipeline_clone.get_ocr_status();
-                                        let ocr_chars = ocr_text.as_deref().map(|s| s.len());
-                                        let ocr_failed_reason =
-                                            pipeline_clone.get_ocr_failed_reason();
-
-                                        log_store.with_current(|log| {
-                                            if let Some(n) = ocr_chars {
-                                                log.info(format!(
-                                                    "Quick Ask: OCR context attached ({} chars)",
-                                                    n
-                                                ));
-                                            } else if quick_ask_ocr_mode != "off" {
-                                                match ocr_status.as_str() {
-                                                    "running" => {
-                                                        log.warn(format!(
-                                                            "Quick Ask: proceeding without OCR (OCR still running; timeout={}ms)",
-                                                            ocr_config.request_timeout_ms
-                                                        ));
-                                                    }
-                                                    "failed" => {
-                                                        log.warn(format!(
-                                                            "Quick Ask: proceeding without OCR (OCR failed: {})",
-                                                            ocr_failed_reason.unwrap_or_else(|| "unknown".to_string())
-                                                        ));
-                                                    }
-                                                    "cancelled" => {
-                                                        log.info(
-                                                            "Quick Ask: proceeding without OCR (OCR cancelled)".to_string(),
-                                                        );
-                                                    }
-                                                    _ => {
-                                                        log.info(format!(
-                                                            "Quick Ask: proceeding without OCR (status={})",
-                                                            ocr_status
-                                                        ));
-                                                    }
-                                                }
-                                            }
-
-                                            // Mirror the OCR attachment status into the Quick Ask request JSON.
-                                            if let Some(serde_json::Value::Object(map)) =
-                                                log.quick_ask_request_json.as_mut()
-                                            {
-                                                map.insert(
-                                                    "ocr_status".to_string(),
-                                                    serde_json::Value::String(ocr_status),
-                                                );
-                                                map.insert(
-                                                    "ocr_context_present".to_string(),
-                                                    serde_json::Value::Bool(ocr_chars.is_some()),
-                                                );
-                                                map.insert(
-                                                    "ocr_context_chars".to_string(),
-                                                    ocr_chars
-                                                        .map(|n| {
-                                                            serde_json::Value::Number(
-                                                                serde_json::Number::from(n as u64),
-                                                            )
-                                                        })
-                                                        .unwrap_or(serde_json::Value::Null),
-                                                );
-                                            }
-                                        });
-                                    }
-
-                                    let question_with_context = crate::clipboard_context::build_quick_ask_user_message_with_context(
-                                        question.as_str(),
-                                        selected_context_capped.as_deref(),
-                                        surrounding_context_capped.as_deref(),
-                                        clipboard_context_capped.as_deref(),
-                                        ocr_text.as_deref(),
-                                    );
-
-                                    // Best-effort: include last N Quick Ask turns from in-memory history.
-                                    // We intentionally do NOT persist or log this conversation content.
-                                    let question_with_context =
-                                        if quick_ask_conversation_history_enabled {
-                                            let turns: Vec<crate::state::QuickAskConversationTurn> =
-                                                app_clone
-                                                    .try_state::<QuickAskConversationMemory>()
-                                                    .map(|m| {
-                                                        m.snapshot_last(
-                                                            quick_ask_conversation_history_count,
-                                                        )
-                                                    })
-                                                    .unwrap_or_default();
-
-                                            if turns.is_empty() {
-                                                question_with_context
-                                            } else {
-                                                let mut s = String::new();
-                                                s.push_str("Previous Quick Ask conversation (most recent last):\n\n");
-
-                                                for t in turns.iter() {
-                                                    let q = t.question.trim();
-                                                    let a = t.answer.trim();
-                                                    if q.is_empty() && a.is_empty() {
-                                                        continue;
-                                                    }
-
-                                                    // Keep each turn reasonably bounded.
-                                                    let cap = 1_500usize;
-                                                    let q_capped = if q.len() > cap {
-                                                        format!(
-                                                            "{}…",
-                                                            truncate_utf8_to_byte_cap(q, cap)
-                                                        )
-                                                    } else {
-                                                        q.to_string()
-                                                    };
-                                                    let a_capped = if a.len() > cap {
-                                                        format!(
-                                                            "{}…",
-                                                            truncate_utf8_to_byte_cap(a, cap)
-                                                        )
-                                                    } else {
-                                                        a.to_string()
-                                                    };
-
-                                                    s.push_str("User: ");
-                                                    s.push_str(&q_capped);
-                                                    s.push_str("\nAssistant: ");
-                                                    s.push_str(&a_capped);
-                                                    s.push_str("\n\n");
-                                                }
-
-                                                s.push_str("---\n\n");
-                                                s.push_str(&question_with_context);
-                                                s
-                                            }
-                                        } else {
-                                            question_with_context
-                                        };
-
-                                    // Update the logical request payload to indicate context was used.
-                                    // We avoid logging the raw context string by default (it may contain secrets).
-                                    if let Some(log_store) =
-                                        app_clone.try_state::<RequestLogStore>()
-                                    {
-                                        let context_chars =
-                                            selected_context_trimmed.map(|s| s.len()).or_else(
-                                                || surrounding_context_trimmed.map(|s| s.len()),
-                                            );
-                                        let clipboard_chars = clipboard_trimmed.map(|s| s.len());
-                                        let ocr_chars = ocr_text.as_deref().map(|s| s.len());
-                                        let ocr_failed_reason =
-                                            pipeline_clone.get_ocr_failed_reason();
-                                        let quick_ask_context_text_for_log =
-                                            quick_ask_context_text_for_log.clone();
-                                        let quick_ask_clipboard_context_for_log =
-                                            quick_ask_clipboard_context_for_log.clone();
-                                        log_store.with_current(|log| {
-                                            log.quick_ask_context_text =
-                                                quick_ask_context_text_for_log;
-                                            log.quick_ask_clipboard_context =
-                                                quick_ask_clipboard_context_for_log;
-                                            log.ocr_context_present = ocr_chars.is_some();
-                                            log.ocr_context_chars = ocr_chars.map(|n| n as u64);
-                                            log.ocr_context_text = ocr_text.clone();
-                                            if ocr_chars.is_none() {
-                                                log.ocr_failed_reason = ocr_failed_reason;
-                                            }
-
-                                            if let Some(serde_json::Value::Object(map)) =
-                                                log.quick_ask_request_json.as_mut()
-                                            {
-                                                if !request_logs_privacy_mode {
-                                                    map.insert(
-                                                        "user_message".to_string(),
-                                                        serde_json::Value::String(
-                                                            question_with_context.clone(),
-                                                        ),
-                                                    );
-                                                }
-                                                map.insert(
-                                                    "context_present".to_string(),
-                                                    serde_json::Value::Bool(
-                                                        context_chars.is_some(),
-                                                    ),
-                                                );
-                                                map.insert(
-                                                    "context_chars".to_string(),
-                                                    context_chars
-                                                        .map(|n| {
-                                                            serde_json::Value::Number(
-                                                                serde_json::Number::from(n as u64),
-                                                            )
-                                                        })
-                                                        .unwrap_or(serde_json::Value::Null),
-                                                );
-                                                map.insert(
-                                                    "clipboard_context_present".to_string(),
-                                                    serde_json::Value::Bool(
-                                                        clipboard_chars.is_some(),
-                                                    ),
-                                                );
-                                                map.insert(
-                                                    "clipboard_context_chars".to_string(),
-                                                    clipboard_chars
-                                                        .map(|n| {
-                                                            serde_json::Value::Number(
-                                                                serde_json::Number::from(n as u64),
-                                                            )
-                                                        })
-                                                        .unwrap_or(serde_json::Value::Null),
-                                                );
-                                            }
-                                        });
-                                    }
-
-                                    let t0 = std::time::Instant::now();
-                                    match provider_impl
-                                        .complete(
-                                            system_prompt.as_str(),
-                                            question_with_context.as_str(),
-                                        )
-                                        .await
-                                    {
-                                        Ok(answer) => {
-                                            let answer = answer.trim().to_string();
-                                            let duration_ms = t0.elapsed().as_millis() as u64;
-
-                                            // Record the successful Q/A turn into in-memory Quick Ask history.
-                                            if let Some(mem) =
-                                                app_clone.try_state::<QuickAskConversationMemory>()
-                                            {
-                                                mem.push_turn(question.clone(), answer.clone());
-                                            }
-
-                                            if let Some(log_store) =
-                                                app_clone.try_state::<RequestLogStore>()
-                                            {
-                                                log_store.with_current(|log| {
-                                                    log.kind = RequestKind::QuickAsk;
-                                                    log.quick_ask_answer = Some(answer.clone());
-                                                    log.quick_ask_provider =
-                                                        Some(provider_impl.name().to_string());
-                                                    log.quick_ask_model =
-                                                        Some(provider_impl.model().to_string());
-                                                    log.quick_ask_duration_ms = Some(duration_ms);
-                                                    log.quick_ask_response_json =
-                                                        Some(serde_json::json!({
-                                                            "ok": true,
-                                                            "answer": answer.clone(),
-                                                            "provider_used": provider_impl.name(),
-                                                            "model_used": provider_impl.model(),
-                                                            "duration_ms": duration_ms,
-                                                        }));
-                                                    log.complete_success();
-                                                });
-
-                                                if let Some(wav) =
-                                                    pipeline_clone.clone_last_wav_bytes()
-                                                {
-                                                    stats::emit_cost_events_for_current_request(
-                                                        &app_clone,
-                                                        stats::EventStatus::Success,
-                                                        Some(&wav),
-                                                    );
-                                                }
-
-                                                log_store.complete_current();
-                                            }
-
-                                            if let Some(req_id) = request_id.as_deref() {
-                                                pipeline_clone.end_ocr_session_if_matches(req_id);
-                                            }
-
-                                            crate::sessions::quick_ask::emit_to_quick_ask(
-                                                &app_clone,
-                                                crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
-                                                QuickAskAnswerPayload::Ok(
-                                                    QuickAskAnswerOkPayload {
-                                                        ok: true,
-                                                        answer,
-                                                        provider_used: Some(
-                                                            provider_impl.name().to_string(),
-                                                        ),
-                                                        model_used: Some(
-                                                            provider_impl.model().to_string(),
-                                                        ),
-                                                        duration_ms: Some(duration_ms),
-                                                    },
-                                                ),
-                                            );
-
-                                            // Show the Quick Ask window only once we have something to display.
-                                            crate::sessions::quick_ask::ensure_quick_ask_window_visible(&app_clone);
-                                        }
-                                        Err(e) => {
-                                            let err = e.to_string();
-                                            if let Some(log_store) =
-                                                app_clone.try_state::<RequestLogStore>()
-                                            {
-                                                log_store.with_current(|log| {
-                                                    log.kind = RequestKind::QuickAsk;
-                                                    log.quick_ask_answer = None;
-                                                    log.quick_ask_response_json =
-                                                        Some(serde_json::json!({
-                                                            "ok": false,
-                                                            "error": err.clone(),
-                                                        }));
-                                                    log.error(format!(
-                                                        "Quick Ask failed: {}",
-                                                        err.clone()
-                                                    ));
-                                                    log.complete_error(err.clone());
-                                                });
-
-                                                if let Some(wav) =
-                                                    pipeline_clone.clone_last_wav_bytes()
-                                                {
-                                                    stats::emit_cost_events_for_current_request(
-                                                        &app_clone,
-                                                        stats::EventStatus::Error,
-                                                        Some(&wav),
-                                                    );
-                                                }
-
-                                                log_store.complete_current();
-                                            }
-
-                                            if let Some(req_id) = request_id.as_deref() {
-                                                pipeline_clone.end_ocr_session_if_matches(req_id);
-                                            }
-
-                                            crate::sessions::quick_ask::emit_to_quick_ask(
-                                                &app_clone,
-                                                crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
-                                                QuickAskAnswerPayload::Err(
-                                                    QuickAskAnswerErrorPayload {
-                                                        ok: false,
-                                                        error: err,
-                                                    },
-                                                ),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
+                            // Preserve the pre-extraction stop_recording ordering: Quick Ask owns
+                            // its request-log/provider lifecycle, then global recording retention
+                            // still runs before the overlay-hide follow-up below.
+                            commands::recording::apply_transcription_retention(&app_clone);
                         } else {
-                            // Output the transcript based on mode.
-                            // If Quick Replace is enabled and we captured highlighted text when transcription started,
-                            // rewrite the selection using the transcript as an instruction.
-                            if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
-                                // Wait briefly for the selection probe to finish (best-effort).
-                                let selection_context =
-                                    sessions::selection_probe::await_probe_result(
-                                        &app_clone,
-                                        sessions::selection_probe::ProbeKind::QuickReplace,
-                                        quick_replace_epoch,
-                                        700,
-                                    )
-                                    .await;
+                            let quick_replace_result =
+                                sessions::quick_action_execution::try_quick_replace(
+                                    sessions::quick_action_execution::QuickReplaceExecution {
+                                        app: &app_clone,
+                                        pipeline: &pipeline_clone,
+                                        request_id: request_id.as_deref(),
+                                        config: &quick_replace_cfg,
+                                        probe_plan: quick_replace_probe_plan,
+                                        ocr_mode: quick_replace_ocr_mode.as_str(),
+                                        ocr_config: &ocr_config,
+                                        output_value,
+                                    },
+                                )
+                                .await;
+                            output_value = quick_replace_result.output_value;
+                            let quick_replace_failure = quick_replace_result.failure;
 
-                                let selected_text = selection_context
-                                    .as_ref()
-                                    .and_then(|ctx| ctx.selection_text.as_deref())
-                                    .map(str::trim)
-                                    .filter(|s| !s.is_empty());
-
-                                let surrounding_text = selection_context
-                                    .as_ref()
-                                    .and_then(|ctx| ctx.surrounding_text.as_deref())
-                                    .map(str::trim)
-                                    .filter(|s| !s.is_empty());
-
-                                if let Some(selected) = selected_text {
-                                    let ocr_text = if quick_replace_ocr_mode != "off" {
-                                        pipeline_clone
-                                            .get_ocr_result_with_timeout(Duration::from_millis(
-                                                ocr_config.request_timeout_ms,
-                                            ))
-                                            .await
-                                            .map(|r| r.text)
-                                    } else {
-                                        None
-                                    };
-
-                                    if let Some(log_store) =
-                                        app_clone.try_state::<RequestLogStore>()
-                                    {
-                                        log_store.with_current(|log| {
-                                            log.kind = RequestKind::QuickReplace;
-                                            log.info(format!(
-                                                "Quick replace: rewriting selection ({} chars)",
-                                                selected.len()
-                                            ));
-
-                                            // Best-effort: keep these bounded so request logs stay usable.
-                                            let cap = 8_000usize;
-                                            let selected_capped =
-                                                clipboard_context::cap_context_text_for_prompt(
-                                                    selected, cap,
-                                                );
-
-                                            let instructions = output_value.trim().to_string();
-                                            let instructions_capped =
-                                                clipboard_context::cap_context_text_for_prompt(
-                                                    instructions.as_str(),
-                                                    cap,
-                                                );
-
-                                            log.quick_replace_selected_text = Some(selected_capped);
-                                            log.quick_replace_instructions =
-                                                Some(instructions_capped);
-                                        });
-                                    }
-
-                                    // Resolve effective LLM config from the Quick Replace profile settings.
-                                    let cfg = pipeline_clone.config();
-                                    let provider = quick_replace_cfg
-                                        .provider
-                                        .clone()
-                                        .unwrap_or_else(|| cfg.llm_config.provider.clone());
-                                    let model = quick_replace_cfg
-                                        .model
-                                        .clone()
-                                        .or_else(|| cfg.llm_config.model.clone())
-                                        .or_else(|| {
-                                            llm::default_llm_model_for_provider(provider.as_str())
-                                                .map(|m| m.to_string())
-                                        });
-                                    let api_key = if provider == "ollama" {
-                                        String::new()
-                                    } else {
-                                        cfg.llm_api_keys
-                                            .get(provider.as_str())
-                                            .cloned()
-                                            .unwrap_or_default()
-                                    };
-
-                                    if provider != "ollama" && api_key.trim().is_empty() {
-                                        let err = format!(
-                                            "Quick Replace failed: no API key configured for provider: {}",
-                                            provider
-                                        );
-                                        if let Some(log_store) =
-                                            app_clone.try_state::<RequestLogStore>()
-                                        {
-                                            log_store.with_current(|log| {
-                                                log.warn(format!(
-                                                    "Quick replace: skipped (no API key configured for provider: {})",
-                                                    provider
-                                                ));
-                                                log.quick_replace_provider = Some(provider.clone());
-                                                log.quick_replace_model = quick_replace_cfg.model.clone();
-                                                log.quick_replace_response_json = Some(serde_json::json!({
-                                                    "ok": false,
-                                                    "error": err.clone(),
-                                                }));
-                                                log.error(err.clone());
-                                                log.complete_error(err.clone());
-                                            });
-                                        }
-
-                                        quick_replace_failure = Some(err);
-                                    } else {
-                                        // NOTE: Keep prompts minimal and instruct the model to output only the rewritten text.
-                                        let system_prompt = quick_replace_cfg.system_prompt.clone();
-                                        let instructions_text = output_value.trim().to_string();
-
-                                        // Read clipboard context if enabled for this profile.
-                                        let clipboard_text: Option<String> = if quick_replace_cfg
-                                            .include_clipboard_context
-                                        {
-                                            clipboard_context::read_clipboard_text_best_effort_async(8000).await
-                                        } else {
-                                            None
-                                        };
-
-                                        let user_prompt =
-                                            clipboard_context::build_quick_replace_user_message(
-                                                instructions_text.as_str(),
-                                                selected,
-                                                surrounding_text,
-                                                clipboard_text.as_deref(),
-                                                ocr_text.as_deref(),
-                                            );
-
-                                        // Store clipboard context in request log if present.
-                                        if let Some(ref cb_text) = clipboard_text {
-                                            if let Some(log_store) =
-                                                app_clone.try_state::<RequestLogStore>()
-                                            {
-                                                log_store.with_current(|log| {
-                                                    log.quick_replace_clipboard_context =
-                                                        Some(cb_text.clone());
-                                                });
-                                            }
-                                        }
-
-                                        if let Some(log_store) =
-                                            app_clone.try_state::<RequestLogStore>()
-                                        {
-                                            let ocr_chars = ocr_text.as_deref().map(|s| s.len());
-                                            let ocr_failed_reason =
-                                                pipeline_clone.get_ocr_failed_reason();
-                                            let ocr_text_clone = ocr_text.clone();
-                                            log_store.with_current(|log| {
-                                                log.ocr_context_present = ocr_chars.is_some();
-                                                log.ocr_context_chars = ocr_chars.map(|n| n as u64);
-                                                log.ocr_context_text = ocr_text_clone;
-                                                if ocr_chars.is_none() {
-                                                    log.ocr_failed_reason = ocr_failed_reason;
-                                                }
-                                            });
-                                        }
-
-                                        let provider_cfg = crate::llm::LlmConfig {
-                                            enabled: true,
-                                            provider: provider.clone(),
-                                            api_key,
-                                            model,
-                                            ollama_url: cfg.llm_config.ollama_url.clone(),
-                                            managed_gateway_url: cfg
-                                                .llm_config
-                                                .managed_gateway_url
-                                                .clone(),
-                                            openai_reasoning_effort: cfg
-                                                .llm_config
-                                                .openai_reasoning_effort
-                                                .clone(),
-                                            gemini_thinking_budget: cfg
-                                                .llm_config
-                                                .gemini_thinking_budget,
-                                            gemini_thinking_level: cfg
-                                                .llm_config
-                                                .gemini_thinking_level
-                                                .clone(),
-                                            anthropic_thinking_budget: cfg
-                                                .llm_config
-                                                .anthropic_thinking_budget,
-                                            prompts: crate::llm::PromptSections::default(),
-                                            program_prompt_profiles: Vec::new(),
-                                            timeout: cfg.llm_config.timeout,
-                                        };
-
-                                        let provider_impl =
-                                            crate::commands::llm::create_llm_provider_unstructured(
-                                                &provider_cfg,
-                                            );
-                                        let t0 = Instant::now();
-                                        match provider_impl
-                                            .complete(&system_prompt, &user_prompt)
-                                            .await
-                                        {
-                                            Ok(rewritten) => {
-                                                let rewritten = rewritten.trim().to_string();
-                                                if rewritten.is_empty() {
-                                                    let err = "Quick Replace failed: model returned empty output".to_string();
-                                                    if let Some(log_store) =
-                                                        app_clone.try_state::<RequestLogStore>()
-                                                    {
-                                                        log_store.with_current(|log| {
-                                                            log.kind = RequestKind::QuickReplace;
-                                                            log.quick_replace_provider = Some(
-                                                                provider_impl.name().to_string(),
-                                                            );
-                                                            log.quick_replace_model = Some(
-                                                                provider_impl.model().to_string(),
-                                                            );
-                                                            log.quick_replace_response_json =
-                                                                Some(serde_json::json!({
-                                                                    "ok": false,
-                                                                    "error": err.clone(),
-                                                                }));
-                                                            log.error(err.clone());
-                                                            log.complete_error(err.clone());
-                                                        });
-                                                    }
-                                                    quick_replace_failure = Some(err);
-                                                } else {
-                                                    output_value = rewritten;
-                                                    if let Some(log_store) =
-                                                        app_clone.try_state::<RequestLogStore>()
-                                                    {
-                                                        let ms = t0.elapsed().as_millis() as u64;
-                                                        log_store.with_current(|log| {
-                                                            log.kind = RequestKind::QuickReplace;
-                                                            log.info(format!(
-                                                                "Quick replace: rewrite succeeded in {}ms ({} chars)",
-                                                                ms,
-                                                                output_value.len()
-                                                            ));
-
-                                                            log.quick_replace_provider =
-                                                                Some(provider_impl.name().to_string());
-                                                            log.quick_replace_model =
-                                                                Some(provider_impl.model().to_string());
-                                                            log.quick_replace_duration_ms = Some(ms);
-                                                            log.quick_replace_output_text = Some(output_value.clone());
-                                                            log.quick_replace_request_json = Some(serde_json::json!({
-                                                                "provider": provider.clone(),
-                                                                "model": provider_impl.model(),
-                                                                "system_prompt": system_prompt.clone(),
-                                                                "instructions_chars": instructions_text.len(),
-                                                                "selected_text_chars": selected.len(),
-                                                            }));
-                                                            log.quick_replace_response_json = Some(serde_json::json!({
-                                                                "ok": true,
-                                                                "provider_used": provider_impl.name(),
-                                                                "model_used": provider_impl.model(),
-                                                                "duration_ms": ms,
-                                                                "output_chars": output_value.len(),
-                                                            }));
-
-                                                            // The effective final output for this request.
-                                                            log.formatted_transcript = Some(output_value.clone());
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let err = e.to_string();
-                                                if let Some(log_store) =
-                                                    app_clone.try_state::<RequestLogStore>()
-                                                {
-                                                    log_store.with_current(|log| {
-                                                        log.kind = RequestKind::QuickReplace;
-                                                        log.quick_replace_provider = Some(provider.clone());
-                                                        log.quick_replace_model = quick_replace_cfg.model.clone();
-                                                        log.quick_replace_request_json = Some(serde_json::json!({
-                                                            "provider": provider.clone(),
-                                                            "system_prompt": system_prompt.clone(),
-                                                            "selected_text_chars": selected.len(),
-                                                        }));
-                                                        log.quick_replace_response_json = Some(serde_json::json!({
-                                                            "ok": false,
-                                                            "error": err.clone(),
-                                                        }));
-                                                        log.warn(format!(
-                                                            "Quick replace: rewrite failed ({})",
-                                                            err
-                                                        ));
-
-                                                        // Treat rewrite failure as a request error; do not pretend success.
-                                                        log.error(format!("Quick Replace failed: {}", err.clone()));
-                                                        log.complete_error(err.clone());
-                                                    });
-                                                }
-
-                                                quick_replace_failure = Some(err);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // If we deferred request-log completion for Quick Replace, finalize it now.
-                            // (Quick Ask handles its own completion in its branch.)
-                            if quick_replace_cfg.enabled && quick_replace_epoch != 0 {
-                                if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                    log_store.with_current(|log| {
-                                        if log.status
-                                            == crate::request_log::RequestStatus::InProgress
-                                        {
-                                            if quick_replace_failure.is_some() {
-                                                // Preserve error status set earlier.
-                                            } else {
-                                                log.complete_success();
-                                            }
-                                        }
-                                    });
-
-                                    if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                                        stats::emit_cost_events_for_current_request(
-                                            &app_clone,
-                                            if quick_replace_failure.is_some() {
-                                                stats::EventStatus::Error
-                                            } else {
-                                                stats::EventStatus::Success
-                                            },
-                                            Some(&wav),
-                                        );
-                                    }
-
-                                    log_store.complete_current();
-                                }
-
-                                if let Some(req_id) = request_id.as_deref() {
-                                    pipeline_clone.end_ocr_session_if_matches(req_id);
-                                }
-                            }
-
-                            // If Quick Replace was intended but failed, surface an error instead of
-                            // pasting the transcript into the selection.
-                            if let Some(err) = quick_replace_failure.as_deref() {
-                                // In hotkey-triggered flows, the overlay webview may not be created
-                                // (or visible) yet. Show it so the error state + Retry UI is actually seen.
-                                let _ = commands::overlay::show_overlay(app_clone.clone()).await;
-
-                                // Emit pipeline-error so overlay shows error state + retry affordance.
-                                let payload = PipelineErrorPayload {
-                                    message: err.to_string(),
-                                    request_id: request_id.clone(),
-                                };
-                                let _ = app_clone.emit(events::EVENT_PIPELINE_ERROR, payload);
-                                let _ = app_clone.emit(
-                                    events::EVENT_PIPELINE_STATE_CHANGED,
-                                    PipelineStateEvent::Error,
-                                );
-                            } else if result.live_output_completed {
-                                // Live output already pasted committed chunks during
-                                // recording — skip the final paste to avoid duplication.
-                                log::info!(
-                                    "Pipeline: skipping final paste (live output completed)"
-                                );
-                            } else {
-                                // Output using the selected output mode.
-                                let output_clipboard_privacy_mode: bool = get_setting_from_store(
+                            let normal_output_result =
+                                sessions::normal_dictation_output::execute_normal_dictation_output(
                                     &app_clone,
-                                    "output_clipboard_privacy_mode",
-                                    false,
-                                );
-                                let output_smart_paste_protection: bool = get_setting_from_store(
-                                    &app_clone,
-                                    "output_smart_paste_protection",
-                                    false,
-                                );
-
-                                #[cfg(target_os = "windows")]
-                                {
-                                    if matches!(output_mode, commands::text::OutputMode::Paste) {
-                                        let snapshot = app_clone
-                                            .state::<AppState>()
-                                            .windows_text_target_snapshot
-                                            .lock()
-                                            .ok()
-                                            .and_then(|mut g| g.take());
-
-                                        if let Err(e) =
-                                            crate::windows_uia::insert::insert_text_with_snapshot(
-                                                &app_clone,
-                                                &output_value,
-                                                snapshot,
-                                                true,
-                                                true,
-                                                output_smart_paste_protection,
-                                            )
-                                        {
-                                            log::error!(
-                                                "Failed to output transcript (UIA ladder): {}",
-                                                e
-                                            );
-
-                                            if let Some(log_store) =
-                                                app_clone.try_state::<RequestLogStore>()
-                                            {
-                                                log_store.with_current(|log| {
-                                                    log.warn(format!("Output failed: {}", e));
-                                                });
-                                            }
-                                        }
-                                    } else {
-                                        let safe_to_insert = if output_smart_paste_protection {
-                                            crate::windows_uia::snapshot::capture_focused_snapshot()
-                                                .ok()
-                                                .map(|snapshot| {
-                                                    crate::windows_uia::safety::allow_insert_with_protection(
-                                                        &snapshot,
-                                                        output_smart_paste_protection,
-                                                    )
-                                                })
-                                                .unwrap_or(true)
-                                        } else {
-                                            true
-                                        };
-
-                                        if !safe_to_insert {
-                                            if let Err(e) =
-                                                crate::text::inject::copy_to_clipboard_and_notify(
-                                                    &app_clone,
-                                                    &output_value,
-                                                )
-                                            {
-                                                log::error!("Failed to output transcript (safe fallback): {}", e);
-                                            }
-                                        } else if let Err(e) =
-                                            commands::text::output_text_with_mode_options(
-                                                &output_value,
-                                                output_mode,
-                                                output_hit_enter,
-                                                !output_clipboard_privacy_mode,
-                                            )
-                                        {
-                                            log::error!("Failed to output transcript: {}", e);
-
-                                            if let Some(log_store) =
-                                                app_clone.try_state::<RequestLogStore>()
-                                            {
-                                                log_store.with_current(|log| {
-                                                    log.warn(format!("Output failed: {}", e));
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-
-                                #[cfg(not(target_os = "windows"))]
-                                {
-                                    if let Err(e) = commands::text::output_text_with_mode_options(
-                                        &output_value,
+                                    sessions::normal_dictation_output::NormalDictationOutputRequest {
+                                        output_value: output_value.as_str(),
                                         output_mode,
                                         output_hit_enter,
-                                        !output_clipboard_privacy_mode,
-                                    ) {
-                                        log::error!("Failed to output transcript: {}", e);
+                                        live_output_completed: result.live_output_completed,
+                                        quick_replace_failure: quick_replace_failure.as_deref(),
+                                        request_id: request_id.as_deref(),
+                                    },
+                                )
+                                .await;
+                            log::debug!(
+                                "Normal dictation output finished (decision={:?}, output_error={})",
+                                normal_output_result.decision,
+                                normal_output_result.output_error.is_some()
+                            );
 
-                                        if let Some(log_store) =
-                                            app_clone.try_state::<RequestLogStore>()
-                                        {
-                                            log_store.with_current(|log| {
-                                                log.warn(format!("Output failed: {}", e));
-                                            });
-                                        }
-                                    }
-                                }
-                            }
+                            sessions::normal_dictation_output::finalize_normal_dictation_request(
+                                &app_clone,
+                                sessions::normal_dictation_output::NormalDictationFinalizationRequest {
+                                    pipeline: &pipeline_clone,
+                                    request_id: request_id.as_deref(),
+                                    result: &result,
+                                    output_value: output_value.as_str(),
+                                    quick_replace_failure: quick_replace_failure.as_deref(),
+                                    complete_request_log_after_output,
+                                },
+                            );
                         }
-
-                        // Finalize request log after output so UIA insert logs are captured.
-                        if complete_request_log_after_output {
-                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                log_store.with_current(|log| {
-                                    if log.status == crate::request_log::RequestStatus::InProgress {
-                                        log.complete_success();
-                                    }
-                                });
-
-                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                                    stats::emit_cost_events_for_current_request(
-                                        &app_clone,
-                                        stats::EventStatus::Success,
-                                        Some(&wav),
-                                    );
-                                }
-
-                                log_store.complete_current();
-                            }
-
-                            if let Some(req_id) = request_id.as_deref() {
-                                pipeline_clone.end_ocr_session_if_matches(req_id);
-                            }
-                        }
-
-                        // Save to history
-                        if !is_quick_ask_session {
-                            if let Some(req_id) = request_id.as_ref() {
-                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                    // Store the actual output (Quick Replace may have changed it).
-                                    if let Some(err) = quick_replace_failure.as_deref() {
-                                        let _ =
-                                            history.complete_request_error(req_id, err.to_string());
-                                    } else if let Err(e) = history
-                                        .complete_request_success(req_id, output_value.clone())
-                                    {
-                                        log::warn!("Failed to update history: {}", e);
-                                    }
-
-                                    let (provider, model) = if result.llm_attempted() {
-                                        (
-                                            result.llm_provider_used.clone(),
-                                            result.llm_model_used.clone(),
-                                        )
-                                    } else {
-                                        (None, None)
-                                    };
-                                    let _ = history.set_request_llm_model(req_id, provider, model);
-                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
-                                }
-                            }
-                        }
-
-                        // Time-based retention (best-effort). This path is used by global shortcuts.
-                        commands::recording::apply_transcription_retention(&app_clone);
                     } else {
                         // Emit empty transcript event so UI can update appropriately
                         let _ = app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, "");
@@ -2159,43 +879,10 @@ pub(crate) fn stop_recording(
                         log::info!("No transcript output (empty/whitespace), not outputting");
 
                         if is_quick_ask_session {
-                            // Finalize the deferred Quick Ask request log.
-                            if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                                log_store.with_current(|log| {
-                                    log.kind = RequestKind::QuickAsk;
-                                    log.quick_ask_question = Some(String::new());
-                                    log.error("Quick Ask failed: no transcript to answer (empty)");
-                                    log.complete_error("No transcript to answer (empty)");
-                                });
-
-                                if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                                    stats::emit_cost_events_for_current_request(
-                                        &app_clone,
-                                        stats::EventStatus::Error,
-                                        Some(&wav),
-                                    );
-                                }
-
-                                log_store.complete_current();
-                            }
-
-                            crate::sessions::quick_ask::emit_to_quick_ask(
+                            sessions::quick_action_execution::complete_quick_ask_empty_transcript_error(
                                 &app_clone,
-                                crate::sessions::quick_ask::EVENT_QUICK_ASK_STARTED,
-                                QuickAskStartedPayload {
-                                    question: Some(String::new()),
-                                    provider: None,
-                                    model: None,
-                                },
-                            );
-
-                            crate::sessions::quick_ask::emit_to_quick_ask(
-                                &app_clone,
-                                crate::sessions::quick_ask::EVENT_QUICK_ASK_ANSWER,
-                                QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
-                                    ok: false,
-                                    error: "No transcript to answer (empty)".to_string(),
-                                }),
+                                &pipeline_clone,
+                                request_id.as_deref(),
                             );
                         }
 

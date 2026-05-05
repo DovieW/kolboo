@@ -57,17 +57,21 @@ Ideas:
 
 ## Consolidate context capture + prompt building
 
+**Status:** Implemented by Quick Action/output deepening work (2026-05-05); follow-up ideas below remain optional.
+
 Context capture for Quick Ask / Quick Replace is currently spread across multiple places:
 
 - Highlighted-selection capture (key injection + clipboard sentinel) lives in `app/src-tauri/src/text/selection_probe.rs` and is orchestrated via `app/src-tauri/src/sessions/selection_probe.rs`.
 - Clipboard "extra context" reading lives in `app/src-tauri/src/clipboard_context.rs`.
-- The *final* prompt assembly differs per feature and is mostly inline in `app/src-tauri/src/lib.rs` (Quick Ask has a helper for question+context; Quick Replace builds its user prompt inline).
+- Prompt formatting now lives in `app/src-tauri/src/prompt_builders.rs` so clipboard transport/context capping and LLM message assembly stay separate.
+- Quick Ask / Quick Replace context-source orchestration now lives in `app/src-tauri/src/sessions/context_collection.rs`; `quick_action_execution.rs` owns provider execution, request-log updates, stats, and Quick Action completion.
+- Normal dictation final output execution and non-empty success finalization now live in `app/src-tauri/src/sessions/normal_dictation_output.rs`, including request-log completion, cost stats, OCR cleanup, history updates, and retention after output warnings are recorded.
 
 Ideas:
 
-- Centralize "context sources" (selected text + clipboard context) into a single helper that returns a structured object with consistent size limits and sentinel protection.
+- If empty-transcript or error/cancel finalization becomes a real pain point, consider extracting that separately with characterization tests; the normal non-empty success path is already delegated.
 - Consider wiring up `ContextGrabMethod::ClipboardOnly` end-to-end (it exists in Rust but isn't currently selectable via the `context_grab_method` string mapping in `lib.rs` / settings docs).
-- Move the Quick Replace user-prompt builder into `clipboard_context.rs` (or a new `prompt_builders.rs`) so both Quick Ask + Quick Replace follow the same conventions and are easier to test.
+- Keep `selection_probe.rs` AppState/epoch mechanics as an adapter detail unless a later deletion test proves a probe result store would add real Depth rather than ceremony.
 
 ## Improve Win+C (Copilot) hotkey reliability when Kolboo is focused
 
@@ -246,10 +250,17 @@ Future cleanup could return a single `ResolvedActiveWindowOcrModes` value for an
 
 ## Deepen Quick Ask / Quick Replace request ownership
 
-Quick Ask and Quick Replace now share a lot of behavior, but the ownership is still spread across `app/src-tauri/src/lib.rs`, `app/src-tauri/src/sessions/selection_probe.rs`, `app/src-tauri/src/clipboard_context.rs`, OCR Session calls, request-log updates, and provider construction.
+**Status:** Completed (2026-05-05)
 
-The real friction is not just duplicated code; it is low locality. A change to one LLM-backed flow can require checking selection capture, clipboard context, OCR attachment, provider/model fallback, request-log privacy fields, cost emission, and final output behavior in separate places.
+Quick Ask / Quick Replace request ownership is now centralized enough for the original pain point:
 
-Future cleanup could deepen this into one flow-owned Module that keeps Quick Ask and Quick Replace feature-specific behavior thin while centralizing the shared request lifecycle: context collection, prompt assembly, provider readiness, request-log/cost bookkeeping, and OCR attachment decisions.
+- Pure lifecycle vocabulary/config/context decisions live in `app/src-tauri/src/sessions/quick_action_lifecycle.rs`.
+- Side-effectful execution ownership lives in `app/src-tauri/src/sessions/quick_action_execution.rs`: context collection, provider readiness, request-log/cost bookkeeping, OCR cleanup, Quick Ask answer emission, and Quick Replace rewrite attempts.
+- `app/src-tauri/src/lib.rs::stop_recording(...)` now delegates Quick Ask/Quick Replace execution and keeps the normal dictation output/paste decision visible in the stop-recording path.
+
+Remaining smaller cleanup ideas, if this area gets touched again:
+
+- Consider moving normal dictation final output/paste handling into its own small helper once there is a clear behavior boundary and test coverage.
+- Keep expanding pure tests around lifecycle decisions instead of unit-testing Tauri/AppHandle side effects directly.
 
 Keep this separate from provider-family seams. The shared behavior here is about feature request ownership, not generic provider behavior.

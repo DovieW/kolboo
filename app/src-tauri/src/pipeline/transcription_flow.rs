@@ -747,7 +747,7 @@ pub(super) async fn run_llm_rewrite<C: TranscriptionCallbacks>(
             None
         };
 
-        let rewrite_user_message = crate::clipboard_context::build_rewrite_user_message(
+        let rewrite_user_message = crate::prompt_builders::build_rewrite_user_message(
             stt_text,
             clipboard_text.as_deref(),
             ctx.active_window_ocr_text.as_deref(),

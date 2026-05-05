@@ -61,6 +61,9 @@
 
   - The backend pipeline is a state machine; prefer explicit guard methods/transitions over ad-hoc flags.
   - Cancellation is part of the UX (escape-to-cancel is registered only while active). Avoid re-entrant shortcut registration; follow the existing lock/async pattern in `app/src-tauri/src/lib.rs`.
+  - Prompt formatting for rewrite/Quick Ask/Quick Replace lives in `app/src-tauri/src/prompt_builders.rs`; keep clipboard transport and context capping in `app/src-tauri/src/clipboard_context.rs`.
+  - Quick Ask / Quick Replace context-source collection (selection probe, clipboard context, OCR fetch) lives in `app/src-tauri/src/sessions/context_collection.rs`; provider execution and Quick Action request-log completion live in `app/src-tauri/src/sessions/quick_action_execution.rs`.
+  - Normal dictation final output and non-empty success finalization live in `app/src-tauri/src/sessions/normal_dictation_output.rs`; `lib.rs::stop_recording(...)` should remain orchestration rather than owning platform paste/type branches.
 
 - Spec Kit/git workflow:
 
@@ -87,5 +90,8 @@ Implemented slice conventions from this initiative:
 - Routing strategy outputs flow through the strategy-independent `RoutingDecision` type in `app/src-tauri/src/pipeline/routing.rs`.
 - Profile behavior is split between `app/src-tauri/src/pipeline/profile_matcher.rs` and `app/src-tauri/src/pipeline/profile_resolution.rs`.
 - Local provider cache/readiness/bypass decisions live in `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`.
+- Prompt formatting is centralized in `app/src-tauri/src/prompt_builders.rs`.
+- Quick Action context-source collection is centralized in `app/src-tauri/src/sessions/context_collection.rs`.
+- Normal dictation final output/non-empty success finalization is centralized in `app/src-tauri/src/sessions/normal_dictation_output.rs`.
 - Do not add provider-family seams unless `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` records a two-adapter proof and deletion-test pass.
 <!-- SPECKIT END -->
