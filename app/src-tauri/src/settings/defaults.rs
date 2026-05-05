@@ -238,7 +238,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     );
     // When true, hide full request payloads in the UI (privacy mode).
     // Default is false so payloads are visible unless explicitly hidden.
-    dirty |= set_default("request_logs_privacy_mode", json!(false), false);
+    dirty |= set_default(
+        "request_logs_privacy_mode",
+        json!(default_values::DEFAULT_REQUEST_LOGS_PRIVACY_MODE),
+        false,
+    );
     // Transcription retention mode (amount or time). Used by history capping.
     dirty |= set_default(
         "transcription_retention_mode",
@@ -253,22 +257,22 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Recordings retention (amount or time). Time-based retention is UI-only today.
     dirty |= set_default(
         "recordings_retention_mode",
-        json!(default_values::DEFAULT_REQUEST_LOGS_RETENTION_MODE),
+        json!(default_values::DEFAULT_RECORDINGS_RETENTION_MODE),
         false,
     );
     dirty |= set_default(
         "recordings_retention_amount",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_AMOUNT),
+        json!(default_values::DEFAULT_RECORDINGS_RETENTION_AMOUNT),
         false,
     );
     dirty |= set_default(
         "recordings_retention_unit",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_UNIT),
+        json!(default_values::DEFAULT_RECORDINGS_RETENTION_UNIT),
         false,
     );
     dirty |= set_default(
         "recordings_retention_value",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_VALUE),
+        json!(default_values::DEFAULT_RECORDINGS_RETENTION_VALUE),
         false,
     );
     // Time-based retention for history/transcriptions. 0 = keep forever.
@@ -288,20 +292,24 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // When deleting old transcriptions, optionally also delete their .wav recordings.
     dirty |= set_default(
         "transcription_retention_delete_recordings",
-        json!(false),
+        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_DELETE_RECORDINGS),
         false,
     );
 
     // Optional diagnostics: when true, emit additional hotkey debug events to the
     // in-app "System Events" panel (useful in release builds).
-    dirty |= set_default("hotkey_debug_enabled", json!(false), false);
+    dirty |= set_default(
+        "hotkey_debug_enabled",
+        json!(default_values::DEFAULT_HOTKEY_DEBUG_ENABLED),
+        false,
+    );
 
     // Persisted stats retention (usage/cost events).
     // These are stored on disk (unlike request logs which are in-memory).
     // 0 = keep forever.
     dirty |= set_default(
         "stats_retention_unit",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_UNIT),
+        json!(default_values::DEFAULT_STATS_RETENTION_UNIT),
         false,
     );
     dirty |= set_default(
@@ -324,15 +332,14 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         json!(default_values::DEFAULT_OVERLAY_MODE),
         false,
     );
-    dirty |= set_default(
-        "overlay_mode",
-        json!(default_values::DEFAULT_OVERLAY_MODE),
-        false,
-    );
     // Whether the overlay shows detailed phase text while processing
     // (e.g. "transcribing…", "routing…", "rewriting…"). When false, the overlay
     // uses a waveform animation instead.
-    dirty |= set_default("overlay_show_detailed_loading", json!(false), false);
+    dirty |= set_default(
+        "overlay_show_detailed_loading",
+        json!(default_values::DEFAULT_OVERLAY_SHOW_DETAILED_LOADING),
+        false,
+    );
     // Which monitor overlay windows should appear on.
     // - main: primary monitor
     // - cursor: monitor containing cursor
@@ -363,7 +370,11 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         json!(default_values::DEFAULT_OUTPUT_MODE),
         false,
     );
-    dirty |= set_default("output_hit_enter", json!(false), false);
+    dirty |= set_default(
+        "output_hit_enter",
+        json!(default_values::DEFAULT_OUTPUT_HIT_ENTER),
+        false,
+    );
     // When true, paste each committed streaming chunk live during recording
     // instead of waiting for the full transcript at the end.
     dirty |= set_default(
@@ -381,9 +392,17 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // When true, output injection will not read the clipboard and will not attempt to restore it.
     // This reduces accidental exposure of clipboard contents at the cost of leaving output text
     // on the clipboard after paste.
-    dirty |= set_default("output_clipboard_privacy_mode", json!(false), false);
+    dirty |= set_default(
+        "output_clipboard_privacy_mode",
+        json!(default_values::DEFAULT_OUTPUT_CLIPBOARD_PRIVACY_MODE),
+        false,
+    );
     // When true, avoid pasting into sensitive targets (e.g., password fields).
-    dirty |= set_default("output_smart_paste_protection", json!(false), false);
+    dirty |= set_default(
+        "output_smart_paste_protection",
+        json!(default_values::DEFAULT_OUTPUT_SMART_PASTE_PROTECTION),
+        false,
+    );
     dirty |= set_default(
         "playing_audio_handling",
         json!(default_values::DEFAULT_PLAYING_AUDIO_HANDLING),
@@ -511,17 +530,33 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     );
 
     // Quick Ask dismiss mode (manual or auto).
-    dirty |= set_default("quick_ask_dismiss_mode", json!("manual"), false);
+    dirty |= set_default(
+        "quick_ask_dismiss_mode",
+        json!(default_values::DEFAULT_QUICK_ASK_DISMISS_MODE),
+        false,
+    );
 
     // Quick Ask conversation history (ephemeral; stored in memory only).
     // These keys only control whether/how much in-memory history to attach to prompts.
-    dirty |= set_default("quick_ask_conversation_history_enabled", json!(true), false);
+    dirty |= set_default(
+        "quick_ask_conversation_history_enabled",
+        json!(default_values::DEFAULT_QUICK_ASK_CONVERSATION_HISTORY_ENABLED),
+        false,
+    );
     // How many previous Q/A turns to include when enabled.
-    dirty |= set_default("quick_ask_conversation_history_count", json!(3), false);
+    dirty |= set_default(
+        "quick_ask_conversation_history_count",
+        json!(default_values::DEFAULT_QUICK_ASK_CONVERSATION_HISTORY_COUNT),
+        false,
+    );
 
     // Quick Ask highlighted selection context (disabled by default).
     // When false, we won't probe/capture the currently highlighted text for Quick Ask.
-    dirty |= set_default("quick_ask_include_selected_text", json!(false), false);
+    dirty |= set_default(
+        "quick_ask_include_selected_text",
+        json!(default_values::DEFAULT_QUICK_ASK_INCLUDE_SELECTED_TEXT),
+        false,
+    );
 
     // VAD settings are used by the pipeline.
     dirty |= set_default(
@@ -534,8 +569,16 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // - hot_mic_enabled: keep the input stream open while idle and maintain a rolling pre-roll
     // - hot_mic_pre_roll_ms: pre-roll duration (ms) to prepend at record start
     // - mic_auto_recover_enabled: watchdog the stream and attempt restart on hangs/disconnects
-    dirty |= set_default("hot_mic_enabled", json!(false), false);
-    dirty |= set_default("hot_mic_pre_roll_ms", json!(1500u32), false);
+    dirty |= set_default(
+        "hot_mic_enabled",
+        json!(default_values::DEFAULT_HOT_MIC_ENABLED),
+        false,
+    );
+    dirty |= set_default(
+        "hot_mic_pre_roll_ms",
+        json!(default_values::DEFAULT_HOT_MIC_PRE_ROLL_MS),
+        false,
+    );
     dirty |= set_default(
         "mic_auto_recover_enabled",
         json!(default_values::DEFAULT_MIC_AUTO_RECOVER_ENABLED),

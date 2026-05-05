@@ -34,6 +34,14 @@ export function isMissing(record: unknown, key: string): boolean {
 	return !hasOwnValue(record, key) || record[key] === undefined;
 }
 
+export function isInheritedSettingValue(record: unknown, key: string): boolean {
+	// Settings UI treats both missing and explicit null profile values as
+	// intentional inheritance from the Default/global setting. Keep this near the
+	// Settings View helpers so production components do not re-implement the
+	// same null-vs-missing rule in slightly different ways.
+	return isMissing(record, key) || isExplicitNull(record, key);
+}
+
 function normalizeOrNull<T>(
 	value: unknown,
 	normalize?: (value: unknown) => T | null,
@@ -139,19 +147,19 @@ export function presetSettingView<T>(params: {
 		}
 
 		if (preset[params.key] === null) {
-      const inherited = inheritedSettingView({
-        globalValue: params.globalValue,
-        profile: params.profile,
-        key: params.key,
-        defaultValue: params.defaultValue,
-        normalize: params.normalize,
-      });
+			const inherited = inheritedSettingView({
+				globalValue: params.globalValue,
+				profile: params.profile,
+				key: params.key,
+				defaultValue: params.defaultValue,
+				normalize: params.normalize,
+			});
 
-      // A preset-level explicit null means “inherit from profile/global/default”.
-      // Preserve that provenance so the Settings View interface can explain the
-      // difference between “missing” and “intentionally inherited”.
-      return { ...inherited, explicitNull: true };
-    }
+			// A preset-level explicit null means “inherit from profile/global/default”.
+			// Preserve that provenance so the Settings View interface can explain the
+			// difference between “missing” and “intentionally inherited”.
+			return { ...inherited, explicitNull: true };
+		}
 	}
 
 	return inheritedSettingView({

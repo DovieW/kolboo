@@ -23,8 +23,8 @@
 //! - Partials: `AddPartialTranscript` (interim), `AddTranscript` (final/committed).
 
 use super::streaming::{
-    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, is_ws_closed_error,
-    ws_next_with_timeout, PartialTranscript, StreamingSttSession,
+    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, f32_to_pcm_s16le,
+    is_ws_closed_error, ws_next_with_timeout, PartialTranscript, StreamingSttSession,
 };
 use super::{language, AudioEncoding, AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
@@ -229,17 +229,6 @@ impl SpeechmaticsSttProvider {
     /// Timeout when waiting for `EndOfTranscript` after sending `EndOfStream`.
     const POST_EOS_TIMEOUT: Duration = Duration::from_secs(15);
 
-    /// Convert f32 mono samples to little-endian i16 bytes (PCM s16le).
-    fn f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8> {
-        let mut pcm = Vec::with_capacity(samples.len() * 2);
-        for &s in samples {
-            let clamped = s.clamp(-1.0, 1.0);
-            let val = (clamped * i16::MAX as f32).round() as i16;
-            pcm.extend_from_slice(&val.to_le_bytes());
-        }
-        pcm
-    }
-
     /// Start a real-time WebSocket streaming session.
     async fn start_streaming_session(
         &self,
@@ -405,7 +394,7 @@ impl SpeechmaticsSttProvider {
                 audio_chunk = audio_rx.recv(), if !audio_done => {
                     match audio_chunk {
                         Some(f32_samples) => {
-                            let pcm = Self::f32_to_pcm_s16le(&f32_samples);
+                            let pcm = f32_to_pcm_s16le(&f32_samples);
                             pcm_buffer.extend_from_slice(&pcm);
 
                             while pcm_buffer.len() >= target_chunk_bytes {
@@ -1053,23 +1042,6 @@ mod tests {
         );
         assert_eq!(provider.operating_point, "standard");
         assert!(provider.supports_streaming());
-    }
-
-    #[test]
-    fn test_f32_to_pcm_s16le() {
-        let samples = vec![0.0_f32, 1.0, -1.0, 0.5];
-        let pcm = SpeechmaticsSttProvider::f32_to_pcm_s16le(&samples);
-
-        // 4 samples × 2 bytes each = 8 bytes.
-        assert_eq!(pcm.len(), 8);
-
-        let s0 = i16::from_le_bytes([pcm[0], pcm[1]]);
-        let s1 = i16::from_le_bytes([pcm[2], pcm[3]]);
-        let s2 = i16::from_le_bytes([pcm[4], pcm[5]]);
-
-        assert_eq!(s0, 0);
-        assert_eq!(s1, i16::MAX);
-        assert_eq!(s2, -i16::MAX); // -1.0 × MAX rounds to -MAX (not MIN)
     }
 
     #[test]

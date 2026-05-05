@@ -307,14 +307,14 @@ export default function RecordingControl() {
 	);
 
 	const onSettingsChanged = useMemo(
-    () =>
-      createOverlaySettingsChangedHandler({
-        applyAccentColor,
-        reloadSettingsFromDisk: () => tauriAPI.reloadSettingsFromDisk(),
-        queryClient,
-      }),
-    [queryClient],
-  );
+		() =>
+			createOverlaySettingsChangedHandler({
+				applyAccentColor,
+				reloadSettingsFromDisk: () => tauriAPI.reloadSettingsFromDisk(),
+				queryClient,
+			}),
+		[queryClient],
+	);
 
 	// Hover-revealed preset controls.
 	// IMPORTANT: Do NOT resize the main overlay window on hover (it causes cursor flicker/jitter).

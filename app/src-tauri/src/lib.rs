@@ -6,6 +6,9 @@ use tauri_plugin_cli::CliExt;
 use tracing::Instrument;
 
 fn truncate_utf8_to_byte_cap(s: &str, cap_bytes: usize) -> &str {
+    // Conversation-history snippets use a compact trailing ellipsis rather than
+    // the multi-line "… (truncated)" context marker used by prompt context blocks.
+    // Keep this tiny helper local until conversation history joins Context Capture.
     if s.len() <= cap_bytes {
         return s;
     }
@@ -314,21 +317,18 @@ pub(crate) fn stop_recording(
 
         let ocr_config = config.ocr_config.clone();
 
-        let rewrite_ocr_mode = pipeline::resolve_rewrite_active_window_ocr_mode(
+        let ocr_modes = pipeline::resolve_active_window_ocr_modes(
             profile.as_ref(),
             default_profile,
-            ocr_config.rewrite_mode.as_str(),
+            pipeline::ActiveWindowOcrModeFallbacks {
+                rewrite: ocr_config.rewrite_mode.as_str(),
+                quick_ask: ocr_config.quick_ask_mode.as_str(),
+                quick_replace: ocr_config.quick_replace_mode.as_str(),
+            },
         );
-        let quick_ask_ocr_mode = pipeline::resolve_quick_ask_active_window_ocr_mode(
-            profile.as_ref(),
-            default_profile,
-            ocr_config.quick_ask_mode.as_str(),
-        );
-        let quick_replace_ocr_mode = pipeline::resolve_quick_replace_active_window_ocr_mode(
-            profile.as_ref(),
-            default_profile,
-            ocr_config.quick_replace_mode.as_str(),
-        );
+        let rewrite_ocr_mode = ocr_modes.rewrite().to_string();
+        let quick_ask_ocr_mode = ocr_modes.quick_ask().to_string();
+        let quick_replace_ocr_mode = ocr_modes.quick_replace().to_string();
 
         // Debug breadcrumbs for OCR gating.
         // This is intentionally high-level (no screenshot bytes, no secrets).
@@ -338,13 +338,11 @@ pub(crate) fn stop_recording(
             let quick_replace_ocr_mode = quick_replace_ocr_mode.clone();
             log_store.with_current(|log| {
                 // Record the effective mode for the active flow.
-                log.ocr_effective_mode = Some(if is_quick_ask_session {
-                    quick_ask_ocr_mode.clone()
-                } else {
-                    // The normal recording flow uses rewrite by default.
-                    // Quick Replace may still consume OCR when enabled.
-                    rewrite_ocr_mode.clone()
-                });
+                log.ocr_effective_mode = Some(
+                    ocr_modes
+                        .effective_mode_for_session(is_quick_ask_session)
+                        .to_string(),
+                );
 
                 log.debug(format!(
                     "OCR: effective modes (rewrite={}, quick_ask={}, quick_replace={})",
@@ -356,12 +354,7 @@ pub(crate) fn stop_recording(
         // IMPORTANT: Only auto-start OCR for the *current* flow.
         // Previously, rewrite_mode == "auto" caused OCR to start even during Quick Ask sessions,
         // which made the tri-state dropdown feel broken (Quick Ask always did OCR work).
-        let should_auto_ocr = pipeline::should_auto_start_active_window_ocr(
-            is_quick_ask_session,
-            rewrite_ocr_mode.as_str(),
-            quick_ask_ocr_mode.as_str(),
-            quick_replace_ocr_mode.as_str(),
-        );
+        let should_auto_ocr = ocr_modes.should_auto_start(is_quick_ask_session);
 
         if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
             let quick_ask_ocr_mode = quick_ask_ocr_mode.clone();
@@ -1236,41 +1229,23 @@ pub(crate) fn stop_recording(
                                     // Both are independently optional.
                                     let cap = 8_000usize;
 
-                                    let selected_context_capped: Option<String> =
-                                        selected_context_trimmed.map(|ctx| {
-                                            if ctx.len() > cap {
-                                                format!(
-                                                    "{}\n\n… (truncated)",
-                                                    truncate_utf8_to_byte_cap(ctx, cap)
-                                                )
-                                            } else {
-                                                ctx.to_string()
-                                            }
-                                        });
+                                    let selected_context_capped =
+                                        clipboard_context::cap_optional_context_text_for_prompt(
+                                            selected_context_trimmed,
+                                            cap,
+                                        );
 
-                                    let surrounding_context_capped: Option<String> =
-                                        surrounding_context_trimmed.map(|ctx| {
-                                            if ctx.len() > cap {
-                                                format!(
-                                                    "{}\n\n… (truncated)",
-                                                    truncate_utf8_to_byte_cap(ctx, cap)
-                                                )
-                                            } else {
-                                                ctx.to_string()
-                                            }
-                                        });
+                                    let surrounding_context_capped =
+                                        clipboard_context::cap_optional_context_text_for_prompt(
+                                            surrounding_context_trimmed,
+                                            cap,
+                                        );
 
-                                    let clipboard_context_capped: Option<String> =
-                                        clipboard_trimmed.map(|cb| {
-                                            if cb.len() > cap {
-                                                format!(
-                                                    "{}\n\n… (truncated)",
-                                                    truncate_utf8_to_byte_cap(cb, cap)
-                                                )
-                                            } else {
-                                                cb.to_string()
-                                            }
-                                        });
+                                    let clipboard_context_capped =
+                                        clipboard_context::cap_optional_context_text_for_prompt(
+                                            clipboard_trimmed,
+                                            cap,
+                                        );
 
                                     // This is the *exact* context text (if any) we attached to the question.
                                     // Stored for request logs/UI.
@@ -1677,10 +1652,6 @@ pub(crate) fn stop_recording(
                                         None
                                     };
 
-                                    let ocr_context = ocr_text
-                                        .as_deref()
-                                        .map(crate::ocr::build_labeled_ocr_context)
-                                        .filter(|s| !s.is_empty());
                                     if let Some(log_store) =
                                         app_clone.try_state::<RequestLogStore>()
                                     {
@@ -1693,27 +1664,17 @@ pub(crate) fn stop_recording(
 
                                             // Best-effort: keep these bounded so request logs stay usable.
                                             let cap = 8_000usize;
-                                            let selected_capped = if selected.len() > cap {
-                                                format!(
-                                                    "{}\n\n… (truncated)",
-                                                    truncate_utf8_to_byte_cap(selected, cap)
-                                                )
-                                            } else {
-                                                selected.to_string()
-                                            };
+                                            let selected_capped =
+                                                clipboard_context::cap_context_text_for_prompt(
+                                                    selected, cap,
+                                                );
 
                                             let instructions = output_value.trim().to_string();
-                                            let instructions_capped = if instructions.len() > cap {
-                                                format!(
-                                                    "{}\n\n… (truncated)",
-                                                    truncate_utf8_to_byte_cap(
-                                                        instructions.as_str(),
-                                                        cap
-                                                    )
-                                                )
-                                            } else {
-                                                instructions
-                                            };
+                                            let instructions_capped =
+                                                clipboard_context::cap_context_text_for_prompt(
+                                                    instructions.as_str(),
+                                                    cap,
+                                                );
 
                                             log.quick_replace_selected_text = Some(selected_capped);
                                             log.quick_replace_instructions =
@@ -1783,27 +1744,14 @@ pub(crate) fn stop_recording(
                                             None
                                         };
 
-                                        let mut user_prompt = format!(
-                                            "INSTRUCTIONS:\n{}\n\nSELECTED TEXT:\n{}",
-                                            instructions_text, selected
-                                        );
-
-                                        if let Some(surrounding) = surrounding_text {
-                                            user_prompt.push_str("\n\nSURROUNDING TEXT:\n");
-                                            user_prompt.push_str(surrounding);
-                                        }
-
-                                        if let Some(ref cb) = clipboard_text {
-                                            user_prompt.push_str("\n\nCLIPBOARD CONTEXT:\n");
-                                            user_prompt.push_str(cb.trim());
-                                        }
-
-                                        if let Some(ref ocr) = ocr_context {
-                                            user_prompt.push_str("\n\n");
-                                            user_prompt.push_str(ocr.as_str());
-                                        }
-
-                                        user_prompt.push_str("\n\nReturn only the updated text.");
+                                        let user_prompt =
+                                            clipboard_context::build_quick_replace_user_message(
+                                                instructions_text.as_str(),
+                                                selected,
+                                                surrounding_text,
+                                                clipboard_text.as_deref(),
+                                                ocr_text.as_deref(),
+                                            );
 
                                         // Store clipboard context in request log if present.
                                         if let Some(ref cb_text) = clipboard_text {

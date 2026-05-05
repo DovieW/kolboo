@@ -21,8 +21,8 @@
 use super::http;
 use super::language;
 use super::streaming::{
-    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, is_ws_closed_error,
-    ws_next_with_timeout, PartialTranscript, StreamingSttSession,
+    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, f32_to_pcm_s16le,
+    is_ws_closed_error, ws_next_with_timeout, PartialTranscript, StreamingSttSession,
 };
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
@@ -398,17 +398,6 @@ impl AssemblyAiSttProvider {
         Ok(format!("{}?{}", base, params.join("&")))
     }
 
-    /// Convert f32 mono samples to little-endian i16 bytes.
-    fn f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8> {
-        let mut pcm = Vec::with_capacity(samples.len() * 2);
-        for &s in samples {
-            let clamped = s.clamp(-1.0, 1.0);
-            let val = (clamped * i16::MAX as f32).round() as i16;
-            pcm.extend_from_slice(&val.to_le_bytes());
-        }
-        pcm
-    }
-
     /// Start a real-time WebSocket streaming session.
     async fn start_streaming_session(
         &self,
@@ -536,7 +525,7 @@ impl AssemblyAiSttProvider {
                             // Convert f32 mono samples to PCM s16le at the native
                             // capture sample rate.  The server knows the rate from
                             // the `sample_rate` query param and resamples internally.
-                            let pcm = Self::f32_to_pcm_s16le(&f32_samples);
+                            let pcm = f32_to_pcm_s16le(&f32_samples);
                             pcm_buffer.extend_from_slice(&pcm);
 
                             // Send binary chunks when we've accumulated enough.
@@ -988,21 +977,6 @@ mod tests {
             AssemblyAiSttProvider::join_turn_texts(&empty, "  Hello  "),
             "Hello"
         );
-    }
-
-    #[test]
-    fn test_f32_to_pcm_s16le() {
-        let samples = vec![0.0_f32, 1.0, -1.0, 0.5];
-        let pcm = AssemblyAiSttProvider::f32_to_pcm_s16le(&samples);
-        assert_eq!(pcm.len(), 8); // 4 samples × 2 bytes
-
-        // 0.0 → 0
-        assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 0);
-        // 1.0 → i16::MAX
-        assert_eq!(i16::from_le_bytes([pcm[2], pcm[3]]), i16::MAX);
-        // -1.0 → clamped to -i16::MAX (not i16::MIN due to f32 multiply)
-        let neg = i16::from_le_bytes([pcm[4], pcm[5]]);
-        assert!(neg < -32000);
     }
 
     /// Integration test: connects to real AssemblyAI WS, sends audio, verifies message flow.

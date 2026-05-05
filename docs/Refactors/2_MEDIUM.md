@@ -243,3 +243,13 @@ Keep actual model loading explicit and command-driven; do not hide heavy local m
 `app/src-tauri/src/pipeline/profile_resolution.rs` now owns profile matching and effective behavior, but callers still request rewrite, Quick Replace, and Quick Ask OCR modes separately in a few places.
 
 Future cleanup could return a single `ResolvedActiveWindowOcrModes` value for an active/default/global profile context, so callers do not repeat the same precedence wiring and can ask flow-specific questions like "should this session auto-start OCR?" from one resolved object.
+
+## Deepen Quick Ask / Quick Replace request ownership
+
+Quick Ask and Quick Replace now share a lot of behavior, but the ownership is still spread across `app/src-tauri/src/lib.rs`, `app/src-tauri/src/sessions/selection_probe.rs`, `app/src-tauri/src/clipboard_context.rs`, OCR Session calls, request-log updates, and provider construction.
+
+The real friction is not just duplicated code; it is low locality. A change to one LLM-backed flow can require checking selection capture, clipboard context, OCR attachment, provider/model fallback, request-log privacy fields, cost emission, and final output behavior in separate places.
+
+Future cleanup could deepen this into one flow-owned Module that keeps Quick Ask and Quick Replace feature-specific behavior thin while centralizing the shared request lifecycle: context collection, prompt assembly, provider readiness, request-log/cost bookkeeping, and OCR attachment decisions.
+
+Keep this separate from provider-family seams. The shared behavior here is about feature request ownership, not generic provider behavior.

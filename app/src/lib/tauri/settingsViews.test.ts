@@ -9,6 +9,7 @@ import {
 	findProfileById,
 	inheritedSettingView,
 	isExplicitNull,
+	isInheritedSettingValue,
 	isMissing,
 	presetSettingView,
 	settingValueView,
@@ -44,6 +45,9 @@ describe("settings view helpers", () => {
 
 		expect(isExplicitNull(raw, "sound_enabled")).toBe(true);
 		expect(isMissing(raw, "missing_key")).toBe(true);
+		expect(isInheritedSettingValue(raw, "sound_enabled")).toBe(true);
+		expect(isInheritedSettingValue(raw, "missing_key")).toBe(true);
+		expect(isInheritedSettingValue(raw, "output_hit_enter")).toBe(false);
 		expect(
 			settingValueView({
 				record: raw,
@@ -196,15 +200,15 @@ describe("settings view helpers", () => {
 			}),
 		).toEqual({ value: "always", source: "preset", explicitNull: false });
 		expect(
-      presetSettingView({
-        globalValue: "recording_only" as const,
-        profile,
-        preset: findPresetById(profile, "inherit"),
-        key: "overlay_mode",
-        defaultValue: "recording_only" as const,
-        normalize: normalizeOverlayMode,
-      }),
-    ).toEqual({ value: "never", source: "profile", explicitNull: true });
+			presetSettingView({
+				globalValue: "recording_only" as const,
+				profile,
+				preset: findPresetById(profile, "inherit"),
+				key: "overlay_mode",
+				defaultValue: "recording_only" as const,
+				normalize: normalizeOverlayMode,
+			}),
+		).toEqual({ value: "never", source: "profile", explicitNull: true });
 		expect(
 			presetSettingView({
 				globalValue: "recording_only" as const,

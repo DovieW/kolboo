@@ -87,23 +87,17 @@ fn is_manual_ocr_available_for_current_session(pipeline: &SharedPipeline) -> boo
         .iter()
         .find(|p| p.id == "default");
 
-    let rewrite_mode = crate::pipeline::resolve_rewrite_active_window_ocr_mode(
+    let ocr_modes = crate::pipeline::resolve_active_window_ocr_modes(
         active_profile,
         default_profile,
-        config.ocr_config.rewrite_mode.as_str(),
-    );
-    let quick_replace_mode = crate::pipeline::resolve_quick_replace_active_window_ocr_mode(
-        active_profile,
-        default_profile,
-        config.ocr_config.quick_replace_mode.as_str(),
-    );
-    let quick_ask_mode = crate::pipeline::resolve_quick_ask_active_window_ocr_mode(
-        active_profile,
-        default_profile,
-        config.ocr_config.quick_ask_mode.as_str(),
+        crate::pipeline::ActiveWindowOcrModeFallbacks {
+            rewrite: config.ocr_config.rewrite_mode.as_str(),
+            quick_ask: config.ocr_config.quick_ask_mode.as_str(),
+            quick_replace: config.ocr_config.quick_replace_mode.as_str(),
+        },
     );
 
-    rewrite_mode == "manual" || quick_replace_mode == "manual" || quick_ask_mode == "manual"
+    ocr_modes.has_manual_mode()
 }
 
 fn pipeline_state_string(pipeline: &SharedPipeline) -> String {

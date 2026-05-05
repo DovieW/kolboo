@@ -68,24 +68,10 @@ pub use types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionR
 
 use profile_matcher::select_profile_for_program_path;
 pub(crate) use profile_resolution::{
-    resolve_quick_ask_active_window_ocr_mode, resolve_quick_replace_active_window_ocr_mode,
-    resolve_rewrite_active_window_ocr_mode,
+    resolve_active_window_ocr_modes, resolve_rewrite_active_window_ocr_mode,
+    ActiveWindowOcrModeFallbacks,
 };
 use profile_resolution::{select_default_profile, select_effective_preset};
-
-pub(crate) fn should_auto_start_active_window_ocr(
-    is_quick_ask_session: bool,
-    rewrite_ocr_mode: &str,
-    quick_ask_ocr_mode: &str,
-    quick_replace_ocr_mode: &str,
-) -> bool {
-    profile_resolution::should_auto_start_active_window_ocr(
-        is_quick_ask_session,
-        rewrite_ocr_mode,
-        quick_ask_ocr_mode,
-        quick_replace_ocr_mode,
-    )
-}
 
 pub(crate) fn select_profile_for_foreground_app(
     llm_config: &LlmConfig,

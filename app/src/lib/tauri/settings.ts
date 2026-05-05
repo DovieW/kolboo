@@ -551,9 +551,9 @@ function normalizeOutputMode(value: unknown): OutputMode {
 
 function normalizeOverlayModeValue(value: unknown): OverlayMode | null {
 	if (value === "always" || value === "never" || value === "recording_only") {
-    return value;
-  }
-  return null;
+		return value;
+	}
+	return null;
 }
 
 function normalizeOverlayMode(value: unknown): OverlayMode {
@@ -565,9 +565,9 @@ function normalizeBooleanSetting(value: unknown): boolean | null {
 }
 
 function normalizeNonEmptyStringSetting(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : null;
 }
 
 function normalizeOverlayMonitorTarget(value: unknown): OverlayMonitorTarget {
@@ -1267,14 +1267,14 @@ async function applySettingsPatch(params: {
 	}
 
 	await applySettingsRuntimeSyncPolicy({
-    patch: prepared.patch,
-    deleteKeys: prepared.deleteKeys,
-    backendEventEmitted: hasPatch || hasDeletes,
-    policyNormalized: prepared.policyNormalized,
-    policyViolations: prepared.violations,
-    invoke,
-    emitSettingsChanged: (payload) => emitTyped("settings-changed", payload),
-  });
+		patch: prepared.patch,
+		deleteKeys: prepared.deleteKeys,
+		backendEventEmitted: hasPatch || hasDeletes,
+		policyNormalized: prepared.policyNormalized,
+		policyViolations: prepared.violations,
+		invoke,
+		emitSettingsChanged: (payload) => emitTyped("settings-changed", payload),
+	});
 
 	await reloadSettingsStoreFromDisk();
 }
@@ -1309,17 +1309,17 @@ export const tauriSettingsAPI = {
 
 		const LOCAL_ACCENT_COLOR_KEY = "tv_accent_color";
 		const readSettingValue = async <T>(
-      key: string,
-      defaultValue: T,
-      normalize?: (value: unknown) => T | null,
-    ): Promise<T> => {
-      return settingValueView({
-        record: { [key]: await store.get(key) },
-        key,
-        defaultValue,
-        normalize,
-      }).value;
-    };
+			key: string,
+			defaultValue: T,
+			normalize?: (value: unknown) => T | null,
+		): Promise<T> => {
+			return settingValueView({
+				record: { [key]: await store.get(key) },
+				key,
+				defaultValue,
+				normalize,
+			}).value;
+		};
 
 		const normalizePromptSection = (value: unknown) => {
 			if (value === null) return null;
@@ -1713,409 +1713,409 @@ export const tauriSettingsAPI = {
 			normalizedShortcutCards ?? buildShortcutCardsFromLegacy(legacyHotkeys);
 
 		const settings: AppSettings = {
-      settings_version: settingsVersion,
-      policy_state: normalizePolicyState(await store.get("policy_state")),
-      license_state: normalizeLicenseState(await store.get("license_state")),
-      token_exchange_trigger_set: normalizeTokenExchangeTriggerSet(
-        await store.get("token_exchange_trigger_set"),
-      ),
-      toggle_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "toggle"),
-      hold_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "hold"),
-      paste_last_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "paste_last"),
-      retry_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "retry"),
-      quick_ask_hold_hotkey: getFirstHotkeyByType(
-        hotkey_shortcuts,
-        "quick_ask_hold",
-      ),
-      quick_ask_toggle_hotkey: getFirstHotkeyByType(
-        hotkey_shortcuts,
-        "quick_ask_toggle",
-      ),
-      hotkey_shortcuts,
+			settings_version: settingsVersion,
+			policy_state: normalizePolicyState(await store.get("policy_state")),
+			license_state: normalizeLicenseState(await store.get("license_state")),
+			token_exchange_trigger_set: normalizeTokenExchangeTriggerSet(
+				await store.get("token_exchange_trigger_set"),
+			),
+			toggle_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "toggle"),
+			hold_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "hold"),
+			paste_last_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "paste_last"),
+			retry_hotkey: getFirstHotkeyByType(hotkey_shortcuts, "retry"),
+			quick_ask_hold_hotkey: getFirstHotkeyByType(
+				hotkey_shortcuts,
+				"quick_ask_hold",
+			),
+			quick_ask_toggle_hotkey: getFirstHotkeyByType(
+				hotkey_shortcuts,
+				"quick_ask_toggle",
+			),
+			hotkey_shortcuts,
 
-      hotkey_debug_enabled: await readSettingValue(
-        "hotkey_debug_enabled",
-        DEFAULT_SETTINGS_VALUES.hotkey_debug_enabled,
-        normalizeBooleanSetting,
-      ),
+			hotkey_debug_enabled: await readSettingValue(
+				"hotkey_debug_enabled",
+				DEFAULT_SETTINGS_VALUES.hotkey_debug_enabled,
+				normalizeBooleanSetting,
+			),
 
-      selected_mic_id:
-        (await store.get<string | null>("selected_mic_id")) ?? null,
-      sound_enabled: await readSettingValue(
-        "sound_enabled",
-        DEFAULT_SETTINGS_VALUES.sound_enabled,
-        normalizeBooleanSetting,
-      ),
-      audio_cue: normalizeAudioCue(await store.get("audio_cue")),
-      accent_color: await (async () => {
-        const raw = (await store.get<string | null>("accent_color")) ?? null;
-        const normalized = normalizeHexColor(raw);
+			selected_mic_id:
+				(await store.get<string | null>("selected_mic_id")) ?? null,
+			sound_enabled: await readSettingValue(
+				"sound_enabled",
+				DEFAULT_SETTINGS_VALUES.sound_enabled,
+				normalizeBooleanSetting,
+			),
+			audio_cue: normalizeAudioCue(await store.get("audio_cue")),
+			accent_color: await (async () => {
+				const raw = (await store.get<string | null>("accent_color")) ?? null;
+				const normalized = normalizeHexColor(raw);
 
-        // If unset/invalid, default to the app's default accent.
-        // (Tangerine is an explicit option in the UI, not the implicit default.)
-        if (!normalized) return DEFAULT_ACCENT_HEX;
+				// If unset/invalid, default to the app's default accent.
+				// (Tangerine is an explicit option in the UI, not the implicit default.)
+				if (!normalized) return DEFAULT_ACCENT_HEX;
 
-        return normalized;
-      })(),
-      rewrite_llm_enabled: await readSettingValue(
-        "rewrite_llm_enabled",
-        DEFAULT_SETTINGS_VALUES.rewrite_llm_enabled,
-        normalizeBooleanSetting,
-      ),
-      quick_replace_enabled: await readSettingValue(
-        "quick_replace_enabled",
-        DEFAULT_SETTINGS_VALUES.quick_replace_enabled,
-        normalizeBooleanSetting,
-      ),
-      cleanup_prompt_sections: await (async () => {
-        const raw = await store.get<unknown>("cleanup_prompt_sections");
-        const normalized = normalizeCleanupPromptSections(raw);
+				return normalized;
+			})(),
+			rewrite_llm_enabled: await readSettingValue(
+				"rewrite_llm_enabled",
+				DEFAULT_SETTINGS_VALUES.rewrite_llm_enabled,
+				normalizeBooleanSetting,
+			),
+			quick_replace_enabled: await readSettingValue(
+				"quick_replace_enabled",
+				DEFAULT_SETTINGS_VALUES.quick_replace_enabled,
+				normalizeBooleanSetting,
+			),
+			cleanup_prompt_sections: await (async () => {
+				const raw = await store.get<unknown>("cleanup_prompt_sections");
+				const normalized = normalizeCleanupPromptSections(raw);
 
-        return normalized;
-      })(),
-      rewrite_program_prompt_profiles,
-      stt_provider: await readSettingValue(
-        "stt_provider",
-        DEFAULT_SETTINGS_VALUES.stt_provider,
-        normalizeNonEmptyStringSetting,
-      ),
-      stt_model: (await store.get<string | null>("stt_model")) ?? null,
-      stt_language: normalizeSttLanguage(
-        await store.get("stt_language"),
-        DEFAULT_STT_LANGUAGE,
-      ),
-      stt_transcription_prompt:
-        (await store.get<string | null>("stt_transcription_prompt")) ?? null,
-      stt_live_output: await readSettingValue(
-        "stt_live_output",
-        DEFAULT_SETTINGS_VALUES.stt_live_output,
-        normalizeBooleanSetting,
-      ),
-      stt_simulated_streaming: await readSettingValue(
-        "stt_simulated_streaming",
-        DEFAULT_SETTINGS_VALUES.stt_simulated_streaming,
-        normalizeBooleanSetting,
-      ),
-      aquavoice_base_url:
-        (await store.get<string | null>("aquavoice_base_url")) ?? null,
-      whisper_server_base_url:
-        (await store.get<string | null>("whisper_server_base_url")) ?? null,
-      ollama_url: (await store.get<string | null>("ollama_url")) ?? null,
-      local_whisper_model_id: normalizeLocalWhisperModelId(
-        await store.get("local_whisper_model_id"),
-      ),
-      local_whisper_load_mode: normalizeLocalWhisperLoadMode(
-        await store.get("local_whisper_load_mode"),
-      ),
-      proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
-      llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
-      llm_model: (await store.get<string | null>("llm_model")) ?? null,
+				return normalized;
+			})(),
+			rewrite_program_prompt_profiles,
+			stt_provider: await readSettingValue(
+				"stt_provider",
+				DEFAULT_SETTINGS_VALUES.stt_provider,
+				normalizeNonEmptyStringSetting,
+			),
+			stt_model: (await store.get<string | null>("stt_model")) ?? null,
+			stt_language: normalizeSttLanguage(
+				await store.get("stt_language"),
+				DEFAULT_STT_LANGUAGE,
+			),
+			stt_transcription_prompt:
+				(await store.get<string | null>("stt_transcription_prompt")) ?? null,
+			stt_live_output: await readSettingValue(
+				"stt_live_output",
+				DEFAULT_SETTINGS_VALUES.stt_live_output,
+				normalizeBooleanSetting,
+			),
+			stt_simulated_streaming: await readSettingValue(
+				"stt_simulated_streaming",
+				DEFAULT_SETTINGS_VALUES.stt_simulated_streaming,
+				normalizeBooleanSetting,
+			),
+			aquavoice_base_url:
+				(await store.get<string | null>("aquavoice_base_url")) ?? null,
+			whisper_server_base_url:
+				(await store.get<string | null>("whisper_server_base_url")) ?? null,
+			ollama_url: (await store.get<string | null>("ollama_url")) ?? null,
+			local_whisper_model_id: normalizeLocalWhisperModelId(
+				await store.get("local_whisper_model_id"),
+			),
+			local_whisper_load_mode: normalizeLocalWhisperLoadMode(
+				await store.get("local_whisper_load_mode"),
+			),
+			proxy_settings: normalizeProxySettings(await store.get("proxy_settings")),
+			llm_provider: (await store.get<string | null>("llm_provider")) ?? null,
+			llm_model: (await store.get<string | null>("llm_model")) ?? null,
 
-      quick_ask_provider:
-        (await store.get<string | null>("quick_ask_provider")) ?? null,
-      quick_ask_model:
-        (await store.get<string | null>("quick_ask_model")) ?? null,
-      quick_ask_system_prompt:
-        (await store.get<string | null>("quick_ask_system_prompt")) ?? null,
-      quick_ask_dismiss_mode: normalizeQuickAskDismissMode(
-        (await store.get("quick_ask_dismiss_mode")) ??
-          DEFAULT_SETTINGS_VALUES.quick_ask_dismiss_mode,
-      ),
+			quick_ask_provider:
+				(await store.get<string | null>("quick_ask_provider")) ?? null,
+			quick_ask_model:
+				(await store.get<string | null>("quick_ask_model")) ?? null,
+			quick_ask_system_prompt:
+				(await store.get<string | null>("quick_ask_system_prompt")) ?? null,
+			quick_ask_dismiss_mode: normalizeQuickAskDismissMode(
+				(await store.get("quick_ask_dismiss_mode")) ??
+					DEFAULT_SETTINGS_VALUES.quick_ask_dismiss_mode,
+			),
 
-      quick_ask_include_selected_text: await readSettingValue(
-        "quick_ask_include_selected_text",
-        DEFAULT_SETTINGS_VALUES.quick_ask_include_selected_text,
-        normalizeBooleanSetting,
-      ),
-      windows_clipboard_fallback_for_context_capture: await readSettingValue(
-        "windows_clipboard_fallback_for_context_capture",
-        DEFAULT_SETTINGS_VALUES.windows_clipboard_fallback_for_context_capture,
-        normalizeBooleanSetting,
-      ),
+			quick_ask_include_selected_text: await readSettingValue(
+				"quick_ask_include_selected_text",
+				DEFAULT_SETTINGS_VALUES.quick_ask_include_selected_text,
+				normalizeBooleanSetting,
+			),
+			windows_clipboard_fallback_for_context_capture: await readSettingValue(
+				"windows_clipboard_fallback_for_context_capture",
+				DEFAULT_SETTINGS_VALUES.windows_clipboard_fallback_for_context_capture,
+				normalizeBooleanSetting,
+			),
 
-      quick_ask_conversation_history_enabled: await readSettingValue(
-        "quick_ask_conversation_history_enabled",
-        DEFAULT_SETTINGS_VALUES.quick_ask_conversation_history_enabled,
-        normalizeBooleanSetting,
-      ),
-      quick_ask_conversation_history_count:
-        normalizeQuickAskConversationHistoryCount(
-          await store.get("quick_ask_conversation_history_count"),
-        ),
+			quick_ask_conversation_history_enabled: await readSettingValue(
+				"quick_ask_conversation_history_enabled",
+				DEFAULT_SETTINGS_VALUES.quick_ask_conversation_history_enabled,
+				normalizeBooleanSetting,
+			),
+			quick_ask_conversation_history_count:
+				normalizeQuickAskConversationHistoryCount(
+					await store.get("quick_ask_conversation_history_count"),
+				),
 
-      quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(
-        await store.get("quick_ask_openai_reasoning_effort"),
-      ),
-      quick_ask_anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
-        await store.get("quick_ask_anthropic_thinking_budget"),
-      ),
-      quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(
-        await store.get("quick_ask_gemini_thinking_budget"),
-      ),
-      quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(
-        await store.get("quick_ask_gemini_thinking_level"),
-      ),
-      cerebras_free_tier:
-        (await store.get<boolean>("cerebras_free_tier")) ??
-        DEFAULT_SETTINGS_VALUES.cerebras_free_tier,
-      groq_free_tier:
-        (await store.get<boolean>("groq_free_tier")) ??
-        DEFAULT_SETTINGS_VALUES.groq_free_tier,
-      cohere_free_tier:
-        (await store.get<boolean>("cohere_free_tier")) ??
-        DEFAULT_SETTINGS_VALUES.cohere_free_tier,
-      assemblyai_free_tier:
-        (await store.get<boolean>("assemblyai_free_tier")) ??
-        DEFAULT_SETTINGS_VALUES.assemblyai_free_tier,
-      speechmatics_free_tier:
-        (await store.get<boolean>("speechmatics_free_tier")) ??
-        DEFAULT_SETTINGS_VALUES.speechmatics_free_tier,
-      openai_reasoning_effort: normalizeOpenAiReasoningEffort(
-        await store.get("openai_reasoning_effort"),
-      ),
-      anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
-        await store.get("anthropic_thinking_budget"),
-      ),
-      gemini_thinking_budget: normalizeGeminiThinkingBudget(
-        await store.get("gemini_thinking_budget"),
-      ),
-      gemini_thinking_level: normalizeGeminiThinkingLevel(
-        await store.get("gemini_thinking_level"),
-      ),
-      playing_audio_handling: normalizePlayingAudioHandling(
-        (await store.get("playing_audio_handling")) ??
-          // Legacy key for migration:
-          (await store.get<boolean>("auto_mute_audio")) ??
-          // If neither exists, default to none
-          "none",
-      ),
-      stt_timeout_seconds:
-        (await store.get<number | null>("stt_timeout_seconds")) ?? null,
-      overlay_mode: await readSettingValue(
-        "overlay_mode",
-        DEFAULT_SETTINGS_VALUES.overlay_mode,
-        normalizeOverlayModeValue,
-      ),
-      overlay_show_detailed_loading: await readSettingValue(
-        "overlay_show_detailed_loading",
-        DEFAULT_SETTINGS_VALUES.overlay_show_detailed_loading,
-        normalizeBooleanSetting,
-      ),
-      overlay_monitor_target: normalizeOverlayMonitorTarget(
-        (await store.get("overlay_monitor_target")) ??
-          DEFAULT_SETTINGS_VALUES.overlay_monitor_target,
-      ),
-      widget_position:
-        (await store.get<WidgetPosition>("widget_position")) ??
-        DEFAULT_SETTINGS_VALUES.widget_position,
-      output_mode: normalizeOutputMode(await store.get("output_mode")),
-      output_hit_enter: await readSettingValue(
-        "output_hit_enter",
-        DEFAULT_SETTINGS_VALUES.output_hit_enter,
-        normalizeBooleanSetting,
-      ),
-      output_clipboard_privacy_mode: await readSettingValue(
-        "output_clipboard_privacy_mode",
-        DEFAULT_SETTINGS_VALUES.output_clipboard_privacy_mode,
-        normalizeBooleanSetting,
-      ),
-      output_smart_paste_protection: await readSettingValue(
-        "output_smart_paste_protection",
-        DEFAULT_SETTINGS_VALUES.output_smart_paste_protection,
-        normalizeBooleanSetting,
-      ),
+			quick_ask_openai_reasoning_effort: normalizeOpenAiReasoningEffort(
+				await store.get("quick_ask_openai_reasoning_effort"),
+			),
+			quick_ask_anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
+				await store.get("quick_ask_anthropic_thinking_budget"),
+			),
+			quick_ask_gemini_thinking_budget: normalizeGeminiThinkingBudget(
+				await store.get("quick_ask_gemini_thinking_budget"),
+			),
+			quick_ask_gemini_thinking_level: normalizeGeminiThinkingLevel(
+				await store.get("quick_ask_gemini_thinking_level"),
+			),
+			cerebras_free_tier:
+				(await store.get<boolean>("cerebras_free_tier")) ??
+				DEFAULT_SETTINGS_VALUES.cerebras_free_tier,
+			groq_free_tier:
+				(await store.get<boolean>("groq_free_tier")) ??
+				DEFAULT_SETTINGS_VALUES.groq_free_tier,
+			cohere_free_tier:
+				(await store.get<boolean>("cohere_free_tier")) ??
+				DEFAULT_SETTINGS_VALUES.cohere_free_tier,
+			assemblyai_free_tier:
+				(await store.get<boolean>("assemblyai_free_tier")) ??
+				DEFAULT_SETTINGS_VALUES.assemblyai_free_tier,
+			speechmatics_free_tier:
+				(await store.get<boolean>("speechmatics_free_tier")) ??
+				DEFAULT_SETTINGS_VALUES.speechmatics_free_tier,
+			openai_reasoning_effort: normalizeOpenAiReasoningEffort(
+				await store.get("openai_reasoning_effort"),
+			),
+			anthropic_thinking_budget: normalizeAnthropicThinkingBudget(
+				await store.get("anthropic_thinking_budget"),
+			),
+			gemini_thinking_budget: normalizeGeminiThinkingBudget(
+				await store.get("gemini_thinking_budget"),
+			),
+			gemini_thinking_level: normalizeGeminiThinkingLevel(
+				await store.get("gemini_thinking_level"),
+			),
+			playing_audio_handling: normalizePlayingAudioHandling(
+				(await store.get("playing_audio_handling")) ??
+					// Legacy key for migration:
+					(await store.get<boolean>("auto_mute_audio")) ??
+					// If neither exists, default to none
+					"none",
+			),
+			stt_timeout_seconds:
+				(await store.get<number | null>("stt_timeout_seconds")) ?? null,
+			overlay_mode: await readSettingValue(
+				"overlay_mode",
+				DEFAULT_SETTINGS_VALUES.overlay_mode,
+				normalizeOverlayModeValue,
+			),
+			overlay_show_detailed_loading: await readSettingValue(
+				"overlay_show_detailed_loading",
+				DEFAULT_SETTINGS_VALUES.overlay_show_detailed_loading,
+				normalizeBooleanSetting,
+			),
+			overlay_monitor_target: normalizeOverlayMonitorTarget(
+				(await store.get("overlay_monitor_target")) ??
+					DEFAULT_SETTINGS_VALUES.overlay_monitor_target,
+			),
+			widget_position:
+				(await store.get<WidgetPosition>("widget_position")) ??
+				DEFAULT_SETTINGS_VALUES.widget_position,
+			output_mode: normalizeOutputMode(await store.get("output_mode")),
+			output_hit_enter: await readSettingValue(
+				"output_hit_enter",
+				DEFAULT_SETTINGS_VALUES.output_hit_enter,
+				normalizeBooleanSetting,
+			),
+			output_clipboard_privacy_mode: await readSettingValue(
+				"output_clipboard_privacy_mode",
+				DEFAULT_SETTINGS_VALUES.output_clipboard_privacy_mode,
+				normalizeBooleanSetting,
+			),
+			output_smart_paste_protection: await readSettingValue(
+				"output_smart_paste_protection",
+				DEFAULT_SETTINGS_VALUES.output_smart_paste_protection,
+				normalizeBooleanSetting,
+			),
 
-      main_window_close_behavior: normalizeMainWindowCloseBehavior(
-        await store.get("main_window_close_behavior"),
-      ),
+			main_window_close_behavior: normalizeMainWindowCloseBehavior(
+				await store.get("main_window_close_behavior"),
+			),
 
-      quiet_audio_gate_enabled:
-        (await store.get<boolean>("quiet_audio_gate_enabled")) ??
-        DEFAULT_SETTINGS_VALUES.quiet_audio_gate_enabled,
-      quiet_audio_min_duration_secs:
-        (await store.get<number>("quiet_audio_min_duration_secs")) ??
-        DEFAULT_SETTINGS_VALUES.quiet_audio_min_duration_secs,
-      quiet_audio_rms_dbfs_threshold:
-        (await store.get<number>("quiet_audio_rms_dbfs_threshold")) ??
-        DEFAULT_SETTINGS_VALUES.quiet_audio_rms_dbfs_threshold,
-      quiet_audio_peak_dbfs_threshold:
-        (await store.get<number>("quiet_audio_peak_dbfs_threshold")) ??
-        DEFAULT_SETTINGS_VALUES.quiet_audio_peak_dbfs_threshold,
-      quiet_audio_require_speech:
-        (await store.get<boolean>("quiet_audio_require_speech")) ??
-        DEFAULT_SETTINGS_VALUES.quiet_audio_require_speech,
+			quiet_audio_gate_enabled:
+				(await store.get<boolean>("quiet_audio_gate_enabled")) ??
+				DEFAULT_SETTINGS_VALUES.quiet_audio_gate_enabled,
+			quiet_audio_min_duration_secs:
+				(await store.get<number>("quiet_audio_min_duration_secs")) ??
+				DEFAULT_SETTINGS_VALUES.quiet_audio_min_duration_secs,
+			quiet_audio_rms_dbfs_threshold:
+				(await store.get<number>("quiet_audio_rms_dbfs_threshold")) ??
+				DEFAULT_SETTINGS_VALUES.quiet_audio_rms_dbfs_threshold,
+			quiet_audio_peak_dbfs_threshold:
+				(await store.get<number>("quiet_audio_peak_dbfs_threshold")) ??
+				DEFAULT_SETTINGS_VALUES.quiet_audio_peak_dbfs_threshold,
+			quiet_audio_require_speech:
+				(await store.get<boolean>("quiet_audio_require_speech")) ??
+				DEFAULT_SETTINGS_VALUES.quiet_audio_require_speech,
 
-      hot_mic_enabled:
-        (await store.get<boolean>("hot_mic_enabled")) ??
-        DEFAULT_SETTINGS_VALUES.hot_mic_enabled,
-      hot_mic_pre_roll_ms:
-        (await store.get<number>("hot_mic_pre_roll_ms")) ??
-        DEFAULT_SETTINGS_VALUES.hot_mic_pre_roll_ms,
-      mic_auto_recover_enabled:
-        (await store.get<boolean>("mic_auto_recover_enabled")) ??
-        DEFAULT_SETTINGS_VALUES.mic_auto_recover_enabled,
+			hot_mic_enabled:
+				(await store.get<boolean>("hot_mic_enabled")) ??
+				DEFAULT_SETTINGS_VALUES.hot_mic_enabled,
+			hot_mic_pre_roll_ms:
+				(await store.get<number>("hot_mic_pre_roll_ms")) ??
+				DEFAULT_SETTINGS_VALUES.hot_mic_pre_roll_ms,
+			mic_auto_recover_enabled:
+				(await store.get<boolean>("mic_auto_recover_enabled")) ??
+				DEFAULT_SETTINGS_VALUES.mic_auto_recover_enabled,
 
-      noise_gate_threshold_dbfs: await (async () => {
-        const configured = normalizeNoiseGateThresholdDbfs(
-          await store.get("noise_gate_threshold_dbfs"),
-        );
-        if (configured != null) return configured;
+			noise_gate_threshold_dbfs: await (async () => {
+				const configured = normalizeNoiseGateThresholdDbfs(
+					await store.get("noise_gate_threshold_dbfs"),
+				);
+				if (configured != null) return configured;
 
-        // Legacy fallback
-        const legacyStrength = normalizeNoiseGateStrength(
-          await store.get("noise_gate_strength"),
-        );
-        return noiseGateStrengthToThresholdDbfs(legacyStrength);
-      })(),
+				// Legacy fallback
+				const legacyStrength = normalizeNoiseGateStrength(
+					await store.get("noise_gate_strength"),
+				);
+				return noiseGateStrengthToThresholdDbfs(legacyStrength);
+			})(),
 
-      audio_downmix_to_mono:
-        (await store.get<boolean>("audio_downmix_to_mono")) ??
-        DEFAULT_SETTINGS_VALUES.audio_downmix_to_mono,
-      audio_resample_to_16khz:
-        (await store.get<boolean>("audio_resample_to_16khz")) ??
-        DEFAULT_SETTINGS_VALUES.audio_resample_to_16khz,
-      audio_highpass_enabled:
-        (await store.get<boolean>("audio_highpass_enabled")) ??
-        DEFAULT_SETTINGS_VALUES.audio_highpass_enabled,
-      audio_agc_enabled:
-        (await store.get<boolean>("audio_agc_enabled")) ??
-        DEFAULT_SETTINGS_VALUES.audio_agc_enabled,
-      audio_noise_suppression_enabled:
-        (await store.get<boolean>("audio_noise_suppression_enabled")) ??
-        DEFAULT_SETTINGS_VALUES.audio_noise_suppression_enabled,
+			audio_downmix_to_mono:
+				(await store.get<boolean>("audio_downmix_to_mono")) ??
+				DEFAULT_SETTINGS_VALUES.audio_downmix_to_mono,
+			audio_resample_to_16khz:
+				(await store.get<boolean>("audio_resample_to_16khz")) ??
+				DEFAULT_SETTINGS_VALUES.audio_resample_to_16khz,
+			audio_highpass_enabled:
+				(await store.get<boolean>("audio_highpass_enabled")) ??
+				DEFAULT_SETTINGS_VALUES.audio_highpass_enabled,
+			audio_agc_enabled:
+				(await store.get<boolean>("audio_agc_enabled")) ??
+				DEFAULT_SETTINGS_VALUES.audio_agc_enabled,
+			audio_noise_suppression_enabled:
+				(await store.get<boolean>("audio_noise_suppression_enabled")) ??
+				DEFAULT_SETTINGS_VALUES.audio_noise_suppression_enabled,
 
-      max_saved_recordings: maxSavedRecordings,
-      recordings_retention_mode: recordingsRetentionMode,
-      recordings_retention_amount: recordingsRetentionAmount,
-      recordings_retention_unit: recordingsRetentionUnit,
-      recordings_retention_value: recordingsRetentionValue,
+			max_saved_recordings: maxSavedRecordings,
+			recordings_retention_mode: recordingsRetentionMode,
+			recordings_retention_amount: recordingsRetentionAmount,
+			recordings_retention_unit: recordingsRetentionUnit,
+			recordings_retention_value: recordingsRetentionValue,
 
-      request_logs_retention_mode: normalizeRequestLogsRetentionMode(
-        await store.get("request_logs_retention_mode"),
-      ),
-      request_logs_retention_amount: normalizeRequestLogsRetentionAmount(
-        await store.get("request_logs_retention_amount"),
-      ),
-      request_logs_retention_days: normalizeRequestLogsRetentionDays(
-        await store.get("request_logs_retention_days"),
-      ),
-      request_logs_privacy_mode:
-        (await store.get<boolean>("request_logs_privacy_mode")) ??
-        DEFAULT_SETTINGS_VALUES.request_logs_privacy_mode,
+			request_logs_retention_mode: normalizeRequestLogsRetentionMode(
+				await store.get("request_logs_retention_mode"),
+			),
+			request_logs_retention_amount: normalizeRequestLogsRetentionAmount(
+				await store.get("request_logs_retention_amount"),
+			),
+			request_logs_retention_days: normalizeRequestLogsRetentionDays(
+				await store.get("request_logs_retention_days"),
+			),
+			request_logs_privacy_mode:
+				(await store.get<boolean>("request_logs_privacy_mode")) ??
+				DEFAULT_SETTINGS_VALUES.request_logs_privacy_mode,
 
-      transcription_retention_mode: transcriptionRetentionMode,
-      transcription_retention_amount: transcriptionRetentionAmount,
-      // Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
-      ...(await (async () => {
-        const rawUnit = await store.get("transcription_retention_unit");
-        const rawValue = await store.get("transcription_retention_value");
+			transcription_retention_mode: transcriptionRetentionMode,
+			transcription_retention_amount: transcriptionRetentionAmount,
+			// Time retention: new (unit+value), with legacy fallback to transcription_retention_days.
+			...(await (async () => {
+				const rawUnit = await store.get("transcription_retention_unit");
+				const rawValue = await store.get("transcription_retention_value");
 
-        // Legacy installs only have days.
-        if (rawUnit == null && rawValue == null) {
-          const legacyDays = normalizeTranscriptionRetentionValue(
-            await store.get("transcription_retention_days"),
-            "days",
-          );
-          return {
-            transcription_retention_unit: "days" as const,
-            transcription_retention_value: legacyDays,
-          };
-        }
+				// Legacy installs only have days.
+				if (rawUnit == null && rawValue == null) {
+					const legacyDays = normalizeTranscriptionRetentionValue(
+						await store.get("transcription_retention_days"),
+						"days",
+					);
+					return {
+						transcription_retention_unit: "days" as const,
+						transcription_retention_value: legacyDays,
+					};
+				}
 
-        const unit = normalizeTranscriptionRetentionUnit(rawUnit);
-        const value = normalizeTranscriptionRetentionValue(rawValue, unit);
-        return {
-          transcription_retention_unit: unit,
-          transcription_retention_value: value,
-        };
-      })()),
-      transcription_retention_delete_recordings:
-        normalizeTranscriptionRetentionDeleteRecordings(
-          await store.get("transcription_retention_delete_recordings"),
-        ),
+				const unit = normalizeTranscriptionRetentionUnit(rawUnit);
+				const value = normalizeTranscriptionRetentionValue(rawValue, unit);
+				return {
+					transcription_retention_unit: unit,
+					transcription_retention_value: value,
+				};
+			})()),
+			transcription_retention_delete_recordings:
+				normalizeTranscriptionRetentionDeleteRecordings(
+					await store.get("transcription_retention_delete_recordings"),
+				),
 
-      // Stats retention (persisted on disk).
-      ...(await (async () => {
-        const rawUnit = await store.get("stats_retention_unit");
-        const rawValue = await store.get("stats_retention_value");
+			// Stats retention (persisted on disk).
+			...(await (async () => {
+				const rawUnit = await store.get("stats_retention_unit");
+				const rawValue = await store.get("stats_retention_value");
 
-        const unit = normalizeTranscriptionRetentionUnit(rawUnit ?? "days");
-        const value = normalizeTranscriptionRetentionValue(
-          rawValue ?? 30,
-          unit,
-        );
+				const unit = normalizeTranscriptionRetentionUnit(rawUnit ?? "days");
+				const value = normalizeTranscriptionRetentionValue(
+					rawValue ?? 30,
+					unit,
+				);
 
-        return {
-          stats_retention_unit: unit,
-          stats_retention_value: value,
-        };
-      })()),
-      stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
-        await store.get("stats_retention_max_bytes"),
-      ),
+				return {
+					stats_retention_unit: unit,
+					stats_retention_value: value,
+				};
+			})()),
+			stats_retention_max_bytes: normalizeStatsRetentionMaxBytes(
+				await store.get("stats_retention_max_bytes"),
+			),
 
-      // Backups
-      github_backup_gist_id:
-        (await store.get<string | null>("github_backup_gist_id")) ??
-        DEFAULT_SETTINGS_VALUES.github_backup_gist_id,
+			// Backups
+			github_backup_gist_id:
+				(await store.get<string | null>("github_backup_gist_id")) ??
+				DEFAULT_SETTINGS_VALUES.github_backup_gist_id,
 
-      // ============================================================================
-      // OCR (Active Window Context) settings
-      // ============================================================================
+			// ============================================================================
+			// OCR (Active Window Context) settings
+			// ============================================================================
 
-      ocr_base_url:
-        (await store.get<string | null>("ocr_base_url")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_base_url,
-      ocr_model: await readSettingValue(
-        "ocr_model",
-        DEFAULT_SETTINGS_VALUES.ocr_model,
-        normalizeNonEmptyStringSetting,
-      ),
-      ocr_auth_mode: normalizeOcrAuthMode(await store.get("ocr_auth_mode")),
-      ocr_prompt:
-        (await store.get<string | null>("ocr_prompt")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_prompt,
-      ocr_max_tokens:
-        (await store.get<number | null>("ocr_max_tokens")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_max_tokens,
-      ocr_temperature:
-        (await store.get<number | null>("ocr_temperature")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_temperature,
-      ocr_top_p:
-        (await store.get<number | null>("ocr_top_p")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_top_p,
-      ocr_request_timeout_ms:
-        (await store.get<number | null>("ocr_request_timeout_ms")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_request_timeout_ms,
-      ocr_context_max_chars:
-        (await store.get<number | null>("ocr_context_max_chars")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_context_max_chars,
+			ocr_base_url:
+				(await store.get<string | null>("ocr_base_url")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_base_url,
+			ocr_model: await readSettingValue(
+				"ocr_model",
+				DEFAULT_SETTINGS_VALUES.ocr_model,
+				normalizeNonEmptyStringSetting,
+			),
+			ocr_auth_mode: normalizeOcrAuthMode(await store.get("ocr_auth_mode")),
+			ocr_prompt:
+				(await store.get<string | null>("ocr_prompt")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_prompt,
+			ocr_max_tokens:
+				(await store.get<number | null>("ocr_max_tokens")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_max_tokens,
+			ocr_temperature:
+				(await store.get<number | null>("ocr_temperature")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_temperature,
+			ocr_top_p:
+				(await store.get<number | null>("ocr_top_p")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_top_p,
+			ocr_request_timeout_ms:
+				(await store.get<number | null>("ocr_request_timeout_ms")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_request_timeout_ms,
+			ocr_context_max_chars:
+				(await store.get<number | null>("ocr_context_max_chars")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_context_max_chars,
 
-      rewrite_active_window_ocr_mode: normalizeActiveWindowOcrMode(
-        await store.get("rewrite_active_window_ocr_mode"),
-      ),
-      quick_replace_active_window_ocr_mode: normalizeActiveWindowOcrMode(
-        await store.get("quick_replace_active_window_ocr_mode"),
-      ),
-      quick_ask_active_window_ocr_mode: normalizeActiveWindowOcrMode(
-        await store.get("quick_ask_active_window_ocr_mode"),
-      ),
-      ocr_auto_capture_timing: normalizeOcrAutoCaptureTiming(
-        await store.get("ocr_auto_capture_timing"),
-      ),
-      ocr_hallucination_protection:
-        (await store.get<boolean | null>("ocr_hallucination_protection")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_hallucination_protection,
-      ocr_hallucination_threshold:
-        (await store.get<number | null>("ocr_hallucination_threshold")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_hallucination_threshold,
-      ocr_resize_max_dimension:
-        (await store.get<number | null>("ocr_resize_max_dimension")) ??
-        DEFAULT_SETTINGS_VALUES.ocr_resize_max_dimension,
-      ocr_resize_filter: normalizeOcrResizeFilter(
-        await store.get("ocr_resize_filter"),
-      ),
-    };
+			rewrite_active_window_ocr_mode: normalizeActiveWindowOcrMode(
+				await store.get("rewrite_active_window_ocr_mode"),
+			),
+			quick_replace_active_window_ocr_mode: normalizeActiveWindowOcrMode(
+				await store.get("quick_replace_active_window_ocr_mode"),
+			),
+			quick_ask_active_window_ocr_mode: normalizeActiveWindowOcrMode(
+				await store.get("quick_ask_active_window_ocr_mode"),
+			),
+			ocr_auto_capture_timing: normalizeOcrAutoCaptureTiming(
+				await store.get("ocr_auto_capture_timing"),
+			),
+			ocr_hallucination_protection:
+				(await store.get<boolean | null>("ocr_hallucination_protection")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_hallucination_protection,
+			ocr_hallucination_threshold:
+				(await store.get<number | null>("ocr_hallucination_threshold")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_hallucination_threshold,
+			ocr_resize_max_dimension:
+				(await store.get<number | null>("ocr_resize_max_dimension")) ??
+				DEFAULT_SETTINGS_VALUES.ocr_resize_max_dimension,
+			ocr_resize_filter: normalizeOcrResizeFilter(
+				await store.get("ocr_resize_filter"),
+			),
+		};
 
 		// Mirror the accent so index.html can apply it synchronously at next launch.
 		tryWriteLocalStorage(LOCAL_ACCENT_COLOR_KEY, settings.accent_color ?? null);

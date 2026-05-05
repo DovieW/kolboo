@@ -17,8 +17,9 @@ use super::http;
 use super::language;
 use super::openai_compat;
 use super::streaming::{
-    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, is_ws_closed_error,
-    ws_next_with_timeout, PartialTranscript, StreamingSttSession,
+    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, f32_to_pcm_s16le,
+    is_ws_closed_error, resample_linear, ws_next_with_timeout, PartialTranscript,
+    StreamingSttSession,
 };
 use super::{AudioFormat, SttError, SttProvider};
 use crate::request_log::RequestLogStore;
@@ -191,36 +192,6 @@ impl OpenAiSttProvider {
             "{}://{}/v1/realtime?intent=transcription",
             ws_scheme, host,
         ))
-    }
-
-    /// Resample f32 mono samples from `input_rate` to `output_rate` using linear
-    /// interpolation. Perfectly adequate for STT.
-    fn resample_linear(input: &[f32], input_rate: u32, output_rate: u32) -> Vec<f32> {
-        if input_rate == output_rate || input.is_empty() {
-            return input.to_vec();
-        }
-        let ratio = input_rate as f64 / output_rate as f64;
-        let output_len = (input.len() as f64 / ratio).ceil() as usize;
-        let mut output = Vec::with_capacity(output_len);
-        for i in 0..output_len {
-            let src_idx = i as f64 * ratio;
-            let idx0 = src_idx.floor() as usize;
-            let idx1 = (idx0 + 1).min(input.len() - 1);
-            let frac = (src_idx - idx0 as f64) as f32;
-            output.push(input[idx0] * (1.0 - frac) + input[idx1] * frac);
-        }
-        output
-    }
-
-    /// Convert f32 mono samples to little-endian i16 bytes.
-    fn f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8> {
-        let mut pcm = Vec::with_capacity(samples.len() * 2);
-        for &s in samples {
-            let clamped = s.clamp(-1.0, 1.0);
-            let val = (clamped * i16::MAX as f32).round() as i16;
-            pcm.extend_from_slice(&val.to_le_bytes());
-        }
-        pcm
     }
 
     /// Start a concurrent streaming STT session via the OpenAI Realtime API.
@@ -411,12 +382,12 @@ impl OpenAiSttProvider {
                     match audio_chunk {
                         Some(f32_samples) => {
                             // Resample to 24 kHz if needed.
-                            let resampled = Self::resample_linear(
+                            let resampled = resample_linear(
                                 &f32_samples,
                                 capture_sample_rate,
                                 Self::REALTIME_SAMPLE_RATE,
                             );
-                            let pcm = Self::f32_to_pcm_s16le(&resampled);
+                            let pcm = f32_to_pcm_s16le(&resampled);
                             pcm_buffer.extend_from_slice(&pcm);
 
                             // Send chunks when we've accumulated enough.
@@ -1177,41 +1148,5 @@ mod tests {
         let provider = provider.with_api_base_url("http://localhost:8080".to_string());
         let url = provider.realtime_ws_url().unwrap();
         assert_eq!(url, "ws://localhost:8080/v1/realtime?intent=transcription");
-    }
-
-    #[test]
-    fn test_resample_linear_passthrough() {
-        let input = vec![0.0, 0.5, 1.0, -1.0];
-        let output = OpenAiSttProvider::resample_linear(&input, 24000, 24000);
-        assert_eq!(output, input);
-    }
-
-    #[test]
-    fn test_resample_linear_downsample() {
-        // 48 kHz → 24 kHz should roughly halve the sample count.
-        let input: Vec<f32> = (0..480).map(|i| (i as f32) / 480.0).collect();
-        let output = OpenAiSttProvider::resample_linear(&input, 48000, 24000);
-        assert_eq!(output.len(), 240);
-    }
-
-    #[test]
-    fn test_resample_linear_upsample() {
-        // 16 kHz → 24 kHz should increase sample count by 1.5x.
-        let input: Vec<f32> = (0..160).map(|i| (i as f32) / 160.0).collect();
-        let output = OpenAiSttProvider::resample_linear(&input, 16000, 24000);
-        assert_eq!(output.len(), 240);
-    }
-
-    #[test]
-    fn test_f32_to_pcm_s16le() {
-        let samples = vec![0.0_f32, 1.0, -1.0];
-        let pcm = OpenAiSttProvider::f32_to_pcm_s16le(&samples);
-        assert_eq!(pcm.len(), 6); // 3 samples × 2 bytes
-                                  // 0.0 → 0
-        assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 0);
-        // 1.0 → i16::MAX
-        assert_eq!(i16::from_le_bytes([pcm[2], pcm[3]]), i16::MAX);
-        // -1.0 → -i16::MAX (due to rounding)
-        assert_eq!(i16::from_le_bytes([pcm[4], pcm[5]]), -i16::MAX);
     }
 }

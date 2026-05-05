@@ -39,6 +39,12 @@ import type {
 	PlayingAudioHandling,
 	RewriteProgramPromptProfile,
 } from "../../lib/tauri";
+import { DEFAULT_SETTINGS_VALUES } from "../../lib/tauri/settingsDefaults";
+import {
+	findProfileById,
+	inheritedSettingView,
+	isInheritedSettingValue,
+} from "../../lib/tauri/settingsViews";
 import {
 	SettingsIconButton,
 	SettingsRow,
@@ -49,11 +55,6 @@ const INHERIT_TOOLTIP = "Inheriting from Default profile";
 
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
-
-/** Helper to check if a profile value is inheriting (null/undefined) */
-function isInheriting<T>(value: T | null | undefined): boolean {
-	return value === null || value === undefined;
-}
 
 const OVERLAY_MODE_OPTIONS = [
 	{ value: "always", label: "Always visible" },
@@ -100,12 +101,39 @@ const CONTEXT_GRAB_METHOD_OPTIONS: Array<{
 	{ value: "none", label: "None" },
 ];
 
-function getProfileValue<T>(
-	profileValue: T | null | undefined,
-	globalValue: T,
-): T {
-	return profileValue ?? globalValue;
-}
+const normalizeBoolean = (value: unknown): boolean | null =>
+	typeof value === "boolean" ? value : null;
+
+const normalizePlayingAudioHandling = (
+	value: unknown,
+): PlayingAudioHandling | null =>
+	value === "none" ||
+	value === "mute" ||
+	value === "pause" ||
+	value === "mute_and_pause"
+		? value
+		: null;
+
+const normalizeOverlayMode = (value: unknown): OverlayMode | null =>
+	value === "always" || value === "recording_only" || value === "never"
+		? value
+		: null;
+
+const normalizeOutputMode = (value: unknown): OutputMode | null =>
+	value === "paste" || value === "clipboard" || value === "paste_and_clipboard"
+		? value
+		: null;
+
+const normalizeContextGrabMethod = (
+	value: unknown,
+): ContextGrabMethod | null =>
+	value === "ctrl_c" ||
+	value === "ctrl_shift_c" ||
+	value === "ctrl_insert" ||
+	value === "none" ||
+	value === "clipboard_only"
+		? value
+		: null;
 
 export function UiSettings({
 	editingProfileId,
@@ -133,10 +161,10 @@ export function UiSettings({
 		useUpdateRewriteProgramPromptProfiles();
 
 	const profiles = settings?.rewrite_program_prompt_profiles ?? [];
-	const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
+	const defaultProfile = findProfileById(profiles, "default");
 	const profile: RewriteProgramPromptProfile | null =
 		editingProfileId && editingProfileId !== "default"
-			? (profiles.find((p) => p.id === editingProfileId) ?? null)
+			? findProfileById(profiles, editingProfileId)
 			: null;
 
 	const isProfileScope = profile !== null;
@@ -176,13 +204,21 @@ export function UiSettings({
 		updateRewriteProgramPromptProfiles.mutate(next);
 	};
 
-	// Get effective values (profile value or fall back to global)
-	const globalSoundEnabled = settings?.sound_enabled ?? true;
-	const soundEnabled = isProfileScope
-		? getProfileValue(profile?.sound_enabled, globalSoundEnabled)
-		: globalSoundEnabled;
+	// Profile-scoped UI reads go through Settings View helpers so inheritance,
+	// explicit-null, and malformed values are resolved in one place instead of as
+	// repeated `profileValue ?? globalValue` snippets across settings screens.
+	const globalSoundEnabled =
+		settings?.sound_enabled ?? DEFAULT_SETTINGS_VALUES.sound_enabled;
+	const soundView = inheritedSettingView({
+		globalValue: globalSoundEnabled,
+		profile,
+		key: "sound_enabled",
+		defaultValue: DEFAULT_SETTINGS_VALUES.sound_enabled,
+		normalize: normalizeBoolean,
+	});
+	const soundEnabled = soundView.value;
 	const soundInheriting =
-		isProfileScope && isInheriting(profile?.sound_enabled);
+		isProfileScope && isInheritedSettingValue(profile, "sound_enabled");
 
 	const audioCueFromSettings: AudioCue = settings?.audio_cue ?? "kolboo";
 	const [audioCueDropdownValue, setAudioCueDropdownValue] =
@@ -193,15 +229,19 @@ export function UiSettings({
 	}, [audioCueFromSettings]);
 
 	const globalPlayingAudioHandling: PlayingAudioHandling =
-		settings?.playing_audio_handling ?? "none";
-	const playingAudioHandling = isProfileScope
-		? getProfileValue(
-				profile?.playing_audio_handling,
-				globalPlayingAudioHandling,
-			)
-		: globalPlayingAudioHandling;
+		settings?.playing_audio_handling ??
+		DEFAULT_SETTINGS_VALUES.playing_audio_handling;
+	const playingAudioHandlingView = inheritedSettingView({
+		globalValue: globalPlayingAudioHandling,
+		profile,
+		key: "playing_audio_handling",
+		defaultValue: DEFAULT_SETTINGS_VALUES.playing_audio_handling,
+		normalize: normalizePlayingAudioHandling,
+	});
+	const playingAudioHandling = playingAudioHandlingView.value;
 	const playingAudioHandlingInheriting =
-		isProfileScope && isInheriting(profile?.playing_audio_handling);
+		isProfileScope &&
+		isInheritedSettingValue(profile, "playing_audio_handling");
 
 	const cueDisabledByMuteHandling =
 		playingAudioHandling === "mute" ||
@@ -212,12 +252,17 @@ export function UiSettings({
 		: null;
 
 	const globalOverlayMode: OverlayMode =
-		settings?.overlay_mode ?? "recording_only";
-	const overlayMode = isProfileScope
-		? getProfileValue(profile?.overlay_mode, globalOverlayMode)
-		: globalOverlayMode;
+		settings?.overlay_mode ?? DEFAULT_SETTINGS_VALUES.overlay_mode;
+	const overlayModeView = inheritedSettingView({
+		globalValue: globalOverlayMode,
+		profile,
+		key: "overlay_mode",
+		defaultValue: DEFAULT_SETTINGS_VALUES.overlay_mode,
+		normalize: normalizeOverlayMode,
+	});
+	const overlayMode = overlayModeView.value;
 	const overlayModeInheriting =
-		isProfileScope && isInheriting(profile?.overlay_mode);
+		isProfileScope && isInheritedSettingValue(profile, "overlay_mode");
 
 	const overlayShowDetailedLoading =
 		settings?.overlay_show_detailed_loading ?? false;
@@ -225,30 +270,47 @@ export function UiSettings({
 	const overlayMonitorTarget: OverlayMonitorTarget =
 		settings?.overlay_monitor_target ?? "main";
 
-	const globalOutputMode: OutputMode = settings?.output_mode ?? "paste";
-	const outputMode = isProfileScope
-		? getProfileValue(profile?.output_mode, globalOutputMode)
-		: globalOutputMode;
+	const globalOutputMode: OutputMode =
+		settings?.output_mode ?? DEFAULT_SETTINGS_VALUES.output_mode;
+	const outputModeView = inheritedSettingView({
+		globalValue: globalOutputMode,
+		profile,
+		key: "output_mode",
+		defaultValue: DEFAULT_SETTINGS_VALUES.output_mode,
+		normalize: normalizeOutputMode,
+	});
+	const outputMode = outputModeView.value;
 	const outputModeInheriting =
-		isProfileScope && isInheriting(profile?.output_mode);
+		isProfileScope && isInheritedSettingValue(profile, "output_mode");
 
-	const globalOutputHitEnter = settings?.output_hit_enter ?? false;
-	const outputHitEnter = isProfileScope
-		? getProfileValue(profile?.output_hit_enter, globalOutputHitEnter)
-		: globalOutputHitEnter;
+	const globalOutputHitEnter =
+		settings?.output_hit_enter ?? DEFAULT_SETTINGS_VALUES.output_hit_enter;
+	const outputHitEnterView = inheritedSettingView({
+		globalValue: globalOutputHitEnter,
+		profile,
+		key: "output_hit_enter",
+		defaultValue: DEFAULT_SETTINGS_VALUES.output_hit_enter,
+		normalize: normalizeBoolean,
+	});
+	const outputHitEnter = outputHitEnterView.value;
 	const outputHitEnterInheriting =
-		isProfileScope && isInheriting(profile?.output_hit_enter);
+		isProfileScope && isInheritedSettingValue(profile, "output_hit_enter");
 
 	const outputSmartPasteProtection =
 		settings?.output_smart_paste_protection ?? false;
 
 	const globalContextGrabMethod: ContextGrabMethod =
 		defaultProfile?.context_grab_method ?? "ctrl_c";
-	const contextGrabMethod = isProfileScope
-		? getProfileValue(profile?.context_grab_method, globalContextGrabMethod)
-		: globalContextGrabMethod;
+	const contextGrabMethodView = inheritedSettingView({
+		globalValue: globalContextGrabMethod,
+		profile,
+		key: "context_grab_method",
+		defaultValue: "ctrl_c" as const,
+		normalize: normalizeContextGrabMethod,
+	});
+	const contextGrabMethod = contextGrabMethodView.value;
 	const contextGrabMethodInheriting =
-		isProfileScope && isInheriting(profile?.context_grab_method);
+		isProfileScope && isInheritedSettingValue(profile, "context_grab_method");
 
 	// Backward compatible: older settings may contain the deprecated value
 	// "clipboard_only". We no longer show it as an option; display it as Ctrl+C

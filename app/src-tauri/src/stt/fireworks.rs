@@ -15,8 +15,9 @@
 //! - Server replies with `{"checkpoint_id": "final"}` when done
 
 use super::streaming::{
-    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, is_ws_closed_error,
-    ws_next_with_timeout, PartialTranscript, StreamingSttSession,
+    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, f32_to_pcm_s16le,
+    is_ws_closed_error, resample_linear, ws_next_with_timeout, PartialTranscript,
+    StreamingSttSession,
 };
 use super::{http, language, openai_compat};
 use super::{AudioFormat, SttError, SttProvider};
@@ -146,36 +147,6 @@ impl FireworksSttProvider {
         } else {
             Ok(base)
         }
-    }
-
-    /// Resample f32 mono samples from `input_rate` to `output_rate` using linear
-    /// interpolation.
-    fn resample_linear(input: &[f32], input_rate: u32, output_rate: u32) -> Vec<f32> {
-        if input_rate == output_rate || input.is_empty() {
-            return input.to_vec();
-        }
-        let ratio = input_rate as f64 / output_rate as f64;
-        let output_len = (input.len() as f64 / ratio).ceil() as usize;
-        let mut output = Vec::with_capacity(output_len);
-        for i in 0..output_len {
-            let src_idx = i as f64 * ratio;
-            let idx0 = src_idx.floor() as usize;
-            let idx1 = (idx0 + 1).min(input.len() - 1);
-            let frac = (src_idx - idx0 as f64) as f32;
-            output.push(input[idx0] * (1.0 - frac) + input[idx1] * frac);
-        }
-        output
-    }
-
-    /// Convert f32 mono samples to little-endian i16 bytes.
-    fn f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8> {
-        let mut pcm = Vec::with_capacity(samples.len() * 2);
-        for &s in samples {
-            let clamped = s.clamp(-1.0, 1.0);
-            let val = (clamped * i16::MAX as f32).round() as i16;
-            pcm.extend_from_slice(&val.to_le_bytes());
-        }
-        pcm
     }
 
     /// Start a real-time WebSocket streaming session.
@@ -326,12 +297,12 @@ impl FireworksSttProvider {
                     match audio_chunk {
                         Some(f32_samples) => {
                             // Resample to 16 kHz if needed.
-                            let resampled = Self::resample_linear(
+                            let resampled = resample_linear(
                                 &f32_samples,
                                 capture_sample_rate,
                                 Self::STREAMING_SAMPLE_RATE,
                             );
-                            let pcm = Self::f32_to_pcm_s16le(&resampled);
+                            let pcm = f32_to_pcm_s16le(&resampled);
                             pcm_buffer.extend_from_slice(&pcm);
 
                             // Send binary chunks when we've accumulated enough.
@@ -774,36 +745,6 @@ mod tests {
         .with_api_base_url("http://localhost:8080".to_string());
         let url = provider.streaming_ws_url().unwrap();
         assert_eq!(url, "ws://localhost:8080/v1/audio/transcriptions/streaming");
-    }
-
-    #[test]
-    fn test_f32_to_pcm_s16le() {
-        let samples = vec![0.0_f32, 1.0, -1.0, 0.5];
-        let pcm = FireworksSttProvider::f32_to_pcm_s16le(&samples);
-        assert_eq!(pcm.len(), 8); // 4 samples × 2 bytes
-
-        // 0.0 → 0
-        assert_eq!(i16::from_le_bytes([pcm[0], pcm[1]]), 0);
-        // 1.0 → i16::MAX
-        assert_eq!(i16::from_le_bytes([pcm[2], pcm[3]]), i16::MAX);
-        // -1.0 → clamped to -i16::MAX (not i16::MIN due to f32 multiply)
-        let neg = i16::from_le_bytes([pcm[4], pcm[5]]);
-        assert!(neg < -32000);
-    }
-
-    #[test]
-    fn test_resample_same_rate() {
-        let input = vec![1.0_f32, 2.0, 3.0];
-        let output = FireworksSttProvider::resample_linear(&input, 16000, 16000);
-        assert_eq!(output, input);
-    }
-
-    #[test]
-    fn test_resample_downsample() {
-        // 48kHz → 16kHz = 3:1 ratio
-        let input: Vec<f32> = (0..300).map(|i| i as f32).collect();
-        let output = FireworksSttProvider::resample_linear(&input, 48000, 16000);
-        assert_eq!(output.len(), 100);
     }
 
     #[test]
