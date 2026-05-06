@@ -71,22 +71,31 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 
 function extractRustSeededSettingsKeys(rustSource: string): string[] {
 	// We intentionally keep this parsing dumb + stable.
-	// The backend default seeding uses set_default("key", ...) and some direct store.set("key", ...)
-	// in ensure_default_settings for migrations.
+	// The backend default seeding uses SettingDefaultDefinition::missing*("key", ...),
+	// set_default("key", ...), and some direct store.set("key", ...) in
+	// ensure_default_settings for migrations.
 	const keys = new Set<string>();
 
 	const functionBody = extractRustFunctionBody(
 		rustSource,
 		"ensure_default_settings",
 	);
-	const targetSource = functionBody ?? rustSource;
+	const targetSources = functionBody
+		? [functionBody, rustSource]
+		: [rustSource];
 
-	const patterns = [/set_default\(\s*"([^"]+)"/g, /store\.set\(\s*"([^"]+)"/g];
+	const patterns = [
+		/SettingDefaultDefinition::missing_(?:or_null|only)\(\s*"([^"]+)"/g,
+		/set_default\(\s*"([^"]+)"/g,
+		/store\.set\(\s*"([^"]+)"/g,
+	];
 	for (const re of patterns) {
-		for (const match of targetSource.matchAll(re)) {
-			const k = match[1];
-			if (typeof k === "string" && k.trim().length > 0) {
-				keys.add(k);
+		for (const targetSource of targetSources) {
+			for (const match of targetSource.matchAll(re)) {
+				const k = match[1];
+				if (typeof k === "string" && k.trim().length > 0) {
+					keys.add(k);
+				}
 			}
 		}
 	}
@@ -128,7 +137,14 @@ describe("settings contract: Rust defaults vs TS getSettings", () => {
 			"../../../src-tauri/src/settings/defaults.rs",
 			import.meta.url,
 		);
-		const rustSource = fs.readFileSync(rustPath, "utf8");
+		const rustDefinitionsPath = new URL(
+			"../../../src-tauri/src/settings/default_definitions.rs",
+			import.meta.url,
+		);
+		const rustSource = `${fs.readFileSync(rustPath, "utf8")}\n${fs.readFileSync(
+			rustDefinitionsPath,
+			"utf8",
+		)}`;
 		const rustSeededKeys = extractRustSeededSettingsKeys(rustSource);
 		const rustSeededKeySet = new Set(rustSeededKeys);
 

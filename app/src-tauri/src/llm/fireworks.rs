@@ -9,7 +9,6 @@ use super::{LlmError, LlmProvider, DEFAULT_LLM_TIMEOUT};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde_json::json;
 use std::time::Duration;
 
 const FIREWORKS_API_URL: &str = "https://api.fireworks.ai/inference/v1/chat/completions";
@@ -109,32 +108,21 @@ impl LlmProvider for FireworksLlmProvider {
             0.3,
         );
 
-        if let Some(store) = &self.request_log_store {
-            let request_json = serde_json::to_value(&request).unwrap_or_else(|_| {
-                json!({
-                    "provider": "fireworks",
-                    "error": "failed to serialize request",
-                })
-            });
-            store.with_current(|log| {
-                log.llm_request_json = Some(request_json);
-            });
-        }
-
         let req = self
             .client
             .post(&self.api_base_url)
             .bearer_auth(&self.api_key)
             .json(&request);
 
-        let response_json = http_json::send_json_request("Fireworks", req, self.timeout).await?;
-
-        if let Some(store) = &self.request_log_store {
-            let response_for_log = response_json.clone();
-            store.with_current(|log| {
-                log.llm_response_json = Some(response_for_log);
-            });
-        }
+        let response_json = http_json::send_json_request_logged(
+            "Fireworks",
+            "fireworks",
+            req,
+            self.timeout,
+            self.request_log_store.as_ref(),
+            &request,
+        )
+        .await?;
 
         openai_compat::extract_first_choice_text(&response_json)
             .ok_or_else(|| LlmError::InvalidResponse("No response choices returned".to_string()))

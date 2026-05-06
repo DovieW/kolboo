@@ -4,6 +4,8 @@
 
 ## Centralize setting default values (DRY violation)
 
+**Status:** Mostly addressed by architecture-deepening work (2026-05-05)
+
 Setting defaults are currently defined in multiple places, making it easy for them to drift out of sync:
 
 1. **Rust struct defaults** — `pipeline/config.rs` (`PipelineConfig::default()`, `OcrConfig` fields)
@@ -20,6 +22,12 @@ Ideas:
 - Have `PipelineConfig::default()`, `ensure_default_settings()`, and `get_setting_from_store` all reference these constants.
 - For TypeScript, generate a `defaults.generated.ts` from the Rust constants (similar to how we generate types from schemas), or define them once in `types.ts` and import everywhere.
 - UI components should reference the normalize function's output rather than inline `?? "..."` fallbacks.
+
+Progress (2026-05-05):
+
+- Added `app/src-tauri/src/settings/default_definitions.rs` as the startup seeding definition Module for persisted setting defaults and explicit-null seed rules.
+- `settings/defaults.rs::ensure_default_settings(...)` now iterates those definitions and keeps only store-state-dependent migrations inline (Default rewrite profile insertion and derived hotkey shortcut cards).
+- Follow-up remains: reduce remaining bootstrap/read-time fallback literals in `bootstrap/mod.rs` and TS normalization once a safe generated/shared default contract is available.
 
 ## Broaden Settings View adoption for inherited/preset callers
 
@@ -42,6 +50,12 @@ Future deepening could route effective profile/preset setting reads through thes
 - preset → profile → global fallback
 - explicit-null/inherit semantics
 - future user-facing "where did this value come from?" explanations
+
+Progress (2026-05-05):
+
+- Added `app/src/components/settings/prompt/effectivePromptSettings.ts` to move prompt/profile fallback calculation out of `usePromptSettingsProfileState.ts`.
+- The prompt settings hook now uses the shared `settingsViews.ts::isInheritedSettingValue(...)` rule for profile inheritance checks.
+- Follow-up remains: route preset-specific editor state through `presetSettingView(...)` when preset editing gets touched again.
 
 ## Reduce maintenance cost of schema registry
 
@@ -185,6 +199,8 @@ Remaining ideas:
 
 ## Consolidate duplicated Settings shell components
 
+**Status:** Partially addressed by architecture-deepening work (2026-05-05)
+
 `app/src/App.tsx` currently contains both `_SettingsView` and `SettingsViewWithGuideLauncher`, and they each reimplement nearly the same:
 
 - profile picker state
@@ -199,6 +215,11 @@ Ideas:
 - Extract a single shared `SettingsShell` component that owns the tab list and panel rendering.
 - Pass optional header actions (like the setup-guide launcher) via props instead of duplicating the whole screen.
 - Keep the profile-picker state in one place so tab/view changes do not need mirrored updates.
+
+Progress (2026-05-05):
+
+- Added `app/src/components/settings/SettingsShell.tsx`, and the active Settings route now renders through this shared shell with an optional setup-guide launcher.
+- Follow-up remains: delete the legacy `_SettingsView` / legacy wrapper code from `App.tsx` once the shell has baked and no standalone entrypoint relies on the old definitions.
 
 ## Deduplicate audio conversion utilities across STT streaming providers
 

@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tauri::AppHandle;
 
 #[cfg(desktop)]
@@ -14,6 +14,17 @@ pub const ROUTER_EMBEDDINGS_STORE_KEY: &str = "router_embeddings_cache_v1";
 // `hotkey_debug_enabled`.
 #[cfg(desktop)]
 pub const ROUTER_EMBEDDINGS_STORE_FILE: &str = "router_embeddings_cache.json";
+
+pub fn router_embedding_cache_key(provider: &str, model: &str, hint: &str) -> String {
+    match provider {
+        "cohere" => format!("cohere::{model}::search_document::{hint}"),
+        "fireworks" => format!("fireworks::{model}::{hint}"),
+        // Back-compat: keep existing OpenAI cache key format. Do not add a
+        // provider-family abstraction here unless another concrete embeddings
+        // provider proves it shares semantics beyond the cache-key shape.
+        _ => format!("openai::{model}::{hint}"),
+    }
+}
 
 /// Migration: older installs stored the embeddings cache in `settings.json`.
 ///
@@ -127,6 +138,28 @@ pub fn load_router_embeddings_from_store(app: &AppHandle) -> HashMap<String, Vec
     out
 }
 
+#[cfg(desktop)]
+pub fn load_router_embeddings_encoded_map(
+    app: &AppHandle,
+    force_refresh: bool,
+) -> Result<(HashSet<String>, serde_json::Map<String, JsonValue>), String> {
+    if force_refresh {
+        return Ok((HashSet::new(), serde_json::Map::new()));
+    }
+
+    let store = app
+        .store(ROUTER_EMBEDDINGS_STORE_FILE)
+        .map_err(|e| format!("Failed to get store: {e}"))?;
+
+    match store.get(ROUTER_EMBEDDINGS_STORE_KEY) {
+        Some(JsonValue::Object(map)) => {
+            let keys = map.keys().cloned().collect();
+            Ok((keys, map))
+        }
+        _ => Ok((HashSet::new(), serde_json::Map::new())),
+    }
+}
+
 #[cfg(not(desktop))]
 pub fn load_router_embeddings_from_store(_app: &AppHandle) -> HashMap<String, Vec<f32>> {
     HashMap::new()
@@ -176,4 +209,25 @@ pub fn merge_router_embeddings_into_store(
     _new_entries: &HashMap<String, Vec<f32>>,
 ) -> Result<(usize, usize), String> {
     Ok((0, 0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn router_embedding_cache_key_preserves_provider_shapes() {
+        assert_eq!(
+            router_embedding_cache_key("openai", "text-embedding-3-small", "hello"),
+            "openai::text-embedding-3-small::hello"
+        );
+        assert_eq!(
+            router_embedding_cache_key("cohere", "embed-english-v3.0", "hello"),
+            "cohere::embed-english-v3.0::search_document::hello"
+        );
+        assert_eq!(
+            router_embedding_cache_key("fireworks", "fireworks/qwen3", "hello"),
+            "fireworks::fireworks/qwen3::hello"
+        );
+    }
 }

@@ -17,4 +17,5 @@ export {
 	SettingsRow,
 	SettingsTooltipIcon,
 } from "./SettingsRow";
+export { SettingsShell } from "./SettingsShell";
 export { UiSettings } from "./UiSettings";

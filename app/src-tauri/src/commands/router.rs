@@ -2,15 +2,11 @@ use crate::pipeline::SharedPipeline;
 use crate::router_embeddings_cache;
 use crate::settings::{IntentRouterStrategy, ProxySettings};
 use schemars::JsonSchema;
-use serde_json::Value as JsonValue;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::time::Duration;
 use tauri::{AppHandle, State};
 
 use crate::commands::CommandResult;
-#[cfg(desktop)]
-use tauri_plugin_store::StoreExt;
 
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct CacheRouterEmbeddingsResponse {
@@ -152,21 +148,8 @@ pub async fn cache_router_embeddings(
     // (useful if the app started before the store was populated, or if the runtime cache was cleared).
     let mut preload_from_store: HashMap<String, Vec<f32>> = HashMap::new();
 
-    let (persisted_keys, persisted_map): (HashSet<String>, serde_json::Map<String, JsonValue>) =
-        if force_refresh {
-            (HashSet::new(), serde_json::Map::new())
-        } else {
-            let store = app
-                .store(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_FILE)
-                .map_err(|e| format!("Failed to get store: {e}"))?;
-            match store.get(router_embeddings_cache::ROUTER_EMBEDDINGS_STORE_KEY) {
-                Some(JsonValue::Object(map)) => {
-                    let keys = map.keys().cloned().collect();
-                    (keys, map)
-                }
-                _ => (HashSet::new(), serde_json::Map::new()),
-            }
-        };
+    let (persisted_keys, persisted_map) =
+        router_embeddings_cache::load_router_embeddings_encoded_map(&app, force_refresh)?;
 
     let hints = collect_candidate_hints(&profile);
 
@@ -181,14 +164,11 @@ pub async fn cache_router_embeddings(
             continue;
         }
 
-        let cache_key = if embedding_provider == "cohere" {
-            format!("cohere::{}::search_document::{}", embedding_model, hint)
-        } else if embedding_provider == "fireworks" {
-            format!("fireworks::{}::{}", embedding_model, hint)
-        } else {
-            // Back-compat: keep existing OpenAI cache key format.
-            format!("openai::{}::{}", embedding_model, hint)
-        };
+        let cache_key = router_embeddings_cache::router_embedding_cache_key(
+            &embedding_provider,
+            &embedding_model,
+            hint,
+        );
 
         if !force_refresh {
             // If the embedding is already persisted, ensure it's also present in the in-memory cache.
@@ -250,7 +230,7 @@ pub async fn cache_router_embeddings(
             .await
             .map_err(|e| format!("Embeddings request failed: {e}"))?;
 
-            for (cache_key, embedding) in cache_keys.into_iter().zip(embeddings.into_iter()) {
+            for (cache_key, embedding) in cache_keys.into_iter().zip(embeddings) {
                 if embedding.is_empty() {
                     continue;
                 }

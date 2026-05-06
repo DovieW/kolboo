@@ -31,7 +31,7 @@ mod config;
 #[cfg(test)]
 #[path = "pipeline/tests/enterprise_mode_tests.rs"]
 mod enterprise_mode_tests;
-mod llm_provider;
+pub(crate) mod llm_provider;
 mod local_provider_lifecycle;
 #[cfg(test)]
 #[path = "pipeline/tests/managed_outage_tests.rs"]

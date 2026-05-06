@@ -14,7 +14,6 @@ use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Serialize;
-use serde_json::json;
 use std::time::Duration;
 
 const CEREBRAS_API_URL: &str = "https://api.cerebras.ai/v1/chat/completions";
@@ -123,32 +122,21 @@ impl LlmProvider for CerebrasLlmProvider {
             reasoning_effort: self.reasoning_effort.clone(),
         };
 
-        if let Some(store) = &self.request_log_store {
-            let request_json = serde_json::to_value(&request).unwrap_or_else(|_| {
-                json!({
-                    "provider": "cerebras",
-                    "error": "failed to serialize request",
-                })
-            });
-            store.with_current(|log| {
-                log.llm_request_json = Some(request_json);
-            });
-        }
-
         let req = self
             .client
             .post(CEREBRAS_API_URL)
             .bearer_auth(&self.api_key)
             .json(&request);
 
-        let response_json = http_json::send_json_request("Cerebras", req, self.timeout).await?;
-
-        if let Some(store) = &self.request_log_store {
-            let response_for_log = response_json.clone();
-            store.with_current(|log| {
-                log.llm_response_json = Some(response_for_log);
-            });
-        }
+        let response_json = http_json::send_json_request_logged(
+            "Cerebras",
+            "cerebras",
+            req,
+            self.timeout,
+            self.request_log_store.as_ref(),
+            &request,
+        )
+        .await?;
 
         // Some providers (or edge cases) may return a JSON error payload with a 2xx status.
         // Prefer surfacing that message over a generic "no choices" parse failure.

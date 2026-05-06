@@ -4,6 +4,8 @@ use std::str::FromStr;
 
 use crate::llm::PromptSections;
 
+#[path = "settings/default_definitions.rs"]
+pub mod default_definitions;
 #[path = "settings/default_values.rs"]
 pub mod default_values;
 #[path = "settings/defaults.rs"]

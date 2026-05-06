@@ -249,7 +249,8 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
         timeout: pipeline_config.llm_config.timeout,
     };
 
-    let provider_impl = crate::commands::llm::create_llm_provider_unstructured(&provider_config);
+    let provider_impl =
+        crate::pipeline::llm_provider::create_llm_provider_unstructured(&provider_config);
 
     let request_context = context_collection::collect_quick_ask_context(
         input.app,
@@ -543,8 +544,9 @@ pub(crate) async fn try_quick_replace(
                     timeout: pipeline_config.llm_config.timeout,
                 };
 
-                let provider_impl =
-                    crate::commands::llm::create_llm_provider_unstructured(&provider_config);
+                let provider_impl = crate::pipeline::llm_provider::create_llm_provider_unstructured(
+                    &provider_config,
+                );
                 let t0 = Instant::now();
 
                 match provider_impl.complete(&system_prompt, &user_prompt).await {

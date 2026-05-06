@@ -6,6 +6,10 @@ import type {
 	QuickAskDismissMode,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
+import {
+	profileSettingIsInherited,
+	resolvePromptProfileFallbacks,
+} from "./effectivePromptSettings";
 
 type UsePromptSettingsProfileStateOptions = {
 	activeProfileId: string;
@@ -334,153 +338,161 @@ export function usePromptSettingsProfileState({
 	useEffect(() => {
 		if (activeProfile) {
 			// Track whether each setting is inheriting (null in the profile)
-			const sttProviderIsNull =
-				activeProfile.stt_provider === null ||
-				activeProfile.stt_provider === undefined;
-			const sttModelIsNull =
-				activeProfile.stt_model === null ||
-				activeProfile.stt_model === undefined;
-			const sttLanguageIsNull =
-				activeProfile.stt_language === null ||
-				activeProfile.stt_language === undefined;
-			const sttTimeoutIsNull =
-				activeProfile.stt_timeout_seconds === null ||
-				activeProfile.stt_timeout_seconds === undefined;
-			const llmProviderIsNull =
-				activeProfile.llm_provider === null ||
-				activeProfile.llm_provider === undefined;
-			const llmModelIsNull =
-				activeProfile.llm_model === null ||
-				activeProfile.llm_model === undefined;
-			const rewriteEnabledIsNull =
-				activeProfile.rewrite_llm_enabled === null ||
-				activeProfile.rewrite_llm_enabled === undefined;
+			const sttProviderIsNull = profileSettingIsInherited(
+				activeProfile,
+				"stt_provider",
+			);
+			const sttModelIsNull = profileSettingIsInherited(
+				activeProfile,
+				"stt_model",
+			);
+			const sttLanguageIsNull = profileSettingIsInherited(
+				activeProfile,
+				"stt_language",
+			);
+			const sttTimeoutIsNull = profileSettingIsInherited(
+				activeProfile,
+				"stt_timeout_seconds",
+			);
+			const llmProviderIsNull = profileSettingIsInherited(
+				activeProfile,
+				"llm_provider",
+			);
+			const llmModelIsNull = profileSettingIsInherited(
+				activeProfile,
+				"llm_model",
+			);
+			const rewriteEnabledIsNull = profileSettingIsInherited(
+				activeProfile,
+				"rewrite_llm_enabled",
+			);
 
-			const openAiReasoningEffortIsNull =
-				activeProfile.openai_reasoning_effort === null ||
-				activeProfile.openai_reasoning_effort === undefined;
-			const geminiThinkingLevelIsNull =
-				activeProfile.gemini_thinking_level === null ||
-				activeProfile.gemini_thinking_level === undefined;
-			const geminiThinkingBudgetIsNull =
-				activeProfile.gemini_thinking_budget === null ||
-				activeProfile.gemini_thinking_budget === undefined;
-			const anthropicThinkingBudgetIsNull =
-				activeProfile.anthropic_thinking_budget === null ||
-				activeProfile.anthropic_thinking_budget === undefined;
+			const openAiReasoningEffortIsNull = profileSettingIsInherited(
+				activeProfile,
+				"openai_reasoning_effort",
+			);
+			const geminiThinkingLevelIsNull = profileSettingIsInherited(
+				activeProfile,
+				"gemini_thinking_level",
+			);
+			const geminiThinkingBudgetIsNull = profileSettingIsInherited(
+				activeProfile,
+				"gemini_thinking_budget",
+			);
+			const anthropicThinkingBudgetIsNull = profileSettingIsInherited(
+				activeProfile,
+				"anthropic_thinking_budget",
+			);
 
-			const quickAskProviderIsNull =
-				activeProfile.quick_ask_provider === null ||
-				activeProfile.quick_ask_provider === undefined;
-			const quickAskModelIsNull =
-				activeProfile.quick_ask_model === null ||
-				activeProfile.quick_ask_model === undefined;
-			const quickAskSystemPromptIsNull =
-				activeProfile.quick_ask_system_prompt === null ||
-				activeProfile.quick_ask_system_prompt === undefined;
-			const quickAskDismissModeIsNull =
-				activeProfile.quick_ask_dismiss_mode === null ||
-				activeProfile.quick_ask_dismiss_mode === undefined;
+			const quickAskProviderIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_provider",
+			);
+			const quickAskModelIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_model",
+			);
+			const quickAskSystemPromptIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_system_prompt",
+			);
+			const quickAskDismissModeIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_dismiss_mode",
+			);
 
 			const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
+			const fallbackSettings = {
+				quick_replace_enabled: settings?.quick_replace_enabled,
+				llm_provider: settings?.llm_provider,
+				llm_model: settings?.llm_model,
+				rewrite_active_window_ocr_mode:
+					settings?.rewrite_active_window_ocr_mode,
+				quick_replace_active_window_ocr_mode:
+					settings?.quick_replace_active_window_ocr_mode,
+				quick_ask_active_window_ocr_mode:
+					settings?.quick_ask_active_window_ocr_mode,
+				quick_ask_dismiss_mode: settings?.quick_ask_dismiss_mode,
+			};
 
-			// Quick Replace inherits from the Default profile. If Default has never been
-			// configured, we fall back to the legacy global toggle for backward
-			// compatibility.
-			const baseQuickReplaceEnabled =
-				typeof defaultProfile?.quick_replace_enabled === "boolean"
-					? defaultProfile.quick_replace_enabled
-					: (settings?.quick_replace_enabled ?? false);
-			const baseQuickReplaceProvider =
-				defaultProfile?.quick_replace_provider ??
-				settings?.llm_provider ??
-				null;
-			const baseQuickReplaceModel =
-				defaultProfile?.quick_replace_model ?? settings?.llm_model ?? null;
-			const baseQuickReplaceSystemPrompt =
-				defaultProfile?.quick_replace_system_prompt ??
-				defaultQuickReplaceSystemPrompt;
+			const {
+				baseQuickReplaceEnabled,
+				baseQuickReplaceProvider,
+				baseQuickReplaceModel,
+				baseQuickReplaceSystemPrompt,
+				baseRewriteIncludeClipboardContext,
+				baseQuickReplaceIncludeClipboardContext,
+				baseQuickAskIncludeClipboardContext,
+				baseRewriteActiveWindowOcrMode,
+				baseQuickReplaceActiveWindowOcrMode,
+				baseQuickAskActiveWindowOcrMode,
+				baseQuickAskDismissMode,
+			} = resolvePromptProfileFallbacks({
+				defaultProfile,
+				settings: fallbackSettings,
+				defaultQuickReplaceSystemPrompt,
+			});
 
-			const baseRewriteIncludeClipboardContext =
-				typeof defaultProfile?.rewrite_include_clipboard_context === "boolean"
-					? defaultProfile.rewrite_include_clipboard_context
-					: false;
-			const baseQuickReplaceIncludeClipboardContext =
-				typeof defaultProfile?.quick_replace_include_clipboard_context ===
-				"boolean"
-					? defaultProfile.quick_replace_include_clipboard_context
-					: false;
-			const baseQuickAskIncludeClipboardContext =
-				typeof defaultProfile?.quick_ask_include_clipboard_context === "boolean"
-					? defaultProfile.quick_ask_include_clipboard_context
-					: false;
+			const quickReplaceEnabledIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_replace_enabled",
+			);
+			const quickReplaceProviderIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_replace_provider",
+			);
+			const quickReplaceModelIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_replace_model",
+			);
+			const quickReplaceSystemPromptIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_replace_system_prompt",
+			);
 
-			const baseRewriteActiveWindowOcrMode: ActiveWindowOcrMode =
-				defaultProfile?.rewrite_active_window_ocr_mode ??
-				settings?.rewrite_active_window_ocr_mode ??
-				"off";
-			const baseQuickReplaceActiveWindowOcrMode: ActiveWindowOcrMode =
-				defaultProfile?.quick_replace_active_window_ocr_mode ??
-				settings?.quick_replace_active_window_ocr_mode ??
-				"off";
-			const baseQuickAskActiveWindowOcrMode: ActiveWindowOcrMode =
-				defaultProfile?.quick_ask_active_window_ocr_mode ??
-				settings?.quick_ask_active_window_ocr_mode ??
-				"off";
-			const baseQuickAskDismissMode: QuickAskDismissMode =
-				defaultProfile?.quick_ask_dismiss_mode === "auto"
-					? "auto"
-					: defaultProfile?.quick_ask_dismiss_mode === "manual"
-						? "manual"
-						: settings?.quick_ask_dismiss_mode === "auto"
-							? "auto"
-							: "manual";
-
-			const quickReplaceEnabledIsNull =
-				activeProfile.quick_replace_enabled === null ||
-				activeProfile.quick_replace_enabled === undefined;
-			const quickReplaceProviderIsNull =
-				activeProfile.quick_replace_provider === null ||
-				activeProfile.quick_replace_provider === undefined;
-			const quickReplaceModelIsNull =
-				activeProfile.quick_replace_model === null ||
-				activeProfile.quick_replace_model === undefined;
-			const quickReplaceSystemPromptIsNull =
-				activeProfile.quick_replace_system_prompt === null ||
-				activeProfile.quick_replace_system_prompt === undefined;
-
-			const rewriteIncludeClipboardContextIsNull =
-				activeProfile.rewrite_include_clipboard_context === null ||
-				activeProfile.rewrite_include_clipboard_context === undefined;
+			const rewriteIncludeClipboardContextIsNull = profileSettingIsInherited(
+				activeProfile,
+				"rewrite_include_clipboard_context",
+			);
 			const quickReplaceIncludeClipboardContextIsNull =
-				activeProfile.quick_replace_include_clipboard_context === null ||
-				activeProfile.quick_replace_include_clipboard_context === undefined;
-			const quickAskIncludeClipboardContextIsNull =
-				activeProfile.quick_ask_include_clipboard_context === null ||
-				activeProfile.quick_ask_include_clipboard_context === undefined;
+				profileSettingIsInherited(
+					activeProfile,
+					"quick_replace_include_clipboard_context",
+				);
+			const quickAskIncludeClipboardContextIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_include_clipboard_context",
+			);
 
-			const rewriteActiveWindowOcrModeIsNull =
-				activeProfile.rewrite_active_window_ocr_mode === null ||
-				activeProfile.rewrite_active_window_ocr_mode === undefined;
-			const quickReplaceActiveWindowOcrModeIsNull =
-				activeProfile.quick_replace_active_window_ocr_mode === null ||
-				activeProfile.quick_replace_active_window_ocr_mode === undefined;
-			const quickAskActiveWindowOcrModeIsNull =
-				activeProfile.quick_ask_active_window_ocr_mode === null ||
-				activeProfile.quick_ask_active_window_ocr_mode === undefined;
+			const rewriteActiveWindowOcrModeIsNull = profileSettingIsInherited(
+				activeProfile,
+				"rewrite_active_window_ocr_mode",
+			);
+			const quickReplaceActiveWindowOcrModeIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_replace_active_window_ocr_mode",
+			);
+			const quickAskActiveWindowOcrModeIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_active_window_ocr_mode",
+			);
 
-			const quickAskOpenAiReasoningEffortIsNull =
-				activeProfile.quick_ask_openai_reasoning_effort === null ||
-				activeProfile.quick_ask_openai_reasoning_effort === undefined;
-			const quickAskGeminiThinkingLevelIsNull =
-				activeProfile.quick_ask_gemini_thinking_level === null ||
-				activeProfile.quick_ask_gemini_thinking_level === undefined;
-			const quickAskGeminiThinkingBudgetIsNull =
-				activeProfile.quick_ask_gemini_thinking_budget === null ||
-				activeProfile.quick_ask_gemini_thinking_budget === undefined;
-			const quickAskAnthropicThinkingBudgetIsNull =
-				activeProfile.quick_ask_anthropic_thinking_budget === null ||
-				activeProfile.quick_ask_anthropic_thinking_budget === undefined;
+			const quickAskOpenAiReasoningEffortIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_openai_reasoning_effort",
+			);
+			const quickAskGeminiThinkingLevelIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_gemini_thinking_level",
+			);
+			const quickAskGeminiThinkingBudgetIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_gemini_thinking_budget",
+			);
+			const quickAskAnthropicThinkingBudgetIsNull = profileSettingIsInherited(
+				activeProfile,
+				"quick_ask_anthropic_thinking_budget",
+			);
 
 			setSttProviderInheriting(sttProviderIsNull);
 			setSttModelInheriting(sttModelIsNull);

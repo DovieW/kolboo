@@ -49,6 +49,7 @@ import {
 	PrivacySettings,
 	ProfileConfigModal,
 	PromptSettings,
+	SettingsShell,
 	UiSettings,
 } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
@@ -910,7 +911,7 @@ function _SettingsView() {
 }
 
 // Active settings view entrypoint; update UI tweaks here (not _SettingsView).
-function SettingsViewWithGuideLauncher({
+function _LegacySettingsViewWithGuideLauncher({
 	onRunSetupGuide,
 }: {
 	onRunSetupGuide: () => void;
@@ -1208,6 +1209,14 @@ function SettingsViewWithGuideLauncher({
 			</div>
 		</div>
 	);
+}
+
+function SettingsViewWithGuideLauncher({
+	onRunSetupGuide,
+}: {
+	onRunSetupGuide: () => void;
+}) {
+	return <SettingsShell onRunSetupGuide={onRunSetupGuide} />;
 }
 
 function AccentColorSync() {

@@ -34,6 +34,219 @@ pub(super) struct LlmProviderParams {
     pub anthropic_thinking_budget: Option<i64>,
 }
 
+/// Create an LLM provider for one-off ad-hoc completions where callers expect
+/// free-form text instead of rewrite-oriented structured outputs.
+///
+/// Keeping this constructor in the LLM Provider Resolution Module prevents
+/// command handlers and Quick Actions from growing provider-specific match
+/// statements whenever a provider knob is added.
+pub(crate) fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
+    match config.provider.as_str() {
+        "cerebras" => {
+            let provider = if let Some(model) = &config.model {
+                CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CerebrasLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .with_timeout(config.timeout)
+                    .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+            )
+        }
+        "anthropic" => {
+            let provider = if let Some(model) = &config.model {
+                AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                AnthropicLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .with_timeout(config.timeout)
+                    .with_thinking_budget(config.anthropic_thinking_budget),
+            )
+        }
+        "groq" => {
+            let provider = if let Some(model) = &config.model {
+                GroqLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                GroqLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(provider.with_timeout(config.timeout))
+        }
+        "gemini" => {
+            let provider = if let Some(model) = &config.model {
+                GeminiLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                GeminiLlmProvider::new(config.api_key.clone())
+            };
+
+            Arc::new(
+                provider
+                    .with_timeout(config.timeout)
+                    .with_thinking_budget(config.gemini_thinking_budget)
+                    .with_thinking_level(config.gemini_thinking_level.clone())
+                    .with_structured_outputs(false),
+            )
+        }
+        "cohere" => {
+            let provider = if let Some(model) = &config.model {
+                CohereLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CohereLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(provider.with_timeout(config.timeout))
+        }
+        "fireworks" => {
+            let provider = if let Some(model) = &config.model {
+                FireworksLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                FireworksLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(provider.with_timeout(config.timeout))
+        }
+        "ollama" => {
+            let provider = OllamaLlmProvider::with_url(
+                config
+                    .ollama_url
+                    .clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
+                config.model.clone(),
+            );
+            Arc::new(provider.with_timeout(config.timeout))
+        }
+        _ => {
+            // Default to OpenAI
+            let provider = if let Some(model) = &config.model {
+                OpenAiLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                OpenAiLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .with_timeout(config.timeout)
+                    .with_reasoning_effort(config.openai_reasoning_effort.clone())
+                    .with_structured_outputs(false),
+            )
+        }
+    }
+}
+
+/// Create an LLM provider for Settings test commands that intentionally avoid
+/// request timeouts while still attaching request-log capture.
+pub(crate) fn create_llm_provider_without_timeout(
+    config: &LlmConfig,
+    request_log_store: Option<RequestLogStore>,
+) -> Arc<dyn LlmProvider> {
+    match config.provider.as_str() {
+        "cerebras" => {
+            let provider = if let Some(model) = &config.model {
+                CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CerebrasLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
+                    .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+            )
+        }
+        "anthropic" => {
+            let provider = if let Some(model) = &config.model {
+                AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                AnthropicLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
+                    .with_thinking_budget(config.anthropic_thinking_budget),
+            )
+        }
+        "groq" => {
+            let provider = if let Some(model) = &config.model {
+                GroqLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                GroqLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
+        }
+        "gemini" => {
+            let provider = if let Some(model) = &config.model {
+                GeminiLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                GeminiLlmProvider::new(config.api_key.clone())
+            };
+
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
+                    .with_thinking_budget(config.gemini_thinking_budget)
+                    .with_thinking_level(config.gemini_thinking_level.clone()),
+            )
+        }
+        "cohere" => {
+            let provider = if let Some(model) = &config.model {
+                CohereLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                CohereLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
+        }
+        "fireworks" => {
+            let provider = if let Some(model) = &config.model {
+                FireworksLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                FireworksLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
+        }
+        "ollama" => {
+            let provider = OllamaLlmProvider::with_url(
+                config
+                    .ollama_url
+                    .clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
+                config.model.clone(),
+            );
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
+        }
+        _ => {
+            // Default to OpenAI
+            let provider = if let Some(model) = &config.model {
+                OpenAiLlmProvider::with_model(config.api_key.clone(), model.clone())
+            } else {
+                OpenAiLlmProvider::new(config.api_key.clone())
+            };
+            Arc::new(
+                provider
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone())
+                    .with_reasoning_effort(config.openai_reasoning_effort.clone()),
+            )
+        }
+    }
+}
+
 /// Create an LLM provider based on configuration
 pub(super) fn create_llm_provider(
     config: &LlmConfig,

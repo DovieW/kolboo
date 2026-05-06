@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use reqwest::RequestBuilder;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::LlmError;
+use crate::request_log::RequestLogStore;
 
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
@@ -87,4 +88,55 @@ pub(super) async fn send_json_request(
     timeout: Option<Duration>,
 ) -> Result<serde_json::Value, LlmError> {
     send_json_request_with_error_parser(provider_label, req, timeout, parse_error_message).await
+}
+
+pub(super) fn record_llm_request<T: Serialize>(
+    request_log_store: Option<&RequestLogStore>,
+    provider_id: &str,
+    request: &T,
+) {
+    let Some(store) = request_log_store else {
+        return;
+    };
+
+    let request_json = serde_json::to_value(request).unwrap_or_else(|_| {
+        serde_json::json!({
+            "provider": provider_id,
+            "error": "failed to serialize request",
+        })
+    });
+    store.with_current(|log| {
+        log.llm_request_json = Some(request_json);
+    });
+}
+
+pub(super) fn record_llm_response(
+    request_log_store: Option<&RequestLogStore>,
+    response_json: &serde_json::Value,
+) {
+    let Some(store) = request_log_store else {
+        return;
+    };
+
+    let response_for_log = response_json.clone();
+    store.with_current(|log| {
+        log.llm_response_json = Some(response_for_log);
+    });
+}
+
+pub(super) async fn send_json_request_logged<T: Serialize>(
+    provider_label: &str,
+    provider_id: &str,
+    req: RequestBuilder,
+    timeout: Option<Duration>,
+    request_log_store: Option<&RequestLogStore>,
+    request: &T,
+) -> Result<serde_json::Value, LlmError> {
+    // The HTTP layer owns the request/response logging shape so providers only
+    // describe their payload once. This keeps logging behavior consistent while
+    // preserving provider-specific payload construction in each adapter.
+    record_llm_request(request_log_store, provider_id, request);
+    let response_json = send_json_request(provider_label, req, timeout).await?;
+    record_llm_response(request_log_store, &response_json);
+    Ok(response_json)
 }

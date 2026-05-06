@@ -1,6 +1,4 @@
 #[cfg(desktop)]
-use crate::pipeline;
-#[cfg(desktop)]
 use crate::secrets;
 #[cfg(desktop)]
 use serde_json::{json, Value};
@@ -10,7 +8,7 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 #[cfg(desktop)]
-use super::{default_values, migrations, HotkeyConfig, VadSettings};
+use super::{default_definitions, default_values, migrations};
 
 /// Ensure settings shown in the UI match what the backend will use.
 ///
@@ -28,7 +26,7 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
     // Keep these defaults aligned with pipeline defaults / expected backend behavior.
     // We intentionally seed these so a brand new install has the same effective
     // settings that the pipeline will use at runtime (and what the UI shows).
-    let default_pipeline_config = pipeline::PipelineConfig::default();
+    let default_pipeline_config = crate::pipeline::PipelineConfig::default();
 
     let is_missing = |v: Option<Value>| -> bool { matches!(v, None | Some(Value::Null)) };
 
@@ -53,382 +51,18 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         false
     };
 
-    // Settings schema version (for forward migrations).
-    // Bump when adding migrations; keep TS/Rust/tests in sync.
-    // Start at version 1 for new installs.
-    dirty |= set_default(
-        "settings_version",
-        default_values::default_settings_version_value(),
-        false,
-    );
-
-    // Enterprise policy posture (Phase 0 baseline): unmanaged by default.
-    dirty |= set_default(
-        "policy_state",
-        default_values::default_policy_state_value(),
-        false,
-    );
-
-    // License/account posture (Phase 1): signed out by default.
-    dirty |= set_default(
-        "license_state",
-        default_values::default_license_state_value(),
-        false,
-    );
-
-    dirty |= set_default(
-        "token_exchange_trigger_set",
-        default_values::default_token_exchange_trigger_set_value(),
-        false,
-    );
-
-    dirty |= set_default(
-        "stt_provider",
-        json!(default_values::DEFAULT_STT_PROVIDER),
-        false,
-    );
-    dirty |= set_default(
-        "stt_language",
-        json!(default_values::DEFAULT_STT_LANGUAGE),
-        false,
-    );
-    // Cerebras free-tier toggle (used by stats filtering).
-    dirty |= set_default("cerebras_free_tier", json!(true), false);
-    // Groq-specific toggle used by the UI (and potentially future backend pricing logic).
-    dirty |= set_default("groq_free_tier", json!(true), false);
-    // Cohere toggle (used by stats filtering).
-    dirty |= set_default("cohere_free_tier", json!(true), false);
-    // AssemblyAI and Speechmatics toggles (used by stats filtering).
-    dirty |= set_default("assemblyai_free_tier", json!(true), false);
-    dirty |= set_default("speechmatics_free_tier", json!(true), false);
-    dirty |= set_default("stt_transcription_prompt", json!(null), false);
-    dirty |= set_default("whisper_server_base_url", json!(null), false);
-    dirty |= set_default("ollama_url", json!(null), false);
-    dirty |= set_default("ocr_base_url", json!(null), false);
-    dirty |= set_default("ocr_model", json!(default_values::DEFAULT_OCR_MODEL), false);
-    dirty |= set_default(
-        "ocr_auth_mode",
-        json!(default_values::DEFAULT_OCR_AUTH_MODE),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_prompt",
-        json!(default_pipeline_config.ocr_config.prompt),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_max_tokens",
-        json!(default_pipeline_config.ocr_config.max_tokens),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_temperature",
-        json!(default_pipeline_config.ocr_config.temperature),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_top_p",
-        json!(default_pipeline_config.ocr_config.top_p),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_request_timeout_ms",
-        json!(default_values::DEFAULT_OCR_REQUEST_TIMEOUT_MS),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_context_max_chars",
-        json!(default_values::DEFAULT_OCR_CONTEXT_MAX_CHARS),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_auto_capture_timing",
-        json!(default_values::DEFAULT_OCR_AUTO_CAPTURE_TIMING),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_hallucination_protection",
-        json!(default_values::DEFAULT_OCR_HALLUCINATION_PROTECTION),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_hallucination_threshold",
-        json!(default_values::DEFAULT_OCR_HALLUCINATION_THRESHOLD),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_resize_max_dimension",
-        json!(default_values::DEFAULT_OCR_RESIZE_MAX_DIMENSION),
-        false,
-    );
-    dirty |= set_default(
-        "ocr_resize_filter",
-        json!(default_values::DEFAULT_OCR_RESIZE_FILTER),
-        false,
-    );
-    dirty |= set_default(
-        "rewrite_active_window_ocr_mode",
-        json!(default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE),
-        false,
-    );
-    dirty |= set_default(
-        "quick_replace_active_window_ocr_mode",
-        json!(default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE),
-        false,
-    );
-    dirty |= set_default(
-        "quick_ask_active_window_ocr_mode",
-        json!(default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE),
-        false,
-    );
-
-    // Local Whisper model selection (only meaningful when compiled with the feature).
-    // This is the *model file* used by whisper.cpp (not the remote STT model dropdown).
-    #[cfg(feature = "local-whisper")]
-    {
-        dirty |= set_default("local_whisper_model_id", json!("base"), false);
-        // When to load the local whisper.cpp model file.
-        // - manual: only load when user clicks Load
-        // - on_transcribe: lazily load the first time transcription needs it
-        // - on_launch: best-effort preload shortly after app launch
+    for definition in default_definitions::seedable_settings(&default_pipeline_config)? {
         dirty |= set_default(
-            "local_whisper_load_mode",
-            json!(default_values::DEFAULT_LOCAL_WHISPER_LOAD_MODE),
-            false,
+            definition.key,
+            definition.value,
+            definition.seed_rule.only_if_absent(),
         );
     }
 
-    dirty |= set_default(
-        "stt_timeout_seconds",
-        json!(default_values::DEFAULT_STT_TIMEOUT_SECONDS),
-        false,
-    );
-
-    // Network / proxy settings.
-    dirty |= set_default(
-        "proxy_settings",
-        default_values::default_proxy_settings_value()?,
-        false,
-    );
-    // How many recordings/history items to retain (impacts disk usage).
-    // Keep this aligned with the UI default.
-    dirty |= set_default(
-        "max_saved_recordings",
-        json!(default_values::DEFAULT_MAX_SAVED_RECORDINGS),
-        false,
-    );
-
-    // Request logs retention (in-memory request log history).
-    // Keep this aligned with the UI default.
-    dirty |= set_default(
-        "request_logs_retention_mode",
-        json!(default_values::DEFAULT_REQUEST_LOGS_RETENTION_MODE),
-        false,
-    );
-    dirty |= set_default(
-        "request_logs_retention_amount",
-        json!(default_values::DEFAULT_REQUEST_LOGS_RETENTION_AMOUNT),
-        false,
-    );
-    // Only used when mode == "time" (days; 0 = forever)
-    dirty |= set_default(
-        "request_logs_retention_days",
-        json!(default_values::DEFAULT_REQUEST_LOGS_RETENTION_DAYS),
-        false,
-    );
-    // When true, hide full request payloads in the UI (privacy mode).
-    // Default is false so payloads are visible unless explicitly hidden.
-    dirty |= set_default(
-        "request_logs_privacy_mode",
-        json!(default_values::DEFAULT_REQUEST_LOGS_PRIVACY_MODE),
-        false,
-    );
-    // Transcription retention mode (amount or time). Used by history capping.
-    dirty |= set_default(
-        "transcription_retention_mode",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_MODE),
-        false,
-    );
-    dirty |= set_default(
-        "transcription_retention_amount",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_AMOUNT),
-        false,
-    );
-    // Recordings retention (amount or time). Time-based retention is UI-only today.
-    dirty |= set_default(
-        "recordings_retention_mode",
-        json!(default_values::DEFAULT_RECORDINGS_RETENTION_MODE),
-        false,
-    );
-    dirty |= set_default(
-        "recordings_retention_amount",
-        json!(default_values::DEFAULT_RECORDINGS_RETENTION_AMOUNT),
-        false,
-    );
-    dirty |= set_default(
-        "recordings_retention_unit",
-        json!(default_values::DEFAULT_RECORDINGS_RETENTION_UNIT),
-        false,
-    );
-    dirty |= set_default(
-        "recordings_retention_value",
-        json!(default_values::DEFAULT_RECORDINGS_RETENTION_VALUE),
-        false,
-    );
-    // Time-based retention for history/transcriptions. 0 = keep forever.
-    dirty |= set_default("transcription_retention_days", json!(0), false);
-    // New retention keys (unit+value) used by newer UI.
-    // Keep legacy days key as well for backward compatibility.
-    dirty |= set_default(
-        "transcription_retention_unit",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_UNIT),
-        false,
-    );
-    dirty |= set_default(
-        "transcription_retention_value",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_VALUE),
-        false,
-    );
-    // When deleting old transcriptions, optionally also delete their .wav recordings.
-    dirty |= set_default(
-        "transcription_retention_delete_recordings",
-        json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_DELETE_RECORDINGS),
-        false,
-    );
-
-    // Optional diagnostics: when true, emit additional hotkey debug events to the
-    // in-app "System Events" panel (useful in release builds).
-    dirty |= set_default(
-        "hotkey_debug_enabled",
-        json!(default_values::DEFAULT_HOTKEY_DEBUG_ENABLED),
-        false,
-    );
-
-    // Persisted stats retention (usage/cost events).
-    // These are stored on disk (unlike request logs which are in-memory).
-    // 0 = keep forever.
-    dirty |= set_default(
-        "stats_retention_unit",
-        json!(default_values::DEFAULT_STATS_RETENTION_UNIT),
-        false,
-    );
-    dirty |= set_default(
-        "stats_retention_value",
-        json!(default_values::DEFAULT_STATS_RETENTION_VALUE),
-        false,
-    );
-    // Defensive cap (bytes). The pruning logic enforces this regardless of time settings.
-    dirty |= set_default(
-        "stats_retention_max_bytes",
-        json!(default_values::DEFAULT_STATS_RETENTION_MAX_BYTES),
-        false,
-    );
-
-    // Backups
-    // Optional GitHub Gist id for push/pull backups. Null/absent means "not configured".
-    dirty |= set_default("github_backup_gist_id", json!(null), true);
-    dirty |= set_default(
-        "overlay_mode",
-        json!(default_values::DEFAULT_OVERLAY_MODE),
-        false,
-    );
-    // Whether the overlay shows detailed phase text while processing
-    // (e.g. "transcribing…", "routing…", "rewriting…"). When false, the overlay
-    // uses a waveform animation instead.
-    dirty |= set_default(
-        "overlay_show_detailed_loading",
-        json!(default_values::DEFAULT_OVERLAY_SHOW_DETAILED_LOADING),
-        false,
-    );
-    // Which monitor overlay windows should appear on.
-    // - main: primary monitor
-    // - cursor: monitor containing cursor
-    // - active_window: monitor containing the active/foreground window
-    dirty |= set_default(
-        "overlay_monitor_target",
-        json!(default_values::DEFAULT_OVERLAY_MONITOR_TARGET),
-        false,
-    );
-    dirty |= set_default(
-        "widget_position",
-        json!(default_values::DEFAULT_WIDGET_POSITION),
-        false,
-    );
-    // Whether clicking the window X exits the app or closes the main window to the tray.
-    // - "exit_program": exit the application process
-    // - "minimize_to_tray": close (destroy) the main window but keep the tray app running
-    //   (the tray can recreate the main window on demand)
-    // Legacy (migrated by the frontend normalizer):
-    // - "close_window": previously meant "destroy the main window (tray can recreate it)".
-    dirty |= set_default(
-        "main_window_close_behavior",
-        json!(default_values::DEFAULT_MAIN_WINDOW_CLOSE_BEHAVIOR),
-        false,
-    );
-    dirty |= set_default(
-        "output_mode",
-        json!(default_values::DEFAULT_OUTPUT_MODE),
-        false,
-    );
-    dirty |= set_default(
-        "output_hit_enter",
-        json!(default_values::DEFAULT_OUTPUT_HIT_ENTER),
-        false,
-    );
-    // When true, paste each committed streaming chunk live during recording
-    // instead of waiting for the full transcript at the end.
-    dirty |= set_default(
-        "stt_live_output",
-        json!(default_values::DEFAULT_STT_LIVE_OUTPUT),
-        false,
-    );
-    // When true, simulate realtime streaming for batch-only STT models by
-    // periodically sending audio chunks to the batch API during recording.
-    dirty |= set_default(
-        "stt_simulated_streaming",
-        json!(default_values::DEFAULT_STT_SIMULATED_STREAMING),
-        false,
-    );
-    // When true, output injection will not read the clipboard and will not attempt to restore it.
-    // This reduces accidental exposure of clipboard contents at the cost of leaving output text
-    // on the clipboard after paste.
-    dirty |= set_default(
-        "output_clipboard_privacy_mode",
-        json!(default_values::DEFAULT_OUTPUT_CLIPBOARD_PRIVACY_MODE),
-        false,
-    );
-    // When true, avoid pasting into sensitive targets (e.g., password fields).
-    dirty |= set_default(
-        "output_smart_paste_protection",
-        json!(default_values::DEFAULT_OUTPUT_SMART_PASTE_PROTECTION),
-        false,
-    );
-    dirty |= set_default(
-        "playing_audio_handling",
-        json!(default_values::DEFAULT_PLAYING_AUDIO_HANDLING),
-        false,
-    );
-    dirty |= set_default(
-        "sound_enabled",
-        json!(default_values::DEFAULT_SOUND_ENABLED),
-        false,
-    );
-    dirty |= set_default(
-        "rewrite_llm_enabled",
-        json!(default_values::DEFAULT_REWRITE_LLM_ENABLED),
-        false,
-    );
-    // When true, if there is highlighted text when transcription starts, treat the transcript
-    // as an instruction to rewrite the selected text (Quick replace).
-    dirty |= set_default(
-        "quick_replace_enabled",
-        json!(default_values::DEFAULT_QUICK_REPLACE_ENABLED),
-        false,
-    );
-
-    // Rewrite profiles: historically this was an empty array with the Default profile
-    // represented implicitly by global settings. We now want Default to be a real,
-    // persisted profile (id="default") so it can own presets/router config.
+    // Rewrite profiles are partly static and partly a migration: historically this was
+    // an empty array with the Default profile represented implicitly by global settings.
+    // We now keep Default as a real persisted profile (id="default") so it can own
+    // presets/router config, without discarding any user's existing profiles.
     let default_rewrite_profile = default_values::default_rewrite_profile_value();
     dirty |= set_default(
         "rewrite_program_prompt_profiles",
@@ -436,8 +70,6 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         false,
     );
 
-    // Migration: if the key exists but Default isn't present yet (e.g. was seeded as []),
-    // insert Default at the front without overwriting other profiles.
     match store.get("rewrite_program_prompt_profiles") {
         Some(Value::Array(mut arr)) => {
             let has_default = arr.iter().any(|v| {
@@ -469,21 +101,6 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
             dirty = true;
         }
     }
-
-    // Hotkeys: allow explicit null to mean "disabled"; only seed when key is absent.
-    dirty |= set_default(
-        "toggle_hotkey",
-        serde_json::to_value(HotkeyConfig::default_toggle())?,
-        true,
-    );
-    // Hotkeys: allow explicit null to mean "disabled"; only seed when key is absent.
-    // Hold-to-record and paste-last are disabled by default.
-    dirty |= set_default("hold_hotkey", json!(null), true);
-    dirty |= set_default("paste_last_hotkey", json!(null), true);
-    dirty |= set_default("retry_hotkey", json!(null), true);
-    dirty |= set_default("quick_ask_hotkey", json!(null), true);
-    dirty |= set_default("quick_ask_hold_hotkey", json!(null), true);
-    dirty |= set_default("quick_ask_toggle_hotkey", json!(null), true);
 
     if store.get("hotkey_shortcuts").is_none() {
         let mut cards: Vec<Value> = Vec::new();
@@ -519,130 +136,6 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         store.set("hotkey_shortcuts".to_string(), Value::Array(cards));
         dirty = true;
     }
-
-    // Quick Ask system prompt:
-    // - missing key => seed the default
-    // - explicit null => user disabled it, don't overwrite
-    dirty |= set_default(
-        "quick_ask_system_prompt",
-        json!("Try to answer the question in a single word, sentence or paragraph when possible. Use markdown for formatting when necessary."),
-        true,
-    );
-
-    // Quick Ask dismiss mode (manual or auto).
-    dirty |= set_default(
-        "quick_ask_dismiss_mode",
-        json!(default_values::DEFAULT_QUICK_ASK_DISMISS_MODE),
-        false,
-    );
-
-    // Quick Ask conversation history (ephemeral; stored in memory only).
-    // These keys only control whether/how much in-memory history to attach to prompts.
-    dirty |= set_default(
-        "quick_ask_conversation_history_enabled",
-        json!(default_values::DEFAULT_QUICK_ASK_CONVERSATION_HISTORY_ENABLED),
-        false,
-    );
-    // How many previous Q/A turns to include when enabled.
-    dirty |= set_default(
-        "quick_ask_conversation_history_count",
-        json!(default_values::DEFAULT_QUICK_ASK_CONVERSATION_HISTORY_COUNT),
-        false,
-    );
-
-    // Quick Ask highlighted selection context (disabled by default).
-    // When false, we won't probe/capture the currently highlighted text for Quick Ask.
-    dirty |= set_default(
-        "quick_ask_include_selected_text",
-        json!(default_values::DEFAULT_QUICK_ASK_INCLUDE_SELECTED_TEXT),
-        false,
-    );
-
-    // VAD settings are used by the pipeline.
-    dirty |= set_default(
-        "vad_settings",
-        serde_json::to_value(VadSettings::default())?,
-        false,
-    );
-
-    // Capture behavior (Hot Mic + recovery)
-    // - hot_mic_enabled: keep the input stream open while idle and maintain a rolling pre-roll
-    // - hot_mic_pre_roll_ms: pre-roll duration (ms) to prepend at record start
-    // - mic_auto_recover_enabled: watchdog the stream and attempt restart on hangs/disconnects
-    dirty |= set_default(
-        "hot_mic_enabled",
-        json!(default_values::DEFAULT_HOT_MIC_ENABLED),
-        false,
-    );
-    dirty |= set_default(
-        "hot_mic_pre_roll_ms",
-        json!(default_values::DEFAULT_HOT_MIC_PRE_ROLL_MS),
-        false,
-    );
-    dirty |= set_default(
-        "mic_auto_recover_enabled",
-        json!(default_values::DEFAULT_MIC_AUTO_RECOVER_ENABLED),
-        false,
-    );
-
-    // Audio + quiet-recording gating.
-    dirty |= set_default(
-        "quiet_audio_gate_enabled",
-        json!(default_pipeline_config.quiet_audio_gate_enabled),
-        false,
-    );
-    dirty |= set_default(
-        "quiet_audio_min_duration_secs",
-        json!(default_pipeline_config.quiet_audio_min_duration_secs),
-        false,
-    );
-    dirty |= set_default(
-        "quiet_audio_rms_dbfs_threshold",
-        json!(default_pipeline_config.quiet_audio_rms_dbfs_threshold),
-        false,
-    );
-    dirty |= set_default(
-        "quiet_audio_peak_dbfs_threshold",
-        json!(default_pipeline_config.quiet_audio_peak_dbfs_threshold),
-        false,
-    );
-    dirty |= set_default(
-        "quiet_audio_require_speech",
-        json!(default_pipeline_config.quiet_audio_require_speech),
-        false,
-    );
-
-    // Stop-time preprocessing defaults.
-    dirty |= set_default(
-        "noise_gate_threshold_dbfs",
-        json!(default_pipeline_config.noise_gate_threshold_dbfs),
-        false,
-    );
-    dirty |= set_default(
-        "audio_downmix_to_mono",
-        json!(default_pipeline_config.audio_downmix_to_mono),
-        false,
-    );
-    dirty |= set_default(
-        "audio_resample_to_16khz",
-        json!(default_pipeline_config.audio_resample_to_16khz),
-        false,
-    );
-    dirty |= set_default(
-        "audio_highpass_enabled",
-        json!(default_pipeline_config.audio_highpass_enabled),
-        false,
-    );
-    dirty |= set_default(
-        "audio_agc_enabled",
-        json!(default_pipeline_config.audio_agc_enabled),
-        false,
-    );
-    dirty |= set_default(
-        "audio_noise_suppression_enabled",
-        json!(default_pipeline_config.audio_noise_suppression_enabled),
-        false,
-    );
 
     if dirty {
         // Persist seeded defaults.
