@@ -11,6 +11,8 @@ use reqwest::Client;
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::stt_cloud_adapters;
+
 // STT requests can legitimately take a while (slow networks, provider backlog, long audio).
 // We intentionally keep the reqwest client timeout very generous so the *user-configured*
 // Tokio timeout in `stt_flow` is the effective source of truth.
@@ -67,113 +69,20 @@ pub(crate) fn create_cloud_stt_provider(
         .map(|url| url.trim().to_string())
         .filter(|url| !url.is_empty());
 
-    let provider: Arc<dyn SttProvider> = match provider_id.as_str() {
-        "openai" => {
-            let provider = crate::stt::OpenAiSttProvider::with_client(
-                client,
-                api_key,
-                model,
-                language,
-                transcription_prompt,
-            );
-            let provider = if let Some(url) = managed_gateway_url.clone() {
-                provider.with_api_base_url(url)
-            } else {
-                provider
-            };
+    let adapter = stt_cloud_adapters::adapter_for(provider_id.as_str())
+        .ok_or_else(|| PipelineError::Config(format!("Unknown STT provider: {}", provider_id)))?;
 
-            Arc::new(provider.with_request_log_store(request_log_store))
-        }
-        "fireworks" => {
-            let provider = crate::stt::FireworksSttProvider::with_client(
-                client,
-                api_key,
-                model,
-                language,
-                transcription_prompt,
-            );
-            let provider = if let Some(url) = managed_gateway_url.clone() {
-                provider.with_api_base_url(url)
-            } else {
-                provider
-            };
-
-            Arc::new(provider.with_request_log_store(request_log_store))
-        }
-        "aquavoice" => {
-            let provider = crate::stt::AquavoiceSttProvider::with_client(
-                client,
-                api_key,
-                model,
-                language,
-                transcription_prompt,
-            );
-            let provider = if let Some(url) = managed_gateway_url.clone() {
-                provider.with_api_base_url(url)
-            } else {
-                provider
-            };
-
-            Arc::new(provider.with_request_log_store(request_log_store))
-        }
-        "groq" => {
-            let provider = crate::stt::GroqSttProvider::with_client(
-                client,
-                api_key,
-                model,
-                language,
-                transcription_prompt,
-            );
-            let provider = if let Some(url) = managed_gateway_url.clone() {
-                provider.with_api_base_url(url)
-            } else {
-                provider
-            };
-
-            Arc::new(provider.with_request_log_store(request_log_store))
-        }
-        "elevenlabs" => {
-            let provider =
-                crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model, language)
-                    .with_vad_commit(stt_live_output);
-            let provider = if let Some(url) = managed_gateway_url.clone() {
-                provider.with_api_base_url(url)
-            } else {
-                provider
-            };
-            Arc::new(provider.with_request_log_store(request_log_store))
-        }
-        "assemblyai" => {
-            let provider =
-                crate::stt::AssemblyAiSttProvider::with_client(client, api_key, model, language);
-            let provider = if let Some(url) = managed_gateway_url.clone() {
-                provider.with_api_base_url(url)
-            } else {
-                provider
-            };
-            Arc::new(provider.with_request_log_store(request_log_store))
-        }
-        "speechmatics" => Arc::new(
-            crate::stt::SpeechmaticsSttProvider::new(api_key, model, language)
-                .with_request_log_store(request_log_store),
-        ),
-        "deepgram" => {
-            let provider =
-                crate::stt::DeepgramSttProvider::with_client(client, api_key, model, language);
-            let provider = if let Some(url) = managed_gateway_url.clone() {
-                provider.with_api_base_url(url)
-            } else {
-                provider
-            };
-            Arc::new(provider.with_request_log_store(request_log_store))
-        }
-        other => {
-            return Err(PipelineError::Config(format!(
-                "Unknown STT provider: {}",
-                other
-            )))
-        }
-    };
+    let provider: Arc<dyn SttProvider> =
+        adapter.build(stt_cloud_adapters::CloudSttProviderBuildContext {
+            client,
+            model,
+            language,
+            api_key,
+            managed_gateway_url,
+            transcription_prompt,
+            request_log_store,
+            stt_live_output,
+        });
 
     Ok(provider)
 }

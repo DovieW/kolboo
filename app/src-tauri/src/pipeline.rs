@@ -46,6 +46,7 @@ mod profile_resolution;
 mod recording;
 mod routing;
 mod state_machine;
+mod stt_cloud_adapters;
 mod stt_flow;
 pub(crate) mod stt_provider;
 mod stt_provider_resolver;

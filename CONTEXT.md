@@ -59,3 +59,27 @@ Local Provider Lifecycle is deterministic and separate from cloud provider const
 A shared provider abstraction that is only introduced when at least two concrete adapters use it and the deletion test proves caller complexity would otherwise reappear.
 
 Provider-family concerns without a real two-adapter proof are documented as deferred rather than implemented as pass-through abstractions.
+
+### Telemetry Mapping
+
+The conversion from rich, request-scoped diagnostics into narrow read models for downstream systems.
+
+Telemetry Mapping does not own request-log storage, redaction, or export stripping. It selects the minimum fields needed by a consumer (for example, Cost Reporting inputs) so consumers do not need to know every `RequestLog` variant and fallback rule.
+
+### Cost Reporting
+
+The event-level assembly of provider telemetry, usage counters, duration fallbacks, and estimated list-price cost for persisted stats events.
+
+Cost Reporting owns provider response parsing and choosing the cost estimate for a single STT or LLM event. Provider pricing tables and formulas remain in provider-specific `cost/**` modules, while `stats.rs` owns persistence, aggregation, retention, and UI invalidation.
+
+### Embeddings Module
+
+The provider interface and concrete adapters used to turn text into embeddings for intent routing.
+
+The Embeddings Module owns provider defaults, query-vs-document input roles, and construction of HTTP-backed embeddings adapters. Routing Decision logic consumes the `EmbeddingsProvider` interface and does not call provider-specific embedding modules directly.
+
+### Recording Orchestration
+
+The command-facing coordination that translates pipeline state transitions into user-visible recording phase events and related side effects.
+
+Recording Orchestration does not own the pipeline state machine, STT execution, Transcription Flow, or Quick Ask / Quick Replace execution. It keeps repeated command-side watchers and phase-notification policies local while preserving the pipeline as the source of truth.

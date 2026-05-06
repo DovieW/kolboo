@@ -2,6 +2,24 @@
 
 <!-- Add medium-priority refactor ideas here. Keep each item specific and code-grounded. -->
 
+## Continue narrowing command-side recording finalization
+
+**Status:** Partially addressed by remaining module-deepening work (2026-05-06)
+
+`app/src-tauri/src/recording_orchestration.rs` now owns the duplicated command-side phase notification watchers for Routing/Rewriting events, but `app/src-tauri/src/commands/recording.rs` still owns several broad side-effect clusters:
+
+- request-log creation/fallback at stop/dictate/retry
+- in-progress History entry creation and completion
+- saved WAV persistence for retry/playback
+- cancellation/error cleanup
+- time-based retention calls
+
+Follow-up idea:
+
+- Extract only one proven cluster at a time, with characterization tests around request id/history/recording invariants before moving behavior.
+- Keep the pipeline state machine, STT Execution, Transcription Flow, and Quick Ask / Quick Replace execution ownership in their current Modules.
+- Avoid a generic "recording session manager" unless the deletion test proves it removes real duplicated caller logic rather than hiding Tauri side effects.
+
 ## Centralize setting default values (DRY violation)
 
 **Status:** Addressed further by architecture-deepening work (2026-05-05)

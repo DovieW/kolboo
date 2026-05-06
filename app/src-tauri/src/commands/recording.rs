@@ -755,42 +755,10 @@ async fn pipeline_stop_and_transcribe_inner(
         );
     }
 
-    // Emit routing started once the pipeline actually enters the Routing phase.
-    {
-        let app_clone = app.clone();
-        let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(
-            async move {
-                let start = Instant::now();
-                loop {
-                    match pipeline_clone.state() {
-                        PipelineState::Routing => {
-                            let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
-                            let _ = app_clone.emit(
-                                events::EVENT_PIPELINE_STATE_CHANGED,
-                                PipelineStateEvent::Routing,
-                            );
-                            break;
-                        }
-                        PipelineState::Idle | PipelineState::Error => {
-                            break;
-                        }
-                        PipelineState::Recording
-                        | PipelineState::Transcribing
-                        | PipelineState::Rewriting => {}
-                    }
-
-                    // Hard stop to avoid a runaway task in pathological cases.
-                    if start.elapsed() > Duration::from_secs(15 * 60) {
-                        break;
-                    }
-
-                    tokio::time::sleep(Duration::from_millis(25)).await;
-                }
-            }
-            .in_current_span(),
-        );
-    }
+    crate::recording_orchestration::spawn_routing_started_watcher(
+        app.clone(),
+        pipeline.inner().clone(),
+    );
 
     // Emit rewriting started once the pipeline actually enters the optional LLM phase.
     //
@@ -798,44 +766,10 @@ async fn pipeline_stop_and_transcribe_inner(
     // The overlay may be awaiting a long-running `invoke("pipeline_stop_and_transcribe")`,
     // which can prevent intermediate polling updates from being observed. A dedicated event
     // keeps the UI honest about the rewrite duration.
-    {
-        let app_clone = app.clone();
-        let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(
-            async move {
-                let start = Instant::now();
-                loop {
-                    match pipeline_clone.state() {
-                        PipelineState::Rewriting => {
-                            let _ = app_clone.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
-                            let _ = app_clone.emit(
-                                events::EVENT_PIPELINE_STATE_CHANGED,
-                                PipelineStateEvent::Rewriting,
-                            );
-                            break;
-                        }
-                        PipelineState::Idle | PipelineState::Error => {
-                            // No rewrite (disabled/failed early) or pipeline exited.
-                            break;
-                        }
-                        PipelineState::Recording
-                        | PipelineState::Transcribing
-                        | PipelineState::Routing => {
-                            // Not yet.
-                        }
-                    }
-
-                    // Hard stop to avoid a runaway task in pathological cases.
-                    if start.elapsed() > Duration::from_secs(15 * 60) {
-                        break;
-                    }
-
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                }
-            }
-            .in_current_span(),
-        );
-    }
+    crate::recording_orchestration::spawn_rewriting_started_watcher(
+        app.clone(),
+        pipeline.inner().clone(),
+    );
 
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
@@ -1306,71 +1240,9 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         None
     };
 
-    // Emit rewriting started once we enter the optional LLM phase.
-    {
-        let app_clone = app.clone();
-        let pipeline_clone = pipeline.clone();
-        tauri::async_runtime::spawn(async move {
-            let start = Instant::now();
-            loop {
-                match pipeline_clone.state() {
-                    PipelineState::Rewriting => {
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_REWRITING_STARTED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Rewriting,
-                        );
-                        break;
-                    }
-                    PipelineState::Idle | PipelineState::Error => {
-                        break;
-                    }
-                    PipelineState::Recording
-                    | PipelineState::Transcribing
-                    | PipelineState::Routing => {}
-                }
+    crate::recording_orchestration::spawn_rewriting_started_watcher(app.clone(), pipeline.clone());
 
-                if start.elapsed() > Duration::from_secs(15 * 60) {
-                    break;
-                }
-
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        });
-    }
-
-    // Emit routing started once we enter the Routing phase.
-    {
-        let app_clone = app.clone();
-        let pipeline_clone = pipeline.clone();
-        tauri::async_runtime::spawn(async move {
-            let start = Instant::now();
-            loop {
-                match pipeline_clone.state() {
-                    PipelineState::Routing => {
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Routing,
-                        );
-                        break;
-                    }
-                    PipelineState::Idle | PipelineState::Error => {
-                        break;
-                    }
-                    PipelineState::Recording
-                    | PipelineState::Transcribing
-                    | PipelineState::Rewriting => {}
-                }
-
-                if start.elapsed() > Duration::from_secs(15 * 60) {
-                    break;
-                }
-
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-        });
-    }
+    crate::recording_orchestration::spawn_routing_started_watcher(app.clone(), pipeline.clone());
 
     // Run the retry transcription (STT + optional LLM)
     let result = match pipeline
@@ -1802,40 +1674,10 @@ async fn pipeline_dictate_inner(
         );
     }
 
-    // Emit routing started once we enter the Routing phase.
-    {
-        let app_clone = app.clone();
-        let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(
-            async move {
-                let start = Instant::now();
-                loop {
-                    match pipeline_clone.state() {
-                        PipelineState::Routing => {
-                            let _ = app_clone.emit(events::EVENT_PIPELINE_ROUTING_STARTED, ());
-                            let _ = app_clone.emit(
-                                events::EVENT_PIPELINE_STATE_CHANGED,
-                                PipelineStateEvent::Routing,
-                            );
-                            break;
-                        }
-                        PipelineState::Idle | PipelineState::Error => {
-                            break;
-                        }
-                        PipelineState::Recording
-                        | PipelineState::Transcribing
-                        | PipelineState::Rewriting => {}
-                    }
-
-                    if start.elapsed() > Duration::from_secs(15 * 60) {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(25)).await;
-                }
-            }
-            .in_current_span(),
-        );
-    }
+    crate::recording_orchestration::spawn_routing_started_watcher(
+        app.clone(),
+        pipeline.inner().clone(),
+    );
 
     let result = match pipeline.stop_and_transcribe_detailed().await {
         Ok(r) => r,

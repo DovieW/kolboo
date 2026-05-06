@@ -174,10 +174,7 @@ pub(super) async fn route_preset_id_with_embeddings(
 
     let embedding_provider = router.embedding_provider.as_deref().unwrap_or("openai");
 
-    if embedding_provider != "openai"
-        && embedding_provider != "cohere"
-        && embedding_provider != "fireworks"
-    {
+    if !embeddings::is_supported_provider(embedding_provider) {
         log::warn!(
             "Intent router: embeddings provider '{}' not supported; routing skipped",
             embedding_provider
@@ -185,14 +182,8 @@ pub(super) async fn route_preset_id_with_embeddings(
         return None;
     }
 
-    let embedding_model_default = if embedding_provider == "cohere" {
-        "embed-english-v3.0"
-    } else if embedding_provider == "fireworks" {
-        // Starter default: keep in sync with the UI model list.
-        "fireworks/qwen3-embedding-0p6b"
-    } else {
-        "text-embedding-3-small"
-    };
+    let embedding_model_default = embeddings::default_model_for_provider(embedding_provider)
+        .unwrap_or("text-embedding-3-small");
     let embedding_model = router
         .embedding_model
         .as_deref()
@@ -201,15 +192,10 @@ pub(super) async fn route_preset_id_with_embeddings(
     let threshold = router.similarity_threshold.unwrap_or(0.78);
     let margin = router.similarity_margin.unwrap_or(0.05);
 
-    // When an injected provider is present, we skip API key validation and HTTP client
-    // creation since the provider handles everything internally (useful for testing).
-    let api_key: String;
-    let client: Option<reqwest::Client>;
-
-    if injected_provider.is_some() {
-        // Injected provider handles its own auth/network
-        api_key = String::new();
-        client = None;
+    // The provider trait is the test surface: fake adapters use it for
+    // deterministic tests, and production adapters use it for real HTTP calls.
+    let provider: Arc<dyn EmbeddingsProvider> = if let Some(provider) = injected_provider.clone() {
+        provider
     } else {
         let key = llm_api_keys
             .get(embedding_provider)
@@ -222,19 +208,31 @@ pub(super) async fn route_preset_id_with_embeddings(
             );
             return None;
         }
-        api_key = key.to_string();
 
-        client = match crate::network::build_http_client_with_timeout(
+        let client = match crate::network::build_http_client_with_timeout(
             proxy_settings,
             Duration::from_secs(30),
         ) {
-            Ok(c) => Some(c),
+            Ok(c) => c,
             Err(e) => {
                 log::warn!("Intent router: failed to build HTTP client: {}", e);
                 return None;
             }
         };
-    }
+
+        match embeddings::build_provider(
+            client,
+            embedding_provider,
+            key.to_string(),
+            embedding_model.to_string(),
+        ) {
+            Ok(provider) => provider,
+            Err(e) => {
+                log::warn!("Intent router: failed to build embeddings provider: {}", e);
+                return None;
+            }
+        }
+    };
 
     let transcript = transcript.trim();
     if transcript.is_empty() {
@@ -299,54 +297,22 @@ pub(super) async fn route_preset_id_with_embeddings(
         (router_request_json, router_response_json)
     }
 
-    // Embed the transcript
-    let transcript_input_type = if embedding_provider == "cohere" {
-        Some("search_query")
-    } else {
-        None
-    };
+    fn input_type_json(input_type: Option<&str>) -> JsonValue {
+        input_type
+            .map(|value| JsonValue::String(value.to_string()))
+            .unwrap_or(JsonValue::Null)
+    }
 
-    let transcript_embedding_result: Result<(Vec<f32>, JsonValue, JsonValue), String> =
-        if let Some(ref provider) = injected_provider {
-            // Use injected provider (for testing)
-            provider
-                .embed_text(transcript, transcript_input_type)
-                .await
-                .map_err(|e| e.to_string())
-        } else if let Some(ref http_client) = client {
-            // Use real HTTP-based providers
-            if embedding_provider == "cohere" {
-                embeddings::cohere::embed_text_with_debug(
-                    http_client,
-                    &api_key,
-                    embedding_model,
-                    "search_query",
-                    transcript,
-                )
-                .await
-                .map_err(|e| e.to_string())
-            } else if embedding_provider == "fireworks" {
-                embeddings::fireworks::embed_text_with_debug(
-                    http_client,
-                    &api_key,
-                    embedding_model,
-                    transcript,
-                )
-                .await
-                .map_err(|e| e.to_string())
-            } else {
-                embeddings::openai::embed_text_with_debug(
-                    http_client,
-                    &api_key,
-                    embedding_model,
-                    transcript,
-                )
-                .await
-                .map_err(|e| e.to_string())
-            }
-        } else {
-            Err("No embeddings provider available".to_string())
-        };
+    // Embed the transcript
+    let transcript_input_type = embeddings::input_type_for_provider(
+        embedding_provider,
+        embeddings::EmbeddingInputRole::Query,
+    );
+
+    let transcript_embedding_result: Result<(Vec<f32>, JsonValue, JsonValue), String> = provider
+        .embed_text(transcript, transcript_input_type)
+        .await
+        .map_err(|e| e.to_string());
 
     let transcript_embedding = match transcript_embedding_result {
         Ok((v, req, resp)) => {
@@ -360,11 +326,7 @@ pub(super) async fn route_preset_id_with_embeddings(
             let req = serde_json::json!({
                 "provider": embedding_provider,
                 "model": embedding_model,
-                "input_type": if embedding_provider == "cohere" {
-                    JsonValue::String("search_query".to_string())
-                } else {
-                    JsonValue::Null
-                },
+                "input_type": input_type_json(transcript_input_type),
                 "input_preview": preview,
                 "input_len": len,
                 "input_truncated": truncated,
@@ -429,14 +391,15 @@ pub(super) async fn route_preset_id_with_embeddings(
         let mut candidate_best: Option<f32> = None;
 
         for hint in hints {
-            let cache_key = if embedding_provider == "cohere" {
-                format!("cohere::{}::search_document::{}", embedding_model, hint)
-            } else if embedding_provider == "fireworks" {
-                format!("fireworks::{}::{}", embedding_model, hint)
-            } else {
-                // Back-compat: keep existing OpenAI cache key format.
-                format!("openai::{}::{}", embedding_model, hint)
-            };
+            let cache_key = crate::router_embeddings_cache::router_embedding_cache_key(
+                embedding_provider,
+                embedding_model,
+                &hint,
+            );
+            let hint_input_type = embeddings::input_type_for_provider(
+                embedding_provider,
+                embeddings::EmbeddingInputRole::Document,
+            );
 
             let cached_hint_embedding: Vec<f32> = {
                 if let Ok(cache) = embedding_cache.lock() {
@@ -455,11 +418,7 @@ pub(super) async fn route_preset_id_with_embeddings(
                 let req = serde_json::json!({
                     "provider": embedding_provider,
                     "model": embedding_model,
-                    "input_type": if embedding_provider == "cohere" {
-                        JsonValue::String("search_document".to_string())
-                    } else {
-                        JsonValue::Null
-                    },
+                    "input_type": input_type_json(hint_input_type),
                     "cache_key": cache_key,
                     "input_preview": preview,
                     "input_len": len,
@@ -479,54 +438,10 @@ pub(super) async fn route_preset_id_with_embeddings(
                 );
                 cached_hint_embedding
             } else {
-                // Embed the hint
-                let hint_input_type = if embedding_provider == "cohere" {
-                    Some("search_document")
-                } else {
-                    None
-                };
-
-                let embed_result: Result<(Vec<f32>, JsonValue, JsonValue), String> =
-                    if let Some(ref provider) = injected_provider {
-                        // Use injected provider (for testing)
-                        provider
-                            .embed_text(&hint, hint_input_type)
-                            .await
-                            .map_err(|e| e.to_string())
-                    } else if let Some(ref http_client) = client {
-                        // Use real HTTP-based providers
-                        if embedding_provider == "cohere" {
-                            embeddings::cohere::embed_text_with_debug(
-                                http_client,
-                                &api_key,
-                                embedding_model,
-                                "search_document",
-                                &hint,
-                            )
-                            .await
-                            .map_err(|e| e.to_string())
-                        } else if embedding_provider == "fireworks" {
-                            embeddings::fireworks::embed_text_with_debug(
-                                http_client,
-                                &api_key,
-                                embedding_model,
-                                &hint,
-                            )
-                            .await
-                            .map_err(|e| e.to_string())
-                        } else {
-                            embeddings::openai::embed_text_with_debug(
-                                http_client,
-                                &api_key,
-                                embedding_model,
-                                &hint,
-                            )
-                            .await
-                            .map_err(|e| e.to_string())
-                        }
-                    } else {
-                        Err("No embeddings provider available".to_string())
-                    };
+                let embed_result: Result<(Vec<f32>, JsonValue, JsonValue), String> = provider
+                    .embed_text(&hint, hint_input_type)
+                    .await
+                    .map_err(|e| e.to_string());
 
                 match embed_result {
                     Ok((v, req, resp)) => {
@@ -572,11 +487,7 @@ pub(super) async fn route_preset_id_with_embeddings(
                         let req = serde_json::json!({
                             "provider": embedding_provider,
                             "model": embedding_model,
-                            "input_type": if embedding_provider == "cohere" {
-                                JsonValue::String("search_document".to_string())
-                            } else {
-                                JsonValue::Null
-                            },
+                            "input_type": input_type_json(hint_input_type),
                             "input_preview": preview,
                             "input_len": len,
                             "input_truncated": truncated,
@@ -909,7 +820,7 @@ mod tests {
         async fn embed_text(
             &self,
             text: &str,
-            _input_type: Option<&str>,
+            input_type: Option<&str>,
         ) -> Result<(Vec<f32>, JsonValue, JsonValue), EmbeddingsError> {
             if self.error_for.as_deref() == Some(text) {
                 return Err(EmbeddingsError::Api("planned failure".to_string()));
@@ -921,7 +832,7 @@ mod tests {
                 .unwrap_or_else(|| vec![0.0, 0.0]);
             Ok((
                 embedding.clone(),
-                serde_json::json!({ "text": text }),
+                serde_json::json!({ "text": text, "input_type": input_type }),
                 serde_json::json!({ "embedding_len": embedding.len() }),
             ))
         }
@@ -1143,6 +1054,59 @@ mod tests {
         assert_eq!(decision.outcome, RoutingDecisionOutcome::Failed);
         assert_eq!(decision.selected_preset_id, None);
         assert_eq!(decision.response_json["outcome"], "failed");
+    }
+
+    #[tokio::test]
+    async fn embeddings_router_uses_shared_cache_key_and_input_roles() {
+        let mut profile = profile(IntentRouterStrategy::Embeddings);
+        if let Some(router) = profile.router.as_mut() {
+            router.embedding_provider = Some("cohere".to_string());
+            router.embedding_model = Some("embed-english-v3.0".to_string());
+        }
+
+        let cache = Arc::new(Mutex::new(HashMap::new()));
+        let decision = route_preset_id_with_embeddings(
+            &profile,
+            "send email",
+            &ProxySettings::default(),
+            &HashMap::new(),
+            &cache,
+            None,
+            Some(Arc::new(FakeEmbeddingsProvider::new(&[
+                ("send email", vec![1.0, 0.0]),
+                ("email hint", vec![0.95, 0.05]),
+                ("calendar hint", vec![0.0, 1.0]),
+                ("default target", vec![0.0, 1.0]),
+            ]))),
+        )
+        .await
+        .expect("router should be attempted");
+
+        let expected_key = crate::router_embeddings_cache::router_embedding_cache_key(
+            "cohere",
+            "embed-english-v3.0",
+            "email hint",
+        );
+        assert!(
+            cache
+                .lock()
+                .expect("cache lock")
+                .contains_key(&expected_key),
+            "hint embeddings should be stored under the shared cache-key helper"
+        );
+
+        let calls = decision.request_json["calls"]
+            .as_array()
+            .expect("request calls array");
+        let email_hint_call = calls
+            .iter()
+            .find(|call| {
+                call["kind"] == "hint"
+                    && call["candidate_id"] == "email"
+                    && call["request"]["text"] == "email hint"
+            })
+            .expect("email hint call");
+        assert_eq!(email_hint_call["request"]["input_type"], "search_document");
     }
 
     #[tokio::test]

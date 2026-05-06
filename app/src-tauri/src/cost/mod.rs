@@ -7,4 +7,5 @@ pub mod gemini;
 pub mod groq;
 pub mod math;
 pub mod openai;
+pub mod reporting;
 pub mod speechmatics;

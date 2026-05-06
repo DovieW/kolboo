@@ -1,7 +1,3 @@
-// Allow dead code for provider infrastructure that's not yet wired into production
-// but is used by tests and will be used when embeddings routing is fully integrated.
-#![allow(dead_code)]
-
 pub mod cohere;
 pub mod fireworks;
 pub mod openai;
@@ -16,12 +12,19 @@ use std::sync::Arc;
 /// Error type for embeddings operations
 #[derive(Debug, thiserror::Error)]
 pub enum EmbeddingsError {
+    // Reserved for adapters that can distinguish transport failure from a
+    // provider-level API error. Keep the variant so callers do not need a
+    // breaking error-shape change when we add that adapter.
+    #[allow(dead_code)]
     #[error("HTTP error: {0}")]
     Http(String),
 
     #[error("API error: {0}")]
     Api(String),
 
+    // Provider helpers currently normalize missing embeddings into `Api(...)`.
+    // Keep the precise variant for future adapters that can surface it directly.
+    #[allow(dead_code)]
     #[error("Missing embedding in response")]
     MissingEmbedding,
 
@@ -48,14 +51,69 @@ pub trait EmbeddingsProvider: Send + Sync {
     ) -> Result<(Vec<f32>, JsonValue, JsonValue), EmbeddingsError>;
 
     /// Get the provider name (e.g., "openai", "cohere", "fireworks")
+    #[allow(dead_code)]
     fn name(&self) -> &'static str;
 
     /// Get the current model being used
+    #[allow(dead_code)]
     fn model(&self) -> &str;
 }
 
 /// A boxed embeddings provider for dynamic dispatch
 pub type BoxedEmbeddingsProvider = Arc<dyn EmbeddingsProvider>;
+
+/// Provider input role. Some embeddings APIs need different input-type hints
+/// for a user query vs. a document/candidate hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbeddingInputRole {
+    Query,
+    Document,
+}
+
+pub fn is_supported_provider(provider_id: &str) -> bool {
+    matches!(provider_id, "openai" | "cohere" | "fireworks")
+}
+
+pub fn default_model_for_provider(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "cohere" => Some("embed-english-v3.0"),
+        // Starter default: keep in sync with the UI model list.
+        "fireworks" => Some("fireworks/qwen3-embedding-0p6b"),
+        "openai" => Some("text-embedding-3-small"),
+        _ => None,
+    }
+}
+
+pub fn input_type_for_provider(
+    provider_id: &str,
+    role: EmbeddingInputRole,
+) -> Option<&'static str> {
+    match (provider_id, role) {
+        ("cohere", EmbeddingInputRole::Query) => Some("search_query"),
+        ("cohere", EmbeddingInputRole::Document) => Some("search_document"),
+        _ => None,
+    }
+}
+
+pub fn build_provider(
+    client: reqwest::Client,
+    provider_id: &str,
+    api_key: String,
+    model: String,
+) -> Result<BoxedEmbeddingsProvider, EmbeddingsError> {
+    if api_key.trim().is_empty() {
+        return Err(EmbeddingsError::NoApiKey(provider_id.to_string()));
+    }
+
+    let provider: BoxedEmbeddingsProvider = match provider_id {
+        "openai" => Arc::new(OpenAiEmbeddingsProvider::new(client, api_key, model)),
+        "cohere" => Arc::new(CohereEmbeddingsProvider::new(client, api_key, model)),
+        "fireworks" => Arc::new(FireworksEmbeddingsProvider::new(client, api_key, model)),
+        other => return Err(EmbeddingsError::ProviderNotAvailable(other.to_string())),
+    };
+
+    Ok(provider)
+}
 
 // --------------------------------------------------------------------------
 // Concrete provider implementations wrapping existing API functions
@@ -283,5 +341,51 @@ mod tests {
             "similar words should have higher similarity"
         );
         assert!(sim_hello_hi > 0.9, "similar words should be highly similar");
+    }
+
+    #[test]
+    fn provider_defaults_and_input_roles_are_provider_specific() {
+        assert!(is_supported_provider("openai"));
+        assert!(is_supported_provider("cohere"));
+        assert!(is_supported_provider("fireworks"));
+        assert!(!is_supported_provider("unknown"));
+
+        assert_eq!(
+            default_model_for_provider("openai"),
+            Some("text-embedding-3-small")
+        );
+        assert_eq!(
+            input_type_for_provider("cohere", EmbeddingInputRole::Query),
+            Some("search_query")
+        );
+        assert_eq!(
+            input_type_for_provider("cohere", EmbeddingInputRole::Document),
+            Some("search_document")
+        );
+        assert_eq!(
+            input_type_for_provider("openai", EmbeddingInputRole::Document),
+            None
+        );
+    }
+
+    #[test]
+    fn build_provider_constructs_multiple_concrete_adapters() {
+        let openai = build_provider(
+            reqwest::Client::new(),
+            "openai",
+            "test-key".to_string(),
+            "text-embedding-3-small".to_string(),
+        )
+        .expect("openai embeddings provider");
+        let cohere = build_provider(
+            reqwest::Client::new(),
+            "cohere",
+            "test-key".to_string(),
+            "embed-english-v3.0".to_string(),
+        )
+        .expect("cohere embeddings provider");
+
+        assert_eq!(openai.name(), "openai");
+        assert_eq!(cohere.name(), "cohere");
     }
 }

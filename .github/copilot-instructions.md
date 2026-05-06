@@ -62,6 +62,11 @@
   - The backend pipeline is a state machine; prefer explicit guard methods/transitions over ad-hoc flags.
   - Cancellation is part of the UX (escape-to-cancel is registered only while active). Avoid re-entrant shortcut registration; follow the existing lock/async pattern in `app/src-tauri/src/lib.rs`.
   - Shared audio format normalization (downmixing, PCM conversion, streaming chunk sizing, latency-friendly streaming resampling, and VAD-quality 16 kHz resampling) lives in `app/src-tauri/src/audio_normalization.rs`; STT streaming modules should own WebSocket/session lifecycle rather than pure audio helpers.
+  - Telemetry Mapping from rich request logs into narrow read models lives in `app/src-tauri/src/telemetry.rs`; keep request-log storage/redaction/export stripping in `app/src-tauri/src/request_log.rs`.
+  - Cost Reporting event assembly (provider response parsing, token mapping, duration fallback, and event-level estimate selection) lives in `app/src-tauri/src/cost/reporting.rs`; provider pricing tables/formulas stay in provider-specific `app/src-tauri/src/cost/**` modules, and `stats.rs` owns persistence/aggregation/retention/UI invalidation.
+  - Embeddings routing should call through the `EmbeddingsProvider` interface in `app/src-tauri/src/embeddings/mod.rs`; do not bypass it with provider-specific routing HTTP calls unless a new two-adapter proof updates the seam evidence.
+  - Cloud STT provider constructor quirks live in `app/src-tauri/src/pipeline/stt_cloud_adapters.rs`; STT Provider Resolution remains in `pipeline/stt_provider_resolver.rs`, and local-whisper/whisper-server lifecycle special cases should stay explicit.
+  - Command-facing recording phase notification watchers live in `app/src-tauri/src/recording_orchestration.rs`; the pipeline state machine remains the source of truth for actual transitions.
   - Prompt formatting for rewrite/Quick Ask/Quick Replace lives in `app/src-tauri/src/prompt_builders.rs`; keep clipboard transport and context capping in `app/src-tauri/src/clipboard_context.rs`.
   - Quick Ask / Quick Replace context-source collection (selection probe, clipboard context, OCR fetch) lives in `app/src-tauri/src/sessions/context_collection.rs`; provider execution and Quick Action request-log completion live in `app/src-tauri/src/sessions/quick_action_execution.rs`.
   - Normal dictation final output and non-empty success finalization live in `app/src-tauri/src/sessions/normal_dictation_output.rs`; `lib.rs::stop_recording(...)` should remain orchestration rather than owning platform paste/type branches.
@@ -92,7 +97,12 @@ Implemented slice conventions from this initiative:
 - Profile behavior is split between `app/src-tauri/src/pipeline/profile_matcher.rs` and `app/src-tauri/src/pipeline/profile_resolution.rs`.
 - Local provider cache/readiness/bypass decisions live in `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`.
 - Prompt formatting is centralized in `app/src-tauri/src/prompt_builders.rs`.
+- Telemetry Mapping lives in `app/src-tauri/src/telemetry.rs`.
+- Cost Reporting event assembly lives in `app/src-tauri/src/cost/reporting.rs` while stats persistence remains in `app/src-tauri/src/stats.rs`.
+- Embeddings routing uses the `EmbeddingsProvider` interface and shared cache-key helper instead of direct provider HTTP calls in routing.
+- Cloud STT provider construction adapters live in `app/src-tauri/src/pipeline/stt_cloud_adapters.rs`.
+- Recording phase notification watchers live in `app/src-tauri/src/recording_orchestration.rs`.
 - Quick Action context-source collection is centralized in `app/src-tauri/src/sessions/context_collection.rs`.
 - Normal dictation final output/non-empty success finalization is centralized in `app/src-tauri/src/sessions/normal_dictation_output.rs`.
-- Do not add provider-family seams unless `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` records a two-adapter proof and deletion-test pass.
+- Do not add provider-family seams unless `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` records a two-adapter proof and deletion-test pass; follow-up seam evidence for the remaining module-deepening slice lives under `specs/018-remaining-module-deepening/validation/`.
 <!-- SPECKIT END -->
