@@ -43,7 +43,10 @@ import {
 	useUpdateSTTTimeout,
 	useUpdateSTTTranscriptionPrompt,
 } from "../../lib/queries";
-import { STT_LANGUAGE_OPTIONS } from "../../lib/sttLanguages";
+import {
+  DEFAULT_STT_LANGUAGE,
+  STT_LANGUAGE_OPTIONS,
+} from "../../lib/sttLanguages";
 import {
 	type ActiveWindowOcrMode,
 	type CleanupPromptSections,
@@ -54,6 +57,7 @@ import {
 	type RewriteProgramPromptProfile,
 	tauriAPI,
 } from "../../lib/tauri";
+import { resolvePresetRuntimeFallbackViews } from "./prompt/effectivePromptSettings";
 import { PresetEditorModal } from "./prompt/PresetEditorModal";
 import { PromptIntentRouterSection } from "./prompt/PromptIntentRouterSection";
 import { PromptSettingsModals } from "./prompt/PromptSettingsModals";
@@ -950,6 +954,25 @@ export function PromptSettings({
 		updateQuickAskModel.mutate(value);
 	};
 
+	const selectedPresetRuntimeFallbackViews = useMemo(() => {
+    if (!selectedPreset || !activeProfile) return null;
+
+    return resolvePresetRuntimeFallbackViews({
+      profile: activeProfile,
+      preset: selectedPreset,
+      settings: {
+        stt_provider: settings?.stt_provider,
+        stt_model: settings?.stt_model,
+        stt_language: settings?.stt_language,
+        stt_timeout_seconds: settings?.stt_timeout_seconds,
+        llm_provider: settings?.llm_provider,
+        llm_model: settings?.llm_model,
+      },
+      defaultSttTimeout: DEFAULT_STT_TIMEOUT,
+      defaultSttLanguage: DEFAULT_STT_LANGUAGE,
+    });
+  }, [activeProfile, selectedPreset, settings]);
+
 	if (isLoading) {
 		return (
 			<div
@@ -1110,713 +1133,716 @@ export function PromptSettings({
 	};
 
 	return (
-		<>
-			<PromptSettingsModals
-				linkPresetModalOpen={linkPresetModalOpen}
-				onCloseLinkPresetModal={() => setLinkPresetModalOpen(false)}
-				linkableProfiles={linkableProfiles}
-				linkSourceProfileId={linkSourceProfileId}
-				onLinkSourceProfileChange={handleLinkSourceProfileChange}
-				linkSourcePresetId={linkSourcePresetId}
-				onLinkSourcePresetChange={handleLinkSourcePresetChange}
-				linkSourceProfile={linkSourceProfile}
-				canConfirmLinkPreset={Boolean(linkSourcePreset)}
-				onConfirmLinkPreset={confirmLinkPreset}
-				deletePresetDialog={deletePresetDialog}
-				onCloseDeletePresetDialog={() => setDeletePresetDialog(null)}
-				onConfirmDeletePreset={handleConfirmDeletePreset}
-				resetDialog={resetDialog}
-				onCloseResetDialog={() => setResetDialog(null)}
-				onConfirmResetDialog={handleConfirmResetDialog}
-			/>
+    <>
+      <PromptSettingsModals
+        linkPresetModalOpen={linkPresetModalOpen}
+        onCloseLinkPresetModal={() => setLinkPresetModalOpen(false)}
+        linkableProfiles={linkableProfiles}
+        linkSourceProfileId={linkSourceProfileId}
+        onLinkSourceProfileChange={handleLinkSourceProfileChange}
+        linkSourcePresetId={linkSourcePresetId}
+        onLinkSourcePresetChange={handleLinkSourcePresetChange}
+        linkSourceProfile={linkSourceProfile}
+        canConfirmLinkPreset={Boolean(linkSourcePreset)}
+        onConfirmLinkPreset={confirmLinkPreset}
+        deletePresetDialog={deletePresetDialog}
+        onCloseDeletePresetDialog={() => setDeletePresetDialog(null)}
+        onConfirmDeletePreset={handleConfirmDeletePreset}
+        resetDialog={resetDialog}
+        onCloseResetDialog={() => setResetDialog(null)}
+        onConfirmResetDialog={handleConfirmResetDialog}
+      />
 
-			<RewritePromptLabModal
-				opened={promptLabOpen}
-				onClose={closePromptLab}
-				profileId={activeProfileId}
-				profileLabel={promptLabContextLabel || activeProfileLabel}
-				initialLlmProvider={effectiveLlmProvider}
-				initialLlmModel={effectiveLlmModel}
-				initialTranscript={rewriteTestInput}
-				initialProblemOutput={rewriteTestOutput}
-				currentPrompt={promptLabContextPrompt || effectiveCurrentPrompt}
-				onSetPrompt={(nextPrompt) => {
-					const trimmed = nextPrompt.trim();
-					if (!trimmed) return;
+      <RewritePromptLabModal
+        opened={promptLabOpen}
+        onClose={closePromptLab}
+        profileId={activeProfileId}
+        profileLabel={promptLabContextLabel || activeProfileLabel}
+        initialLlmProvider={effectiveLlmProvider}
+        initialLlmModel={effectiveLlmModel}
+        initialTranscript={rewriteTestInput}
+        initialProblemOutput={rewriteTestOutput}
+        currentPrompt={promptLabContextPrompt || effectiveCurrentPrompt}
+        onSetPrompt={(nextPrompt) => {
+          const trimmed = nextPrompt.trim();
+          if (!trimmed) return;
 
-					const target = promptLabApplyTarget;
-					if (!target || target.type === "profile") {
-						handleSave("system", trimmed);
-						return;
-					}
+          const target = promptLabApplyTarget;
+          if (!target || target.type === "profile") {
+            handleSave("system", trimmed);
+            return;
+          }
 
-					const preset = presets.find((p) => p.id === target.presetId);
-					if (!preset) {
-						// Preset was deleted/changed while modal was open.
-						handleSave("system", trimmed);
-						return;
-					}
+          const preset = presets.find((p) => p.id === target.presetId);
+          if (!preset) {
+            // Preset was deleted/changed while modal was open.
+            handleSave("system", trimmed);
+            return;
+          }
 
-					const baseContent = profilePromptDefaultContent;
-					const contentToStore =
-						trimmed === baseContent ? null : trimmed || null;
-					const section =
-						contentToStore == null ? null : { content: contentToStore };
-					savePresetSectionOverride(preset, target.key, section);
-				}}
-				onIteratePrompt={async (params) => {
-					const res = await iterateRewritePrompt.mutateAsync({
-						transcript: params.transcript,
-						problemOutput: params.problemOutput,
-						desiredOutput: params.desiredOutput,
-						currentPrompt: params.currentPrompt,
-						profileId: params.profileId,
-						mode: params.mode,
-						llmProvider: params.llmProvider,
-						llmModel: params.llmModel,
-						openAiReasoningEffort: params.openAiReasoningEffort,
-						geminiThinkingLevel: params.geminiThinkingLevel,
-						geminiThinkingBudget: params.geminiThinkingBudget,
-						anthropicThinkingBudget: params.anthropicThinkingBudget,
-					});
+          const baseContent = profilePromptDefaultContent;
+          const contentToStore =
+            trimmed === baseContent ? null : trimmed || null;
+          const section =
+            contentToStore == null ? null : { content: contentToStore };
+          savePresetSectionOverride(preset, target.key, section);
+        }}
+        onIteratePrompt={async (params) => {
+          const res = await iterateRewritePrompt.mutateAsync({
+            transcript: params.transcript,
+            problemOutput: params.problemOutput,
+            desiredOutput: params.desiredOutput,
+            currentPrompt: params.currentPrompt,
+            profileId: params.profileId,
+            mode: params.mode,
+            llmProvider: params.llmProvider,
+            llmModel: params.llmModel,
+            openAiReasoningEffort: params.openAiReasoningEffort,
+            geminiThinkingLevel: params.geminiThinkingLevel,
+            geminiThinkingBudget: params.geminiThinkingBudget,
+            anthropicThinkingBudget: params.anthropicThinkingBudget,
+          });
 
-					return {
-						improvedPrompt: res.improved_prompt,
-						providerUsed: res.provider_used,
-						modelUsed: res.model_used,
-					};
-				}}
-				onTestPrompt={async (params) => {
-					const res = await testRewriteWithPrompt.mutateAsync({
-						transcript: params.transcript,
-						prompt: params.prompt,
-						profileId: params.profileId,
-					});
+          return {
+            improvedPrompt: res.improved_prompt,
+            providerUsed: res.provider_used,
+            modelUsed: res.model_used,
+          };
+        }}
+        onTestPrompt={async (params) => {
+          const res = await testRewriteWithPrompt.mutateAsync({
+            transcript: params.transcript,
+            prompt: params.prompt,
+            profileId: params.profileId,
+          });
 
-					return {
-						output: res.output,
-						providerUsed: res.provider_used,
-						modelUsed: res.model_used,
-					};
-				}}
-			/>
+          return {
+            output: res.output,
+            providerUsed: res.provider_used,
+            modelUsed: res.model_used,
+          };
+        }}
+      />
 
-			<TranscribeSettingsSection
-				activeProfileId={activeProfileId}
-				isDefaultScope={isDefaultScope}
-				inheritTooltip={INHERIT_TOOLTIP}
-				sttProviderInheriting={sttProviderInheriting}
-				sttModelInheriting={sttModelInheriting}
-				sttTimeoutInheriting={sttTimeoutInheriting}
-				sttLanguageInheriting={sttLanguageInheriting}
-				effectiveSttProvider={effectiveSttProvider}
-				sttProviderOptions={sttProviderOptions}
-				isSttProviderOptionsDisabled={
-					sttCloudProviders.length === 0 && sttLocalProviders.length === 0
-				}
-				sttProviderIsWhisperServer={sttProviderIsWhisperServer}
-				sttModelOptions={sttModelOptions}
-				selectedSttModelForUi={selectedSttModelForUi}
-				sttPricingLabel={sttPricingLabel}
-				sttLanguageOptions={STT_LANGUAGE_OPTIONS}
-				localProfileSttLanguage={localProfileSttLanguage}
-				whisperServerModelDraft={whisperServerModelDraft}
-				onWhisperServerModelDraftChange={setWhisperServerModelDraft}
-				onWhisperServerModelBlur={handleWhisperServerModelDraftBlur}
-				onSttProviderChange={handleSttProviderChange}
-				onSttModelChange={handleSttModelChange}
-				onSttLanguageChange={handleSttLanguageChange}
-				onDisableSttProviderOverride={handleDisableSttProviderOverride}
-				onDisableSttModelOverride={handleDisableSttModelOverride}
-				onDisableSttLanguageOverride={handleDisableSttLanguageOverride}
-				onDisableSttTimeoutOverride={handleDisableSttTimeoutOverride}
-				localProfileSttTimeout={localProfileSttTimeout}
-				onSttTimeoutChange={handleSttTimeoutChange}
-				onSttTimeoutBlur={handleSttTimeoutBlur}
-				sttPromptSupported={sttPromptSupported}
-				sttPromptDisabledReason={sttPromptDisabledReason}
-				sttPromptMaxChars={promptMaxChars}
-				isPrompt224CharLimited={isPrompt224CharLimited}
-				localSttTranscriptionPrompt={localSttTranscriptionPrompt}
-				onSttPromptChange={setLocalSttTranscriptionPrompt}
-				sttTestDurationMs={sttTestDurationMs}
-				sttTestError={sttTestError}
-				sttTestOutput={sttTestOutput}
-				hasLastAudioForSttTest={Boolean(hasLastAudioForSttTest)}
-				isSttTestRunning={testSttLastAudio.isPending}
-				onRunSttTest={handleRunSttTest}
-				hasStoredTranscriptionPrompt={hasStoredTranscriptionPrompt}
-			/>
+      <TranscribeSettingsSection
+        activeProfileId={activeProfileId}
+        isDefaultScope={isDefaultScope}
+        inheritTooltip={INHERIT_TOOLTIP}
+        sttProviderInheriting={sttProviderInheriting}
+        sttModelInheriting={sttModelInheriting}
+        sttTimeoutInheriting={sttTimeoutInheriting}
+        sttLanguageInheriting={sttLanguageInheriting}
+        effectiveSttProvider={effectiveSttProvider}
+        sttProviderOptions={sttProviderOptions}
+        isSttProviderOptionsDisabled={
+          sttCloudProviders.length === 0 && sttLocalProviders.length === 0
+        }
+        sttProviderIsWhisperServer={sttProviderIsWhisperServer}
+        sttModelOptions={sttModelOptions}
+        selectedSttModelForUi={selectedSttModelForUi}
+        sttPricingLabel={sttPricingLabel}
+        sttLanguageOptions={STT_LANGUAGE_OPTIONS}
+        localProfileSttLanguage={localProfileSttLanguage}
+        whisperServerModelDraft={whisperServerModelDraft}
+        onWhisperServerModelDraftChange={setWhisperServerModelDraft}
+        onWhisperServerModelBlur={handleWhisperServerModelDraftBlur}
+        onSttProviderChange={handleSttProviderChange}
+        onSttModelChange={handleSttModelChange}
+        onSttLanguageChange={handleSttLanguageChange}
+        onDisableSttProviderOverride={handleDisableSttProviderOverride}
+        onDisableSttModelOverride={handleDisableSttModelOverride}
+        onDisableSttLanguageOverride={handleDisableSttLanguageOverride}
+        onDisableSttTimeoutOverride={handleDisableSttTimeoutOverride}
+        localProfileSttTimeout={localProfileSttTimeout}
+        onSttTimeoutChange={handleSttTimeoutChange}
+        onSttTimeoutBlur={handleSttTimeoutBlur}
+        sttPromptSupported={sttPromptSupported}
+        sttPromptDisabledReason={sttPromptDisabledReason}
+        sttPromptMaxChars={promptMaxChars}
+        isPrompt224CharLimited={isPrompt224CharLimited}
+        localSttTranscriptionPrompt={localSttTranscriptionPrompt}
+        onSttPromptChange={setLocalSttTranscriptionPrompt}
+        sttTestDurationMs={sttTestDurationMs}
+        sttTestError={sttTestError}
+        sttTestOutput={sttTestOutput}
+        hasLastAudioForSttTest={Boolean(hasLastAudioForSttTest)}
+        isSttTestRunning={testSttLastAudio.isPending}
+        onRunSttTest={handleRunSttTest}
+        hasStoredTranscriptionPrompt={hasStoredTranscriptionPrompt}
+      />
 
-			<RewriteSettingsSection
-				isDefaultScope={isDefaultScope}
-				inheritTooltip={INHERIT_TOOLTIP}
-				ocrProviderAvailable={ocrProviderAvailable}
-				ocrProviderUnavailableReason={ocrProviderUnavailableReason}
-				defaultRewriteEnabled={defaultRewriteEnabled}
-				localProfileRewriteEnabled={localProfileRewriteEnabled}
-				rewriteEnabledInheriting={rewriteEnabledInheriting}
-				onRewriteEnabledChange={handleRewriteEnabledChange}
-				onDisableRewriteEnabledOverride={handleDisableRewriteEnabledOverride}
-				isUpdatingRewriteEnabled={updateRewriteLlmEnabled.isPending}
-				localProfileRewriteIncludeClipboardContext={
-					localProfileRewriteIncludeClipboardContext
-				}
-				rewriteIncludeClipboardContextInheriting={
-					rewriteIncludeClipboardContextInheriting
-				}
-				onRewriteIncludeClipboardContextChange={
-					handleRewriteIncludeClipboardContextChange
-				}
-				onDisableRewriteIncludeClipboardContextOverride={
-					handleDisableRewriteIncludeClipboardContextOverride
-				}
-				localProfileRewriteActiveWindowOcrMode={
-					localProfileRewriteActiveWindowOcrMode
-				}
-				rewriteActiveWindowOcrModeInheriting={
-					rewriteActiveWindowOcrModeInheriting
-				}
-				onRewriteActiveWindowOcrModeChange={
-					handleRewriteActiveWindowOcrModeChange
-				}
-				onDisableRewriteActiveWindowOcrModeOverride={
-					handleDisableRewriteActiveWindowOcrModeOverride
-				}
-				effectiveLlmProvider={effectiveLlmProvider}
-				llmProviderOptions={llmProviderOptions}
-				isLlmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
-				llmProviderInheriting={llmProviderInheriting}
-				onLlmProviderChange={handleRewriteLlmProviderChange}
-				onDisableLlmProviderOverride={handleDisableRewriteLlmProviderOverride}
-				llmModelOptions={llmModelOptions}
-				llmModelInheriting={llmModelInheriting}
-				localProfileLlmModel={localProfileLlmModel}
-				llmPricingLabel={llmPricingLabel}
-				settings={settings}
-				onLlmModelChange={handleRewriteLlmModelChange}
-				onDisableLlmModelOverride={handleDisableRewriteLlmModelOverride}
-				supportsOpenAiThinking={supportsOpenAiThinking}
-				openAiReasoningEffortInheriting={openAiReasoningEffortInheriting}
-				localProfileOpenAiReasoningEffort={localProfileOpenAiReasoningEffort}
-				openAiThinkingOptions={openAiThinkingOptions}
-				effectiveLlmModel={effectiveLlmModel}
-				onOpenAiThinkingChange={handleRewriteOpenAiThinkingChange}
-				onDisableOpenAiThinkingOverride={
-					handleDisableRewriteOpenAiThinkingOverride
-				}
-				openAiDefaultReasoningEffortForModel={
-					openAiDefaultReasoningEffortForModel
-				}
-				supportsGeminiThinkingLevel={supportsGeminiThinkingLevel}
-				isGemini3Pro={isGemini3Pro}
-				geminiThinkingLevelInheriting={geminiThinkingLevelInheriting}
-				localProfileGeminiThinkingLevel={localProfileGeminiThinkingLevel}
-				geminiThinkingLevelOptions={geminiThinkingLevelOptions}
-				onGeminiThinkingLevelChange={handleRewriteGeminiThinkingLevelChange}
-				onDisableGeminiThinkingLevelOverride={
-					handleDisableRewriteGeminiThinkingLevelOverride
-				}
-				supportsGeminiThinkingBudget={supportsGeminiThinkingBudget}
-				geminiThinkingBudgetInheriting={geminiThinkingBudgetInheriting}
-				localProfileGeminiThinkingBudget={localProfileGeminiThinkingBudget}
-				geminiThinkingBudgetOptions={geminiThinkingBudgetOptions}
-				onGeminiThinkingBudgetChange={handleRewriteGeminiThinkingBudgetChange}
-				onDisableGeminiThinkingBudgetOverride={
-					handleDisableRewriteGeminiThinkingBudgetOverride
-				}
-				supportsAnthropicThinkingBudget={supportsAnthropicThinkingBudget}
-				anthropicThinkingBudgetInheriting={anthropicThinkingBudgetInheriting}
-				localProfileAnthropicThinkingBudget={
-					localProfileAnthropicThinkingBudget
-				}
-				anthropicThinkingLevelOptionsWithCustom={
-					anthropicThinkingLevelOptionsWithCustom
-				}
-				onAnthropicThinkingBudgetChange={
-					handleRewriteAnthropicThinkingBudgetChange
-				}
-				onDisableAnthropicThinkingBudgetOverride={
-					handleDisableRewriteAnthropicThinkingBudgetOverride
-				}
-				formatThinkingBudgetShort={formatThinkingBudgetShort}
-			/>
-			{/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
+      <RewriteSettingsSection
+        isDefaultScope={isDefaultScope}
+        inheritTooltip={INHERIT_TOOLTIP}
+        ocrProviderAvailable={ocrProviderAvailable}
+        ocrProviderUnavailableReason={ocrProviderUnavailableReason}
+        defaultRewriteEnabled={defaultRewriteEnabled}
+        localProfileRewriteEnabled={localProfileRewriteEnabled}
+        rewriteEnabledInheriting={rewriteEnabledInheriting}
+        onRewriteEnabledChange={handleRewriteEnabledChange}
+        onDisableRewriteEnabledOverride={handleDisableRewriteEnabledOverride}
+        isUpdatingRewriteEnabled={updateRewriteLlmEnabled.isPending}
+        localProfileRewriteIncludeClipboardContext={
+          localProfileRewriteIncludeClipboardContext
+        }
+        rewriteIncludeClipboardContextInheriting={
+          rewriteIncludeClipboardContextInheriting
+        }
+        onRewriteIncludeClipboardContextChange={
+          handleRewriteIncludeClipboardContextChange
+        }
+        onDisableRewriteIncludeClipboardContextOverride={
+          handleDisableRewriteIncludeClipboardContextOverride
+        }
+        localProfileRewriteActiveWindowOcrMode={
+          localProfileRewriteActiveWindowOcrMode
+        }
+        rewriteActiveWindowOcrModeInheriting={
+          rewriteActiveWindowOcrModeInheriting
+        }
+        onRewriteActiveWindowOcrModeChange={
+          handleRewriteActiveWindowOcrModeChange
+        }
+        onDisableRewriteActiveWindowOcrModeOverride={
+          handleDisableRewriteActiveWindowOcrModeOverride
+        }
+        effectiveLlmProvider={effectiveLlmProvider}
+        llmProviderOptions={llmProviderOptions}
+        isLlmProviderDisabled={
+          llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+        }
+        llmProviderInheriting={llmProviderInheriting}
+        onLlmProviderChange={handleRewriteLlmProviderChange}
+        onDisableLlmProviderOverride={handleDisableRewriteLlmProviderOverride}
+        llmModelOptions={llmModelOptions}
+        llmModelInheriting={llmModelInheriting}
+        localProfileLlmModel={localProfileLlmModel}
+        llmPricingLabel={llmPricingLabel}
+        settings={settings}
+        onLlmModelChange={handleRewriteLlmModelChange}
+        onDisableLlmModelOverride={handleDisableRewriteLlmModelOverride}
+        supportsOpenAiThinking={supportsOpenAiThinking}
+        openAiReasoningEffortInheriting={openAiReasoningEffortInheriting}
+        localProfileOpenAiReasoningEffort={localProfileOpenAiReasoningEffort}
+        openAiThinkingOptions={openAiThinkingOptions}
+        effectiveLlmModel={effectiveLlmModel}
+        onOpenAiThinkingChange={handleRewriteOpenAiThinkingChange}
+        onDisableOpenAiThinkingOverride={
+          handleDisableRewriteOpenAiThinkingOverride
+        }
+        openAiDefaultReasoningEffortForModel={
+          openAiDefaultReasoningEffortForModel
+        }
+        supportsGeminiThinkingLevel={supportsGeminiThinkingLevel}
+        isGemini3Pro={isGemini3Pro}
+        geminiThinkingLevelInheriting={geminiThinkingLevelInheriting}
+        localProfileGeminiThinkingLevel={localProfileGeminiThinkingLevel}
+        geminiThinkingLevelOptions={geminiThinkingLevelOptions}
+        onGeminiThinkingLevelChange={handleRewriteGeminiThinkingLevelChange}
+        onDisableGeminiThinkingLevelOverride={
+          handleDisableRewriteGeminiThinkingLevelOverride
+        }
+        supportsGeminiThinkingBudget={supportsGeminiThinkingBudget}
+        geminiThinkingBudgetInheriting={geminiThinkingBudgetInheriting}
+        localProfileGeminiThinkingBudget={localProfileGeminiThinkingBudget}
+        geminiThinkingBudgetOptions={geminiThinkingBudgetOptions}
+        onGeminiThinkingBudgetChange={handleRewriteGeminiThinkingBudgetChange}
+        onDisableGeminiThinkingBudgetOverride={
+          handleDisableRewriteGeminiThinkingBudgetOverride
+        }
+        supportsAnthropicThinkingBudget={supportsAnthropicThinkingBudget}
+        anthropicThinkingBudgetInheriting={anthropicThinkingBudgetInheriting}
+        localProfileAnthropicThinkingBudget={
+          localProfileAnthropicThinkingBudget
+        }
+        anthropicThinkingLevelOptionsWithCustom={
+          anthropicThinkingLevelOptionsWithCustom
+        }
+        onAnthropicThinkingBudgetChange={
+          handleRewriteAnthropicThinkingBudgetChange
+        }
+        onDisableAnthropicThinkingBudgetOverride={
+          handleDisableRewriteAnthropicThinkingBudgetOverride
+        }
+        formatThinkingBudgetShort={formatThinkingBudgetShort}
+      />
+      {/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
 
-			{activeProfile ? (
-				<div
-					className="settings-accordion-block"
-					style={{ marginTop: 0, marginBottom: 16 }}
-				>
-					<Accordion variant="separated" radius="md">
-						<Accordion.Item value={`${activeProfileId}-presets`}>
-							<Accordion.Control>
-								<div>
-									<p className="settings-label">Presets</p>
-									<p className="settings-description">
-										Create multiple dictation modes for this program, then
-										choose one manually or let the intent router auto-select.
-									</p>
-								</div>
-							</Accordion.Control>
-							<Accordion.Panel>
-								<div
-									style={{
-										display: "flex",
-										flexDirection: "column",
-										gap: 12,
-									}}
-								>
-									<Group
-										justify="space-between"
-										align="center"
-										wrap="wrap"
-										gap={12}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: 12,
-												flexWrap: "wrap",
-											}}
-										>
-											<div>
-												<Text size="xs" c="dimmed" mb={4}>
-													Default preset
-												</Text>
-												<Select
-													data={[
-														{ value: "__none__", label: "Default" },
-														...presetSelectOptions,
-													]}
-													value={defaultPresetValue}
-													onChange={(value) => {
-														if (!value) return;
-														saveProfileMetadata({
-															default_preset_id:
-																value === "__none__" ? null : value,
-														});
-													}}
-													placeholder="Default"
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 220,
-														},
-													}}
-												/>
-											</div>
+      {activeProfile ? (
+        <div
+          className="settings-accordion-block"
+          style={{ marginTop: 0, marginBottom: 16 }}
+        >
+          <Accordion variant="separated" radius="md">
+            <Accordion.Item value={`${activeProfileId}-presets`}>
+              <Accordion.Control>
+                <div>
+                  <p className="settings-label">Presets</p>
+                  <p className="settings-description">
+                    Create multiple dictation modes for this program, then
+                    choose one manually or let the intent router auto-select.
+                  </p>
+                </div>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  <Group
+                    justify="space-between"
+                    align="center"
+                    wrap="wrap"
+                    gap={12}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Default preset
+                        </Text>
+                        <Select
+                          data={[
+                            { value: "__none__", label: "Default" },
+                            ...presetSelectOptions,
+                          ]}
+                          value={defaultPresetValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            saveProfileMetadata({
+                              default_preset_id:
+                                value === "__none__" ? null : value,
+                            });
+                          }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 220,
+                            },
+                          }}
+                        />
+                      </div>
 
-											<div>
-												<Text size="xs" c="dimmed" mb={4}>
-													Manual preset override (persisted)
-												</Text>
-												<Select
-													data={[
-														{
-															value: "__none__",
-															label: "No override (use router/default)",
-														},
-														...presetSelectOptions,
-													]}
-													value={activePresetValue}
-													onChange={(value) => {
-														if (!value) return;
-														saveProfileMetadata({
-															active_preset_id:
-																value === "__none__" ? null : value,
-														});
-													}}
-													placeholder="Default"
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 260,
-														},
-													}}
-												/>
-											</div>
-										</div>
+                      <div>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Manual preset override (persisted)
+                        </Text>
+                        <Select
+                          data={[
+                            {
+                              value: "__none__",
+                              label: "No override (use router/default)",
+                            },
+                            ...presetSelectOptions,
+                          ]}
+                          value={activePresetValue}
+                          onChange={(value) => {
+                            if (!value) return;
+                            saveProfileMetadata({
+                              active_preset_id:
+                                value === "__none__" ? null : value,
+                            });
+                          }}
+                          placeholder="Default"
+                          withCheckIcon={false}
+                          styles={{
+                            input: {
+                              backgroundColor: "var(--bg-elevated)",
+                              borderColor: "var(--border-default)",
+                              color: "var(--text-primary)",
+                              minWidth: 260,
+                            },
+                          }}
+                        />
+                      </div>
+                    </div>
 
-										<Button
-											color="gray"
-											variant="light"
-											onClick={() => setPresetEditorOpen(true)}
-										>
-											Edit Presets
-										</Button>
-									</Group>
+                    <Button
+                      color="gray"
+                      variant="light"
+                      onClick={() => setPresetEditorOpen(true)}
+                    >
+                      Edit Presets
+                    </Button>
+                  </Group>
 
-									<PresetEditorModal
-										opened={presetEditorOpen}
-										onClose={() => setPresetEditorOpen(false)}
-										editDefaultPresetId={EDIT_DEFAULT_PRESET}
-										presetSelectOptions={presetSelectOptions}
-										editingPresetId={editingPresetId}
-										onEditingPresetChange={setEditingPresetId}
-										onNewPreset={newPreset}
-										linkableProfiles={linkableProfiles}
-										onOpenLinkPresetModal={openLinkPresetModal}
-										isEditingDefaultPreset={isEditingDefaultPreset}
-										selectedPreset={selectedPreset}
-										onRequestDeletePreset={(preset) =>
-											setDeletePresetDialog({
-												presetId: preset.id,
-												presetName: preset.name?.trim() || preset.id,
-												isShared: isSharedPresetId(preset.id),
-											})
-										}
-										localPresetName={localPresetName}
-										onLocalPresetNameChange={setLocalPresetName}
-										localPresetHintsText={localPresetHintsText}
-										onLocalPresetHintsChange={setLocalPresetHintsText}
-										onUpdatePreset={updatePreset}
-										getPresetPromptOverride={getPresetPromptOverride}
-										profilePromptDefaultContent={profilePromptDefaultContent}
-										activeProfileId={activeProfileId}
-										activeProfileLabel={activeProfileLabel}
-										onOpenPresetPromptLab={handleOpenPresetPromptLab}
-										onSavePresetSectionOverride={savePresetSectionOverride}
-										isSavingProfiles={isSavingProfiles}
-										rewriteTestInput={rewriteTestInput}
-										onRewriteTestInputChange={setRewriteTestInput}
-										onRunRewriteTest={runRewriteTest}
-										isTestingRewrite={testRewriteWithPrompt.isPending}
-										rewriteTestDurationMs={rewriteTestDurationMs}
-										rewriteTestError={rewriteTestError}
-										rewriteTestOutput={rewriteTestOutput}
-										defaultPresetRewriteStepValue={
-											defaultPresetRewriteStepValue
-										}
-										onDefaultPresetRewriteStepChange={
-											handleDefaultPresetRewriteStepChange
-										}
-										localDefaultPresetDescription={
-											localDefaultPresetDescription
-										}
-										onLocalDefaultPresetDescriptionChange={
-											setLocalDefaultPresetDescription
-										}
-										currentDefaultPresetDescription={
-											activeProfile?.default_preset_description ?? null
-										}
-										onSaveDefaultPresetDescription={
-											handleSaveDefaultPresetDescription
-										}
-										defaultSystemPromptContent={
-											localSections?.system.content ?? ""
-										}
-										defaultSystemPromptDefaultContent={
-											defaultSections?.system ?? ""
-										}
-										defaultSystemPromptHasCustom={hasCustomContent.system}
-										defaultSystemPromptInheritMode={
-											defaultSystemPromptInheritMode
-										}
-										onDisableDefaultSystemPromptOverride={
-											isDefaultScope
-												? undefined
-												: handleDisableDefaultSystemPromptOverride
-										}
-										onOpenDefaultPromptLab={handleOpenDefaultPromptLab}
-										onSaveDefaultSystemPrompt={(content) =>
-											handleSave("system", content)
-										}
-										onResetDefaultSystemPrompt={() => handleReset("system")}
-										isDefaultPromptSaving={
-											updateCleanupPromptSections.isPending ||
-											updateRewriteProgramPromptProfiles.isPending
-										}
-										isDefaultPromptLabDisabled={
-											updateCleanupPromptSections.isPending ||
-											updateRewriteProgramPromptProfiles.isPending ||
-											updateRewriteLlmEnabled.isPending
-										}
-										isSavingCleanupSections={
-											updateCleanupPromptSections.isPending
-										}
-										isSavingRewriteEnabled={updateRewriteLlmEnabled.isPending}
-									/>
-								</div>
-							</Accordion.Panel>
-						</Accordion.Item>
+                  <PresetEditorModal
+                    opened={presetEditorOpen}
+                    onClose={() => setPresetEditorOpen(false)}
+                    editDefaultPresetId={EDIT_DEFAULT_PRESET}
+                    presetSelectOptions={presetSelectOptions}
+                    editingPresetId={editingPresetId}
+                    onEditingPresetChange={setEditingPresetId}
+                    onNewPreset={newPreset}
+                    linkableProfiles={linkableProfiles}
+                    onOpenLinkPresetModal={openLinkPresetModal}
+                    isEditingDefaultPreset={isEditingDefaultPreset}
+                    selectedPreset={selectedPreset}
+                    selectedPresetRuntimeFallbackViews={
+                      selectedPresetRuntimeFallbackViews
+                    }
+                    onRequestDeletePreset={(preset) =>
+                      setDeletePresetDialog({
+                        presetId: preset.id,
+                        presetName: preset.name?.trim() || preset.id,
+                        isShared: isSharedPresetId(preset.id),
+                      })
+                    }
+                    localPresetName={localPresetName}
+                    onLocalPresetNameChange={setLocalPresetName}
+                    localPresetHintsText={localPresetHintsText}
+                    onLocalPresetHintsChange={setLocalPresetHintsText}
+                    onUpdatePreset={updatePreset}
+                    getPresetPromptOverride={getPresetPromptOverride}
+                    profilePromptDefaultContent={profilePromptDefaultContent}
+                    activeProfileId={activeProfileId}
+                    activeProfileLabel={activeProfileLabel}
+                    onOpenPresetPromptLab={handleOpenPresetPromptLab}
+                    onSavePresetSectionOverride={savePresetSectionOverride}
+                    isSavingProfiles={isSavingProfiles}
+                    rewriteTestInput={rewriteTestInput}
+                    onRewriteTestInputChange={setRewriteTestInput}
+                    onRunRewriteTest={runRewriteTest}
+                    isTestingRewrite={testRewriteWithPrompt.isPending}
+                    rewriteTestDurationMs={rewriteTestDurationMs}
+                    rewriteTestError={rewriteTestError}
+                    rewriteTestOutput={rewriteTestOutput}
+                    defaultPresetRewriteStepValue={
+                      defaultPresetRewriteStepValue
+                    }
+                    onDefaultPresetRewriteStepChange={
+                      handleDefaultPresetRewriteStepChange
+                    }
+                    localDefaultPresetDescription={
+                      localDefaultPresetDescription
+                    }
+                    onLocalDefaultPresetDescriptionChange={
+                      setLocalDefaultPresetDescription
+                    }
+                    currentDefaultPresetDescription={
+                      activeProfile?.default_preset_description ?? null
+                    }
+                    onSaveDefaultPresetDescription={
+                      handleSaveDefaultPresetDescription
+                    }
+                    defaultSystemPromptContent={
+                      localSections?.system.content ?? ""
+                    }
+                    defaultSystemPromptDefaultContent={
+                      defaultSections?.system ?? ""
+                    }
+                    defaultSystemPromptHasCustom={hasCustomContent.system}
+                    defaultSystemPromptInheritMode={
+                      defaultSystemPromptInheritMode
+                    }
+                    onDisableDefaultSystemPromptOverride={
+                      isDefaultScope
+                        ? undefined
+                        : handleDisableDefaultSystemPromptOverride
+                    }
+                    onOpenDefaultPromptLab={handleOpenDefaultPromptLab}
+                    onSaveDefaultSystemPrompt={(content) =>
+                      handleSave("system", content)
+                    }
+                    onResetDefaultSystemPrompt={() => handleReset("system")}
+                    isDefaultPromptSaving={
+                      updateCleanupPromptSections.isPending ||
+                      updateRewriteProgramPromptProfiles.isPending
+                    }
+                    isDefaultPromptLabDisabled={
+                      updateCleanupPromptSections.isPending ||
+                      updateRewriteProgramPromptProfiles.isPending ||
+                      updateRewriteLlmEnabled.isPending
+                    }
+                    isSavingCleanupSections={
+                      updateCleanupPromptSections.isPending
+                    }
+                    isSavingRewriteEnabled={updateRewriteLlmEnabled.isPending}
+                  />
+                </div>
+              </Accordion.Panel>
+            </Accordion.Item>
 
-						<PromptIntentRouterSection
-							activeProfileId={activeProfileId}
-							presets={presets}
-							settings={settings}
-							profileRouter={activeProfile?.router}
-							effectiveRouter={effectiveRouter}
-							routerStrategyValue={routerStrategyValue}
-							embeddingProviderValue={embeddingProviderValue}
-							embeddingModels={embeddingModels}
-							embeddingModelValue={embeddingModelValue}
-							isCachingRouterEmbeddings={isCachingRouterEmbeddings}
-							selectDefaultValue={SELECT_DEFAULT}
-							anthropicThinkingBudgets={ANTHROPIC_THINKING_LEVEL_BUDGETS}
-							getEmbeddingModelsForProvider={getEmbeddingModelsForProvider}
-							getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
-							saveRouter={saveRouter}
-							onCacheRouterEmbeddings={handleCacheRouterEmbeddings}
-						/>
-					</Accordion>
-				</div>
-			) : null}
+            <PromptIntentRouterSection
+              activeProfileId={activeProfileId}
+              presets={presets}
+              settings={settings}
+              profileRouter={activeProfile?.router}
+              effectiveRouter={effectiveRouter}
+              routerStrategyValue={routerStrategyValue}
+              embeddingProviderValue={embeddingProviderValue}
+              embeddingModels={embeddingModels}
+              embeddingModelValue={embeddingModelValue}
+              isCachingRouterEmbeddings={isCachingRouterEmbeddings}
+              selectDefaultValue={SELECT_DEFAULT}
+              anthropicThinkingBudgets={ANTHROPIC_THINKING_LEVEL_BUDGETS}
+              getEmbeddingModelsForProvider={getEmbeddingModelsForProvider}
+              getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
+              saveRouter={saveRouter}
+              onCacheRouterEmbeddings={handleCacheRouterEmbeddings}
+            />
+          </Accordion>
+        </div>
+      ) : null}
 
-			<QuickReplaceSettings
-				activeProfileId={activeProfileId}
-				activeProfile={activeProfile}
-				isDefaultScope={isDefaultScope}
-				inheritTooltip={INHERIT_TOOLTIP}
-				defaultSystemPrompt={DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT}
-				ocrProviderAvailable={ocrProviderAvailable}
-				ocrProviderUnavailableReason={ocrProviderUnavailableReason}
-				defaultQuickReplaceEnabled={defaultQuickReplaceEnabled}
-				defaultQuickReplaceIncludeClipboardContext={
-					defaultQuickReplaceIncludeClipboardContext
-				}
-				localProfileQuickReplaceActiveWindowOcrMode={
-					localProfileQuickReplaceActiveWindowOcrMode
-				}
-				quickReplaceActiveWindowOcrModeInheriting={
-					quickReplaceActiveWindowOcrModeInheriting
-				}
-				setQuickReplaceActiveWindowOcrModeInheriting={
-					setQuickReplaceActiveWindowOcrModeInheriting
-				}
-				setLocalProfileQuickReplaceActiveWindowOcrMode={
-					setLocalProfileQuickReplaceActiveWindowOcrMode
-				}
-				defaultQuickReplaceProvider={defaultQuickReplaceProvider}
-				defaultQuickReplaceModel={defaultQuickReplaceModel}
-				defaultQuickReplaceSystemPrompt={defaultQuickReplaceSystemPrompt}
-				effectiveQuickReplaceProvider={effectiveQuickReplaceProvider}
-				llmProviderOptions={llmProviderOptions}
-				llmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
-				quickReplaceModelOptions={quickReplaceModelOptions}
-				selectedQuickReplaceModelForUi={selectedQuickReplaceModelForUi}
-				localProfileQuickReplaceEnabled={localProfileQuickReplaceEnabled}
-				localProfileQuickReplaceIncludeClipboardContext={
-					localProfileQuickReplaceIncludeClipboardContext
-				}
-				localQuickReplaceSystemPrompt={localQuickReplaceSystemPrompt}
-				quickReplaceEnabledInheriting={quickReplaceEnabledInheriting}
-				quickReplaceIncludeClipboardContextInheriting={
-					quickReplaceIncludeClipboardContextInheriting
-				}
-				quickReplaceProviderInheriting={quickReplaceProviderInheriting}
-				quickReplaceModelInheriting={quickReplaceModelInheriting}
-				quickReplaceSystemPromptInheriting={quickReplaceSystemPromptInheriting}
-				setQuickReplaceEnabledInheriting={setQuickReplaceEnabledInheriting}
-				setQuickReplaceIncludeClipboardContextInheriting={
-					setQuickReplaceIncludeClipboardContextInheriting
-				}
-				setQuickReplaceProviderInheriting={setQuickReplaceProviderInheriting}
-				setQuickReplaceModelInheriting={setQuickReplaceModelInheriting}
-				setQuickReplaceSystemPromptInheriting={
-					setQuickReplaceSystemPromptInheriting
-				}
-				setLocalProfileQuickReplaceEnabled={setLocalProfileQuickReplaceEnabled}
-				setLocalProfileQuickReplaceIncludeClipboardContext={
-					setLocalProfileQuickReplaceIncludeClipboardContext
-				}
-				setLocalProfileQuickReplaceProvider={
-					setLocalProfileQuickReplaceProvider
-				}
-				setLocalProfileQuickReplaceModel={setLocalProfileQuickReplaceModel}
-				setLocalQuickReplaceSystemPrompt={setLocalQuickReplaceSystemPrompt}
-				saveProfileMetadata={saveProfileMetadata}
-				openDisableOverrideDialog={openDisableOverrideDialog}
-				getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
-				rewriteProvider={settings?.llm_provider ?? null}
-				rewriteModel={settings?.llm_model ?? null}
-				isSaving={updateRewriteProgramPromptProfiles.isPending}
-			/>
-			<QuickAskPanel
-				activeProfileId={activeProfileId}
-				activeProfile={activeProfile}
-				isDefaultScope={isDefaultScope}
-				inheritTooltip={INHERIT_TOOLTIP}
-				defaultSystemPrompt={DEFAULT_QUICK_ASK_SYSTEM_PROMPT}
-				selectDefault={SELECT_DEFAULT}
-				settings={settings}
-				ocrProviderAvailable={ocrProviderAvailable}
-				ocrProviderUnavailableReason={ocrProviderUnavailableReason}
-				effectiveQuickAskProvider={effectiveQuickAskProvider}
-				effectiveQuickAskModel={effectiveQuickAskModel}
-				quickAskIncludeSelectedText={quickAskIncludeSelectedText}
-				quickAskConversationHistoryEnabled={quickAskConversationHistoryEnabled}
-				quickAskConversationHistoryCount={quickAskConversationHistoryCount}
-				localProfileQuickAskActiveWindowOcrMode={
-					localProfileQuickAskActiveWindowOcrMode
-				}
-				quickAskActiveWindowOcrModeInheriting={
-					quickAskActiveWindowOcrModeInheriting
-				}
-				setQuickAskActiveWindowOcrModeInheriting={
-					setQuickAskActiveWindowOcrModeInheriting
-				}
-				setLocalProfileQuickAskActiveWindowOcrMode={
-					setLocalProfileQuickAskActiveWindowOcrMode
-				}
-				quickAskIncludeClipboardContextInheriting={
-					quickAskIncludeClipboardContextInheriting
-				}
-				quickAskProviderInheriting={quickAskProviderInheriting}
-				quickAskModelInheriting={quickAskModelInheriting}
-				quickAskOpenAiReasoningEffortInheriting={
-					quickAskOpenAiReasoningEffortInheriting
-				}
-				quickAskGeminiThinkingLevelInheriting={
-					quickAskGeminiThinkingLevelInheriting
-				}
-				quickAskGeminiThinkingBudgetInheriting={
-					quickAskGeminiThinkingBudgetInheriting
-				}
-				quickAskAnthropicThinkingBudgetInheriting={
-					quickAskAnthropicThinkingBudgetInheriting
-				}
-				quickAskSystemPromptInheriting={quickAskSystemPromptInheriting}
-				quickAskDismissModeInheriting={quickAskDismissModeInheriting}
-				defaultQuickAskIncludeClipboardContext={
-					defaultQuickAskIncludeClipboardContext
-				}
-				defaultQuickAskDismissMode={defaultQuickAskDismissMode}
-				localProfileQuickAskIncludeClipboardContext={
-					localProfileQuickAskIncludeClipboardContext
-				}
-				localProfileQuickAskDismissMode={localProfileQuickAskDismissMode}
-				localProfileQuickAskOpenAiReasoningEffort={
-					localProfileQuickAskOpenAiReasoningEffort
-				}
-				localProfileQuickAskGeminiThinkingLevel={
-					localProfileQuickAskGeminiThinkingLevel
-				}
-				localProfileQuickAskGeminiThinkingBudget={
-					localProfileQuickAskGeminiThinkingBudget
-				}
-				localProfileQuickAskAnthropicThinkingBudget={
-					localProfileQuickAskAnthropicThinkingBudget
-				}
-				localQuickAskSystemPrompt={localQuickAskSystemPrompt}
-				quickAskModelOptions={quickAskModelOptions}
-				selectedQuickAskModelForUi={selectedQuickAskModelForUi}
-				quickAskOpenAiThinkingOptions={quickAskOpenAiThinkingOptions}
-				quickAskGeminiThinkingLevelOptions={quickAskGeminiThinkingLevelOptions}
-				quickAskGeminiThinkingBudgetOptions={
-					quickAskGeminiThinkingBudgetOptions
-				}
-				quickAskAnthropicThinkingLevelOptionsWithCustom={
-					quickAskAnthropicThinkingLevelOptionsWithCustom
-				}
-				supportsQuickAskOpenAiThinking={supportsQuickAskOpenAiThinking}
-				supportsQuickAskGeminiThinkingLevel={
-					supportsQuickAskGeminiThinkingLevel
-				}
-				supportsQuickAskGeminiThinkingBudget={
-					supportsQuickAskGeminiThinkingBudget
-				}
-				supportsQuickAskAnthropicThinkingBudget={
-					supportsQuickAskAnthropicThinkingBudget
-				}
-				quickAskModelForThinking={quickAskModelForThinking}
-				llmProviderOptions={llmProviderOptions}
-				llmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
-				updateQuickAskIncludeSelectedText={updateQuickAskIncludeSelectedText}
-				updateQuickAskConversationHistoryEnabled={
-					updateQuickAskConversationHistoryEnabled
-				}
-				updateQuickAskConversationHistoryCount={
-					updateQuickAskConversationHistoryCount
-				}
-				updateQuickAskOpenAiReasoningEffort={
-					updateQuickAskOpenAiReasoningEffort
-				}
-				updateQuickAskGeminiThinkingLevel={updateQuickAskGeminiThinkingLevel}
-				updateQuickAskGeminiThinkingBudget={updateQuickAskGeminiThinkingBudget}
-				updateQuickAskAnthropicThinkingBudget={
-					updateQuickAskAnthropicThinkingBudget
-				}
-				updateQuickAskSystemPrompt={updateQuickAskSystemPrompt}
-				updateQuickAskDismissMode={updateQuickAskDismissMode}
-				setQuickAskIncludeClipboardContextInheriting={
-					setQuickAskIncludeClipboardContextInheriting
-				}
-				setQuickAskProviderInheriting={setQuickAskProviderInheriting}
-				setQuickAskModelInheriting={setQuickAskModelInheriting}
-				setQuickAskOpenAiReasoningEffortInheriting={
-					setQuickAskOpenAiReasoningEffortInheriting
-				}
-				setQuickAskGeminiThinkingLevelInheriting={
-					setQuickAskGeminiThinkingLevelInheriting
-				}
-				setQuickAskGeminiThinkingBudgetInheriting={
-					setQuickAskGeminiThinkingBudgetInheriting
-				}
-				setQuickAskAnthropicThinkingBudgetInheriting={
-					setQuickAskAnthropicThinkingBudgetInheriting
-				}
-				setQuickAskSystemPromptInheriting={setQuickAskSystemPromptInheriting}
-				setQuickAskDismissModeInheriting={setQuickAskDismissModeInheriting}
-				setLocalProfileQuickAskIncludeClipboardContext={
-					setLocalProfileQuickAskIncludeClipboardContext
-				}
-				setLocalProfileQuickAskProvider={setLocalProfileQuickAskProvider}
-				setLocalProfileQuickAskModel={setLocalProfileQuickAskModel}
-				setLocalProfileQuickAskDismissMode={setLocalProfileQuickAskDismissMode}
-				setLocalProfileQuickAskOpenAiReasoningEffort={
-					setLocalProfileQuickAskOpenAiReasoningEffort
-				}
-				setLocalProfileQuickAskGeminiThinkingLevel={
-					setLocalProfileQuickAskGeminiThinkingLevel
-				}
-				setLocalProfileQuickAskGeminiThinkingBudget={
-					setLocalProfileQuickAskGeminiThinkingBudget
-				}
-				setLocalProfileQuickAskAnthropicThinkingBudget={
-					setLocalProfileQuickAskAnthropicThinkingBudget
-				}
-				setLocalQuickAskSystemPrompt={setLocalQuickAskSystemPrompt}
-				handleDefaultQuickAskProviderChange={
-					handleDefaultQuickAskProviderChange
-				}
-				handleDefaultQuickAskModelChange={handleDefaultQuickAskModelChange}
-				openDisableOverrideDialog={openDisableOverrideDialog}
-				saveProfileMetadata={saveProfileMetadata}
-				getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
-				isOpenAiReasoningEffort={isOpenAiReasoningEffort}
-				isGeminiThinkingLevel={isGeminiThinkingLevel}
-				openAiDefaultReasoningEffortForModel={
-					openAiDefaultReasoningEffortForModel
-				}
-				formatThinkingBudgetShort={formatThinkingBudgetShort}
-				isSavingProfile={updateRewriteProgramPromptProfiles.isPending}
-				errorToMessage={formatErrorMessage}
-				quickAskTestInput={quickAskTestInput}
-				quickAskTestOutput={quickAskTestOutput}
-				quickAskTestError={quickAskTestError}
-				quickAskTestDurationMs={quickAskTestDurationMs}
-				quickAskTestPending={quickAskTestPending}
-				quickAskTestStartRef={quickAskTestStartRef}
-				setQuickAskTestInput={setQuickAskTestInput}
-				setQuickAskTestOutput={setQuickAskTestOutput}
-				setQuickAskTestError={setQuickAskTestError}
-				setQuickAskTestDurationMs={setQuickAskTestDurationMs}
-				setQuickAskTestPending={setQuickAskTestPending}
-			/>
-		</>
-	);
+      <QuickReplaceSettings
+        activeProfileId={activeProfileId}
+        activeProfile={activeProfile}
+        isDefaultScope={isDefaultScope}
+        inheritTooltip={INHERIT_TOOLTIP}
+        defaultSystemPrompt={DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT}
+        ocrProviderAvailable={ocrProviderAvailable}
+        ocrProviderUnavailableReason={ocrProviderUnavailableReason}
+        defaultQuickReplaceEnabled={defaultQuickReplaceEnabled}
+        defaultQuickReplaceIncludeClipboardContext={
+          defaultQuickReplaceIncludeClipboardContext
+        }
+        localProfileQuickReplaceActiveWindowOcrMode={
+          localProfileQuickReplaceActiveWindowOcrMode
+        }
+        quickReplaceActiveWindowOcrModeInheriting={
+          quickReplaceActiveWindowOcrModeInheriting
+        }
+        setQuickReplaceActiveWindowOcrModeInheriting={
+          setQuickReplaceActiveWindowOcrModeInheriting
+        }
+        setLocalProfileQuickReplaceActiveWindowOcrMode={
+          setLocalProfileQuickReplaceActiveWindowOcrMode
+        }
+        defaultQuickReplaceProvider={defaultQuickReplaceProvider}
+        defaultQuickReplaceModel={defaultQuickReplaceModel}
+        defaultQuickReplaceSystemPrompt={defaultQuickReplaceSystemPrompt}
+        effectiveQuickReplaceProvider={effectiveQuickReplaceProvider}
+        llmProviderOptions={llmProviderOptions}
+        llmProviderDisabled={
+          llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+        }
+        quickReplaceModelOptions={quickReplaceModelOptions}
+        selectedQuickReplaceModelForUi={selectedQuickReplaceModelForUi}
+        localProfileQuickReplaceEnabled={localProfileQuickReplaceEnabled}
+        localProfileQuickReplaceIncludeClipboardContext={
+          localProfileQuickReplaceIncludeClipboardContext
+        }
+        localQuickReplaceSystemPrompt={localQuickReplaceSystemPrompt}
+        quickReplaceEnabledInheriting={quickReplaceEnabledInheriting}
+        quickReplaceIncludeClipboardContextInheriting={
+          quickReplaceIncludeClipboardContextInheriting
+        }
+        quickReplaceProviderInheriting={quickReplaceProviderInheriting}
+        quickReplaceModelInheriting={quickReplaceModelInheriting}
+        quickReplaceSystemPromptInheriting={quickReplaceSystemPromptInheriting}
+        setQuickReplaceEnabledInheriting={setQuickReplaceEnabledInheriting}
+        setQuickReplaceIncludeClipboardContextInheriting={
+          setQuickReplaceIncludeClipboardContextInheriting
+        }
+        setQuickReplaceProviderInheriting={setQuickReplaceProviderInheriting}
+        setQuickReplaceModelInheriting={setQuickReplaceModelInheriting}
+        setQuickReplaceSystemPromptInheriting={
+          setQuickReplaceSystemPromptInheriting
+        }
+        setLocalProfileQuickReplaceEnabled={setLocalProfileQuickReplaceEnabled}
+        setLocalProfileQuickReplaceIncludeClipboardContext={
+          setLocalProfileQuickReplaceIncludeClipboardContext
+        }
+        setLocalProfileQuickReplaceProvider={
+          setLocalProfileQuickReplaceProvider
+        }
+        setLocalProfileQuickReplaceModel={setLocalProfileQuickReplaceModel}
+        setLocalQuickReplaceSystemPrompt={setLocalQuickReplaceSystemPrompt}
+        saveProfileMetadata={saveProfileMetadata}
+        openDisableOverrideDialog={openDisableOverrideDialog}
+        getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
+        rewriteProvider={settings?.llm_provider ?? null}
+        rewriteModel={settings?.llm_model ?? null}
+        isSaving={updateRewriteProgramPromptProfiles.isPending}
+      />
+      <QuickAskPanel
+        activeProfileId={activeProfileId}
+        activeProfile={activeProfile}
+        isDefaultScope={isDefaultScope}
+        inheritTooltip={INHERIT_TOOLTIP}
+        defaultSystemPrompt={DEFAULT_QUICK_ASK_SYSTEM_PROMPT}
+        selectDefault={SELECT_DEFAULT}
+        settings={settings}
+        ocrProviderAvailable={ocrProviderAvailable}
+        ocrProviderUnavailableReason={ocrProviderUnavailableReason}
+        effectiveQuickAskProvider={effectiveQuickAskProvider}
+        effectiveQuickAskModel={effectiveQuickAskModel}
+        quickAskIncludeSelectedText={quickAskIncludeSelectedText}
+        quickAskConversationHistoryEnabled={quickAskConversationHistoryEnabled}
+        quickAskConversationHistoryCount={quickAskConversationHistoryCount}
+        localProfileQuickAskActiveWindowOcrMode={
+          localProfileQuickAskActiveWindowOcrMode
+        }
+        quickAskActiveWindowOcrModeInheriting={
+          quickAskActiveWindowOcrModeInheriting
+        }
+        setQuickAskActiveWindowOcrModeInheriting={
+          setQuickAskActiveWindowOcrModeInheriting
+        }
+        setLocalProfileQuickAskActiveWindowOcrMode={
+          setLocalProfileQuickAskActiveWindowOcrMode
+        }
+        quickAskIncludeClipboardContextInheriting={
+          quickAskIncludeClipboardContextInheriting
+        }
+        quickAskProviderInheriting={quickAskProviderInheriting}
+        quickAskModelInheriting={quickAskModelInheriting}
+        quickAskOpenAiReasoningEffortInheriting={
+          quickAskOpenAiReasoningEffortInheriting
+        }
+        quickAskGeminiThinkingLevelInheriting={
+          quickAskGeminiThinkingLevelInheriting
+        }
+        quickAskGeminiThinkingBudgetInheriting={
+          quickAskGeminiThinkingBudgetInheriting
+        }
+        quickAskAnthropicThinkingBudgetInheriting={
+          quickAskAnthropicThinkingBudgetInheriting
+        }
+        quickAskSystemPromptInheriting={quickAskSystemPromptInheriting}
+        quickAskDismissModeInheriting={quickAskDismissModeInheriting}
+        defaultQuickAskIncludeClipboardContext={
+          defaultQuickAskIncludeClipboardContext
+        }
+        defaultQuickAskDismissMode={defaultQuickAskDismissMode}
+        localProfileQuickAskIncludeClipboardContext={
+          localProfileQuickAskIncludeClipboardContext
+        }
+        localProfileQuickAskDismissMode={localProfileQuickAskDismissMode}
+        localProfileQuickAskOpenAiReasoningEffort={
+          localProfileQuickAskOpenAiReasoningEffort
+        }
+        localProfileQuickAskGeminiThinkingLevel={
+          localProfileQuickAskGeminiThinkingLevel
+        }
+        localProfileQuickAskGeminiThinkingBudget={
+          localProfileQuickAskGeminiThinkingBudget
+        }
+        localProfileQuickAskAnthropicThinkingBudget={
+          localProfileQuickAskAnthropicThinkingBudget
+        }
+        localQuickAskSystemPrompt={localQuickAskSystemPrompt}
+        quickAskModelOptions={quickAskModelOptions}
+        selectedQuickAskModelForUi={selectedQuickAskModelForUi}
+        quickAskOpenAiThinkingOptions={quickAskOpenAiThinkingOptions}
+        quickAskGeminiThinkingLevelOptions={quickAskGeminiThinkingLevelOptions}
+        quickAskGeminiThinkingBudgetOptions={
+          quickAskGeminiThinkingBudgetOptions
+        }
+        quickAskAnthropicThinkingLevelOptionsWithCustom={
+          quickAskAnthropicThinkingLevelOptionsWithCustom
+        }
+        supportsQuickAskOpenAiThinking={supportsQuickAskOpenAiThinking}
+        supportsQuickAskGeminiThinkingLevel={
+          supportsQuickAskGeminiThinkingLevel
+        }
+        supportsQuickAskGeminiThinkingBudget={
+          supportsQuickAskGeminiThinkingBudget
+        }
+        supportsQuickAskAnthropicThinkingBudget={
+          supportsQuickAskAnthropicThinkingBudget
+        }
+        quickAskModelForThinking={quickAskModelForThinking}
+        llmProviderOptions={llmProviderOptions}
+        llmProviderDisabled={
+          llmCloudProviders.length === 0 && llmLocalProviders.length === 0
+        }
+        updateQuickAskIncludeSelectedText={updateQuickAskIncludeSelectedText}
+        updateQuickAskConversationHistoryEnabled={
+          updateQuickAskConversationHistoryEnabled
+        }
+        updateQuickAskConversationHistoryCount={
+          updateQuickAskConversationHistoryCount
+        }
+        updateQuickAskOpenAiReasoningEffort={
+          updateQuickAskOpenAiReasoningEffort
+        }
+        updateQuickAskGeminiThinkingLevel={updateQuickAskGeminiThinkingLevel}
+        updateQuickAskGeminiThinkingBudget={updateQuickAskGeminiThinkingBudget}
+        updateQuickAskAnthropicThinkingBudget={
+          updateQuickAskAnthropicThinkingBudget
+        }
+        updateQuickAskSystemPrompt={updateQuickAskSystemPrompt}
+        updateQuickAskDismissMode={updateQuickAskDismissMode}
+        setQuickAskIncludeClipboardContextInheriting={
+          setQuickAskIncludeClipboardContextInheriting
+        }
+        setQuickAskProviderInheriting={setQuickAskProviderInheriting}
+        setQuickAskModelInheriting={setQuickAskModelInheriting}
+        setQuickAskOpenAiReasoningEffortInheriting={
+          setQuickAskOpenAiReasoningEffortInheriting
+        }
+        setQuickAskGeminiThinkingLevelInheriting={
+          setQuickAskGeminiThinkingLevelInheriting
+        }
+        setQuickAskGeminiThinkingBudgetInheriting={
+          setQuickAskGeminiThinkingBudgetInheriting
+        }
+        setQuickAskAnthropicThinkingBudgetInheriting={
+          setQuickAskAnthropicThinkingBudgetInheriting
+        }
+        setQuickAskSystemPromptInheriting={setQuickAskSystemPromptInheriting}
+        setQuickAskDismissModeInheriting={setQuickAskDismissModeInheriting}
+        setLocalProfileQuickAskIncludeClipboardContext={
+          setLocalProfileQuickAskIncludeClipboardContext
+        }
+        setLocalProfileQuickAskProvider={setLocalProfileQuickAskProvider}
+        setLocalProfileQuickAskModel={setLocalProfileQuickAskModel}
+        setLocalProfileQuickAskDismissMode={setLocalProfileQuickAskDismissMode}
+        setLocalProfileQuickAskOpenAiReasoningEffort={
+          setLocalProfileQuickAskOpenAiReasoningEffort
+        }
+        setLocalProfileQuickAskGeminiThinkingLevel={
+          setLocalProfileQuickAskGeminiThinkingLevel
+        }
+        setLocalProfileQuickAskGeminiThinkingBudget={
+          setLocalProfileQuickAskGeminiThinkingBudget
+        }
+        setLocalProfileQuickAskAnthropicThinkingBudget={
+          setLocalProfileQuickAskAnthropicThinkingBudget
+        }
+        setLocalQuickAskSystemPrompt={setLocalQuickAskSystemPrompt}
+        handleDefaultQuickAskProviderChange={
+          handleDefaultQuickAskProviderChange
+        }
+        handleDefaultQuickAskModelChange={handleDefaultQuickAskModelChange}
+        openDisableOverrideDialog={openDisableOverrideDialog}
+        saveProfileMetadata={saveProfileMetadata}
+        getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
+        isOpenAiReasoningEffort={isOpenAiReasoningEffort}
+        isGeminiThinkingLevel={isGeminiThinkingLevel}
+        openAiDefaultReasoningEffortForModel={
+          openAiDefaultReasoningEffortForModel
+        }
+        formatThinkingBudgetShort={formatThinkingBudgetShort}
+        isSavingProfile={updateRewriteProgramPromptProfiles.isPending}
+        errorToMessage={formatErrorMessage}
+        quickAskTestInput={quickAskTestInput}
+        quickAskTestOutput={quickAskTestOutput}
+        quickAskTestError={quickAskTestError}
+        quickAskTestDurationMs={quickAskTestDurationMs}
+        quickAskTestPending={quickAskTestPending}
+        quickAskTestStartRef={quickAskTestStartRef}
+        setQuickAskTestInput={setQuickAskTestInput}
+        setQuickAskTestOutput={setQuickAskTestOutput}
+        setQuickAskTestError={setQuickAskTestError}
+        setQuickAskTestDurationMs={setQuickAskTestDurationMs}
+        setQuickAskTestPending={setQuickAskTestPending}
+      />
+    </>
+  );
 }

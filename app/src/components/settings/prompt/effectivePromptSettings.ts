@@ -1,11 +1,14 @@
+import type { SettingsValueView } from "../../../lib/tauri/settingsViews";
 import {
 	inheritedSettingView,
 	isInheritedSettingValue,
+	presetSettingView,
 } from "../../../lib/tauri/settingsViews";
 import type {
 	ActiveWindowOcrMode,
 	AppSettings,
 	QuickAskDismissMode,
+	RewritePreset,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri/types";
 
@@ -23,6 +26,15 @@ export type PromptProfileFallbacks = {
 	baseQuickAskDismissMode: QuickAskDismissMode;
 };
 
+export type PresetRuntimeFallbackViews = {
+	sttProvider: SettingsValueView<string | null>;
+	sttModel: SettingsValueView<string | null>;
+	sttLanguage: SettingsValueView<string | null>;
+	sttTimeoutSeconds: SettingsValueView<number>;
+	llmProvider: SettingsValueView<string | null>;
+	llmModel: SettingsValueView<string | null>;
+};
+
 type PromptFallbackSettings = Partial<
 	Pick<
 		AppSettings,
@@ -33,6 +45,18 @@ type PromptFallbackSettings = Partial<
 		| "quick_replace_active_window_ocr_mode"
 		| "quick_ask_active_window_ocr_mode"
 		| "quick_ask_dismiss_mode"
+	>
+>;
+
+type PresetRuntimeSettings = Partial<
+	Pick<
+		AppSettings,
+		| "stt_provider"
+		| "stt_model"
+		| "stt_language"
+		| "stt_timeout_seconds"
+		| "llm_provider"
+		| "llm_model"
 	>
 >;
 
@@ -69,6 +93,12 @@ function quickAskDismissModeOrDefault(
 	fallback: QuickAskDismissMode,
 ): QuickAskDismissMode {
 	return value === "auto" || value === "manual" ? value : fallback;
+}
+
+function finitePositiveNumberOrNull(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value > 0
+		? value
+		: null;
 }
 
 export function resolvePromptProfileFallbacks({
@@ -180,5 +210,73 @@ export function resolvePromptProfileFallbacks({
 			quickReplaceActiveWindowOcrModeView.value,
 		baseQuickAskActiveWindowOcrMode: quickAskActiveWindowOcrModeView.value,
 		baseQuickAskDismissMode: quickAskDismissModeView.value,
+	};
+}
+
+export function resolvePresetRuntimeFallbackViews({
+	profile,
+	preset,
+	settings,
+	defaultSttTimeout,
+	defaultSttLanguage,
+}: {
+	profile: RewriteProgramPromptProfile | null;
+	preset: RewritePreset | null;
+	settings: PresetRuntimeSettings | undefined;
+	defaultSttTimeout: number;
+	defaultSttLanguage: string;
+}): PresetRuntimeFallbackViews {
+	// Preset runtime overrides follow the same null/missing/malformed vocabulary as
+	// the profile Settings View helpers. Keeping this logic here lets production UI
+	// explain effective preset values without rebuilding fallback rules inline.
+	return {
+		sttProvider: presetSettingView<string | null>({
+			globalValue: settings?.stt_provider,
+			profile,
+			preset,
+			key: "stt_provider",
+			defaultValue: null,
+			normalize: stringOrNull,
+		}),
+		sttModel: presetSettingView<string | null>({
+			globalValue: settings?.stt_model,
+			profile,
+			preset,
+			key: "stt_model",
+			defaultValue: null,
+			normalize: stringOrNull,
+		}),
+		sttLanguage: presetSettingView<string | null>({
+			globalValue: settings?.stt_language,
+			profile,
+			preset,
+			key: "stt_language",
+			defaultValue: defaultSttLanguage,
+			normalize: stringOrNull,
+		}),
+		sttTimeoutSeconds: presetSettingView<number>({
+			globalValue: settings?.stt_timeout_seconds,
+			profile,
+			preset,
+			key: "stt_timeout_seconds",
+			defaultValue: defaultSttTimeout,
+			normalize: finitePositiveNumberOrNull,
+		}),
+		llmProvider: presetSettingView<string | null>({
+			globalValue: settings?.llm_provider,
+			profile,
+			preset,
+			key: "llm_provider",
+			defaultValue: null,
+			normalize: stringOrNull,
+		}),
+		llmModel: presetSettingView<string | null>({
+			globalValue: settings?.llm_model,
+			profile,
+			preset,
+			key: "llm_model",
+			defaultValue: null,
+			normalize: stringOrNull,
+		}),
 	};
 }

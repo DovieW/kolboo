@@ -4,7 +4,8 @@ use crate::commands::CommandError;
 use crate::llm::format_text;
 use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::pipeline::llm_provider::{
-    create_llm_provider_unstructured, create_llm_provider_without_timeout,
+    create_one_off_llm_provider_unstructured, create_one_off_llm_provider_without_timeout,
+    LlmProviderParams,
 };
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
@@ -333,16 +334,6 @@ pub async fn test_llm_rewrite(
             )
         };
 
-    let api_key = if desired_provider == "ollama" {
-        String::new()
-    } else {
-        config
-            .llm_api_keys
-            .get(desired_provider.as_str())
-            .cloned()
-            .unwrap_or_default()
-    };
-
     // Apply provider-specific thinking/reasoning knobs (profile overrides -> global defaults).
     let effective_openai_reasoning_effort = resolved_profile
         .as_ref()
@@ -361,24 +352,23 @@ pub async fn test_llm_rewrite(
         .and_then(|p| p.anthropic_thinking_budget)
         .or(config.llm_config.anthropic_thinking_budget);
 
-    let provider_cfg = LlmConfig {
-        enabled: true,
-        provider: desired_provider,
-        api_key,
-        model: desired_model,
-        ollama_url: config.llm_config.ollama_url.clone(),
-        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
-        openai_reasoning_effort: effective_openai_reasoning_effort,
-        gemini_thinking_budget: effective_gemini_thinking_budget,
-        gemini_thinking_level: effective_gemini_thinking_level,
-        anthropic_thinking_budget: effective_anthropic_thinking_budget,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: config.llm_config.timeout,
-    };
-
     // This is a *test* endpoint: do not enforce request timeouts.
-    let provider = create_llm_provider_without_timeout(&provider_cfg, request_log_store.clone());
+    let provider = create_one_off_llm_provider_without_timeout(
+        &config.llm_config,
+        &config.llm_api_keys,
+        desired_provider.as_str(),
+        LlmProviderParams {
+            model: desired_model,
+            timeout: config.llm_config.timeout,
+            ollama_url: config.llm_config.ollama_url.clone(),
+            openai_reasoning_effort: effective_openai_reasoning_effort,
+            gemini_thinking_budget: effective_gemini_thinking_budget,
+            gemini_thinking_level: effective_gemini_thinking_level,
+            anthropic_thinking_budget: effective_anthropic_thinking_budget,
+        },
+        request_log_store.clone(),
+    )
+    .map_err(|e| llm_error(e.to_string()))?;
 
     let output_res = format_text(provider.as_ref(), &transcript, &prompts).await;
 
@@ -563,16 +553,6 @@ pub async fn iterate_rewrite_prompt(
         .map(|s| Some(s.to_string()))
         .unwrap_or(base_model);
 
-    let api_key = if desired_provider == "ollama" {
-        String::new()
-    } else {
-        config
-            .llm_api_keys
-            .get(desired_provider.as_str())
-            .cloned()
-            .unwrap_or_default()
-    };
-
     // Apply provider-specific thinking/reasoning knobs.
     // Precedence: Prompt Lab override -> profile override -> global defaults.
     let effective_openai_reasoning_effort = open_ai_reasoning_effort
@@ -615,24 +595,23 @@ pub async fn iterate_rewrite_prompt(
         })
         .or(config.llm_config.anthropic_thinking_budget);
 
-    let provider_cfg = LlmConfig {
-        enabled: true,
-        provider: desired_provider,
-        api_key,
-        model: desired_model,
-        ollama_url: config.llm_config.ollama_url.clone(),
-        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
-        openai_reasoning_effort: effective_openai_reasoning_effort,
-        gemini_thinking_budget: effective_gemini_thinking_budget,
-        gemini_thinking_level: effective_gemini_thinking_level,
-        anthropic_thinking_budget: effective_anthropic_thinking_budget,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: config.llm_config.timeout,
-    };
-
     // This is a Settings UI helper: do not enforce request timeouts.
-    let provider = create_llm_provider_without_timeout(&provider_cfg, request_log_store.clone());
+    let provider = create_one_off_llm_provider_without_timeout(
+        &config.llm_config,
+        &config.llm_api_keys,
+        desired_provider.as_str(),
+        LlmProviderParams {
+            model: desired_model,
+            timeout: config.llm_config.timeout,
+            ollama_url: config.llm_config.ollama_url.clone(),
+            openai_reasoning_effort: effective_openai_reasoning_effort,
+            gemini_thinking_budget: effective_gemini_thinking_budget,
+            gemini_thinking_level: effective_gemini_thinking_level,
+            anthropic_thinking_budget: effective_anthropic_thinking_budget,
+        },
+        request_log_store.clone(),
+    )
+    .map_err(|e| llm_error(e.to_string()))?;
 
     let mode = mode.as_deref().unwrap_or("fixed");
 
@@ -857,16 +836,6 @@ pub async fn test_rewrite_with_prompt(
         )
     };
 
-    let api_key = if desired_provider == "ollama" {
-        String::new()
-    } else {
-        config
-            .llm_api_keys
-            .get(desired_provider.as_str())
-            .cloned()
-            .unwrap_or_default()
-    };
-
     let effective_openai_reasoning_effort = resolved_profile
         .as_ref()
         .and_then(|p| p.openai_reasoning_effort.clone())
@@ -884,23 +853,22 @@ pub async fn test_rewrite_with_prompt(
         .and_then(|p| p.anthropic_thinking_budget)
         .or(config.llm_config.anthropic_thinking_budget);
 
-    let provider_cfg = LlmConfig {
-        enabled: true,
-        provider: desired_provider,
-        api_key,
-        model: desired_model,
-        ollama_url: config.llm_config.ollama_url.clone(),
-        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
-        openai_reasoning_effort: effective_openai_reasoning_effort,
-        gemini_thinking_budget: effective_gemini_thinking_budget,
-        gemini_thinking_level: effective_gemini_thinking_level,
-        anthropic_thinking_budget: effective_anthropic_thinking_budget,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: config.llm_config.timeout,
-    };
-
-    let provider = create_llm_provider_without_timeout(&provider_cfg, request_log_store.clone());
+    let provider = create_one_off_llm_provider_without_timeout(
+        &config.llm_config,
+        &config.llm_api_keys,
+        desired_provider.as_str(),
+        LlmProviderParams {
+            model: desired_model,
+            timeout: config.llm_config.timeout,
+            ollama_url: config.llm_config.ollama_url.clone(),
+            openai_reasoning_effort: effective_openai_reasoning_effort,
+            gemini_thinking_budget: effective_gemini_thinking_budget,
+            gemini_thinking_level: effective_gemini_thinking_level,
+            anthropic_thinking_budget: effective_anthropic_thinking_budget,
+        },
+        request_log_store.clone(),
+    )
+    .map_err(|e| llm_error(e.to_string()))?;
 
     let output_res = provider
         .complete(prompt.as_str(), transcript.as_str())
@@ -994,50 +962,31 @@ pub async fn llm_complete(
     let desired_provider = args.provider;
     let desired_model = args.model;
 
-    let api_key = if desired_provider == "ollama" {
-        String::new()
-    } else {
-        config
-            .llm_api_keys
-            .get(desired_provider.as_str())
-            .cloned()
-            .unwrap_or_default()
-    };
-
-    if desired_provider != "ollama" && api_key.trim().is_empty() {
-        return Err(llm_error(format!(
-            "No API key configured for provider: {}",
-            desired_provider
-        )));
-    }
-
-    let provider_cfg = LlmConfig {
-        enabled: true,
-        provider: desired_provider,
-        api_key,
-        model: desired_model,
-        ollama_url: config.llm_config.ollama_url.clone(),
-        managed_gateway_url: config.llm_config.managed_gateway_url.clone(),
-        openai_reasoning_effort: args
-            .openai_reasoning_effort
-            .clone()
-            .or_else(|| config.llm_config.openai_reasoning_effort.clone()),
-        gemini_thinking_budget: args
-            .gemini_thinking_budget
-            .or(config.llm_config.gemini_thinking_budget),
-        gemini_thinking_level: args
-            .gemini_thinking_level
-            .clone()
-            .or_else(|| config.llm_config.gemini_thinking_level.clone()),
-        anthropic_thinking_budget: args
-            .anthropic_thinking_budget
-            .or(config.llm_config.anthropic_thinking_budget),
-        prompts: PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: config.llm_config.timeout,
-    };
-
-    let provider = create_llm_provider_unstructured(&provider_cfg);
+    let provider = create_one_off_llm_provider_unstructured(
+        &config.llm_config,
+        &config.llm_api_keys,
+        desired_provider.as_str(),
+        LlmProviderParams {
+            model: desired_model,
+            timeout: config.llm_config.timeout,
+            ollama_url: config.llm_config.ollama_url.clone(),
+            openai_reasoning_effort: args
+                .openai_reasoning_effort
+                .clone()
+                .or_else(|| config.llm_config.openai_reasoning_effort.clone()),
+            gemini_thinking_budget: args
+                .gemini_thinking_budget
+                .or(config.llm_config.gemini_thinking_budget),
+            gemini_thinking_level: args
+                .gemini_thinking_level
+                .clone()
+                .or_else(|| config.llm_config.gemini_thinking_level.clone()),
+            anthropic_thinking_budget: args
+                .anthropic_thinking_budget
+                .or(config.llm_config.anthropic_thinking_budget),
+        },
+    )
+    .map_err(|e| llm_error(e.to_string()))?;
     let output = provider
         .complete(args.system_prompt.as_str(), args.user_prompt.as_str())
         .await

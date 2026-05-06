@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { RewriteProgramPromptProfile } from "../../../lib/tauri/types";
-import { resolvePromptProfileFallbacks } from "./effectivePromptSettings";
+import type {
+	RewritePreset,
+	RewriteProgramPromptProfile,
+} from "../../../lib/tauri/types";
+import {
+	resolvePresetRuntimeFallbackViews,
+	resolvePromptProfileFallbacks,
+} from "./effectivePromptSettings";
 
 const defaultQuickReplaceSystemPrompt = "Apply the requested edit.";
 
@@ -12,6 +18,17 @@ function profile(
 		name: "Default",
 		program_paths: [],
 		cleanup_prompt_sections: null,
+		...overrides,
+	};
+}
+
+function preset(overrides: Partial<RewritePreset>): RewritePreset {
+	return {
+		id: "preset-1",
+		name: "Preset",
+		routing_hints: null,
+		cleanup_prompt_sections: null,
+		rewrite_llm_enabled: true,
 		...overrides,
 	};
 }
@@ -125,5 +142,93 @@ describe("prompt profile fallback resolution", () => {
 		expect(fallbacks.baseQuickReplaceProvider).toBe("openai");
 		expect(fallbacks.baseRewriteActiveWindowOcrMode).toBe("manual");
 		expect(fallbacks.baseQuickAskDismissMode).toBe("auto");
+	});
+
+	it("resolves preset runtime values through preset, profile, global, and defaults", () => {
+		const views = resolvePresetRuntimeFallbackViews({
+			profile: profile({
+				stt_provider: "groq",
+				stt_model: "whisper-large-v3",
+				stt_language: "en",
+				stt_timeout_seconds: 18,
+				llm_provider: "anthropic",
+				llm_model: "claude-sonnet",
+			}),
+			preset: preset({
+				stt_provider: null,
+				stt_model: "whisper-large-v3-turbo",
+				stt_timeout_seconds: null,
+				llm_provider: "openai",
+				llm_model: null,
+			}),
+			settings: {
+				stt_provider: "openai",
+				stt_model: "gpt-4o-transcribe",
+				stt_language: "es",
+				stt_timeout_seconds: 10,
+				llm_provider: "gemini",
+				llm_model: "gemini-2.5-pro",
+			},
+			defaultSttTimeout: 30,
+			defaultSttLanguage: "auto",
+		});
+
+		expect(views.sttProvider).toEqual({
+			value: "groq",
+			source: "profile",
+			explicitNull: true,
+		});
+		expect(views.sttModel).toEqual({
+			value: "whisper-large-v3-turbo",
+			source: "preset",
+			explicitNull: false,
+		});
+		expect(views.sttLanguage).toEqual({
+			value: "en",
+			source: "profile",
+			explicitNull: false,
+		});
+		expect(views.sttTimeoutSeconds).toEqual({
+			value: 18,
+			source: "profile",
+			explicitNull: true,
+		});
+		expect(views.llmProvider).toEqual({
+			value: "openai",
+			source: "preset",
+			explicitNull: false,
+		});
+		expect(views.llmModel).toEqual({
+			value: "claude-sonnet",
+			source: "profile",
+			explicitNull: true,
+		});
+	});
+
+	it("falls back safely for malformed preset runtime values", () => {
+		const views = resolvePresetRuntimeFallbackViews({
+			profile: profile({
+				stt_provider: "groq",
+				stt_timeout_seconds: 12,
+			}),
+			preset: preset({
+				stt_provider: 42 as never,
+				stt_timeout_seconds: "soon" as never,
+				llm_provider: false as never,
+			}),
+			settings: {
+				stt_provider: "openai",
+				stt_timeout_seconds: 9,
+				llm_provider: "gemini",
+			},
+			defaultSttTimeout: 30,
+			defaultSttLanguage: "auto",
+		});
+
+		expect(views.sttProvider.value).toBe("groq");
+		expect(views.sttProvider.source).toBe("profile");
+		expect(views.sttTimeoutSeconds.value).toBe(12);
+		expect(views.llmProvider.value).toBe("gemini");
+		expect(views.llmProvider.source).toBe("global");
 	});
 });

@@ -1,5 +1,6 @@
 pub(crate) mod context_collection;
 pub(crate) mod normal_dictation_output;
+pub(crate) mod ocr_usage;
 pub(crate) mod quick_action_execution;
 pub(crate) mod quick_action_lifecycle;
 pub(crate) mod quick_ask;

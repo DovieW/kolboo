@@ -1,12 +1,17 @@
 use crate::llm::{
     AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider, FireworksLlmProvider,
     GeminiLlmProvider, GroqLlmProvider, LlmConfig, LlmProvider, OllamaLlmProvider,
-    OpenAiLlmProvider,
+    OpenAiLlmProvider, PromptSections,
 };
 use crate::request_log::RequestLogStore;
 use crate::settings::ProxySettings;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+
+use super::{
+    managed_gateway_ready, resolve_llm_provider_for_runtime, PipelineConfig, PipelineError,
+};
 
 fn managed_llm_api_base_url(provider: &str, gateway_url: &str) -> Option<String> {
     let gateway = gateway_url.trim().trim_end_matches('/');
@@ -24,7 +29,8 @@ fn managed_llm_api_base_url(provider: &str, gateway_url: &str) -> Option<String>
     }
 }
 
-pub(super) struct LlmProviderParams {
+#[derive(Clone)]
+pub(crate) struct LlmProviderParams {
     pub model: Option<String>,
     pub timeout: Duration,
     pub ollama_url: Option<String>,
@@ -32,6 +38,175 @@ pub(super) struct LlmProviderParams {
     pub gemini_thinking_budget: Option<i64>,
     pub gemini_thinking_level: Option<String>,
     pub anthropic_thinking_budget: Option<i64>,
+}
+
+pub(super) struct ResolvedCachedLlmProviderConfig {
+    pub provider_id: String,
+    pub cache_key: String,
+    pub managed_transport_active: bool,
+    pub config: LlmConfig,
+}
+
+pub(super) fn llm_provider_cache_key(provider_id: &str, params: &LlmProviderParams) -> String {
+    let model_key = params
+        .model
+        .clone()
+        .unwrap_or_else(|| "<default>".to_string());
+    let url_key = params
+        .ollama_url
+        .clone()
+        .unwrap_or_else(|| "<default-url>".to_string());
+    let openai_effort_key = params
+        .openai_reasoning_effort
+        .clone()
+        .unwrap_or_else(|| "<default-effort>".to_string());
+    let gemini_budget_key = params
+        .gemini_thinking_budget
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| "<default-budget>".to_string());
+    let gemini_level_key = params
+        .gemini_thinking_level
+        .clone()
+        .unwrap_or_else(|| "<default-level>".to_string());
+    let anthropic_budget_key = params
+        .anthropic_thinking_budget
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| "<default-budget>".to_string());
+
+    format!(
+        "{}::{}::{}::{}::{}::{}::{}::{}",
+        provider_id,
+        model_key,
+        params.timeout.as_secs_f64(),
+        url_key,
+        openai_effort_key,
+        gemini_budget_key,
+        gemini_level_key,
+        anthropic_budget_key
+    )
+}
+
+pub(super) fn resolve_cached_llm_provider_config(
+    pipeline_config: &PipelineConfig,
+    provider_id: &str,
+    params: LlmProviderParams,
+) -> Result<ResolvedCachedLlmProviderConfig, PipelineError> {
+    let provider_id = resolve_llm_provider_for_runtime(pipeline_config, provider_id);
+    let managed_ready =
+        pipeline_config.managed_inference_enabled && managed_gateway_ready(pipeline_config);
+    // Ollama is local and never uses managed transport.
+    let managed_transport_active = managed_ready && provider_id != "ollama";
+
+    let api_key = if provider_id == "ollama" {
+        String::new()
+    } else if managed_transport_active {
+        pipeline_config
+            .managed_inference_access_token
+            .clone()
+            .unwrap_or_default()
+    } else {
+        pipeline_config
+            .llm_api_keys
+            .get(&provider_id)
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    if provider_id != "ollama" && api_key.is_empty() {
+        return Err(PipelineError::Config(format!(
+            "LLM provider '{}' requires an API key",
+            provider_id
+        )));
+    }
+
+    // Preserve global runtime config (including provider-specific knobs) but override the
+    // effective provider/model/timeout for this transcription.
+    let mut config = pipeline_config.llm_config.clone();
+    config.enabled = true;
+    config.provider = provider_id.clone();
+    config.api_key = api_key;
+    config.model = params.model.clone();
+    config.ollama_url = params.ollama_url.clone();
+    config.timeout = params.timeout;
+    config.managed_gateway_url = if managed_transport_active {
+        pipeline_config.managed_inference_gateway_url.clone()
+    } else {
+        None
+    };
+    config.openai_reasoning_effort = params.openai_reasoning_effort.clone();
+    config.gemini_thinking_budget = params.gemini_thinking_budget;
+    config.gemini_thinking_level = params.gemini_thinking_level.clone();
+    config.anthropic_thinking_budget = params.anthropic_thinking_budget;
+
+    Ok(ResolvedCachedLlmProviderConfig {
+        cache_key: llm_provider_cache_key(&provider_id, &params),
+        provider_id,
+        managed_transport_active,
+        config,
+    })
+}
+
+pub(crate) fn resolve_one_off_llm_config(
+    base_config: &LlmConfig,
+    llm_api_keys: &HashMap<String, String>,
+    provider_id: &str,
+    params: LlmProviderParams,
+) -> Result<LlmConfig, PipelineError> {
+    let provider_id = provider_id.trim().to_string();
+    let api_key = if provider_id == "ollama" {
+        String::new()
+    } else {
+        llm_api_keys.get(&provider_id).cloned().unwrap_or_default()
+    };
+
+    if provider_id != "ollama" && api_key.trim().is_empty() {
+        return Err(PipelineError::Config(format!(
+            "No API key configured for provider: {}",
+            provider_id
+        )));
+    }
+
+    let mut config = base_config.clone();
+    config.enabled = true;
+    config.provider = provider_id;
+    config.api_key = api_key;
+    config.model = params.model;
+    config.ollama_url = params.ollama_url;
+    config.timeout = params.timeout;
+    config.openai_reasoning_effort = params.openai_reasoning_effort;
+    config.gemini_thinking_budget = params.gemini_thinking_budget;
+    config.gemini_thinking_level = params.gemini_thinking_level;
+    config.anthropic_thinking_budget = params.anthropic_thinking_budget;
+    // One-off callers provide prompts explicitly and should not drag along persisted profile
+    // matching state into ad-hoc completions.
+    config.prompts = PromptSections::default();
+    config.program_prompt_profiles.clear();
+
+    Ok(config)
+}
+
+pub(crate) fn create_one_off_llm_provider_unstructured(
+    base_config: &LlmConfig,
+    llm_api_keys: &HashMap<String, String>,
+    provider_id: &str,
+    params: LlmProviderParams,
+) -> Result<Arc<dyn LlmProvider>, PipelineError> {
+    let config = resolve_one_off_llm_config(base_config, llm_api_keys, provider_id, params)?;
+    Ok(create_llm_provider_unstructured(&config))
+}
+
+pub(crate) fn create_one_off_llm_provider_without_timeout(
+    base_config: &LlmConfig,
+    llm_api_keys: &HashMap<String, String>,
+    provider_id: &str,
+    params: LlmProviderParams,
+    request_log_store: Option<RequestLogStore>,
+) -> Result<Arc<dyn LlmProvider>, PipelineError> {
+    let config = resolve_one_off_llm_config(base_config, llm_api_keys, provider_id, params)?;
+    Ok(create_llm_provider_without_timeout(
+        &config,
+        request_log_store,
+    ))
 }
 
 /// Create an LLM provider for one-off ad-hoc completions where callers expect
@@ -402,4 +577,101 @@ pub(super) fn create_llm_provider(
     };
 
     Ok(provider)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::PromptSections;
+
+    #[test]
+    fn llm_provider_cache_key_tracks_provider_identity_knobs() {
+        let params_a = LlmProviderParams {
+            model: Some("gpt-5".to_string()),
+            timeout: Duration::from_secs(30),
+            ollama_url: None,
+            openai_reasoning_effort: Some("low".to_string()),
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+        };
+        let params_b = LlmProviderParams {
+            openai_reasoning_effort: Some("high".to_string()),
+            ..params_a.clone()
+        };
+
+        assert_ne!(
+            llm_provider_cache_key("openai", &params_a),
+            llm_provider_cache_key("openai", &params_b)
+        );
+    }
+
+    #[test]
+    fn resolve_cached_runtime_config_uses_managed_token_and_gateway() {
+        let mut config = PipelineConfig::default();
+        config.managed_inference_enabled = true;
+        config.managed_inference_gateway_url = Some("https://managed.example.test".to_string());
+        config.managed_inference_access_token = Some("managed-token".to_string());
+
+        let resolved = resolve_cached_llm_provider_config(
+            &config,
+            "openai",
+            LlmProviderParams {
+                model: Some("gpt-5".to_string()),
+                timeout: Duration::from_secs(45),
+                ollama_url: None,
+                openai_reasoning_effort: Some("medium".to_string()),
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+        )
+        .expect("managed runtime config should resolve");
+
+        assert_eq!(resolved.provider_id, "openai");
+        assert!(resolved.managed_transport_active);
+        assert_eq!(resolved.config.api_key, "managed-token");
+        assert_eq!(
+            resolved.config.managed_gateway_url.as_deref(),
+            Some("https://managed.example.test")
+        );
+    }
+
+    #[test]
+    fn resolve_one_off_config_uses_provider_key_and_resets_prompt_state() {
+        let mut base = LlmConfig::default();
+        base.managed_gateway_url = Some("https://gateway.example.test".to_string());
+        base.prompts = PromptSections {
+            system_custom: Some("Persisted prompt".to_string()),
+        };
+
+        let mut llm_api_keys = HashMap::new();
+        llm_api_keys.insert("groq".to_string(), "groq-key".to_string());
+
+        let resolved = resolve_one_off_llm_config(
+            &base,
+            &llm_api_keys,
+            "groq",
+            LlmProviderParams {
+                model: Some("llama-3.3-70b-versatile".to_string()),
+                timeout: Duration::from_secs(30),
+                ollama_url: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+        )
+        .expect("one-off config should resolve");
+
+        assert_eq!(resolved.provider, "groq");
+        assert_eq!(resolved.api_key, "groq-key");
+        assert_eq!(resolved.model.as_deref(), Some("llama-3.3-70b-versatile"));
+        assert_eq!(
+            resolved.managed_gateway_url.as_deref(),
+            Some("https://gateway.example.test")
+        );
+        assert!(resolved.prompts.system_custom.is_none());
+        assert!(resolved.program_prompt_profiles.is_empty());
+    }
 }

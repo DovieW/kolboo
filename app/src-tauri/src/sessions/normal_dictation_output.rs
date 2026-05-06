@@ -18,8 +18,7 @@ use crate::stats;
 /// Inputs needed to decide and perform final normal dictation output.
 pub(crate) struct NormalDictationOutputRequest<'a> {
     pub(crate) output_value: &'a str,
-    pub(crate) output_mode: commands::text::OutputMode,
-    pub(crate) output_hit_enter: bool,
+    pub(crate) output_intent: crate::core::output_settings::ResolvedOutputIntent,
     pub(crate) live_output_completed: bool,
     pub(crate) quick_replace_failure: Option<&'a str>,
     pub(crate) request_id: Option<&'a str>,
@@ -91,19 +90,8 @@ pub(crate) async fn execute_normal_dictation_output(
             }
         }
         NormalDictationOutputDecision::Output => {
-            let output_clipboard_privacy_mode: bool =
-                crate::get_setting_from_store(app, "output_clipboard_privacy_mode", false);
-            let output_smart_paste_protection: bool =
-                crate::get_setting_from_store(app, "output_smart_paste_protection", false);
-
-            let output_error = output_text_for_platform(
-                app,
-                request.output_value,
-                request.output_mode,
-                request.output_hit_enter,
-                output_clipboard_privacy_mode,
-                output_smart_paste_protection,
-            );
+            let output_error =
+                output_text_for_platform(app, request.output_value, request.output_intent);
 
             NormalDictationOutputResult {
                 decision: NormalDictationOutputDecision::Output,
@@ -194,12 +182,9 @@ fn update_history_after_output(app: &AppHandle, request: &NormalDictationFinaliz
 fn output_text_for_platform(
     app: &AppHandle,
     output_value: &str,
-    output_mode: commands::text::OutputMode,
-    output_hit_enter: bool,
-    output_clipboard_privacy_mode: bool,
-    output_smart_paste_protection: bool,
+    output_intent: crate::core::output_settings::ResolvedOutputIntent,
 ) -> Option<String> {
-    if matches!(output_mode, commands::text::OutputMode::Paste) {
+    if matches!(output_intent.mode(), commands::text::OutputMode::Paste) {
         let snapshot = app
             .state::<crate::state::AppState>()
             .windows_text_target_snapshot
@@ -213,7 +198,7 @@ fn output_text_for_platform(
             snapshot,
             true,
             true,
-            output_smart_paste_protection,
+            output_intent.smart_paste_protection(),
         ) {
             log::error!("Failed to output transcript (UIA ladder): {}", e);
             record_output_failure(app, &e);
@@ -223,7 +208,7 @@ fn output_text_for_platform(
         return None;
     }
 
-    let safe_to_insert = if output_smart_paste_protection {
+    let safe_to_insert = if output_intent.smart_paste_protection() {
         // Preserve the existing safety-first behavior: non-paste modes re-check the currently
         // focused target instead of relying on the recording-stop snapshot. LLM latency, overlay
         // focus changes, or user navigation can move focus between stop-recording and final output.
@@ -232,7 +217,7 @@ fn output_text_for_platform(
             .map(|snapshot| {
                 crate::windows_uia::safety::allow_insert_with_protection(
                     &snapshot,
-                    output_smart_paste_protection,
+                    output_intent.smart_paste_protection(),
                 )
             })
             .unwrap_or(true)
@@ -251,9 +236,9 @@ fn output_text_for_platform(
 
     if let Err(e) = commands::text::output_text_with_mode_options(
         output_value,
-        output_mode,
-        output_hit_enter,
-        !output_clipboard_privacy_mode,
+        output_intent.mode(),
+        output_intent.hit_enter(),
+        !output_intent.clipboard_privacy_mode(),
     ) {
         log::error!("Failed to output transcript: {}", e);
         record_output_failure(app, &e);
@@ -267,16 +252,13 @@ fn output_text_for_platform(
 fn output_text_for_platform(
     app: &AppHandle,
     output_value: &str,
-    output_mode: commands::text::OutputMode,
-    output_hit_enter: bool,
-    output_clipboard_privacy_mode: bool,
-    _output_smart_paste_protection: bool,
+    output_intent: crate::core::output_settings::ResolvedOutputIntent,
 ) -> Option<String> {
     if let Err(e) = commands::text::output_text_with_mode_options(
         output_value,
-        output_mode,
-        output_hit_enter,
-        !output_clipboard_privacy_mode,
+        output_intent.mode(),
+        output_intent.hit_enter(),
+        !output_intent.clipboard_privacy_mode(),
     ) {
         log::error!("Failed to output transcript: {}", e);
         record_output_failure(app, &e);

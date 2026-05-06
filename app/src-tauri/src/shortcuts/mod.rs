@@ -127,18 +127,14 @@ pub(crate) fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &st
             return;
         };
 
-        let output_mode_str: String =
-            get_setting_from_store(&app, "output_mode", "paste".to_string());
-        let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
-        let output_hit_enter: bool = get_setting_from_store(&app, "output_hit_enter", false);
-        let output_clipboard_privacy_mode: bool =
-            get_setting_from_store(&app, "output_clipboard_privacy_mode", false);
+        let output_intent =
+            crate::core::output_settings::resolve_output_intent_from_store(&app, None, None);
 
         if let Err(e) = commands::text::output_text_with_mode_options(
             &text,
-            output_mode,
-            output_hit_enter,
-            !output_clipboard_privacy_mode,
+            output_intent.mode(),
+            output_intent.hit_enter(),
+            !output_intent.clipboard_privacy_mode(),
         ) {
             log::error!("{source}: failed to output retry transcript: {}", e);
         }
@@ -764,14 +760,10 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                     log::info!("OutputLast: outputting last transcription");
 
                     // Get output mode from settings
-                    let output_mode_str: String =
-                        get_setting_from_store(app, "output_mode", "paste".to_string());
-                    let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
-
-                    let output_hit_enter: bool =
-                        get_setting_from_store(app, "output_hit_enter", false);
-                    let output_clipboard_privacy_mode: bool =
-                        get_setting_from_store(app, "output_clipboard_privacy_mode", false);
+                    let output_intent =
+                        crate::core::output_settings::resolve_output_intent_from_store(
+                            app, None, None,
+                        );
 
                     let history_storage = app.state::<HistoryStorage>();
 
@@ -779,9 +771,9 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
                         if let Some(entry) = entries.first() {
                             if let Err(e) = commands::text::output_text_with_mode_options(
                                 &entry.text,
-                                output_mode,
-                                output_hit_enter,
-                                !output_clipboard_privacy_mode,
+                                output_intent.mode(),
+                                output_intent.hit_enter(),
+                                !output_intent.clipboard_privacy_mode(),
                             ) {
                                 log::error!("Failed to output last transcription: {}", e);
                             }
@@ -1275,12 +1267,8 @@ pub(crate) fn handle_modifier_key_event(
         // Key released - output based on configured mode
         log::info!("{}: outputting last transcription", paste_last_label);
 
-        let output_mode_str: String =
-            get_setting_from_store(app, "output_mode", "paste".to_string());
-        let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
-        let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
-        let output_clipboard_privacy_mode: bool =
-            get_setting_from_store(app, "output_clipboard_privacy_mode", false);
+        let output_intent =
+            crate::core::output_settings::resolve_output_intent_from_store(app, None, None);
 
         let history_storage = app.state::<HistoryStorage>();
 
@@ -1288,9 +1276,9 @@ pub(crate) fn handle_modifier_key_event(
             if let Some(entry) = entries.first() {
                 if let Err(e) = commands::text::output_text_with_mode_options(
                     &entry.text,
-                    output_mode,
-                    output_hit_enter,
-                    !output_clipboard_privacy_mode,
+                    output_intent.mode(),
+                    output_intent.hit_enter(),
+                    !output_intent.clipboard_privacy_mode(),
                 ) {
                     log::error!("Failed to output last transcription: {}", e);
                 }

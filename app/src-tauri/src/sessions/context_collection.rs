@@ -10,7 +10,6 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use crate::clipboard_context;
-use crate::pipeline::{OcrConfig, SharedPipeline};
 use crate::sessions::quick_action_lifecycle::{
     is_selection_probe_sentinel, QuickActionContext, QuickActionProbePlan, QuickAskEffectiveConfig,
 };
@@ -67,25 +66,6 @@ pub(crate) async fn read_clipboard_context_if_enabled(
     } else {
         None
     }
-}
-
-/// Fetch OCR text for a Quick Action if its effective mode allows OCR.
-///
-/// Keep the timeout at this boundary so execution code does not need to know whether OCR was still
-/// pending, already cached, or unavailable for this request.
-pub(crate) async fn collect_quick_action_ocr_text(
-    pipeline: &SharedPipeline,
-    ocr_mode: &str,
-    ocr_config: &OcrConfig,
-) -> Option<String> {
-    if ocr_mode == "off" {
-        return None;
-    }
-
-    pipeline
-        .get_ocr_result_with_timeout(Duration::from_millis(ocr_config.request_timeout_ms))
-        .await
-        .map(|result| result.text)
 }
 
 async fn await_selection_context(

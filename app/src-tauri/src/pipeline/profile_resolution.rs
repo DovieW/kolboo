@@ -157,6 +157,106 @@ pub(crate) fn router_enabled(profile: &ProgramPromptProfile) -> bool {
         .unwrap_or(false)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DefaultProfileSelectionPolicy {
+    UseDefaultAsActiveFallback,
+    KeepDefaultAsFallbackOnly,
+}
+
+/// Coherent request-time profile context for pipeline/command callers.
+///
+/// Matching stays outside this Module (`profile_matcher.rs` still owns foreground-app matching),
+/// but once a caller has a candidate foreground profile id and/or a session override, this
+/// interface keeps profile/default/preset/OCR/request-log decisions together.
+#[derive(Debug, Clone)]
+pub(crate) struct RequestProfileContext {
+    active_profile: Option<ProgramPromptProfile>,
+    default_profile: Option<ProgramPromptProfile>,
+    effective_preset: Option<ProgramPreset>,
+    ocr_modes: ResolvedActiveWindowOcrModes,
+    request_log_profile_id: Option<String>,
+    request_log_profile_name: Option<String>,
+}
+
+impl RequestProfileContext {
+    pub(crate) fn active_profile(&self) -> Option<&ProgramPromptProfile> {
+        self.active_profile.as_ref()
+    }
+
+    pub(crate) fn default_profile(&self) -> Option<&ProgramPromptProfile> {
+        self.default_profile.as_ref()
+    }
+
+    pub(crate) fn effective_preset(&self) -> Option<&ProgramPreset> {
+        self.effective_preset.as_ref()
+    }
+
+    pub(crate) fn ocr_modes(&self) -> &ResolvedActiveWindowOcrModes {
+        &self.ocr_modes
+    }
+
+    pub(crate) fn request_log_profile_id(&self) -> Option<&str> {
+        self.request_log_profile_id.as_deref()
+    }
+
+    pub(crate) fn request_log_profile_name(&self) -> Option<&str> {
+        self.request_log_profile_name.as_deref()
+    }
+}
+
+pub(crate) fn resolve_request_profile_context(
+    llm_config: &LlmConfig,
+    session_profile_id: Option<&str>,
+    foreground_profile: Option<ProgramPromptProfile>,
+    global_ocr_fallbacks: ActiveWindowOcrModeFallbacks<'_>,
+    default_policy: DefaultProfileSelectionPolicy,
+) -> RequestProfileContext {
+    let default_profile = select_default_profile(llm_config);
+
+    let session_profile = session_profile_id.and_then(|id| {
+        llm_config
+            .program_prompt_profiles
+            .iter()
+            .find(|p| p.id == id)
+            .cloned()
+    });
+
+    let active_profile = session_profile
+        .or(foreground_profile)
+        .or_else(|| match default_policy {
+            DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback => default_profile.clone(),
+            DefaultProfileSelectionPolicy::KeepDefaultAsFallbackOnly => None,
+        });
+
+    let effective_preset = active_profile
+        .as_ref()
+        .and_then(select_effective_preset)
+        .cloned();
+    let ocr_modes = resolve_active_window_ocr_modes(
+        active_profile.as_ref(),
+        default_profile.as_ref(),
+        global_ocr_fallbacks,
+    );
+
+    let (request_log_profile_id, request_log_profile_name) =
+        if let Some(profile) = active_profile.as_ref() {
+            (Some(profile.id.clone()), Some(profile.name.clone()))
+        } else if session_profile_id == Some("default") {
+            (Some("default".to_string()), Some("Default".to_string()))
+        } else {
+            (None, None)
+        };
+
+    RequestProfileContext {
+        active_profile,
+        default_profile,
+        effective_preset,
+        ocr_modes,
+        request_log_profile_id,
+        request_log_profile_name,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,5 +568,106 @@ mod tests {
 
         p.router.as_mut().expect("router").strategy = IntentRouterStrategy::Embeddings;
         assert!(router_enabled(&p));
+    }
+
+    #[test]
+    fn request_profile_context_prefers_session_override_and_returns_request_identity() {
+        let mut app = profile("app", vec![preset("active")]);
+        app.active_preset_id = Some("active".to_string());
+        app.rewrite_active_window_ocr_mode = Some("manual".to_string());
+
+        let mut default_p = profile("default", vec![preset("fallback")]);
+        default_p.quick_ask_active_window_ocr_mode = Some("auto".to_string());
+
+        let cfg = LlmConfig {
+            program_prompt_profiles: vec![default_p.clone(), app.clone()],
+            ..Default::default()
+        };
+
+        let context = resolve_request_profile_context(
+            &cfg,
+            Some("app"),
+            Some(default_p.clone()),
+            ActiveWindowOcrModeFallbacks {
+                rewrite: "off",
+                quick_ask: "off",
+                quick_replace: "off",
+            },
+            DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
+        );
+
+        assert_eq!(context.active_profile().map(|p| p.id.as_str()), Some("app"));
+        assert_eq!(
+            context.effective_preset().map(|preset| preset.id.as_str()),
+            Some("active")
+        );
+        assert_eq!(context.request_log_profile_id(), Some("app"));
+        assert_eq!(context.request_log_profile_name(), Some("app"));
+        assert_eq!(context.ocr_modes().rewrite(), "manual");
+        assert_eq!(context.ocr_modes().quick_ask(), "auto");
+    }
+
+    #[test]
+    fn request_profile_context_can_keep_default_as_fallback_only() {
+        let mut default_p = profile("default", vec![]);
+        default_p.quick_replace_active_window_ocr_mode = Some("manual".to_string());
+
+        let cfg = LlmConfig {
+            program_prompt_profiles: vec![default_p],
+            ..Default::default()
+        };
+
+        let context = resolve_request_profile_context(
+            &cfg,
+            None,
+            None,
+            ActiveWindowOcrModeFallbacks {
+                rewrite: "off",
+                quick_ask: "off",
+                quick_replace: "off",
+            },
+            DefaultProfileSelectionPolicy::KeepDefaultAsFallbackOnly,
+        );
+
+        assert!(context.active_profile().is_none());
+        assert_eq!(
+            context.default_profile().map(|p| p.id.as_str()),
+            Some("default")
+        );
+        assert_eq!(context.ocr_modes().quick_replace(), "manual");
+        assert_eq!(context.request_log_profile_id(), None);
+    }
+
+    #[test]
+    fn request_profile_context_can_promote_default_to_active_fallback() {
+        let mut default_p = profile("default", vec![preset("fallback")]);
+        default_p.default_preset_id = Some("fallback".to_string());
+        let cfg = LlmConfig {
+            program_prompt_profiles: vec![default_p],
+            ..Default::default()
+        };
+
+        let context = resolve_request_profile_context(
+            &cfg,
+            None,
+            None,
+            ActiveWindowOcrModeFallbacks {
+                rewrite: "auto",
+                quick_ask: "off",
+                quick_replace: "off",
+            },
+            DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
+        );
+
+        assert_eq!(
+            context.active_profile().map(|p| p.id.as_str()),
+            Some("default")
+        );
+        assert_eq!(
+            context.effective_preset().map(|preset| preset.id.as_str()),
+            Some("fallback")
+        );
+        assert_eq!(context.request_log_profile_id(), Some("default"));
+        assert_eq!(context.ocr_modes().rewrite(), "auto");
     }
 }

@@ -210,13 +210,6 @@ pub(crate) fn stop_recording(
     let overlay_mode: String =
         get_setting_from_store(app, "overlay_mode", "recording_only".to_string());
 
-    // Get output mode for how to output text
-    let output_mode_str: String = get_setting_from_store(app, "output_mode", "paste".to_string());
-    let output_mode = commands::text::OutputMode::from_str(&output_mode_str);
-
-    // Optional: after pasting, press Enter.
-    let output_hit_enter: bool = get_setting_from_store(app, "output_hit_enter", false);
-
     // Windows-only: capture a focused target snapshot near recording stop.
     #[cfg(target_os = "windows")]
     {
@@ -238,7 +231,7 @@ pub(crate) fn stop_recording(
     // Apply per-program output overrides (if configured in settings UI).
     // IMPORTANT: We only apply these when we have a real matched program profile id.
     // The explicit "default" marker is for UI/log semantics and should not change runtime behavior.
-    let (output_mode, output_hit_enter) = {
+    let output_intent = {
         let (mut profile_output_mode, mut profile_output_hit_enter) = (None::<String>, None);
         if let Some(pid) = session_profile_id.as_deref() {
             if pid != "default" {
@@ -251,9 +244,8 @@ pub(crate) fn stop_recording(
             }
         }
 
-        crate::core::output_settings::resolve_effective_output_settings(
-            output_mode,
-            output_hit_enter,
+        crate::core::output_settings::resolve_output_intent_from_store(
+            app,
             profile_output_mode.as_deref(),
             profile_output_hit_enter,
         )
@@ -267,17 +259,19 @@ pub(crate) fn stop_recording(
 
         // Capture model info from pipeline config for persistence in history.
         let config = pipeline.config();
-        let profile: Option<crate::llm::ProgramPromptProfile> = session_profile_id
-            .as_deref()
-            .and_then(|id| {
-                config
-                    .llm_config
-                    .program_prompt_profiles
-                    .iter()
-                    .find(|p| p.id == id)
-                    .cloned()
-            })
-            .or_else(|| pipeline::select_profile_for_foreground_app(&config.llm_config));
+        let request_profile_context = pipeline::resolve_request_profile_context(
+            &config.llm_config,
+            session_profile_id.as_deref(),
+            pipeline::select_profile_for_foreground_app(&config.llm_config),
+            pipeline::ActiveWindowOcrModeFallbacks {
+                rewrite: config.ocr_config.rewrite_mode.as_str(),
+                quick_ask: config.ocr_config.quick_ask_mode.as_str(),
+                quick_replace: config.ocr_config.quick_replace_mode.as_str(),
+            },
+            pipeline::DefaultProfileSelectionPolicy::KeepDefaultAsFallbackOnly,
+        );
+        let profile: Option<crate::llm::ProgramPromptProfile> =
+            request_profile_context.active_profile().cloned();
 
         let model_info = RequestModelInfo {
             stt_provider: Some(config.stt_provider.clone()),
@@ -294,23 +288,11 @@ pub(crate) fn stop_recording(
             preset_name: None,
         };
 
-        let default_profile = config
-            .llm_config
-            .program_prompt_profiles
-            .iter()
-            .find(|p| p.id == "default");
+        let default_profile = request_profile_context.default_profile().cloned();
 
         let ocr_config = config.ocr_config.clone();
 
-        let ocr_modes = pipeline::resolve_active_window_ocr_modes(
-            profile.as_ref(),
-            default_profile,
-            pipeline::ActiveWindowOcrModeFallbacks {
-                rewrite: ocr_config.rewrite_mode.as_str(),
-                quick_ask: ocr_config.quick_ask_mode.as_str(),
-                quick_replace: ocr_config.quick_replace_mode.as_str(),
-            },
-        );
+        let ocr_modes = request_profile_context.ocr_modes().clone();
         let rewrite_ocr_mode = ocr_modes.rewrite().to_string();
         let quick_ask_ocr_mode = ocr_modes.quick_ask().to_string();
         let quick_replace_ocr_mode = ocr_modes.quick_replace().to_string();
@@ -369,24 +351,25 @@ pub(crate) fn stop_recording(
                 }
             });
         }
-        // Only start OCR at stop time if it hasn't already started (on_start timing).
-        let ocr_status = pipeline_clone.get_ocr_status();
-        let ocr_already_started = ocr_status == "running" || ocr_status == "done";
-        if !ocr_already_started {
-            pipeline_clone.start_ocr_task_if_auto(&ocr_config, should_auto_ocr);
-        }
+        // Keep stop-time OCR start policy centralized so normal dictation and Quick Actions do
+        // not each drift on what counts as "already started enough" for the current session.
+        sessions::ocr_usage::ensure_stop_time_ocr_started(
+            &pipeline_clone,
+            &ocr_config,
+            should_auto_ocr,
+        );
 
         let quick_ask_profile_cfg =
             sessions::quick_action_lifecycle::QuickAskProfileConfig::from_profiles(
                 profile.as_ref(),
-                default_profile,
+                default_profile.as_ref(),
             );
 
         // Context grabbing method (highlighted selection capture).
         // This is a per-profile setting; when unset, we default to Ctrl+C.
         let context_grab_method = sessions::quick_action_lifecycle::resolve_context_grab_method(
             profile.as_ref(),
-            default_profile,
+            default_profile.as_ref(),
         );
 
         // Backward-compatible fallback to the legacy global key (pre per-profile settings).
@@ -395,7 +378,7 @@ pub(crate) fn stop_recording(
 
         let quick_replace_cfg = sessions::quick_action_lifecycle::QuickReplaceConfig::resolve(
             profile.as_ref(),
-            default_profile,
+            default_profile.as_ref(),
             &config.llm_config,
             is_quick_ask_session,
             quick_replace_enabled_legacy,
@@ -770,8 +753,7 @@ pub(crate) fn stop_recording(
                                     &app_clone,
                                     sessions::normal_dictation_output::NormalDictationOutputRequest {
                                         output_value: output_value.as_str(),
-                                        output_mode,
-                                        output_hit_enter,
+                                        output_intent,
                                         live_output_completed: result.live_output_completed,
                                         quick_replace_failure: quick_replace_failure.as_deref(),
                                         request_id: request_id.as_deref(),

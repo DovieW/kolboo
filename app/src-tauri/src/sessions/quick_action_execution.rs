@@ -184,62 +184,50 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
     );
 
     let pipeline_config = input.pipeline.config();
-    let api_key = if provider == "ollama" {
-        String::new()
-    } else {
-        pipeline_config
-            .llm_api_keys
-            .get(provider.as_str())
-            .cloned()
-            .unwrap_or_default()
-    };
-
-    if provider != "ollama" && api_key.trim().is_empty() {
-        let err = format!("No API key configured for provider: {}", provider);
-        if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
-            log_store.with_current(|log| {
-                log.kind = QuickActionKind::QuickAsk.request_kind();
-                log.error(format!("Quick Ask failed: {}", err));
-                log.complete_error(err.clone());
-            });
-        }
-
-        complete_current_request_with_cost(
-            input.app,
-            input.pipeline,
-            input.request_id,
-            stats::EventStatus::Error,
-        );
-
-        quick_ask::emit_to_quick_ask(
-            input.app,
-            quick_ask::EVENT_QUICK_ASK_ANSWER,
-            QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
-                ok: false,
-                error: err,
-            }),
-        );
-        return;
-    }
-
-    let provider_config = llm::LlmConfig {
-        enabled: true,
-        provider: provider.clone(),
-        api_key,
-        model: model.clone(),
-        ollama_url: pipeline_config.llm_config.ollama_url.clone(),
-        managed_gateway_url: pipeline_config.llm_config.managed_gateway_url.clone(),
-        openai_reasoning_effort: quick_ask_config.openai_reasoning_effort.clone(),
-        gemini_thinking_budget: quick_ask_config.gemini_thinking_budget,
-        gemini_thinking_level: quick_ask_config.gemini_thinking_level.clone(),
-        anthropic_thinking_budget: quick_ask_config.anthropic_thinking_budget,
-        prompts: llm::PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: pipeline_config.llm_config.timeout,
-    };
-
     let provider_impl =
-        crate::pipeline::llm_provider::create_llm_provider_unstructured(&provider_config);
+        match crate::pipeline::llm_provider::create_one_off_llm_provider_unstructured(
+            &pipeline_config.llm_config,
+            &pipeline_config.llm_api_keys,
+            provider.as_str(),
+            crate::pipeline::llm_provider::LlmProviderParams {
+                model: model.clone(),
+                timeout: pipeline_config.llm_config.timeout,
+                ollama_url: pipeline_config.llm_config.ollama_url.clone(),
+                openai_reasoning_effort: quick_ask_config.openai_reasoning_effort.clone(),
+                gemini_thinking_budget: quick_ask_config.gemini_thinking_budget,
+                gemini_thinking_level: quick_ask_config.gemini_thinking_level.clone(),
+                anthropic_thinking_budget: quick_ask_config.anthropic_thinking_budget,
+            },
+        ) {
+            Ok(provider) => provider,
+            Err(e) => {
+                let err = e.to_string();
+                if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
+                    log_store.with_current(|log| {
+                        log.kind = QuickActionKind::QuickAsk.request_kind();
+                        log.error(format!("Quick Ask failed: {}", err));
+                        log.complete_error(err.clone());
+                    });
+                }
+
+                complete_current_request_with_cost(
+                    input.app,
+                    input.pipeline,
+                    input.request_id,
+                    stats::EventStatus::Error,
+                );
+
+                quick_ask::emit_to_quick_ask(
+                    input.app,
+                    quick_ask::EVENT_QUICK_ASK_ANSWER,
+                    QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+                        ok: false,
+                        error: err,
+                    }),
+                );
+                return;
+            }
+        };
 
     let request_context = context_collection::collect_quick_ask_context(
         input.app,
@@ -265,20 +253,15 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
         .or_else(|| surrounding_context_capped.clone());
     let quick_ask_clipboard_context_for_log = clipboard_context_capped.clone();
 
-    let ocr_text = context_collection::collect_quick_action_ocr_text(
+    let ocr_context = crate::sessions::ocr_usage::collect_ocr_context(
         input.pipeline,
         input.ocr_mode,
         input.ocr_config,
     )
     .await;
+    let ocr_text = ocr_context.text().map(str::to_string);
 
-    record_quick_ask_ocr_start_context(
-        input.app,
-        input.pipeline,
-        input.ocr_mode,
-        input.ocr_config,
-        ocr_text.as_deref(),
-    );
+    record_quick_ask_ocr_start_context(input.app, &ocr_context);
 
     let question_with_context = prompt_builders::build_quick_ask_user_message_with_context(
         question.as_str(),
@@ -451,12 +434,13 @@ pub(crate) async fn try_quick_replace(
         let surrounding_text = quick_replace_context.surrounding_text_for_prompt();
 
         if let Some(selected) = selected_text {
-            let ocr_text = context_collection::collect_quick_action_ocr_text(
+            let ocr_context = crate::sessions::ocr_usage::collect_ocr_context(
                 input.pipeline,
                 input.ocr_mode,
                 input.ocr_config,
             )
             .await;
+            let ocr_text = ocr_context.text().map(str::to_string);
 
             record_quick_replace_selection_start(input.app, selected, output_value.as_str());
 
@@ -474,115 +458,112 @@ pub(crate) async fn try_quick_replace(
                 .or_else(|| {
                     llm::default_llm_model_for_provider(provider.as_str()).map(|m| m.to_string())
                 });
-            let api_key = if provider == "ollama" {
-                String::new()
-            } else {
-                pipeline_config
-                    .llm_api_keys
-                    .get(provider.as_str())
-                    .cloned()
-                    .unwrap_or_default()
-            };
 
-            if provider != "ollama" && api_key.trim().is_empty() {
-                let err = format!(
-                    "Quick Replace failed: no API key configured for provider: {}",
-                    provider
-                );
-                record_quick_replace_missing_key(input.app, &provider, input.config, &err);
-                failure = Some(err);
-            } else {
-                let system_prompt = input.config.system_prompt.clone();
-                let instructions_text = output_value.trim().to_string();
-                let clipboard_text = context_collection::read_clipboard_context_if_enabled(
-                    input.config.include_clipboard_context,
-                )
-                .await;
+            let system_prompt = input.config.system_prompt.clone();
+            let instructions_text = output_value.trim().to_string();
+            let clipboard_text = context_collection::read_clipboard_context_if_enabled(
+                input.config.include_clipboard_context,
+            )
+            .await;
 
-                let user_prompt = prompt_builders::build_quick_replace_user_message(
-                    instructions_text.as_str(),
-                    selected,
-                    surrounding_text,
-                    clipboard_text.as_deref(),
-                    ocr_text.as_deref(),
-                );
+            let user_prompt = prompt_builders::build_quick_replace_user_message(
+                instructions_text.as_str(),
+                selected,
+                surrounding_text,
+                clipboard_text.as_deref(),
+                ocr_text.as_deref(),
+            );
 
-                record_quick_replace_context(
-                    input.app,
-                    input.pipeline,
-                    clipboard_text.clone(),
-                    ocr_text.clone(),
-                );
+            record_quick_replace_context(input.app, clipboard_text.clone(), &ocr_context);
 
-                let provider_config = llm::LlmConfig {
-                    enabled: true,
-                    provider: provider.clone(),
-                    api_key,
-                    model,
-                    ollama_url: pipeline_config.llm_config.ollama_url.clone(),
-                    managed_gateway_url: pipeline_config.llm_config.managed_gateway_url.clone(),
-                    openai_reasoning_effort: pipeline_config
-                        .llm_config
-                        .openai_reasoning_effort
-                        .clone(),
-                    gemini_thinking_budget: pipeline_config.llm_config.gemini_thinking_budget,
-                    gemini_thinking_level: pipeline_config.llm_config.gemini_thinking_level.clone(),
-                    anthropic_thinking_budget: pipeline_config.llm_config.anthropic_thinking_budget,
-                    prompts: llm::PromptSections::default(),
-                    program_prompt_profiles: Vec::new(),
-                    timeout: pipeline_config.llm_config.timeout,
-                };
-
-                let provider_impl = crate::pipeline::llm_provider::create_llm_provider_unstructured(
-                    &provider_config,
-                );
-                let t0 = Instant::now();
-
-                match provider_impl.complete(&system_prompt, &user_prompt).await {
-                    Ok(rewritten) => {
-                        let rewritten = rewritten.trim().to_string();
-                        if rewritten.is_empty() {
-                            let err =
-                                "Quick Replace failed: model returned empty output".to_string();
-                            record_quick_replace_empty_output(input.app, &provider_impl, &err);
-                            failure = Some(err);
-                        } else {
-                            output_value = rewritten;
-                            record_quick_replace_success(
-                                input.app,
-                                &provider,
-                                &provider_impl,
-                                &system_prompt,
-                                &instructions_text,
-                                selected,
-                                &output_value,
-                                t0.elapsed().as_millis() as u64,
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        let err = e.to_string();
-                        record_quick_replace_provider_error(
-                            input.app,
-                            input.config,
-                            &provider,
-                            &system_prompt,
-                            selected,
-                            &err,
+            let provider_impl =
+                match crate::pipeline::llm_provider::create_one_off_llm_provider_unstructured(
+                    &pipeline_config.llm_config,
+                    &pipeline_config.llm_api_keys,
+                    provider.as_str(),
+                    crate::pipeline::llm_provider::LlmProviderParams {
+                        model: model.clone(),
+                        timeout: pipeline_config.llm_config.timeout,
+                        ollama_url: pipeline_config.llm_config.ollama_url.clone(),
+                        openai_reasoning_effort: pipeline_config
+                            .llm_config
+                            .openai_reasoning_effort
+                            .clone(),
+                        gemini_thinking_budget: pipeline_config.llm_config.gemini_thinking_budget,
+                        gemini_thinking_level: pipeline_config
+                            .llm_config
+                            .gemini_thinking_level
+                            .clone(),
+                        anthropic_thinking_budget: pipeline_config
+                            .llm_config
+                            .anthropic_thinking_budget,
+                    },
+                ) {
+                    Ok(provider_impl) => provider_impl,
+                    Err(_) => {
+                        let err = format!(
+                            "Quick Replace failed: no API key configured for provider: {}",
+                            provider
                         );
+                        record_quick_replace_missing_key(input.app, &provider, input.config, &err);
                         failure = Some(err);
+                        finalize_quick_replace_attempt(
+                            input.app,
+                            input.pipeline,
+                            input.request_id,
+                            failure.as_ref(),
+                        );
+                        return QuickReplaceExecutionResult {
+                            output_value,
+                            failure,
+                        };
                     }
+                };
+            let t0 = Instant::now();
+
+            match provider_impl.complete(&system_prompt, &user_prompt).await {
+                Ok(rewritten) => {
+                    let rewritten = rewritten.trim().to_string();
+                    if rewritten.is_empty() {
+                        let err = "Quick Replace failed: model returned empty output".to_string();
+                        record_quick_replace_empty_output(input.app, &provider_impl, &err);
+                        failure = Some(err);
+                    } else {
+                        output_value = rewritten;
+                        record_quick_replace_success(
+                            input.app,
+                            &provider,
+                            &provider_impl,
+                            &system_prompt,
+                            &instructions_text,
+                            selected,
+                            &output_value,
+                            t0.elapsed().as_millis() as u64,
+                        );
+                    }
+                }
+                Err(e) => {
+                    let err = e.to_string();
+                    record_quick_replace_provider_error(
+                        input.app,
+                        input.config,
+                        &provider,
+                        &system_prompt,
+                        selected,
+                        &err,
+                    );
+                    failure = Some(err);
                 }
             }
         }
-
-        finalize_quick_replace_attempt(
-            input.app,
-            input.pipeline,
-            input.request_id,
-            failure.as_ref(),
-        );
     }
+
+    finalize_quick_replace_attempt(
+        input.app,
+        input.pipeline,
+        input.request_id,
+        failure.as_ref(),
+    );
 
     QuickReplaceExecutionResult {
         output_value,
@@ -592,38 +573,33 @@ pub(crate) async fn try_quick_replace(
 
 fn record_quick_ask_ocr_start_context(
     app: &AppHandle,
-    pipeline: &SharedPipeline,
-    ocr_mode: &str,
-    ocr_config: &OcrConfig,
-    ocr_text: Option<&str>,
+    ocr_context: &crate::sessions::ocr_usage::CollectedOcrContext,
 ) {
     let Some(log_store) = app.try_state::<RequestLogStore>() else {
         return;
     };
 
-    let ocr_status = pipeline.get_ocr_status();
-    let ocr_chars = ocr_text.map(str::len);
-    let ocr_failed_reason = pipeline.get_ocr_failed_reason();
+    let ocr_chars = ocr_context.text_len();
 
     log_store.with_current(|log| {
         if let Some(n) = ocr_chars {
             log.info(format!("Quick Ask: OCR context attached ({} chars)", n));
-        } else if ocr_mode != "off" {
-            match ocr_status.as_str() {
+        } else if ocr_context.requested() {
+            match ocr_context.status() {
                 "running" => log.warn(format!(
                     "Quick Ask: proceeding without OCR (OCR still running; timeout={}ms)",
-                    ocr_config.request_timeout_ms
+                    ocr_context.timeout_ms()
                 )),
                 "failed" => log.warn(format!(
                     "Quick Ask: proceeding without OCR (OCR failed: {})",
-                    ocr_failed_reason.unwrap_or_else(|| "unknown".to_string())
+                    ocr_context.failed_reason().unwrap_or("unknown")
                 )),
                 "cancelled" => {
                     log.info("Quick Ask: proceeding without OCR (OCR cancelled)".to_string())
                 }
                 _ => log.info(format!(
                     "Quick Ask: proceeding without OCR (status={})",
-                    ocr_status
+                    ocr_context.status()
                 )),
             }
         }
@@ -631,7 +607,7 @@ fn record_quick_ask_ocr_start_context(
         if let Some(serde_json::Value::Object(map)) = log.quick_ask_request_json.as_mut() {
             map.insert(
                 "ocr_status".to_string(),
-                serde_json::Value::String(ocr_status),
+                serde_json::Value::String(ocr_context.status().to_string()),
             );
             map.insert(
                 "ocr_context_present".to_string(),
@@ -823,22 +799,20 @@ fn record_quick_replace_missing_key(
 
 fn record_quick_replace_context(
     app: &AppHandle,
-    pipeline: &SharedPipeline,
     clipboard_text: Option<String>,
-    ocr_text: Option<String>,
+    ocr_context: &crate::sessions::ocr_usage::CollectedOcrContext,
 ) {
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        let ocr_chars = ocr_text.as_deref().map(str::len);
-        let ocr_failed_reason = pipeline.get_ocr_failed_reason();
+        let ocr_chars = ocr_context.text_len();
         log_store.with_current(|log| {
             if let Some(cb_text) = clipboard_text {
                 log.quick_replace_clipboard_context = Some(cb_text);
             }
             log.ocr_context_present = ocr_chars.is_some();
             log.ocr_context_chars = ocr_chars.map(|n| n as u64);
-            log.ocr_context_text = ocr_text;
+            log.ocr_context_text = ocr_context.text().map(str::to_string);
             if ocr_chars.is_none() {
-                log.ocr_failed_reason = ocr_failed_reason;
+                log.ocr_failed_reason = ocr_context.failed_reason().map(str::to_string);
             }
         });
     }

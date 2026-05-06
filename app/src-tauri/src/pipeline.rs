@@ -69,9 +69,8 @@ pub use types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionR
 
 use profile_matcher::select_profile_for_program_path;
 pub(crate) use profile_resolution::{
-    resolve_active_window_ocr_modes, ActiveWindowOcrModeFallbacks,
+    resolve_request_profile_context, ActiveWindowOcrModeFallbacks, DefaultProfileSelectionPolicy,
 };
-use profile_resolution::{select_default_profile, select_effective_preset};
 
 pub(crate) fn select_profile_for_foreground_app(
     llm_config: &LlmConfig,
@@ -88,7 +87,10 @@ pub(crate) fn select_profile_for_foreground_app(
     select_profile_for_program_path(llm_config, &foreground)
 }
 
-use llm_provider::{create_llm_provider, LlmProviderParams};
+use llm_provider::{
+    create_llm_provider, llm_provider_cache_key, resolve_cached_llm_provider_config,
+    LlmProviderParams,
+};
 use local_provider_lifecycle as local_provider;
 use ocr_session_state::OcrSessionState;
 use stt_flow::run_stt_transcription;
@@ -423,106 +425,27 @@ impl PipelineInner {
         provider_id: &str,
         params: LlmProviderParams,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
-        let provider_id = resolve_llm_provider_for_runtime(&self.config, provider_id);
-        let model_key = params
-            .model
-            .clone()
-            .unwrap_or_else(|| "<default>".to_string());
-        let url_key = params
-            .ollama_url
-            .clone()
-            .unwrap_or_else(|| "<default-url>".to_string());
-        let openai_effort_key = params
-            .openai_reasoning_effort
-            .clone()
-            .unwrap_or_else(|| "<default-effort>".to_string());
-        let gemini_budget_key = params
-            .gemini_thinking_budget
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "<default-budget>".to_string());
-        let gemini_level_key = params
-            .gemini_thinking_level
-            .clone()
-            .unwrap_or_else(|| "<default-level>".to_string());
-        let anthropic_budget_key = params
-            .anthropic_thinking_budget
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "<default-budget>".to_string());
-        let managed_ready =
-            self.config.managed_inference_enabled && managed_gateway_ready(&self.config);
-        // Ollama is local and never uses managed transport.
-        let managed_transport_active = managed_ready && provider_id != "ollama";
+        let resolved = resolve_cached_llm_provider_config(&self.config, provider_id, params)?;
 
-        if managed_transport_active {
+        if resolved.managed_transport_active {
             if let Some(store) = &self.config.request_log_store {
                 let _ = store.with_current(|log| {
                     log.managed_inference = true;
                 });
             }
         }
-        let cache_key = format!(
-            "{}::{}::{}::{}::{}::{}::{}::{}",
-            provider_id,
-            model_key,
-            params.timeout.as_secs_f64(),
-            url_key,
-            openai_effort_key,
-            gemini_budget_key,
-            gemini_level_key,
-            anthropic_budget_key
-        );
 
-        if let Some(p) = self.llm_provider_cache.get(&cache_key) {
+        if let Some(p) = self.llm_provider_cache.get(&resolved.cache_key) {
             return Ok(p.clone());
         }
 
-        let api_key = if provider_id == "ollama" {
-            String::new()
-        } else if managed_transport_active {
-            self.config
-                .managed_inference_access_token
-                .clone()
-                .unwrap_or_default()
-        } else {
-            self.config
-                .llm_api_keys
-                .get(&provider_id)
-                .cloned()
-                .unwrap_or_default()
-        };
-
-        if provider_id != "ollama" && api_key.is_empty() {
-            return Err(PipelineError::Config(format!(
-                "LLM provider '{}' requires an API key",
-                provider_id
-            )));
-        }
-
-        // Preserve global LLM config (including provider-specific knobs) but override the
-        // effective provider/model/timeout for this transcription.
-        let mut cfg = self.config.llm_config.clone();
-        cfg.enabled = true;
-        cfg.provider = provider_id.to_string();
-        cfg.api_key = api_key;
-        cfg.model = params.model;
-        cfg.ollama_url = params.ollama_url;
-        cfg.timeout = params.timeout;
-        cfg.managed_gateway_url = if managed_transport_active {
-            self.config.managed_inference_gateway_url.clone()
-        } else {
-            None
-        };
-        cfg.openai_reasoning_effort = params.openai_reasoning_effort;
-        cfg.gemini_thinking_budget = params.gemini_thinking_budget;
-        cfg.gemini_thinking_level = params.gemini_thinking_level;
-        cfg.anthropic_thinking_budget = params.anthropic_thinking_budget;
-
         let provider = create_llm_provider(
-            &cfg,
+            &resolved.config,
             self.config.request_log_store.clone(),
             &self.config.proxy_settings,
         )?;
-        self.llm_provider_cache.insert(cache_key, provider.clone());
+        self.llm_provider_cache
+            .insert(resolved.cache_key, provider.clone());
         Ok(provider)
     }
 
@@ -672,6 +595,96 @@ pub struct SharedPipeline {
 }
 
 impl SharedPipeline {
+    fn mark_stt_complete(&self, reason: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.stt_complete = true;
+            log::debug!("stt_complete set to true ({})", reason);
+        }
+    }
+
+    fn finish_failed_stt_attempt(&self, error: &PipelineError) -> Result<(), PipelineError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|err| PipelineError::Lock(err.to_string()))?;
+        if matches!(error, PipelineError::Cancelled) {
+            inner.reset_to_idle();
+        } else {
+            inner.set_error(&error.to_string());
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_batch_stt_request(
+        &self,
+        stt_provider: Arc<dyn SttProvider>,
+        stt_provider_id: &str,
+        stt_model: Option<String>,
+        stt_language: Option<String>,
+        wav_bytes: &[u8],
+        retry_config: &crate::stt::RetryConfig,
+        timeout: Duration,
+        cancel_token: &CancellationToken,
+        log_prefix: &str,
+        stt_complete_reason: &str,
+    ) -> Result<stt_flow::SttResult, PipelineError> {
+        let stt_result = run_stt_transcription(
+            stt_provider,
+            wav_bytes,
+            retry_config,
+            Some(timeout),
+            cancel_token,
+            log_prefix,
+        )
+        .await;
+
+        match stt_result {
+            Ok(result) => {
+                self.mark_stt_complete(stt_complete_reason);
+                Ok(result)
+            }
+            Err(error) => {
+                let managed_auth_recovered = {
+                    let managed_enabled = self
+                        .inner
+                        .lock()
+                        .map(|inner| inner.config.managed_inference_enabled)
+                        .unwrap_or(false);
+                    managed_enabled && is_managed_auth_token_error(&error)
+                };
+
+                if managed_auth_recovered {
+                    match self
+                        .try_refresh_managed_auth_and_retry_stt(
+                            stt_provider_id,
+                            stt_model,
+                            stt_language,
+                            wav_bytes,
+                            retry_config,
+                            timeout,
+                            cancel_token,
+                            log_prefix,
+                        )
+                        .await
+                    {
+                        Ok(recovered) => {
+                            self.mark_stt_complete(stt_complete_reason);
+                            Ok(recovered)
+                        }
+                        Err(retry_error) => {
+                            self.finish_failed_stt_attempt(&retry_error)?;
+                            Err(retry_error)
+                        }
+                    }
+                } else {
+                    self.finish_failed_stt_attempt(&error)?;
+                    Err(error)
+                }
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     // This helper keeps retry orchestration readable at the call site: the
     // arguments are the STT attempt context that should remain visible together
@@ -803,14 +816,17 @@ impl SharedPipeline {
     ) {
         let mut inner = self.inner.lock().expect("pipeline lock");
 
-        // Build a cache key that matches the normal lookup in `get_or_create_llm_provider`.
-        // We use simplified defaults for test keys; real lookups include more fields.
-        let model_key = model
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "<default>".to_string());
-        let cache_key = format!(
-            "{}::{}::30::<default-url>::<default-effort>::<default-budget>::<default-level>::<default-budget>",
-            provider_id, model_key
+        let cache_key = llm_provider_cache_key(
+            provider_id,
+            &LlmProviderParams {
+                model: model.map(|s| s.to_string()),
+                timeout: Duration::from_secs(30),
+                ollama_url: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
         );
 
         inner.llm_provider_cache.insert(cache_key, provider);
@@ -1556,46 +1572,38 @@ impl SharedPipeline {
             inner.transition_to(PipelineState::Transcribing, "stop_and_transcribe_detailed");
 
             let llm_config = inner.config.llm_config.clone();
-            let active_profile = session_profile_override
-                .as_deref()
-                .and_then(|id| {
-                    llm_config
-                        .program_prompt_profiles
-                        .iter()
-                        .find(|p| p.id == id)
-                        .cloned()
-                })
-                .or_else(|| select_profile_for_foreground_app(&llm_config))
-                .or_else(|| select_default_profile(&llm_config));
-
-            let default_profile = select_default_profile(&llm_config);
+            let request_profile_context = resolve_request_profile_context(
+                &llm_config,
+                session_profile_override.as_deref(),
+                select_profile_for_foreground_app(&llm_config),
+                ActiveWindowOcrModeFallbacks {
+                    rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
+                    quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
+                    quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
+                },
+                DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
+            );
+            let active_profile = request_profile_context.active_profile().cloned();
+            let default_profile = request_profile_context.default_profile().cloned();
 
             let default_rewrite_include_clipboard_context = default_profile
                 .as_ref()
                 .and_then(|p| p.rewrite_include_clipboard_context)
                 .unwrap_or(false);
 
-            let active_preset = active_profile
-                .as_ref()
-                .and_then(|profile| select_effective_preset(profile));
+            let active_preset = request_profile_context.effective_preset().cloned();
 
             // Persist the *actual* profile used for this request into the request log.
             // Note: picking the profile at transcription time tends to be more accurate than
             // at recording start (e.g. overlay window can steal focus).
             if let Some(store) = inner.config.request_log_store.as_ref() {
-                let (profile_id, profile_name) = if let Some(p) = active_profile.as_ref() {
-                    (Some(p.id.clone()), Some(p.name.clone()))
-                } else if session_profile_override.as_deref() == Some("default") {
-                    (Some("default".to_string()), Some("Default".to_string()))
-                } else if let Some(id) = session_profile_override.as_deref() {
-                    (Some(id.to_string()), None)
-                } else {
-                    (Some("default".to_string()), Some("Default".to_string()))
-                };
-
                 store.with_current(|log| {
-                    log.profile_id = profile_id;
-                    log.profile_name = profile_name;
+                    log.profile_id = request_profile_context
+                        .request_log_profile_id()
+                        .map(str::to_string);
+                    log.profile_name = request_profile_context
+                        .request_log_profile_name()
+                        .map(str::to_string);
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
@@ -1603,7 +1611,7 @@ impl SharedPipeline {
                 &mut inner,
                 SttProviderResolutionRequest {
                     active_profile: active_profile.as_ref(),
-                    active_preset,
+                    active_preset: active_preset.as_ref(),
                     forced_provider: None,
                     forced_model: None,
                 },
@@ -1615,15 +1623,7 @@ impl SharedPipeline {
                 .clone()
                 .unwrap_or_else(CancellationToken::new);
 
-            let ocr_modes = resolve_active_window_ocr_modes(
-                active_profile.as_ref(),
-                default_profile.as_ref(),
-                ActiveWindowOcrModeFallbacks {
-                    rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
-                    quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
-                    quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
-                },
-            );
+            let ocr_modes = request_profile_context.ocr_modes().clone();
 
             // Take the streaming session (if one was started during recording).
             // live_audio_tx was already cleared right after stop_recording_session.
@@ -1727,79 +1727,21 @@ impl SharedPipeline {
                         e
                     );
                     // Fall back to batch transcription.
-                    let stt_result = run_stt_transcription(
-                        stt_provider,
-                        &wav_bytes,
-                        &retry_config,
-                        Some(timeout),
-                        &cancel_token,
-                        "Pipeline (streaming-fallback)",
-                    )
-                    .await;
-                    match stt_result {
-                        Ok(result) => {
-                            if let Ok(mut inner) = self.inner.lock() {
-                                inner.stt_complete = true;
-                            }
-                            (result.text, result.duration_ms, Some(result.retry))
-                        }
-                        Err(e) => {
-                            let managed_auth_recovered = {
-                                let managed_enabled = self
-                                    .inner
-                                    .lock()
-                                    .map(|inner| inner.config.managed_inference_enabled)
-                                    .unwrap_or(false);
-                                managed_enabled && is_managed_auth_token_error(&e)
-                            };
-
-                            if managed_auth_recovered {
-                                match self
-                                    .try_refresh_managed_auth_and_retry_stt(
-                                        &stt_provider_id,
-                                        stt_model.clone(),
-                                        stt_language.clone(),
-                                        &wav_bytes,
-                                        &retry_config,
-                                        timeout,
-                                        &cancel_token,
-                                        "Pipeline (streaming-fallback)",
-                                    )
-                                    .await
-                                {
-                                    Ok(recovered) => {
-                                        if let Ok(mut inner) = self.inner.lock() {
-                                            inner.stt_complete = true;
-                                        }
-                                        (
-                                            recovered.text,
-                                            recovered.duration_ms,
-                                            Some(recovered.retry),
-                                        )
-                                    }
-                                    Err(retry_err) => {
-                                        let mut inner = self
-                                            .inner
-                                            .lock()
-                                            .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                                        inner.set_error(&retry_err.to_string());
-                                        return Err(retry_err);
-                                    }
-                                }
-                            } else {
-                                let mut inner = self
-                                    .inner
-                                    .lock()
-                                    .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                                if matches!(e, PipelineError::Cancelled) {
-                                    inner.reset_to_idle();
-                                } else {
-                                    inner.set_error(&e.to_string());
-                                }
-                                return Err(e);
-                            }
-                        }
-                    }
+                    let result = self
+                        .run_batch_stt_request(
+                            stt_provider,
+                            &stt_provider_id,
+                            stt_model.clone(),
+                            stt_language.clone(),
+                            &wav_bytes,
+                            &retry_config,
+                            timeout,
+                            &cancel_token,
+                            "Pipeline (streaming-fallback)",
+                            "streaming fallback",
+                        )
+                        .await?;
+                    (result.text, result.duration_ms, Some(result.retry))
                 }
             }
         } else {
@@ -1827,82 +1769,21 @@ impl SharedPipeline {
             );
 
             // Phase 2: Transcribe with retry logic (async, outside the lock)
-            let stt_result = run_stt_transcription(
-                stt_provider,
-                &wav_bytes,
-                &retry_config,
-                Some(timeout),
-                &cancel_token,
-                "Pipeline",
-            )
-            .await;
-
-            match stt_result {
-                Ok(result) => {
-                    // STT portion is done. Mark this so the overlay can show "waiting for OCR"
-                    // instead of "transcribing" if OCR is still running.
-                    if let Ok(mut inner) = self.inner.lock() {
-                        inner.stt_complete = true;
-                        log::debug!("stt_complete set to true (stop_and_transcribe_detailed)");
-                    }
-                    (result.text, result.duration_ms, Some(result.retry))
-                }
-                Err(e) => {
-                    let managed_auth_recovered = {
-                        let managed_enabled = self
-                            .inner
-                            .lock()
-                            .map(|inner| inner.config.managed_inference_enabled)
-                            .unwrap_or(false);
-                        managed_enabled && is_managed_auth_token_error(&e)
-                    };
-
-                    if managed_auth_recovered {
-                        match self
-                            .try_refresh_managed_auth_and_retry_stt(
-                                &stt_provider_id,
-                                stt_model.clone(),
-                                stt_language.clone(),
-                                &wav_bytes,
-                                &retry_config,
-                                timeout,
-                                &cancel_token,
-                                "Pipeline",
-                            )
-                            .await
-                        {
-                            Ok(recovered) => {
-                                if let Ok(mut inner) = self.inner.lock() {
-                                    inner.stt_complete = true;
-                                    log::debug!(
-                                        "stt_complete set to true (stop_and_transcribe_detailed post-refresh)"
-                                    );
-                                }
-                                (recovered.text, recovered.duration_ms, Some(recovered.retry))
-                            }
-                            Err(retry_err) => {
-                                let mut inner = self
-                                    .inner
-                                    .lock()
-                                    .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                                inner.set_error(&retry_err.to_string());
-                                return Err(retry_err);
-                            }
-                        }
-                    } else {
-                        let mut inner = self
-                            .inner
-                            .lock()
-                            .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                        if matches!(e, PipelineError::Cancelled) {
-                            inner.reset_to_idle();
-                        } else {
-                            inner.set_error(&e.to_string());
-                        }
-                        return Err(e);
-                    }
-                }
-            }
+            let result = self
+                .run_batch_stt_request(
+                    stt_provider,
+                    &stt_provider_id,
+                    stt_model.clone(),
+                    stt_language.clone(),
+                    &wav_bytes,
+                    &retry_config,
+                    timeout,
+                    &cancel_token,
+                    "Pipeline",
+                    "stop_and_transcribe_detailed",
+                )
+                .await?;
+            (result.text, result.duration_ms, Some(result.retry))
         };
 
         // Phase 3-4: Routing and LLM rewrite via transcription_flow module
@@ -2110,43 +1991,36 @@ impl SharedPipeline {
             inner.cancel_token = Some(cancel_token.clone());
 
             let llm_config = inner.config.llm_config.clone();
-            let active_profile = profile_id_override
-                .and_then(|id| {
-                    llm_config
-                        .program_prompt_profiles
-                        .iter()
-                        .find(|p| p.id == id)
-                        .cloned()
-                })
-                .or_else(|| select_profile_for_foreground_app(&llm_config))
-                .or_else(|| select_default_profile(&llm_config));
-
-            let default_profile = select_default_profile(&llm_config);
+            let request_profile_context = resolve_request_profile_context(
+                &llm_config,
+                profile_id_override,
+                select_profile_for_foreground_app(&llm_config),
+                ActiveWindowOcrModeFallbacks {
+                    rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
+                    quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
+                    quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
+                },
+                DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
+            );
+            let active_profile = request_profile_context.active_profile().cloned();
+            let default_profile = request_profile_context.default_profile().cloned();
 
             let default_rewrite_include_clipboard_context = default_profile
                 .as_ref()
                 .and_then(|p| p.rewrite_include_clipboard_context)
                 .unwrap_or(false);
 
-            let active_preset = active_profile
-                .as_ref()
-                .and_then(|profile| select_effective_preset(profile));
+            let active_preset = request_profile_context.effective_preset().cloned();
 
             // Persist the profile being used for this retry attempt into the request log, if available.
             if let Some(store) = inner.config.request_log_store.as_ref() {
-                let (profile_id, profile_name) = if let Some(p) = active_profile.as_ref() {
-                    (Some(p.id.clone()), Some(p.name.clone()))
-                } else if profile_id_override == Some("default") {
-                    (Some("default".to_string()), Some("Default".to_string()))
-                } else if let Some(id) = profile_id_override {
-                    (Some(id.to_string()), None)
-                } else {
-                    (Some("default".to_string()), Some("Default".to_string()))
-                };
-
                 store.with_current(|log| {
-                    log.profile_id = profile_id;
-                    log.profile_name = profile_name;
+                    log.profile_id = request_profile_context
+                        .request_log_profile_id()
+                        .map(str::to_string);
+                    log.profile_name = request_profile_context
+                        .request_log_profile_name()
+                        .map(str::to_string);
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
@@ -2154,7 +2028,7 @@ impl SharedPipeline {
                 &mut inner,
                 SttProviderResolutionRequest {
                     active_profile: active_profile.as_ref(),
-                    active_preset,
+                    active_preset: active_preset.as_ref(),
                     forced_provider: forced_stt_provider,
                     forced_model: forced_stt_model,
                 },
@@ -2162,15 +2036,7 @@ impl SharedPipeline {
 
             let retry_config = inner.config.retry_config.clone();
 
-            let ocr_modes = resolve_active_window_ocr_modes(
-                active_profile.as_ref(),
-                default_profile.as_ref(),
-                ActiveWindowOcrModeFallbacks {
-                    rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
-                    quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
-                    quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
-                },
-            );
+            let ocr_modes = request_profile_context.ocr_modes().clone();
 
             (
                 resolved_stt.provider,
@@ -2196,76 +2062,22 @@ impl SharedPipeline {
         );
 
         // Phase 2: STT transcription
-        let stt_result = run_stt_transcription(
-            stt_provider,
-            &wav_bytes,
-            &retry_config,
-            Some(timeout),
-            &cancel_token,
-            "Pipeline (retry)",
-        )
-        .await;
-
-        let (stt_text, stt_duration_ms, stt_retry) = match stt_result {
-            Ok(result) => {
-                // STT portion is done. Mark this so the overlay can show "waiting for OCR"
-                // instead of "transcribing" if OCR is still running.
-                if let Ok(mut inner) = self.inner.lock() {
-                    inner.stt_complete = true;
-                    log::debug!("stt_complete set to true (retry_transcription)");
-                }
-                (result.text, result.duration_ms, Some(result.retry))
-            }
-            Err(e) => {
-                let managed_auth_recovered = {
-                    let managed_enabled = self
-                        .inner
-                        .lock()
-                        .map(|inner| inner.config.managed_inference_enabled)
-                        .unwrap_or(false);
-                    managed_enabled && is_managed_auth_token_error(&e)
-                };
-
-                if managed_auth_recovered {
-                    match self
-                        .try_refresh_managed_auth_and_retry_stt(
-                            &stt_provider_id,
-                            stt_model.clone(),
-                            stt_language.clone(),
-                            &wav_bytes,
-                            &retry_config,
-                            timeout,
-                            &cancel_token,
-                            "Pipeline (retry)",
-                        )
-                        .await
-                    {
-                        Ok(recovered) => {
-                            (recovered.text, recovered.duration_ms, Some(recovered.retry))
-                        }
-                        Err(retry_err) => {
-                            let mut inner = self
-                                .inner
-                                .lock()
-                                .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                            inner.set_error(&retry_err.to_string());
-                            return Err(retry_err);
-                        }
-                    }
-                } else {
-                    let mut inner = self
-                        .inner
-                        .lock()
-                        .map_err(|err| PipelineError::Lock(err.to_string()))?;
-                    if matches!(e, PipelineError::Cancelled) {
-                        inner.reset_to_idle();
-                    } else {
-                        inner.set_error(&e.to_string());
-                    }
-                    return Err(e);
-                }
-            }
-        };
+        let result = self
+            .run_batch_stt_request(
+                stt_provider,
+                &stt_provider_id,
+                stt_model.clone(),
+                stt_language.clone(),
+                &wav_bytes,
+                &retry_config,
+                timeout,
+                &cancel_token,
+                "Pipeline (retry)",
+                "retry_transcription",
+            )
+            .await?;
+        let (stt_text, stt_duration_ms, stt_retry) =
+            (result.text, result.duration_ms, Some(result.retry));
 
         // Phase 3-4: Routing and LLM rewrite via transcription_flow module
         let (proxy_settings, llm_api_keys, request_log_store, llm_enabled_global, llm_config) = {

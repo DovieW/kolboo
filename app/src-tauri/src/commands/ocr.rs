@@ -70,34 +70,19 @@ fn is_manual_ocr_available_for_current_session(pipeline: &SharedPipeline) -> boo
     let config = pipeline.config();
 
     let session_profile_id = pipeline.peek_session_profile_override();
-    let active_profile = session_profile_id
-        .as_deref()
-        .and_then(|id| if id == "default" { None } else { Some(id) })
-        .and_then(|id| {
-            config
-                .llm_config
-                .program_prompt_profiles
-                .iter()
-                .find(|p| p.id == id)
-        });
-
-    let default_profile = config
-        .llm_config
-        .program_prompt_profiles
-        .iter()
-        .find(|p| p.id == "default");
-
-    let ocr_modes = crate::pipeline::resolve_active_window_ocr_modes(
-        active_profile,
-        default_profile,
+    let request_profile_context = crate::pipeline::resolve_request_profile_context(
+        &config.llm_config,
+        session_profile_id.as_deref(),
+        None,
         crate::pipeline::ActiveWindowOcrModeFallbacks {
             rewrite: config.ocr_config.rewrite_mode.as_str(),
             quick_ask: config.ocr_config.quick_ask_mode.as_str(),
             quick_replace: config.ocr_config.quick_replace_mode.as_str(),
         },
+        crate::pipeline::DefaultProfileSelectionPolicy::KeepDefaultAsFallbackOnly,
     );
 
-    ocr_modes.has_manual_mode()
+    request_profile_context.ocr_modes().has_manual_mode()
 }
 
 fn pipeline_state_string(pipeline: &SharedPipeline) -> String {
