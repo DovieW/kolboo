@@ -21,14 +21,14 @@
 use super::http;
 use super::language;
 use super::streaming::{
-    connect_ws_split_with_timeout, is_ws_closed_error, ws_next_with_timeout, PartialTranscript,
-    StreamingSttSession,
+    connect_ws_split_with_timeout, ws_close_best_effort, ws_next_with_timeout,
+    ws_send_binary_with_closed_handling, ws_send_json_text_with_closed_handling, PartialTranscript,
+    StreamingSttSession, WsSendOutcome,
 };
 use super::{AudioFormat, SttError, SttProvider};
 use crate::audio_normalization::{chunk_size_bytes_for_pcm_s16le, f32_to_pcm_s16le};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
-use futures_util::SinkExt;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Url;
 use serde_json::json;
@@ -338,15 +338,15 @@ impl DeepgramSttProvider {
                             // Send binary chunks when we've accumulated enough.
                             while pcm_buffer.len() >= target_chunk_bytes {
                                 let chunk: Vec<u8> = pcm_buffer.drain(..target_chunk_bytes).collect();
-                                match ws_write.send(Message::Binary(chunk.into())).await {
-                                    Ok(()) => { num_chunks_sent += 1; }
-                                    Err(e) if is_ws_closed_error(&e) => {
-                                        log::warn!("Deepgram streaming: WS closed while sending audio, finishing early");
+                                match ws_send_binary_with_closed_handling(
+                                    &mut ws_write,
+                                    chunk,
+                                    "Deepgram streaming: send audio chunk",
+                                ).await? {
+                                    WsSendOutcome::Sent => { num_chunks_sent += 1; }
+                                    WsSendOutcome::Closed => {
                                         ws_done = true;
                                         break;
-                                    }
-                                    Err(e) => {
-                                        return Err(SttError::NetworkMessage(format!("WS send failed: {}", e)));
                                     }
                                 }
                             }
@@ -355,17 +355,17 @@ impl DeepgramSttProvider {
                             // Audio channel closed (recording stopped).
                             // Send any remaining buffered PCM.
                             if !pcm_buffer.is_empty() {
-                                match ws_write.send(Message::Binary(pcm_buffer.clone().into())).await {
-                                    Ok(()) => { num_chunks_sent += 1; }
-                                    Err(e) if is_ws_closed_error(&e) => {
-                                        log::warn!("Deepgram streaming: WS closed while sending final audio");
+                                match ws_send_binary_with_closed_handling(
+                                    &mut ws_write,
+                                    pcm_buffer.clone(),
+                                    "Deepgram streaming: send final audio chunk",
+                                ).await? {
+                                    WsSendOutcome::Sent => { num_chunks_sent += 1; }
+                                    WsSendOutcome::Closed => {
                                         audio_done = true;
                                         ws_done = true;
                                         pcm_buffer.clear();
                                         continue;
-                                    }
-                                    Err(e) => {
-                                        return Err(SttError::NetworkMessage(format!("WS send failed: {}", e)));
                                     }
                                 }
                                 pcm_buffer.clear();
@@ -373,27 +373,27 @@ impl DeepgramSttProvider {
 
                             // Flush any pending transcription.
                             let finalize = json!({"type": "Finalize"});
-                            match ws_write.send(Message::Text(finalize.to_string().into())).await {
-                                Ok(()) => {}
-                                Err(e) if is_ws_closed_error(&e) => {
-                                    log::warn!("Deepgram streaming: WS closed while sending Finalize");
+                            match ws_send_json_text_with_closed_handling(
+                                &mut ws_write,
+                                &finalize,
+                                "Deepgram streaming: send Finalize",
+                            ).await? {
+                                WsSendOutcome::Sent => {}
+                                WsSendOutcome::Closed => {
                                     ws_done = true;
-                                }
-                                Err(e) => {
-                                    return Err(SttError::NetworkMessage(format!("WS send Finalize failed: {}", e)));
                                 }
                             }
 
                             // Signal end-of-session.
                             let close_stream = json!({"type": "CloseStream"});
-                            match ws_write.send(Message::Text(close_stream.to_string().into())).await {
-                                Ok(()) => {}
-                                Err(e) if is_ws_closed_error(&e) => {
-                                    log::warn!("Deepgram streaming: WS closed while sending CloseStream");
+                            match ws_send_json_text_with_closed_handling(
+                                &mut ws_write,
+                                &close_stream,
+                                "Deepgram streaming: send CloseStream",
+                            ).await? {
+                                WsSendOutcome::Sent => {}
+                                WsSendOutcome::Closed => {
                                     ws_done = true;
-                                }
-                                Err(e) => {
-                                    return Err(SttError::NetworkMessage(format!("WS send CloseStream failed: {}", e)));
                                 }
                             }
 
@@ -516,15 +516,7 @@ impl DeepgramSttProvider {
             }
         }
 
-        // Best-effort close with a short timeout.
-        match tokio::time::timeout(Duration::from_secs(3), ws_write.send(Message::Close(None)))
-            .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) if is_ws_closed_error(&e) => {}
-            Ok(Err(e)) => log::debug!("Deepgram streaming: WS close send error: {}", e),
-            Err(_) => log::debug!("Deepgram streaming: WS close send timed out"),
-        }
+        ws_close_best_effort(&mut ws_write, "Deepgram streaming", Duration::from_secs(3)).await;
 
         // Drop the write half explicitly so the TCP connection tears down cleanly.
         drop(ws_write);

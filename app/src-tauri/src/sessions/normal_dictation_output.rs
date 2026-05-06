@@ -12,6 +12,7 @@ use crate::event_payloads::{PipelineErrorPayload, PipelineStateEvent};
 use crate::history::HistoryStorage;
 use crate::pipeline::{SharedPipeline, TranscriptionResult};
 use crate::request_log::{RequestLogStore, RequestStatus};
+use crate::sessions::recording_finalization;
 use crate::stats;
 
 /// Inputs needed to decide and perform final normal dictation output.
@@ -158,21 +159,14 @@ fn finalize_request_log_after_output(
                 log.complete_success();
             }
         });
-
-        if let Some(wav) = request.pipeline.clone_last_wav_bytes() {
-            stats::emit_cost_events_for_current_request(
-                app,
-                stats::EventStatus::Success,
-                Some(&wav),
-            );
-        }
-
-        log_store.complete_current();
     }
 
-    if let Some(req_id) = request.request_id {
-        request.pipeline.end_ocr_session_if_matches(req_id);
-    }
+    recording_finalization::complete_current_request_with_pipeline_wav(
+        app,
+        request.pipeline,
+        request.request_id,
+        stats::EventStatus::Success,
+    );
 }
 
 fn update_history_after_output(app: &AppHandle, request: &NormalDictationFinalizationRequest<'_>) {
@@ -193,20 +187,7 @@ fn update_history_after_output(app: &AppHandle, request: &NormalDictationFinaliz
         log::warn!("Failed to update history: {}", e);
     }
 
-    let (provider, model) = llm_metadata_for_history(request.result);
-    let _ = history.set_request_llm_model(req_id, provider, model);
-    let _ = app.emit(crate::events::EVENT_HISTORY_CHANGED, ());
-}
-
-fn llm_metadata_for_history(result: &TranscriptionResult) -> (Option<String>, Option<String>) {
-    if result.llm_attempted() {
-        (
-            result.llm_provider_used.clone(),
-            result.llm_model_used.clone(),
-        )
-    } else {
-        (None, None)
-    }
+    recording_finalization::persist_history_llm_metadata(app, Some(req_id), request.result);
 }
 
 #[cfg(target_os = "windows")]
@@ -316,7 +297,6 @@ fn record_output_failure(app: &AppHandle, error: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::{LlmNotAttemptedReason, LlmOutcome};
 
     #[test]
     fn output_decision_prioritizes_quick_replace_failure() {
@@ -340,33 +320,5 @@ mod tests {
             decide_normal_dictation_output(None, false),
             NormalDictationOutputDecision::Output
         );
-    }
-
-    #[test]
-    fn history_llm_metadata_is_only_kept_when_llm_was_attempted() {
-        let attempted = transcription_result(LlmOutcome::Succeeded);
-        assert_eq!(
-            llm_metadata_for_history(&attempted),
-            (Some("openai".into()), Some("gpt-test".into()))
-        );
-
-        let not_attempted = transcription_result(LlmOutcome::NotAttempted(
-            LlmNotAttemptedReason::DisabledByDefaultProfile,
-        ));
-        assert_eq!(llm_metadata_for_history(&not_attempted), (None, None));
-    }
-
-    fn transcription_result(llm_outcome: LlmOutcome) -> TranscriptionResult {
-        TranscriptionResult {
-            stt_text: "raw".into(),
-            final_text: "final".into(),
-            stt_duration_ms: 1,
-            stt_retry: None,
-            llm_duration_ms: Some(2),
-            llm_provider_used: Some("openai".into()),
-            llm_model_used: Some("gpt-test".into()),
-            llm_outcome,
-            live_output_completed: false,
-        }
     }
 }

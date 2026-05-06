@@ -9,9 +9,10 @@ use crate::commands::history::{get_history_max_entries, get_max_saved_recordings
 use crate::commands::CommandError;
 use crate::events;
 use crate::history::{HistoryStorage, RequestModelInfo};
-use crate::pipeline::{LlmOutcome, PipelineConfig, PipelineError, PipelineState, SharedPipeline};
+use crate::pipeline::{PipelineConfig, PipelineError, PipelineState, SharedPipeline};
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
+use crate::sessions::recording_finalization;
 use crate::stats::{self, EventStatus};
 use crate::PipelineStateEvent;
 use chrono::{Duration as ChronoDuration, Utc};
@@ -525,21 +526,23 @@ pub fn pipeline_start_recording(
     // Start request logging
     let mut request_id: Option<String> = None;
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        let id = log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+        let id = log_store.start_request_with(
+            config.stt_provider.clone(),
+            config.stt_model.clone(),
+            |log| {
+                log.profile_id = profile_id;
+                log.profile_name = profile_name;
+                log.llm_provider = if config.llm_config.enabled {
+                    Some(config.llm_config.provider.clone())
+                } else {
+                    None
+                };
+                log.llm_model = config.llm_config.model.clone();
+                log.info("Recording started");
+            },
+        );
         tracing::Span::current().record("request_id", tracing::field::display(&id));
         request_id = Some(id.clone());
-
-        log_store.with_current(|log| {
-            log.profile_id = profile_id;
-            log.profile_name = profile_name;
-            log.llm_provider = if config.llm_config.enabled {
-                Some(config.llm_config.provider.clone())
-            } else {
-                None
-            };
-            log.llm_model = config.llm_config.model.clone();
-            log.info("Recording started");
-        });
     }
 
     // Bind OCR to this request id so OCR survives internal pipeline transitions and cannot
@@ -552,17 +555,18 @@ pub fn pipeline_start_recording(
         // If we fail to start, clear any pinned session profile so it doesn't leak.
         let _ = pipeline.set_session_profile_override(None);
 
-        if let Some(req_id) = request_id.as_deref() {
-            pipeline.end_ocr_session_if_matches(req_id);
-        }
-
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
             log_store.with_current(|log| {
                 log.error(format!("Failed to start recording: {}", e));
                 log.complete_error(e.to_string());
             });
-            log_store.complete_current();
         }
+
+        recording_finalization::complete_current_request_without_cost(
+            &app,
+            pipeline.inner(),
+            request_id.as_deref(),
+        );
         CommandError::from(e)
     })?;
 
@@ -616,22 +620,25 @@ async fn pipeline_stop_and_transcribe_inner(
 
     if active_request_id.is_none() {
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let id = log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
-            log_store.with_current(|log| {
-                log.profile_id = profile_id.clone();
-                log.profile_name = profile_name.clone();
-                log.llm_provider = if config.llm_config.enabled {
-                    Some(config.llm_config.provider.clone())
-                } else {
-                    None
-                };
-                log.llm_model = if config.llm_config.enabled {
-                    config.llm_config.model.clone()
-                } else {
-                    None
-                };
-                log.warn("Request log was missing at stop; started a new request log entry");
-            });
+            let id = log_store.start_request_with(
+                config.stt_provider.clone(),
+                config.stt_model.clone(),
+                |log| {
+                    log.profile_id = profile_id.clone();
+                    log.profile_name = profile_name.clone();
+                    log.llm_provider = if config.llm_config.enabled {
+                        Some(config.llm_config.provider.clone())
+                    } else {
+                        None
+                    };
+                    log.llm_model = if config.llm_config.enabled {
+                        config.llm_config.model.clone()
+                    } else {
+                        None
+                    };
+                    log.warn("Request log was missing at stop; started a new request log entry");
+                },
+            );
             active_request_id = Some(id);
         }
     }
@@ -797,12 +804,13 @@ async fn pipeline_stop_and_transcribe_inner(
                     log.warn("Recording cancelled by user");
                     log.complete_cancelled();
                 });
-                log_store.complete_current();
             }
 
-            if let Some(req_id) = active_request_id.as_deref() {
-                pipeline.end_ocr_session_if_matches(req_id);
-            }
+            recording_finalization::complete_current_request_without_cost(
+                &app,
+                pipeline.inner(),
+                active_request_id.as_deref(),
+            );
 
             // Best-effort: remove the in-progress history entry so it doesn't linger as
             // "Transcribing..." forever.
@@ -834,20 +842,15 @@ async fn pipeline_stop_and_transcribe_inner(
                     );
                     log.complete_error(e.to_string());
                 });
-
-                // Persist cost/usage stats (best-effort).
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Error,
-                    wav_bytes.as_deref(),
-                );
-
-                log_store.complete_current();
             }
 
-            if let Some(req_id) = active_request_id.as_deref() {
-                pipeline.end_ocr_session_if_matches(req_id);
-            }
+            recording_finalization::complete_current_request_with_cost(
+                &app,
+                pipeline.inner(),
+                active_request_id.as_deref(),
+                EventStatus::Error,
+                wav_bytes.as_deref(),
+            );
 
             // Update history entry with error (keep it visible for retry)
             if let Some(req_id) = active_request_id.as_deref() {
@@ -901,132 +904,39 @@ async fn pipeline_stop_and_transcribe_inner(
     // Log success
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
-            log.raw_transcript = Some(result.stt_text.clone());
-            log.formatted_transcript = Some(result.final_text.clone());
-            log.stt_duration_ms = Some(result.stt_duration_ms);
-            log.llm_duration_ms = result.llm_duration_ms;
-
-            log.llm_outcome = Some(result.llm_outcome.code().to_string());
-            log.llm_not_attempted_reason = None;
-            log.llm_error_message = None;
-
-            // Useful for stats (and for later UI display).
-            let audio_secs = audio_secs_from_wav.or_else(|| {
-                if log.stt_provider == "openai" {
-                    log.stt_response_json
-                        .as_ref()
-                        .and_then(stats::parse_openai_stt_duration_secs_from_response_json)
-                } else {
-                    None
-                }
-            });
-
-            log.audio_duration_secs = audio_secs.map(|s| s as f32);
-            log.audio_size_bytes = audio_size_bytes;
-
-            // Use the provider instance's model (includes provider defaults) so the UI can show
-            // the real model used even if no explicit model override was configured.
-            if result.llm_attempted() {
-                log.llm_provider = result.llm_provider_used.clone();
-                log.llm_model = result.llm_model_used.clone();
-            } else {
-                // Avoid misleading UI chips: if we didn't attempt LLM formatting,
-                // clear any pre-populated provider/model values.
-                log.llm_provider = None;
-                log.llm_model = None;
-            }
-
-            log.info(format!(
-                "STT completed in {}ms ({} chars)",
-                result.stt_duration_ms,
-                result.stt_text.len()
-            ));
-
-            match &result.llm_outcome {
-                LlmOutcome::NotAttempted(reason) => {
-                    log.llm_not_attempted_reason = Some(reason.code().to_string());
-                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } =
-                        reason
-                    {
-                        log.llm_error_message = Some(reason.to_log_details());
-                    }
-                    log.info_with_details("LLM formatting not attempted", reason.to_log_details());
-                }
-                LlmOutcome::Succeeded => {
-                    if let Some(ms) = result.llm_duration_ms {
-                        log.info(format!(
-                            "LLM formatting succeeded in {}ms ({} -> {} chars)",
-                            ms,
-                            result.stt_text.len(),
-                            result.final_text.len()
-                        ));
-                    } else {
-                        log.info("LLM formatting succeeded");
-                    }
-                }
-                LlmOutcome::TimedOut => {
-                    if let Some(ms) = result.llm_duration_ms {
-                        log.warn(format!(
-                            "LLM formatting timed out after {}ms; fell back to STT transcript",
-                            ms
-                        ));
-                    } else {
-                        log.warn("LLM formatting timed out; fell back to STT transcript");
-                    }
-                }
-                LlmOutcome::Failed(err) => {
-                    log.llm_error_message = Some(err.clone());
-                    log.warn(format!(
-                        "LLM formatting failed; fell back to STT transcript ({})",
-                        err
-                    ));
-                }
-            }
-
+            recording_finalization::record_transcription_success(
+                log,
+                recording_finalization::TranscriptionSuccessLogUpdate {
+                    result: &result,
+                    formatted_transcript: Some(result.final_text.as_str()),
+                    audio_duration_secs: audio_secs_from_wav,
+                    audio_size_bytes,
+                    stt_summary_label: "STT",
+                    completion_log_message: None,
+                    warn_if_no_formatted_transcript: false,
+                },
+            );
             log.complete_success();
         });
-
-        // Persist cost/usage stats (best-effort).
-        crate::stats::emit_cost_events_for_current_request(
-            &app,
-            EventStatus::Success,
-            wav_bytes.as_deref(),
-        );
-
-        // Persist preset metadata into History (best-effort).
-        if let Some(req_id) = active_request_id.as_deref() {
-            let preset_meta =
-                log_store.with_current(|log| (log.preset_id.clone(), log.preset_name.clone()));
-            if let Some((preset_id, preset_name)) = preset_meta {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
-            }
-        }
-
-        // Persist the *actual* LLM provider/model used (or clear it if not attempted).
-        if let Some(req_id) = active_request_id.as_deref() {
-            if let Some(history) = app.try_state::<HistoryStorage>() {
-                let (provider, model) = if result.llm_attempted() {
-                    (
-                        result.llm_provider_used.clone(),
-                        result.llm_model_used.clone(),
-                    )
-                } else {
-                    (None, None)
-                };
-                let _ = history.set_request_llm_model(req_id, provider, model);
-                let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-            }
-        }
-
-        log_store.complete_current();
     }
 
-    if let Some(req_id) = active_request_id.as_deref() {
-        pipeline.end_ocr_session_if_matches(req_id);
-    }
+    // The finalization Module keeps log closure/cost/OCR ordering consistent across command flows.
+    recording_finalization::persist_current_request_preset_to_history(
+        &app,
+        active_request_id.as_deref(),
+    );
+    recording_finalization::persist_history_llm_metadata(
+        &app,
+        active_request_id.as_deref(),
+        &result,
+    );
+    recording_finalization::complete_current_request_with_cost(
+        &app,
+        pipeline.inner(),
+        active_request_id.as_deref(),
+        EventStatus::Success,
+        wav_bytes.as_deref(),
+    );
 
     // Persist audio for retry (best-effort)
     if let (Some(req_id), Some(store)) = (
@@ -1050,16 +960,6 @@ async fn pipeline_stop_and_transcribe_inner(
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.complete_request_success(req_id, final_text.clone());
-
-            let (provider, model) = if result.llm_attempted() {
-                (
-                    result.llm_provider_used.clone(),
-                    result.llm_model_used.clone(),
-                )
-            } else {
-                (None, None)
-            };
-            let _ = history.set_request_llm_model(req_id, provider, model);
             let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
@@ -1158,7 +1058,18 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     };
 
     let new_request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
-        log_store.start_request(config.stt_provider.clone(), config.stt_model.clone())
+        log_store.start_request_with(
+            config.stt_provider.clone(),
+            config.stt_model.clone(),
+            |log| {
+                log.profile_id = profile_id.clone();
+                log.profile_name = profile_name.clone();
+                // Seed preset metadata up-front so UI/logs can reflect intent immediately.
+                // The pipeline will still persist the *effective* preset selected during routing.
+                log.preset_id = original_preset_id.clone();
+                log.preset_name = original_preset_name.clone();
+            },
+        )
     });
 
     // Bind OCR to this retry request id so OCR cannot leak across requests.
@@ -1168,17 +1079,6 @@ pub(crate) async fn pipeline_retry_transcription_impl(
 
     if let Some(req_id) = new_request_id.as_deref() {
         tracing::Span::current().record("request_id", tracing::field::display(req_id));
-    }
-
-    if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        log_store.with_current(|log| {
-            log.profile_id = profile_id.clone();
-            log.profile_name = profile_name.clone();
-            // Seed preset metadata up-front so UI/logs can reflect intent immediately.
-            // The pipeline will still persist the *effective* preset selected during routing.
-            log.preset_id = original_preset_id.clone();
-            log.preset_name = original_preset_name.clone();
-        });
     }
 
     // Capture model info for persistence in history.
@@ -1259,12 +1159,13 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                     log.warn("Retry transcription cancelled by user");
                     log.complete_cancelled();
                 });
-                log_store.complete_current();
             }
 
-            if let Some(req_id) = new_request_id.as_deref() {
-                pipeline.end_ocr_session_if_matches(req_id);
-            }
+            recording_finalization::complete_current_request_without_cost(
+                &app,
+                &pipeline,
+                new_request_id.as_deref(),
+            );
 
             let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
             let _ = app.emit(
@@ -1285,20 +1186,15 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                     );
                     log.complete_error(e.to_string());
                 });
-
-                // Persist cost/usage stats (best-effort).
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Error,
-                    Some(wav.as_slice()),
-                );
-
-                log_store.complete_current();
             }
 
-            if let Some(req_id) = new_request_id.as_deref() {
-                pipeline.end_ocr_session_if_matches(req_id);
-            }
+            recording_finalization::complete_current_request_with_cost(
+                &app,
+                &pipeline,
+                new_request_id.as_deref(),
+                EventStatus::Error,
+                Some(wav.as_slice()),
+            );
 
             if let Some(req_id) = new_request_id.as_deref() {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
@@ -1334,76 +1230,39 @@ pub(crate) async fn pipeline_retry_transcription_impl(
     // Update log store on success
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
-            log.raw_transcript = Some(result.stt_text.clone());
-            log.formatted_transcript = Some(result.final_text.clone());
-            log.stt_duration_ms = Some(result.stt_duration_ms);
-            log.llm_duration_ms = result.llm_duration_ms;
-
-            log.llm_outcome = Some(result.llm_outcome.code().to_string());
-            log.llm_not_attempted_reason = None;
-            log.llm_error_message = None;
-
-            // Useful for stats (and for later UI display).
-            log.audio_duration_secs = stats::wav_duration_secs(wav.as_slice()).map(|s| s as f32);
-            log.audio_size_bytes = Some(wav.len());
-
-            if result.llm_attempted() {
-                log.llm_provider = result.llm_provider_used.clone();
-                log.llm_model = result.llm_model_used.clone();
-            } else {
-                // Avoid misleading UI chips: clear any pre-populated provider/model values.
-                log.llm_provider = None;
-                log.llm_model = None;
-            }
-
-            log.info(format!(
-                "Retry STT completed in {}ms ({} chars)",
-                result.stt_duration_ms,
-                result.stt_text.len()
-            ));
+            recording_finalization::record_transcription_success(
+                log,
+                recording_finalization::TranscriptionSuccessLogUpdate {
+                    result: &result,
+                    formatted_transcript: Some(result.final_text.as_str()),
+                    audio_duration_secs: stats::wav_duration_secs(wav.as_slice()),
+                    audio_size_bytes: Some(wav.len()),
+                    stt_summary_label: "Retry STT",
+                    completion_log_message: None,
+                    warn_if_no_formatted_transcript: false,
+                },
+            );
             log.complete_success();
         });
-
-        // Persist cost/usage stats (best-effort).
-        crate::stats::emit_cost_events_for_current_request(
-            &app,
-            EventStatus::Success,
-            Some(wav.as_slice()),
-        );
-
-        // Persist preset metadata into History (best-effort).
-        if let Some(req_id) = new_request_id.as_deref() {
-            let preset_meta =
-                log_store.with_current(|log| (log.preset_id.clone(), log.preset_name.clone()));
-            if let Some((preset_id, preset_name)) = preset_meta {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
-            }
-        }
-
-        log_store.complete_current();
     }
 
-    if let Some(req_id) = new_request_id.as_deref() {
-        pipeline.end_ocr_session_if_matches(req_id);
-    }
+    recording_finalization::persist_current_request_preset_to_history(
+        &app,
+        new_request_id.as_deref(),
+    );
+    recording_finalization::persist_history_llm_metadata(&app, new_request_id.as_deref(), &result);
+    recording_finalization::complete_current_request_with_cost(
+        &app,
+        &pipeline,
+        new_request_id.as_deref(),
+        EventStatus::Success,
+        Some(wav.as_slice()),
+    );
 
     // Update history on success
     if let Some(req_id) = new_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.complete_request_success(req_id, final_text.clone());
-
-            let (provider, model) = if result.llm_attempted() {
-                (
-                    result.llm_provider_used.clone(),
-                    result.llm_model_used.clone(),
-                )
-            } else {
-                (None, None)
-            };
-            let _ = history.set_request_llm_model(req_id, provider, model);
             let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
@@ -1578,22 +1437,25 @@ async fn pipeline_dictate_inner(
 
     if active_request_id.is_none() {
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let id = log_store.start_request(cfg.stt_provider.clone(), cfg.stt_model.clone());
-            log_store.with_current(|log| {
-                log.profile_id = profile_id.clone();
-                log.profile_name = profile_name.clone();
-                log.llm_provider = if cfg.llm_config.enabled {
-                    Some(cfg.llm_config.provider.clone())
-                } else {
-                    None
-                };
-                log.llm_model = if cfg.llm_config.enabled {
-                    cfg.llm_config.model.clone()
-                } else {
-                    None
-                };
-                log.warn("Request log was missing at dictate; started a new request log entry");
-            });
+            let id = log_store.start_request_with(
+                cfg.stt_provider.clone(),
+                cfg.stt_model.clone(),
+                |log| {
+                    log.profile_id = profile_id.clone();
+                    log.profile_name = profile_name.clone();
+                    log.llm_provider = if cfg.llm_config.enabled {
+                        Some(cfg.llm_config.provider.clone())
+                    } else {
+                        None
+                    };
+                    log.llm_model = if cfg.llm_config.enabled {
+                        cfg.llm_config.model.clone()
+                    } else {
+                        None
+                    };
+                    log.warn("Request log was missing at dictate; started a new request log entry");
+                },
+            );
             active_request_id = Some(id);
         }
     }
@@ -1696,8 +1558,13 @@ async fn pipeline_dictate_inner(
                     log.warn("Recording cancelled by user");
                     log.complete_cancelled();
                 });
-                log_store.complete_current();
             }
+
+            recording_finalization::complete_current_request_without_cost(
+                &app,
+                pipeline.inner(),
+                active_request_id.as_deref(),
+            );
 
             if let Some(req_id) = active_request_id.as_deref() {
                 if let Some(history) = app.try_state::<HistoryStorage>() {
@@ -1715,11 +1582,6 @@ async fn pipeline_dictate_inner(
             // Best-effort: persist cost/usage stats even when dictate fails.
             // (This flow is commonly used by the global hotkey / toggle path.)
             let wav_bytes = pipeline.clone_last_wav_bytes();
-            crate::stats::emit_cost_events_for_current_request(
-                &app,
-                EventStatus::Error,
-                wav_bytes.as_deref(),
-            );
 
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
                 log_store.with_current(|log| {
@@ -1729,12 +1591,15 @@ async fn pipeline_dictate_inner(
                     );
                     log.complete_error(e.to_string());
                 });
-                log_store.complete_current();
             }
 
-            if let Some(req_id) = active_request_id.as_deref() {
-                pipeline.end_ocr_session_if_matches(req_id);
-            }
+            recording_finalization::complete_current_request_with_cost_best_effort(
+                &app,
+                pipeline.inner(),
+                active_request_id.as_deref(),
+                EventStatus::Error,
+                wav_bytes.as_deref(),
+            );
 
             // Persist audio for retry (best-effort)
             if let (Some(req_id), Some(store)) = (
@@ -1821,97 +1686,40 @@ async fn pipeline_dictate_inner(
     // Log success
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
-            log.raw_transcript = Some(result.stt_text.clone());
-            log.formatted_transcript = Some(result.final_text.clone());
-            log.stt_duration_ms = Some(result.stt_duration_ms);
-            log.llm_duration_ms = result.llm_duration_ms;
-
-            if result.llm_attempted() {
-                log.llm_provider = result.llm_provider_used.clone();
-                log.llm_model = result.llm_model_used.clone();
-            } else {
-                // Avoid misleading UI chips: clear any pre-populated provider/model values.
-                log.llm_provider = None;
-                log.llm_model = None;
-            }
-
-            log.info(format!(
-                "STT completed in {}ms ({} chars)",
-                result.stt_duration_ms,
-                result.stt_text.len()
-            ));
-
-            match &result.llm_outcome {
-                LlmOutcome::NotAttempted(reason) => {
-                    log.llm_not_attempted_reason = Some(reason.code().to_string());
-                    if let crate::pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } =
-                        reason
-                    {
-                        log.llm_error_message = Some(reason.to_log_details());
-                    }
-                    log.info_with_details("LLM formatting not attempted", reason.to_log_details());
-                }
-                LlmOutcome::Succeeded => {
-                    if let Some(ms) = result.llm_duration_ms {
-                        log.info(format!(
-                            "LLM formatting succeeded in {}ms ({} -> {} chars)",
-                            ms,
-                            result.stt_text.len(),
-                            result.final_text.len()
-                        ));
-                    } else {
-                        log.info("LLM formatting succeeded");
-                    }
-                }
-                LlmOutcome::TimedOut => {
-                    if let Some(ms) = result.llm_duration_ms {
-                        log.warn(format!(
-                            "LLM formatting timed out after {}ms; fell back to STT transcript",
-                            ms
-                        ));
-                    } else {
-                        log.warn("LLM formatting timed out; fell back to STT transcript");
-                    }
-                }
-                LlmOutcome::Failed(err) => {
-                    log.llm_error_message = Some(err.clone());
-                    log.warn(format!(
-                        "LLM formatting failed; fell back to STT transcript ({})",
-                        err
-                    ));
-                }
-            }
-
+            recording_finalization::record_transcription_success(
+                log,
+                recording_finalization::TranscriptionSuccessLogUpdate {
+                    result: &result,
+                    formatted_transcript: Some(result.final_text.as_str()),
+                    audio_duration_secs: wav_bytes.as_deref().and_then(stats::wav_duration_secs),
+                    audio_size_bytes: wav_bytes.as_ref().map(|b| b.len()),
+                    stt_summary_label: "STT",
+                    completion_log_message: None,
+                    warn_if_no_formatted_transcript: false,
+                },
+            );
             log.complete_success();
         });
-
-        // Persist cost/usage stats (best-effort).
-        // NOTE: `pipeline_stop_and_transcribe` and `pipeline_retry_transcription` already do this,
-        // but `pipeline_dictate` is a separate flow used by hotkeys and should also be tracked.
-        crate::stats::emit_cost_events_for_current_request(
-            &app,
-            EventStatus::Success,
-            wav_bytes.as_deref(),
-        );
-
-        // Persist preset metadata into History (best-effort).
-        if let Some(req_id) = active_request_id.as_deref() {
-            let preset_meta =
-                log_store.with_current(|log| (log.preset_id.clone(), log.preset_name.clone()));
-            if let Some((preset_id, preset_name)) = preset_meta {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.set_request_preset(req_id, preset_id, preset_name);
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
-            }
-        }
-
-        log_store.complete_current();
     }
 
-    if let Some(req_id) = active_request_id.as_deref() {
-        pipeline.end_ocr_session_if_matches(req_id);
-    }
+    // NOTE: `pipeline_stop_and_transcribe` and `pipeline_retry_transcription` already emit cost,
+    // but `pipeline_dictate` is a separate hotkey/toggle flow and must be tracked too.
+    recording_finalization::persist_current_request_preset_to_history(
+        &app,
+        active_request_id.as_deref(),
+    );
+    recording_finalization::persist_history_llm_metadata(
+        &app,
+        active_request_id.as_deref(),
+        &result,
+    );
+    recording_finalization::complete_current_request_with_cost_best_effort(
+        &app,
+        pipeline.inner(),
+        active_request_id.as_deref(),
+        EventStatus::Success,
+        wav_bytes.as_deref(),
+    );
 
     // Persist audio for retry/playback (best-effort)
     if let (Some(req_id), Some(store)) = (
@@ -1929,16 +1737,6 @@ async fn pipeline_dictate_inner(
     if let Some(req_id) = active_request_id.as_deref() {
         if let Some(history) = app.try_state::<HistoryStorage>() {
             let _ = history.complete_request_success(req_id, final_text.clone());
-
-            let (provider, model) = if result.llm_attempted() {
-                (
-                    result.llm_provider_used.clone(),
-                    result.llm_model_used.clone(),
-                )
-            } else {
-                (None, None)
-            };
-            let _ = history.set_request_llm_model(req_id, provider, model);
             let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
         }
     }
@@ -2010,20 +1808,18 @@ async fn pipeline_test_transcribe_last_audio_inner(
             })
             .unwrap_or_else(|| (cfg.stt_provider.clone(), cfg.stt_model.clone()));
 
-        let id = log_store.start_request(desired_provider, desired_model);
-        tracing::Span::current().record("request_id", tracing::field::display(&id));
-        request_id = Some(id.clone());
-
-        // Tie OCR to this request id so OCR (if triggered) is isolated to this test request.
-        pipeline.begin_ocr_session(id);
-
-        log_store.with_current(|log| {
+        let id = log_store.start_request_with(desired_provider, desired_model, |log| {
             log.profile_id = profile_id_used;
             log.profile_name = profile_name_used;
             log.llm_provider = None;
             log.llm_model = None;
             log.info("Test transcription started");
         });
+        tracing::Span::current().record("request_id", tracing::field::display(&id));
+        request_id = Some(id.clone());
+
+        // Tie OCR to this request id so OCR (if triggered) is isolated to this test request.
+        pipeline.begin_ocr_session(id);
     }
 
     // Attempt transcription and persist cost events centrally.
@@ -2049,26 +1845,17 @@ async fn pipeline_test_transcribe_last_audio_inner(
                     ));
                     log.complete_success();
                 });
-
-                // Best-effort: emit cost events using the last WAV bytes.
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Success,
-                    wav.as_deref(),
-                );
-
-                log_store.complete_current();
-            } else {
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Success,
-                    wav.as_deref(),
-                );
             }
 
-            if let Some(req_id) = request_id.as_deref() {
-                pipeline.end_ocr_session_if_matches(req_id);
-            }
+            // Test transcription is standalone, so preserve its legacy best-effort stats behavior
+            // while still centralizing request-log closure and OCR cleanup.
+            recording_finalization::complete_current_request_with_cost_best_effort(
+                &app,
+                pipeline.inner(),
+                request_id.as_deref(),
+                EventStatus::Success,
+                wav.as_deref(),
+            );
 
             Ok(s)
         }
@@ -2086,25 +1873,15 @@ async fn pipeline_test_transcribe_last_audio_inner(
                     );
                     log.complete_error(e.to_string());
                 });
-
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Error,
-                    wav.as_deref(),
-                );
-
-                log_store.complete_current();
-            } else {
-                crate::stats::emit_cost_events_for_current_request(
-                    &app,
-                    EventStatus::Error,
-                    wav.as_deref(),
-                );
             }
 
-            if let Some(req_id) = request_id.as_deref() {
-                pipeline.end_ocr_session_if_matches(req_id);
-            }
+            recording_finalization::complete_current_request_with_cost_best_effort(
+                &app,
+                pipeline.inner(),
+                request_id.as_deref(),
+                EventStatus::Error,
+                wav.as_deref(),
+            );
 
             Err(e.into())
         }
@@ -2180,20 +1957,22 @@ pub async fn pipeline_toggle(
         // Pipeline started successfully - now create the request log
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
             let config = pipeline.config();
-            let request_id =
-                log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
+            let request_id = log_store.start_request_with(
+                config.stt_provider.clone(),
+                config.stt_model.clone(),
+                |log| {
+                    log.llm_provider = if config.llm_config.enabled {
+                        Some(config.llm_config.provider.clone())
+                    } else {
+                        None
+                    };
+                    log.llm_model = config.llm_config.model.clone();
+                    log.info("Recording started (toggle)");
+                },
+            );
 
             // Bind OCR to this request id so OCR cannot leak across requests.
             pipeline.begin_ocr_session(request_id);
-            log_store.with_current(|log| {
-                log.llm_provider = if config.llm_config.enabled {
-                    Some(config.llm_config.provider.clone())
-                } else {
-                    None
-                };
-                log.llm_model = config.llm_config.model.clone();
-                log.info("Recording started (toggle)");
-            });
         }
 
         let _ = app.emit(events::EVENT_PIPELINE_RECORDING_STARTED, ());

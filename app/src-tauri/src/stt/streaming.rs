@@ -8,7 +8,7 @@
 //! - `StreamingSttSession` abstraction for concurrent record-and-transcribe
 
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
@@ -21,6 +21,12 @@ use crate::stt::SttError;
 pub(crate) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub(crate) type WsWrite = SplitSink<WsStream, Message>;
 pub(crate) type WsRead = SplitStream<WsStream>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WsSendOutcome {
+    Sent,
+    Closed,
+}
 
 /// Check if a tungstenite send error indicates the WebSocket has transitioned
 /// to a closing/closed state (e.g. the server sent a `Close` frame).
@@ -71,6 +77,71 @@ pub(crate) async fn ws_next_with_timeout(
 
     let msg = msg.map_err(|e| SttError::NetworkMessage(format!("WS recv failed: {}", e)))?;
     Ok(Some(msg))
+}
+
+/// Send a JSON WebSocket text frame and normalize the provider-independent closed-socket path.
+pub(crate) async fn ws_send_json_text_with_closed_handling(
+    ws_write: &mut WsWrite,
+    value: &serde_json::Value,
+    context: &str,
+) -> Result<WsSendOutcome, SttError> {
+    ws_send_text_with_closed_handling(ws_write, value.to_string(), context).await
+}
+
+/// Send a WebSocket text frame and return `Closed` instead of forcing every Adapter to duplicate
+/// tungstenite's closing/closed error matching.
+pub(crate) async fn ws_send_text_with_closed_handling(
+    ws_write: &mut WsWrite,
+    text: String,
+    context: &str,
+) -> Result<WsSendOutcome, SttError> {
+    match ws_write.send(Message::Text(text.into())).await {
+        Ok(()) => Ok(WsSendOutcome::Sent),
+        Err(e) if is_ws_closed_error(&e) => {
+            log::warn!("{}: WS closed while sending", context);
+            Ok(WsSendOutcome::Closed)
+        }
+        Err(e) => Err(SttError::NetworkMessage(format!(
+            "{} failed: {}",
+            context, e
+        ))),
+    }
+}
+
+/// Send a WebSocket binary frame and normalize the provider-independent closed-socket path.
+pub(crate) async fn ws_send_binary_with_closed_handling(
+    ws_write: &mut WsWrite,
+    bytes: Vec<u8>,
+    context: &str,
+) -> Result<WsSendOutcome, SttError> {
+    match ws_write.send(Message::Binary(bytes.into())).await {
+        Ok(()) => Ok(WsSendOutcome::Sent),
+        Err(e) if is_ws_closed_error(&e) => {
+            log::warn!("{}: WS closed while sending", context);
+            Ok(WsSendOutcome::Closed)
+        }
+        Err(e) => Err(SttError::NetworkMessage(format!(
+            "{} failed: {}",
+            context, e
+        ))),
+    }
+}
+
+/// Best-effort close for provider WebSocket sessions.
+///
+/// Closing noise is not a provider protocol failure after we've already collected a transcript, so
+/// the transport Module owns the timeout and closed-socket handling in one place.
+pub(crate) async fn ws_close_best_effort(
+    ws_write: &mut WsWrite,
+    context: &str,
+    close_timeout: Duration,
+) {
+    match timeout(close_timeout, ws_write.send(Message::Close(None))).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) if is_ws_closed_error(&e) => {}
+        Ok(Err(e)) => log::debug!("{}: WS close send error: {}", context, e),
+        Err(_) => log::debug!("{}: WS close send timed out", context),
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

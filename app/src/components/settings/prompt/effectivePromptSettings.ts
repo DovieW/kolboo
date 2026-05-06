@@ -1,4 +1,7 @@
-import { isInheritedSettingValue } from "../../../lib/tauri/settingsViews";
+import {
+	inheritedSettingView,
+	isInheritedSettingValue,
+} from "../../../lib/tauri/settingsViews";
 import type {
 	ActiveWindowOcrMode,
 	AppSettings,
@@ -43,8 +46,22 @@ export function profileSettingIsInherited(
 	return isInheritedSettingValue(profile, key);
 }
 
-function boolOrDefault(value: boolean | null | undefined, fallback: boolean) {
-	return typeof value === "boolean" ? value : fallback;
+function boolOrNull(value: unknown): boolean | null {
+	return typeof value === "boolean" ? value : null;
+}
+
+function stringOrNull(value: unknown): string | null {
+	return typeof value === "string" ? value : null;
+}
+
+function activeWindowOcrModeOrNull(value: unknown): ActiveWindowOcrMode | null {
+	return value === "off" || value === "auto" || value === "manual"
+		? value
+		: null;
+}
+
+function quickAskDismissModeOrNull(value: unknown): QuickAskDismissMode | null {
+	return value === "auto" || value === "manual" ? value : null;
 }
 
 function quickAskDismissModeOrDefault(
@@ -63,50 +80,105 @@ export function resolvePromptProfileFallbacks({
 	settings: PromptFallbackSettings | undefined;
 	defaultQuickReplaceSystemPrompt: string;
 }): PromptProfileFallbacks {
-	// Quick Replace inherits from the Default profile. If Default has never been
-	// configured, keep the legacy global fallback so older settings.json shapes
-	// remain behavior-compatible.
-	const baseQuickReplaceEnabled = boolOrDefault(
-		defaultProfile?.quick_replace_enabled,
-		settings?.quick_replace_enabled ?? false,
-	);
+	// Quick Replace inherits from the Default profile. Route every fallback through
+	// Settings View helpers so profile UI, effective state, and future provenance
+	// labels keep one null/missing/malformed vocabulary.
+	const quickReplaceEnabledView = inheritedSettingView({
+		globalValue: settings?.quick_replace_enabled,
+		profile: defaultProfile,
+		key: "quick_replace_enabled",
+		defaultValue: false,
+		normalize: boolOrNull,
+	});
+	const quickReplaceProviderView = inheritedSettingView<string | null>({
+		globalValue: settings?.llm_provider,
+		profile: defaultProfile,
+		key: "quick_replace_provider",
+		defaultValue: null,
+		normalize: stringOrNull,
+	});
+	const quickReplaceModelView = inheritedSettingView<string | null>({
+		globalValue: settings?.llm_model,
+		profile: defaultProfile,
+		key: "quick_replace_model",
+		defaultValue: null,
+		normalize: stringOrNull,
+	});
+	const quickReplaceSystemPromptView = inheritedSettingView({
+		globalValue: undefined,
+		profile: defaultProfile,
+		key: "quick_replace_system_prompt",
+		defaultValue: defaultQuickReplaceSystemPrompt,
+		normalize: stringOrNull,
+	});
+	const rewriteIncludeClipboardContextView = inheritedSettingView({
+		globalValue: undefined,
+		profile: defaultProfile,
+		key: "rewrite_include_clipboard_context",
+		defaultValue: false,
+		normalize: boolOrNull,
+	});
+	const quickReplaceIncludeClipboardContextView = inheritedSettingView({
+		globalValue: undefined,
+		profile: defaultProfile,
+		key: "quick_replace_include_clipboard_context",
+		defaultValue: false,
+		normalize: boolOrNull,
+	});
+	const quickAskIncludeClipboardContextView = inheritedSettingView({
+		globalValue: undefined,
+		profile: defaultProfile,
+		key: "quick_ask_include_clipboard_context",
+		defaultValue: false,
+		normalize: boolOrNull,
+	});
+	const rewriteActiveWindowOcrModeView = inheritedSettingView({
+		globalValue: settings?.rewrite_active_window_ocr_mode,
+		profile: defaultProfile,
+		key: "rewrite_active_window_ocr_mode",
+		defaultValue: "off" as const,
+		normalize: activeWindowOcrModeOrNull,
+	});
+	const quickReplaceActiveWindowOcrModeView = inheritedSettingView({
+		globalValue: settings?.quick_replace_active_window_ocr_mode,
+		profile: defaultProfile,
+		key: "quick_replace_active_window_ocr_mode",
+		defaultValue: "off" as const,
+		normalize: activeWindowOcrModeOrNull,
+	});
+	const quickAskActiveWindowOcrModeView = inheritedSettingView({
+		globalValue: settings?.quick_ask_active_window_ocr_mode,
+		profile: defaultProfile,
+		key: "quick_ask_active_window_ocr_mode",
+		defaultValue: "off" as const,
+		normalize: activeWindowOcrModeOrNull,
+	});
+	const quickAskDismissModeView = inheritedSettingView({
+		globalValue: quickAskDismissModeOrDefault(
+			settings?.quick_ask_dismiss_mode,
+			"manual",
+		),
+		profile: defaultProfile,
+		key: "quick_ask_dismiss_mode",
+		defaultValue: "manual" as const,
+		normalize: quickAskDismissModeOrNull,
+	});
 
 	return {
-		baseQuickReplaceEnabled,
-		baseQuickReplaceProvider:
-			defaultProfile?.quick_replace_provider ?? settings?.llm_provider ?? null,
-		baseQuickReplaceModel:
-			defaultProfile?.quick_replace_model ?? settings?.llm_model ?? null,
-		baseQuickReplaceSystemPrompt:
-			defaultProfile?.quick_replace_system_prompt ??
-			defaultQuickReplaceSystemPrompt,
-		baseRewriteIncludeClipboardContext: boolOrDefault(
-			defaultProfile?.rewrite_include_clipboard_context,
-			false,
-		),
-		baseQuickReplaceIncludeClipboardContext: boolOrDefault(
-			defaultProfile?.quick_replace_include_clipboard_context,
-			false,
-		),
-		baseQuickAskIncludeClipboardContext: boolOrDefault(
-			defaultProfile?.quick_ask_include_clipboard_context,
-			false,
-		),
-		baseRewriteActiveWindowOcrMode:
-			defaultProfile?.rewrite_active_window_ocr_mode ??
-			settings?.rewrite_active_window_ocr_mode ??
-			"off",
+		baseQuickReplaceEnabled: quickReplaceEnabledView.value,
+		baseQuickReplaceProvider: quickReplaceProviderView.value,
+		baseQuickReplaceModel: quickReplaceModelView.value,
+		baseQuickReplaceSystemPrompt: quickReplaceSystemPromptView.value,
+		baseRewriteIncludeClipboardContext:
+			rewriteIncludeClipboardContextView.value,
+		baseQuickReplaceIncludeClipboardContext:
+			quickReplaceIncludeClipboardContextView.value,
+		baseQuickAskIncludeClipboardContext:
+			quickAskIncludeClipboardContextView.value,
+		baseRewriteActiveWindowOcrMode: rewriteActiveWindowOcrModeView.value,
 		baseQuickReplaceActiveWindowOcrMode:
-			defaultProfile?.quick_replace_active_window_ocr_mode ??
-			settings?.quick_replace_active_window_ocr_mode ??
-			"off",
-		baseQuickAskActiveWindowOcrMode:
-			defaultProfile?.quick_ask_active_window_ocr_mode ??
-			settings?.quick_ask_active_window_ocr_mode ??
-			"off",
-		baseQuickAskDismissMode: quickAskDismissModeOrDefault(
-			defaultProfile?.quick_ask_dismiss_mode,
-			quickAskDismissModeOrDefault(settings?.quick_ask_dismiss_mode, "manual"),
-		),
+			quickReplaceActiveWindowOcrModeView.value,
+		baseQuickAskActiveWindowOcrMode: quickAskActiveWindowOcrModeView.value,
+		baseQuickAskDismissMode: quickAskDismissModeView.value,
 	};
 }

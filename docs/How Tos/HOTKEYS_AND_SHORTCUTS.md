@@ -30,7 +30,7 @@ There are **two shortcut mechanisms**:
    - Implemented via a low-level keyboard hook.
    - File: `app/src-tauri/src/windows_modifier_hotkeys.rs`
    - Forwards events to:
-     - `app/src-tauri/src/lib.rs` → `handle_modifier_key_event(...)`
+     - `app/src-tauri/src/shortcuts/mod.rs` → `handle_modifier_key_event(...)`
    - This exists because OS-level hotkey APIs (and the Tauri global shortcut plugin) generally
      do **not** support “modifier-only” hotkeys.
 
@@ -153,20 +153,32 @@ There are two separate registration paths:
 
 1. Startup registration:
 
-   - `app/src-tauri/src/lib.rs` → `register_initial_shortcuts(...)`
+   - `app/src-tauri/src/shortcuts/mod.rs` → `register_initial_shortcuts(...)`
 
 2. Runtime registration (when user changes settings):
-  - `app/src-tauri/src/commands/settings.rs` → `register_shortcuts` / `unregister_shortcuts`
-  - Reads `hotkey_shortcuts` (cards) and supports multiple cards per action.
+
+    - `app/src-tauri/src/commands/settings.rs` → `register_shortcuts` / `unregister_shortcuts`
+    - Reads `hotkey_shortcuts` (cards) and supports multiple cards per action.
+
+Both paths delegate shared registration decisions to:
+
+- `app/src-tauri/src/shortcuts/lifecycle.rs`
+  - `register_hotkey_cards(...)`
+  - `sync_windows_modifier_hook_flags(...)`
+  - `is_windows_hook_handled_hotkey(...)`
+
+Keep provider-like mechanics separate: `shortcuts/lifecycle.rs` decides which cards are registered
+through the global-shortcut plugin vs. the Windows hook, while `windows_modifier_hotkeys.rs` remains
+the Windows hook Adapter itself.
 
 ### Shortcut event handling
 
-- `app/src-tauri/src/lib.rs` → `handle_shortcut_event(...)`
+- `app/src-tauri/src/shortcuts/mod.rs` → `handle_shortcut_event(...)`
 
   - Routes shortcut events to toggle/hold/paste actions.
 
 - Windows modifier-only events:
-  - `app/src-tauri/src/lib.rs` → `handle_modifier_key_event(...)`
+  - `app/src-tauri/src/shortcuts/mod.rs` → `handle_modifier_key_event(...)`
 
 ---
 
@@ -185,7 +197,8 @@ Checklist:
 
 3. **Backend startup registration**
 
-   - `app/src-tauri/src/lib.rs` → `register_initial_shortcuts(...)`
+   - `app/src-tauri/src/shortcuts/mod.rs` → `register_initial_shortcuts(...)`
+   - Shared registration rules live in `app/src-tauri/src/shortcuts/lifecycle.rs`.
    - If the default is **modifier-only** on Windows (e.g. `AltRight`), ensure startup code:
      - does **not** attempt to register it via the global shortcut plugin
      - does **not** fall back to some legacy default key
@@ -204,26 +217,27 @@ Example: add a new shortcut action `foo`.
 
 1. Add new action type
 
-  - `app/src/lib/hotkeys.ts` → add to `HotkeyType`
-  - `app/src-tauri/src/settings.rs` → add to `HotkeyAction`
+   - `app/src/lib/hotkeys.ts` → add to `HotkeyType`
+   - `app/src-tauri/src/settings.rs` → add to `HotkeyAction`
 
 2. Add card support
 
-  - Update card label/description in `HotkeySettings.tsx`.
-  - Update any defaults/seeding if needed.
+   - Update card label/description in `HotkeySettings.tsx`.
+   - Update any defaults/seeding if needed.
 
 3. Update backend card handling
 
-  - `app/src-tauri/src/shortcuts/mod.rs` → handle new action in dispatch.
-  - Ensure registration reads cards (already supports duplicates).
+   - `app/src-tauri/src/shortcuts/mod.rs` → handle new action in dispatch.
+   - Ensure registration reads cards (already supports duplicates).
 
 4. Update frontend mutations
 
-  - Use card CRUD mutations in `app/src/lib/queries.ts`.
-  - Add duplicate validation in `hotkeyMutations.ts` if needed.
+   - Use card CRUD mutations in `app/src/lib/queries.ts`.
+   - Add duplicate validation in `hotkeyMutations.ts` if needed.
 
 5. Update UI
-  - Add the new type to the dropdown list in `HotkeySettings.tsx`.
+
+    - Add the new type to the dropdown list in `HotkeySettings.tsx`.
 
 ### Backend
 
@@ -236,9 +250,13 @@ Example: add a new shortcut action `foo`.
 
    - `app/src-tauri/src/commands/settings.rs` → `register_shortcuts`
    - Also update startup registration:
-     - `app/src-tauri/src/lib.rs` → `register_initial_shortcuts`
+     - `app/src-tauri/src/shortcuts/mod.rs` → `register_initial_shortcuts`
+   - If the new action changes common registration rules, update
+     `app/src-tauri/src/shortcuts/lifecycle.rs` so restart-time and settings-change behavior stay
+     aligned.
 
 3. Handle the action
+
    - Extend `handle_shortcut_event(...)` (and `handle_modifier_key_event(...)` if you want
      modifier-only support on Windows).
 
@@ -304,11 +322,12 @@ You should see entries like:
 
 ### 2) Startup registration vs runtime registration
 
-There are two different registration functions (startup vs runtime). When you change anything
-about hotkeys, verify you updated both.
+There are two different registration entrypoints (startup vs runtime). They share common lifecycle
+helpers, but you still need to think about both call sites when changing hotkeys.
 
-- Startup: `register_initial_shortcuts` (in `lib.rs`)
+- Startup: `shortcuts/mod.rs::register_initial_shortcuts`
 - Runtime: `commands/settings.rs::register_shortcuts`
+- Shared lifecycle decisions: `shortcuts/lifecycle.rs`
 
 If only one is updated, you can get different behavior after restart vs after changing settings.
 

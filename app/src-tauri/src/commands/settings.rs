@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager};
 use crate::commands::CommandError;
 use crate::commands::CommandResult;
 #[cfg(desktop)]
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 #[cfg(desktop)]
 use tauri_plugin_store::StoreExt;
@@ -72,13 +72,6 @@ pub fn forward_modifier_key_event(_app: AppHandle, _key: String, _is_down: bool)
     // No-op on non-Windows platforms
 }
 
-#[cfg(all(desktop, target_os = "windows"))]
-fn is_windows_hook_handled_hotkey(hk: &HotkeyConfig) -> bool {
-    // These are handled by a low-level Windows keyboard hook, not by
-    // tauri-plugin-global-shortcut.
-    hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight" | "Copilot")
-}
-
 /// Temporarily unregister all global shortcuts.
 /// Call this before capturing a new hotkey to prevent the shortcuts from intercepting key presses.
 #[cfg(desktop)]
@@ -126,90 +119,12 @@ pub async fn register_shortcuts(app: AppHandle) -> CommandResult<()> {
     // - null => disabled
     // - invalid => default
     let cards = crate::shortcuts::get_hotkey_cards_from_store(&app);
-
-    // Keep Windows hook behavior in sync with settings.
-    #[cfg(target_os = "windows")]
-    {
-        let copilot_enabled = cards.iter().any(|card| {
-            card.hotkey
-                .as_ref()
-                .is_some_and(|hk| hk.modifiers.is_empty() && hk.key == "Copilot")
-        });
-        let alt_right_enabled = cards.iter().any(|card| {
-            card.hotkey
-                .as_ref()
-                .is_some_and(|hk| hk.modifiers.is_empty() && hk.key == "AltRight")
-        });
-
-        crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
-        crate::windows_modifier_hotkeys::set_alt_right_hotkey_enabled(alt_right_enabled);
-    }
-
-    let mut hotkey_summaries: Vec<String> = Vec::new();
-    for card in &cards {
-        let Some(hotkey) = card.hotkey.as_ref() else {
-            continue;
-        };
-        hotkey_summaries.push(hotkey.to_shortcut_string());
-    }
-    log::info!(
-        "Re-registering {} shortcut cards: {}",
-        hotkey_summaries.len(),
-        if hotkey_summaries.is_empty() {
-            "<disabled>".to_string()
-        } else {
-            hotkey_summaries.join(", ")
-        }
-    );
-
-    // Get the global shortcut manager
-    let shortcut_manager = app.global_shortcut();
-
-    // Unregister all existing shortcuts
-    shortcut_manager
-        .unregister_all()
-        .map_err(|e| format!("Failed to unregister shortcuts: {}", e))?;
-
-    // Collect shortcuts to register
-    let mut shortcuts: Vec<Shortcut> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    fn push_unique(shortcuts: &mut Vec<Shortcut>, seen: &mut HashSet<String>, sc: Shortcut) {
-        let k = sc.to_string();
-        if seen.insert(k) {
-            shortcuts.push(sc);
-        } else {
-            log::warn!("Duplicate hotkey detected; skipping duplicate registration");
-        }
-    }
-    for card in &cards {
-        let Some(hk) = card.hotkey.as_ref() else {
-            continue;
-        };
-
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(hk) {
-            // handled by Windows hook
-            continue;
-        }
-
-        match hk.to_shortcut() {
-            Ok(sc) => push_unique(&mut shortcuts, &mut seen, sc),
-            Err(e) => log::warn!(
-                "Invalid hotkey in settings store ({}); treating as disabled",
-                e
-            ),
-        }
-    }
-
-    // Register new shortcuts with handler (skip if all are disabled)
-    if !shortcuts.is_empty() {
-        shortcut_manager
-            .on_shortcuts(shortcuts, |app, shortcut, event| {
-                crate::handle_shortcut_event(app, shortcut, &event);
-            })
-            .map_err(|e| format!("Failed to register shortcuts: {}", e))?;
-    }
+    crate::shortcuts::sync_windows_modifier_hook_flags(&cards);
+    crate::shortcuts::register_hotkey_cards(
+        &app,
+        &cards,
+        crate::shortcuts::HotkeyRegistrationMode::RuntimeReplaceAll,
+    )?;
 
     // If we're currently recording/transcribing, re-enable Escape-to-cancel.
     // (Registering hotkeys unregisters all shortcuts, which would otherwise drop Escape.)
@@ -219,7 +134,6 @@ pub async fn register_shortcuts(app: AppHandle) -> CommandResult<()> {
         .unwrap_or(false);
     crate::set_escape_cancel_shortcut_enabled(&app, should_enable_escape);
 
-    log::info!("Shortcuts re-registered successfully");
     Ok(())
 }
 
@@ -261,7 +175,7 @@ fn validate_hotkey_shortcut_cards(cards: &[HotkeyShortcutCard]) -> CommandResult
         let needs_global_shortcut = {
             #[cfg(all(desktop, target_os = "windows"))]
             {
-                !is_windows_hook_handled_hotkey(hotkey)
+                !crate::shortcuts::is_windows_hook_handled_hotkey(hotkey)
             }
             #[cfg(not(all(desktop, target_os = "windows")))]
             {

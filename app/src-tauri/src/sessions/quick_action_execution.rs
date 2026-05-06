@@ -24,6 +24,7 @@ use crate::sessions::quick_action_lifecycle::{
     QuickActionKind, QuickActionProbePlan, QuickAskEffectiveConfig, QuickAskGlobalConfig,
     QuickAskProfileConfig, QuickReplaceConfig,
 };
+use crate::sessions::recording_finalization;
 use crate::sessions::{context_collection, quick_ask};
 use crate::state::QuickAskConversationMemory;
 use crate::stats;
@@ -74,21 +75,9 @@ pub(crate) fn complete_current_request_with_cost(
     request_id: Option<&str>,
     status: stats::EventStatus,
 ) {
-    if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        if let Some(wav) = pipeline.clone_last_wav_bytes() {
-            stats::emit_cost_events_for_current_request(app, status, Some(&wav));
-        }
-
-        log_store.complete_current();
-    }
-
-    end_ocr_session_for_request(pipeline, request_id);
-}
-
-pub(crate) fn end_ocr_session_for_request(pipeline: &SharedPipeline, request_id: Option<&str>) {
-    if let Some(req_id) = request_id {
-        pipeline.end_ocr_session_if_matches(req_id);
-    }
+    recording_finalization::complete_current_request_with_pipeline_wav(
+        app, pipeline, request_id, status,
+    );
 }
 
 /// Resolve the settings-store side of Quick Ask config.

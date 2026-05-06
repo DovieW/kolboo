@@ -131,9 +131,7 @@ use request_log::RequestLogStore;
 use state::{AppState, MicTestMeterState, QuickAskConversationMemory, TrayKeepAlive};
 
 #[cfg(desktop)]
-pub(crate) use shortcuts::{
-    cancel_pipeline_session, handle_shortcut_event, set_escape_cancel_shortcut_enabled,
-};
+pub(crate) use shortcuts::{cancel_pipeline_session, set_escape_cancel_shortcut_enabled};
 
 #[cfg(desktop)]
 pub(crate) use app_shared::{emit_system_event, get_setting_from_store};
@@ -653,115 +651,41 @@ pub(crate) fn stop_recording(
                             || (quick_replace_cfg.enabled
                                 && quick_replace_probe_plan.should_await()));
 
+                        let completion_log_message = if should_complete_now {
+                            "Transcription completed; output pending"
+                        } else if is_quick_ask_session {
+                            "Transcription completed; Quick Ask answer pending"
+                        } else {
+                            // Quick Replace keeps the request log open for its follow-up LLM call,
+                            // so avoid labeling that path as Quick Ask in diagnostics.
+                            "Transcription completed; Quick Replace rewrite pending"
+                        };
+
                         log_store.with_current(|log| {
-                            // Raw STT output (pre-LLM)
-                            log.raw_transcript = Some(result.stt_text.clone());
-
-                            // Final output after pipeline + hallucination filtering (if any)
-                            if let Some(ref text) = filtered_transcript {
-                                log.formatted_transcript = Some(text.clone());
-                            }
-
-                            log.stt_duration_ms = Some(result.stt_duration_ms);
-                            log.llm_duration_ms = result.llm_duration_ms;
-
-                            // Persist a structured outcome so the UI can surface
-                            // why rewrite didn't run (common confusion when STT succeeds).
-                            log.llm_outcome = Some(result.llm_outcome.code().to_string());
-                            log.llm_not_attempted_reason = None;
-                            log.llm_error_message = None;
-
-                            // Use the provider instance's model (includes provider defaults) so
-                            // the UI can show the real model used. If we didn't attempt LLM
-                            // formatting, clear any pre-populated provider/model values.
-                            if result.llm_attempted() {
-                                log.llm_provider = result.llm_provider_used.clone();
-                                log.llm_model = result.llm_model_used.clone();
-                            } else {
-                                log.llm_provider = None;
-                                log.llm_model = None;
-                            }
-
-                            log.info(format!(
-                                "STT completed in {}ms ({} chars)",
-                                result.stt_duration_ms,
-                                result.stt_text.len()
-                            ));
-
-                            match &result.llm_outcome {
-                                pipeline::LlmOutcome::NotAttempted(reason) => {
-                                    log.llm_not_attempted_reason =
-                                        Some(reason.code().to_string());
-                                    if let pipeline::LlmNotAttemptedReason::ProviderUnavailable { .. } = reason {
-                                        log.llm_error_message = Some(reason.to_log_details());
-                                    }
-                                    log.info_with_details(
-                                        "LLM formatting not attempted",
-                                        reason.to_log_details(),
-                                    );
-                                }
-                                pipeline::LlmOutcome::Succeeded => {
-                                    if let Some(ms) = result.llm_duration_ms {
-                                        log.info(format!(
-                                            "LLM formatting succeeded in {}ms ({} -> {} chars)",
-                                            ms,
-                                            result.stt_text.len(),
-                                            result.final_text.len()
-                                        ));
-                                    } else {
-                                        log.info("LLM formatting succeeded");
-                                    }
-                                }
-                                pipeline::LlmOutcome::TimedOut => {
-                                    if let Some(ms) = result.llm_duration_ms {
-                                        log.warn(format!(
-                                            "LLM formatting timed out after {}ms; fell back to STT transcript",
-                                            ms
-                                        ));
-                                    } else {
-                                        log.warn("LLM formatting timed out; fell back to STT transcript");
-                                    }
-                                }
-                                pipeline::LlmOutcome::Failed(err) => {
-                                    log.llm_error_message = Some(err.clone());
-                                    log.warn(format!(
-                                        "LLM formatting failed; fell back to STT transcript ({})",
-                                        err
-                                    ));
-                                }
-                            }
-
-                            if filtered_transcript.is_none() {
-                                log.warn("No transcript output (empty/whitespace)");
-                            }
-
-                            if should_complete_now {
-                                log.info("Transcription completed; output pending");
-                            } else {
-                                log.info("Transcription completed; Quick Ask answer pending");
-                            }
+                            sessions::recording_finalization::record_transcription_success(
+                                log,
+                                sessions::recording_finalization::TranscriptionSuccessLogUpdate {
+                                    result: &result,
+                                    formatted_transcript: filtered_transcript.as_deref(),
+                                    audio_duration_secs: None,
+                                    audio_size_bytes: None,
+                                    stt_summary_label: "STT",
+                                    completion_log_message: Some(completion_log_message),
+                                    warn_if_no_formatted_transcript: true,
+                                },
+                            );
                         });
 
                         if should_complete_now {
                             complete_request_log_after_output = true;
                         }
 
-                        // Persist preset metadata into History (best-effort).
-                        // The pipeline decides preset selection during routing and stores it
-                        // into the current RequestLog; we mirror that into History so the
-                        // History badge matches Request Logs.
-                        if let Some(req_id) = request_id.as_deref() {
-                            let preset_meta = log_store.with_current(|log| {
-                                (log.preset_id.clone(), log.preset_name.clone())
-                            });
-                            if let Some((preset_id, preset_name)) = preset_meta {
-                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                    let _ =
-                                        history.set_request_preset(req_id, preset_id, preset_name);
-                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
-                                }
-                            }
-                        }
+                        // The pipeline decides preset selection during routing and stores it into
+                        // the current RequestLog; mirror it into History so UI badges stay aligned.
+                        sessions::recording_finalization::persist_current_request_preset_to_history(
+                            &app_clone,
+                            request_id.as_deref(),
+                        );
 
                         // Persist cost/usage stats (best-effort).
                         // For Quick Ask sessions we emit stats after the answer step so we can
@@ -894,19 +818,14 @@ pub(crate) fn stop_recording(
                             if let Some(req_id) = request_id.as_ref() {
                                 if let Some(history) = app_clone.try_state::<HistoryStorage>() {
                                     let _ = history.complete_request_success(req_id, String::new());
-
-                                    let (provider, model) = if result.llm_attempted() {
-                                        (
-                                            result.llm_provider_used.clone(),
-                                            result.llm_model_used.clone(),
-                                        )
-                                    } else {
-                                        (None, None)
-                                    };
-                                    let _ = history.set_request_llm_model(req_id, provider, model);
-                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
                                 }
                             }
+
+                            sessions::recording_finalization::persist_history_llm_metadata(
+                                &app_clone,
+                                request_id.as_deref(),
+                                &result,
+                            );
                         }
 
                         // Time-based retention (best-effort). This path is used by global shortcuts.
@@ -972,22 +891,14 @@ pub(crate) fn stop_recording(
                                 log.warn("Recording cancelled by user");
                                 log.complete_cancelled();
                             });
-
-                            // Persist cost/usage stats (best-effort).
-                            if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                                stats::emit_cost_events_for_current_request(
-                                    &app_clone,
-                                    stats::EventStatus::Cancelled,
-                                    Some(&wav),
-                                );
-                            }
-
-                            log_store.complete_current();
                         }
 
-                        if let Some(req_id) = request_id.as_deref() {
-                            pipeline_clone.end_ocr_session_if_matches(req_id);
-                        }
+                        sessions::recording_finalization::complete_current_request_with_pipeline_wav(
+                            &app_clone,
+                            &pipeline_clone,
+                            request_id.as_deref(),
+                            stats::EventStatus::Cancelled,
+                        );
 
                         // Notify frontend and hide overlay if needed.
                         let _ = app_clone.emit(events::EVENT_PIPELINE_CANCELLED, ());
@@ -1045,22 +956,14 @@ pub(crate) fn stop_recording(
                             );
                             log.complete_error(e.to_string());
                         });
-
-                        // Persist cost/usage stats (best-effort).
-                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                            stats::emit_cost_events_for_current_request(
-                                &app_clone,
-                                stats::EventStatus::Error,
-                                Some(&wav),
-                            );
-                        }
-
-                        log_store.complete_current();
                     }
 
-                    if let Some(req_id) = request_id.as_deref() {
-                        pipeline_clone.end_ocr_session_if_matches(req_id);
-                    }
+                    sessions::recording_finalization::complete_current_request_with_pipeline_wav(
+                        &app_clone,
+                        &pipeline_clone,
+                        request_id.as_deref(),
+                        stats::EventStatus::Error,
+                    );
 
                     // Persist audio for retry (best-effort)
                     if let (Some(req_id), Some(store)) = (

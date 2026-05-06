@@ -75,9 +75,9 @@ import {
 	normalizeAuthReasonCode,
 } from "./tauri/license";
 import {
-  applySettingsRuntimeSyncPolicy,
-  classifySettingsRuntimeEffects,
-  type SettingsQueryInvalidation,
+	applySettingsRuntimeSyncPolicy,
+	classifySettingsRuntimeEffects,
+	type SettingsQueryInvalidation,
 } from "./tauri/settingsSync";
 
 export function toManagedInferenceMessage(error: unknown): string {
@@ -313,37 +313,37 @@ export function usePolicyState() {
 }
 
 export async function applySettingsQueryInvalidations(
-  queryClient: Pick<QueryClient, "invalidateQueries">,
-  invalidations: readonly SettingsQueryInvalidation[],
+	queryClient: Pick<QueryClient, "invalidateQueries">,
+	invalidations: readonly SettingsQueryInvalidation[],
 ): Promise<void> {
-  await Promise.all(
-    invalidations.map((invalidation) =>
-      queryClient.invalidateQueries({ queryKey: invalidation.queryKey }),
-    ),
-  );
+	await Promise.all(
+		invalidations.map((invalidation) =>
+			queryClient.invalidateQueries({ queryKey: invalidation.queryKey }),
+		),
+	);
 }
 
 export async function invalidatePolicyRelatedQueries(
 	queryClient: Pick<QueryClient, "invalidateQueries">,
 ): Promise<void> {
 	await applySettingsQueryInvalidations(
-    queryClient,
-    classifySettingsRuntimeEffects({ policyNormalized: true })
-      .queryInvalidations,
-  );
+		queryClient,
+		classifySettingsRuntimeEffects({ policyNormalized: true })
+			.queryInvalidations,
+	);
 }
 
 export async function invalidateLicenseRelatedQueries(
 	queryClient: Pick<QueryClient, "invalidateQueries">,
 ): Promise<void> {
 	await applySettingsQueryInvalidations(
-    queryClient,
-    classifySettingsRuntimeEffects({
-      patch: { license_state: true },
-    }).queryInvalidations.filter(
-      (invalidation) => invalidation.reason === "license",
-    ),
-  );
+		queryClient,
+		classifySettingsRuntimeEffects({
+			patch: { license_state: true },
+		}).queryInvalidations.filter(
+			(invalidation) => invalidation.reason === "license",
+		),
+	);
 }
 
 export async function invalidateLogoutRelatedQueries(

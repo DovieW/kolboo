@@ -4,6 +4,7 @@ import type {
 	AppSettings,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
+import { resolvePromptProfileFallbacks } from "./effectivePromptSettings";
 
 // Keep this aligned with backend defaults (see Quick Replace config resolution in `src-tauri/src/lib.rs`).
 const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT =
@@ -169,31 +170,24 @@ export function usePromptProviderOptions({
 			: null;
 
 	const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
-
-	const defaultQuickReplaceEnabled =
-		typeof defaultProfile?.quick_replace_enabled === "boolean"
-			? defaultProfile.quick_replace_enabled
-			: (settings?.quick_replace_enabled ?? false);
-	const defaultQuickReplaceProvider =
-		defaultProfile?.quick_replace_provider ?? settings?.llm_provider ?? null;
-	const defaultQuickReplaceModel =
-		defaultProfile?.quick_replace_model ?? settings?.llm_model ?? null;
-	const defaultQuickReplaceSystemPromptValue =
-		defaultProfile?.quick_replace_system_prompt ??
-		DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT;
-
-	const defaultRewriteIncludeClipboardContext =
-		typeof defaultProfile?.rewrite_include_clipboard_context === "boolean"
-			? defaultProfile.rewrite_include_clipboard_context
-			: false;
-	const defaultQuickReplaceIncludeClipboardContext =
-		typeof defaultProfile?.quick_replace_include_clipboard_context === "boolean"
-			? defaultProfile.quick_replace_include_clipboard_context
-			: false;
-	const defaultQuickAskIncludeClipboardContext =
-		typeof defaultProfile?.quick_ask_include_clipboard_context === "boolean"
-			? defaultProfile.quick_ask_include_clipboard_context
-			: false;
+	const {
+		baseQuickReplaceEnabled: defaultQuickReplaceEnabled,
+		baseQuickReplaceProvider: defaultQuickReplaceProvider,
+		baseQuickReplaceModel: defaultQuickReplaceModel,
+		baseQuickReplaceSystemPrompt: defaultQuickReplaceSystemPromptValue,
+		baseRewriteIncludeClipboardContext: defaultRewriteIncludeClipboardContext,
+		baseQuickReplaceIncludeClipboardContext:
+			defaultQuickReplaceIncludeClipboardContext,
+		baseQuickAskIncludeClipboardContext: defaultQuickAskIncludeClipboardContext,
+	} = resolvePromptProfileFallbacks({
+		defaultProfile,
+		settings: {
+			quick_replace_enabled: settings?.quick_replace_enabled,
+			llm_provider: settings?.llm_provider,
+			llm_model: settings?.llm_model,
+		},
+		defaultQuickReplaceSystemPrompt: DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT,
+	});
 
 	const quickAskIncludeSelectedText =
 		settings?.quick_ask_include_selected_text ?? false;

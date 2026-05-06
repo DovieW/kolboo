@@ -790,6 +790,24 @@ impl RequestLogStore {
 
     /// Start a new request log
     pub fn start_request(&self, stt_provider: String, stt_model: Option<String>) -> String {
+        self.start_request_with(stt_provider, stt_model, |_| {})
+    }
+
+    /// Start a new request log and stamp initial metadata before it becomes current.
+    ///
+    /// Several recording command paths need the same lifecycle shape: start a new current request,
+    /// seed profile/model context, then let asynchronous STT/LLM work mutate it. Keeping the seed
+    /// closure inside the store prevents callers from doing `start_request(...)` followed by a
+    /// separate `with_current(...)` pass that can drift or forget fields.
+    pub fn start_request_with<F>(
+        &self,
+        stt_provider: String,
+        stt_model: Option<String>,
+        seed: F,
+    ) -> String
+    where
+        F: FnOnce(&mut RequestLog),
+    {
         let mut current = lock_or_recover(&self.current);
 
         // If there's an existing request, finalize it first
@@ -800,7 +818,8 @@ impl RequestLogStore {
             self.store_log(existing);
         }
 
-        let log = RequestLog::new(stt_provider, stt_model);
+        let mut log = RequestLog::new(stt_provider, stt_model);
+        seed(&mut log);
         let id = log.id.clone();
         *current = Some(log);
         id
@@ -973,6 +992,45 @@ mod tests {
             assert_eq!(log.id, new_id);
             assert_eq!(log.ocr_status.as_deref(), Some("running"));
         });
+    }
+
+    #[test]
+    fn start_request_with_seeds_metadata_before_request_is_current() {
+        let store = RequestLogStore::new();
+
+        let id =
+            store.start_request_with("openai".to_string(), Some("whisper".to_string()), |log| {
+                log.profile_id = Some("default".to_string());
+                log.profile_name = Some("Default".to_string());
+                log.llm_provider = Some("anthropic".to_string());
+                log.info("seeded");
+            });
+
+        store.with_current(|log| {
+            assert_eq!(log.id, id);
+            assert_eq!(log.profile_id.as_deref(), Some("default"));
+            assert_eq!(log.profile_name.as_deref(), Some("Default"));
+            assert_eq!(log.llm_provider.as_deref(), Some("anthropic"));
+            assert_eq!(log.entries.len(), 1);
+        });
+    }
+
+    #[test]
+    fn start_request_with_preserves_previous_request_rollover() {
+        let store = RequestLogStore::new();
+
+        let first = store.start_request("groq".to_string(), None);
+        let second = store.start_request_with("openai".to_string(), None, |log| {
+            log.profile_name = Some("Second".to_string());
+        });
+
+        assert_ne!(first, second);
+        let logs = store.get_logs(None);
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].id, second);
+        assert_eq!(logs[0].profile_name.as_deref(), Some("Second"));
+        assert_eq!(logs[1].id, first);
+        assert_eq!(logs[1].status, RequestStatus::Cancelled);
     }
 
     #[test]

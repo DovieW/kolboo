@@ -17,8 +17,8 @@ use super::http;
 use super::language;
 use super::openai_compat;
 use super::streaming::{
-    connect_ws_split_with_timeout, is_ws_closed_error, ws_next_with_timeout, PartialTranscript,
-    StreamingSttSession,
+    connect_ws_split_with_timeout, ws_close_best_effort, ws_next_with_timeout,
+    ws_send_json_text_with_closed_handling, PartialTranscript, StreamingSttSession, WsSendOutcome,
 };
 use super::{AudioFormat, SttError, SttProvider};
 use crate::audio_normalization::{
@@ -27,7 +27,6 @@ use crate::audio_normalization::{
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use futures_util::SinkExt;
 use serde_json::json;
 use serde_json::Value as JsonValue;
 use std::time::Duration;
@@ -331,15 +330,18 @@ impl OpenAiSttProvider {
             }
         });
 
-        ws_write
-            .send(Message::Text(session_update.to_string().into()))
-            .await
-            .map_err(|e| {
-                SttError::NetworkMessage(format!(
-                    "WS send transcription_session.update failed: {}",
-                    e
-                ))
-            })?;
+        if ws_send_json_text_with_closed_handling(
+            &mut ws_write,
+            &session_update,
+            "OpenAI realtime: send transcription_session.update",
+        )
+        .await?
+            == WsSendOutcome::Closed
+        {
+            return Err(SttError::NetworkMessage(
+                "OpenAI realtime: WebSocket closed before session update completed".to_string(),
+            ));
+        }
 
         // Chunk size in 24 kHz PCM s16le bytes (50ms target for snappy partials).
         let target_chunk_bytes =
@@ -399,18 +401,18 @@ impl OpenAiSttProvider {
                                     "type": "input_audio_buffer.append",
                                     "audio": STANDARD.encode(&chunk),
                                 });
-                                match ws_write.send(Message::Text(msg.to_string().into())).await {
-                                    Ok(()) => {
+                                match ws_send_json_text_with_closed_handling(
+                                    &mut ws_write,
+                                    &msg,
+                                    "OpenAI realtime: send audio append",
+                                ).await? {
+                                    WsSendOutcome::Sent => {
                                         num_chunks_sent += 1;
                                         has_audio_since_last_commit = true;
                                     }
-                                    Err(e) if is_ws_closed_error(&e) => {
-                                        log::warn!("OpenAI realtime: WS closed while sending audio, finishing early");
+                                    WsSendOutcome::Closed => {
                                         ws_done = true;
                                         break;
-                                    }
-                                    Err(e) => {
-                                        return Err(SttError::NetworkMessage(format!("WS send failed: {}", e)));
                                     }
                                 }
                             }
@@ -423,20 +425,20 @@ impl OpenAiSttProvider {
                                     "type": "input_audio_buffer.append",
                                     "audio": STANDARD.encode(&pcm_buffer),
                                 });
-                                match ws_write.send(Message::Text(msg.to_string().into())).await {
-                                    Ok(()) => {
+                                match ws_send_json_text_with_closed_handling(
+                                    &mut ws_write,
+                                    &msg,
+                                    "OpenAI realtime: send final audio append",
+                                ).await? {
+                                    WsSendOutcome::Sent => {
                                         num_chunks_sent += 1;
                                         has_audio_since_last_commit = true;
                                     }
-                                    Err(e) if is_ws_closed_error(&e) => {
-                                        log::warn!("OpenAI realtime: WS closed while sending final audio");
+                                    WsSendOutcome::Closed => {
                                         audio_done = true;
                                         ws_done = true;
                                         pcm_buffer.clear();
                                         continue;
-                                    }
-                                    Err(e) => {
-                                        return Err(SttError::NetworkMessage(format!("WS send failed: {}", e)));
                                     }
                                 }
                                 pcm_buffer.clear();
@@ -447,17 +449,17 @@ impl OpenAiSttProvider {
                             // causes the server to return an error.
                             if has_audio_since_last_commit {
                                 let commit = json!({ "type": "input_audio_buffer.commit" });
-                                match ws_write.send(Message::Text(commit.to_string().into())).await {
-                                    Ok(()) => {
+                                match ws_send_json_text_with_closed_handling(
+                                    &mut ws_write,
+                                    &commit,
+                                    "OpenAI realtime: send final commit",
+                                ).await? {
+                                    WsSendOutcome::Sent => {
                                         awaiting_final_commit = true;
                                         log::debug!("OpenAI realtime: sent final commit (audio done)");
                                     }
-                                    Err(e) if is_ws_closed_error(&e) => {
-                                        log::warn!("OpenAI realtime: WS closed while sending commit");
+                                    WsSendOutcome::Closed => {
                                         ws_done = true;
-                                    }
-                                    Err(e) => {
-                                        return Err(SttError::NetworkMessage(format!("WS send commit failed: {}", e)));
                                     }
                                 }
                             } else {
@@ -642,15 +644,7 @@ impl OpenAiSttProvider {
             }
         }
 
-        // Best-effort close with a short timeout.
-        match tokio::time::timeout(Duration::from_secs(3), ws_write.send(Message::Close(None)))
-            .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) if is_ws_closed_error(&e) => {}
-            Ok(Err(e)) => log::debug!("OpenAI realtime: WS close send error: {}", e),
-            Err(_) => log::debug!("OpenAI realtime: WS close send timed out"),
-        }
+        ws_close_best_effort(&mut ws_write, "OpenAI realtime", Duration::from_secs(3)).await;
 
         // Drop the write half explicitly so the TCP connection tears down cleanly.
         drop(ws_write);

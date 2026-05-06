@@ -3,6 +3,15 @@ use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(desktop)]
+mod lifecycle;
+
+#[cfg(desktop)]
+pub(crate) use lifecycle::{
+    is_windows_hook_handled_hotkey, register_hotkey_cards, sync_windows_modifier_hook_flags,
+    HotkeyRegistrationMode,
+};
+
+#[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
 #[cfg(desktop)]
@@ -208,18 +217,6 @@ fn card_matches_modifier_only(card: &HotkeyShortcutCard, key: &str) -> bool {
     card.hotkey
         .as_ref()
         .is_some_and(|hk| hk.modifiers.is_empty() && hk.key == key)
-}
-
-#[cfg(desktop)]
-fn hotkey_action_label(action: HotkeyAction) -> &'static str {
-    match action {
-        HotkeyAction::Toggle => "Toggle",
-        HotkeyAction::Hold => "Hold",
-        HotkeyAction::PasteLast => "PasteLast",
-        HotkeyAction::Retry => "Retry",
-        HotkeyAction::QuickAskHold => "QuickAskHold",
-        HotkeyAction::QuickAskToggle => "QuickAskToggle",
-    }
 }
 
 /// Read a hotkey setting from the store.
@@ -1493,129 +1490,13 @@ pub(crate) fn handle_modifier_key_event(
 pub(crate) fn register_initial_shortcuts(
     app: &AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(all(desktop, target_os = "windows"))]
-    fn is_windows_hook_handled_hotkey(hk: &HotkeyConfig) -> bool {
-        hk.modifiers.is_empty() && matches!(hk.key.as_str(), "AltRight" | "Copilot")
-    }
-
     let cards = get_hotkey_cards_from_store(app);
 
-    // Keep Windows hook behavior in sync with settings at startup.
-    #[cfg(target_os = "windows")]
-    {
-        let copilot_enabled = cards
-            .iter()
-            .any(|card| card_matches_modifier_only(card, "Copilot"));
-        let alt_right_enabled = cards
-            .iter()
-            .any(|card| card_matches_modifier_only(card, "AltRight"));
-
-        crate::windows_modifier_hotkeys::set_copilot_hotkey_enabled(copilot_enabled);
-        crate::windows_modifier_hotkeys::set_alt_right_hotkey_enabled(alt_right_enabled);
-    }
-
-    // Convert to shortcut strings with validation.
-    //
-    // Windows-only note:
-    // - Modifier-only hotkeys (e.g. AltRight) are handled by the low-level hook
-    //   in windows_modifier_hotkeys.rs and are NOT registered with
-    //   tauri-plugin-global-shortcut.
-    //
-    // We must not fall back to a different key (like the historical F3) here,
-    // otherwise both keys can end up toggling recording.
-    // NOTE: We intentionally register each shortcut individually so that a conflict
-    // (e.g. another app already using Ctrl+F3) doesn't prevent the app from starting.
-    let mut hotkey_summaries: Vec<String> = Vec::new();
-    for card in &cards {
-        let Some(hotkey) = card.hotkey.as_ref() else {
-            continue;
-        };
-        hotkey_summaries.push(format!(
-            "{}: {}",
-            hotkey_action_label(card.kind),
-            hotkey.to_shortcut_string()
-        ));
-    }
-    log::info!(
-        "Registering {} shortcut cards: {}",
-        hotkey_summaries.len(),
-        if hotkey_summaries.is_empty() {
-            "<disabled>".to_string()
-        } else {
-            hotkey_summaries.join(", ")
-        }
-    );
-
-    let shortcut_manager = app.global_shortcut();
-
-    // Register each shortcut independently; on failure we log + emit a warning event.
-    let mut failures: Vec<String> = Vec::new();
-
-    let mut registered: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for card in &cards {
-        let Some(hotkey) = card.hotkey.as_ref() else {
-            continue;
-        };
-
-        #[cfg(all(desktop, target_os = "windows"))]
-        if is_windows_hook_handled_hotkey(hotkey) {
-            continue;
-        }
-
-        let shortcut_str = match hotkey.to_shortcut() {
-            Ok(_) => hotkey.to_shortcut_string(),
-            Err(e) => {
-                log::warn!(
-                    "Invalid {} hotkey in settings store ({}); treating as disabled",
-                    hotkey_action_label(card.kind),
-                    e
-                );
-                continue;
-            }
-        };
-
-        if !registered.insert(shortcut_str.clone()) {
-            log::warn!("Duplicate hotkey detected; skipping duplicate registration");
-            continue;
-        }
-
-        let shortcut = <Shortcut as std::str::FromStr>::from_str(&shortcut_str).map_err(|e| {
-            failures.push(format!(
-                "{} ({}) => failed to parse shortcut: {:?}",
-                hotkey_action_label(card.kind),
-                shortcut_str,
-                e
-            ));
-        });
-        if let Ok(shortcut) = shortcut {
-            if let Err(e) = shortcut_manager.on_shortcut(shortcut, |app, shortcut, event| {
-                handle_shortcut_event(app, shortcut, &event);
-            }) {
-                failures.push(format!(
-                    "{} ({}) => {}",
-                    hotkey_action_label(card.kind),
-                    shortcut_str,
-                    e
-                ));
-            }
-        }
-    }
-
-    if failures.is_empty() {
-        log::info!("Shortcuts registered successfully");
-    } else {
-        let details = failures.join("\n");
-        log::warn!(
-            "One or more shortcuts failed to register. The app will continue running, but some hotkeys may not work until you change them in Settings.\n{}",
-            details
-        );
-        emit_system_event(
-            app,
-            "warning",
-            "Some global hotkeys could not be registered",
-            Some(&details),
-        );
-    }
+    // Startup and runtime registration intentionally share lifecycle decisions so adding a
+    // hotkey action or Windows-hook Adapter cannot accidentally diverge after restart.
+    sync_windows_modifier_hook_flags(&cards);
+    register_hotkey_cards(app, &cards, HotkeyRegistrationMode::StartupBestEffort)
+        .map_err(|e| Box::<dyn std::error::Error>::from(std::io::Error::other(e)))?;
 
     // Never abort startup due to hotkey registration failures.
     Ok(())

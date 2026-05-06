@@ -6,9 +6,10 @@
 
 **Status:** Partially addressed by remaining module-deepening work (2026-05-06)
 
-`app/src-tauri/src/recording_orchestration.rs` now owns the duplicated command-side phase notification watchers for Routing/Rewriting events, but `app/src-tauri/src/commands/recording.rs` still owns several broad side-effect clusters:
+`app/src-tauri/src/recording_orchestration.rs` now owns the duplicated command-side phase notification watchers for Routing/Rewriting events, and `app/src-tauri/src/sessions/recording_finalization.rs` owns the narrow terminal request-log/cost/OCR cleanup helpers. `RequestLogStore::start_request_with(...)` also keeps command-side request creation + initial metadata seeding atomic.
 
-- request-log creation/fallback at stop/dictate/retry
+`app/src-tauri/src/commands/recording.rs` still owns several broad side-effect clusters:
+
 - in-progress History entry creation and completion
 - saved WAV persistence for retry/playback
 - cancellation/error cleanup
@@ -75,6 +76,11 @@ Progress (2026-05-05):
 
 - Added `app/src/components/settings/prompt/effectivePromptSettings.ts` to move prompt/profile fallback calculation out of `usePromptSettingsProfileState.ts`.
 - The prompt settings hook now uses the shared `settingsViews.ts::isInheritedSettingValue(...)` rule for profile inheritance checks.
+
+Progress (2026-05-06):
+
+- `resolvePromptProfileFallbacks(...)` now routes Default-profile/global fallback resolution through `settingsViews.ts::inheritedSettingView(...)`, including defensive normalization of malformed global fallback values.
+- `usePromptProviderOptions(...)` reuses the same prompt fallback helper instead of maintaining a separate Default-profile fallback chain.
 - Follow-up remains: route preset-specific editor state through `presetSettingView(...)` when preset editing gets touched again.
 
 ## Reduce maintenance cost of schema registry
@@ -136,7 +142,7 @@ Ideas:
 
 **Files involved:**
 - `app/src-tauri/src/windows_modifier_hotkeys.rs` — WH_KEYBOARD_LL hook
-- `app/src-tauri/src/commands/settings.rs` — `is_windows_hook_handled_hotkey()` determines routing
+- `app/src-tauri/src/shortcuts/lifecycle.rs` — `is_windows_hook_handled_hotkey()` determines registration routing
 - `app/src/hooks/useModifierKeyForwarder.ts` — JavaScript key forwarder (already handles AltRight)
 
 ## Centralize STT language normalization + mapping
@@ -181,6 +187,11 @@ Progress (2026-02-05):
 	- PCM s16le chunk sizing (`chunk_size_bytes_for_pcm_s16le`)
 - `ElevenLabsSttProvider` now uses these helpers for its realtime WS path.
 - `SpeechmaticsSttProvider` now reuses the shared chunk sizing helper.
+
+Progress (2026-05-06):
+
+- `stt/streaming.rs` now also owns provider-independent WS send/closed-socket handling and best-effort close helpers.
+- OpenAI Realtime and Deepgram streaming use those helpers for audio/control sends and close, while keeping provider protocol state machines in their adapters.
 
 Remaining gaps:
 
@@ -235,7 +246,7 @@ Remaining ideas:
 
 ## Consolidate duplicated Settings shell components
 
-**Status:** Partially addressed by architecture-deepening work (2026-05-05)
+**Status:** Completed by architecture-deepening work (2026-05-06)
 
 `app/src/App.tsx` currently contains both `_SettingsView` and `SettingsViewWithGuideLauncher`, and they each reimplement nearly the same:
 
@@ -255,7 +266,10 @@ Ideas:
 Progress (2026-05-05):
 
 - Added `app/src/components/settings/SettingsShell.tsx`, and the active Settings route now renders through this shared shell with an optional setup-guide launcher.
-- Follow-up remains: delete the legacy `_SettingsView` / legacy wrapper code from `App.tsx` once the shell has baked and no standalone entrypoint relies on the old definitions.
+
+Progress (2026-05-06):
+
+- Deleted the legacy inactive `_SettingsView` / legacy wrapper code from `App.tsx`; the active Settings route delegates to `SettingsShell` only.
 
 ## Deduplicate audio conversion utilities across STT streaming providers
 

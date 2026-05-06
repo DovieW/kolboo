@@ -155,6 +155,19 @@ describe("settings view helpers", () => {
 			source: "global",
 			explicitNull: false,
 		});
+		expect(
+			inheritedSettingView({
+				globalValue: "sideways" as never,
+				profile: inheritingProfile,
+				key: "overlay_mode",
+				defaultValue: "never" as const,
+				normalize: normalizeOverlayMode,
+			}),
+		).toEqual({
+			value: "never",
+			source: "default",
+			explicitNull: true,
+		});
 	});
 
 	it("resolves preset inheritance before profile and global values", () => {

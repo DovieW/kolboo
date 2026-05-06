@@ -109,6 +109,7 @@ export function inheritedSettingView<T>(params: {
 				params.globalValue,
 				params.defaultValue,
 				true,
+				params.normalize,
 			);
 		}
 
@@ -122,7 +123,12 @@ export function inheritedSettingView<T>(params: {
 		}
 	}
 
-	return resolveGlobalOrDefault(params.globalValue, params.defaultValue, false);
+	return resolveGlobalOrDefault(
+		params.globalValue,
+		params.defaultValue,
+		false,
+		params.normalize,
+	);
 }
 
 export function presetSettingView<T>(params: {
@@ -191,10 +197,24 @@ function resolveGlobalOrDefault<T>(
 	globalValue: T | null | undefined,
 	defaultValue: T,
 	explicitNull: boolean,
+	normalize?: (value: unknown) => T | null,
 ): SettingsValueView<T> {
 	if (globalValue != null) {
+		// Global settings are usually normalized before they reach components, but
+		// Settings View helpers are a defensive boundary. If a legacy/malformed
+		// value slips through, inherit to the known default instead of spreading a
+		// bad value into profile UI state.
+		const normalized = normalizeOrNull(globalValue, normalize);
+		if (normalized == null) {
+			return {
+				value: defaultValue,
+				source: "default",
+				explicitNull,
+			};
+		}
+
 		return {
-			value: globalValue,
+			value: normalized,
 			source: "global",
 			explicitNull,
 		};
