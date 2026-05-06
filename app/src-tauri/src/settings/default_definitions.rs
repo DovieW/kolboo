@@ -403,7 +403,7 @@ pub(crate) fn seedable_settings(
         let mut definitions = definitions;
         definitions.push(SettingDefaultDefinition::missing_or_null(
             "local_whisper_model_id",
-            json!("base"),
+            json!(default_values::DEFAULT_LOCAL_WHISPER_MODEL_ID),
         ));
         definitions.push(SettingDefaultDefinition::missing_or_null(
             "local_whisper_load_mode",
@@ -468,7 +468,8 @@ mod tests {
 
     #[test]
     fn seedable_settings_expose_runtime_defaults() {
-        let definitions = seedable_settings(&PipelineConfig::default()).expect("defaults");
+        let pipeline_config = PipelineConfig::default();
+        let definitions = seedable_settings(&pipeline_config).expect("defaults");
 
         assert_eq!(
             definition_for(&definitions, "stt_provider").value,
@@ -480,7 +481,64 @@ mod tests {
         );
         assert_eq!(
             definition_for(&definitions, "quiet_audio_gate_enabled").value,
-            json!(PipelineConfig::default().quiet_audio_gate_enabled)
+            json!(pipeline_config.quiet_audio_gate_enabled)
+        );
+
+        // OCR defaults are consumed both when seeding settings.json and when
+        // building an in-memory PipelineConfig. Keep this table intentionally
+        // explicit so a future OCR setting cannot drift silently between the
+        // persisted Settings View and the runtime pipeline fallback.
+        assert_eq!(
+            definition_for(&definitions, "ocr_model").value,
+            json!(pipeline_config.ocr_config.model)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_auth_mode").value,
+            json!(pipeline_config.ocr_config.auth_mode)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_prompt").value,
+            json!(pipeline_config.ocr_config.prompt)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_max_tokens").value,
+            json!(pipeline_config.ocr_config.max_tokens)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_temperature").value,
+            json!(pipeline_config.ocr_config.temperature)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_top_p").value,
+            json!(pipeline_config.ocr_config.top_p)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_request_timeout_ms").value,
+            json!(pipeline_config.ocr_config.request_timeout_ms)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_context_max_chars").value,
+            json!(pipeline_config.ocr_config.context_max_chars)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_auto_capture_timing").value,
+            json!(pipeline_config.ocr_config.auto_capture_timing)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_hallucination_protection").value,
+            json!(pipeline_config.ocr_config.hallucination_protection)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_hallucination_threshold").value,
+            json!(pipeline_config.ocr_config.hallucination_threshold)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_resize_max_dimension").value,
+            json!(pipeline_config.ocr_config.resize_max_dimension)
+        );
+        assert_eq!(
+            definition_for(&definitions, "ocr_resize_filter").value,
+            json!(pipeline_config.ocr_config.resize_filter)
         );
     }
 }

@@ -19,6 +19,7 @@ mod app_paths;
 mod audio;
 mod audio_capture;
 mod audio_mute;
+mod audio_normalization;
 mod bootstrap;
 mod cli;
 mod clipboard_context;

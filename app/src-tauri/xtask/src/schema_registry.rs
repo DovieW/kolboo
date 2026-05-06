@@ -6,6 +6,26 @@ pub(crate) struct SchemaSpec {
     pub generator: fn() -> RootSchema,
 }
 
+impl SchemaSpec {
+    const fn new(
+        out_file: &'static str,
+        label: &'static str,
+        generator: fn() -> RootSchema,
+    ) -> Self {
+        Self {
+            out_file,
+            label,
+            generator,
+        }
+    }
+}
+
+macro_rules! schema_spec {
+    ($out_file:literal, $label:expr, $generator:ident) => {
+        SchemaSpec::new($out_file, $label, $generator)
+    };
+}
+
 fn gen_export_audio_capture_diagnostics_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::AudioCaptureDiagnostics)
 }
@@ -235,289 +255,103 @@ fn gen_export_windows_internet_proxy_settings_schema() -> RootSchema {
 }
 
 pub(crate) const SCHEMAS: &[SchemaSpec] = &[
-    SchemaSpec {
-        out_file: "audio-capture-diagnostics.schema.json",
-        label: "AudioCaptureDiagnostics",
-        generator: gen_export_audio_capture_diagnostics_schema,
-    },
-    SchemaSpec {
-        out_file: "audio-level-stats.schema.json",
-        label: "AudioLevelStats",
-        generator: gen_export_audio_level_stats_schema,
-    },
-    SchemaSpec {
-        out_file: "audio-settings-test-wavs.schema.json",
-        label: "AudioSettingsTestWavs",
-        generator: gen_export_audio_settings_test_wavs_schema,
-    },
-    SchemaSpec {
-        out_file: "available-providers-response.schema.json",
-        label: "AvailableProvidersResponse",
-        generator: gen_export_available_providers_response_schema,
-    },
-    SchemaSpec {
-        out_file: "cache-router-embeddings-response.schema.json",
-        label: "CacheRouterEmbeddingsResponse",
-        generator: gen_export_cache_router_embeddings_response_schema,
-    },
-    SchemaSpec {
-        out_file: "connection-state-changed.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_CONNECTION_STATE_CHANGED),
-        generator: gen_export_connection_state_changed_schema,
-    },
-    SchemaSpec {
-        out_file: "cost-by-provider.schema.json",
-        label: "CostByProviderResponse",
-        generator: gen_export_cost_by_provider_schema,
-    },
-    SchemaSpec {
-        out_file: "cost-summary.schema.json",
-        label: "CostSummaryResponse",
-        generator: gen_export_cost_summary_schema,
-    },
-    SchemaSpec {
-        out_file: "data-storage-summary.schema.json",
-        label: "DataStorageSummary",
-        generator: gen_export_data_storage_summary_schema,
-    },
-    SchemaSpec {
-        out_file: "default-sections-response.schema.json",
-        label: "DefaultSectionsResponse",
-        generator: gen_export_default_sections_response_schema,
-    },
-    SchemaSpec {
-        out_file: "history-changed.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_HISTORY_CHANGED),
-        generator: gen_export_history_changed_schema,
-    },
-    SchemaSpec {
-        out_file: "history-delete-mode.schema.json",
-        label: "HistoryDeleteMode",
-        generator: gen_export_history_delete_mode_schema,
-    },
-    SchemaSpec {
-        out_file: "history-delete-options.schema.json",
-        label: "HistoryDeleteOptions",
-        generator: gen_export_history_delete_options_schema,
-    },
-    SchemaSpec {
-        out_file: "history-delete-result.schema.json",
-        label: "HistoryDeleteResult",
-        generator: gen_export_history_delete_result_schema,
-    },
-    SchemaSpec {
-        out_file: "history-page-query.schema.json",
-        label: "HistoryPageQuery",
-        generator: gen_export_history_page_query_schema,
-    },
-    SchemaSpec {
-        out_file: "history-page-result.schema.json",
-        label: "HistoryPageResult",
-        generator: gen_export_history_page_result_schema,
-    },
-    SchemaSpec {
-        out_file: "hotkey-config.schema.json",
-        label: "HotkeyConfig",
-        generator: gen_export_hotkey_config_schema,
-    },
-    SchemaSpec {
-        out_file: "intent-router-settings.schema.json",
-        label: "IntentRouterSettings",
-        generator: gen_export_intent_router_settings_schema,
-    },
-    SchemaSpec {
-        out_file: "iterate-rewrite-prompt-response.schema.json",
-        label: "IterateRewritePromptResponse",
-        generator: gen_export_iterate_rewrite_prompt_response_schema,
-    },
-    SchemaSpec {
-        out_file: "llm-complete-response.schema.json",
-        label: "LlmCompleteResponse",
-        generator: gen_export_llm_complete_response_schema,
-    },
-    SchemaSpec {
-        out_file: "llm-provider-info.schema.json",
-        label: "LlmProviderInfo",
-        generator: gen_export_llm_provider_info_schema,
-    },
-    SchemaSpec {
-        out_file: "local-whisper-backend-status.schema.json",
-        label: "LocalWhisperBackendStatus",
-        generator: gen_export_local_whisper_backend_status_schema,
-    },
-    SchemaSpec {
-        out_file: "local-whisper-model-load-event.schema.json",
-        label: "LocalWhisperModelLoadEvent",
-        generator: gen_export_local_whisper_model_load_event_schema,
-    },
-    SchemaSpec {
-        out_file: "mic-test-audio-level-payload.schema.json",
-        label: "MicTestAudioLevelPayload",
-        generator: gen_export_mic_test_audio_level_payload_schema,
-    },
-    SchemaSpec {
-        out_file: "model-option.schema.json",
-        label: "ModelOption",
-        generator: gen_export_model_option_schema,
-    },
-    SchemaSpec {
-        out_file: "model-pricing.schema.json",
-        label: "ModelPricingResponse",
-        generator: gen_export_model_pricing_schema,
-    },
-    SchemaSpec {
-        out_file: "open-window-info.schema.json",
-        label: "OpenWindowInfo",
-        generator: gen_export_open_window_info_schema,
-    },
-    SchemaSpec {
-        out_file: "overlay-audio-level-payload.schema.json",
-        label: "OverlayAudioLevelPayload",
-        generator: gen_export_overlay_audio_level_payload_schema,
-    },
-    SchemaSpec {
-        out_file: "overlay-hide-requested.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_OVERLAY_HIDE_REQUESTED),
-        generator: gen_export_overlay_hide_requested_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-cancelled.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_PIPELINE_CANCELLED),
-        generator: gen_export_pipeline_cancelled_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-error-payload.schema.json",
-        label: "PipelineErrorPayload",
-        generator: gen_export_pipeline_error_payload_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-recording-started.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_PIPELINE_RECORDING_STARTED),
-        generator: gen_export_pipeline_recording_started_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-reset.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_PIPELINE_RESET),
-        generator: gen_export_pipeline_reset_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-rewriting-started.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_PIPELINE_REWRITING_STARTED),
-        generator: gen_export_pipeline_rewriting_started_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-routing-started.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_PIPELINE_ROUTING_STARTED),
-        generator: gen_export_pipeline_routing_started_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-state-changed.schema.json",
-        label: "PipelineStateEvent",
-        generator: gen_export_pipeline_state_changed_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-transcript-ready.schema.json",
-        label: "PipelineTranscriptReadyPayload",
-        generator: gen_export_pipeline_transcript_ready_schema,
-    },
-    SchemaSpec {
-        out_file: "pipeline-transcription-started.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_PIPELINE_TRANSCRIPTION_STARTED),
-        generator: gen_export_pipeline_transcription_started_schema,
-    },
-    SchemaSpec {
-        out_file: "proxy-settings.schema.json",
-        label: "ProxySettings",
-        generator: gen_export_proxy_settings_schema,
-    },
-    SchemaSpec {
-        out_file: "quick-ask-answer-payload.schema.json",
-        label: "QuickAskAnswerPayload",
-        generator: gen_export_quick_ask_answer_payload_schema,
-    },
-    SchemaSpec {
-        out_file: "quick-ask-started-payload.schema.json",
-        label: "QuickAskStartedPayload",
-        generator: gen_export_quick_ask_started_payload_schema,
-    },
-    SchemaSpec {
-        out_file: "recording-start.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_RECORDING_START),
-        generator: gen_export_recording_start_schema,
-    },
-    SchemaSpec {
-        out_file: "recording-stop.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_RECORDING_STOP),
-        generator: gen_export_recording_stop_schema,
-    },
-    SchemaSpec {
-        out_file: "recordings-stats.schema.json",
-        label: "RecordingsStats",
-        generator: gen_export_recordings_stats_schema,
-    },
-    SchemaSpec {
-        out_file: "request-log.schema.json",
-        label: "RequestLog",
-        generator: gen_export_request_log_schema,
-    },
-    SchemaSpec {
-        out_file: "rewrite-preset.schema.json",
-        label: "RewritePreset",
-        generator: gen_export_rewrite_preset_schema,
-    },
-    SchemaSpec {
-        out_file: "rewrite-program-profile.schema.json",
-        label: "RewriteProgramPromptProfile",
-        generator: gen_export_rewrite_program_profile_schema,
-    },
-    SchemaSpec {
-        out_file: "settings-changed.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_SETTINGS_CHANGED),
-        generator: gen_export_settings_changed_schema,
-    },
-    SchemaSpec {
-        out_file: "stats-changed.schema.json",
-        label: stringify!(kolboo_lib::events::EVENT_STATS_CHANGED),
-        generator: gen_export_stats_changed_schema,
-    },
-    SchemaSpec {
-        out_file: "system-event.schema.json",
-        label: "SystemEvent",
-        generator: gen_export_system_event_schema,
-    },
-    SchemaSpec {
-        out_file: "system-proxy-info.schema.json",
-        label: "SystemProxyInfo",
-        generator: gen_export_system_proxy_info_schema,
-    },
-    SchemaSpec {
-        out_file: "test-llm-rewrite-response.schema.json",
-        label: "TestLlmRewriteResponse",
-        generator: gen_export_test_llm_rewrite_response_schema,
-    },
-    SchemaSpec {
-        out_file: "test-rewrite-with-prompt-response.schema.json",
-        label: "TestRewriteWithPromptResponse",
-        generator: gen_export_test_rewrite_with_prompt_response_schema,
-    },
-    SchemaSpec {
-        out_file: "whisper-model-download-progress.schema.json",
-        label: "WhisperModelDownloadProgress",
-        generator: gen_export_whisper_model_download_progress_schema,
-    },
-    SchemaSpec {
-        out_file: "whisper-model-download-status.schema.json",
-        label: "WhisperModelDownloadStatus",
-        generator: gen_export_whisper_model_download_status_schema,
-    },
-    SchemaSpec {
-        out_file: "whisper-model-info.schema.json",
-        label: "WhisperModelInfo",
-        generator: gen_export_whisper_model_info_schema,
-    },
-    SchemaSpec {
-        out_file: "windows-internet-proxy-settings.schema.json",
-        label: "WindowsInternetProxySettings",
-        generator: gen_export_windows_internet_proxy_settings_schema,
-    },
+    schema_spec!("audio-capture-diagnostics.schema.json", "AudioCaptureDiagnostics", gen_export_audio_capture_diagnostics_schema),
+    schema_spec!("audio-level-stats.schema.json", "AudioLevelStats", gen_export_audio_level_stats_schema),
+    schema_spec!("audio-settings-test-wavs.schema.json", "AudioSettingsTestWavs", gen_export_audio_settings_test_wavs_schema),
+    schema_spec!("available-providers-response.schema.json", "AvailableProvidersResponse", gen_export_available_providers_response_schema),
+    schema_spec!("cache-router-embeddings-response.schema.json", "CacheRouterEmbeddingsResponse", gen_export_cache_router_embeddings_response_schema),
+    schema_spec!("connection-state-changed.schema.json", stringify!(kolboo_lib::events::EVENT_CONNECTION_STATE_CHANGED), gen_export_connection_state_changed_schema),
+    schema_spec!("cost-by-provider.schema.json", "CostByProviderResponse", gen_export_cost_by_provider_schema),
+    schema_spec!("cost-summary.schema.json", "CostSummaryResponse", gen_export_cost_summary_schema),
+    schema_spec!("data-storage-summary.schema.json", "DataStorageSummary", gen_export_data_storage_summary_schema),
+    schema_spec!("default-sections-response.schema.json", "DefaultSectionsResponse", gen_export_default_sections_response_schema),
+    schema_spec!("history-changed.schema.json", stringify!(kolboo_lib::events::EVENT_HISTORY_CHANGED), gen_export_history_changed_schema),
+    schema_spec!("history-delete-mode.schema.json", "HistoryDeleteMode", gen_export_history_delete_mode_schema),
+    schema_spec!("history-delete-options.schema.json", "HistoryDeleteOptions", gen_export_history_delete_options_schema),
+    schema_spec!("history-delete-result.schema.json", "HistoryDeleteResult", gen_export_history_delete_result_schema),
+    schema_spec!("history-page-query.schema.json", "HistoryPageQuery", gen_export_history_page_query_schema),
+    schema_spec!("history-page-result.schema.json", "HistoryPageResult", gen_export_history_page_result_schema),
+    schema_spec!("hotkey-config.schema.json", "HotkeyConfig", gen_export_hotkey_config_schema),
+    schema_spec!("intent-router-settings.schema.json", "IntentRouterSettings", gen_export_intent_router_settings_schema),
+    schema_spec!("iterate-rewrite-prompt-response.schema.json", "IterateRewritePromptResponse", gen_export_iterate_rewrite_prompt_response_schema),
+    schema_spec!("llm-complete-response.schema.json", "LlmCompleteResponse", gen_export_llm_complete_response_schema),
+    schema_spec!("llm-provider-info.schema.json", "LlmProviderInfo", gen_export_llm_provider_info_schema),
+    schema_spec!("local-whisper-backend-status.schema.json", "LocalWhisperBackendStatus", gen_export_local_whisper_backend_status_schema),
+    schema_spec!("local-whisper-model-load-event.schema.json", "LocalWhisperModelLoadEvent", gen_export_local_whisper_model_load_event_schema),
+    schema_spec!("mic-test-audio-level-payload.schema.json", "MicTestAudioLevelPayload", gen_export_mic_test_audio_level_payload_schema),
+    schema_spec!("model-option.schema.json", "ModelOption", gen_export_model_option_schema),
+    schema_spec!("model-pricing.schema.json", "ModelPricingResponse", gen_export_model_pricing_schema),
+    schema_spec!("open-window-info.schema.json", "OpenWindowInfo", gen_export_open_window_info_schema),
+    schema_spec!("overlay-audio-level-payload.schema.json", "OverlayAudioLevelPayload", gen_export_overlay_audio_level_payload_schema),
+    schema_spec!("overlay-hide-requested.schema.json", stringify!(kolboo_lib::events::EVENT_OVERLAY_HIDE_REQUESTED), gen_export_overlay_hide_requested_schema),
+    schema_spec!("pipeline-cancelled.schema.json", stringify!(kolboo_lib::events::EVENT_PIPELINE_CANCELLED), gen_export_pipeline_cancelled_schema),
+    schema_spec!("pipeline-error-payload.schema.json", "PipelineErrorPayload", gen_export_pipeline_error_payload_schema),
+    schema_spec!("pipeline-recording-started.schema.json", stringify!(kolboo_lib::events::EVENT_PIPELINE_RECORDING_STARTED), gen_export_pipeline_recording_started_schema),
+    schema_spec!("pipeline-reset.schema.json", stringify!(kolboo_lib::events::EVENT_PIPELINE_RESET), gen_export_pipeline_reset_schema),
+    schema_spec!("pipeline-rewriting-started.schema.json", stringify!(kolboo_lib::events::EVENT_PIPELINE_REWRITING_STARTED), gen_export_pipeline_rewriting_started_schema),
+    schema_spec!("pipeline-routing-started.schema.json", stringify!(kolboo_lib::events::EVENT_PIPELINE_ROUTING_STARTED), gen_export_pipeline_routing_started_schema),
+    schema_spec!("pipeline-state-changed.schema.json", "PipelineStateEvent", gen_export_pipeline_state_changed_schema),
+    schema_spec!("pipeline-transcript-ready.schema.json", "PipelineTranscriptReadyPayload", gen_export_pipeline_transcript_ready_schema),
+    schema_spec!("pipeline-transcription-started.schema.json", stringify!(kolboo_lib::events::EVENT_PIPELINE_TRANSCRIPTION_STARTED), gen_export_pipeline_transcription_started_schema),
+    schema_spec!("proxy-settings.schema.json", "ProxySettings", gen_export_proxy_settings_schema),
+    schema_spec!("quick-ask-answer-payload.schema.json", "QuickAskAnswerPayload", gen_export_quick_ask_answer_payload_schema),
+    schema_spec!("quick-ask-started-payload.schema.json", "QuickAskStartedPayload", gen_export_quick_ask_started_payload_schema),
+    schema_spec!("recording-start.schema.json", stringify!(kolboo_lib::events::EVENT_RECORDING_START), gen_export_recording_start_schema),
+    schema_spec!("recording-stop.schema.json", stringify!(kolboo_lib::events::EVENT_RECORDING_STOP), gen_export_recording_stop_schema),
+    schema_spec!("recordings-stats.schema.json", "RecordingsStats", gen_export_recordings_stats_schema),
+    schema_spec!("request-log.schema.json", "RequestLog", gen_export_request_log_schema),
+    schema_spec!("rewrite-preset.schema.json", "RewritePreset", gen_export_rewrite_preset_schema),
+    schema_spec!("rewrite-program-profile.schema.json", "RewriteProgramPromptProfile", gen_export_rewrite_program_profile_schema),
+    schema_spec!("settings-changed.schema.json", stringify!(kolboo_lib::events::EVENT_SETTINGS_CHANGED), gen_export_settings_changed_schema),
+    schema_spec!("stats-changed.schema.json", stringify!(kolboo_lib::events::EVENT_STATS_CHANGED), gen_export_stats_changed_schema),
+    schema_spec!("system-event.schema.json", "SystemEvent", gen_export_system_event_schema),
+    schema_spec!("system-proxy-info.schema.json", "SystemProxyInfo", gen_export_system_proxy_info_schema),
+    schema_spec!("test-llm-rewrite-response.schema.json", "TestLlmRewriteResponse", gen_export_test_llm_rewrite_response_schema),
+    schema_spec!("test-rewrite-with-prompt-response.schema.json", "TestRewriteWithPromptResponse", gen_export_test_rewrite_with_prompt_response_schema),
+    schema_spec!("whisper-model-download-progress.schema.json", "WhisperModelDownloadProgress", gen_export_whisper_model_download_progress_schema),
+    schema_spec!("whisper-model-download-status.schema.json", "WhisperModelDownloadStatus", gen_export_whisper_model_download_status_schema),
+    schema_spec!("whisper-model-info.schema.json", "WhisperModelInfo", gen_export_whisper_model_info_schema),
+    schema_spec!("windows-internet-proxy-settings.schema.json", "WindowsInternetProxySettings", gen_export_windows_internet_proxy_settings_schema),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::SCHEMAS;
+    use std::collections::HashSet;
+
+    #[test]
+    fn schema_registry_has_unique_output_files() {
+        let mut seen = HashSet::new();
+
+        for schema in SCHEMAS {
+            assert!(
+                seen.insert(schema.out_file),
+                "duplicate schema output file {}",
+                schema.out_file
+            );
+        }
+    }
+
+    #[test]
+    fn schema_registry_entries_are_complete() {
+        for schema in SCHEMAS {
+            assert!(
+                schema.out_file.ends_with(".schema.json"),
+                "schema output file should be generated JSON schema: {}",
+                schema.out_file
+            );
+            assert!(!schema.label.trim().is_empty(), "schema label is empty");
+
+            // Generating each schema here keeps the registry Interface honest:
+            // adding an entry with a stale generator breaks a small xtask test
+            // instead of a later frontend type-generation step.
+            let generated = (schema.generator)();
+            assert!(
+                !generated.schema.metadata().title.as_deref().unwrap_or("").is_empty()
+                    || !generated.definitions.is_empty(),
+                "schema generator for {} produced an unexpectedly empty schema",
+                schema.label
+            );
+        }
+    }
+}

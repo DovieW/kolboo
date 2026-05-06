@@ -306,7 +306,7 @@ async fn write_loopback_response(
     );
     let response = format!(
         "{status_line}\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.as_bytes().len()
+        body.len()
     );
 
     let _ = stream.write_all(response.as_bytes()).await;

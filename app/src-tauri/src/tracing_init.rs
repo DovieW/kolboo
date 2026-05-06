@@ -97,17 +97,21 @@ pub fn init() {
                 .to_lowercase();
             matches!(fmt.as_str(), "pretty" | "text")
         };
+        let is_cli_invocation = crate::cli::is_cli_invocation();
 
         // Console layers (only one will be Some based on format preference).
         // Each layer gets its own filter so console and file can differ.
-        let console_pretty = is_pretty.then(|| {
+        // CLI mode reserves stdout for the final machine-readable envelope.
+        // Progress that is intentionally user-visible should use stderr from
+        // the CLI command itself; structured tracing still goes to the file log.
+        let console_pretty = (!is_cli_invocation && is_pretty).then(|| {
             fmt::layer()
                 .pretty()
                 .with_target(false)
                 .with_ansi(true)
                 .with_filter(make_filter("info"))
         });
-        let console_json = (!is_pretty).then(|| {
+        let console_json = (!is_cli_invocation && !is_pretty).then(|| {
             fmt::layer()
                 .json()
                 .flatten_event(true)

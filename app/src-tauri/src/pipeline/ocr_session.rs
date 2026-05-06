@@ -837,7 +837,7 @@ impl SharedPipeline {
                     log.ocr_failed_reason = Some(err.to_string());
                     log.warn("OCR: task aborted".to_string());
                 });
-                return None;
+                None
             }
         }
     }

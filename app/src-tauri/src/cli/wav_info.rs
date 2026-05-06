@@ -61,13 +61,11 @@ pub(crate) fn parse_wav_info(bytes: &[u8]) -> Option<WavInfo> {
         }
 
         match chunk_id {
-            b"fmt " => {
+            b"fmt " if chunk_size >= 16 => {
                 // fmt chunk requires at least 16 bytes for PCM.
-                if chunk_size >= 16 {
-                    channels = read_u16_le(bytes, chunk_data_offset + 2);
-                    sample_rate = read_u32_le(bytes, chunk_data_offset + 4);
-                    bits_per_sample = read_u16_le(bytes, chunk_data_offset + 14);
-                }
+                channels = read_u16_le(bytes, chunk_data_offset + 2);
+                sample_rate = read_u32_le(bytes, chunk_data_offset + 4);
+                bits_per_sample = read_u16_le(bytes, chunk_data_offset + 14);
             }
             b"data" => {
                 data_bytes = Some(chunk_size as u32);

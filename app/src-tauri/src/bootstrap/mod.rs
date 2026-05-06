@@ -11,7 +11,7 @@ use crate::llm;
 use crate::pipeline;
 use crate::pipeline::normalize_stt_language_setting;
 use crate::request_log::{RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
-use crate::settings;
+use crate::settings::{self, default_values};
 use crate::state::TrayKeepAlive;
 use crate::stt;
 use crate::{get_setting_from_store, stats};
@@ -495,7 +495,11 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
     );
 
     // Read LLM settings from store
-    let rewrite_llm_enabled: bool = get_setting_from_store(app, "rewrite_llm_enabled", false);
+    let rewrite_llm_enabled: bool = get_setting_from_store(
+        app,
+        "rewrite_llm_enabled",
+        default_values::DEFAULT_REWRITE_LLM_ENABLED,
+    );
     let llm_provider_setting: Option<String> = get_setting_from_store(app, "llm_provider", None);
     let llm_model_setting: Option<String> = get_setting_from_store(app, "llm_model", None);
 
@@ -680,11 +684,22 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
     // - hot_mic_enabled: keep the input stream open while idle and maintain a rolling pre-roll
     // - hot_mic_pre_roll_ms: pre-roll duration (ms) to prepend at record start
     // - mic_auto_recover_enabled: watchdog the stream and attempt restart on hangs/disconnects
-    let hot_mic_enabled: bool = get_setting_from_store(app, "hot_mic_enabled", false);
-    let hot_mic_pre_roll_ms: u32 =
-        get_setting_from_store(app, "hot_mic_pre_roll_ms", 1500u32).min(5000);
-    let mic_auto_recover_enabled: bool =
-        get_setting_from_store(app, "mic_auto_recover_enabled", false);
+    let hot_mic_enabled: bool = get_setting_from_store(
+        app,
+        "hot_mic_enabled",
+        default_values::DEFAULT_HOT_MIC_ENABLED,
+    );
+    let hot_mic_pre_roll_ms: u32 = get_setting_from_store(
+        app,
+        "hot_mic_pre_roll_ms",
+        default_values::DEFAULT_HOT_MIC_PRE_ROLL_MS,
+    )
+    .min(5000);
+    let mic_auto_recover_enabled: bool = get_setting_from_store(
+        app,
+        "mic_auto_recover_enabled",
+        default_values::DEFAULT_MIC_AUTO_RECOVER_ENABLED,
+    );
 
     let proxy_settings: settings::ProxySettings =
         get_setting_from_store(app, "proxy_settings", settings::ProxySettings::default());
@@ -702,9 +717,16 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         let raw: Option<String> = get_setting_from_store(app, "ocr_base_url", None);
         crate::app_shared::normalize_optional_base_url(raw)
     };
-    let ocr_model: String =
-        get_setting_from_store(app, "ocr_model", "lightonai/LightOnOCR-1B-1025".to_string());
-    let ocr_auth_mode: String = get_setting_from_store(app, "ocr_auth_mode", "none".to_string());
+    let ocr_model: String = get_setting_from_store(
+        app,
+        "ocr_model",
+        default_values::DEFAULT_OCR_MODEL.to_string(),
+    );
+    let ocr_auth_mode: String = get_setting_from_store(
+        app,
+        "ocr_auth_mode",
+        default_values::DEFAULT_OCR_AUTH_MODE.to_string(),
+    );
     let ocr_prompt: String = {
         let raw: String = get_setting_from_store(
             app,
@@ -726,35 +748,66 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
             .clamp(0.0, 2.0);
     let ocr_top_p: f64 =
         get_setting_from_store(app, "ocr_top_p", crate::ocr::OCR_TOP_P_DEFAULT).clamp(0.0, 1.0);
-    let ocr_request_timeout_ms: u64 =
-        get_setting_from_store(app, "ocr_request_timeout_ms", 2000u64);
-    let ocr_context_max_chars: u64 = get_setting_from_store(app, "ocr_context_max_chars", 8000u64);
-    let rewrite_active_window_ocr_mode: String =
-        get_setting_from_store(app, "rewrite_active_window_ocr_mode", "off".to_string());
+    let ocr_request_timeout_ms: u64 = get_setting_from_store(
+        app,
+        "ocr_request_timeout_ms",
+        default_values::DEFAULT_OCR_REQUEST_TIMEOUT_MS,
+    );
+    let ocr_context_max_chars: u64 = get_setting_from_store(
+        app,
+        "ocr_context_max_chars",
+        default_values::DEFAULT_OCR_CONTEXT_MAX_CHARS,
+    );
+    let rewrite_active_window_ocr_mode: String = get_setting_from_store(
+        app,
+        "rewrite_active_window_ocr_mode",
+        default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE.to_string(),
+    );
     let quick_replace_active_window_ocr_mode: String = get_setting_from_store(
         app,
         "quick_replace_active_window_ocr_mode",
-        "off".to_string(),
+        default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE.to_string(),
     );
-    let quick_ask_active_window_ocr_mode: String =
-        get_setting_from_store(app, "quick_ask_active_window_ocr_mode", "off".to_string());
-    let ocr_auto_capture_timing: String =
-        get_setting_from_store(app, "ocr_auto_capture_timing", "on_start".to_string());
-    let ocr_hallucination_protection: bool =
-        get_setting_from_store(app, "ocr_hallucination_protection", true);
-    let ocr_hallucination_threshold: u64 =
-        get_setting_from_store(app, "ocr_hallucination_threshold", 2500u64);
-    let ocr_resize_max_dimension: u32 =
-        get_setting_from_store(app, "ocr_resize_max_dimension", 0u32);
-    let ocr_resize_filter: String =
-        get_setting_from_store(app, "ocr_resize_filter", "nearest".to_string());
+    let quick_ask_active_window_ocr_mode: String = get_setting_from_store(
+        app,
+        "quick_ask_active_window_ocr_mode",
+        default_values::DEFAULT_ACTIVE_WINDOW_OCR_MODE.to_string(),
+    );
+    let ocr_auto_capture_timing: String = get_setting_from_store(
+        app,
+        "ocr_auto_capture_timing",
+        default_values::DEFAULT_OCR_AUTO_CAPTURE_TIMING.to_string(),
+    );
+    let ocr_hallucination_protection: bool = get_setting_from_store(
+        app,
+        "ocr_hallucination_protection",
+        default_values::DEFAULT_OCR_HALLUCINATION_PROTECTION,
+    );
+    let ocr_hallucination_threshold: u64 = get_setting_from_store(
+        app,
+        "ocr_hallucination_threshold",
+        default_values::DEFAULT_OCR_HALLUCINATION_THRESHOLD,
+    );
+    let ocr_resize_max_dimension: u32 = get_setting_from_store(
+        app,
+        "ocr_resize_max_dimension",
+        default_values::DEFAULT_OCR_RESIZE_MAX_DIMENSION,
+    );
+    let ocr_resize_filter: String = get_setting_from_store(
+        app,
+        "ocr_resize_filter",
+        default_values::DEFAULT_OCR_RESIZE_FILTER.to_string(),
+    );
 
     #[cfg(feature = "local-whisper")]
     let whisper_model_path: Option<std::path::PathBuf> = {
         use crate::stt::WhisperModel;
 
-        let model_id: String =
-            get_setting_from_store(app, "local_whisper_model_id", "base".to_string());
+        let model_id: String = get_setting_from_store(
+            app,
+            "local_whisper_model_id",
+            default_values::DEFAULT_LOCAL_WHISPER_MODEL_ID.to_string(),
+        );
         let model = match model_id.trim().to_lowercase().as_str() {
             "tiny" => WhisperModel::Tiny,
             "tinyen" | "tiny_en" | "tiny-en" => WhisperModel::TinyEn,
@@ -780,8 +833,11 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         })
     };
 
-    let local_whisper_load_mode: String =
-        get_setting_from_store(app, "local_whisper_load_mode", "manual".to_string());
+    let local_whisper_load_mode: String = get_setting_from_store(
+        app,
+        "local_whisper_load_mode",
+        default_values::DEFAULT_LOCAL_WHISPER_LOAD_MODE.to_string(),
+    );
 
     let config = pipeline::PipelineConfig {
         input_device_name,
@@ -871,8 +927,16 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
 
         local_whisper_load_mode,
 
-        stt_live_output: get_setting_from_store(app, "stt_live_output", false),
-        stt_simulated_streaming: get_setting_from_store(app, "stt_simulated_streaming", false),
+        stt_live_output: get_setting_from_store(
+            app,
+            "stt_live_output",
+            default_values::DEFAULT_STT_LIVE_OUTPUT,
+        ),
+        stt_simulated_streaming: get_setting_from_store(
+            app,
+            "stt_simulated_streaming",
+            default_values::DEFAULT_STT_SIMULATED_STREAMING,
+        ),
     };
 
     log::info!(

@@ -11,10 +11,18 @@ export type RuntimeSyncReason =
 	| "policy-constraints";
 
 export type RuntimeSyncEffects = {
-	needsPipelineSync: boolean;
-	needsSettingsChangedEvent: boolean;
-	reasons: RuntimeSyncReason[];
-	eventPayload: SettingsChangedPayload;
+  needsPipelineSync: boolean;
+  needsSettingsChangedEvent: boolean;
+  reasons: RuntimeSyncReason[];
+  eventPayload: SettingsChangedPayload;
+  queryInvalidations: SettingsQueryInvalidation[];
+};
+
+export type SettingsQueryInvalidationReason = "settings" | "policy" | "license";
+
+export type SettingsQueryInvalidation = {
+  queryKey: readonly unknown[];
+  reason: SettingsQueryInvalidationReason;
 };
 
 export type RuntimeSyncPolicyResult = RuntimeSyncEffects & {
@@ -160,6 +168,51 @@ function buildSettingsChangedPayload(params: {
 	return payload;
 }
 
+function addQueryInvalidation(
+  invalidations: Map<string, SettingsQueryInvalidation>,
+  queryKey: readonly unknown[],
+  reason: SettingsQueryInvalidationReason,
+) {
+  // Query invalidation is part of the settings-mutation Interface, so keep
+  // dedupe here rather than making each mutation caller remember which query
+  // keys overlap. The string key is only for local set membership.
+  invalidations.set(JSON.stringify(queryKey), { queryKey, reason });
+}
+
+function buildQueryInvalidations(params: {
+  keys: Set<string>;
+  apiKeysChanged?: boolean;
+  policyNormalized?: boolean;
+  policyViolations?: PolicyConstraintViolation[];
+}): SettingsQueryInvalidation[] {
+  const invalidations = new Map<string, SettingsQueryInvalidation>();
+  const hasChanges = params.keys.size > 0;
+  const hasPolicyViolations = (params.policyViolations?.length ?? 0) > 0;
+  const hasPolicyStateChange =
+    params.keys.has("policy_state") ||
+    params.keys.has("token_exchange_trigger_set") ||
+    Boolean(params.policyNormalized) ||
+    hasPolicyViolations;
+  const hasLicenseStateChange = params.keys.has("license_state");
+
+  if (hasChanges || params.apiKeysChanged) {
+    addQueryInvalidation(invalidations, ["settings"], "settings");
+  }
+
+  if (hasPolicyStateChange) {
+    addQueryInvalidation(invalidations, ["policyState"], "policy");
+    addQueryInvalidation(invalidations, ["settings"], "settings");
+  }
+
+  if (hasLicenseStateChange) {
+    addQueryInvalidation(invalidations, ["licenseState"], "license");
+    addQueryInvalidation(invalidations, ["licenseAuthContext"], "license");
+    addQueryInvalidation(invalidations, ["settings"], "settings");
+  }
+
+  return [...invalidations.values()];
+}
+
 export function classifySettingsRuntimeEffects(params: {
 	patch?: Record<string, unknown>;
 	deleteKeys?: string[];
@@ -195,16 +248,22 @@ export function classifySettingsRuntimeEffects(params: {
 		hasPolicyViolations;
 
 	return {
-		needsPipelineSync,
-		needsSettingsChangedEvent,
-		reasons: [...reasons],
-		eventPayload: buildSettingsChangedPayload({
-			keys,
-			apiKeysChanged: params.apiKeysChanged,
-			policyNormalized: params.policyNormalized,
-			policyViolations: params.policyViolations,
-		}),
-	};
+    needsPipelineSync,
+    needsSettingsChangedEvent,
+    reasons: [...reasons],
+    eventPayload: buildSettingsChangedPayload({
+      keys,
+      apiKeysChanged: params.apiKeysChanged,
+      policyNormalized: params.policyNormalized,
+      policyViolations: params.policyViolations,
+    }),
+    queryInvalidations: buildQueryInvalidations({
+      keys,
+      apiKeysChanged: params.apiKeysChanged,
+      policyNormalized: params.policyNormalized,
+      policyViolations: params.policyViolations,
+    }),
+  };
 }
 
 export async function applySettingsRuntimeSyncPolicy(

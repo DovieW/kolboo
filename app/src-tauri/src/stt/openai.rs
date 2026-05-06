@@ -17,11 +17,13 @@ use super::http;
 use super::language;
 use super::openai_compat;
 use super::streaming::{
-    chunk_size_bytes_for_pcm_s16le, connect_ws_split_with_timeout, f32_to_pcm_s16le,
-    is_ws_closed_error, resample_linear, ws_next_with_timeout, PartialTranscript,
+    connect_ws_split_with_timeout, is_ws_closed_error, ws_next_with_timeout, PartialTranscript,
     StreamingSttSession,
 };
 use super::{AudioFormat, SttError, SttProvider};
+use crate::audio_normalization::{
+    chunk_size_bytes_for_pcm_s16le, f32_to_pcm_s16le, resample_linear,
+};
 use crate::request_log::RequestLogStore;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine as _};

@@ -4,6 +4,7 @@
 //! rules here so provider resolution and UI commands do not duplicate Local
 //! Whisper-specific behavior.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 pub(super) const LOCAL_WHISPER_PROVIDER_ID: &str = "local-whisper";
@@ -56,6 +57,37 @@ pub(super) fn should_keep_after_local_whisper_unload(cache_key: &str) -> bool {
     !is_local_whisper_cache_key(cache_key)
 }
 
+pub(super) fn local_whisper_cache_contains<T>(cache: &HashMap<String, T>, cache_key: &str) -> bool {
+    cache.contains_key(cache_key)
+}
+
+pub(super) fn retain_after_local_whisper_unload<T>(cache: &mut HashMap<String, T>) {
+    // Explicit unload is a local-provider lifecycle operation. Keep the retain
+    // predicate here so callers do not need to know the cache-key prefix shape.
+    cache.retain(|key, _| should_keep_after_local_whisper_unload(key));
+}
+
+#[cfg_attr(not(feature = "local-whisper"), allow(dead_code))]
+pub(super) fn insert_loaded_local_whisper<T>(
+    cache: &mut HashMap<String, T>,
+    cache_key: String,
+    provider: T,
+) {
+    cache.insert(cache_key, provider);
+}
+
+#[cfg_attr(not(feature = "local-whisper"), allow(dead_code))]
+pub(super) fn insert_loaded_local_whisper_if_absent<T>(
+    cache: &mut HashMap<String, T>,
+    cache_key: String,
+    provider: T,
+) {
+    // Slow manual loads release the pipeline lock while the model is created.
+    // If another path loaded the same identity meanwhile, preserve the first
+    // provider so the explicit-load command stays idempotent.
+    cache.entry(cache_key).or_insert(provider);
+}
+
 pub(super) fn should_evict_local_whisper_cache(
     old_model_key: &str,
     new_model_key: &str,
@@ -82,6 +114,7 @@ pub(super) fn manual_unloaded_error(
     None
 }
 
+#[cfg_attr(not(feature = "local-whisper"), allow(dead_code))]
 pub(super) fn local_whisper_model_unavailable_error(
     provider_id: &str,
     local_whisper_available: bool,
@@ -221,5 +254,28 @@ mod tests {
             Some("prompt"),
             Some("prompt")
         ));
+    }
+
+    #[test]
+    fn cache_controller_helpers_keep_mutation_rules_local() {
+        let mut cache = HashMap::from([
+            ("local-whisper::model::en".to_string(), 1),
+            ("openai::whisper-1::en::live=false".to_string(), 2),
+        ]);
+
+        assert!(local_whisper_cache_contains(
+            &cache,
+            "local-whisper::model::en"
+        ));
+
+        retain_after_local_whisper_unload(&mut cache);
+        assert!(!cache.contains_key("local-whisper::model::en"));
+        assert_eq!(cache.get("openai::whisper-1::en::live=false"), Some(&2));
+
+        insert_loaded_local_whisper(&mut cache, "local-whisper::new::en".to_string(), 3);
+        assert_eq!(cache.get("local-whisper::new::en"), Some(&3));
+
+        insert_loaded_local_whisper_if_absent(&mut cache, "local-whisper::new::en".to_string(), 4);
+        assert_eq!(cache.get("local-whisper::new::en"), Some(&3));
     }
 }

@@ -649,13 +649,8 @@ async fn pipeline_stop_and_transcribe_inner(
         // NEW: Capture screenshot immediately if timing is "on_start" and any mode is auto.
         // This allows OCR to run in parallel with recording, so results are ready by stop time.
         let ocr_config = config.ocr_config.clone();
-        if ocr_config.auto_capture_timing == "on_start" {
-            let any_mode_auto = ocr_config.rewrite_mode == "auto"
-                || ocr_config.quick_ask_mode == "auto"
-                || ocr_config.quick_replace_mode == "auto";
-            if any_mode_auto {
-                pipeline.start_ocr_task(&ocr_config);
-            }
+        if ocr_config.auto_capture_timing == "on_start" && ocr_config.has_any_auto_mode() {
+            pipeline.start_ocr_task(&ocr_config);
         }
     }
 

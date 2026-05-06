@@ -134,11 +134,12 @@ describe("settings runtime sync policy", () => {
 
 	it("classifies pipeline-affecting, secondary-window, both, and no-runtime changes", () => {
 		expect(
-			classifySettingsRuntimeEffects({ patch: { stt_provider: "groq" } }),
-		).toMatchObject({
-			needsPipelineSync: true,
-			needsSettingsChangedEvent: false,
-		});
+      classifySettingsRuntimeEffects({ patch: { stt_provider: "groq" } }),
+    ).toMatchObject({
+      needsPipelineSync: true,
+      needsSettingsChangedEvent: false,
+      queryInvalidations: [{ queryKey: ["settings"], reason: "settings" }],
+    });
 		expect(
 			classifySettingsRuntimeEffects({ patch: { overlay_mode: "always" } }),
 		).toMatchObject({
@@ -154,14 +155,34 @@ describe("settings runtime sync policy", () => {
 			needsSettingsChangedEvent: true,
 		});
 		expect(
-			classifySettingsRuntimeEffects({
-				patch: { github_backup_gist_id: "gist" },
-			}),
-		).toMatchObject({
-			needsPipelineSync: false,
-			needsSettingsChangedEvent: false,
-		});
+      classifySettingsRuntimeEffects({
+        patch: { github_backup_gist_id: "gist" },
+      }),
+    ).toMatchObject({
+      needsPipelineSync: false,
+      needsSettingsChangedEvent: false,
+      queryInvalidations: [{ queryKey: ["settings"], reason: "settings" }],
+    });
 	});
+
+	it("centralizes query invalidation intent for policy and license changes", () => {
+    expect(
+      classifySettingsRuntimeEffects({ policyNormalized: true })
+        .queryInvalidations,
+    ).toEqual([
+      { queryKey: ["policyState"], reason: "policy" },
+      { queryKey: ["settings"], reason: "settings" },
+    ]);
+
+    expect(
+      classifySettingsRuntimeEffects({ patch: { license_state: {} } })
+        .queryInvalidations,
+    ).toEqual([
+      { queryKey: ["settings"], reason: "settings" },
+      { queryKey: ["licenseState"], reason: "license" },
+      { queryKey: ["licenseAuthContext"], reason: "license" },
+    ]);
+  });
 
 	it("deduplicates pipeline sync and backend settings-change events for one patch batch", async () => {
 		const adapters = createAdapters();

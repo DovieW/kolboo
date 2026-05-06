@@ -68,8 +68,7 @@ pub use types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionR
 
 use profile_matcher::select_profile_for_program_path;
 pub(crate) use profile_resolution::{
-    resolve_active_window_ocr_modes, resolve_rewrite_active_window_ocr_mode,
-    ActiveWindowOcrModeFallbacks,
+    resolve_active_window_ocr_modes, ActiveWindowOcrModeFallbacks,
 };
 use profile_resolution::{select_default_profile, select_effective_preset};
 
@@ -322,18 +321,17 @@ impl PipelineInner {
 
     fn is_local_whisper_loaded(&self) -> bool {
         let key = self.local_whisper_cache_key();
-        self.stt_provider_cache.contains_key(&key)
+        local_provider::local_whisper_cache_contains(&self.stt_provider_cache, &key)
     }
 
     fn unload_local_whisper(&mut self) {
-        self.stt_provider_cache
-            .retain(|k, _| local_provider::should_keep_after_local_whisper_unload(k));
+        local_provider::retain_after_local_whisper_unload(&mut self.stt_provider_cache);
     }
 
     fn force_load_local_whisper(&mut self) -> Result<(), PipelineError> {
         let cache_key = self.local_whisper_cache_key();
 
-        if self.stt_provider_cache.contains_key(&cache_key) {
+        if local_provider::local_whisper_cache_contains(&self.stt_provider_cache, &cache_key) {
             return Ok(());
         }
 
@@ -354,7 +352,11 @@ impl PipelineInner {
                 })
                 .map_err(|e| PipelineError::Config(format!("Local Whisper init failed: {}", e)))?;
             let provider = Arc::new(provider);
-            self.stt_provider_cache.insert(cache_key, provider);
+            local_provider::insert_loaded_local_whisper(
+                &mut self.stt_provider_cache,
+                cache_key,
+                provider,
+            );
             return Ok(());
         }
 
@@ -669,6 +671,10 @@ pub struct SharedPipeline {
 }
 
 impl SharedPipeline {
+    #[allow(clippy::too_many_arguments)]
+    // This helper keeps retry orchestration readable at the call site: the
+    // arguments are the STT attempt context that should remain visible together
+    // rather than hidden behind another broad state bag.
     async fn try_refresh_managed_auth_and_retry_stt(
         &self,
         stt_provider_id: &str,
@@ -1457,7 +1463,7 @@ impl SharedPipeline {
             active_profile,
             default_rewrite_include_clipboard_context,
             ocr_config,
-            rewrite_ocr_mode,
+            ocr_modes,
             mut streaming_session,
         ) = {
             let mut inner = self
@@ -1608,12 +1614,15 @@ impl SharedPipeline {
                 .clone()
                 .unwrap_or_else(CancellationToken::new);
 
-            let rewrite_ocr_mode = resolve_rewrite_active_window_ocr_mode(
+            let ocr_modes = resolve_active_window_ocr_modes(
                 active_profile.as_ref(),
                 default_profile.as_ref(),
-                inner.config.ocr_config.rewrite_mode.as_str(),
-            )
-            .to_string();
+                ActiveWindowOcrModeFallbacks {
+                    rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
+                    quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
+                    quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
+                },
+            );
 
             // Take the streaming session (if one was started during recording).
             // live_audio_tx was already cleared right after stop_recording_session.
@@ -1636,12 +1645,12 @@ impl SharedPipeline {
                 active_profile,
                 default_rewrite_include_clipboard_context,
                 inner.config.ocr_config.clone(),
-                rewrite_ocr_mode,
+                ocr_modes,
                 streaming_session,
             )
         };
 
-        self.start_ocr_task_if_auto(&ocr_config, rewrite_ocr_mode == "auto");
+        self.start_ocr_task_if_auto(&ocr_config, ocr_modes.should_auto_start(false));
 
         // If the current model is realtime-only but the streaming session hasn't
         // been stored yet (WebSocket still connecting in the spawned task), wait
@@ -1914,7 +1923,7 @@ impl SharedPipeline {
         // - auto: start + wait
         // - manual: user may have triggered OCR via overlay; if so, wait for it here
         // - off: never wait
-        let ocr_result = if rewrite_ocr_mode != "off" {
+        let ocr_result = if ocr_modes.should_wait_for_normal_dictation_ocr() {
             self.get_ocr_result_with_timeout(Duration::from_millis(ocr_config.request_timeout_ms))
                 .await
         } else {
@@ -2060,7 +2069,7 @@ impl SharedPipeline {
             active_profile,
             default_rewrite_include_clipboard_context,
             ocr_config,
-            rewrite_ocr_mode,
+            ocr_modes,
         ) = {
             let mut inner = self
                 .inner
@@ -2152,12 +2161,15 @@ impl SharedPipeline {
 
             let retry_config = inner.config.retry_config.clone();
 
-            let rewrite_ocr_mode = resolve_rewrite_active_window_ocr_mode(
+            let ocr_modes = resolve_active_window_ocr_modes(
                 active_profile.as_ref(),
                 default_profile.as_ref(),
-                inner.config.ocr_config.rewrite_mode.as_str(),
-            )
-            .to_string();
+                ActiveWindowOcrModeFallbacks {
+                    rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
+                    quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
+                    quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
+                },
+            );
 
             (
                 resolved_stt.provider,
@@ -2170,11 +2182,11 @@ impl SharedPipeline {
                 active_profile,
                 default_rewrite_include_clipboard_context,
                 inner.config.ocr_config.clone(),
-                rewrite_ocr_mode,
+                ocr_modes,
             )
         };
 
-        self.start_ocr_task_if_auto(&ocr_config, rewrite_ocr_mode == "auto");
+        self.start_ocr_task_if_auto(&ocr_config, ocr_modes.should_auto_start(false));
 
         log::info!(
             "Pipeline: Starting retry transcription ({} bytes, timeout {:?})",
@@ -2269,7 +2281,7 @@ impl SharedPipeline {
             )
         };
 
-        let ocr_result = if rewrite_ocr_mode != "off" {
+        let ocr_result = if ocr_modes.should_wait_for_normal_dictation_ocr() {
             self.get_ocr_result_with_timeout(Duration::from_millis(ocr_config.request_timeout_ms))
                 .await
         } else {
@@ -2667,7 +2679,10 @@ impl SharedPipeline {
                 }
 
                 let cache_key = inner.local_whisper_cache_key();
-                if inner.stt_provider_cache.contains_key(&cache_key) {
+                if local_provider::local_whisper_cache_contains(
+                    &inner.stt_provider_cache,
+                    &cache_key,
+                ) {
                     return Ok(());
                 }
 
@@ -2707,10 +2722,11 @@ impl SharedPipeline {
                 return Err(PipelineError::AlreadyRecording);
             }
 
-            inner
-                .stt_provider_cache
-                .entry(cache_key)
-                .or_insert(provider);
+            local_provider::insert_loaded_local_whisper_if_absent(
+                &mut inner.stt_provider_cache,
+                cache_key,
+                provider,
+            );
 
             Ok(())
         }

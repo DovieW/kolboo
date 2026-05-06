@@ -71,18 +71,7 @@ pub(crate) fn handle_cli(
         }
     };
 
-    match output_format {
-        CliOutputFormat::Json => {
-            write_json(&result).map_err(|err| CliError::Runtime(err.to_string()))?;
-        }
-        CliOutputFormat::Human => {
-            let message = result
-                .message
-                .clone()
-                .unwrap_or_else(|| "Command completed".to_string());
-            write_human(&message);
-        }
-    }
+    write_result(output_format, &result).map_err(|err| CliError::Runtime(err.to_string()))?;
 
     Ok(Some(result.code))
 }

@@ -127,50 +127,9 @@ fn db_to_amp(db: f32) -> f32 {
     10.0_f32.powf(db / 20.0)
 }
 
-fn downmix_interleaved_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
-    let channels = channels.max(1);
-    if channels == 1 {
-        return samples.to_vec();
-    }
-
-    let frames = samples.len() / channels;
-    let mut mono = Vec::with_capacity(frames);
-    for frame_idx in 0..frames {
-        let base = frame_idx * channels;
-        let mut sum = 0.0_f32;
-        for c in 0..channels {
-            sum += samples[base + c];
-        }
-        mono.push(sum / channels as f32);
-    }
-    mono
-}
-
-fn downmix_interleaved_chunk_to_mono_into(samples: &[f32], channels: usize, out: &mut Vec<f32>) {
-    let channels = channels.max(1);
-    out.clear();
-    if samples.is_empty() {
-        return;
-    }
-
-    if channels == 1 {
-        out.extend_from_slice(samples);
-        return;
-    }
-
-    let frames = samples.len() / channels;
-    // Note: we rely on callers to provision sufficient capacity to avoid allocations.
-    // This reserve is a no-op in the common case; it only allocates if capacity is too small.
-    out.reserve(frames);
-    for frame_idx in 0..frames {
-        let base = frame_idx * channels;
-        let mut sum = 0.0_f32;
-        for c in 0..channels {
-            sum += samples[base + c];
-        }
-        out.push(sum / channels as f32);
-    }
-}
+use crate::audio_normalization::{
+    downmix_interleaved_chunk_to_mono_into, downmix_interleaved_to_mono,
+};
 
 fn estimate_callback_interleaved_capacity(config: &cpal::StreamConfig, channels: usize) -> usize {
     // CPAL often uses a stable callback size, but it can vary.
@@ -710,8 +669,10 @@ impl AudioBuffer {
 
             // Optional resample after filtering/gain.
             if cfg.resample_to_16khz && out_sample_rate != 16000 {
-                processed_samples =
-                    crate::vad::resample_to_16khz(&processed_samples, out_sample_rate);
+                processed_samples = crate::audio_normalization::resample_to_16khz_vad_quality(
+                    &processed_samples,
+                    out_sample_rate,
+                );
                 out_sample_rate = 16000;
             }
 

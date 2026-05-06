@@ -10,8 +10,11 @@ use crate::stt::RetryConfig;
 use std::collections::HashMap;
 use std::time::Duration;
 
-/// Default timeout for STT transcription requests
-const DEFAULT_TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(10);
+fn default_transcription_timeout() -> Duration {
+    // Keep PipelineConfig aligned with the persisted `stt_timeout_seconds`
+    // default instead of carrying a second literal timeout in this Module.
+    Duration::from_secs_f64(default_values::DEFAULT_STT_TIMEOUT_SECONDS)
+}
 
 /// Maximum WAV file size in bytes (50MB) to prevent memory issues
 const MAX_WAV_SIZE_BYTES: usize = 50 * 1024 * 1024;
@@ -177,6 +180,14 @@ pub struct OcrConfig {
     pub resize_filter: String,
 }
 
+impl OcrConfig {
+    pub(crate) fn has_any_auto_mode(&self) -> bool {
+        self.rewrite_mode == "auto"
+            || self.quick_ask_mode == "auto"
+            || self.quick_replace_mode == "auto"
+    }
+}
+
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
@@ -196,7 +207,7 @@ impl Default for PipelineConfig {
             whisper_server_base_url: None,
             retry_config: RetryConfig::default(),
             vad_config: VadAutoStopConfig::default(),
-            transcription_timeout: DEFAULT_TRANSCRIPTION_TIMEOUT,
+            transcription_timeout: default_transcription_timeout(),
             max_recording_bytes: MAX_WAV_SIZE_BYTES,
 
             proxy_settings: ProxySettings::default(),
@@ -338,7 +349,10 @@ mod tests {
         assert_eq!(config.max_duration_secs, 300.0);
         assert_eq!(config.stt_provider, "groq");
         assert_eq!(config.stt_language.as_deref(), Some("en"));
-        assert_eq!(config.transcription_timeout, DEFAULT_TRANSCRIPTION_TIMEOUT);
+        assert_eq!(
+            config.transcription_timeout,
+            default_transcription_timeout()
+        );
         assert_eq!(config.max_recording_bytes, MAX_WAV_SIZE_BYTES);
     }
 

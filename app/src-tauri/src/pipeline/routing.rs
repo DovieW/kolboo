@@ -86,6 +86,9 @@ fn router_response_with_outcome(
 #[derive(Debug, Clone)]
 pub(super) struct RoutingDecision {
     pub selected_preset_id: Option<String>,
+    #[allow(dead_code)]
+    // Kept as first-class decision data for diagnostics/tests even though the
+    // runtime path currently consumes the serialized response_json field.
     pub outcome: RoutingDecisionOutcome,
     pub scores: Vec<(String, f32)>,
     pub threshold: Option<f32>,

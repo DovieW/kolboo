@@ -74,7 +74,11 @@ import {
 	authReasonCodeToMessage,
 	normalizeAuthReasonCode,
 } from "./tauri/license";
-import { applySettingsRuntimeSyncPolicy } from "./tauri/settingsSync";
+import {
+  applySettingsRuntimeSyncPolicy,
+  classifySettingsRuntimeEffects,
+  type SettingsQueryInvalidation,
+} from "./tauri/settingsSync";
 
 export function toManagedInferenceMessage(error: unknown): string {
 	if (!(error && typeof error === "object")) {
@@ -308,22 +312,38 @@ export function usePolicyState() {
 	});
 }
 
+export async function applySettingsQueryInvalidations(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+  invalidations: readonly SettingsQueryInvalidation[],
+): Promise<void> {
+  await Promise.all(
+    invalidations.map((invalidation) =>
+      queryClient.invalidateQueries({ queryKey: invalidation.queryKey }),
+    ),
+  );
+}
+
 export async function invalidatePolicyRelatedQueries(
 	queryClient: Pick<QueryClient, "invalidateQueries">,
 ): Promise<void> {
-	await Promise.all([
-		queryClient.invalidateQueries({ queryKey: ["policyState"] }),
-		queryClient.invalidateQueries({ queryKey: ["settings"] }),
-	]);
+	await applySettingsQueryInvalidations(
+    queryClient,
+    classifySettingsRuntimeEffects({ policyNormalized: true })
+      .queryInvalidations,
+  );
 }
 
 export async function invalidateLicenseRelatedQueries(
 	queryClient: Pick<QueryClient, "invalidateQueries">,
 ): Promise<void> {
-	await Promise.all([
-		queryClient.invalidateQueries({ queryKey: ["licenseState"] }),
-		queryClient.invalidateQueries({ queryKey: ["licenseAuthContext"] }),
-	]);
+	await applySettingsQueryInvalidations(
+    queryClient,
+    classifySettingsRuntimeEffects({
+      patch: { license_state: true },
+    }).queryInvalidations.filter(
+      (invalidation) => invalidation.reason === "license",
+    ),
+  );
 }
 
 export async function invalidateLogoutRelatedQueries(

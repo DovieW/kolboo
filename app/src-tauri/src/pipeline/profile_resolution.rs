@@ -67,6 +67,16 @@ impl ResolvedActiveWindowOcrModes {
             self.rewrite() == "auto" || self.quick_replace() == "auto"
         }
     }
+
+    /// Whether normal dictation should wait for an OCR Session result before
+    /// continuing Transcription Flow.
+    ///
+    /// Rewrite and Quick Replace can both consume active-window OCR in the normal
+    /// dictation path. Keeping this question here prevents callers from knowing
+    /// the flow-specific string fields and repeating the same precedence rules.
+    pub(crate) fn should_wait_for_normal_dictation_ocr(&self) -> bool {
+        self.rewrite() != "off" || self.quick_replace() != "off"
+    }
 }
 
 fn normalize_active_window_ocr_mode(mode: Option<&str>) -> Option<&str> {
@@ -110,18 +120,6 @@ pub(crate) fn resolve_active_window_ocr_modes(
             global_fallbacks.quick_replace,
         ),
     }
-}
-
-pub(crate) fn resolve_rewrite_active_window_ocr_mode(
-    active_profile: Option<&ProgramPromptProfile>,
-    default_profile: Option<&ProgramPromptProfile>,
-    global_fallback: &str,
-) -> String {
-    resolve_active_window_ocr_mode(
-        active_profile.and_then(|p| p.rewrite_active_window_ocr_mode.as_deref()),
-        default_profile.and_then(|p| p.rewrite_active_window_ocr_mode.as_deref()),
-        global_fallback,
-    )
 }
 
 pub(crate) fn select_default_profile(llm_config: &LlmConfig) -> Option<ProgramPromptProfile> {
@@ -237,14 +235,38 @@ mod tests {
         let mut active_p = profile("app", vec![]);
         active_p.rewrite_active_window_ocr_mode = Some("auto".to_string());
 
-        let mode = resolve_rewrite_active_window_ocr_mode(Some(&active_p), Some(&default_p), "off");
-        assert_eq!(mode, "auto");
+        let modes = resolve_active_window_ocr_modes(
+            Some(&active_p),
+            Some(&default_p),
+            ActiveWindowOcrModeFallbacks {
+                rewrite: "off",
+                quick_ask: "off",
+                quick_replace: "off",
+            },
+        );
+        assert_eq!(modes.rewrite(), "auto");
 
-        let mode = resolve_rewrite_active_window_ocr_mode(None, Some(&default_p), "off");
-        assert_eq!(mode, "manual");
+        let modes = resolve_active_window_ocr_modes(
+            None,
+            Some(&default_p),
+            ActiveWindowOcrModeFallbacks {
+                rewrite: "off",
+                quick_ask: "off",
+                quick_replace: "off",
+            },
+        );
+        assert_eq!(modes.rewrite(), "manual");
 
-        let mode = resolve_rewrite_active_window_ocr_mode(None, None, "auto");
-        assert_eq!(mode, "auto");
+        let modes = resolve_active_window_ocr_modes(
+            None,
+            None,
+            ActiveWindowOcrModeFallbacks {
+                rewrite: "auto",
+                quick_ask: "off",
+                quick_replace: "off",
+            },
+        );
+        assert_eq!(modes.rewrite(), "auto");
     }
 
     #[test]
@@ -356,6 +378,7 @@ mod tests {
         assert!(!modes.should_auto_start(true));
         assert!(modes.should_auto_start(false));
         assert!(modes.has_manual_mode());
+        assert!(modes.should_wait_for_normal_dictation_ocr());
     }
 
     #[test]
@@ -372,6 +395,8 @@ mod tests {
         assert!(modes("auto", "off", "off").should_auto_start(false));
         assert!(modes("off", "off", "auto").should_auto_start(false));
         assert!(!modes("off", "auto", "off").should_auto_start(false));
+        assert!(modes("off", "auto", "manual").should_wait_for_normal_dictation_ocr());
+        assert!(!modes("off", "auto", "off").should_wait_for_normal_dictation_ocr());
     }
 
     #[test]

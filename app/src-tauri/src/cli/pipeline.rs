@@ -628,7 +628,7 @@ async fn run_stream_session(
     });
 
     // Spawn a task to collect partial transcripts.
-    let collect_start = session_start.clone();
+    let collect_start = session_start;
     let collect_task =
         tokio::spawn(async move { collect_partials(partial_rx, collect_start).await });
 

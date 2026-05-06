@@ -4,7 +4,7 @@
 
 ## Centralize setting default values (DRY violation)
 
-**Status:** Mostly addressed by architecture-deepening work (2026-05-05)
+**Status:** Addressed further by architecture-deepening work (2026-05-05)
 
 Setting defaults are currently defined in multiple places, making it easy for them to drift out of sync:
 
@@ -27,7 +27,9 @@ Progress (2026-05-05):
 
 - Added `app/src-tauri/src/settings/default_definitions.rs` as the startup seeding definition Module for persisted setting defaults and explicit-null seed rules.
 - `settings/defaults.rs::ensure_default_settings(...)` now iterates those definitions and keeps only store-state-dependent migrations inline (Default rewrite profile insertion and derived hotkey shortcut cards).
-- Follow-up remains: reduce remaining bootstrap/read-time fallback literals in `bootstrap/mod.rs` and TS normalization once a safe generated/shared default contract is available.
+- `PipelineConfig::default()` now derives STT timeout from the shared Rust `DEFAULT_STT_TIMEOUT_SECONDS` constant instead of a second literal.
+- Bootstrap read-time fallbacks for OCR, hot mic, streaming, rewrite, and local-whisper load settings now reference `settings/default_values.rs` constants.
+- Follow-up remains: if default churn grows again, consider generating `settingsDefaults.ts` from Rust. For now the existing TypeScript drift tests keep the hand-maintained effective Settings View defaults honest without adding generation complexity.
 
 ## Broaden Settings View adoption for inherited/preset callers
 
@@ -59,6 +61,8 @@ Progress (2026-05-05):
 
 ## Reduce maintenance cost of schema registry
 
+**Status:** Addressed by architecture-deepening work (2026-05-05)
+
 `app/src-tauri/xtask/src/schema_registry.rs` is currently a hand-maintained list of all JSON Schemas we export.
 
 It works fine, but adding/removing a schema means touching a big list, which is easy to forget and can drift over time.
@@ -68,6 +72,12 @@ Ideas:
 - Use a macro to declare the registry in a more compact "data-only" way.
 - Generate the registry from a single source of truth (a small TOML/JSON manifest, or a Rust module that is codegen'd).
 - If we ever add many more schemas, consider splitting the registry by domain (settings, commands, events, etc.) and merging them.
+
+Progress (2026-05-05):
+
+- Added a compact `schema_spec!(...)` declaration helper and `SchemaSpec::new(...)` in `app/src-tauri/xtask/src/schema_registry.rs` so each exported schema is now a one-line declaration.
+- Added registry invariant tests for duplicate output files, complete filenames/labels, and stale generator functions.
+- Deferred external manifest/codegen: the macro gives enough locality today without introducing another source file to keep in sync.
 
 ## Consolidate context capture + prompt building
 
@@ -161,6 +171,8 @@ Remaining gaps:
 
 ## Make CLI output reliably machine-readable
 
+**Status:** Addressed by architecture-deepening work (2026-05-05)
+
 **Problem:** CLI commands currently print a single JSON response, but runtime logs (including JSON-formatted tracing logs) may be written to the same stream. This makes it annoying to consume CLI output programmatically (you have to "find the last JSON object" instead of just parsing stdout).
 
 **Why it matters:** The CLI has become our best tool for latency diagnosis and benchmarking, and downstream tooling (PowerShell scripts, CI smoke checks, etc.) should be able to parse output deterministically.
@@ -172,6 +184,12 @@ Ideas:
 - Consider a `--jsonl` mode for streaming per-run benchmark results without mixing with logs.
 
 **Related pain point:** Some CLI benchmark output includes a `request_log` summary field, but it can be `null` if `RequestLogStore` isn't managed/available in the minimal CLI app setup. Either wire it up consistently for CLI runs or remove the field to avoid confusion.
+
+Progress (2026-05-05):
+
+- `app/src-tauri/src/cli/output.rs` now owns JSON/human output writing through a single output Module and has tests for envelope output and serialization fallback behavior.
+- CLI invocations suppress tracing console layers in `tracing_init.rs`, reserving stdout for the final JSON envelope while keeping intentional progress messages on stderr.
+- Follow-up remains optional: add `--quiet` or `--jsonl` only if benchmark tooling needs it.
 
 ## Deduplicate STT transcription flow helpers
 
@@ -223,6 +241,8 @@ Progress (2026-05-05):
 
 ## Deduplicate audio conversion utilities across STT streaming providers
 
+**Status:** Addressed by architecture-deepening work (2026-05-05)
+
 **Problem:** Several small helper functions are copy-pasted identically (or near-identically) across multiple STT provider files:
 
 - `f32_to_pcm_s16le(samples: &[f32]) -> Vec<u8>` — duplicated in `elevenlabs.rs`, `fireworks.rs`, `openai.rs`, `assemblyai.rs`, `speechmatics.rs`, `deepgram.rs`
@@ -234,6 +254,13 @@ Progress (2026-05-05):
 **Suggested fix:** Move these into `app/src-tauri/src/stt/streaming.rs` (which already hosts shared WS and chunking helpers) and have all providers import from there.
 
 **Related:** The "Centralize WebSocket connectivity" refactor item above already added `streaming.rs` — this extends it with audio conversion helpers.
+
+Progress (2026-05-05):
+
+- Added `app/src-tauri/src/audio_normalization.rs` as the shared audio format normalization Module.
+- Moved STT streaming PCM conversion, chunk sizing, latency-friendly linear resampling, downmix helpers, and the existing VAD-quality 16 kHz resampling path behind that Module.
+- STT streaming adapters now import pure audio helpers from `audio_normalization.rs`; `stt/streaming.rs` remains focused on WebSocket/session lifecycle.
+- The Module intentionally keeps latency-friendly streaming resampling distinct from `rubato` VAD/offline resampling so callers pick the right tradeoff explicitly.
 
 ## Revisit provider-family seams only with a real two-adapter proof
 
@@ -252,6 +279,8 @@ Reference: `specs/017-architecture-deepening-plan/validation/provider-family-dec
 
 ## Deepen Local Provider Lifecycle ownership beyond helper rules
 
+**Status:** Addressed further by architecture-deepening work (2026-05-05)
+
 The Spec Kit architecture-deepening slice extracted deterministic Local Whisper rules into `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`, but `pipeline.rs` still owns the mutable cache operations and UI-facing load/unload commands because those operations need `PipelineInner` state and provider construction.
 
 Future cleanup could introduce a small cache-controller seam around:
@@ -263,11 +292,25 @@ Future cleanup could introduce a small cache-controller seam around:
 
 Keep actual model loading explicit and command-driven; do not hide heavy local model loads behind generic provider resolution.
 
+Progress (2026-05-05):
+
+- `app/src-tauri/src/pipeline/local_provider_lifecycle.rs` now owns Local Whisper cache contains/retain/insert helpers in addition to deterministic cache identity/readiness/eviction rules.
+- `pipeline.rs` still performs actual model construction explicitly, including the slow manual-load path outside the pipeline lock.
+- This keeps the heavy local model load visible while concentrating cache mutation rules at the Local Provider Lifecycle seam.
+
 ## Narrow Profile Resolution's OCR-mode interface
+
+**Status:** Addressed by architecture-deepening work (2026-05-05)
 
 `app/src-tauri/src/pipeline/profile_resolution.rs` now owns profile matching and effective behavior, but callers still request rewrite, Quick Replace, and Quick Ask OCR modes separately in a few places.
 
 Future cleanup could return a single `ResolvedActiveWindowOcrModes` value for an active/default/global profile context, so callers do not repeat the same precedence wiring and can ask flow-specific questions like "should this session auto-start OCR?" from one resolved object.
+
+Progress (2026-05-05):
+
+- `ResolvedActiveWindowOcrModes` is now the caller-facing Module for normal dictation auto-start and wait decisions in `pipeline.rs`.
+- The legacy rewrite-only resolver was removed; profile-resolution tests now exercise rewrite, Quick Ask, and Quick Replace together.
+- `OcrConfig::has_any_auto_mode()` owns the global stored-mode check used before profile resolution is available at recording stop.
 
 ## Deepen Quick Ask / Quick Replace request ownership
 

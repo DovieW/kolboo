@@ -768,6 +768,10 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
 }
 
 #[tokio::test]
+#[allow(clippy::result_large_err)]
+// The websocket test server's handshake callback uses tungstenite's required
+// response type directly; boxing it would add noise to the fixture without
+// improving the behavior under test.
 async fn test_elevenlabs_scribe_v2_uses_realtime_ws_and_commits_final_transcript() {
     use futures_util::{SinkExt, StreamExt};
     use serde_json::Value as JsonValue;

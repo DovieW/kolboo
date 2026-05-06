@@ -342,7 +342,7 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
             fireworks_error(format!("Failed to parse Fireworks models response: {}", e))
         })?;
 
-        catalog_models.extend(parsed.models.into_iter());
+        catalog_models.extend(parsed.models);
 
         page_token = parsed.next_page_token;
         if page_token
@@ -388,7 +388,7 @@ pub async fn fireworks_list_models(app: AppHandle) -> CommandResult<Vec<ModelOpt
             disabled: false,
         })
         .collect();
-    callable_out.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+    callable_out.sort_by_key(|model| model.label.to_lowercase());
 
     out.extend(callable_out);
     out.dedup_by(|a, b| a.value == b.value);

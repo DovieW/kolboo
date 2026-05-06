@@ -38,7 +38,7 @@ pub async fn ollama_list_models(app: AppHandle) -> Result<Vec<ModelOption>, Stri
         })
         .collect::<Vec<_>>();
 
-    models.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+    models.sort_by_key(|model| model.label.to_lowercase());
     Ok(models)
 }
 
