@@ -54,9 +54,9 @@ Provider-family seams are only real when at least two concrete adapters use the 
 | Deletion test result            | A broad parser Interface would either erase provider-specific protocol detail or become a pass-through around each adapter's frame loop. Pure parser Modules can still be extracted per provider when they make individual adapters deeper. |
 | Decision                        | Defer                                                                                                                                                                                                                                 |
 | Target files if implemented     | None for this slice; keep provider protocol state machines in concrete STT Adapters and shared session lifecycle in `app/src-tauri/src/stt/streaming.rs`.                                                                               |
-| Characterization tests          | Future parser extractions should use synthetic provider frames only; no network/API-key tests.                                                                                                                                         |
+| Characterization tests          | Future parser extractions should use synthetic provider frames only; no network/API-key tests. The current phase reopens this only as a provider-local OpenAI realtime extraction with fake JSON event payload tests.                    |
 | Redaction/privacy checks        | Synthetic frame tests must avoid real transcripts unless fixtures are intentionally fake.                                                                                                                                               |
-| Notes                           | Reopen only for a narrow normalized-event parser that reduces repeated frame-to-event logic without moving connection/session policy out of `streaming.rs` / `websocket_transport.rs`.                                                |
+| Notes                           | Family seam stays deferred. Phase 9 deepens OpenAI locally by moving realtime protocol parsing/session helpers into `app/src-tauri/src/stt/openai/realtime.rs`, proving the adapter can get smaller without adding a cross-provider parser Interface. |
 
 ## LLM structured output fallback/parsing
 

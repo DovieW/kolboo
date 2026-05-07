@@ -3,17 +3,29 @@ use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(desktop)]
+mod hold_recording;
+#[cfg(desktop)]
 mod lifecycle;
 #[cfg(desktop)]
+mod paste_last;
+#[cfg(desktop)]
 mod retry_last;
+#[cfg(desktop)]
+mod toggle_recording;
 
+#[cfg(desktop)]
+use hold_recording::{handle_hold_shortcut_event, HoldShortcutSource};
 #[cfg(desktop)]
 pub(crate) use lifecycle::{
     is_windows_hook_handled_hotkey, register_hotkey_cards, sync_windows_modifier_hook_flags,
     HotkeyRegistrationMode,
 };
 #[cfg(desktop)]
+use paste_last::{handle_paste_last_shortcut_event, PasteLastShortcutSource};
+#[cfg(desktop)]
 pub(crate) use retry_last::spawn_retry_last_recording_and_output;
+#[cfg(desktop)]
+use toggle_recording::{handle_toggle_shortcut_event, ToggleShortcutSource};
 
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
@@ -22,7 +34,6 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, S
 use tauri_plugin_store::StoreExt;
 
 use crate::audio;
-use crate::commands;
 use crate::events;
 use crate::history::HistoryStorage;
 use crate::pipeline;
@@ -521,166 +532,32 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     let is_quick_ask_toggle = matches_action(HotkeyAction::QuickAskToggle);
 
     if is_toggle {
-        // Toggle mode: action happens on key release (debounced)
-        match event.state {
-            ShortcutState::Pressed => {
-                state.toggle_key_held.swap(true, Ordering::SeqCst);
-            }
-            ShortcutState::Released => {
-                if state.toggle_key_held.swap(false, Ordering::SeqCst) {
-                    // Check pipeline state directly instead of AppState
-                    let pipeline_state = app
-                        .try_state::<pipeline::SharedPipeline>()
-                        .map(|p| p.state());
-
-                    log::info!("Toggle released: pipeline state = {:?}", pipeline_state);
-                    emit_system_event(
-                        app,
-                        "shortcut",
-                        "Toggle key released",
-                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
-                    );
-
-                    // Do not allow starting a new capture while we are processing a previous one.
-                    // This avoids a brief error UI flash if the user taps the toggle again.
-                    if matches!(
-                        pipeline_state,
-                        Some(
-                            pipeline::PipelineState::Transcribing
-                                | pipeline::PipelineState::Rewriting
-                        )
-                    ) {
-                        log::info!("Toggle ignored (pipeline busy: {:?})", pipeline_state);
-                        return;
-                    }
-
-                    let can_stop = pipeline_state
-                        .map(|s| s.can_stop_recording())
-                        .unwrap_or(false);
-                    let can_start = pipeline_state
-                        .map(|s| s.can_start_recording())
-                        .unwrap_or(false);
-
-                    if can_stop {
-                        stop_recording(
-                            app,
-                            &state,
-                            sound_enabled,
-                            audio_cue,
-                            &audio_mute_manager,
-                            playing_audio_handling,
-                            "Toggle",
-                        );
-                    } else if can_start {
-                        start_recording(
-                            app,
-                            &state,
-                            sound_enabled,
-                            audio_cue,
-                            &audio_mute_manager,
-                            playing_audio_handling,
-                            "Toggle",
-                        );
-                    } else {
-                        log::info!("Toggle ignored (pipeline state: {:?})", pipeline_state);
-                    }
-                }
-            }
-        }
+        handle_toggle_shortcut_event(
+            app,
+            &state,
+            matches!(event.state, ShortcutState::Pressed),
+            ToggleShortcutSource::Global,
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
     } else if is_hold {
-        // Hold-to-Record: start on press, stop on release
-        match event.state {
-            ShortcutState::Pressed => {
-                if !state.ptt_key_held.swap(true, Ordering::SeqCst) {
-                    // Only start if pipeline is not already recording/transcribing
-                    let pipeline_state = app
-                        .try_state::<pipeline::SharedPipeline>()
-                        .map(|p| p.state());
-
-                    log::info!("Hold pressed: pipeline state = {:?}", pipeline_state);
-                    emit_system_event(
-                        app,
-                        "shortcut",
-                        "Hold key pressed",
-                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
-                    );
-
-                    let can_start = pipeline_state
-                        .map(|s| s.can_start_recording())
-                        .unwrap_or(false);
-
-                    if can_start {
-                        start_recording(
-                            app,
-                            &state,
-                            sound_enabled,
-                            audio_cue,
-                            &audio_mute_manager,
-                            playing_audio_handling,
-                            "Hold",
-                        );
-                    }
-                }
-            }
-            ShortcutState::Released => {
-                if state.ptt_key_held.swap(false, Ordering::SeqCst) {
-                    // Only stop if pipeline is actually recording
-                    let is_recording = app
-                        .try_state::<pipeline::SharedPipeline>()
-                        .map(|p| p.state() == pipeline::PipelineState::Recording)
-                        .unwrap_or(false);
-
-                    if is_recording {
-                        stop_recording(
-                            app,
-                            &state,
-                            sound_enabled,
-                            audio_cue,
-                            &audio_mute_manager,
-                            playing_audio_handling,
-                            "Hold",
-                        );
-                    }
-                }
-            }
-        }
+        handle_hold_shortcut_event(
+            app,
+            &state,
+            matches!(event.state, ShortcutState::Pressed),
+            HoldShortcutSource::Global,
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
     } else if is_paste_last {
-        // Output last transcription: hold-to-output (output happens on release)
-        match event.state {
-            ShortcutState::Pressed => {
-                // Mark key as held (ignore OS key repeat)
-                state.paste_key_held.swap(true, Ordering::SeqCst);
-            }
-            ShortcutState::Released => {
-                if state.paste_key_held.swap(false, Ordering::SeqCst) {
-                    // Key released - output based on configured mode
-                    log::info!("OutputLast: outputting last transcription");
-
-                    // Get output mode from settings
-                    let output_intent =
-                        crate::core::output_settings::resolve_output_intent_from_store(
-                            app, None, None,
-                        );
-
-                    let history_storage = app.state::<HistoryStorage>();
-
-                    if let Ok(entries) = history_storage.get_all(Some(1)) {
-                        if let Some(entry) = entries.first() {
-                            if let Err(e) = commands::text::output_text_with_mode_options(
-                                &entry.text,
-                                output_intent.mode(),
-                                output_intent.hit_enter(),
-                                !output_intent.clipboard_privacy_mode(),
-                            ) {
-                                log::error!("Failed to output last transcription: {}", e);
-                            }
-                        } else {
-                            log::info!("OutputLast: no history entries available");
-                        }
-                    }
-                }
-            }
-        }
+        handle_paste_last_shortcut_event(
+            app,
+            &state,
+            matches!(event.state, ShortcutState::Pressed),
+            PasteLastShortcutSource::Global,
+        );
     } else if is_retry {
         // Retry last recording: action on release (debounced)
         match event.state {
@@ -900,9 +777,6 @@ pub(crate) fn handle_modifier_key_event(
 ) {
     let state = app.state::<AppState>();
 
-    let toggle_label = format!("Toggle({key})");
-    let hold_label = format!("Hold({key})");
-    let paste_last_label = format!("OutputLast({key})");
     let quick_ask_hold_label = format!("QuickAskHold({key})");
     let quick_ask_toggle_label = format!("QuickAskToggle({key})");
 
@@ -991,198 +865,47 @@ pub(crate) fn handle_modifier_key_event(
     let audio_mute_manager = app.try_state::<AudioMuteManager>();
 
     if is_toggle {
-        // Toggle mode: action happens on key release (debounced)
-        if is_down {
-            state.toggle_key_held.swap(true, Ordering::SeqCst);
-        } else {
-            let was_held = state.toggle_key_held.swap(false, Ordering::SeqCst);
-            if suppress_release_actions {
-                if hotkey_debug {
-                    emit_system_event(
-                        app,
-                        "debug",
-                        &format!("{toggle_label}: release suppressed"),
-                        Some("AltGr/typing suppression triggered"),
-                    );
-                }
-                return;
-            }
-
-            if was_held {
-                let pipeline_state = app
-                    .try_state::<pipeline::SharedPipeline>()
-                    .map(|p| p.state());
-
-                if hotkey_debug {
-                    emit_system_event(
-                        app,
-                        "debug",
-                        &format!("{toggle_label}: key released"),
-                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
-                    );
-                }
-
-                // Do not allow starting a new capture while we are processing a previous one.
-                if matches!(
-                    pipeline_state,
-                    Some(
-                        pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting
-                    )
-                ) {
-                    log::info!(
-                        "{} ignored (pipeline busy: {:?})",
-                        toggle_label,
-                        pipeline_state
-                    );
-
-                    if hotkey_debug {
-                        emit_system_event(
-                            app,
-                            "debug",
-                            &format!("{toggle_label} ignored (pipeline busy)"),
-                            Some(&format!("Pipeline state: {:?}", pipeline_state)),
-                        );
-                    }
-                    return;
-                }
-
-                let can_stop = pipeline_state
-                    .map(|s| s.can_stop_recording())
-                    .unwrap_or(false);
-                let can_start = pipeline_state
-                    .map(|s| s.can_start_recording())
-                    .unwrap_or(false);
-
-                if can_stop {
-                    stop_recording(
-                        app,
-                        &state,
-                        sound_enabled,
-                        audio_cue,
-                        &audio_mute_manager,
-                        playing_audio_handling,
-                        &toggle_label,
-                    );
-                } else if can_start {
-                    start_recording(
-                        app,
-                        &state,
-                        sound_enabled,
-                        audio_cue,
-                        &audio_mute_manager,
-                        playing_audio_handling,
-                        &toggle_label,
-                    );
-                } else {
-                    log::info!(
-                        "{} ignored (pipeline state: {:?})",
-                        toggle_label,
-                        pipeline_state
-                    );
-
-                    if hotkey_debug {
-                        emit_system_event(
-                            app,
-                            "debug",
-                            &format!("{toggle_label} ignored (cannot start/stop)"),
-                            Some(&format!("Pipeline state: {:?}", pipeline_state)),
-                        );
-                    }
-                }
-            } else if hotkey_debug {
-                emit_system_event(
-                    app,
-                    "debug",
-                    &format!("{toggle_label}: key released but was_held=false"),
-                    Some("Down event was not observed/latched"),
-                );
-            }
-        }
+        handle_toggle_shortcut_event(
+            app,
+            &state,
+            is_down,
+            ToggleShortcutSource::ModifierOnly {
+                key,
+                suppress_release_actions,
+                hotkey_debug,
+            },
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
 
         return;
     }
 
     if is_hold {
-        // Hold-to-Record: start on press, stop on release
-        if is_down {
-            if !state.ptt_key_held.swap(true, Ordering::SeqCst) {
-                let pipeline_state = app
-                    .try_state::<pipeline::SharedPipeline>()
-                    .map(|p| p.state());
-                let can_start = pipeline_state
-                    .map(|s| s.can_start_recording())
-                    .unwrap_or(false);
-                if can_start {
-                    start_recording(
-                        app,
-                        &state,
-                        sound_enabled,
-                        audio_cue,
-                        &audio_mute_manager,
-                        playing_audio_handling,
-                        &hold_label,
-                    );
-                }
-            }
-        } else if state.ptt_key_held.swap(false, Ordering::SeqCst) {
-            let is_recording = app
-                .try_state::<pipeline::SharedPipeline>()
-                .map(|p| p.state() == pipeline::PipelineState::Recording)
-                .unwrap_or(false);
-            if is_recording {
-                stop_recording(
-                    app,
-                    &state,
-                    sound_enabled,
-                    audio_cue,
-                    &audio_mute_manager,
-                    playing_audio_handling,
-                    &hold_label,
-                );
-            }
-        }
+        handle_hold_shortcut_event(
+            app,
+            &state,
+            is_down,
+            HoldShortcutSource::ModifierOnly { key },
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
 
         return;
     }
 
     if is_paste_last {
-        // Paste-last: action on release (debounced)
-        if is_down {
-            state.paste_key_held.swap(true, Ordering::SeqCst);
-            return;
-        }
-
-        let was_held = state.paste_key_held.swap(false, Ordering::SeqCst);
-        if !was_held {
-            return;
-        }
-
-        if suppress_release_actions {
-            return;
-        }
-
-        // Key released - output based on configured mode
-        log::info!("{}: outputting last transcription", paste_last_label);
-
-        let output_intent =
-            crate::core::output_settings::resolve_output_intent_from_store(app, None, None);
-
-        let history_storage = app.state::<HistoryStorage>();
-
-        if let Ok(entries) = history_storage.get_all(Some(1)) {
-            if let Some(entry) = entries.first() {
-                if let Err(e) = commands::text::output_text_with_mode_options(
-                    &entry.text,
-                    output_intent.mode(),
-                    output_intent.hit_enter(),
-                    !output_intent.clipboard_privacy_mode(),
-                ) {
-                    log::error!("Failed to output last transcription: {}", e);
-                }
-            } else {
-                log::info!("{}: no history entries available", paste_last_label);
-            }
-        }
+        handle_paste_last_shortcut_event(
+            app,
+            &state,
+            is_down,
+            PasteLastShortcutSource::ModifierOnly {
+                key,
+                suppress_release_actions,
+            },
+        );
 
         return;
     }

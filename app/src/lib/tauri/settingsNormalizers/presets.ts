@@ -3,115 +3,23 @@ import {
 	normalizeRewritePreset as normalizeCanonicalRewritePreset,
 	normalizePresetRoutingHints,
 } from "../presetDefaults";
-import type {
-	CleanupPromptSectionsOverride,
-	OpenAiReasoningEffort,
-	OutputMode,
-	OverlayMode,
-	PlayingAudioHandling,
-	RewritePreset,
-	WidgetPosition,
-} from "../types";
+import type { CleanupPromptSectionsOverride, RewritePreset } from "../types";
+import {
+	normalizeOutputMode,
+	normalizeOverlayModeValue,
+	normalizeWidgetPosition,
+} from "./appBehavior";
+import { normalizePlayingAudioHandling } from "./audio";
+import {
+	normalizeAnthropicThinkingBudget,
+	normalizeGeminiThinkingBudget,
+	normalizeGeminiThinkingLevel,
+	normalizeOpenAiReasoningEffort,
+} from "./reasoning";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
 	return value != null && typeof value === "object" && !Array.isArray(value);
 };
-
-function normalizeOutputMode(value: unknown): OutputMode {
-	if (
-		value === "paste" ||
-		value === "paste_and_clipboard" ||
-		value === "clipboard"
-	) {
-		return value;
-	}
-
-	// Legacy/disabled values: "keystrokes", "keystrokes_and_clipboard",
-	// and "auto_paste" now map to the safe paste path.
-	return "paste";
-}
-
-function normalizePlayingAudioHandling(value: unknown): PlayingAudioHandling {
-	if (
-		value === "none" ||
-		value === "mute" ||
-		value === "pause" ||
-		value === "mute_and_pause"
-	) {
-		return value;
-	}
-
-	if (typeof value === "boolean") {
-		return value ? "mute" : "none";
-	}
-
-	return "none";
-}
-
-function normalizeOverlayMode(value: unknown): OverlayMode {
-	if (value === "always" || value === "never" || value === "recording_only") {
-		return value;
-	}
-	return "recording_only";
-}
-
-function normalizeWidgetPosition(value: unknown): WidgetPosition | null {
-	if (
-		value === "center" ||
-		value === "top-left" ||
-		value === "top-center" ||
-		value === "top-right" ||
-		value === "bottom-left" ||
-		value === "bottom-center" ||
-		value === "bottom-right"
-	) {
-		return value;
-	}
-	return null;
-}
-
-function normalizeOpenAiReasoningEffort(
-	value: unknown,
-): OpenAiReasoningEffort | null {
-	if (typeof value !== "string") return null;
-	const v = value.trim().toLowerCase();
-	if (
-		v === "none" ||
-		v === "minimal" ||
-		v === "low" ||
-		v === "medium" ||
-		v === "high" ||
-		v === "xhigh"
-	) {
-		return v as OpenAiReasoningEffort;
-	}
-	return null;
-}
-
-function normalizeGeminiThinkingLevel(
-	value: unknown,
-): "minimal" | "low" | "medium" | "high" | null {
-	if (typeof value !== "string") return null;
-	const v = value.trim().toLowerCase();
-	if (v === "minimal" || v === "low" || v === "medium" || v === "high") {
-		return v;
-	}
-	return null;
-}
-
-function normalizeGeminiThinkingBudget(value: unknown): number | null {
-	if (value == null) return null;
-	if (typeof value !== "number" || !Number.isFinite(value)) return null;
-	return Math.trunc(value);
-}
-
-function normalizeAnthropicThinkingBudget(value: unknown): number | null {
-	if (value == null) return null;
-	if (typeof value !== "number" || !Number.isFinite(value)) return null;
-	const n = Math.trunc(value);
-	if (n < 1024) return 1024;
-	return Math.min(32768, n);
-}
 
 /**
  * Normalize legacy/persisted preset blobs before Settings exposes them.
@@ -178,9 +86,11 @@ export function normalizeRawRewritePreset(
 			typeof p.playing_audio_handling === "boolean"
 				? normalizePlayingAudioHandling(p.playing_audio_handling)
 				: null,
+		// Preset UI settings are override-or-inherit fields, so malformed overlay
+		// values must stay nullable instead of silently becoming a concrete default.
 		overlay_mode:
 			typeof p.overlay_mode === "string"
-				? normalizeOverlayMode(p.overlay_mode)
+				? normalizeOverlayModeValue(p.overlay_mode)
 				: null,
 		widget_position: normalizeWidgetPosition(p.widget_position),
 		output_mode:

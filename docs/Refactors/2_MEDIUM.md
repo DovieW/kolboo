@@ -2,6 +2,27 @@
 
 <!-- Add medium-priority refactor ideas here. Keep each item specific and code-grounded. -->
 
+## Finish Settings normalization modules
+
+**Status:** Partially addressed by phase 0-1 cleanup work (2026-05-07)
+
+Baseline for this slice:
+
+- `app/src/lib/tauri/settings.ts` still owned store I/O, migrations, and many unrelated raw persisted-settings normalizers in one file.
+- The next low-risk slice was retention/storage settings because the behavior is deterministic, already covered by integration tests, and has a clear ownership line separate from both Settings View and backend pruning.
+
+Progress (2026-05-07):
+
+- Captured the ownership guardrail for future slices: `settings.ts` remains the settings read/write + migration Adapter, while concept-shaped raw persisted-settings normalizers move under `app/src/lib/tauri/settingsNormalizers/**`.
+- Added `settingsNormalizers/{shared,policy,profiles,routing,reasoning,ocr,appBehavior,audio,retention,proxy}.ts` so policy/license state, prompt/profile migration, router/reasoning knobs, OCR settings, proxy settings, output/overlay/window behavior, audio/noise-gate settings, and retention/storage settings now each have clearer Locality.
+- Added focused normalizer tests for retention, policy/license, and profile cleanup/migration behavior plus an integration-style `tauriAPI.getSettings()` characterization test for recordings/request-log/stats retention fallback behavior.
+- Kept Settings View fallback/source semantics in `settingsViews.ts`, frontend display formatting in `app/src/lib/settings/dataLifecycle.ts`, and backend pruning behavior in `app/src-tauri/src/sessions/retention.rs`.
+
+Follow-up remains:
+
+- Continue extracting one concept group at a time when touched: proxy/network settings, OCR/output/overlay settings, provider reasoning settings, policy/license state, and hotkey legacy migration.
+- Avoid moving profile inheritance or preset/global fallback logic into raw persisted-settings normalizers; those remain Settings View / effective settings concerns.
+
 ## Continue narrowing command-side recording finalization
 
 **Status:** Partially addressed by remaining module-deepening work (2026-05-06)
@@ -24,6 +45,7 @@ Progress (2026-05-07):
 - Extracted command-facing `PipelineError` → `CommandError` classification into `app/src-tauri/src/commands/recording_errors.rs`, with pure tests for auth/rate-limit/state error codes. This narrows stable command return-shape ownership without hiding recording side effects.
 - Existing source also has `app/src-tauri/src/sessions/retention.rs`, which owns transcription-retention settings parsing, legacy fallback, History pruning, optional recording deletion, and `history-changed` emission. `commands/recording.rs` now only decides which terminal transcription outcomes should apply that policy.
 - Existing source also has `app/src-tauri/src/pipeline/profile_query.rs`, which owns command-facing profile chips, retry/test-transcription profile identity preservation, and safe program-basename logging.
+- Added `app/src-tauri/src/recording_request_initialization.rs` for command-facing request seed metadata, in-progress `RequestHistoryUpdate::CreateInProgress` payload construction, and request-id tracing around `RequestLogStore::start_request_with(...)`.
 - Follow-up remains: a few flow-specific request-log messages / command return-shape details still live in `commands/recording.rs`; move only when a tested cluster has a clear deletion test.
 
 ## Deepen Audio Capture internal modules
@@ -39,9 +61,14 @@ Progress (2026-05-07):
 - Added `app/src-tauri/src/audio_capture/meters.rs` for realtime level/waveform snapshots, RMS/peak calculation, and speech-presence detection helpers.
 - Preserved the external `AudioCaptureBackend` / `AudioCapture` Interfaces and left CPAL stream/runtime lifecycle in `audio_capture.rs` because moving it would be higher risk and tied to CPAL lifetimes.
 
+Progress (2026-05-07, Phase 6 characterization):
+
+- Added deterministic `audio_capture.rs` tests for buffer format/reset transitions, rolling pre-roll resizing, hot-mic start/stop behavior, VAD event polling, drop cleanup, and watchdog backoff without requiring real audio devices.
+- Centralized repeated pre-roll capacity / watchdog backoff policy as local helpers inside `audio_capture.rs` so the runtime behavior is easier to characterize without pretending the CPAL lifecycle has been extracted yet.
+
 Follow-up remains:
 
-- If capture-thread lifecycle becomes painful again, consider a separate `audio_capture/runtime.rs` only after fake-device/channel characterization tests prove the CPAL lifetime deletion test passes.
+- If capture-thread lifecycle becomes painful again, consider a separate `audio_capture/runtime.rs` only after fake-device/channel characterization tests prove the CPAL lifetime deletion test passes. This slice intentionally stopped at characterization rather than forcing a shallow runtime Module.
 
 ## Centralize setting default values (DRY violation)
 
@@ -113,7 +140,7 @@ Progress (2026-05-07):
 
 ## Reduce repetitive settings mutation hooks in `queries.ts`
 
-**Status:** Partially addressed by architecture-deepening work (2026-05-06)
+**Status:** Addressed by architecture-deepening work (2026-05-07)
 
 `app/src/lib/queries.ts` had a large number of local settings hooks that all repeated the same `useMutation(...)` + `invalidateQueries({ queryKey: ["settings"] })` shape.
 
@@ -125,16 +152,18 @@ Progress (2026-05-06):
 Progress (2026-05-07):
 
 - Split query-function factories by domain under `app/src/lib/queries/queryFns/**` and kept `app/src/lib/queries/queryFns.ts` as the compatibility barrel. The hook monolith still exists, but query normalization/factory logic now has clearer Locality for cost, history, settings, providers, recordings, logs, and transcription tests.
+- Split query hooks by domain under `app/src/lib/queries/**` (`settings.ts`, `providers.ts`, `history.ts`, `recordings.ts`, `logs.ts`, `costs.ts`, `policy.ts`, `license.ts`, `transcription.ts`) and kept `app/src/lib/queries.ts` as the compatibility barrel.
+- Moved shared query invalidation/runtime helpers into `app/src/lib/queries/shared.ts` so simple settings mutations can reuse one path without keeping the old monolith alive.
 
 Follow-up remains:
 
 - Continue migrating bespoke-but-nearly-identical hooks when they are touched.
-- Continue splitting `app/src/lib/queries.ts` hook exports into domain hook Modules when a larger UI slice touches those imports.
+- If one domain hook module grows unwieldy again, split that domain further instead of rebuilding a general-purpose hook monolith.
 - Keep optimistic updates and runtime-sync-heavy flows bespoke when the helper would hide meaningful behavior.
 
 ## Extract Data and History UI read models
 
-**Status:** Addressed by phase 1-3 cleanup work (2026-05-07)
+**Status:** Addressed by phase 1-5 cleanup work (2026-05-07)
 
 The large settings/history components had deterministic read-model logic mixed into UI rendering and mutation wiring.
 
@@ -142,13 +171,36 @@ Progress (2026-05-07):
 
 - Added `app/src/lib/settings/dataLifecycle.ts` for Data Lifecycle read-model helpers: cloud-sync UI-state normalization, retention unit conversion, recordings storage summaries, and byte formatting.
 - `app/src/components/settings/DataSettings.tsx` now consumes those helpers and remains the UI Adapter over Mantine controls and settings/data mutations.
-- Added `app/src/lib/history/readModel.ts` for History Feed read-model helpers: persisted filter normalization/store access, date grouping, token estimates, and analysis prompt construction.
-- `app/src/components/HistoryFeed.tsx` now consumes the read model while keeping playback, query hooks, and destructive-action UI local.
-- Added deterministic Vitest coverage for corrupted history filters, grouping, prompt construction, cloud-sync defaults, retention conversion, and storage formatting.
+- Split `DataSettings.tsx` presentational sections into `app/src/components/settings/data/**` (`DataRetentionSection`, `DataBackupSection`, `DataCloudSyncSection`, `DataDangerZoneSection`, and the GitHub-token / danger-confirm modals) so the adapter keeps mutation/file-dialog orchestration visible without inlining every Mantine row.
+- Expanded `app/src/lib/settings/dataLifecycle.ts` with safer cloud-sync boolean normalization, retention time-input config, recordings-retention description text, transcription delete-recordings gating, and danger-zone storage breakdown formatting.
+- Added deterministic Vitest coverage for the expanded Data Lifecycle helpers and fallback behavior.
+- Added `app/src/lib/history/readModel.ts` for History Feed read-model helpers: persisted filter normalization/store access, entry display metadata, empty-state selection, date grouping, token estimates, and analysis prompt construction.
+- Added `app/src/lib/history/useHistoryFeedFilters.ts` for persisted History tab filter state, page-reset rules, and normalized query shaping.
+- `app/src/components/HistoryFeed.tsx` now consumes the read model, filter-state hook, and `app/src/components/history/**` presentational sections while keeping playback, query hooks, and destructive-action orchestration local.
+- Added deterministic Vitest coverage for corrupted history filters, display metadata, grouping, prompt construction, query shaping, cloud-sync defaults, retention conversion, and storage formatting.
 
 Follow-up remains:
 
-- `DataSettings.tsx` and `HistoryFeed.tsx` are still large UI Adapters. If touched again, extract presentational subcomponents one section at a time rather than introducing a generic settings/history framework.
+- `DataSettings.tsx` is slimmer now, but if backup/cloud-sync mutation orchestration grows again, prefer a feature-shaped hook over re-inlining section UI or adding a generic settings framework.
+- `HistoryFeed.tsx` is slimmer now, but future work should keep history playback/retry/delete flows visible in the adapter while pushing only deterministic display state into the read model and filter hook.
+
+## Extract a Logs View read model and presentational sections
+
+**Status:** Addressed by phase 8 cleanup work (2026-05-07)
+
+`app/src/components/LogsView.tsx` had accumulated deterministic request-log formatting, badge metadata, filtering, pagination, empty-state handling, and large request-details rendering alongside the view's query/export/playback wiring.
+
+Progress (2026-05-07):
+
+- Added `app/src/lib/logs/readModel.ts` for Logs View read-model helpers: request-log timestamp/duration/cost formatting, status/level badge metadata, router score shaping, transcript/rewrite section shaping, system-event display shaping, filtering, pagination helpers, and empty-state selection.
+- Added deterministic Vitest coverage in `app/src/lib/logs/readModel.test.ts` for formatting, cost labels, filtering semantics, pagination, rewrite diff behavior, quick-action display shaping, and malformed duration/timestamp fallbacks.
+- Split the request-log UI into `app/src/components/logs/**` (`LogsToolbar.tsx`, `LogsSystemEventsPanel.tsx`, `LogsRequestList.tsx`, and `RequestLogItem.tsx`) so large display-only sections live outside the adapter.
+- Slimmed `app/src/components/LogsView.tsx` into an adapter over request-log queries, export dialogs, playback wiring, hotkey-debug settings, system-event listening, and page-level filter state.
+
+Follow-up remains:
+
+- If the Logs toolbar/export flows grow significantly, prefer a small feature-shaped hook or another narrow presentational split instead of re-growing a single monolithic `LogsView.tsx`.
+- Keep backend request-log redaction, payload stripping, and persistence behavior in `app/src-tauri/src/request_log.rs` / existing log commands; the frontend should only shape already-sanitized display data.
 
 ## Reduce maintenance cost of schema registry
 
@@ -401,6 +453,7 @@ Progress (2026-05-07):
 
 - Recorded WebSocket Transport Policy as an implemented real Provider-Family Seam with six realtime STT adapters and a deletion test.
 - Added explicit deferrals for LLM provider client configuration, STT streaming transcript event parsing, LLM structured output fallback/parsing, and OCR provider adapters. The LLM client-config candidate remains worth reopening, but this slice stopped before adding a shallow pass-through wrapper.
+- Deepened OpenAI locally by moving its realtime session/parser/task implementation into `app/src-tauri/src/stt/openai/realtime.rs` with synthetic JSON event tests, while keeping STT streaming transcript parsing deferred as a Provider-Family Seam.
 
 ## Deepen Local Provider Lifecycle ownership beyond helper rules
 
@@ -469,3 +522,22 @@ Progress (2026-05-07):
 Follow-up remains:
 
 - Extract broader `shortcuts/dispatch.rs` only after characterization tests cover both global-shortcut and modifier-only paths. Do not hide Tauri side effects behind a generic event framework.
+
+## Broaden Shortcut action ownership carefully
+
+**Status:** Partially addressed by phase 7 cleanup work (2026-05-07)
+
+`app/src-tauri/src/shortcuts/mod.rs` still owned duplicated Toggle, Hold, and Paste Last behavior across both global-shortcut callbacks and Windows modifier-only hook events.
+
+Progress (2026-05-07):
+
+- Added `app/src-tauri/src/shortcuts/toggle_recording.rs` for toggle-specific debounce, pipeline busy/start/stop routing, and source-label diagnostics across global and modifier-only paths.
+- Added `app/src-tauri/src/shortcuts/hold_recording.rs` for hold-to-record start/stop routing across global and modifier-only paths.
+- Added `app/src-tauri/src/shortcuts/paste_last.rs` for debounced last-transcription output across global and modifier-only paths.
+- Kept startup/runtime registration decisions in `shortcuts/lifecycle.rs`, Windows modifier-only hook mechanics in `windows_modifier_hotkeys.rs`, Retry Last in `shortcuts/retry_last.rs`, and Quick Ask / Escape cancel routing visible in `shortcuts/mod.rs`.
+- Added pure characterization tests for the new action Modules so release suppression, latch handling, pipeline-state decisions, and source labels are covered without needing real hotkey hooks.
+
+Follow-up remains:
+
+- Quick Ask hold/toggle dispatch still duplicates across global and modifier-only paths; only extract it if a similarly clear deletion test remains after this slice.
+- Keep the main dispatcher as a visible router over Tauri side effects. Do not introduce a generic shortcut event framework.

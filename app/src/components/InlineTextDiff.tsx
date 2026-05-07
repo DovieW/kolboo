@@ -2,7 +2,11 @@ import { Text } from "@mantine/core";
 import { type CSSProperties, useMemo } from "react";
 import { isDiffTrivial, type TextDiffChunk } from "../lib/textDiff";
 
-export function InlineTextDiff({ chunks }: { chunks: TextDiffChunk[] }) {
+export default function InlineTextDiff({
+	chunks,
+}: {
+	chunks: TextDiffChunk[];
+}) {
 	const rendered = useMemo(() => {
 		if (chunks.length === 0 || isDiffTrivial(chunks)) return null;
 

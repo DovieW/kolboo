@@ -103,6 +103,39 @@ export interface GroupedHistory {
 	items: HistoryEntry[];
 }
 
+export type HistoryEntryContentKind =
+	| "in_progress"
+	| "error"
+	| "text"
+	| "empty";
+
+export interface HistoryEntryViewModel {
+	id: string;
+	timestampLabel: string;
+	contentKind: HistoryEntryContentKind;
+	displayText: string;
+	displayTitle?: string;
+	copyValue: string | null;
+	hasCopyValue: boolean;
+	profilePresetLabel: string | null;
+	recordingRequestId: string | null;
+}
+
+export interface GroupedHistoryViewModel {
+	date: string;
+	items: HistoryEntryViewModel[];
+}
+
+export interface HistoryFeedEmptyState {
+	title: string;
+	message: string;
+}
+
+function trimOrNull(value: string | null | undefined): string | null {
+	const trimmed = (value ?? "").trim();
+	return trimmed.length > 0 ? trimmed : null;
+}
+
 export function groupHistoryByDate(history: HistoryEntry[]): GroupedHistory[] {
 	const groups: Record<string, GroupedHistory> = {};
 
@@ -115,6 +148,126 @@ export function groupHistoryByDate(history: HistoryEntry[]): GroupedHistory[] {
 	}
 
 	return Object.values(groups);
+}
+
+export function getHistoryEntryProfileBadgeLabel(
+	entry: Pick<
+		HistoryEntry,
+		"profile_name" | "profile_id" | "preset_name" | "preset_id"
+	>,
+): string | null {
+	const profileName = trimOrNull(entry.profile_name);
+	const profileId = trimOrNull(entry.profile_id);
+	const presetName = trimOrNull(entry.preset_name);
+	const presetId = trimOrNull(entry.preset_id);
+
+	const profileLabel =
+		profileName ??
+		(!profileId || profileId === "default" ? "Default" : profileId);
+	const presetLabel = presetName ?? presetId ?? "Default";
+	const isDefaultProfile =
+		profileId === "default" || profileLabel.toLowerCase() === "default";
+
+	if (isDefaultProfile && presetLabel.toLowerCase() === "default") {
+		return null;
+	}
+
+	return `${profileLabel}: ${presetLabel}`;
+}
+
+export function toHistoryEntryViewModel(
+	entry: HistoryEntry,
+): HistoryEntryViewModel {
+	const status = entry.status ?? "success";
+	const errorMessage = trimOrNull(entry.error_message);
+	const transcript = trimOrNull(entry.text);
+	const recordingRequestId = trimOrNull(entry.recording_request_id) ?? entry.id;
+
+	if (status === "in_progress") {
+		return {
+			id: entry.id,
+			timestampLabel: formatHistoryTime(entry.timestamp),
+			contentKind: "in_progress",
+			displayText: "Transcribing…",
+			copyValue: null,
+			hasCopyValue: false,
+			profilePresetLabel: getHistoryEntryProfileBadgeLabel(entry),
+			recordingRequestId,
+		};
+	}
+
+	if (status === "error") {
+		return {
+			id: entry.id,
+			timestampLabel: formatHistoryTime(entry.timestamp),
+			contentKind: "error",
+			displayText: errorMessage ?? "Try again",
+			displayTitle: errorMessage ?? undefined,
+			copyValue: errorMessage,
+			hasCopyValue: Boolean(errorMessage),
+			profilePresetLabel: getHistoryEntryProfileBadgeLabel(entry),
+			recordingRequestId,
+		};
+	}
+
+	if (!transcript) {
+		return {
+			id: entry.id,
+			timestampLabel: formatHistoryTime(entry.timestamp),
+			contentKind: "empty",
+			displayText: "No transcript",
+			displayTitle: "No transcript was produced",
+			copyValue: null,
+			hasCopyValue: false,
+			profilePresetLabel: getHistoryEntryProfileBadgeLabel(entry),
+			recordingRequestId,
+		};
+	}
+
+	return {
+		id: entry.id,
+		timestampLabel: formatHistoryTime(entry.timestamp),
+		contentKind: "text",
+		displayText: entry.text,
+		copyValue: entry.text,
+		hasCopyValue: true,
+		profilePresetLabel: getHistoryEntryProfileBadgeLabel(entry),
+		recordingRequestId,
+	};
+}
+
+export function groupHistoryForDisplay(
+	history: HistoryEntry[],
+): GroupedHistoryViewModel[] {
+	return groupHistoryByDate(history).map((group) => ({
+		date: group.date,
+		items: group.items.map((item) => toHistoryEntryViewModel(item)),
+	}));
+}
+
+export function getHistoryFeedEmptyState(args: {
+	totalHistoryCount: number;
+	isFiltering: boolean;
+}): HistoryFeedEmptyState {
+	if (args.totalHistoryCount === 0) {
+		return {
+			title: "No dictation history yet",
+			message:
+				"Your transcribed text will appear here after you use voice dictation.",
+		};
+	}
+
+	if (args.isFiltering) {
+		return {
+			title: "No matches",
+			message: "Try a different filter.",
+		};
+	}
+
+	return {
+		title: "Nothing to show",
+		message: "Start your first recording to see it here.",
+	};
 }
 
 export function estimateTokenCount(text: string): number {

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	buildAnalysisPrompt,
 	estimateTokenCount,
+	getHistoryEntryProfileBadgeLabel,
+	getHistoryFeedEmptyState,
 	groupHistoryByDate,
+	groupHistoryForDisplay,
 	normalizePersistedHistoryFilters,
 } from "./readModel";
 
@@ -33,6 +36,27 @@ describe("History Feed read model", () => {
 		expect(normalizePersistedHistoryFilters("oops")).toBeNull();
 	});
 
+	it("falls back to defaults for malformed persisted filter fields", () => {
+		expect(
+			normalizePersistedHistoryFilters(
+				{
+					filterText: 42,
+					showFailed: "nope",
+					showEmptyTranscript: "nah",
+					selectedSttModelKeys: "bad",
+					selectedLlmModelKeys: ["llm-a", 1],
+				},
+				{ llm: ["llm-a"] },
+			),
+		).toEqual({
+			filterText: "",
+			showFailed: true,
+			showEmptyTranscript: false,
+			selectedSttModelKeys: [],
+			selectedLlmModelKeys: ["llm-a"],
+		});
+	});
+
 	it("groups entries by display date without reordering items", () => {
 		const grouped = groupHistoryByDate([
 			{ id: "1", text: "first", timestamp: "2024-01-01T10:00:00Z" },
@@ -44,6 +68,67 @@ describe("History Feed read model", () => {
 			["1", "2"],
 			["3"],
 		]);
+	});
+
+	it("builds display view models for history entries", () => {
+		const grouped = groupHistoryForDisplay([
+			{
+				id: "error",
+				text: "",
+				timestamp: "2024-01-01T10:00:00Z",
+				status: "error",
+				error_message: "Backend said nope",
+				profile_id: "custom-profile",
+				preset_id: "draft",
+			},
+			{
+				id: "empty",
+				text: "   ",
+				timestamp: "2024-01-01T10:05:00Z",
+				profile_name: "Default",
+				preset_name: "Default",
+			},
+		]);
+
+		expect(grouped).toHaveLength(1);
+		expect(grouped[0]?.items).toMatchObject([
+			{
+				id: "error",
+				contentKind: "error",
+				displayText: "Backend said nope",
+				hasCopyValue: true,
+				profilePresetLabel: "custom-profile: draft",
+				recordingRequestId: "error",
+			},
+			{
+				id: "empty",
+				contentKind: "empty",
+				displayText: "No transcript",
+				hasCopyValue: false,
+				profilePresetLabel: null,
+				recordingRequestId: "empty",
+			},
+		]);
+	});
+
+	it("formats profile and preset badges only when they are meaningful", () => {
+		expect(
+			getHistoryEntryProfileBadgeLabel({
+				profile_name: "Default",
+				profile_id: "default",
+				preset_name: "Default",
+				preset_id: null,
+			}),
+		).toBeNull();
+
+		expect(
+			getHistoryEntryProfileBadgeLabel({
+				profile_name: "Support",
+				profile_id: "support",
+				preset_name: null,
+				preset_id: "rewrite",
+			}),
+		).toBe("Support: rewrite");
 	});
 
 	it("builds analysis prompts from non-empty successful transcripts only", () => {
@@ -76,6 +161,61 @@ describe("History Feed read model", () => {
 		expect(prompt.userPrompt).toContain("useful note");
 		expect(prompt.userPrompt).not.toContain("failure text");
 		expect(prompt.userPrompt).not.toContain("too old");
+	});
+
+	it("sorts included transcripts chronologically and explains empty results", () => {
+		const prompt = buildAnalysisPrompt(
+			[
+				{ id: "2", text: "second", timestamp: "2024-01-02T12:00:00Z" },
+				{ id: "1", text: "first", timestamp: "2024-01-01T12:00:00Z" },
+			],
+			{ style: "productive" },
+		);
+
+		expect(prompt.userPrompt.indexOf("first")).toBeLessThan(
+			prompt.userPrompt.indexOf("second"),
+		);
+
+		const emptyPrompt = buildAnalysisPrompt(
+			[
+				{
+					id: "failed",
+					text: "ignored",
+					timestamp: "2024-01-02T00:50:00Z",
+					status: "error",
+				},
+			],
+			{ style: "productive" },
+		);
+
+		expect(emptyPrompt.includedCount).toBe(0);
+		expect(emptyPrompt.prompt).toContain(
+			"No non-empty transcripts matched your filter",
+		);
+	});
+
+	it("selects the correct empty state copy for the history tab", () => {
+		expect(
+			getHistoryFeedEmptyState({ totalHistoryCount: 0, isFiltering: false }),
+		).toEqual({
+			title: "No dictation history yet",
+			message:
+				"Your transcribed text will appear here after you use voice dictation.",
+		});
+
+		expect(
+			getHistoryFeedEmptyState({ totalHistoryCount: 12, isFiltering: true }),
+		).toEqual({
+			title: "No matches",
+			message: "Try a different filter.",
+		});
+
+		expect(
+			getHistoryFeedEmptyState({ totalHistoryCount: 12, isFiltering: false }),
+		).toEqual({
+			title: "Nothing to show",
+			message: "Start your first recording to see it here.",
+		});
 	});
 
 	it("estimates tokens defensively for empty and non-empty text", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toManagedInferenceMessage } from "./queries";
+import { toManagedInferenceMessage } from "./queries/shared";
 
 describe("toManagedInferenceMessage", () => {
 	it("returns BYOK recovery guidance for temporary outages", () => {

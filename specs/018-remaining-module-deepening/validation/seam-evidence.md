@@ -40,6 +40,14 @@
 - Deletion test: removing the Module pushes manual proxy/tunnel/TLS policy back into every realtime STT adapter or reintroduces the old silent gap where WS ignored configured transport settings.
 - Characterization: unit tests in `stt/websocket_transport.rs` cover exact/suffix/port and wildcard `no_proxy` host matching, the remaining unsupported HTTPS-proxy diagnostic, and local loopback manual HTTP proxy CONNECT request shape with Basic auth.
 
+## OpenAI realtime STT provider-local module
+
+- Interface: `stt::openai::realtime::{supports_realtime_streaming, realtime_transcription_model, realtime_ws_url, start_streaming_session}` called from `stt/openai.rs`.
+- Implementation: owns OpenAI-specific realtime WebSocket URL/auth/session-update payloads, server-event parsing, partial transcript accumulation, and post-commit finalization heuristics.
+- Depth: `stt/openai.rs` stays focused on batch endpoint selection, prompt/language normalization, and Responses/transcriptions HTTP flows while provider-independent WS/session helpers remain in `stt/streaming.rs`.
+- Deletion test: removing the Module restores the long OpenAI realtime protocol state machine to `stt/openai.rs`, mixing batch-path selection with provider-specific WebSocket event handling again.
+- Characterization: unit tests in `stt/openai/realtime.rs` cover delta/completed/error event parsing, transcript accumulation/finalization, and realtime model/URL conventions with synthetic JSON payloads only.
+
 ## Recording Orchestration
 
 - Interface: `recording_orchestration::{spawn_routing_started_watcher, spawn_rewriting_started_watcher}`.
@@ -54,7 +62,7 @@
 - Implementation: device-selection tokens/read models, stop-time preprocessing helpers, and realtime meter snapshots are split from CPAL stream/runtime orchestration.
 - Depth: `audio_capture.rs` no longer owns mic ID encoding/ordinal matching, capture cleanup algorithms, RMS/peak/waveform meter storage, or speech-presence helpers while the external capture Interface stays unchanged.
 - Deletion test: removing these Modules pushes duplicate-name mic selection, noise-gate/high-pass/AGC/noise-suppression logic, and atomic meter state back into the large CPAL runtime file.
-- Characterization: unit tests in `audio_capture/device_selection.rs`, `audio_capture/preprocessing.rs`, and `audio_capture/meters.rs` cover encoded mic IDs, ordinal/legacy selection, gate-strength mapping, preprocessing invariants, meter clamping, waveform bucket shape, and empty speech detection.
+- Characterization: unit tests in `audio_capture/device_selection.rs`, `audio_capture/preprocessing.rs`, and `audio_capture/meters.rs` cover encoded mic IDs, ordinal/legacy selection, gate-strength mapping, preprocessing invariants, meter clamping, waveform bucket shape, and empty speech detection. Additional runtime characterization in `audio_capture.rs` covers buffer format/reset transitions, rolling pre-roll resizing, hot-mic start/stop cleanup, VAD event polling, drop cleanup, and watchdog backoff without real devices.
 
 ## Retry Last Shortcut
 
@@ -63,6 +71,14 @@
 - Depth: retry-specific history/recording lookup and output orchestration moved out of generic shortcut dispatch while registration decisions and Windows hook mechanics remain in their existing Modules.
 - Deletion test: removing the Module restores retryable-history selection and retry output side effects to both global-shortcut and modifier-only dispatch branches.
 - Characterization: unit tests in `shortcuts/retry_last.rs` cover explicit recording-source preference, legacy entry-id fallback, and trimmed recording ids.
+
+## Shortcut Recording Actions
+
+- Interface: `shortcuts::{toggle_recording::handle_toggle_shortcut_event, hold_recording::handle_hold_shortcut_event, paste_last::handle_paste_last_shortcut_event}` called from `shortcuts/mod.rs` after action matching.
+- Implementation: owns Toggle/Hold/Paste Last debounce, pipeline busy/start/stop decisions, and last-transcription output across both global-shortcut and modifier-only hook paths.
+- Depth: duplicated recording/output action branches moved out of generic shortcut dispatch while registration decisions, Windows hook mechanics, Retry Last, and Escape cancel remain separate.
+- Deletion test: removing these Modules restores duplicated toggle/hold/paste-last release handling, pipeline-state guards, and source-label/output logic in both global-shortcut and modifier-only branches.
+- Characterization: unit tests in `shortcuts/toggle_recording.rs`, `shortcuts/hold_recording.rs`, and `shortcuts/paste_last.rs` cover global and modifier-only release gating, start/stop decisions, suppressed modifier releases, and source-label shaping.
 
 ## Batch STT Orchestration
 

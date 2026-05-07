@@ -108,7 +108,7 @@ function redactPayloadValue(
 	return next;
 }
 
-export function LogJsonModal({
+export default function LogJsonModal({
 	opened,
 	onClose,
 	log,

@@ -298,6 +298,37 @@ describe("tauriAPI.getSettings() normalization", () => {
 	);
 
 	itWithImportTimeout(
+		"normalizes recordings, request-log, and stats retention through shared retention settings rules",
+		async () => {
+			vi.resetModules();
+			currentStore = new FakeStore({
+				max_saved_recordings: 1500.6,
+				recordings_retention_mode: "banana",
+				recordings_retention_unit: "hours",
+				recordings_retention_value: 1.5,
+				request_logs_retention_mode: "sideways",
+				request_logs_retention_amount: 5000,
+				request_logs_retention_days: -10,
+				stats_retention_max_bytes: 100,
+			});
+
+			const { tauriAPI } = await import("./tauri");
+			const settings = await tauriAPI.getSettings();
+
+			expect(settings.max_saved_recordings).toBe(1501);
+			expect(settings.recordings_retention_mode).toBe("amount");
+			// Missing recordings_retention_amount should inherit the normalized max.
+			expect(settings.recordings_retention_amount).toBe(1501);
+			expect(settings.recordings_retention_unit).toBe("hours");
+			expect(settings.recordings_retention_value).toBe(1.5);
+			expect(settings.request_logs_retention_mode).toBe("amount");
+			expect(settings.request_logs_retention_amount).toBe(1000);
+			expect(settings.request_logs_retention_days).toBe(0);
+			expect(settings.stats_retention_max_bytes).toBe(1_000_000);
+		},
+	);
+
+	itWithImportTimeout(
 		"normalizes profile.disabled (missing -> false, preserves true/false)",
 		async () => {
 			vi.resetModules();

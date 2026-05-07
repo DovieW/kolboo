@@ -8,13 +8,17 @@ use crate::commands::event_sink::AppEventSink;
 use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
 use crate::commands::CommandError;
 use crate::events;
-use crate::history::{HistoryStorage, RequestHistoryUpdate, RequestModelInfo};
+use crate::history::{HistoryStorage, RequestHistoryUpdate};
 use crate::history_request_lifecycle;
 use crate::pipeline::{
     program_basename_for_log, resolve_profile_by_id, resolve_profile_for_foreground_app,
     PipelineConfig, PipelineError, PipelineState, SharedPipeline,
 };
 use crate::recording_completion;
+use crate::recording_request_initialization::{
+    create_in_progress_history_update, record_request_id_on_current_span,
+    start_request_log_with_seed, HistorySelectionMode, LogLlmSeedMode, RecordingRequestSeed,
+};
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
 use crate::sessions::{recording_finalization, retention};
@@ -228,27 +232,22 @@ pub fn pipeline_start_recording(
         (Some("default".to_string()), Some("Default".to_string()))
     };
 
-    // Start request logging
-    let mut request_id: Option<String> = None;
-    if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        let id = log_store.start_request_with(
-            config.stt_provider.clone(),
-            config.stt_model.clone(),
+    let request_seed = RecordingRequestSeed::from_config(&config)
+        .with_profile(profile_id.clone(), profile_name.clone());
+
+    // Start request logging.
+    let request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
+        let id = start_request_log_with_seed(
+            &log_store,
+            &request_seed,
+            LogLlmSeedMode::PreserveConfigured,
             |log| {
-                log.profile_id = profile_id;
-                log.profile_name = profile_name;
-                log.llm_provider = if config.llm_config.enabled {
-                    Some(config.llm_config.provider.clone())
-                } else {
-                    None
-                };
-                log.llm_model = config.llm_config.model.clone();
                 log.info("Recording started");
             },
         );
-        tracing::Span::current().record("request_id", tracing::field::display(&id));
-        request_id = Some(id.clone());
-    }
+        record_request_id_on_current_span(Some(id.as_str()));
+        id
+    });
 
     // Bind OCR to this request id so OCR survives internal pipeline transitions and cannot
     // leak across requests.
@@ -313,6 +312,8 @@ async fn pipeline_stop_and_transcribe_inner(
 
     let config = pipeline.config();
     let (profile_id, profile_name) = resolve_profile_for_foreground_app(&config);
+    let request_seed = RecordingRequestSeed::from_config(&config)
+        .with_profile(profile_id.clone(), profile_name.clone());
 
     // Try to capture the active request id for history + persistent audio.
     //
@@ -325,22 +326,11 @@ async fn pipeline_stop_and_transcribe_inner(
 
     if active_request_id.is_none() {
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let id = log_store.start_request_with(
-                config.stt_provider.clone(),
-                config.stt_model.clone(),
+            let id = start_request_log_with_seed(
+                &log_store,
+                &request_seed,
+                LogLlmSeedMode::PreserveConfigured,
                 |log| {
-                    log.profile_id = profile_id.clone();
-                    log.profile_name = profile_name.clone();
-                    log.llm_provider = if config.llm_config.enabled {
-                        Some(config.llm_config.provider.clone())
-                    } else {
-                        None
-                    };
-                    log.llm_model = if config.llm_config.enabled {
-                        config.llm_config.model.clone()
-                    } else {
-                        None
-                    };
                     log.warn("Request log was missing at stop; started a new request log entry");
                 },
             );
@@ -348,9 +338,7 @@ async fn pipeline_stop_and_transcribe_inner(
         }
     }
 
-    if let Some(req_id) = active_request_id.as_deref() {
-        tracing::Span::current().record("request_id", tracing::field::display(req_id));
-    }
+    record_request_id_on_current_span(active_request_id.as_deref());
 
     // Bind OCR to this request id so OCR survives internal pipeline transitions and
     // cannot leak across requests. This also handles edge cases where request logging
@@ -366,34 +354,16 @@ async fn pipeline_stop_and_transcribe_inner(
         }
     }
 
-    // Capture model info for persistence in history.
-    // Note: we intentionally start with no profile metadata in history.
-    // The pipeline resolves/stamps the effective profile into the request log during the actual
-    // transcription flow, and we mirror that deterministically before final request completion.
-    let model_info = RequestModelInfo {
-        stt_provider: Some(config.stt_provider.clone()),
-        stt_model: config.stt_model.clone(),
-        llm_provider: if config.llm_config.enabled {
-            Some(config.llm_config.provider.clone())
-        } else {
-            None
-        },
-        llm_model: config.llm_config.model.clone(),
-        profile_id: None,
-        profile_name: None,
-        preset_id: None,
-        preset_name: None,
-    };
-
     // Create an in-progress history entry so the History view shows a running request.
     if let Some(req_id) = active_request_id.as_deref() {
         let _ = history_request_lifecycle::apply_request_history_update(
             &app,
-            RequestHistoryUpdate::CreateInProgress {
-                request_id: req_id.to_string(),
-                model_info,
-                max_entries: max_history_entries,
-            },
+            create_in_progress_history_update(
+                req_id,
+                &request_seed,
+                HistorySelectionMode::OmitSeededSelection,
+                max_history_entries,
+            ),
         );
     }
 
@@ -421,8 +391,7 @@ async fn pipeline_stop_and_transcribe_inner(
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
-            log.profile_id = profile_id.clone();
-            log.profile_name = profile_name.clone();
+            request_seed.seed_log(log, LogLlmSeedMode::LeaveExisting);
             // Important: do not include recording time in the request "Total" duration.
             // The request log is created at recording-start, so we explicitly mark the
             // processing start when transcription begins.
@@ -693,18 +662,16 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         resolve_profile_by_id(&config, original_profile_id.as_deref())
     };
 
+    let request_seed = RecordingRequestSeed::from_config(&config)
+        .with_profile(profile_id.clone(), profile_name.clone())
+        .with_preset(original_preset_id.clone(), original_preset_name.clone());
+
     let new_request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
-        log_store.start_request_with(
-            config.stt_provider.clone(),
-            config.stt_model.clone(),
-            |log| {
-                log.profile_id = profile_id.clone();
-                log.profile_name = profile_name.clone();
-                // Seed preset metadata up-front so UI/logs can reflect intent immediately.
-                // The pipeline will still persist the *effective* preset selected during routing.
-                log.preset_id = original_preset_id.clone();
-                log.preset_name = original_preset_name.clone();
-            },
+        start_request_log_with_seed(
+            &log_store,
+            &request_seed,
+            LogLlmSeedMode::OmitConfigured,
+            |_| {},
         )
     });
 
@@ -713,35 +680,18 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         pipeline.begin_ocr_session(id);
     }
 
-    if let Some(req_id) = new_request_id.as_deref() {
-        tracing::Span::current().record("request_id", tracing::field::display(req_id));
-    }
-
-    // Capture model info for persistence in history.
-    let model_info = RequestModelInfo {
-        stt_provider: Some(config.stt_provider.clone()),
-        stt_model: config.stt_model.clone(),
-        llm_provider: if config.llm_config.enabled {
-            Some(config.llm_config.provider.clone())
-        } else {
-            None
-        },
-        llm_model: config.llm_config.model.clone(),
-        profile_id: profile_id.clone(),
-        profile_name: profile_name.clone(),
-        preset_id: original_preset_id.clone(),
-        preset_name: original_preset_name.clone(),
-    };
+    record_request_id_on_current_span(new_request_id.as_deref());
 
     // Create a history entry for the retry attempt.
     if let Some(req_id) = new_request_id.as_deref() {
         let _ = history_request_lifecycle::apply_request_history_update(
             &app,
-            RequestHistoryUpdate::CreateInProgress {
-                request_id: req_id.to_string(),
-                model_info,
-                max_entries: max_history_entries,
-            },
+            create_in_progress_history_update(
+                req_id,
+                &request_seed,
+                HistorySelectionMode::PreserveSeededSelection,
+                max_history_entries,
+            ),
         );
         let _ = history_request_lifecycle::apply_request_history_update(
             &app,
@@ -1075,6 +1025,8 @@ async fn pipeline_dictate_inner(
 
     let cfg = pipeline.config();
     let (profile_id, profile_name) = resolve_profile_for_foreground_app(&cfg);
+    let request_seed = RecordingRequestSeed::from_config(&cfg)
+        .with_profile(profile_id.clone(), profile_name.clone());
 
     // Ensure there is a request log (pipeline_toggle starts one on recording-start,
     // but other flows can reach here without an active log).
@@ -1084,22 +1036,11 @@ async fn pipeline_dictate_inner(
 
     if active_request_id.is_none() {
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let id = log_store.start_request_with(
-                cfg.stt_provider.clone(),
-                cfg.stt_model.clone(),
+            let id = start_request_log_with_seed(
+                &log_store,
+                &request_seed,
+                LogLlmSeedMode::PreserveConfigured,
                 |log| {
-                    log.profile_id = profile_id.clone();
-                    log.profile_name = profile_name.clone();
-                    log.llm_provider = if cfg.llm_config.enabled {
-                        Some(cfg.llm_config.provider.clone())
-                    } else {
-                        None
-                    };
-                    log.llm_model = if cfg.llm_config.enabled {
-                        cfg.llm_config.model.clone()
-                    } else {
-                        None
-                    };
                     log.warn("Request log was missing at dictate; started a new request log entry");
                 },
             );
@@ -1107,43 +1048,25 @@ async fn pipeline_dictate_inner(
         }
     }
 
-    if let Some(req_id) = active_request_id.as_deref() {
-        tracing::Span::current().record("request_id", tracing::field::display(req_id));
-    }
-
-    // Capture model info for persistence in history.
-    let model_info = RequestModelInfo {
-        stt_provider: Some(cfg.stt_provider.clone()),
-        stt_model: cfg.stt_model.clone(),
-        llm_provider: if cfg.llm_config.enabled {
-            Some(cfg.llm_config.provider.clone())
-        } else {
-            None
-        },
-        llm_model: cfg.llm_config.model.clone(),
-        profile_id: profile_id.clone(),
-        profile_name: profile_name.clone(),
-        preset_id: None,
-        preset_name: None,
-    };
+    record_request_id_on_current_span(active_request_id.as_deref());
 
     // Create an in-progress history entry so the History view shows a running request.
     if let Some(req_id) = active_request_id.as_deref() {
         let _ = history_request_lifecycle::apply_request_history_update(
             &app,
-            RequestHistoryUpdate::CreateInProgress {
-                request_id: req_id.to_string(),
-                model_info,
-                max_entries: max_history_entries,
-            },
+            create_in_progress_history_update(
+                req_id,
+                &request_seed,
+                HistorySelectionMode::PreserveSeededSelection,
+                max_history_entries,
+            ),
         );
     }
 
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
-            log.profile_id = profile_id.clone();
-            log.profile_name = profile_name.clone();
+            request_seed.seed_log(log, LogLlmSeedMode::LeaveExisting);
             // Do not include recording time in the request "Total" duration.
             log.mark_processing_started();
             log.info("Recording stopped, starting transcription");
@@ -1437,14 +1360,17 @@ async fn pipeline_test_transcribe_last_audio_inner(
             })
             .unwrap_or_else(|| (cfg.stt_provider.clone(), cfg.stt_model.clone()));
 
-        let id = log_store.start_request_with(desired_provider, desired_model, |log| {
-            log.profile_id = profile_id_used;
-            log.profile_name = profile_name_used;
-            log.llm_provider = None;
-            log.llm_model = None;
-            log.info("Test transcription started");
-        });
-        tracing::Span::current().record("request_id", tracing::field::display(&id));
+        let request_seed = RecordingRequestSeed::new(desired_provider, desired_model)
+            .with_profile(profile_id_used, profile_name_used);
+        let id = start_request_log_with_seed(
+            &log_store,
+            &request_seed,
+            LogLlmSeedMode::OmitConfigured,
+            |log| {
+                log.info("Test transcription started");
+            },
+        );
+        record_request_id_on_current_span(Some(id.as_str()));
         request_id = Some(id.clone());
 
         // Tie OCR to this request id so OCR (if triggered) is isolated to this test request.
@@ -1586,16 +1512,12 @@ pub async fn pipeline_toggle(
         // Pipeline started successfully - now create the request log
         if let Some(log_store) = app.try_state::<RequestLogStore>() {
             let config = pipeline.config();
-            let request_id = log_store.start_request_with(
-                config.stt_provider.clone(),
-                config.stt_model.clone(),
+            let request_seed = RecordingRequestSeed::from_config(&config);
+            let request_id = start_request_log_with_seed(
+                &log_store,
+                &request_seed,
+                LogLlmSeedMode::PreserveConfigured,
                 |log| {
-                    log.llm_provider = if config.llm_config.enabled {
-                        Some(config.llm_config.provider.clone())
-                    } else {
-                        None
-                    };
-                    log.llm_model = config.llm_config.model.clone();
                     log.info("Recording started (toggle)");
                 },
             );

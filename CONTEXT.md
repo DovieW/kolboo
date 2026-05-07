@@ -44,11 +44,23 @@ A source-aware, normalized read model for persisted settings.
 
 Settings View preserves explicit-null semantics, falls back safely for missing or malformed values, and identifies whether an effective value came from stored/global/profile/preset/default inputs.
 
+### Settings Normalization Module
+
+The frontend raw persisted-settings normalizer for one concept group.
+
+Settings Normalization Modules live under `app/src/lib/tauri/settingsNormalizers/**` and own coercion, clamping, and legacy-shape cleanup at the `settings.json` boundary. They do not own source-aware fallback semantics (Settings View), UI display formatting/read models, or backend pruning behavior.
+
 ### History Request Lifecycle
 
 The app-facing sequence of request-row transitions for History entries.
 
 History Request Lifecycle turns command/session events into deterministic History updates such as create-in-progress, profile/preset/model mirroring, recording-source attachment, terminal success/error, and cancellation cleanup. `history.rs` still owns persistence and querying; the lifecycle layer exists so callers stop hand-stitching low-level History mutations.
+
+### Recording Request Initialization
+
+The command-facing setup logic that shapes request metadata before STT/LLM work begins.
+
+Recording Request Initialization owns request-log seed metadata, initial in-progress History payload construction, and request-id tracing for recording command flows. It does not own the atomic request-log store primitive (`RequestLogStore::start_request_with(...)`), History mutation application (`history_request_lifecycle.rs`), or terminal completion/cost/retention behavior.
 
 ### Runtime Sync Policy
 
@@ -82,13 +94,25 @@ WebSocket Transport Policy owns manual HTTP proxy CONNECT tunnelling, manual `no
 
 The frontend read model for user-visible app data retention, storage, and sync state.
 
-Data Lifecycle owns UI-safe normalization for data/storage settings such as retention unit conversions, recordings storage summaries, cloud-sync display state, and byte formatting. Data settings components consume this read model and remain UI adapters over Mantine controls and mutation hooks.
+Data Lifecycle owns UI-safe normalization for data/storage settings such as retention unit conversions, retention-input display config, recordings storage summaries, cloud-sync display state, danger-zone storage breakdown copy, and byte formatting. Presentational settings sections under `app/src/components/settings/data/**` consume this read model, while `DataSettings.tsx` remains the adapter over query hooks, file dialogs, and destructive-action orchestration.
 
 ### History Feed Read Model
 
 The frontend read model for History tab filtering, grouping, and transcript-analysis prompt preparation.
 
-History Feed Read Model owns persisted filter normalization, date grouping, token-count estimates, and deterministic analysis prompt construction. `HistoryFeed.tsx` remains the UI adapter over query hooks, playback controls, and destructive-action modals.
+History Feed Read Model owns persisted filter normalization, entry display metadata, empty-state copy, date grouping, token-count estimates, and deterministic analysis prompt construction. `HistoryFeed.tsx` remains the UI adapter over query hooks, playback controls, and destructive-action modals.
+
+### History Feed Filter State
+
+The frontend hook/module for persisted filter UI state and server-query shaping in the History tab.
+
+History Feed Filter State lives in `app/src/lib/history/useHistoryFeedFilters.ts`. It owns persisted filter hydration/saving, active-filter detection, page-reset rules, and the normalized main `HistoryPageQuery` shape. It does not own query execution, playback, retry/delete side effects, or transcript-analysis prompt construction.
+
+### Query Hook Module
+
+The frontend domain module that owns TanStack Query hooks and mutation wiring for one concept area.
+
+Query Hook Module owns query keys, invalidation boundaries, and lightweight orchestration for a domain such as settings, providers, history, recordings, logs, license, policy, or transcription tooling. `app/src/lib/queries.ts` remains the compatibility barrel, while pure query-function normalization/factory logic stays under `app/src/lib/queries/queryFns/**`. Query Hook Modules do not own UI rendering or raw persisted-settings normalization.
 
 ### Telemetry Mapping
 
@@ -130,7 +154,7 @@ Transcription Retention owns raw settings parsing, legacy fallback, cutoff calcu
 
 The backend Modules inside Audio Capture that keep microphone selection, stop-time preprocessing, and realtime meters local without changing the external `AudioCaptureBackend` Interface.
 
-Audio Capture Internals owns session-stable mic selection tokens, capture cleanup controls such as high-pass/AGC/noise suppression/noise gate, and atomic level/waveform meter snapshots. It does not own provider-independent audio format conversion; that remains in Audio Normalization.
+Audio Capture Internals owns session-stable mic selection tokens, capture cleanup controls such as high-pass/AGC/noise suppression/noise gate, and atomic level/waveform meter snapshots. CPAL stream creation, capture-thread lifecycle, hot-mic/pre-roll orchestration, VAD worker coordination, and cleanup/drop behavior remain characterized inside `audio_capture.rs` until a fake-device/channel deletion test proves a narrower runtime seam. It does not own provider-independent audio format conversion; that remains in Audio Normalization.
 
 ### Batch STT Orchestration
 
@@ -143,6 +167,12 @@ Batch STT Orchestration owns managed-auth refresh retry, `stt_complete` bookkeep
 The Shortcut Dispatch slice that resolves the most recent saved recording and starts a retry transcription/output action.
 
 Retry Last Shortcut owns retryable history-entry selection, recording-source fallback rules, overlay loading UX, and retry output. It does not own hotkey registration decisions or Windows modifier-only hook mechanics.
+
+### Shortcut Recording Actions
+
+The Shortcut Dispatch slices that keep Toggle, Hold, and Paste Last behavior local without turning the dispatcher into a generic event framework.
+
+Shortcut Recording Actions owns debounce/latch behavior, pipeline busy/start/stop decisions, and last-transcription output for Toggle, Hold, and Paste Last across both global shortcuts and Windows modifier-only hook events. It does not own hotkey registration lifecycle, Windows hook mechanics, Retry Last recording lookup/output, or Escape-to-cancel cleanup.
 
 ### Recording Command Error Mapping
 

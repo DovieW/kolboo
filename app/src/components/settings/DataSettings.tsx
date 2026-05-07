@@ -1,17 +1,4 @@
-import {
-	ActionIcon,
-	Button,
-	Checkbox,
-	Group,
-	Modal,
-	NumberInput,
-	PasswordInput,
-	SegmentedControl,
-	Stack,
-	Text,
-	TextInput,
-	Tooltip,
-} from "@mantine/core";
+import { Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
@@ -19,16 +6,12 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
 	BarChart2,
-	Download,
 	FileText,
-	FolderOpen,
-	Github,
 	Key,
 	MessageSquare,
 	RotateCcw,
 	Skull,
 	Trash2,
-	Upload,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
@@ -41,8 +24,7 @@ import {
 	useUpdateTranscriptionRetentionDeleteRecordings,
 } from "../../lib/queries";
 import {
-	formatDataBytes,
-	preserveRetentionDurationOnUnitChange,
+	buildDataStorageBreakdown,
 	type RequestLogsRetentionMode,
 	type RetentionMode,
 	type RetentionUnit,
@@ -60,7 +42,16 @@ import {
 	tauriAPI,
 } from "../../lib/tauri";
 import { trackProductEvent } from "../../lib/telemetry/posthog";
-import { SettingsRow } from "./SettingsRow";
+import {
+	type DangerZoneAction,
+	DataBackupSection,
+	DataCloudSyncSection,
+	DataDangerConfirmModal,
+	type DataDangerDialogState,
+	DataDangerZoneSection,
+	DataGithubTokenModal,
+	DataRetentionSection,
+} from "./data";
 
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
@@ -73,6 +64,28 @@ export function DataSettings({
 	const { data: settings } = useSettings();
 
 	const queryClient = useQueryClient();
+	const invalidateSettingsQuery = () => {
+		void queryClient.invalidateQueries({ queryKey: ["settings"] });
+	};
+	const invalidateStorageQueries = () => {
+		void queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
+		void queryClient.invalidateQueries({ queryKey: ["dataStorageSummary"] });
+	};
+	const invalidateImportedSettingsQueries = () => {
+		invalidateSettingsQuery();
+		invalidateStorageQueries();
+	};
+	const invalidateDangerZoneQueries = () => {
+		invalidateImportedSettingsQueries();
+		void queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
+		void queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
+		void queryClient.invalidateQueries({ queryKey: ["history"] });
+		void queryClient.invalidateQueries({ queryKey: ["apiKeysSavedCount"] });
+	};
+	const reRegisterShortcuts = async () => {
+		await tauriAPI.unregisterShortcuts();
+		await tauriAPI.registerShortcuts();
+	};
 
 	const updateRequestLogsRetention = useMutation({
 		mutationFn: (params: {
@@ -81,8 +94,8 @@ export function DataSettings({
 			days: number;
 		}) => tauriAPI.updateRequestLogsRetention(params),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-			queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
+			invalidateSettingsQuery();
+			void queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
 		},
 	});
 
@@ -90,7 +103,7 @@ export function DataSettings({
 		mutationFn: (params: { unit: TranscriptionRetentionUnit; value: number }) =>
 			tauriAPI.updateStatsRetention(params),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 		},
 	});
 
@@ -145,7 +158,7 @@ export function DataSettings({
 			await tauriAPI.updateGithubBackupGistId(gistId);
 		},
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 		},
 	});
 
@@ -190,16 +203,13 @@ export function DataSettings({
 			if (!path) return false;
 
 			await backupAPI.importSettingsBackupFromFile({ path });
-			await tauriAPI.unregisterShortcuts();
-			await tauriAPI.registerShortcuts();
+			await reRegisterShortcuts();
 
 			return true;
 		},
 		onSuccess: (didImport) => {
 			if (!didImport) return;
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-			queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
-			queryClient.invalidateQueries({ queryKey: ["dataStorageSummary"] });
+			invalidateImportedSettingsQueries();
 			notifications.show({
 				title: "Imported",
 				message: "Settings backup imported (secrets excluded).",
@@ -222,7 +232,7 @@ export function DataSettings({
 		onSuccess: () => {
 			setGithubTokenDraft("");
 			setGithubTokenModalOpen(false);
-			githubBackupHasToken.refetch();
+			void githubBackupHasToken.refetch();
 			notifications.show({
 				title: "GitHub token saved",
 				message: "Stored securely in your OS credential manager.",
@@ -243,7 +253,7 @@ export function DataSettings({
 			await backupAPI.githubBackupClearToken();
 		},
 		onSuccess: () => {
-			githubBackupHasToken.refetch();
+			void githubBackupHasToken.refetch();
 			notifications.show({
 				title: "GitHub token removed",
 				message: "The stored token was deleted from secure storage.",
@@ -269,7 +279,7 @@ export function DataSettings({
 			return nextId;
 		},
 		onSuccess: (id) => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 			notifications.show({
 				title: "Backed up",
 				message: `Settings pushed to GitHub Gist (${id}).`,
@@ -292,13 +302,10 @@ export function DataSettings({
 
 			const json = await backupAPI.githubBackupPullFromGist({ gistId: id });
 			await backupAPI.importSettingsBackupJson({ json });
-			await tauriAPI.unregisterShortcuts();
-			await tauriAPI.registerShortcuts();
+			await reRegisterShortcuts();
 		},
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-			queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
-			queryClient.invalidateQueries({ queryKey: ["dataStorageSummary"] });
+			invalidateImportedSettingsQueries();
 			notifications.show({
 				title: "Restored",
 				message: "Settings pulled from GitHub Gist and imported.",
@@ -322,7 +329,7 @@ export function DataSettings({
 	});
 
 	const refreshCloudSyncState = () => {
-		queryClient.invalidateQueries({ queryKey: ["cloudSyncUiState"] });
+		void queryClient.invalidateQueries({ queryKey: ["cloudSyncUiState"] });
 	};
 
 	const runCloudSyncAction = useMutation({
@@ -334,7 +341,7 @@ export function DataSettings({
 		},
 		onSuccess: (_value, action) => {
 			refreshCloudSyncState();
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 			void trackProductEvent("cloud_sync_action_succeeded", {
 				action,
 			});
@@ -370,7 +377,7 @@ export function DataSettings({
 		},
 		onSuccess: (_value, enabled) => {
 			refreshCloudSyncState();
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 			void trackProductEvent("cloud_sync_enabled_changed", {
 				enabled,
 			});
@@ -386,7 +393,7 @@ export function DataSettings({
 		},
 		onSuccess: (_value, enabled) => {
 			refreshCloudSyncState();
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 			void trackProductEvent("cloud_sync_auto_push_changed", {
 				enabled,
 			});
@@ -402,7 +409,7 @@ export function DataSettings({
 		},
 		onSuccess: (_value, enabled) => {
 			refreshCloudSyncState();
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 			if (enabled) {
 				void trackProductEvent("analytics_opted_in", {
 					surface: "settings",
@@ -414,7 +421,7 @@ export function DataSettings({
 	const profiles = settings?.rewrite_program_prompt_profiles ?? [];
 	const profile: RewriteProgramPromptProfile | null =
 		editingProfileId && editingProfileId !== "default"
-			? (profiles.find((p) => p.id === editingProfileId) ?? null)
+			? (profiles.find((entry) => entry.id === editingProfileId) ?? null)
 			: null;
 
 	const isProfileScope = profile !== null;
@@ -528,8 +535,8 @@ export function DataSettings({
 			value: number;
 		}) => tauriAPI.updateRecordingsRetention(params),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-			queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
+			invalidateSettingsQuery();
+			void queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
 		},
 	});
 
@@ -560,53 +567,50 @@ export function DataSettings({
 		}
 	};
 
+	const handleOpenAppLogsFolder = async () => {
+		try {
+			await logsAPI.openAppLogsFolder();
+		} catch (e) {
+			notifications.show({
+				title: "App logs",
+				message: formatErrorMessage(e),
+				color: "red",
+			});
+		}
+	};
+
+	const closeGithubTokenModal = () => {
+		if (setGithubToken.isPending) return;
+		setGithubTokenModalOpen(false);
+	};
+
 	const recordingsSummary = summarizeRecordingsStorage(recordingsStats.data);
 
 	// ---------------------------------------------------------------------------
 	// Danger zone (destructive actions)
 	// ---------------------------------------------------------------------------
 
-	const [dangerDialog, setDangerDialog] = useState<null | {
-		title: string;
-		message: string;
-		confirmLabel: string;
-		typedConfirm?: {
-			requiredText: string;
-			label?: string;
-			placeholder?: string;
-		};
-		action: () => Promise<void>;
-	}>(null);
-
+	const [dangerDialog, setDangerDialog] =
+		useState<DataDangerDialogState | null>(null);
 	const [dangerRunning, setDangerRunning] = useState(false);
 	const [dangerTypedDraft, setDangerTypedDraft] = useState("");
 
 	const runDangerAction = async (action: () => Promise<void>) => {
 		await action();
 
-		// Ensure UI reflects the new reality.
-		queryClient.invalidateQueries({ queryKey: ["settings"] });
-		queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
-		queryClient.invalidateQueries({ queryKey: ["recordingsStats"] });
-		queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
-		queryClient.invalidateQueries({ queryKey: ["history"] });
-		queryClient.invalidateQueries({ queryKey: ["dataStorageSummary"] });
-		queryClient.invalidateQueries({ queryKey: ["apiKeysSavedCount"] });
+		// Ensure UI reflects the new reality after destructive actions.
+		invalidateDangerZoneQueries();
 	};
 
-	const openDangerDialog = (args: {
-		title: string;
-		message: string;
-		confirmLabel: string;
-		typedConfirm?: {
-			requiredText: string;
-			label?: string;
-			placeholder?: string;
-		};
-		action: () => Promise<void>;
-	}) => {
+	const openDangerDialog = (args: DataDangerDialogState) => {
 		setDangerTypedDraft("");
 		setDangerDialog(args);
+	};
+
+	const closeDangerDialog = () => {
+		if (dangerRunning) return;
+		setDangerTypedDraft("");
+		setDangerDialog(null);
 	};
 
 	// ---------------------------------------------------------------------------
@@ -666,7 +670,7 @@ export function DataSettings({
 			value: number;
 		}) => tauriAPI.updateTranscriptionRetentionPolicy(params),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
+			invalidateSettingsQuery();
 		},
 	});
 
@@ -712,1212 +716,345 @@ export function DataSettings({
 		updateStatsRetention.mutate(next);
 	};
 
+	const dataStorageBreakdown = dataStorageSummary.data
+		? buildDataStorageBreakdown({
+				summary: dataStorageSummary.data,
+				apiKeysSavedCount: apiKeysSavedCount.data,
+				apiKeyStoreKeyCount: API_KEY_STORE_KEYS.length,
+			})
+		: [];
+
+	const openExternalUrlWithFallback = async (args: {
+		url: string;
+		title: string;
+		message: string;
+	}) => {
+		try {
+			await openUrl(args.url);
+		} catch {
+			notifications.show({
+				title: args.title,
+				message: args.message,
+				color: "red",
+			});
+		}
+	};
+
+	// Keep the destructive-action list visible in the adapter. The section just
+	// lays the buttons out; the adapter still owns the meaning of each action.
+	const dangerActions: DangerZoneAction[] = [
+		{
+			key: "delete-recordings",
+			label: "Delete recordings",
+			icon: <Trash2 size={14} />,
+			color: "red",
+			variant: "outline",
+			onClick: () => {
+				openDangerDialog({
+					title: "Delete recordings",
+					message:
+						"This will permanently delete all saved .wav recordings from disk.",
+					confirmLabel: "Delete recordings",
+					action: async () => {
+						await dataAPI.deleteAllRecordings();
+					},
+				});
+			},
+		},
+		{
+			key: "delete-transcriptions",
+			label: "Delete transcriptions",
+			icon: <MessageSquare size={14} />,
+			color: "red",
+			variant: "outline",
+			onClick: () => {
+				openDangerDialog({
+					title: "Delete transcriptions (history)",
+					message:
+						"This will permanently delete all saved transcriptions from the History tab.",
+					confirmLabel: "Delete transcriptions",
+					action: async () => {
+						await tauriAPI.clearHistory();
+						await tauriAPI.emitHistoryChanged();
+					},
+				});
+			},
+		},
+		{
+			key: "delete-transcripts",
+			label: "Delete transcripts",
+			icon: <FileText size={14} />,
+			color: "red",
+			variant: "outline",
+			onClick: () => {
+				openDangerDialog({
+					title: "Delete transcripts (keep recordings)",
+					message:
+						"This will delete all transcript text from history, but keep your saved .wav recordings.",
+					confirmLabel: "Delete transcripts",
+					action: async () => {
+						await dataAPI.deleteAllTranscriptsKeepRecordings();
+					},
+				});
+			},
+		},
+		{
+			key: "clear-request-logs",
+			label: "Clear request logs",
+			icon: <FileText size={14} />,
+			color: "red",
+			variant: "outline",
+			onClick: () => {
+				openDangerDialog({
+					title: "Clear request logs",
+					message:
+						"This will clear in-memory request logs shown in the Logs tab.",
+					confirmLabel: "Clear logs",
+					action: async () => {
+						await logsAPI.clearRequestLogs();
+					},
+				});
+			},
+		},
+		{
+			key: "delete-stats",
+			label: "Delete stats",
+			icon: <BarChart2 size={14} />,
+			color: "red",
+			variant: "outline",
+			onClick: () => {
+				openDangerDialog({
+					title: "Delete usage/cost stats",
+					message:
+						"This will permanently delete persisted usage/cost stats (JSONL shards).",
+					confirmLabel: "Delete stats",
+					action: async () => {
+						await dataAPI.deleteAllStats();
+					},
+				});
+			},
+		},
+		{
+			key: "delete-api-keys",
+			label: "Delete API keys",
+			icon: <Key size={14} />,
+			color: "red",
+			variant: "outline",
+			onClick: () => {
+				openDangerDialog({
+					title: "Delete API keys",
+					message:
+						"This will remove all stored API keys (OpenAI, Groq, Deepgram, Gemini, Anthropic).",
+					confirmLabel: "Delete API keys",
+					action: async () => {
+						await dataAPI.deleteAllApiKeys();
+					},
+				});
+			},
+		},
+		{
+			key: "reset-settings",
+			label: "Reset settings",
+			icon: <RotateCcw size={14} />,
+			color: "red",
+			variant: "outline",
+			onClick: () => {
+				openDangerDialog({
+					title: "Reset settings",
+					message:
+						"This will reset all settings back to defaults (including API keys).",
+					confirmLabel: "Reset settings",
+					action: async () => {
+						await dataAPI.deleteAllSettings();
+						await reRegisterShortcuts();
+					},
+				});
+			},
+		},
+		{
+			key: "delete-all-data",
+			label: "Delete all data",
+			icon: <Skull size={14} />,
+			color: "red",
+			variant: "filled",
+			fullWidth: true,
+			onClick: () => {
+				openDangerDialog({
+					title: "Delete all data",
+					message:
+						"This will delete ALL app data: history, recordings, request logs, persisted stats, and settings (including API keys).",
+					typedConfirm: {
+						requiredText: "DELETE",
+						label: "Type DELETE to confirm",
+						placeholder: "DELETE",
+					},
+					confirmLabel: "Delete everything",
+					action: async () => {
+						await dataAPI.deleteAllData();
+						await logsAPI.clearRequestLogs();
+						await reRegisterShortcuts();
+					},
+				});
+			},
+		},
+	];
+
 	const content = (
 		<>
-			<SettingsRow
-				label="Logs retention"
-				description="Keep request logs for debugging. Default: store last 10."
-				right={
-					<Group gap={10} align="center" wrap="wrap">
-						{logsRetentionMode === "amount" ? (
-							<NumberInput
-								value={logsRetentionAmount}
-								onChange={(value) => {
-									const nextAmount = typeof value === "number" ? value : 10;
-									commitLogsRetention({
-										mode: "amount",
-										amount: nextAmount,
-										unit: logsRetentionUnit,
-										value: logsRetentionValue,
-									});
-								}}
-								min={1}
-								max={1000}
-								step={1}
-								clampBehavior="strict"
-								disabled={isProfileScope}
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										width: 140,
-									},
-								}}
-							/>
-						) : (
-							<>
-								<NumberInput
-									value={logsRetentionValue}
-									onChange={(value) => {
-										const nextValue = typeof value === "number" ? value : 7;
-										commitLogsRetention({
-											mode: "time",
-											amount: logsRetentionAmount,
-											unit: logsRetentionUnit,
-											value: nextValue,
-										});
-									}}
-									min={0}
-									max={logsRetentionUnit === "hours" ? 36500 * 24 : 36500}
-									step={logsRetentionUnit === "hours" ? 0.5 : 1}
-									decimalScale={logsRetentionUnit === "hours" ? 2 : 0}
-									clampBehavior="strict"
-									disabled={isProfileScope}
-									styles={{
-										input: {
-											backgroundColor: "var(--bg-elevated)",
-											borderColor: "var(--border-default)",
-											color: "var(--text-primary)",
-											width: 140,
-										},
-									}}
-								/>
-
-								<SegmentedControl
-									value={logsRetentionUnit}
-									onChange={(next) => {
-										const nextUnit = next === "hours" ? "hours" : "days";
-										const nextValue = preserveRetentionDurationOnUnitChange({
-											currentUnit: logsRetentionUnit,
-											nextUnit,
-											currentValue: logsRetentionValue,
-										});
-
-										commitLogsRetention({
-											mode: "time",
-											amount: logsRetentionAmount,
-											unit: nextUnit,
-											value: nextValue,
-										});
-									}}
-									data={[
-										{ label: "Days", value: "days" },
-										{ label: "Hours", value: "hours" },
-									]}
-									disabled={isProfileScope}
-									styles={{
-										root: {
-											backgroundColor: "var(--bg-elevated)",
-											border: "1px solid var(--border-default)",
-										},
-										label: {
-											color: "var(--text-primary)",
-										},
-									}}
-								/>
-							</>
-						)}
-
-						<SegmentedControl
-							value={logsRetentionMode}
-							onChange={(next) => {
-								const mode =
-									next === "time" ? ("time" as const) : ("amount" as const);
-								commitLogsRetention({
-									mode,
-									amount: logsRetentionAmount,
-									unit: logsRetentionUnit,
-									value: logsRetentionValue,
-								});
-							}}
-							data={[
-								{ label: "Amount", value: "amount" },
-								{ label: "Time", value: "time" },
-							]}
-							disabled={isProfileScope}
-							styles={{
-								root: {
-									backgroundColor: "var(--bg-elevated)",
-									border: "1px solid var(--border-default)",
-								},
-								label: {
-									color: "var(--text-primary)",
-								},
-							}}
-						/>
-					</Group>
-				}
-			/>
-
-			<SettingsRow
-				label="App logs"
-				description="Daily-rotated trace logs for troubleshooting (7 day retention)."
-				right={
-					<Tooltip label="Open app logs folder" withArrow position="top">
-						<span>
-							<ActionIcon
-								variant="default"
-								size={36}
-								onClick={() => {
-									logsAPI.openAppLogsFolder().catch((e) => {
-										notifications.show({
-											title: "App logs",
-											message: formatErrorMessage(e),
-											color: "red",
-										});
-									});
-								}}
-								aria-label="Open app logs folder"
-								styles={{
-									root: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										height: 36,
-										width: 36,
-									},
-								}}
-							>
-								<FolderOpen size={14} style={{ opacity: 0.75 }} />
-							</ActionIcon>
-						</span>
-					</Tooltip>
-				}
-			/>
-
-			<SettingsRow
-				label="Max recordings to save"
-				description={`Keep at most this many recordings on disk.${
-					recordingsStats.isLoading
-						? " (Calculating storage…)"
-						: recordingsSummary === null
-							? ""
-							: ` (Currently saved ${recordingsSummary.count} recordings at ${recordingsSummary.gb.toFixed(2)} GB)`
-				}`}
-				right={
-					<Group gap={8} align="center">
-						<Tooltip label="Open recordings folder" withArrow position="top">
-							<span>
-								<ActionIcon
-									variant="default"
-									size={36}
-									onClick={() => {
-										handleOpenRecordingsFolder().catch(console.error);
-									}}
-									aria-label="Open recordings folder"
-									styles={{
-										root: {
-											backgroundColor: "var(--bg-elevated)",
-											borderColor: "var(--border-default)",
-											color: "var(--text-primary)",
-											height: 36,
-											width: 36,
-										},
-									}}
-								>
-									<FolderOpen size={14} style={{ opacity: 0.75 }} />
-								</ActionIcon>
-							</span>
-						</Tooltip>
-
-						{recordingsRetentionMode === "amount" ? (
-							<NumberInput
-								value={recordingsRetentionAmount}
-								onChange={(value) => {
-									const nextAmount = typeof value === "number" ? value : 50;
-									commitRecordingsRetention({
-										mode: "amount",
-										amount: nextAmount,
-										unit: recordingsRetentionUnit,
-										value: recordingsRetentionValue,
-									});
-								}}
-								min={1}
-								max={100000}
-								step={10}
-								clampBehavior="strict"
-								disabled={isProfileScope}
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										width: 140,
-									},
-								}}
-							/>
-						) : (
-							<>
-								<NumberInput
-									value={recordingsRetentionValue}
-									onChange={(value) => {
-										const nextValue = typeof value === "number" ? value : 0;
-										commitRecordingsRetention({
-											mode: "time",
-											amount: recordingsRetentionAmount,
-											unit: recordingsRetentionUnit,
-											value: nextValue,
-										});
-									}}
-									min={0}
-									max={recordingsRetentionUnit === "hours" ? 36500 * 24 : 36500}
-									step={recordingsRetentionUnit === "hours" ? 0.5 : 1}
-									decimalScale={recordingsRetentionUnit === "hours" ? 2 : 0}
-									clampBehavior="strict"
-									disabled={isProfileScope}
-									styles={{
-										input: {
-											backgroundColor: "var(--bg-elevated)",
-											borderColor: "var(--border-default)",
-											color: "var(--text-primary)",
-											width: 140,
-										},
-									}}
-								/>
-
-								<SegmentedControl
-									value={recordingsRetentionUnit}
-									onChange={(next) => {
-										const nextUnit = next === "hours" ? "hours" : "days";
-										const nextValue = preserveRetentionDurationOnUnitChange({
-											currentUnit: recordingsRetentionUnit,
-											nextUnit,
-											currentValue: recordingsRetentionValue,
-										});
-
-										commitRecordingsRetention({
-											mode: "time",
-											amount: recordingsRetentionAmount,
-											unit: nextUnit,
-											value: nextValue,
-										});
-									}}
-									data={[
-										{ label: "Days", value: "days" },
-										{ label: "Hours", value: "hours" },
-									]}
-									disabled={isProfileScope}
-									styles={{
-										root: {
-											backgroundColor: "var(--bg-elevated)",
-											border: "1px solid var(--border-default)",
-										},
-										label: {
-											color: "var(--text-primary)",
-										},
-									}}
-								/>
-							</>
-						)}
-
-						<SegmentedControl
-							value={recordingsRetentionMode}
-							onChange={(next) => {
-								const mode = next === "time" ? "time" : "amount";
-								commitRecordingsRetention({
-									mode,
-									amount: recordingsRetentionAmount,
-									unit: recordingsRetentionUnit,
-									value: recordingsRetentionValue,
-								});
-							}}
-							data={[
-								{ label: "Amount", value: "amount" },
-								{ label: "Time", value: "time" },
-							]}
-							disabled={isProfileScope}
-							styles={{
-								root: {
-									backgroundColor: "var(--bg-elevated)",
-									border: "1px solid var(--border-default)",
-								},
-								label: {
-									color: "var(--text-primary)",
-								},
-							}}
-						/>
-					</Group>
-				}
-			/>
-
-			<SettingsRow
-				label="Transcription retention"
-				description="Delete transcriptions older than this (0 = forever)."
-				right={
-					<Group gap={10} align="center" wrap="wrap">
-						{transcriptionRetentionMode === "amount" ? (
-							<NumberInput
-								value={transcriptionRetentionAmount}
-								onChange={(value) => {
-									const nextAmount = typeof value === "number" ? value : 1000;
-									commitTranscriptionRetentionPolicy({
-										mode: "amount",
-										amount: nextAmount,
-										unit: transcriptionRetentionUnit,
-										value: transcriptionRetentionValue,
-									});
-								}}
-								min={1}
-								max={100000}
-								step={10}
-								clampBehavior="strict"
-								disabled={isProfileScope}
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										width: 140,
-									},
-								}}
-							/>
-						) : (
-							<>
-								<NumberInput
-									value={transcriptionRetentionValue}
-									onChange={(value) => {
-										const next = typeof value === "number" ? value : 0;
-										commitTranscriptionRetentionPolicy({
-											mode: "time",
-											amount: transcriptionRetentionAmount,
-											unit: transcriptionRetentionUnit,
-											value: next,
-										});
-									}}
-									min={0}
-									max={
-										transcriptionRetentionUnit === "hours" ? 36500 * 24 : 36500
-									}
-									step={transcriptionRetentionUnit === "hours" ? 0.5 : 1}
-									decimalScale={transcriptionRetentionUnit === "hours" ? 2 : 0}
-									clampBehavior="strict"
-									disabled={isProfileScope}
-									styles={{
-										input: {
-											backgroundColor: "var(--bg-elevated)",
-											borderColor: "var(--border-default)",
-											color: "var(--text-primary)",
-											width: 140,
-										},
-									}}
-								/>
-
-								<SegmentedControl
-									value={transcriptionRetentionUnit}
-									onChange={(next) => {
-										const nextUnit =
-											next === "hours" ? ("hours" as const) : ("days" as const);
-										const nextValue = preserveRetentionDurationOnUnitChange({
-											currentUnit: transcriptionRetentionUnit,
-											nextUnit,
-											currentValue: transcriptionRetentionValue,
-										});
-
-										commitTranscriptionRetentionPolicy({
-											mode: "time",
-											amount: transcriptionRetentionAmount,
-											unit: nextUnit,
-											value: nextValue,
-										});
-									}}
-									data={[
-										{ label: "Days", value: "days" },
-										{ label: "Hours", value: "hours" },
-									]}
-									disabled={isProfileScope}
-									styles={{
-										root: {
-											backgroundColor: "var(--bg-elevated)",
-											border: "1px solid var(--border-default)",
-										},
-										label: {
-											color: "var(--text-primary)",
-										},
-									}}
-								/>
-							</>
-						)}
-
-						<SegmentedControl
-							value={transcriptionRetentionMode}
-							onChange={(next) => {
-								const mode = next === "time" ? "time" : "amount";
-								commitTranscriptionRetentionPolicy({
-									mode,
-									amount: transcriptionRetentionAmount,
-									unit: transcriptionRetentionUnit,
-									value: transcriptionRetentionValue,
-								});
-							}}
-							data={[
-								{ label: "Amount", value: "amount" },
-								{ label: "Time", value: "time" },
-							]}
-							disabled={isProfileScope}
-							styles={{
-								root: {
-									backgroundColor: "var(--bg-elevated)",
-									border: "1px solid var(--border-default)",
-								},
-								label: {
-									color: "var(--text-primary)",
-								},
-							}}
-						/>
-
-						<Checkbox
-							checked={transcriptionRetentionDeleteRecordings}
-							onChange={(event) =>
-								updateTranscriptionRetentionDeleteRecordings.mutate(
-									event.currentTarget.checked,
-								)
-							}
-							disabled={
-								isProfileScope ||
-								(transcriptionRetentionMode === "time"
-									? transcriptionRetentionValue === 0
-									: transcriptionRetentionAmount <= 0)
-							}
-							label="Also delete recordings"
-							color="gray"
-						/>
-					</Group>
-				}
-			/>
-
-			<SettingsRow
-				label="Stats retention"
-				description="Delete usage/cost stats older than this (0 = forever)."
-				right={
-					<Group gap={10} align="center" wrap="wrap">
-						<NumberInput
-							value={statsRetentionValue}
-							onChange={(value) => {
-								const next = typeof value === "number" ? value : 30;
-								commitStatsRetention({
-									unit: statsRetentionUnit,
-									value: next,
-								});
-							}}
-							min={0}
-							max={statsRetentionUnit === "hours" ? 36500 * 24 : 36500}
-							step={statsRetentionUnit === "hours" ? 0.5 : 1}
-							decimalScale={statsRetentionUnit === "hours" ? 2 : 0}
-							clampBehavior="strict"
-							disabled={isProfileScope}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									width: 140,
-								},
-							}}
-						/>
-
-						<SegmentedControl
-							value={statsRetentionUnit}
-							onChange={(next) => {
-								const nextUnit =
-									next === "hours" ? ("hours" as const) : ("days" as const);
-								const nextValue = preserveRetentionDurationOnUnitChange({
-									currentUnit: statsRetentionUnit,
-									nextUnit,
-									currentValue: statsRetentionValue,
-								});
-
-								commitStatsRetention({ unit: nextUnit, value: nextValue });
-							}}
-							data={[
-								{ label: "Days", value: "days" },
-								{ label: "Hours", value: "hours" },
-							]}
-							disabled={isProfileScope}
-							styles={{
-								root: {
-									backgroundColor: "var(--bg-elevated)",
-									border: "1px solid var(--border-default)",
-								},
-								label: {
-									color: "var(--text-primary)",
-								},
-							}}
-						/>
-					</Group>
-				}
-			/>
-
-			<SettingsRow
-				label="Settings backup"
-				description="Export/import settings as JSON. API keys and other secrets are not included."
-				right={
-					<Group gap="xs" wrap="nowrap" justify="flex-end">
-						<Button
-							variant="default"
-							size="xs"
-							leftSection={<Download size={14} />}
-							loading={exportSettingsBackup.isPending}
-							onClick={() => exportSettingsBackup.mutate()}
-						>
-							Export
-						</Button>
-						<Button
-							variant="default"
-							size="xs"
-							leftSection={<Upload size={14} />}
-							loading={importSettingsBackup.isPending}
-							onClick={() => importSettingsBackup.mutate()}
-						>
-							Import
-						</Button>
-					</Group>
-				}
-			/>
-
-			<SettingsRow
-				label="GitHub Gist backup"
-				description={
-					<>
-						Push/pull your settings to a private GitHub Gist. Requires a GitHub
-						token with the <code>gist</code> scope (stored securely).
-					</>
-				}
-				right={
-					<Stack gap={8} style={{ width: "min(640px, 100%)" }}>
-						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
-							<Text size="xs" c="dimmed">
-								Token:{" "}
-								{githubBackupHasToken.isLoading
-									? "checking"
-									: githubBackupHasToken.data
-										? "configured"
-										: "not configured"}
-							</Text>
-
-							<Button
-								variant="default"
-								size="xs"
-								leftSection={<Github size={14} />}
-								onClick={() => setGithubTokenModalOpen(true)}
-							>
-								Set token
-							</Button>
-
-							<Button
-								variant="default"
-								size="xs"
-								color="red"
-								loading={clearGithubToken.isPending}
-								disabled={!githubBackupHasToken.data}
-								onClick={() => clearGithubToken.mutate()}
-							>
-								Clear
-							</Button>
-						</Group>
-
-						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
-							<TextInput
-								value={gistIdDraft}
-								onChange={(e) => setGistIdDraft(e.currentTarget.value)}
-								placeholder="Gist id (optional for first push)"
-								size="xs"
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										width: 280,
-									},
-								}}
-							/>
-
-							<Button
-								variant="default"
-								size="xs"
-								loading={saveGistId.isPending}
-								onClick={() => {
-									const trimmed = (gistIdDraft ?? "").trim();
-									saveGistId.mutate(trimmed || null);
-								}}
-							>
-								Save
-							</Button>
-						</Group>
-
-						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
-							<Button
-								variant="default"
-								size="xs"
-								leftSection={<Upload size={14} />}
-								loading={pushToGist.isPending}
-								disabled={!githubBackupHasToken.data}
-								onClick={() => pushToGist.mutate()}
-							>
-								Push
-							</Button>
-
-							<Button
-								variant="default"
-								size="xs"
-								leftSection={<Download size={14} />}
-								loading={pullFromGist.isPending}
-								disabled={!githubBackupHasToken.data}
-								onClick={() => pullFromGist.mutate()}
-							>
-								Pull
-							</Button>
-						</Group>
-					</Stack>
-				}
-			/>
-
-			<SettingsRow
-				label="Cloud sync (Personal+)"
-				description="Sync settings via the managed cloud endpoint using your signed-in account token."
-				right={
-					<Stack gap={8} style={{ width: "min(640px, 100%)" }}>
-						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
-							<Text size="xs" c="dimmed">
-								Last push: {cloudSyncState.data?.lastPushedAt ?? "never"}
-							</Text>
-							<Text size="xs" c="dimmed">
-								Last pull: {cloudSyncState.data?.lastPulledAt ?? "never"}
-							</Text>
-						</Group>
-
-						<Group gap="xs" align="center" wrap="nowrap" justify="flex-end">
-							<Button
-								variant="default"
-								size="xs"
-								leftSection={<Upload size={14} />}
-								loading={runCloudSyncAction.isPending}
-								disabled={
-									isProfileScope ||
-									!cloudSyncState.data?.enabled ||
-									cloudSyncState.isLoading
-								}
-								onClick={() => runCloudSyncAction.mutate("push")}
-							>
-								Push now
-							</Button>
-
-							<Button
-								variant="default"
-								size="xs"
-								leftSection={<Download size={14} />}
-								loading={runCloudSyncAction.isPending}
-								disabled={
-									isProfileScope ||
-									!cloudSyncState.data?.enabled ||
-									cloudSyncState.isLoading
-								}
-								onClick={() => runCloudSyncAction.mutate("pull")}
-							>
-								Pull now
-							</Button>
-						</Group>
-
-						<Group gap="md" align="center" justify="flex-end">
-							<Checkbox
-								label="Enable cloud sync"
-								checked={cloudSyncState.data?.enabled ?? false}
-								disabled={isProfileScope || updateCloudSyncEnabled.isPending}
-								onChange={(event) => {
-									updateCloudSyncEnabled.mutate(event.currentTarget.checked);
-								}}
-							/>
-							<Checkbox
-								label="Auto-push changes"
-								checked={cloudSyncState.data?.autoPush ?? true}
-								disabled={
-									isProfileScope ||
-									updateCloudSyncAutoPush.isPending ||
-									!(cloudSyncState.data?.enabled ?? false)
-								}
-								onChange={(event) => {
-									updateCloudSyncAutoPush.mutate(event.currentTarget.checked);
-								}}
-							/>
-						</Group>
-
-						<Text
-							size="xs"
-							c={cloudSyncState.data?.lastError ? "red" : "dimmed"}
-							ta="right"
-						>
-							{cloudSyncState.data?.lastError
-								? `Last error: ${cloudSyncState.data.lastError}`
-								: `Revision: ${cloudSyncState.data?.remoteRevision ?? "n/a"}`}
-						</Text>
-
-						{isProfileScope ? (
-							<Text size="xs" c="dimmed" ta="right">
-								{GLOBAL_ONLY_TOOLTIP}
-							</Text>
-						) : null}
-					</Stack>
-				}
-			/>
-
-			<SettingsRow
-				label="Product analytics (PostHog)"
-				description="Enabled by default (privacy-safe). Can be enforced by policy in managed enterprise environments."
-				right={
-					<Group gap="md" justify="flex-end" wrap="nowrap">
-						<Checkbox
-							label="Enable privacy-safe analytics"
-							checked={cloudSyncState.data?.posthogAnalyticsEnabled ?? true}
-							disabled={
-								isProfileScope || updatePosthogAnalyticsEnabled.isPending
-							}
-							onChange={(event) => {
-								updatePosthogAnalyticsEnabled.mutate(
-									event.currentTarget.checked,
-								);
-							}}
-						/>
-					</Group>
-				}
-			/>
-
-			<div
-				style={{
-					marginTop: 16,
-					border: "1px solid rgba(239, 68, 68, 0.20)",
-					borderRadius: 12,
-					padding: 12,
-					background: "rgba(239, 68, 68, 0.05)",
+			<DataRetentionSection
+				isProfileScope={isProfileScope}
+				logsRetention={{
+					mode: logsRetentionMode,
+					amount: logsRetentionAmount,
+					unit: logsRetentionUnit,
+					value: logsRetentionValue,
+					onCommit: commitLogsRetention,
 				}}
-			>
-				<div>
-					<p
-						className="settings-label"
-						style={{ color: "rgba(255, 150, 150, 0.95)" }}
-					>
-						Danger zone
-					</p>
-					<p className="settings-description">
-						Destructive actions (cannot be undone)
-					</p>
+				recordingsRetention={{
+					mode: recordingsRetentionMode,
+					amount: recordingsRetentionAmount,
+					unit: recordingsRetentionUnit,
+					value: recordingsRetentionValue,
+					onCommit: commitRecordingsRetention,
+				}}
+				transcriptionRetention={{
+					mode: transcriptionRetentionMode,
+					amount: transcriptionRetentionAmount,
+					unit: transcriptionRetentionUnit,
+					value: transcriptionRetentionValue,
+					deleteRecordings: transcriptionRetentionDeleteRecordings,
+					onCommit: commitTranscriptionRetentionPolicy,
+					onDeleteRecordingsChange: (checked) => {
+						updateTranscriptionRetentionDeleteRecordings.mutate(checked);
+					},
+				}}
+				statsRetention={{
+					unit: statsRetentionUnit,
+					value: statsRetentionValue,
+					onCommit: commitStatsRetention,
+				}}
+				recordingsStatsLoading={recordingsStats.isLoading}
+				recordingsSummary={recordingsSummary}
+				onOpenAppLogsFolder={() => {
+					void handleOpenAppLogsFolder();
+				}}
+				onOpenRecordingsFolder={() => {
+					void handleOpenRecordingsFolder();
+				}}
+			/>
 
-					<div
-						style={{
-							marginTop: 8,
-							display: "grid",
-							gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-							gap: 12,
-							alignItems: "start",
-						}}
-					>
-						<div>
-							{dataStorageSummary.isLoading ? (
-								<Text size="xs" c="dimmed">
-									Calculating what’s stored…
-								</Text>
-							) : dataStorageSummary.data ? (
-								<div
-									style={{
-										display: "grid",
-										gridTemplateColumns: "auto 1fr",
-										gap: "2px 12px",
-										alignItems: "baseline",
-									}}
-								>
-									<Text size="xs" c="dimmed">
-										Recordings
-									</Text>
-									<Text size="xs" c="dimmed">
-										{dataStorageSummary.data.recordings_count} (
-										{formatDataBytes(dataStorageSummary.data.recordings_bytes)})
-									</Text>
+			<DataBackupSection
+				exportSettingsBackupPending={exportSettingsBackup.isPending}
+				importSettingsBackupPending={importSettingsBackup.isPending}
+				onExportSettingsBackup={() => exportSettingsBackup.mutate()}
+				onImportSettingsBackup={() => importSettingsBackup.mutate()}
+				githubBackupHasTokenLoading={githubBackupHasToken.isLoading}
+				githubBackupHasToken={githubBackupHasToken.data ?? false}
+				onOpenGithubTokenModal={() => setGithubTokenModalOpen(true)}
+				clearGithubTokenPending={clearGithubToken.isPending}
+				onClearGithubToken={() => clearGithubToken.mutate()}
+				gistIdDraft={gistIdDraft}
+				onGistIdDraftChange={(value) => setGistIdDraft(value)}
+				saveGistIdPending={saveGistId.isPending}
+				onSaveGistId={() => {
+					const trimmed = (gistIdDraft ?? "").trim();
+					saveGistId.mutate(trimmed || null);
+				}}
+				pushToGistPending={pushToGist.isPending}
+				onPushToGist={() => pushToGist.mutate()}
+				pullFromGistPending={pullFromGist.isPending}
+				onPullFromGist={() => pullFromGist.mutate()}
+			/>
 
-									<Text size="xs" c="dimmed">
-										Transcriptions
-									</Text>
-									<Text size="xs" c="dimmed">
-										{dataStorageSummary.data.history_count} (
-										{formatDataBytes(dataStorageSummary.data.history_bytes)})
-									</Text>
+			<DataCloudSyncSection
+				isProfileScope={isProfileScope}
+				globalOnlyTooltip={GLOBAL_ONLY_TOOLTIP}
+				cloudSyncState={cloudSyncState.data}
+				cloudSyncStateLoading={cloudSyncState.isLoading}
+				runCloudSyncActionPending={runCloudSyncAction.isPending}
+				onPushCloudSync={() => runCloudSyncAction.mutate("push")}
+				onPullCloudSync={() => runCloudSyncAction.mutate("pull")}
+				updateCloudSyncEnabledPending={updateCloudSyncEnabled.isPending}
+				onCloudSyncEnabledChange={(enabled) => {
+					updateCloudSyncEnabled.mutate(enabled);
+				}}
+				updateCloudSyncAutoPushPending={updateCloudSyncAutoPush.isPending}
+				onCloudSyncAutoPushChange={(enabled) => {
+					updateCloudSyncAutoPush.mutate(enabled);
+				}}
+				updatePosthogAnalyticsEnabledPending={
+					updatePosthogAnalyticsEnabled.isPending
+				}
+				onPosthogAnalyticsEnabledChange={(enabled) => {
+					updatePosthogAnalyticsEnabled.mutate(enabled);
+				}}
+			/>
 
-									<Text size="xs" c="dimmed">
-										Request logs
-									</Text>
-									<Text size="xs" c="dimmed">
-										{dataStorageSummary.data.request_logs_count}
-									</Text>
+			<DataDangerZoneSection
+				storageSummaryLoading={dataStorageSummary.isLoading}
+				storageBreakdownItems={dataStorageBreakdown}
+				actions={dangerActions}
+			/>
 
-									<Text size="xs" c="dimmed">
-										Usage/cost stats
-									</Text>
-									<Text size="xs" c="dimmed">
-										{dataStorageSummary.data.stats_files_count} files (
-										{formatDataBytes(dataStorageSummary.data.stats_bytes)})
-									</Text>
-
-									<Text size="xs" c="dimmed">
-										Settings
-									</Text>
-									<Text size="xs" c="dimmed">
-										{formatDataBytes(dataStorageSummary.data.settings_bytes)}
-									</Text>
-
-									<Text size="xs" c="dimmed">
-										API keys saved
-									</Text>
-									<Text size="xs" c="dimmed">
-										{apiKeysSavedCount.data ??
-											dataStorageSummary.data.api_keys_set_count ??
-											0}{" "}
-										/ {API_KEY_STORE_KEYS.length}
-									</Text>
-								</div>
-							) : null}
-						</div>
-
-						<div
-							style={{
-								display: "grid",
-								gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-								gap: 8,
-								width: "min(560px, 100%)",
-							}}
-						>
-							<Button
-								color="red"
-								variant="outline"
-								size="xs"
-								leftSection={<Trash2 size={14} />}
-								onClick={() => {
-									openDangerDialog({
-										title: "Delete recordings",
-										message:
-											"This will permanently delete all saved .wav recordings from disk.",
-										confirmLabel: "Delete recordings",
-										action: async () => {
-											await dataAPI.deleteAllRecordings();
-										},
-									});
-								}}
-							>
-								Delete recordings
-							</Button>
-
-							<Button
-								color="red"
-								variant="outline"
-								size="xs"
-								leftSection={<MessageSquare size={14} />}
-								onClick={() => {
-									openDangerDialog({
-										title: "Delete transcriptions (history)",
-										message:
-											"This will permanently delete all saved transcriptions from the History tab.",
-										confirmLabel: "Delete transcriptions",
-										action: async () => {
-											await tauriAPI.clearHistory();
-											await tauriAPI.emitHistoryChanged();
-										},
-									});
-								}}
-							>
-								Delete transcriptions
-							</Button>
-
-							<Button
-								color="red"
-								variant="outline"
-								size="xs"
-								leftSection={<FileText size={14} />}
-								onClick={() => {
-									openDangerDialog({
-										title: "Delete transcripts (keep recordings)",
-										message:
-											"This will delete all transcript text from history, but keep your saved .wav recordings.",
-										confirmLabel: "Delete transcripts",
-										action: async () => {
-											await dataAPI.deleteAllTranscriptsKeepRecordings();
-										},
-									});
-								}}
-							>
-								Delete transcripts
-							</Button>
-
-							<Button
-								color="red"
-								variant="outline"
-								size="xs"
-								leftSection={<FileText size={14} />}
-								onClick={() => {
-									openDangerDialog({
-										title: "Clear request logs",
-										message:
-											"This will clear in-memory request logs shown in the Logs tab.",
-										confirmLabel: "Clear logs",
-										action: async () => {
-											await logsAPI.clearRequestLogs();
-										},
-									});
-								}}
-							>
-								Clear request logs
-							</Button>
-
-							<Button
-								color="red"
-								variant="outline"
-								size="xs"
-								leftSection={<BarChart2 size={14} />}
-								onClick={() => {
-									openDangerDialog({
-										title: "Delete usage/cost stats",
-										message:
-											"This will permanently delete persisted usage/cost stats (JSONL shards).",
-										confirmLabel: "Delete stats",
-										action: async () => {
-											await dataAPI.deleteAllStats();
-										},
-									});
-								}}
-							>
-								Delete stats
-							</Button>
-
-							<Button
-								color="red"
-								variant="outline"
-								size="xs"
-								leftSection={<Key size={14} />}
-								onClick={() => {
-									openDangerDialog({
-										title: "Delete API keys",
-										message:
-											"This will remove all stored API keys (OpenAI, Groq, Deepgram, Gemini, Anthropic).",
-										confirmLabel: "Delete API keys",
-										action: async () => {
-											await dataAPI.deleteAllApiKeys();
-										},
-									});
-								}}
-							>
-								Delete API keys
-							</Button>
-
-							<Button
-								color="red"
-								variant="outline"
-								size="xs"
-								leftSection={<RotateCcw size={14} />}
-								onClick={() => {
-									openDangerDialog({
-										title: "Reset settings",
-										message:
-											"This will reset all settings back to defaults (including API keys).",
-										confirmLabel: "Reset settings",
-										action: async () => {
-											await dataAPI.deleteAllSettings();
-											await tauriAPI.unregisterShortcuts();
-											await tauriAPI.registerShortcuts();
-										},
-									});
-								}}
-							>
-								Reset settings
-							</Button>
-
-							<Button
-								color="red"
-								variant="filled"
-								size="xs"
-								leftSection={<Skull size={14} />}
-								style={{ gridColumn: "1 / -1" }}
-								onClick={() => {
-									openDangerDialog({
-										title: "Delete all data",
-										message:
-											"This will delete ALL app data: history, recordings, request logs, persisted stats, and settings (including API keys).",
-										typedConfirm: {
-											requiredText: "DELETE",
-											label: "Type DELETE to confirm",
-											placeholder: "DELETE",
-										},
-										confirmLabel: "Delete everything",
-										action: async () => {
-											await dataAPI.deleteAllData();
-											await logsAPI.clearRequestLogs();
-											await tauriAPI.unregisterShortcuts();
-											await tauriAPI.registerShortcuts();
-										},
-									});
-								}}
-							>
-								Delete all data
-							</Button>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<Modal
+			<DataGithubTokenModal
 				opened={githubTokenModalOpen}
-				onClose={() => {
-					if (setGithubToken.isPending) return;
-					setGithubTokenModalOpen(false);
+				saving={setGithubToken.isPending}
+				value={githubTokenDraft}
+				onChange={(value) => setGithubTokenDraft(value)}
+				onClose={closeGithubTokenModal}
+				onSave={() => {
+					const token = githubTokenDraft.trim();
+					setGithubToken.mutate(token);
 				}}
-				title="GitHub token"
-				centered
-				size="sm"
-			>
-				<Text size="sm" mb="md">
-					Create a GitHub personal access token with the <code>gist</code>{" "}
-					scope. It will be stored securely in your OS credential manager.
-				</Text>
-
-				<Group gap="xs" mb="md" wrap="wrap">
-					<Button
-						variant="subtle"
-						size="xs"
-						onClick={async () => {
-							try {
-								await openUrl(
-									"https://github.com/settings/personal-access-tokens/new",
-								);
-							} catch {
-								notifications.show({
-									title: "Couldn't open link",
-									message:
-										"Failed to open your browser. You can open the token page manually from GitHub settings.",
-									color: "red",
-								});
-							}
-						}}
-					>
-						Open token creation page
-					</Button>
-
-					<Button
-						variant="subtle"
-						size="xs"
-						onClick={async () => {
-							try {
-								await openUrl(
-									"https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
-								);
-							} catch {
-								notifications.show({
-									title: "Couldn't open link",
-									message:
-										"Failed to open your browser. You can find GitHub token docs on docs.github.com.",
-									color: "red",
-								});
-							}
-						}}
-					>
-						Docs
-					</Button>
-				</Group>
-
-				<PasswordInput
-					label="Token"
-					value={githubTokenDraft}
-					onChange={(e) => setGithubTokenDraft(e.currentTarget.value)}
-				/>
-
-				<Group justify="flex-end" gap="sm" mt="md">
-					<Button
-						variant="default"
-						disabled={setGithubToken.isPending}
-						onClick={() => setGithubTokenModalOpen(false)}
-					>
-						Cancel
-					</Button>
-					<Button
-						loading={setGithubToken.isPending}
-						onClick={() => {
-							const token = githubTokenDraft.trim();
-							setGithubToken.mutate(token);
-						}}
-					>
-						Save token
-					</Button>
-				</Group>
-			</Modal>
-
-			<Modal
-				opened={dangerDialog !== null}
-				onClose={() => {
-					if (dangerRunning) return;
-					setDangerTypedDraft("");
-					setDangerDialog(null);
+				onOpenTokenCreationPage={() => {
+					void openExternalUrlWithFallback({
+						url: "https://github.com/settings/personal-access-tokens/new",
+						title: "Couldn't open link",
+						message:
+							"Failed to open your browser. You can open the token page manually from GitHub settings.",
+					});
 				}}
-				title={dangerDialog?.title ?? ""}
-				centered
-				size="sm"
-			>
-				<Text size="sm" mb="md">
-					{dangerDialog?.message ?? ""}
-				</Text>
+				onOpenDocs={() => {
+					void openExternalUrlWithFallback({
+						url: "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
+						title: "Couldn't open link",
+						message:
+							"Failed to open your browser. You can find GitHub token docs on docs.github.com.",
+					});
+				}}
+			/>
 
-				{dangerDialog?.typedConfirm ? (
-					<TextInput
-						label={
-							dangerDialog.typedConfirm.label ??
-							`Type ${dangerDialog.typedConfirm.requiredText} to confirm`
-						}
-						placeholder={
-							dangerDialog.typedConfirm.placeholder ??
-							dangerDialog.typedConfirm.requiredText
-						}
-						value={dangerTypedDraft}
-						onChange={(e) => setDangerTypedDraft(e.currentTarget.value)}
-						mb="md"
-					/>
-				) : null}
+			<DataDangerConfirmModal
+				dialog={dangerDialog}
+				running={dangerRunning}
+				typedDraft={dangerTypedDraft}
+				onTypedDraftChange={(value) => setDangerTypedDraft(value)}
+				onClose={closeDangerDialog}
+				onConfirm={async () => {
+					const action = dangerDialog?.action;
+					if (!action) return;
 
-				<Text size="xs" c="dimmed" mb="md">
-					Tip: if you only want to free up disk space, delete recordings — it's
-					the least destructive option.
-				</Text>
-
-				<Group justify="flex-end" gap="sm">
-					<Button
-						variant="default"
-						disabled={dangerRunning}
-						onClick={() => {
-							setDangerTypedDraft("");
-							setDangerDialog(null);
-						}}
-					>
-						Cancel
-					</Button>
-					<Button
-						color="red"
-						loading={dangerRunning}
-						disabled={(() => {
-							if (dangerRunning) return true;
-							const tc = dangerDialog?.typedConfirm;
-							if (!tc) return false;
-							return dangerTypedDraft.trim() !== tc.requiredText;
-						})()}
-						onClick={async () => {
-							const action = dangerDialog?.action;
-							if (!action) return;
-
-							try {
-								setDangerRunning(true);
-								await runDangerAction(action);
-								notifications.show({
-									title: "Done",
-									message: "Completed.",
-									color: "green",
-								});
-								setDangerDialog(null);
-							} catch (e) {
-								notifications.show({
-									title: "Failed",
-									message: formatErrorMessage(e),
-									color: "red",
-								});
-							} finally {
-								setDangerRunning(false);
-							}
-						}}
-					>
-						{dangerDialog?.confirmLabel ?? "Confirm"}
-					</Button>
-				</Group>
-			</Modal>
+					try {
+						setDangerRunning(true);
+						await runDangerAction(action);
+						notifications.show({
+							title: "Done",
+							message: "Completed.",
+							color: "green",
+						});
+						setDangerTypedDraft("");
+						setDangerDialog(null);
+					} catch (e) {
+						notifications.show({
+							title: "Failed",
+							message: formatErrorMessage(e),
+							color: "red",
+						});
+					} finally {
+						setDangerRunning(false);
+					}
+				}}
+			/>
 		</>
 	);
 

@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	applySettingsQueryInvalidations,
 	createLicenseStateQueryFn,
-	createPolicySyncMutationFn,
 	createRefreshLicenseEntitlementMutationFn,
+} from "./queries/license";
+import { createPolicySyncMutationFn } from "./queries/policy";
+import {
+	applySettingsQueryInvalidations,
 	invalidateLicenseRelatedQueries,
 	invalidateLogoutRelatedQueries,
 	invalidatePolicyRelatedQueries,
 	invalidateSettingsQueries,
-} from "./queries";
+} from "./queries/shared";
 
 describe("license query-layer function builders", () => {
 	it("forwards license state reads to tauri api", async () => {

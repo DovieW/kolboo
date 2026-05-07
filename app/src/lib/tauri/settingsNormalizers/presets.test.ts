@@ -19,6 +19,7 @@ describe("raw preset settings normalizer", () => {
 				stt_timeout_seconds: Number.NaN,
 				playing_audio_handling: "mute_and_pause",
 				output_mode: "keystrokes",
+				overlay_mode: "totally-invalid",
 			}),
 		).toMatchObject({
 			id: "preset-1",
@@ -29,6 +30,7 @@ describe("raw preset settings normalizer", () => {
 			stt_language: "en",
 			stt_timeout_seconds: null,
 			playing_audio_handling: "mute_and_pause",
+			overlay_mode: null,
 			output_mode: "paste",
 		});
 	});

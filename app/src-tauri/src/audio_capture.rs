@@ -57,6 +57,36 @@ fn estimate_callback_interleaved_capacity(config: &cpal::StreamConfig, channels:
     frames.saturating_mul(channels.max(1))
 }
 
+// Keep these runtime-policy helpers local to `audio_capture.rs` on purpose.
+// Phase 6 is about characterizing the CPAL/VAD lifecycle before we invent a broader seam,
+// so centralizing the policy math here reduces drift without pretending the runtime has been
+// cleanly extracted yet.
+const MAX_PRE_ROLL_MS: u32 = 5000;
+const MAX_PRE_ROLL_SAMPLES: usize = 10_000_000;
+const STOP_JOIN_TIMEOUT_MS: u64 = 2500;
+const WATCHDOG_CHECK_EVERY_MS: u64 = 100;
+const WATCHDOG_STALL_MS: u64 = 2000;
+
+fn clamped_pre_roll_ms(pre_roll_ms: u32) -> u32 {
+    pre_roll_ms.min(MAX_PRE_ROLL_MS)
+}
+
+fn pre_roll_capacity_samples(sample_rate: u32, channels: usize, pre_roll_ms: u32) -> usize {
+    let sample_rate = sample_rate.max(1) as f32;
+    let channels = channels.max(1) as f32;
+    let pre_roll_secs = clamped_pre_roll_ms(pre_roll_ms) as f32 / 1000.0;
+    ((sample_rate * pre_roll_secs * channels) as usize).min(MAX_PRE_ROLL_SAMPLES)
+}
+
+fn watchdog_restart_backoff_ms(consecutive_restart_failures: u32) -> u64 {
+    match consecutive_restart_failures {
+        0 | 1 => 200,
+        2 => 500,
+        3 => 1000,
+        _ => 2000,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct AudioEncodeConfig {
     /// If set, apply a noise gate with the given threshold.
@@ -783,7 +813,7 @@ impl AudioCapture {
     ) -> Result<(), AudioCaptureError> {
         self.hot_mic_enabled = hot_mic_enabled;
         self.pre_roll_ms
-            .store(hot_mic_pre_roll_ms.min(5000), Ordering::Relaxed);
+            .store(clamped_pre_roll_ms(hot_mic_pre_roll_ms), Ordering::Relaxed);
         self.mic_auto_recover_enabled
             .store(mic_auto_recover_enabled, Ordering::Relaxed);
 
@@ -882,14 +912,16 @@ impl AudioCapture {
     ) -> Result<(), AudioCaptureError> {
         if self.capture_handle.is_some() {
             // Stream already running; ensure pre-roll buffer capacity matches current config.
-            let pre_ms = self.pre_roll_ms.load(Ordering::Relaxed) as f32;
             let (sr, ch) = self
                 .buffer
                 .lock()
                 .map(|b| (b.sample_rate(), b.channels()))
                 .unwrap_or((self.sample_rate, self.channels));
-            let cap_samples =
-                ((sr as f32 * (pre_ms / 1000.0) * ch as f32) as usize).min(10_000_000);
+            let cap_samples = pre_roll_capacity_samples(
+                sr,
+                ch as usize,
+                self.pre_roll_ms.load(Ordering::Relaxed),
+            );
             if let Ok(mut pr) = self.pre_roll.lock() {
                 pr.set_capacity(cap_samples);
             }
@@ -923,10 +955,11 @@ impl AudioCapture {
         self.channels = config.channels().max(1);
 
         // Update pre-roll buffer capacity based on current stream format.
-        let pre_ms = self.pre_roll_ms.load(Ordering::Relaxed) as f32;
-        let cap_samples = ((self.sample_rate as f32 * (pre_ms / 1000.0) * self.channels as f32)
-            as usize)
-            .min(10_000_000);
+        let cap_samples = pre_roll_capacity_samples(
+            self.sample_rate,
+            self.channels as usize,
+            self.pre_roll_ms.load(Ordering::Relaxed),
+        );
         if let Ok(mut pr) = self.pre_roll.lock() {
             pr.set_capacity(cap_samples);
             pr.clear();
@@ -1146,7 +1179,6 @@ impl AudioCapture {
                 let _ = join_tx.send(res);
             });
 
-            const STOP_JOIN_TIMEOUT_MS: u64 = 2500;
             match join_rx.recv_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS)) {
                 Ok(Ok(Ok(()))) => {}
                 Ok(Ok(Err(e))) => {
@@ -1428,10 +1460,11 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
 
                 // Ensure pre-roll capacity matches the current setting (best effort).
                 // This is safe to do here because we're off the realtime callback.
-                let pre_ms = pre_roll_ms.load(Ordering::Relaxed).min(5000) as f32;
-                let desired_cap = ((sample_rate as f32 * (pre_ms / 1000.0) * channels as f32)
-                    as usize)
-                    .min(10_000_000);
+                let desired_cap = pre_roll_capacity_samples(
+                    sample_rate,
+                    channels,
+                    pre_roll_ms.load(Ordering::Relaxed),
+                );
                 if desired_cap != last_pre_roll_capacity {
                     if let Ok(mut pr) = pre_roll.lock() {
                         pr.set_capacity(desired_cap);
@@ -1764,8 +1797,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         .map_err(|e| AudioCaptureError::StreamStart(e.to_string()))?;
 
     // Wait for stop command, with optional watchdog restart.
-    const WATCHDOG_CHECK_EVERY_MS: u64 = 100;
-    const WATCHDOG_STALL_MS: u64 = 2000;
     let mut consecutive_restart_failures: u32 = 0;
 
     loop {
@@ -1843,11 +1874,11 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                         buf.set_format(config.sample_rate, config.channels);
                     }
                     // Resize pre-roll based on current config and configured ms.
-                    let pre_ms = pre_roll_ms.load(Ordering::Relaxed).min(5000) as f32;
-                    let cap_samples = ((config.sample_rate as f32
-                        * (pre_ms / 1000.0)
-                        * config.channels as f32) as usize)
-                        .min(10_000_000);
+                    let cap_samples = pre_roll_capacity_samples(
+                        config.sample_rate,
+                        config.channels as usize,
+                        pre_roll_ms.load(Ordering::Relaxed),
+                    );
                     if let Ok(mut pr) = pre_roll.lock() {
                         pr.set_capacity(cap_samples);
                     }
@@ -1883,12 +1914,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                 }
 
                 // Backoff to avoid tight restart loops.
-                let backoff_ms = match consecutive_restart_failures {
-                    0 | 1 => 200,
-                    2 => 500,
-                    3 => 1000,
-                    _ => 2000,
-                };
+                let backoff_ms = watchdog_restart_backoff_ms(consecutive_restart_failures);
                 std::thread::sleep(Duration::from_millis(backoff_ms));
             }
         }
@@ -1913,6 +1939,47 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    fn spawn_test_capture_handle(
+        on_stop: Option<Arc<AtomicBool>>,
+    ) -> (CaptureHandle, mpsc::Sender<AudioCaptureEvent>) {
+        let (command_tx, command_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let thread_handle = thread::spawn(move || {
+            let _ = command_rx.recv();
+            if let Some(flag) = on_stop {
+                flag.store(true, Ordering::Relaxed);
+            }
+            Ok(())
+        });
+
+        (
+            CaptureHandle {
+                command_tx,
+                event_rx,
+                thread_handle,
+            },
+            event_tx,
+        )
+    }
+
+    fn attach_running_capture(
+        capture: &mut AudioCapture,
+    ) -> (mpsc::Sender<AudioCaptureEvent>, Arc<AtomicBool>) {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let (handle, event_tx) = spawn_test_capture_handle(Some(stopped.clone()));
+        capture.capture_handle = Some(handle);
+        (event_tx, stopped)
+    }
+
+    fn set_capture_format_for_tests(capture: &mut AudioCapture, sample_rate: u32, channels: u16) {
+        capture.sample_rate = sample_rate;
+        capture.channels = channels.max(1);
+        if let Ok(mut buffer) = capture.buffer.lock() {
+            buffer.set_format(sample_rate, channels);
+        }
+    }
 
     #[test]
     fn test_audio_buffer_creation() {
@@ -1957,5 +2024,213 @@ mod tests {
         buffer.append(&[0.0; 2000]);
         // Should be trimmed to 1 second
         assert_eq!(buffer.len(), 1000);
+    }
+
+    #[test]
+    fn test_audio_buffer_set_format_keeps_newest_samples_when_capacity_changes() {
+        let mut buffer = AudioBuffer::new(4, 1, 1.0);
+        buffer.append(&[1.0, 2.0, 3.0, 4.0]);
+
+        buffer.set_format(2, 1);
+
+        assert_eq!(buffer.sample_rate(), 2);
+        assert_eq!(buffer.channels(), 1);
+        assert_eq!(buffer.snapshot(), vec![3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_audio_buffer_reset_for_recording_clears_existing_audio() {
+        let mut buffer = AudioBuffer::new(16000, 1, 2.0);
+        buffer.append(&[1.0, 2.0, 3.0, 4.0]);
+
+        buffer.reset_for_recording(0.5);
+
+        assert!(buffer.is_empty());
+        assert_eq!(
+            buffer.capacity(),
+            AudioBuffer::max_samples_for(16000, 1, 0.5)
+        );
+    }
+
+    #[test]
+    fn test_rolling_buffer_set_capacity_keeps_newest_tail() {
+        let mut buffer = RollingBuffer::new(6);
+        buffer.push(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        buffer.set_capacity(4);
+
+        assert_eq!(buffer.capacity(), 4);
+        assert_eq!(buffer.snapshot(), vec![3.0, 4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn test_set_capture_behavior_enabling_hot_mic_reuses_running_stream_and_resizes_pre_roll() {
+        let mut capture = AudioCapture::new();
+        let (_event_tx, _stopped) = attach_running_capture(&mut capture);
+        set_capture_format_for_tests(&mut capture, 1000, 2);
+        if let Ok(mut pre_roll) = capture.pre_roll.lock() {
+            pre_roll.set_capacity(10);
+            pre_roll.push(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        }
+
+        capture
+            .set_capture_behavior(true, 3, true, Some("Built-in Mic"))
+            .expect("enabling hot mic on an already-running stream should reuse it");
+
+        assert!(capture.capture_handle.is_some());
+        assert_eq!(capture.pre_roll_ms.load(Ordering::Relaxed), 3);
+        assert!(capture.mic_auto_recover_enabled.load(Ordering::Relaxed));
+        assert_eq!(
+            capture
+                .desired_device_name
+                .lock()
+                .ok()
+                .and_then(|name| name.clone()),
+            Some("Built-in Mic".to_string())
+        );
+
+        let pre_roll = capture
+            .pre_roll
+            .lock()
+            .expect("pre-roll lock should remain available in tests");
+        assert_eq!(pre_roll.capacity(), pre_roll_capacity_samples(1000, 2, 3));
+        assert_eq!(pre_roll.snapshot(), vec![3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    }
+
+    #[test]
+    fn test_set_capture_behavior_disabling_hot_mic_stops_idle_stream_and_normalizes_default_device()
+    {
+        let mut capture = AudioCapture::new();
+        let (_event_tx, stopped) = attach_running_capture(&mut capture);
+        capture.recording_active.store(false, Ordering::Relaxed);
+
+        capture
+            .set_capture_behavior(false, 9000, false, Some(" default "))
+            .expect("disabling hot mic while idle should succeed");
+
+        assert!(stopped.load(Ordering::Relaxed));
+        assert!(capture.capture_handle.is_none());
+        assert_eq!(capture.pre_roll_ms.load(Ordering::Relaxed), MAX_PRE_ROLL_MS);
+        assert!(!capture.mic_auto_recover_enabled.load(Ordering::Relaxed));
+        assert_eq!(
+            capture
+                .desired_device_name
+                .lock()
+                .ok()
+                .and_then(|name| name.clone()),
+            None
+        );
+    }
+
+    #[test]
+    fn test_disabling_hot_mic_while_recording_keeps_stream_until_recording_stops() {
+        let mut capture = AudioCapture::new();
+        let (_event_tx, stopped) = attach_running_capture(&mut capture);
+        capture.hot_mic_enabled = true;
+        capture.recording_active.store(true, Ordering::Relaxed);
+
+        capture
+            .set_capture_behavior(false, 250, false, Some("Desk Mic"))
+            .expect("switching to push-to-talk mid-recording should not tear down the stream");
+
+        assert!(!stopped.load(Ordering::Relaxed));
+        assert!(capture.capture_handle.is_some());
+        assert!(!capture.hot_mic_enabled);
+
+        capture.stop_recording();
+
+        assert!(stopped.load(Ordering::Relaxed));
+        assert!(capture.capture_handle.is_none());
+        assert!(!capture.recording_active.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_start_recording_session_hot_mic_prepends_pre_roll_audio() {
+        let mut capture = AudioCapture::new();
+        let (_event_tx, _stopped) = attach_running_capture(&mut capture);
+        set_capture_format_for_tests(&mut capture, 1000, 1);
+        capture.hot_mic_enabled = true;
+        capture.pre_roll_ms.store(4, Ordering::Relaxed);
+        if let Ok(mut pre_roll) = capture.pre_roll.lock() {
+            pre_roll.set_capacity(4);
+            pre_roll.push(&[10.0, 20.0, 30.0]);
+        }
+
+        capture
+            .start_recording_session(1.0, None)
+            .expect("hot mic start should reuse the armed stream");
+
+        assert!(capture.recording_active.load(Ordering::Relaxed));
+        assert!(capture.capture_handle.is_some());
+        let buffer = capture
+            .buffer
+            .lock()
+            .expect("recording buffer lock should remain available in tests");
+        assert_eq!(buffer.snapshot(), vec![10.0, 20.0, 30.0]);
+        assert_eq!(
+            buffer.capacity(),
+            AudioBuffer::max_samples_for(1000, 1, 1.0)
+        );
+    }
+
+    #[test]
+    fn test_stop_recording_keeps_hot_mic_stream_running() {
+        let mut capture = AudioCapture::new();
+        let (_event_tx, stopped) = attach_running_capture(&mut capture);
+        capture.hot_mic_enabled = true;
+        capture.recording_active.store(true, Ordering::Relaxed);
+
+        capture.stop_recording();
+
+        assert!(!stopped.load(Ordering::Relaxed));
+        assert!(capture.capture_handle.is_some());
+        assert!(!capture.recording_active.load(Ordering::Relaxed));
+
+        capture.stop();
+        assert!(stopped.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_poll_vad_event_returns_buffered_events_in_order() {
+        let mut capture = AudioCapture::new();
+        let (event_tx, _stopped) = attach_running_capture(&mut capture);
+        event_tx
+            .send(AudioCaptureEvent::SpeechStart)
+            .expect("test event send should succeed");
+        event_tx
+            .send(AudioCaptureEvent::SpeechEnd)
+            .expect("test event send should succeed");
+
+        assert!(matches!(
+            capture.poll_vad_event(),
+            Some(AudioCaptureEvent::SpeechStart)
+        ));
+        assert!(matches!(
+            capture.poll_vad_event(),
+            Some(AudioCaptureEvent::SpeechEnd)
+        ));
+        assert!(capture.poll_vad_event().is_none());
+    }
+
+    #[test]
+    fn test_drop_stops_running_capture_thread() {
+        let stopped = Arc::new(AtomicBool::new(false));
+
+        {
+            let mut capture = AudioCapture::new();
+            let (handle, _event_tx) = spawn_test_capture_handle(Some(stopped.clone()));
+            capture.capture_handle = Some(handle);
+        }
+
+        assert!(stopped.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_watchdog_restart_backoff_steps_up_with_failures() {
+        assert_eq!(watchdog_restart_backoff_ms(0), 200);
+        assert_eq!(watchdog_restart_backoff_ms(1), 200);
+        assert_eq!(watchdog_restart_backoff_ms(2), 500);
+        assert_eq!(watchdog_restart_backoff_ms(3), 1000);
+        assert_eq!(watchdog_restart_backoff_ms(4), 2000);
     }
 }

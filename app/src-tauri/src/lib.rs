@@ -42,6 +42,7 @@ mod policy;
 mod prompt_builders;
 mod recording_completion;
 mod recording_orchestration;
+mod recording_request_initialization;
 mod recordings;
 mod request_log;
 mod router_embeddings_cache;
