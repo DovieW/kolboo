@@ -214,9 +214,16 @@ Progress (2026-05-06):
 - `stt/streaming.rs` now also owns provider-independent WS send/closed-socket handling and best-effort close helpers.
 - OpenAI Realtime and Deepgram streaming use those helpers for audio/control sends and close, while keeping provider protocol state machines in their adapters.
 
+Progress (2026-05-07):
+
+- Added `app/src-tauri/src/stt/websocket_transport.rs` so realtime WS providers now share one transport-policy seam for manual proxy CONNECT tunnelling, manual `no_proxy` bypass, and TLS override handling (trusted CA + invalid-cert mode).
+- OpenAI, Deepgram, ElevenLabs, Speechmatics, AssemblyAI, and Fireworks now receive `ProxySettings` through cloud-provider construction and use the shared transport path rather than silently ignoring configured WS transport policy.
+- `stt/streaming.rs` remains the provider-independent WS/session lifecycle Module; provider adapters still own request headers, URL/query construction, and protocol-specific message handling.
+
 Remaining gaps:
 
-- Proxy settings still aren’t consistently applied to WS connections.
+- System/environment proxy discovery still is not mirrored for realtime WS transport the way `reqwest` handles HTTP requests.
+- HTTPS proxy URLs are still unsupported for realtime WS transport.
 - We still have provider-specific request/response log JSON shapes; could standardize a small common subset (endpoint, transport, model_id, chunks_sent, etc.).
 
 ## Make CLI output reliably machine-readable

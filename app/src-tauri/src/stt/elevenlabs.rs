@@ -21,6 +21,7 @@ use super::streaming::{
 use super::{AudioEncoding, AudioFormat, SttError, SttProvider};
 use crate::audio_normalization::{chunk_size_bytes_for_pcm_s16le, f32_to_pcm_s16le};
 use crate::request_log::RequestLogStore;
+use crate::settings::ProxySettings;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use futures_util::SinkExt;
@@ -47,6 +48,7 @@ pub struct ElevenLabsSttProvider {
     /// When true, use `commit_strategy=vad` so the server auto-commits speech
     /// segments during recording (enables live output for ElevenLabs).
     use_vad_commit: bool,
+    proxy_settings: ProxySettings,
 }
 
 impl ElevenLabsSttProvider {
@@ -72,6 +74,7 @@ impl ElevenLabsSttProvider {
             api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
             use_vad_commit: false,
+            proxy_settings: ProxySettings::default(),
         }
     }
 
@@ -92,12 +95,18 @@ impl ElevenLabsSttProvider {
             api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
             use_vad_commit: false,
+            proxy_settings: ProxySettings::default(),
         }
     }
 
     /// Enable VAD-based commit strategy for live output.
     pub fn with_vad_commit(mut self, enabled: bool) -> Self {
         self.use_vad_commit = enabled;
+        self
+    }
+
+    pub fn with_proxy_settings(mut self, proxy_settings: ProxySettings) -> Self {
+        self.proxy_settings = proxy_settings;
         self
     }
 
@@ -336,8 +345,12 @@ impl ElevenLabsSttProvider {
             })?,
         );
 
-        let (mut ws_write, mut ws_read) =
-            connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TRANSCRIPTION_TIMEOUT).await?;
+        let (mut ws_write, mut ws_read) = connect_ws_split_with_timeout(
+            request,
+            Self::DEFAULT_WS_TRANSCRIPTION_TIMEOUT,
+            &self.proxy_settings,
+        )
+        .await?;
 
         // Chunk sizing: 0.5s is a good compromise between overhead and latency.
         // (Docs recommend 0.1s - 1s.)
@@ -545,8 +558,12 @@ impl ElevenLabsSttProvider {
             })?,
         );
 
-        let (ws_write, ws_read) =
-            connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TRANSCRIPTION_TIMEOUT).await?;
+        let (ws_write, ws_read) = connect_ws_split_with_timeout(
+            request,
+            Self::DEFAULT_WS_TRANSCRIPTION_TIMEOUT,
+            &self.proxy_settings,
+        )
+        .await?;
 
         // Generous buffer: ~60s of audio at 10 chunks/sec should never fill up.
         let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>(1024);

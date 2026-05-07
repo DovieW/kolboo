@@ -29,6 +29,7 @@ use super::streaming::{
 use super::{language, AudioEncoding, AudioFormat, SttError, SttProvider};
 use crate::audio_normalization::{chunk_size_bytes_for_pcm_s16le, f32_to_pcm_s16le};
 use crate::request_log::RequestLogStore;
+use crate::settings::ProxySettings;
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value as JsonValue};
@@ -43,6 +44,7 @@ pub struct SpeechmaticsSttProvider {
     operating_point: String,
     language: String,
     request_log_store: Option<RequestLogStore>,
+    proxy_settings: ProxySettings,
 }
 
 impl SpeechmaticsSttProvider {
@@ -61,11 +63,17 @@ impl SpeechmaticsSttProvider {
             operating_point: model.unwrap_or_else(|| "enhanced".to_string()),
             language: Self::normalize_language(language),
             request_log_store: None,
+            proxy_settings: ProxySettings::default(),
         }
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
+        self
+    }
+
+    pub fn with_proxy_settings(mut self, proxy_settings: ProxySettings) -> Self {
+        self.proxy_settings = proxy_settings;
         self
     }
 
@@ -248,7 +256,8 @@ impl SpeechmaticsSttProvider {
         );
 
         let (ws_write, mut ws_read) =
-            connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TIMEOUT).await?;
+            connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TIMEOUT, &self.proxy_settings)
+                .await?;
 
         // Send StartRecognition.
         let start_msg = json!({

@@ -17,6 +17,7 @@ mod retry;
 pub(crate) mod simulated_streaming;
 mod speechmatics;
 pub(crate) mod streaming;
+pub(crate) mod websocket_transport;
 mod whisper_server;
 
 #[cfg(feature = "local-whisper")]

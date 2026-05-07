@@ -10,6 +10,7 @@ use std::sync::Arc;
 use reqwest::Client;
 
 use crate::request_log::RequestLogStore;
+use crate::settings::ProxySettings;
 use crate::stt::SttProvider;
 
 pub(super) struct CloudSttProviderBuildContext {
@@ -17,6 +18,7 @@ pub(super) struct CloudSttProviderBuildContext {
     pub model: Option<String>,
     pub language: Option<String>,
     pub api_key: String,
+    pub proxy_settings: ProxySettings,
     pub managed_gateway_url: Option<String>,
     pub transcription_prompt: Option<String>,
     pub request_log_store: Option<RequestLogStore>,
@@ -95,6 +97,7 @@ fn build_openai(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         model,
         language,
         api_key,
+        proxy_settings,
         managed_gateway_url,
         transcription_prompt,
         request_log_store,
@@ -114,7 +117,11 @@ fn build_openai(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         provider
     };
 
-    Arc::new(provider.with_request_log_store(request_log_store))
+    Arc::new(
+        provider
+            .with_proxy_settings(proxy_settings)
+            .with_request_log_store(request_log_store),
+    )
 }
 
 fn build_fireworks(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
@@ -123,6 +130,7 @@ fn build_fireworks(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         model,
         language,
         api_key,
+        proxy_settings,
         managed_gateway_url,
         transcription_prompt,
         request_log_store,
@@ -142,7 +150,11 @@ fn build_fireworks(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         provider
     };
 
-    Arc::new(provider.with_request_log_store(request_log_store))
+    Arc::new(
+        provider
+            .with_proxy_settings(proxy_settings)
+            .with_request_log_store(request_log_store),
+    )
 }
 
 fn build_aquavoice(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
@@ -207,6 +219,7 @@ fn build_elevenlabs(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         model,
         language,
         api_key,
+        proxy_settings,
         managed_gateway_url,
         request_log_store,
         stt_live_output,
@@ -221,7 +234,11 @@ fn build_elevenlabs(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         provider
     };
 
-    Arc::new(provider.with_request_log_store(request_log_store))
+    Arc::new(
+        provider
+            .with_proxy_settings(proxy_settings)
+            .with_request_log_store(request_log_store),
+    )
 }
 
 fn build_assemblyai(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
@@ -230,6 +247,7 @@ fn build_assemblyai(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         model,
         language,
         api_key,
+        proxy_settings,
         managed_gateway_url,
         request_log_store,
         ..
@@ -242,7 +260,11 @@ fn build_assemblyai(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         provider
     };
 
-    Arc::new(provider.with_request_log_store(request_log_store))
+    Arc::new(
+        provider
+            .with_proxy_settings(proxy_settings)
+            .with_request_log_store(request_log_store),
+    )
 }
 
 fn build_speechmatics(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
@@ -250,12 +272,14 @@ fn build_speechmatics(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider>
         model,
         language,
         api_key,
+        proxy_settings,
         request_log_store,
         ..
     } = ctx;
 
     Arc::new(
         crate::stt::SpeechmaticsSttProvider::new(api_key, model, language)
+            .with_proxy_settings(proxy_settings)
             .with_request_log_store(request_log_store),
     )
 }
@@ -266,6 +290,7 @@ fn build_deepgram(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         model,
         language,
         api_key,
+        proxy_settings,
         managed_gateway_url,
         request_log_store,
         ..
@@ -278,7 +303,11 @@ fn build_deepgram(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         provider
     };
 
-    Arc::new(provider.with_request_log_store(request_log_store))
+    Arc::new(
+        provider
+            .with_proxy_settings(proxy_settings)
+            .with_request_log_store(request_log_store),
+    )
 }
 
 #[cfg(test)]
@@ -292,6 +321,7 @@ mod tests {
             model: Some("test-model".to_string()),
             language: Some("en".to_string()),
             api_key: "test-key".to_string(),
+            proxy_settings: ProxySettings::default(),
             managed_gateway_url: Some("https://managed.example.test".to_string()),
             transcription_prompt: Some("keep punctuation".to_string()),
             request_log_store: None,

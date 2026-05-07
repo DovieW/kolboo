@@ -102,6 +102,7 @@ sha2 = "0.10"
 
 # WebSocket client (Speechmatics realtime STT)
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
+native-tls = "0.2"
 futures-util = "0.3"
 
 # Base64 encoding for audio data

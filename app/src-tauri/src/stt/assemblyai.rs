@@ -27,6 +27,7 @@ use super::streaming::{
 use super::{AudioFormat, SttError, SttProvider};
 use crate::audio_normalization::{chunk_size_bytes_for_pcm_s16le, f32_to_pcm_s16le};
 use crate::request_log::RequestLogStore;
+use crate::settings::ProxySettings;
 use async_trait::async_trait;
 use futures_util::SinkExt;
 use serde::{Deserialize, Serialize};
@@ -74,6 +75,7 @@ pub struct AssemblyAiSttProvider {
     language_detection: bool,
     api_base_url: String,
     request_log_store: Option<RequestLogStore>,
+    proxy_settings: ProxySettings,
 }
 
 /// Models that use the real-time WebSocket streaming API.
@@ -110,6 +112,7 @@ impl AssemblyAiSttProvider {
             language_detection,
             api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
+            proxy_settings: ProxySettings::default(),
         }
     }
 
@@ -130,6 +133,7 @@ impl AssemblyAiSttProvider {
             language_detection,
             api_base_url: Self::DEFAULT_API_BASE_URL.to_string(),
             request_log_store: None,
+            proxy_settings: ProxySettings::default(),
         }
     }
 
@@ -144,6 +148,11 @@ impl AssemblyAiSttProvider {
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
+        self
+    }
+
+    pub fn with_proxy_settings(mut self, proxy_settings: ProxySettings) -> Self {
+        self.proxy_settings = proxy_settings;
         self
     }
 
@@ -419,7 +428,8 @@ impl AssemblyAiSttProvider {
         );
 
         let (ws_write, ws_read) =
-            connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TIMEOUT).await?;
+            connect_ws_split_with_timeout(request, Self::DEFAULT_WS_TIMEOUT, &self.proxy_settings)
+                .await?;
 
         let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>(1024);
         let (partial_tx, partial_rx) = mpsc::channel::<PartialTranscript>(256);

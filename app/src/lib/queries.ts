@@ -356,40 +356,40 @@ export async function invalidateLogoutRelatedQueries(
 }
 
 function buildSettingsMutationInvalidations(
-  extraInvalidations: readonly SettingsQueryInvalidation[] = [],
+	extraInvalidations: readonly SettingsQueryInvalidation[] = [],
 ): readonly SettingsQueryInvalidation[] {
-  return [
-    { queryKey: ["settings"], reason: "settings" },
-    ...extraInvalidations,
-  ];
+	return [
+		{ queryKey: ["settings"], reason: "settings" },
+		...extraInvalidations,
+	];
 }
 
 export async function invalidateSettingsQueries(
-  queryClient: Pick<QueryClient, "invalidateQueries">,
-  extraInvalidations: readonly SettingsQueryInvalidation[] = [],
+	queryClient: Pick<QueryClient, "invalidateQueries">,
+	extraInvalidations: readonly SettingsQueryInvalidation[] = [],
 ): Promise<void> {
-  await applySettingsQueryInvalidations(
-    queryClient,
-    buildSettingsMutationInvalidations(extraInvalidations),
-  );
+	await applySettingsQueryInvalidations(
+		queryClient,
+		buildSettingsMutationInvalidations(extraInvalidations),
+	);
 }
 
 function useSettingsInvalidatingMutation<TVariables, TData = unknown>(
-  mutationFn: (variables: TVariables) => Promise<TData>,
-  options?: {
-    extraInvalidations?: readonly SettingsQueryInvalidation[];
-    onError?: (error: unknown) => void;
-  },
+	mutationFn: (variables: TVariables) => Promise<TData>,
+	options?: {
+		extraInvalidations?: readonly SettingsQueryInvalidation[];
+		onError?: (error: unknown) => void;
+	},
 ) {
-  const queryClient = useQueryClient();
+	const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn,
-    onSuccess: () => {
-      void invalidateSettingsQueries(queryClient, options?.extraInvalidations);
-    },
-    onError: options?.onError,
-  });
+	return useMutation({
+		mutationFn,
+		onSuccess: () => {
+			void invalidateSettingsQueries(queryClient, options?.extraInvalidations);
+		},
+		onError: options?.onError,
+	});
 }
 
 export function useLicenseQueryBootstrap() {
@@ -566,8 +566,8 @@ export function useSetSettingsGuideState() {
 
 export function useCreateHotkeyShortcutCard() {
 	return useSettingsInvalidatingMutation((card: HotkeyShortcutCard) =>
-    tauriAPI.createHotkeyShortcutCard(card),
-  );
+		tauriAPI.createHotkeyShortcutCard(card),
+	);
 }
 
 export function useUpdateHotkeyShortcutCard() {
@@ -628,14 +628,14 @@ export function useDeleteHotkeyShortcutCard() {
 
 export function useUpdateSelectedMic() {
 	return useSettingsInvalidatingMutation((micId: string | null) =>
-    tauriAPI.updateSelectedMic(micId),
-  );
+		tauriAPI.updateSelectedMic(micId),
+	);
 }
 
 export function useUpdateSoundEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateSoundEnabled(enabled),
-  );
+		tauriAPI.updateSoundEnabled(enabled),
+	);
 }
 
 export function useUpdateHotkeyDebugEnabled() {
@@ -669,178 +669,178 @@ export function useUpdateHotkeyDebugEnabled() {
 
 export function useUpdateAudioCue() {
 	return useSettingsInvalidatingMutation((cue: AudioCue) =>
-    tauriAPI.updateAudioCue(cue),
-  );
+		tauriAPI.updateAudioCue(cue),
+	);
 }
 
 export function useUpdateAccentColor() {
 	return useSettingsInvalidatingMutation(
-    (color: string | null) => tauriAPI.updateAccentColor(color),
-    {
-      onError: (error) => {
-        console.error("Update accent color failed:", error);
-      },
-    },
-  );
+		(color: string | null) => tauriAPI.updateAccentColor(color),
+		{
+			onError: (error) => {
+				console.error("Update accent color failed:", error);
+			},
+		},
+	);
 }
 
 export function useUpdateMainWindowCloseBehavior() {
 	return useSettingsInvalidatingMutation((behavior: MainWindowCloseBehavior) =>
-    tauriAPI.updateMainWindowCloseBehavior(behavior),
-  );
+		tauriAPI.updateMainWindowCloseBehavior(behavior),
+	);
 }
 
 export function useUpdateRewriteLlmEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateRewriteLlmEnabled(enabled),
-  );
+		tauriAPI.updateRewriteLlmEnabled(enabled),
+	);
 }
 
 export function useUpdatePlayingAudioHandling() {
 	return useSettingsInvalidatingMutation((handling: PlayingAudioHandling) =>
-    tauriAPI.updatePlayingAudioHandling(handling),
-  );
+		tauriAPI.updatePlayingAudioHandling(handling),
+	);
 }
 
 export function useUpdateOverlayMode() {
 	return useSettingsInvalidatingMutation(
-    (mode: "always" | "never" | "recording_only") =>
-      tauriAPI.updateOverlayMode(mode),
-  );
+		(mode: "always" | "never" | "recording_only") =>
+			tauriAPI.updateOverlayMode(mode),
+	);
 }
 
 export function useUpdateOverlayShowDetailedLoading() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateOverlayShowDetailedLoading(enabled),
-  );
+		tauriAPI.updateOverlayShowDetailedLoading(enabled),
+	);
 }
 
 export function useUpdateOverlayMonitorTarget() {
 	return useSettingsInvalidatingMutation((target: OverlayMonitorTarget) =>
-    tauriAPI.updateOverlayMonitorTarget(target),
-  );
+		tauriAPI.updateOverlayMonitorTarget(target),
+	);
 }
 
 export function useUpdateOutputMode() {
 	return useSettingsInvalidatingMutation((mode: OutputMode) =>
-    tauriAPI.updateOutputMode(mode),
-  );
+		tauriAPI.updateOutputMode(mode),
+	);
 }
 
 export function useUpdateOutputHitEnter() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateOutputHitEnter(enabled),
-  );
+		tauriAPI.updateOutputHitEnter(enabled),
+	);
 }
 
 export function useUpdateOutputSmartPasteProtection() {
 	return useSettingsInvalidatingMutation(
-    (enabled: boolean) => tauriAPI.updateOutputSmartPasteProtection(enabled),
-    {
-      onError: (error) => {
-        console.error("Update smart paste protection failed:", error);
-        notifications.show({
-          title: "Couldn't save setting",
-          message:
-            "Smart paste protection couldn't be saved. Your previous setting is still active.",
-          color: "red",
-        });
-      },
-    },
-  );
+		(enabled: boolean) => tauriAPI.updateOutputSmartPasteProtection(enabled),
+		{
+			onError: (error) => {
+				console.error("Update smart paste protection failed:", error);
+				notifications.show({
+					title: "Couldn't save setting",
+					message:
+						"Smart paste protection couldn't be saved. Your previous setting is still active.",
+					color: "red",
+				});
+			},
+		},
+	);
 }
 
 export function useUpdateRequestLogsPrivacyMode() {
 	return useSettingsInvalidatingMutation(
-    (enabled: boolean) => tauriAPI.updateRequestLogsPrivacyMode(enabled),
-    {
-      extraInvalidations: [{ queryKey: ["requestLogs"], reason: "settings" }],
-    },
-  );
+		(enabled: boolean) => tauriAPI.updateRequestLogsPrivacyMode(enabled),
+		{
+			extraInvalidations: [{ queryKey: ["requestLogs"], reason: "settings" }],
+		},
+	);
 }
 
 export function useUpdateQuietAudioGateEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateQuietAudioGateEnabled(enabled),
-  );
+		tauriAPI.updateQuietAudioGateEnabled(enabled),
+	);
 }
 
 export function useUpdateQuietAudioMinDurationSecs() {
 	return useSettingsInvalidatingMutation((seconds: number) =>
-    tauriAPI.updateQuietAudioMinDurationSecs(seconds),
-  );
+		tauriAPI.updateQuietAudioMinDurationSecs(seconds),
+	);
 }
 
 export function useUpdateQuietAudioRmsDbfsThreshold() {
 	return useSettingsInvalidatingMutation((dbfs: number) =>
-    tauriAPI.updateQuietAudioRmsDbfsThreshold(dbfs),
-  );
+		tauriAPI.updateQuietAudioRmsDbfsThreshold(dbfs),
+	);
 }
 
 export function useUpdateQuietAudioPeakDbfsThreshold() {
 	return useSettingsInvalidatingMutation((dbfs: number) =>
-    tauriAPI.updateQuietAudioPeakDbfsThreshold(dbfs),
-  );
+		tauriAPI.updateQuietAudioPeakDbfsThreshold(dbfs),
+	);
 }
 
 export function useUpdateNoiseGateThresholdDbfs() {
 	return useSettingsInvalidatingMutation((thresholdDbfs: number | null) =>
-    tauriAPI.updateNoiseGateThresholdDbfs(thresholdDbfs),
-  );
+		tauriAPI.updateNoiseGateThresholdDbfs(thresholdDbfs),
+	);
 }
 
 export function useUpdateQuietAudioRequireSpeech() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateQuietAudioRequireSpeech(enabled),
-  );
+		tauriAPI.updateQuietAudioRequireSpeech(enabled),
+	);
 }
 
 export function useUpdateHotMicEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateHotMicEnabled(enabled),
-  );
+		tauriAPI.updateHotMicEnabled(enabled),
+	);
 }
 
 export function useUpdateHotMicPreRollMs() {
 	return useSettingsInvalidatingMutation((ms: number) =>
-    tauriAPI.updateHotMicPreRollMs(ms),
-  );
+		tauriAPI.updateHotMicPreRollMs(ms),
+	);
 }
 
 export function useUpdateMicAutoRecoverEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateMicAutoRecoverEnabled(enabled),
-  );
+		tauriAPI.updateMicAutoRecoverEnabled(enabled),
+	);
 }
 
 export function useUpdateAudioDownmixToMono() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateAudioDownmixToMono(enabled),
-  );
+		tauriAPI.updateAudioDownmixToMono(enabled),
+	);
 }
 
 export function useUpdateAudioResampleTo16khz() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateAudioResampleTo16khz(enabled),
-  );
+		tauriAPI.updateAudioResampleTo16khz(enabled),
+	);
 }
 
 export function useUpdateAudioHighpassEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateAudioHighpassEnabled(enabled),
-  );
+		tauriAPI.updateAudioHighpassEnabled(enabled),
+	);
 }
 
 export function useUpdateAudioAgcEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateAudioAgcEnabled(enabled),
-  );
+		tauriAPI.updateAudioAgcEnabled(enabled),
+	);
 }
 
 export function useUpdateAudioNoiseSuppressionEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateAudioNoiseSuppressionEnabled(enabled),
-  );
+		tauriAPI.updateAudioNoiseSuppressionEnabled(enabled),
+	);
 }
 
 export function useLastRecordingDiagnostics() {
@@ -868,14 +868,14 @@ export function useAudioSettingsTestStopRecording() {
 
 export function useUpdateMaxSavedRecordings() {
 	return useSettingsInvalidatingMutation((max: number) =>
-    tauriAPI.updateMaxSavedRecordings(max),
-  );
+		tauriAPI.updateMaxSavedRecordings(max),
+	);
 }
 
 export function useUpdateTranscriptionRetentionDeleteRecordings() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateTranscriptionRetentionDeleteRecordings(enabled),
-  );
+		tauriAPI.updateTranscriptionRetentionDeleteRecordings(enabled),
+	);
 }
 
 export function useRecordingsStats() {
@@ -1059,165 +1059,165 @@ export function useAvailableProviders() {
 
 export function useUpdateGroqFreeTier() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateGroqFreeTier(enabled),
-  );
+		tauriAPI.updateGroqFreeTier(enabled),
+	);
 }
 
 export function useUpdateCerebrasFreeTier() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateCerebrasFreeTier(enabled),
-  );
+		tauriAPI.updateCerebrasFreeTier(enabled),
+	);
 }
 
 export function useUpdateCohereFreeTier() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateCohereFreeTier(enabled),
-  );
+		tauriAPI.updateCohereFreeTier(enabled),
+	);
 }
 
 export function useUpdateAssemblyAiFreeTier() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateAssemblyAiFreeTier(enabled),
-  );
+		tauriAPI.updateAssemblyAiFreeTier(enabled),
+	);
 }
 
 export function useUpdateSpeechmaticsFreeTier() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateSpeechmaticsFreeTier(enabled),
-  );
+		tauriAPI.updateSpeechmaticsFreeTier(enabled),
+	);
 }
 
 export function useUpdateSTTProvider() {
 	return useSettingsInvalidatingMutation((provider: string | null) =>
-    tauriAPI.updateSTTProvider(provider),
-  );
+		tauriAPI.updateSTTProvider(provider),
+	);
 }
 
 export function useUpdateSTTModel() {
 	return useSettingsInvalidatingMutation((model: string | null) =>
-    tauriAPI.updateSTTModel(model),
-  );
+		tauriAPI.updateSTTModel(model),
+	);
 }
 
 export function useUpdateSTTLiveOutput() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateSTTLiveOutput(enabled),
-  );
+		tauriAPI.updateSTTLiveOutput(enabled),
+	);
 }
 
 export function useUpdateSTTSimulatedStreaming() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateSTTSimulatedStreaming(enabled),
-  );
+		tauriAPI.updateSTTSimulatedStreaming(enabled),
+	);
 }
 
 export function useUpdateSTTLanguage() {
 	return useSettingsInvalidatingMutation((language: string) =>
-    tauriAPI.updateSTTLanguage(language),
-  );
+		tauriAPI.updateSTTLanguage(language),
+	);
 }
 
 export function useUpdateSTTTranscriptionPrompt() {
 	return useSettingsInvalidatingMutation((prompt: string | null) =>
-    tauriAPI.updateSTTTranscriptionPrompt(prompt),
-  );
+		tauriAPI.updateSTTTranscriptionPrompt(prompt),
+	);
 }
 
 export function useUpdateWhisperServerBaseUrl() {
 	return useSettingsInvalidatingMutation((baseUrl: string | null) =>
-    tauriAPI.updateWhisperServerBaseUrl(baseUrl),
-  );
+		tauriAPI.updateWhisperServerBaseUrl(baseUrl),
+	);
 }
 
 export function useUpdateOllamaUrl() {
 	return useSettingsInvalidatingMutation((baseUrl: string | null) =>
-    tauriAPI.updateOllamaUrl(baseUrl),
-  );
+		tauriAPI.updateOllamaUrl(baseUrl),
+	);
 }
 
 export function useUpdateOcrBaseUrl() {
 	return useSettingsInvalidatingMutation((baseUrl: string | null) =>
-    tauriAPI.updateOcrBaseUrl(baseUrl),
-  );
+		tauriAPI.updateOcrBaseUrl(baseUrl),
+	);
 }
 
 export function useUpdateOcrModel() {
 	return useSettingsInvalidatingMutation((model: string | null) =>
-    tauriAPI.updateOcrModel(model),
-  );
+		tauriAPI.updateOcrModel(model),
+	);
 }
 
 export function useUpdateOcrAuthMode() {
 	return useSettingsInvalidatingMutation((mode: OcrAuthMode) =>
-    tauriAPI.updateOcrAuthMode(mode),
-  );
+		tauriAPI.updateOcrAuthMode(mode),
+	);
 }
 
 export function useUpdateOcrPrompt() {
 	return useSettingsInvalidatingMutation((prompt: string) =>
-    tauriAPI.updateOcrPrompt(prompt),
-  );
+		tauriAPI.updateOcrPrompt(prompt),
+	);
 }
 
 export function useUpdateOcrMaxTokens() {
 	return useSettingsInvalidatingMutation((maxTokens: number) =>
-    tauriAPI.updateOcrMaxTokens(maxTokens),
-  );
+		tauriAPI.updateOcrMaxTokens(maxTokens),
+	);
 }
 
 export function useUpdateOcrTemperature() {
 	return useSettingsInvalidatingMutation((temperature: number) =>
-    tauriAPI.updateOcrTemperature(temperature),
-  );
+		tauriAPI.updateOcrTemperature(temperature),
+	);
 }
 
 export function useUpdateOcrTopP() {
 	return useSettingsInvalidatingMutation((topP: number) =>
-    tauriAPI.updateOcrTopP(topP),
-  );
+		tauriAPI.updateOcrTopP(topP),
+	);
 }
 
 export function useUpdateOcrRequestTimeoutMs() {
 	return useSettingsInvalidatingMutation((timeoutMs: number) =>
-    tauriAPI.updateOcrRequestTimeoutMs(timeoutMs),
-  );
+		tauriAPI.updateOcrRequestTimeoutMs(timeoutMs),
+	);
 }
 
 export function useUpdateOcrContextMaxChars() {
 	return useSettingsInvalidatingMutation((maxChars: number) =>
-    tauriAPI.updateOcrContextMaxChars(maxChars),
-  );
+		tauriAPI.updateOcrContextMaxChars(maxChars),
+	);
 }
 
 export function useUpdateOcrAutoCaptureTiming() {
 	return useSettingsInvalidatingMutation((timing: OcrAutoCaptureTiming) =>
-    tauriAPI.updateOcrAutoCaptureTiming(timing),
-  );
+		tauriAPI.updateOcrAutoCaptureTiming(timing),
+	);
 }
 
 export function useUpdateOcrHallucinationProtection() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateOcrHallucinationProtection(enabled),
-  );
+		tauriAPI.updateOcrHallucinationProtection(enabled),
+	);
 }
 
 export function useUpdateOcrHallucinationThreshold() {
 	return useSettingsInvalidatingMutation((value: number) =>
-    tauriAPI.updateOcrHallucinationThreshold(value),
-  );
+		tauriAPI.updateOcrHallucinationThreshold(value),
+	);
 }
 
 export function useUpdateOcrResizeMaxDimension() {
 	return useSettingsInvalidatingMutation((value: number) =>
-    tauriAPI.updateOcrResizeMaxDimension(value),
-  );
+		tauriAPI.updateOcrResizeMaxDimension(value),
+	);
 }
 
 export function useUpdateOcrResizeFilter() {
 	return useSettingsInvalidatingMutation(
-    (filter: "nearest" | "triangle" | "catmullrom" | "lanczos3") =>
-      tauriAPI.updateOcrResizeFilter(filter),
-  );
+		(filter: "nearest" | "triangle" | "catmullrom" | "lanczos3") =>
+			tauriAPI.updateOcrResizeFilter(filter),
+	);
 }
 
 export function useSetOcrApiKey() {
@@ -1242,23 +1242,23 @@ export function useClearOcrApiKey() {
 
 export function useUpdateLocalWhisperModelId() {
 	return useSettingsInvalidatingMutation((modelId: string | null) =>
-    tauriAPI.updateLocalWhisperModelId(modelId),
-  );
+		tauriAPI.updateLocalWhisperModelId(modelId),
+	);
 }
 
 export function useUpdateLocalWhisperLoadMode() {
 	return useSettingsInvalidatingMutation(
-    (mode: "manual" | "on_transcribe" | "on_launch") =>
-      tauriAPI.updateLocalWhisperLoadMode(mode),
-    {
-      extraInvalidations: [
-        {
-          queryKey: ["localWhisperModelLoaded"],
-          reason: "settings",
-        },
-      ],
-    },
-  );
+		(mode: "manual" | "on_transcribe" | "on_launch") =>
+			tauriAPI.updateLocalWhisperLoadMode(mode),
+		{
+			extraInvalidations: [
+				{
+					queryKey: ["localWhisperModelLoaded"],
+					reason: "settings",
+				},
+			],
+		},
+	);
 }
 
 export function useIsLocalWhisperAvailable() {
@@ -1389,131 +1389,131 @@ export function useValidateWhisperModel() {
 
 export function useUpdateProxySettings() {
 	return useSettingsInvalidatingMutation((proxySettings: ProxySettings) =>
-    tauriAPI.updateProxySettings(proxySettings),
-  );
+		tauriAPI.updateProxySettings(proxySettings),
+	);
 }
 
 // Save proxy settings to the local store without syncing the pipeline.
 // Useful for editing Manual fields before enabling Manual mode.
 export function useSaveProxySettings() {
 	return useSettingsInvalidatingMutation(
-    async (proxySettings: ProxySettings) => {
-      await tauriAPI.updateProxySettings(proxySettings);
-    },
-  );
+		async (proxySettings: ProxySettings) => {
+			await tauriAPI.updateProxySettings(proxySettings);
+		},
+	);
 }
 
 export function useUpdateLLMProvider() {
 	return useSettingsInvalidatingMutation((provider: string | null) =>
-    tauriAPI.updateLLMProvider(provider),
-  );
+		tauriAPI.updateLLMProvider(provider),
+	);
 }
 
 export function useUpdateLLMModel() {
 	return useSettingsInvalidatingMutation((model: string | null) =>
-    tauriAPI.updateLLMModel(model),
-  );
+		tauriAPI.updateLLMModel(model),
+	);
 }
 
 export function useUpdateQuickAskProvider() {
 	return useSettingsInvalidatingMutation((provider: string | null) =>
-    tauriAPI.updateQuickAskProvider(provider),
-  );
+		tauriAPI.updateQuickAskProvider(provider),
+	);
 }
 
 export function useUpdateQuickAskModel() {
 	return useSettingsInvalidatingMutation((model: string | null) =>
-    tauriAPI.updateQuickAskModel(model),
-  );
+		tauriAPI.updateQuickAskModel(model),
+	);
 }
 
 export function useUpdateQuickAskSystemPrompt() {
 	return useSettingsInvalidatingMutation((prompt: string | null) =>
-    tauriAPI.updateQuickAskSystemPrompt(prompt),
-  );
+		tauriAPI.updateQuickAskSystemPrompt(prompt),
+	);
 }
 
 export function useUpdateQuickAskDismissMode() {
 	return useSettingsInvalidatingMutation((mode: QuickAskDismissMode) =>
-    tauriAPI.updateQuickAskDismissMode(mode),
-  );
+		tauriAPI.updateQuickAskDismissMode(mode),
+	);
 }
 
 export function useUpdateQuickAskIncludeSelectedText() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateQuickAskIncludeSelectedText(enabled),
-  );
+		tauriAPI.updateQuickAskIncludeSelectedText(enabled),
+	);
 }
 
 export function useUpdateQuickAskConversationHistoryEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
-    tauriAPI.updateQuickAskConversationHistoryEnabled(enabled),
-  );
+		tauriAPI.updateQuickAskConversationHistoryEnabled(enabled),
+	);
 }
 
 export function useUpdateQuickAskConversationHistoryCount() {
 	return useSettingsInvalidatingMutation((count: number) =>
-    tauriAPI.updateQuickAskConversationHistoryCount(count),
-  );
+		tauriAPI.updateQuickAskConversationHistoryCount(count),
+	);
 }
 
 export function useUpdateQuickAskOpenAiReasoningEffort() {
 	return useSettingsInvalidatingMutation(
-    (effort: OpenAiReasoningEffort | null) =>
-      tauriAPI.updateQuickAskOpenAiReasoningEffort(effort),
-  );
+		(effort: OpenAiReasoningEffort | null) =>
+			tauriAPI.updateQuickAskOpenAiReasoningEffort(effort),
+	);
 }
 
 export function useUpdateQuickAskAnthropicThinkingBudget() {
 	return useSettingsInvalidatingMutation((budget: number | null) =>
-    tauriAPI.updateQuickAskAnthropicThinkingBudget(budget),
-  );
+		tauriAPI.updateQuickAskAnthropicThinkingBudget(budget),
+	);
 }
 
 export function useUpdateQuickAskGeminiThinkingBudget() {
 	return useSettingsInvalidatingMutation((budget: number | null) =>
-    tauriAPI.updateQuickAskGeminiThinkingBudget(budget),
-  );
+		tauriAPI.updateQuickAskGeminiThinkingBudget(budget),
+	);
 }
 
 export function useUpdateQuickAskGeminiThinkingLevel() {
 	return useSettingsInvalidatingMutation(
-    (level: "minimal" | "low" | "medium" | "high" | null) =>
-      tauriAPI.updateQuickAskGeminiThinkingLevel(level),
-  );
+		(level: "minimal" | "low" | "medium" | "high" | null) =>
+			tauriAPI.updateQuickAskGeminiThinkingLevel(level),
+	);
 }
 
 export function useUpdateOpenAiReasoningEffort() {
 	return useSettingsInvalidatingMutation(
-    (effort: OpenAiReasoningEffort | null) =>
-      tauriAPI.updateOpenAiReasoningEffort(effort),
-  );
+		(effort: OpenAiReasoningEffort | null) =>
+			tauriAPI.updateOpenAiReasoningEffort(effort),
+	);
 }
 
 export function useUpdateAnthropicThinkingBudget() {
 	return useSettingsInvalidatingMutation((budget: number | null) =>
-    tauriAPI.updateAnthropicThinkingBudget(budget),
-  );
+		tauriAPI.updateAnthropicThinkingBudget(budget),
+	);
 }
 
 export function useUpdateGeminiThinkingBudget() {
 	return useSettingsInvalidatingMutation((budget: number | null) =>
-    tauriAPI.updateGeminiThinkingBudget(budget),
-  );
+		tauriAPI.updateGeminiThinkingBudget(budget),
+	);
 }
 
 export function useUpdateGeminiThinkingLevel() {
 	return useSettingsInvalidatingMutation(
-    (level: "minimal" | "low" | "medium" | "high" | null) =>
-      tauriAPI.updateGeminiThinkingLevel(level),
-  );
+		(level: "minimal" | "low" | "medium" | "high" | null) =>
+			tauriAPI.updateGeminiThinkingLevel(level),
+	);
 }
 
 // STT Timeout mutation (local settings)
 export function useUpdateSTTTimeout() {
 	return useSettingsInvalidatingMutation((timeoutSeconds: number | null) =>
-    tauriAPI.updateSTTTimeout(timeoutSeconds),
-  );
+		tauriAPI.updateSTTTimeout(timeoutSeconds),
+	);
 }
 
 // Request Logs queries and mutations

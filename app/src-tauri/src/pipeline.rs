@@ -44,6 +44,7 @@ mod managed_personal_tests;
 mod ocr_session;
 mod ocr_session_state;
 mod profile_matcher;
+mod profile_query;
 mod profile_resolution;
 mod recording;
 mod routing;
@@ -61,6 +62,9 @@ mod utils;
 use config::canonicalize_stt_provider_id;
 pub(crate) use config::{resolve_provider_mode, ProviderMode};
 pub use config::{OcrConfig, PipelineConfig};
+pub(crate) use profile_query::{
+    program_basename_for_log, resolve_profile_by_id, resolve_profile_for_foreground_app,
+};
 
 pub(crate) fn normalize_stt_language_setting(raw: Option<String>) -> Option<String> {
     config::normalize_stt_language_setting(raw)
@@ -89,10 +93,9 @@ pub(crate) fn select_profile_for_foreground_app(
     select_profile_for_program_path(llm_config, &foreground)
 }
 
-use llm_provider::{
-    create_llm_provider, llm_provider_cache_key, resolve_cached_llm_provider_config,
-    LlmProviderParams,
-};
+#[cfg(test)]
+use llm_provider::llm_provider_cache_key;
+use llm_provider::{create_llm_provider, resolve_cached_llm_provider_config, LlmProviderParams};
 use local_provider_lifecycle as local_provider;
 use ocr_session_state::OcrSessionState;
 use stt_flow::run_stt_transcription;

@@ -295,6 +295,7 @@ pub(super) fn get_or_create_stt_provider(
             model,
             language,
             api_key,
+            proxy_settings: inner.config.proxy_settings.clone(),
             managed_gateway_url: if managed_transport_active {
                 inner.config.managed_inference_gateway_url.clone()
             } else {

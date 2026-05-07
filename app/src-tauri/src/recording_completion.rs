@@ -6,6 +6,7 @@
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::commands::event_sink::EventSink;
 use crate::event_payloads::PipelineErrorPayload;
 use crate::events;
 use crate::history::RequestHistoryUpdate;
@@ -50,6 +51,17 @@ pub(crate) fn persist_request_recording(
     )?;
 
     Ok(true)
+}
+
+/// Emit the shared "recording started" frontend contract.
+///
+/// Keeping the event pair together avoids subtle drift between command and hotkey paths.
+pub(crate) fn emit_pipeline_recording_started<S: EventSink>(sink: &S) {
+    sink.emit(events::EVENT_PIPELINE_RECORDING_STARTED, &());
+    sink.emit(
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        &PipelineStateEvent::Recording,
+    );
 }
 
 pub(crate) fn emit_transcript_ready(app: &AppHandle, final_text: &str) {

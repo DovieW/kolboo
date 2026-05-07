@@ -13,7 +13,7 @@ use crate::history::RequestHistoryUpdate;
 use crate::history_request_lifecycle;
 use crate::pipeline::{SharedPipeline, TranscriptionResult};
 use crate::request_log::{RequestLogStore, RequestStatus};
-use crate::sessions::recording_finalization;
+use crate::sessions::{recording_finalization, retention};
 use crate::stats;
 
 /// Inputs needed to decide and perform final normal dictation output.
@@ -116,7 +116,7 @@ pub(crate) fn finalize_normal_dictation_request(
 
     // Time-based retention (best-effort). This path is used by global shortcuts. Quick Ask calls
     // retention from `lib.rs` after its answer flow and intentionally never reaches this helper.
-    commands::recording::apply_transcription_retention(app);
+    retention::apply_transcription_retention(app);
 }
 
 fn decide_normal_dictation_output(

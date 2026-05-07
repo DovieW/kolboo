@@ -15,6 +15,7 @@ import type { CleanupPromptSections, RewritePreset } from "../../../lib/tauri";
 import { PromptSectionEditor } from "../PromptSectionEditor";
 import type { PresetRuntimeFallbackViews } from "./effectivePromptSettings";
 import type { LinkableProfileOption } from "./PromptSettingsModals";
+import { presetRoutingHintsFromText } from "./presetSettingsState";
 import { TestRewritePanel } from "./TestRewritePanel";
 
 type SectionKey = "system";
@@ -368,11 +369,7 @@ export function PresetEditorModal({
 							value={localPresetHintsText}
 							onChange={(e) => onLocalPresetHintsChange(e.currentTarget.value)}
 							onBlur={() => {
-								const lines = localPresetHintsText
-									.split(/\r?\n/)
-									.map((s) => s.trim())
-									.filter(Boolean);
-								const next = lines.length === 0 ? null : lines;
+								const next = presetRoutingHintsFromText(localPresetHintsText);
 								const current = selectedPreset.routing_hints ?? null;
 								if (JSON.stringify(current) !== JSON.stringify(next)) {
 									onUpdatePreset(selectedPreset.id, {

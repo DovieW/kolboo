@@ -41,6 +41,7 @@ pub(crate) struct LlmProviderParams {
 }
 
 pub(super) struct ResolvedCachedLlmProviderConfig {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub provider_id: String,
     pub cache_key: String,
     pub managed_transport_active: bool,
@@ -608,10 +609,12 @@ mod tests {
 
     #[test]
     fn resolve_cached_runtime_config_uses_managed_token_and_gateway() {
-        let mut config = PipelineConfig::default();
-        config.managed_inference_enabled = true;
-        config.managed_inference_gateway_url = Some("https://managed.example.test".to_string());
-        config.managed_inference_access_token = Some("managed-token".to_string());
+        let config = PipelineConfig {
+            managed_inference_enabled: true,
+            managed_inference_gateway_url: Some("https://managed.example.test".to_string()),
+            managed_inference_access_token: Some("managed-token".to_string()),
+            ..PipelineConfig::default()
+        };
 
         let resolved = resolve_cached_llm_provider_config(
             &config,
@@ -639,10 +642,12 @@ mod tests {
 
     #[test]
     fn resolve_one_off_config_uses_provider_key_and_resets_prompt_state() {
-        let mut base = LlmConfig::default();
-        base.managed_gateway_url = Some("https://gateway.example.test".to_string());
-        base.prompts = PromptSections {
-            system_custom: Some("Persisted prompt".to_string()),
+        let base = LlmConfig {
+            managed_gateway_url: Some("https://gateway.example.test".to_string()),
+            prompts: PromptSections {
+                system_custom: Some("Persisted prompt".to_string()),
+            },
+            ..LlmConfig::default()
         };
 
         let mut llm_api_keys = HashMap::new();

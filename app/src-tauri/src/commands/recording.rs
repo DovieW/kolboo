@@ -4,234 +4,26 @@
 //! enabling voice dictation directly from the Tauri app.
 
 use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
-use crate::commands::event_sink::{AppEventSink, EventSink};
+use crate::commands::event_sink::AppEventSink;
 use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
 use crate::commands::CommandError;
 use crate::events;
 use crate::history::{HistoryStorage, RequestHistoryUpdate, RequestModelInfo};
 use crate::history_request_lifecycle;
-use crate::pipeline::{PipelineConfig, PipelineError, PipelineState, SharedPipeline};
+use crate::pipeline::{
+    program_basename_for_log, resolve_profile_by_id, resolve_profile_for_foreground_app,
+    PipelineConfig, PipelineError, PipelineState, SharedPipeline,
+};
 use crate::recording_completion;
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
-use crate::sessions::recording_finalization;
+use crate::sessions::{recording_finalization, retention};
 use crate::stats::{self, EventStatus};
 use crate::PipelineStateEvent;
-use chrono::{Duration as ChronoDuration, Utc};
 use schemars::JsonSchema;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::Instrument;
-
-use crate::settings::store::get_fresh_settings_store;
-
-#[derive(Debug, Clone, Copy)]
-enum TranscriptionRetentionUnit {
-    Days,
-    Hours,
-}
-
-fn resolve_profile_for_foreground_app(cfg: &PipelineConfig) -> (Option<String>, Option<String>) {
-    // Distinguish between:
-    // - Unknown foreground app (can't determine): return no profile -> no chip in UI.
-    // - Known foreground app but no profile match: return explicit "default".
-    #[cfg(desktop)]
-    {
-        if crate::windows_apps::get_foreground_process_path().is_none() {
-            return (None, None);
-        }
-    }
-
-    #[cfg(not(desktop))]
-    {
-        // Non-desktop targets cannot reliably resolve a foreground app.
-        return (None, None);
-    }
-
-    let profile = crate::pipeline::select_profile_for_foreground_app(&cfg.llm_config);
-
-    if let Some(p) = profile {
-        return (Some(p.id), Some(p.name));
-    }
-
-    // Keep "default" explicit so the UI can always show a chip when desired.
-    (Some("default".to_string()), Some("Default".to_string()))
-}
-
-fn resolve_profile_by_id(
-    cfg: &PipelineConfig,
-    profile_id: Option<&str>,
-) -> (Option<String>, Option<String>) {
-    let Some(profile_id) = profile_id else {
-        return (Some("default".to_string()), Some("Default".to_string()));
-    };
-
-    if profile_id == "default" {
-        return (Some("default".to_string()), Some("Default".to_string()));
-    }
-
-    let name = cfg
-        .llm_config
-        .program_prompt_profiles
-        .iter()
-        .find(|p| p.id == profile_id)
-        .map(|p| p.name.clone());
-
-    (Some(profile_id.to_string()), name)
-}
-
-fn program_basename_for_log(path: &str) -> String {
-    let base = crate::app_shared::basename_for_log(path).trim();
-    if base.is_empty() {
-        "<unknown>".to_string()
-    } else {
-        base.to_string()
-    }
-}
-
-fn get_transcription_retention_duration(app: &AppHandle) -> Option<ChronoDuration> {
-    #[cfg(desktop)]
-    {
-        let store = get_fresh_settings_store(app);
-
-        // New keys: unit + value
-        let unit = store
-            .as_ref()
-            .and_then(|s| s.get("transcription_retention_unit"))
-            .and_then(|v| {
-                v.as_str().map(|s| match s {
-                    "hours" => TranscriptionRetentionUnit::Hours,
-                    _ => TranscriptionRetentionUnit::Days,
-                })
-            });
-
-        let value = store
-            .as_ref()
-            .and_then(|s| s.get("transcription_retention_value"))
-            .and_then(|v| {
-                v.as_f64()
-                    .or_else(|| v.as_u64().map(|x| x as f64))
-                    .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
-            });
-
-        if let (Some(unit), Some(value)) = (unit, value) {
-            // 0 means keep forever.
-            if value.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-                return None;
-            }
-
-            match unit {
-                TranscriptionRetentionUnit::Days => {
-                    // Defensive cap: 0..36500 days (~100 years)
-                    let days = value.round().clamp(0.0, 36_500.0) as i64;
-                    if days <= 0 {
-                        None
-                    } else {
-                        Some(ChronoDuration::days(days))
-                    }
-                }
-                TranscriptionRetentionUnit::Hours => {
-                    // Allow fractional hours (e.g. 0.5)
-                    // Defensive cap: ~100 years in hours
-                    let hours = value.clamp(0.0, 36_500.0 * 24.0);
-                    if hours.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-                        None
-                    } else {
-                        let millis = (hours * 3_600_000.0).round() as i64;
-                        Some(ChronoDuration::milliseconds(millis))
-                    }
-                }
-            }
-        } else {
-            // Legacy key: days
-            let days = get_transcription_retention_days(app);
-            if days == 0 {
-                None
-            } else {
-                Some(ChronoDuration::days(days as i64))
-            }
-        }
-    }
-
-    #[cfg(not(desktop))]
-    {
-        None
-    }
-}
-
-fn get_transcription_retention_delete_recordings(app: &AppHandle) -> bool {
-    #[cfg(desktop)]
-    {
-        get_fresh_settings_store(app)
-            .and_then(|store| store.get("transcription_retention_delete_recordings"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(desktop))]
-    {
-        false
-    }
-}
-
-fn get_transcription_retention_days(app: &AppHandle) -> u64 {
-    #[cfg(desktop)]
-    {
-        get_fresh_settings_store(app)
-            .and_then(|store| store.get("transcription_retention_days"))
-            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
-            .unwrap_or(0u64)
-    }
-
-    #[cfg(not(desktop))]
-    {
-        0u64
-    }
-}
-
-pub(crate) fn apply_transcription_retention(app: &AppHandle) {
-    let Some(retention) = get_transcription_retention_duration(app) else {
-        return;
-    };
-
-    let cutoff = Utc::now() - retention;
-    let delete_recordings = get_transcription_retention_delete_recordings(app);
-
-    let Some(history) = app.try_state::<HistoryStorage>() else {
-        return;
-    };
-
-    let removed = match history.prune_older_than(cutoff) {
-        Ok(ids) => ids,
-        Err(e) => {
-            log::warn!("Failed to prune history by time retention: {}", e);
-            return;
-        }
-    };
-
-    if removed.is_empty() {
-        return;
-    }
-
-    if delete_recordings {
-        if let Some(store) = app.try_state::<RecordingStore>() {
-            for id in removed.iter() {
-                // Best-effort: ignore errors and non-existent files.
-                let _ = store.delete_wav_if_exists(id);
-            }
-        }
-    }
-
-    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-}
-
-pub(crate) fn emit_pipeline_recording_started<S: EventSink>(sink: &S) {
-    sink.emit(events::EVENT_PIPELINE_RECORDING_STARTED, &());
-    sink.emit(
-        events::EVENT_PIPELINE_STATE_CHANGED,
-        &PipelineStateEvent::Recording,
-    );
-}
 
 impl From<PipelineError> for CommandError {
     fn from(err: PipelineError) -> Self {
@@ -577,7 +369,7 @@ pub fn pipeline_start_recording(
     crate::set_escape_cancel_shortcut_enabled(&app, true);
 
     // Emit event to frontend
-    emit_pipeline_recording_started(&AppEventSink(&app));
+    recording_completion::emit_pipeline_recording_started(&AppEventSink(&app));
 
     Ok(())
 }
@@ -804,7 +596,7 @@ async fn pipeline_stop_and_transcribe_inner(
             }
 
             // Time-based retention (best-effort). Runs only after a transcription attempt.
-            apply_transcription_retention(&app);
+            retention::apply_transcription_retention(&app);
 
             // Persist audio for retry (best-effort)
             if let Err(err) = recording_completion::persist_request_recording(
@@ -902,7 +694,7 @@ async fn pipeline_stop_and_transcribe_inner(
     }
 
     // Time-based retention (best-effort). Runs only after a transcription attempt.
-    apply_transcription_retention(&app);
+    retention::apply_transcription_retention(&app);
 
     // Emit transcript ready event
     recording_completion::emit_transcript_ready(&app, &final_text);
@@ -1550,7 +1342,7 @@ async fn pipeline_dictate_inner(
             }
 
             // Time-based retention (best-effort). Still apply even on failures.
-            apply_transcription_retention(&app);
+            retention::apply_transcription_retention(&app);
 
             // Emit pipeline-error event with request_id so the overlay can show a retry button.
             recording_completion::emit_pipeline_error(
@@ -1668,7 +1460,7 @@ async fn pipeline_dictate_inner(
     }
 
     // Time-based retention (best-effort). Runs only after a transcription attempt.
-    apply_transcription_retention(&app);
+    retention::apply_transcription_retention(&app);
 
     #[cfg(desktop)]
     crate::set_escape_cancel_shortcut_enabled(&app, false);
@@ -1901,11 +1693,7 @@ pub async fn pipeline_toggle(
             pipeline.begin_ocr_session(request_id);
         }
 
-        let _ = app.emit(events::EVENT_PIPELINE_RECORDING_STARTED, ());
-        let _ = app.emit(
-            events::EVENT_PIPELINE_STATE_CHANGED,
-            PipelineStateEvent::Recording,
-        );
+        recording_completion::emit_pipeline_recording_started(&AppEventSink(&app));
         Ok(String::new())
     }
 }

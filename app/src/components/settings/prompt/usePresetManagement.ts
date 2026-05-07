@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUpdateRewriteProgramPromptProfiles } from "../../../lib/queries";
+import {
+	createRewritePreset,
+	mergeRewritePreset,
+	normalizeRewritePreset,
+} from "../../../lib/tauri/presetDefaults";
 import type {
+	AppSettings,
 	RewritePreset,
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri/types";
+import type { PresetRuntimeFallbackViews } from "./effectivePromptSettings";
+import {
+	resolvePresetEditorState,
+	resolvePresetMetadataEditorState,
+} from "./presetSettingsState";
 
 /** Sentinel value for editing the "default" pseudo-preset. */
 export const EDIT_DEFAULT_PRESET = "__default__";
@@ -34,6 +45,21 @@ export interface UsePresetManagementParams {
 	activeProfile: RewriteProgramPromptProfile | null;
 	activeProfileId: string;
 	profiles: RewriteProgramPromptProfile[];
+	settings:
+		| Partial<
+				Pick<
+					AppSettings,
+					| "stt_provider"
+					| "stt_model"
+					| "stt_language"
+					| "stt_timeout_seconds"
+					| "llm_provider"
+					| "llm_model"
+				>
+		  >
+		| undefined;
+	defaultSttTimeout: number;
+	defaultSttLanguage: string;
 	saveProfileMetadata: (patch: Partial<RewriteProgramPromptProfile>) => void;
 }
 
@@ -43,6 +69,7 @@ export interface UsePresetManagementResult {
 	editingPresetId: string | null;
 	setEditingPresetId: (id: string | null) => void;
 	selectedPreset: RewritePreset | null;
+	selectedPresetRuntimeFallbackViews: PresetRuntimeFallbackViews | null;
 	isEditingDefaultPreset: boolean;
 
 	// Local form state for preset editor
@@ -89,6 +116,9 @@ export function usePresetManagement({
 	activeProfile,
 	activeProfileId,
 	profiles,
+	settings,
+	defaultSttTimeout,
+	defaultSttLanguage,
 	saveProfileMetadata,
 }: UsePresetManagementParams): UsePresetManagementResult {
 	const updateRewriteProgramPromptProfiles =
@@ -97,14 +127,16 @@ export function usePresetManagement({
 	// Computed presets for active profile
 	const presets: RewritePreset[] = useMemo(() => {
 		if (!activeProfile) return [];
-		return Array.isArray(activeProfile.presets) ? activeProfile.presets : [];
+		return Array.isArray(activeProfile.presets)
+			? activeProfile.presets.map(normalizeRewritePreset)
+			: [];
 	}, [activeProfile]);
 
 	// Helper to get presets for any profile
 	const getPresetsForProfile = useCallback(
 		(p: RewriteProgramPromptProfile): RewritePreset[] => {
 			const raw = p.presets;
-			return Array.isArray(raw) ? raw : [];
+			return Array.isArray(raw) ? raw.map(normalizeRewritePreset) : [];
 		},
 		[],
 	);
@@ -157,6 +189,29 @@ export function usePresetManagement({
 		return presets.find((p) => p.id === editingPresetId) ?? null;
 	}, [activeProfile, presets, editingPresetId]);
 
+	const selectedPresetMetadataState = useMemo(
+		() => resolvePresetMetadataEditorState(selectedPreset),
+		[selectedPreset],
+	);
+
+	const selectedPresetRuntimeFallbackViews = useMemo(
+		() =>
+			resolvePresetEditorState({
+				profile: activeProfile,
+				preset: selectedPreset,
+				settings,
+				defaultSttTimeout,
+				defaultSttLanguage,
+			}).runtimeFallbackViews,
+		[
+			activeProfile,
+			selectedPreset,
+			settings,
+			defaultSttTimeout,
+			defaultSttLanguage,
+		],
+	);
+
 	const isEditingDefaultPreset = editingPresetId === EDIT_DEFAULT_PRESET;
 
 	// Sync editing preset ID when profile/presets change
@@ -193,16 +248,9 @@ export function usePresetManagement({
 
 	// Sync local form state when selected preset changes
 	useEffect(() => {
-		if (!selectedPreset) {
-			setLocalPresetName("");
-			setLocalPresetHintsText("");
-			return;
-		}
-
-		setLocalPresetName(selectedPreset.name);
-		const lines = (selectedPreset.routing_hints ?? []).filter(Boolean);
-		setLocalPresetHintsText(lines.join("\n"));
-	}, [selectedPreset]);
+		setLocalPresetName(selectedPresetMetadataState.name);
+		setLocalPresetHintsText(selectedPresetMetadataState.routingHintsText);
+	}, [selectedPresetMetadataState]);
 
 	// Sync local default preset description when profile changes
 	useEffect(() => {
@@ -222,7 +270,10 @@ export function usePresetManagement({
 			extra?: Partial<RewriteProgramPromptProfile>,
 		) => {
 			if (!activeProfile) return;
-			saveProfileMetadata({ presets: nextPresets, ...(extra ?? {}) });
+			saveProfileMetadata({
+				presets: nextPresets.map(normalizeRewritePreset),
+				...(extra ?? {}),
+			});
 		},
 		[activeProfile, saveProfileMetadata],
 	);
@@ -239,7 +290,7 @@ export function usePresetManagement({
 					return {
 						...profile,
 						presets: profilePresets.map((p) =>
-							p.id === presetId ? { ...p, ...patch } : p,
+							p.id === presetId ? mergeRewritePreset(p, patch) : p,
 						),
 					};
 				});
@@ -249,7 +300,7 @@ export function usePresetManagement({
 			}
 
 			const next = presets.map((p) =>
-				p.id === presetId ? { ...p, ...patch } : p,
+				p.id === presetId ? mergeRewritePreset(p, patch) : p,
 			);
 			savePresets(next);
 		},
@@ -289,29 +340,7 @@ export function usePresetManagement({
 	const newPreset = useCallback(() => {
 		if (!activeProfile) return;
 		const id = createId();
-		const p: RewritePreset = {
-			id,
-			name: "New preset",
-			routing_hints: null,
-			cleanup_prompt_sections: null,
-			// Default presets to rewrite "On".
-			rewrite_llm_enabled: true,
-			stt_provider: null,
-			stt_model: null,
-			stt_timeout_seconds: null,
-			llm_provider: null,
-			llm_model: null,
-			openai_reasoning_effort: null,
-			gemini_thinking_budget: null,
-			gemini_thinking_level: null,
-			anthropic_thinking_budget: null,
-			sound_enabled: null,
-			playing_audio_handling: null,
-			overlay_mode: null,
-			widget_position: null,
-			output_mode: null,
-			output_hit_enter: null,
-		};
+		const p = createRewritePreset(id);
 
 		const next = [...presets, p];
 		savePresets(next);
@@ -368,7 +397,7 @@ export function usePresetManagement({
 
 		// "Hard link" semantics: we reuse the same preset id across profiles.
 		// We still store an object in this profile, but updates propagate by id.
-		const next = [...presets, { ...linkSourcePreset }];
+		const next = [...presets, normalizeRewritePreset({ ...linkSourcePreset })];
 		savePresets(next);
 		pendingPresetIdRef.current = linkSourcePreset.id;
 		setEditingPresetId(linkSourcePreset.id);
@@ -401,6 +430,7 @@ export function usePresetManagement({
 		editingPresetId,
 		setEditingPresetId,
 		selectedPreset,
+		selectedPresetRuntimeFallbackViews,
 		isEditingDefaultPreset,
 
 		// Local form state

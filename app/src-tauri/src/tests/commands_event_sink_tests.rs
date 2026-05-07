@@ -1,6 +1,6 @@
 use crate::commands::event_sink::EventSink;
-use crate::commands::recording::emit_pipeline_recording_started;
 use crate::events;
+use crate::recording_completion::emit_pipeline_recording_started;
 use crate::PipelineStateEvent;
 use serde::Serialize;
 use serde_json::Value;

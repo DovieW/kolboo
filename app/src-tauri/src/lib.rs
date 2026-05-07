@@ -732,7 +732,7 @@ pub(crate) fn stop_recording(
                             // Preserve the pre-extraction stop_recording ordering: Quick Ask owns
                             // its request-log/provider lifecycle, then global recording retention
                             // still runs before the overlay-hide follow-up below.
-                            commands::recording::apply_transcription_retention(&app_clone);
+                            sessions::retention::apply_transcription_retention(&app_clone);
                         } else {
                             let quick_replace_result =
                                 sessions::quick_action_execution::try_quick_replace(
@@ -818,7 +818,7 @@ pub(crate) fn stop_recording(
                         }
 
                         // Time-based retention (best-effort). This path is used by global shortcuts.
-                        commands::recording::apply_transcription_retention(&app_clone);
+                        sessions::retention::apply_transcription_retention(&app_clone);
                     }
 
                     // Hide overlay after transcription completes if in "recording_only" mode.
@@ -976,7 +976,7 @@ pub(crate) fn stop_recording(
                     }
 
                     // Time-based retention (best-effort). Still apply even on failures.
-                    commands::recording::apply_transcription_retention(&app_clone);
+                    sessions::retention::apply_transcription_retention(&app_clone);
 
                     // Force-show overlay for retry UI regardless of overlay_mode.
                     // If the user is not in always-visible mode, also snap back to the saved preset.

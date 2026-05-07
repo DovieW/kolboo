@@ -32,6 +32,14 @@
 - Deletion test: removing the adapter registry restores the large constructor match and provider-specific wiring in the factory.
 - Characterization: adapter registry tests verify expected IDs and two concrete provider constructions.
 
+## WebSocket transport policy
+
+- Interface: `stt::websocket_transport::connect_ws_with_transport_policy(...)` plus the compatibility wrapper `stt::streaming::connect_ws_split_with_timeout(...)`.
+- Implementations/Adapters: OpenAI Realtime, Deepgram, ElevenLabs, Speechmatics, AssemblyAI, and Fireworks now pass provider-owned `ProxySettings` into the shared transport path while keeping provider-specific headers, URLs, and protocol messages in their adapters.
+- Depth: manual proxy CONNECT tunnelling, manual `no_proxy` bypass, and trusted-CA / invalid-cert TLS overrides moved out of provider adapters; `stt/streaming.rs` stays focused on provider-independent session lifecycle helpers.
+- Deletion test: removing the Module pushes manual proxy/tunnel/TLS policy back into every realtime STT adapter or reintroduces the old silent gap where WS ignored configured transport settings.
+- Characterization: unit tests in `stt/websocket_transport.rs` cover `no_proxy` host matching and the remaining unsupported HTTPS-proxy diagnostic.
+
 ## Recording Orchestration
 
 - Interface: `recording_orchestration::{spawn_routing_started_watcher, spawn_rewriting_started_watcher}`.

@@ -49,6 +49,7 @@ import {
 } from "../../lib/sttLanguages";
 import {
 	type ActiveWindowOcrMode,
+	type AppSettings,
 	type CleanupPromptSections,
 	type CleanupPromptSectionsOverride,
 	type IntentRouterSettings,
@@ -57,7 +58,6 @@ import {
 	type RewriteProgramPromptProfile,
 	tauriAPI,
 } from "../../lib/tauri";
-import { resolvePresetRuntimeFallbackViews } from "./prompt/effectivePromptSettings";
 import { PresetEditorModal } from "./prompt/PresetEditorModal";
 import { PromptIntentRouterSection } from "./prompt/PromptIntentRouterSection";
 import { PromptSettingsModals } from "./prompt/PromptSettingsModals";
@@ -453,6 +453,31 @@ export function PromptSettings({
 		return settings?.quick_ask_dismiss_mode ?? "manual";
 	}, [profiles, settings?.quick_ask_dismiss_mode]);
 
+	const presetRuntimeSettings = useMemo(
+		() =>
+			settings
+				? ({
+						stt_provider: settings.stt_provider,
+						stt_model: settings.stt_model,
+						stt_language: settings.stt_language,
+						stt_timeout_seconds: settings.stt_timeout_seconds,
+						llm_provider: settings.llm_provider,
+						llm_model: settings.llm_model,
+					} satisfies Partial<
+						Pick<
+							AppSettings,
+							| "stt_provider"
+							| "stt_model"
+							| "stt_language"
+							| "stt_timeout_seconds"
+							| "llm_provider"
+							| "llm_model"
+						>
+					>)
+				: undefined,
+		[settings],
+	);
+
 	const saveRouter = (router: IntentRouterSettings | null) => {
 		if (!activeProfile) return;
 		saveProfileMetadata({ router });
@@ -818,6 +843,7 @@ export function PromptSettings({
 		editingPresetId,
 		setEditingPresetId,
 		selectedPreset,
+		selectedPresetRuntimeFallbackViews,
 		isEditingDefaultPreset,
 		localPresetName,
 		setLocalPresetName,
@@ -849,6 +875,9 @@ export function PromptSettings({
 		activeProfile,
 		activeProfileId,
 		profiles,
+		settings: presetRuntimeSettings,
+		defaultSttTimeout: DEFAULT_STT_TIMEOUT,
+		defaultSttLanguage: DEFAULT_STT_LANGUAGE,
 		saveProfileMetadata,
 	});
 
@@ -953,25 +982,6 @@ export function PromptSettings({
 		if (!value) return;
 		updateQuickAskModel.mutate(value);
 	};
-
-	const selectedPresetRuntimeFallbackViews = useMemo(() => {
-		if (!selectedPreset || !activeProfile) return null;
-
-		return resolvePresetRuntimeFallbackViews({
-			profile: activeProfile,
-			preset: selectedPreset,
-			settings: {
-				stt_provider: settings?.stt_provider,
-				stt_model: settings?.stt_model,
-				stt_language: settings?.stt_language,
-				stt_timeout_seconds: settings?.stt_timeout_seconds,
-				llm_provider: settings?.llm_provider,
-				llm_model: settings?.llm_model,
-			},
-			defaultSttTimeout: DEFAULT_STT_TIMEOUT,
-			defaultSttLanguage: DEFAULT_STT_LANGUAGE,
-		});
-	}, [activeProfile, selectedPreset, settings]);
 
 	if (isLoading) {
 		return (
