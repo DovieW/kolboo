@@ -6,10 +6,10 @@
 //! session. It deliberately does **not** own Quick Ask/Quick Replace execution or platform text
 //! output; those remain in their dedicated Modules so this stays a small finalization seam.
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
-use crate::events;
-use crate::history::HistoryStorage;
+use crate::history::RequestHistoryUpdate;
+use crate::history_request_lifecycle;
 use crate::pipeline::{LlmOutcome, SharedPipeline, TranscriptionResult};
 use crate::request_log::{RequestLog, RequestLogStore};
 use crate::stats::{self, EventStatus};
@@ -230,12 +230,14 @@ pub(crate) fn persist_current_request_preset_to_history(app: &AppHandle, request
         return;
     };
 
-    let Some(history) = app.try_state::<HistoryStorage>() else {
-        return;
-    };
-
-    let _ = history.set_request_preset(req_id, preset_id, preset_name);
-    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
+    let _ = history_request_lifecycle::apply_request_history_update(
+        app,
+        RequestHistoryUpdate::SetPreset {
+            request_id: req_id.to_string(),
+            preset_id,
+            preset_name,
+        },
+    );
 }
 
 pub(crate) fn persist_history_llm_metadata(
@@ -247,13 +249,15 @@ pub(crate) fn persist_history_llm_metadata(
         return;
     };
 
-    let Some(history) = app.try_state::<HistoryStorage>() else {
-        return;
-    };
-
     let (provider, model) = llm_metadata_for_history(result);
-    let _ = history.set_request_llm_model(req_id, provider, model);
-    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
+    let _ = history_request_lifecycle::apply_request_history_update(
+        app,
+        RequestHistoryUpdate::SetLlmModel {
+            request_id: req_id.to_string(),
+            llm_provider: provider,
+            llm_model: model,
+        },
+    );
 }
 
 pub(crate) fn llm_metadata_for_history(

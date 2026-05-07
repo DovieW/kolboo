@@ -355,6 +355,43 @@ export async function invalidateLogoutRelatedQueries(
 	]);
 }
 
+function buildSettingsMutationInvalidations(
+  extraInvalidations: readonly SettingsQueryInvalidation[] = [],
+): readonly SettingsQueryInvalidation[] {
+  return [
+    { queryKey: ["settings"], reason: "settings" },
+    ...extraInvalidations,
+  ];
+}
+
+export async function invalidateSettingsQueries(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+  extraInvalidations: readonly SettingsQueryInvalidation[] = [],
+): Promise<void> {
+  await applySettingsQueryInvalidations(
+    queryClient,
+    buildSettingsMutationInvalidations(extraInvalidations),
+  );
+}
+
+function useSettingsInvalidatingMutation<TVariables, TData = unknown>(
+  mutationFn: (variables: TVariables) => Promise<TData>,
+  options?: {
+    extraInvalidations?: readonly SettingsQueryInvalidation[];
+    onError?: (error: unknown) => void;
+  },
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void invalidateSettingsQueries(queryClient, options?.extraInvalidations);
+    },
+    onError: options?.onError,
+  });
+}
+
 export function useLicenseQueryBootstrap() {
 	const queryClient = useQueryClient();
 
@@ -528,14 +565,9 @@ export function useSetSettingsGuideState() {
 }
 
 export function useCreateHotkeyShortcutCard() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (card: HotkeyShortcutCard) =>
-			tauriAPI.createHotkeyShortcutCard(card),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((card: HotkeyShortcutCard) =>
+    tauriAPI.createHotkeyShortcutCard(card),
+  );
 }
 
 export function useUpdateHotkeyShortcutCard() {
@@ -595,23 +627,15 @@ export function useDeleteHotkeyShortcutCard() {
 }
 
 export function useUpdateSelectedMic() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (micId: string | null) => tauriAPI.updateSelectedMic(micId),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((micId: string | null) =>
+    tauriAPI.updateSelectedMic(micId),
+  );
 }
 
 export function useUpdateSoundEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateSoundEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateSoundEnabled(enabled),
+  );
 }
 
 export function useUpdateHotkeyDebugEnabled() {
@@ -644,294 +668,179 @@ export function useUpdateHotkeyDebugEnabled() {
 }
 
 export function useUpdateAudioCue() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (cue: AudioCue) => tauriAPI.updateAudioCue(cue),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((cue: AudioCue) =>
+    tauriAPI.updateAudioCue(cue),
+  );
 }
 
 export function useUpdateAccentColor() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (color: string | null) => tauriAPI.updateAccentColor(color),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-		onError: (error) => {
-			console.error("Update accent color failed:", error);
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (color: string | null) => tauriAPI.updateAccentColor(color),
+    {
+      onError: (error) => {
+        console.error("Update accent color failed:", error);
+      },
+    },
+  );
 }
 
 export function useUpdateMainWindowCloseBehavior() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (behavior: MainWindowCloseBehavior) =>
-			tauriAPI.updateMainWindowCloseBehavior(behavior),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((behavior: MainWindowCloseBehavior) =>
+    tauriAPI.updateMainWindowCloseBehavior(behavior),
+  );
 }
 
 export function useUpdateRewriteLlmEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateRewriteLlmEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateRewriteLlmEnabled(enabled),
+  );
 }
 
 export function useUpdatePlayingAudioHandling() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (handling: PlayingAudioHandling) =>
-			tauriAPI.updatePlayingAudioHandling(handling),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((handling: PlayingAudioHandling) =>
+    tauriAPI.updatePlayingAudioHandling(handling),
+  );
 }
 
 export function useUpdateOverlayMode() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (mode: "always" | "never" | "recording_only") =>
-			tauriAPI.updateOverlayMode(mode),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (mode: "always" | "never" | "recording_only") =>
+      tauriAPI.updateOverlayMode(mode),
+  );
 }
 
 export function useUpdateOverlayShowDetailedLoading() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateOverlayShowDetailedLoading(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateOverlayShowDetailedLoading(enabled),
+  );
 }
 
 export function useUpdateOverlayMonitorTarget() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (target: OverlayMonitorTarget) =>
-			tauriAPI.updateOverlayMonitorTarget(target),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((target: OverlayMonitorTarget) =>
+    tauriAPI.updateOverlayMonitorTarget(target),
+  );
 }
 
 export function useUpdateOutputMode() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (mode: OutputMode) => tauriAPI.updateOutputMode(mode),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((mode: OutputMode) =>
+    tauriAPI.updateOutputMode(mode),
+  );
 }
 
 export function useUpdateOutputHitEnter() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateOutputHitEnter(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateOutputHitEnter(enabled),
+  );
 }
 
 export function useUpdateOutputSmartPasteProtection() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateOutputSmartPasteProtection(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-		onError: (error) => {
-			console.error("Update smart paste protection failed:", error);
-			notifications.show({
-				title: "Couldn't save setting",
-				message:
-					"Smart paste protection couldn't be saved. Your previous setting is still active.",
-				color: "red",
-			});
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (enabled: boolean) => tauriAPI.updateOutputSmartPasteProtection(enabled),
+    {
+      onError: (error) => {
+        console.error("Update smart paste protection failed:", error);
+        notifications.show({
+          title: "Couldn't save setting",
+          message:
+            "Smart paste protection couldn't be saved. Your previous setting is still active.",
+          color: "red",
+        });
+      },
+    },
+  );
 }
 
 export function useUpdateRequestLogsPrivacyMode() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateRequestLogsPrivacyMode(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-			queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (enabled: boolean) => tauriAPI.updateRequestLogsPrivacyMode(enabled),
+    {
+      extraInvalidations: [{ queryKey: ["requestLogs"], reason: "settings" }],
+    },
+  );
 }
 
 export function useUpdateQuietAudioGateEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateQuietAudioGateEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateQuietAudioGateEnabled(enabled),
+  );
 }
 
 export function useUpdateQuietAudioMinDurationSecs() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (seconds: number) =>
-			tauriAPI.updateQuietAudioMinDurationSecs(seconds),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((seconds: number) =>
+    tauriAPI.updateQuietAudioMinDurationSecs(seconds),
+  );
 }
 
 export function useUpdateQuietAudioRmsDbfsThreshold() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (dbfs: number) =>
-			tauriAPI.updateQuietAudioRmsDbfsThreshold(dbfs),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((dbfs: number) =>
+    tauriAPI.updateQuietAudioRmsDbfsThreshold(dbfs),
+  );
 }
 
 export function useUpdateQuietAudioPeakDbfsThreshold() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (dbfs: number) =>
-			tauriAPI.updateQuietAudioPeakDbfsThreshold(dbfs),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((dbfs: number) =>
+    tauriAPI.updateQuietAudioPeakDbfsThreshold(dbfs),
+  );
 }
 
 export function useUpdateNoiseGateThresholdDbfs() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (thresholdDbfs: number | null) =>
-			tauriAPI.updateNoiseGateThresholdDbfs(thresholdDbfs),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((thresholdDbfs: number | null) =>
+    tauriAPI.updateNoiseGateThresholdDbfs(thresholdDbfs),
+  );
 }
 
 export function useUpdateQuietAudioRequireSpeech() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateQuietAudioRequireSpeech(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateQuietAudioRequireSpeech(enabled),
+  );
 }
 
 export function useUpdateHotMicEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateHotMicEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateHotMicEnabled(enabled),
+  );
 }
 
 export function useUpdateHotMicPreRollMs() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (ms: number) => tauriAPI.updateHotMicPreRollMs(ms),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((ms: number) =>
+    tauriAPI.updateHotMicPreRollMs(ms),
+  );
 }
 
 export function useUpdateMicAutoRecoverEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateMicAutoRecoverEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateMicAutoRecoverEnabled(enabled),
+  );
 }
 
 export function useUpdateAudioDownmixToMono() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateAudioDownmixToMono(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateAudioDownmixToMono(enabled),
+  );
 }
 
 export function useUpdateAudioResampleTo16khz() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateAudioResampleTo16khz(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateAudioResampleTo16khz(enabled),
+  );
 }
 
 export function useUpdateAudioHighpassEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateAudioHighpassEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateAudioHighpassEnabled(enabled),
+  );
 }
 
 export function useUpdateAudioAgcEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateAudioAgcEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateAudioAgcEnabled(enabled),
+  );
 }
 
 export function useUpdateAudioNoiseSuppressionEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateAudioNoiseSuppressionEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateAudioNoiseSuppressionEnabled(enabled),
+  );
 }
 
 export function useLastRecordingDiagnostics() {
@@ -958,24 +867,15 @@ export function useAudioSettingsTestStopRecording() {
 }
 
 export function useUpdateMaxSavedRecordings() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (max: number) => tauriAPI.updateMaxSavedRecordings(max),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((max: number) =>
+    tauriAPI.updateMaxSavedRecordings(max),
+  );
 }
 
 export function useUpdateTranscriptionRetentionDeleteRecordings() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateTranscriptionRetentionDeleteRecordings(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateTranscriptionRetentionDeleteRecordings(enabled),
+  );
 }
 
 export function useRecordingsStats() {
@@ -1158,286 +1058,166 @@ export function useAvailableProviders() {
 }
 
 export function useUpdateGroqFreeTier() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateGroqFreeTier(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateGroqFreeTier(enabled),
+  );
 }
 
 export function useUpdateCerebrasFreeTier() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateCerebrasFreeTier(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateCerebrasFreeTier(enabled),
+  );
 }
 
 export function useUpdateCohereFreeTier() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateCohereFreeTier(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateCohereFreeTier(enabled),
+  );
 }
 
 export function useUpdateAssemblyAiFreeTier() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateAssemblyAiFreeTier(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateAssemblyAiFreeTier(enabled),
+  );
 }
 
 export function useUpdateSpeechmaticsFreeTier() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateSpeechmaticsFreeTier(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateSpeechmaticsFreeTier(enabled),
+  );
 }
 
 export function useUpdateSTTProvider() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (provider: string | null) =>
-			tauriAPI.updateSTTProvider(provider),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((provider: string | null) =>
+    tauriAPI.updateSTTProvider(provider),
+  );
 }
 
 export function useUpdateSTTModel() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (model: string | null) => tauriAPI.updateSTTModel(model),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((model: string | null) =>
+    tauriAPI.updateSTTModel(model),
+  );
 }
 
 export function useUpdateSTTLiveOutput() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) => tauriAPI.updateSTTLiveOutput(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateSTTLiveOutput(enabled),
+  );
 }
 
 export function useUpdateSTTSimulatedStreaming() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateSTTSimulatedStreaming(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateSTTSimulatedStreaming(enabled),
+  );
 }
 
 export function useUpdateSTTLanguage() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (language: string) => tauriAPI.updateSTTLanguage(language),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((language: string) =>
+    tauriAPI.updateSTTLanguage(language),
+  );
 }
 
 export function useUpdateSTTTranscriptionPrompt() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (prompt: string | null) =>
-			tauriAPI.updateSTTTranscriptionPrompt(prompt),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((prompt: string | null) =>
+    tauriAPI.updateSTTTranscriptionPrompt(prompt),
+  );
 }
 
 export function useUpdateWhisperServerBaseUrl() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (baseUrl: string | null) =>
-			tauriAPI.updateWhisperServerBaseUrl(baseUrl),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((baseUrl: string | null) =>
+    tauriAPI.updateWhisperServerBaseUrl(baseUrl),
+  );
 }
 
 export function useUpdateOllamaUrl() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (baseUrl: string | null) => tauriAPI.updateOllamaUrl(baseUrl),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((baseUrl: string | null) =>
+    tauriAPI.updateOllamaUrl(baseUrl),
+  );
 }
 
 export function useUpdateOcrBaseUrl() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (baseUrl: string | null) => tauriAPI.updateOcrBaseUrl(baseUrl),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((baseUrl: string | null) =>
+    tauriAPI.updateOcrBaseUrl(baseUrl),
+  );
 }
 
 export function useUpdateOcrModel() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (model: string | null) => tauriAPI.updateOcrModel(model),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((model: string | null) =>
+    tauriAPI.updateOcrModel(model),
+  );
 }
 
 export function useUpdateOcrAuthMode() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (mode: OcrAuthMode) => tauriAPI.updateOcrAuthMode(mode),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((mode: OcrAuthMode) =>
+    tauriAPI.updateOcrAuthMode(mode),
+  );
 }
 
 export function useUpdateOcrPrompt() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (prompt: string) => tauriAPI.updateOcrPrompt(prompt),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((prompt: string) =>
+    tauriAPI.updateOcrPrompt(prompt),
+  );
 }
 
 export function useUpdateOcrMaxTokens() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (maxTokens: number) => tauriAPI.updateOcrMaxTokens(maxTokens),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((maxTokens: number) =>
+    tauriAPI.updateOcrMaxTokens(maxTokens),
+  );
 }
 
 export function useUpdateOcrTemperature() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (temperature: number) =>
-			tauriAPI.updateOcrTemperature(temperature),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((temperature: number) =>
+    tauriAPI.updateOcrTemperature(temperature),
+  );
 }
 
 export function useUpdateOcrTopP() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (topP: number) => tauriAPI.updateOcrTopP(topP),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((topP: number) =>
+    tauriAPI.updateOcrTopP(topP),
+  );
 }
 
 export function useUpdateOcrRequestTimeoutMs() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (timeoutMs: number) =>
-			tauriAPI.updateOcrRequestTimeoutMs(timeoutMs),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((timeoutMs: number) =>
+    tauriAPI.updateOcrRequestTimeoutMs(timeoutMs),
+  );
 }
 
 export function useUpdateOcrContextMaxChars() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (maxChars: number) =>
-			tauriAPI.updateOcrContextMaxChars(maxChars),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((maxChars: number) =>
+    tauriAPI.updateOcrContextMaxChars(maxChars),
+  );
 }
 
 export function useUpdateOcrAutoCaptureTiming() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (timing: OcrAutoCaptureTiming) =>
-			tauriAPI.updateOcrAutoCaptureTiming(timing),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((timing: OcrAutoCaptureTiming) =>
+    tauriAPI.updateOcrAutoCaptureTiming(timing),
+  );
 }
 
 export function useUpdateOcrHallucinationProtection() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateOcrHallucinationProtection(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateOcrHallucinationProtection(enabled),
+  );
 }
 
 export function useUpdateOcrHallucinationThreshold() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (value: number) =>
-			tauriAPI.updateOcrHallucinationThreshold(value),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((value: number) =>
+    tauriAPI.updateOcrHallucinationThreshold(value),
+  );
 }
 
 export function useUpdateOcrResizeMaxDimension() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (value: number) => tauriAPI.updateOcrResizeMaxDimension(value),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((value: number) =>
+    tauriAPI.updateOcrResizeMaxDimension(value),
+  );
 }
 
 export function useUpdateOcrResizeFilter() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (filter: "nearest" | "triangle" | "catmullrom" | "lanczos3") =>
-			tauriAPI.updateOcrResizeFilter(filter),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (filter: "nearest" | "triangle" | "catmullrom" | "lanczos3") =>
+      tauriAPI.updateOcrResizeFilter(filter),
+  );
 }
 
 export function useSetOcrApiKey() {
@@ -1461,26 +1241,24 @@ export function useClearOcrApiKey() {
 }
 
 export function useUpdateLocalWhisperModelId() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (modelId: string | null) =>
-			tauriAPI.updateLocalWhisperModelId(modelId),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((modelId: string | null) =>
+    tauriAPI.updateLocalWhisperModelId(modelId),
+  );
 }
 
 export function useUpdateLocalWhisperLoadMode() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (mode: "manual" | "on_transcribe" | "on_launch") =>
-			tauriAPI.updateLocalWhisperLoadMode(mode),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-			queryClient.invalidateQueries({ queryKey: ["localWhisperModelLoaded"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (mode: "manual" | "on_transcribe" | "on_launch") =>
+      tauriAPI.updateLocalWhisperLoadMode(mode),
+    {
+      extraInvalidations: [
+        {
+          queryKey: ["localWhisperModelLoaded"],
+          reason: "settings",
+        },
+      ],
+    },
+  );
 }
 
 export function useIsLocalWhisperAvailable() {
@@ -1610,225 +1388,132 @@ export function useValidateWhisperModel() {
 }
 
 export function useUpdateProxySettings() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (proxySettings: ProxySettings) =>
-			tauriAPI.updateProxySettings(proxySettings),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((proxySettings: ProxySettings) =>
+    tauriAPI.updateProxySettings(proxySettings),
+  );
 }
 
 // Save proxy settings to the local store without syncing the pipeline.
 // Useful for editing Manual fields before enabling Manual mode.
 export function useSaveProxySettings() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: async (proxySettings: ProxySettings) => {
-			await tauriAPI.updateProxySettings(proxySettings);
-		},
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    async (proxySettings: ProxySettings) => {
+      await tauriAPI.updateProxySettings(proxySettings);
+    },
+  );
 }
 
 export function useUpdateLLMProvider() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (provider: string | null) =>
-			tauriAPI.updateLLMProvider(provider),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((provider: string | null) =>
+    tauriAPI.updateLLMProvider(provider),
+  );
 }
 
 export function useUpdateLLMModel() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (model: string | null) => tauriAPI.updateLLMModel(model),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((model: string | null) =>
+    tauriAPI.updateLLMModel(model),
+  );
 }
 
 export function useUpdateQuickAskProvider() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (provider: string | null) =>
-			tauriAPI.updateQuickAskProvider(provider),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((provider: string | null) =>
+    tauriAPI.updateQuickAskProvider(provider),
+  );
 }
 
 export function useUpdateQuickAskModel() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (model: string | null) => tauriAPI.updateQuickAskModel(model),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((model: string | null) =>
+    tauriAPI.updateQuickAskModel(model),
+  );
 }
 
 export function useUpdateQuickAskSystemPrompt() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (prompt: string | null) =>
-			tauriAPI.updateQuickAskSystemPrompt(prompt),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((prompt: string | null) =>
+    tauriAPI.updateQuickAskSystemPrompt(prompt),
+  );
 }
 
 export function useUpdateQuickAskDismissMode() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (mode: QuickAskDismissMode) =>
-			tauriAPI.updateQuickAskDismissMode(mode),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((mode: QuickAskDismissMode) =>
+    tauriAPI.updateQuickAskDismissMode(mode),
+  );
 }
 
 export function useUpdateQuickAskIncludeSelectedText() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateQuickAskIncludeSelectedText(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateQuickAskIncludeSelectedText(enabled),
+  );
 }
 
 export function useUpdateQuickAskConversationHistoryEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateQuickAskConversationHistoryEnabled(enabled),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+    tauriAPI.updateQuickAskConversationHistoryEnabled(enabled),
+  );
 }
 
 export function useUpdateQuickAskConversationHistoryCount() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (count: number) =>
-			tauriAPI.updateQuickAskConversationHistoryCount(count),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((count: number) =>
+    tauriAPI.updateQuickAskConversationHistoryCount(count),
+  );
 }
 
 export function useUpdateQuickAskOpenAiReasoningEffort() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (effort: OpenAiReasoningEffort | null) =>
-			tauriAPI.updateQuickAskOpenAiReasoningEffort(effort),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (effort: OpenAiReasoningEffort | null) =>
+      tauriAPI.updateQuickAskOpenAiReasoningEffort(effort),
+  );
 }
 
 export function useUpdateQuickAskAnthropicThinkingBudget() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (budget: number | null) =>
-			tauriAPI.updateQuickAskAnthropicThinkingBudget(budget),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((budget: number | null) =>
+    tauriAPI.updateQuickAskAnthropicThinkingBudget(budget),
+  );
 }
 
 export function useUpdateQuickAskGeminiThinkingBudget() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (budget: number | null) =>
-			tauriAPI.updateQuickAskGeminiThinkingBudget(budget),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((budget: number | null) =>
+    tauriAPI.updateQuickAskGeminiThinkingBudget(budget),
+  );
 }
 
 export function useUpdateQuickAskGeminiThinkingLevel() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (level: "minimal" | "low" | "medium" | "high" | null) =>
-			tauriAPI.updateQuickAskGeminiThinkingLevel(level),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (level: "minimal" | "low" | "medium" | "high" | null) =>
+      tauriAPI.updateQuickAskGeminiThinkingLevel(level),
+  );
 }
 
 export function useUpdateOpenAiReasoningEffort() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (effort: OpenAiReasoningEffort | null) =>
-			tauriAPI.updateOpenAiReasoningEffort(effort),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (effort: OpenAiReasoningEffort | null) =>
+      tauriAPI.updateOpenAiReasoningEffort(effort),
+  );
 }
 
 export function useUpdateAnthropicThinkingBudget() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (budget: number | null) =>
-			tauriAPI.updateAnthropicThinkingBudget(budget),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((budget: number | null) =>
+    tauriAPI.updateAnthropicThinkingBudget(budget),
+  );
 }
 
 export function useUpdateGeminiThinkingBudget() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (budget: number | null) =>
-			tauriAPI.updateGeminiThinkingBudget(budget),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((budget: number | null) =>
+    tauriAPI.updateGeminiThinkingBudget(budget),
+  );
 }
 
 export function useUpdateGeminiThinkingLevel() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (level: "minimal" | "low" | "medium" | "high" | null) =>
-			tauriAPI.updateGeminiThinkingLevel(level),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation(
+    (level: "minimal" | "low" | "medium" | "high" | null) =>
+      tauriAPI.updateGeminiThinkingLevel(level),
+  );
 }
 
 // STT Timeout mutation (local settings)
 export function useUpdateSTTTimeout() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (timeoutSeconds: number | null) =>
-			tauriAPI.updateSTTTimeout(timeoutSeconds),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
+	return useSettingsInvalidatingMutation((timeoutSeconds: number | null) =>
+    tauriAPI.updateSTTTimeout(timeoutSeconds),
+  );
 }
 
 // Request Logs queries and mutations

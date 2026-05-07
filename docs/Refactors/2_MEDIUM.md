@@ -6,14 +6,12 @@
 
 **Status:** Partially addressed by remaining module-deepening work (2026-05-06)
 
-`app/src-tauri/src/recording_orchestration.rs` now owns the duplicated command-side phase notification watchers for Routing/Rewriting events, and `app/src-tauri/src/sessions/recording_finalization.rs` owns the narrow terminal request-log/cost/OCR cleanup helpers. `RequestLogStore::start_request_with(...)` also keeps command-side request creation + initial metadata seeding atomic.
+`app/src-tauri/src/recording_orchestration.rs` now owns the duplicated command-side phase notification watchers for Transcribing/Routing/Rewriting events, `app/src-tauri/src/history_request_lifecycle.rs` owns app-facing History request-row updates + `history-changed` emission, and `app/src-tauri/src/recording_completion.rs` owns saved-WAV persistence plus shared terminal transcript/cancel/error event shapes. `app/src-tauri/src/sessions/recording_finalization.rs` still owns the narrow request-log/cost/OCR cleanup helpers, and `RequestLogStore::start_request_with(...)` keeps command-side request creation + initial metadata seeding atomic.
 
-`app/src-tauri/src/commands/recording.rs` still owns several broad side-effect clusters:
+`app/src-tauri/src/commands/recording.rs` still owns some broad side-effect clusters:
 
-- in-progress History entry creation and completion
-- saved WAV persistence for retry/playback
-- cancellation/error cleanup
 - time-based retention calls
+- a few flow-specific request-log messages / command return-shape details
 
 Follow-up idea:
 
@@ -81,7 +79,24 @@ Progress (2026-05-06):
 
 - `resolvePromptProfileFallbacks(...)` now routes Default-profile/global fallback resolution through `settingsViews.ts::inheritedSettingView(...)`, including defensive normalization of malformed global fallback values.
 - `usePromptProviderOptions(...)` reuses the same prompt fallback helper instead of maintaining a separate Default-profile fallback chain.
+- Added backend `app/src-tauri/src/settings_view.rs` so Rust callers now share typed Settings View reads for output settings, Quick Ask config, request-log retention, stats retention, and free-tier toggles instead of repeating raw store keys.
 - Follow-up remains: route preset-specific editor state through `presetSettingView(...)` when preset editing gets touched again.
+
+## Reduce repetitive settings mutation hooks in `queries.ts`
+
+**Status:** Partially addressed by architecture-deepening work (2026-05-06)
+
+`app/src/lib/queries.ts` had a large number of local settings hooks that all repeated the same `useMutation(...)` + `invalidateQueries({ queryKey: ["settings"] })` shape.
+
+Progress (2026-05-06):
+
+- Added `useSettingsInvalidatingMutation(...)` and `invalidateSettingsQueries(...)` so simple settings writes share one query-invalidation path.
+- Migrated a large block of plain settings mutations (output/audio/OCR/proxy/STT/LLM/Quick Ask/free-tier settings) to the helper.
+
+Follow-up remains:
+
+- Continue migrating bespoke-but-nearly-identical hooks when they are touched.
+- Keep optimistic updates and runtime-sync-heavy flows bespoke when the helper would hide meaningful behavior.
 
 ## Reduce maintenance cost of schema registry
 
@@ -187,6 +202,12 @@ Progress (2026-02-05):
 	- PCM s16le chunk sizing (`chunk_size_bytes_for_pcm_s16le`)
 - `ElevenLabsSttProvider` now uses these helpers for its realtime WS path.
 - `SpeechmaticsSttProvider` now reuses the shared chunk sizing helper.
+
+Progress (2026-05-06):
+
+- `app/src-tauri/src/stt/streaming.rs` now exposes `describe_websocket_transport_policy_gap(...)` so realtime streaming paths can explicitly log when current proxy/TLS settings cannot be honored by direct WebSocket transport.
+- The app concurrent-streaming path and CLI streaming path now emit that diagnostic before attempting realtime WS startup.
+- This is still not full proxy support; it is an explicit unsupported-path diagnostic so failures are easier to reason about.
 
 Progress (2026-05-06):
 

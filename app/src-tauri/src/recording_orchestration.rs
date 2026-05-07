@@ -35,6 +35,20 @@ fn classify_phase_watch_state(state: PipelineState, target: PipelineState) -> Ph
     }
 }
 
+pub(crate) fn spawn_transcription_started_watcher(app: AppHandle, pipeline: SharedPipeline) {
+    // Keep this watcher intentionally short-lived. The command flows use it specifically to avoid
+    // flashing "TRANSCRIBING" when the quiet-audio gate skips STT and returns directly to Idle.
+    spawn_phase_started_watcher(
+        app,
+        pipeline,
+        PipelineState::Transcribing,
+        events::EVENT_PIPELINE_TRANSCRIPTION_STARTED,
+        PipelineStateEvent::Transcribing,
+        Duration::from_millis(15),
+        Duration::from_secs(2),
+    );
+}
+
 pub(crate) fn spawn_routing_started_watcher(app: AppHandle, pipeline: SharedPipeline) {
     spawn_phase_started_watcher(
         app,
@@ -120,6 +134,18 @@ mod tests {
         assert_eq!(
             classify_phase_watch_state(PipelineState::Error, PipelineState::Rewriting),
             PhaseWatchDecision::Stop
+        );
+    }
+
+    #[test]
+    fn transcription_watcher_waits_while_recording_and_routing() {
+        assert_eq!(
+            classify_phase_watch_state(PipelineState::Recording, PipelineState::Transcribing),
+            PhaseWatchDecision::Continue
+        );
+        assert_eq!(
+            classify_phase_watch_state(PipelineState::Routing, PipelineState::Transcribing),
+            PhaseWatchDecision::Continue
         );
     }
 }

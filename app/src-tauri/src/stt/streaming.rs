@@ -16,6 +16,7 @@ use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
+use crate::settings::{ProxyMode, ProxySettings};
 use crate::stt::SttError;
 
 pub(crate) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -43,6 +44,46 @@ pub(crate) fn is_ws_closed_error(e: &tokio_tungstenite::tungstenite::Error) -> b
         }
         Error::ConnectionClosed | Error::AlreadyClosed => true,
         _ => false,
+    }
+}
+
+/// Describe the current websocket transport-policy gaps for realtime STT.
+///
+/// HTTP requests use `network.rs` and can honor proxy/TLS settings. Realtime streaming still uses
+/// `tokio_tungstenite::connect_async(...)` directly, so make the unsupported parts explicit in logs
+/// instead of letting them look like mysterious provider failures.
+pub(crate) fn describe_websocket_transport_policy_gap(
+    proxy_settings: &ProxySettings,
+) -> Option<String> {
+    let mut gaps: Vec<&str> = Vec::new();
+
+    match proxy_settings.mode {
+        ProxyMode::Manual if !proxy_settings.manual.proxy_url.trim().is_empty() => gaps.push(
+            "manual proxy settings are not yet applied to realtime WebSocket STT connections",
+        ),
+        ProxyMode::NoProxy => gaps.push(
+            "realtime WebSocket STT cannot yet force no-proxy mode independently of system/environment proxy handling",
+        ),
+        _ => {}
+    }
+
+    if !proxy_settings.trusted_ca_certificates.is_empty() {
+        gaps.push("trusted CA certificates are not yet applied to realtime WebSocket STT TLS");
+    }
+
+    if proxy_settings.danger_accept_invalid_certs {
+        gaps.push(
+            "danger_accept_invalid_certs does not currently affect realtime WebSocket STT TLS",
+        );
+    }
+
+    if gaps.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Realtime streaming transport note: {}.",
+            gaps.join("; ")
+        ))
     }
 }
 
@@ -219,5 +260,53 @@ impl StreamingSttSession {
         self.task
             .await
             .map_err(|e| SttError::NetworkMessage(format!("Streaming task panicked: {}", e)))?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_transport_gap_is_none_for_default_system_settings() {
+        assert_eq!(
+            describe_websocket_transport_policy_gap(&ProxySettings::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn websocket_transport_gap_mentions_manual_proxy_and_tls_overrides() {
+        let mut proxy_settings = ProxySettings {
+            mode: ProxyMode::Manual,
+            ..ProxySettings::default()
+        };
+        proxy_settings.manual.proxy_url = "http://127.0.0.1:8080".to_string();
+        proxy_settings
+            .trusted_ca_certificates
+            .push(crate::settings::TrustedCaCertificate {
+                id: "cert-1".to_string(),
+                file_name: "corp.pem".to_string(),
+                format: crate::settings::TrustedCaCertFormat::Pem,
+                data_base64: "ZmFrZQ==".to_string(),
+            });
+        proxy_settings.danger_accept_invalid_certs = true;
+
+        let message = describe_websocket_transport_policy_gap(&proxy_settings)
+            .expect("expected a transport gap message");
+        assert!(message.contains("manual proxy settings"));
+        assert!(message.contains("trusted CA certificates"));
+        assert!(message.contains("danger_accept_invalid_certs"));
+    }
+
+    #[test]
+    fn websocket_transport_gap_mentions_no_proxy_mode() {
+        let message = describe_websocket_transport_policy_gap(&ProxySettings {
+            mode: ProxyMode::NoProxy,
+            ..ProxySettings::default()
+        })
+        .expect("expected no-proxy warning");
+
+        assert!(message.contains("no-proxy mode"));
     }
 }

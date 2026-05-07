@@ -9,7 +9,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands;
 use crate::event_payloads::{PipelineErrorPayload, PipelineStateEvent};
-use crate::history::HistoryStorage;
+use crate::history::RequestHistoryUpdate;
+use crate::history_request_lifecycle;
 use crate::pipeline::{SharedPipeline, TranscriptionResult};
 use crate::request_log::{RequestLogStore, RequestStatus};
 use crate::sessions::recording_finalization;
@@ -162,16 +163,24 @@ fn update_history_after_output(app: &AppHandle, request: &NormalDictationFinaliz
         return;
     };
 
-    let Some(history) = app.try_state::<HistoryStorage>() else {
-        return;
-    };
-
     // Store the actual output (Quick Replace may have changed it).
     if let Some(err) = request.quick_replace_failure {
-        let _ = history.complete_request_error(req_id, err.to_string());
-    } else if let Err(e) =
-        history.complete_request_success(req_id, request.output_value.to_string())
-    {
+        if let Err(e) = history_request_lifecycle::apply_request_history_update(
+            app,
+            RequestHistoryUpdate::CompleteError {
+                request_id: req_id.to_string(),
+                error_message: err.to_string(),
+            },
+        ) {
+            log::warn!("Failed to update history: {}", e);
+        }
+    } else if let Err(e) = history_request_lifecycle::apply_request_history_update(
+        app,
+        RequestHistoryUpdate::CompleteSuccess {
+            request_id: req_id.to_string(),
+            text: request.output_value.to_string(),
+        },
+    ) {
         log::warn!("Failed to update history: {}", e);
     }
 

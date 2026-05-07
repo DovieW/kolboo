@@ -8,8 +8,10 @@ use crate::commands::event_sink::{AppEventSink, EventSink};
 use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
 use crate::commands::CommandError;
 use crate::events;
-use crate::history::{HistoryStorage, RequestModelInfo};
+use crate::history::{HistoryStorage, RequestHistoryUpdate, RequestModelInfo};
+use crate::history_request_lifecycle;
 use crate::pipeline::{PipelineConfig, PipelineError, PipelineState, SharedPipeline};
+use crate::recording_completion;
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
 use crate::sessions::recording_finalization;
@@ -663,9 +665,8 @@ async fn pipeline_stop_and_transcribe_inner(
 
     // Capture model info for persistence in history.
     // Note: we intentionally start with no profile metadata in history.
-    // The overlay window can steal focus during stop, which can cause an incorrect
-    // "Default" profile to be recorded here. We'll update the entry once the
-    // pipeline actually transitions into Transcribing/Rewriting.
+    // The pipeline resolves/stamps the effective profile into the request log during the actual
+    // transcription flow, and we mirror that deterministically before final request completion.
     let model_info = RequestModelInfo {
         stt_provider: Some(config.stt_provider.clone()),
         stt_model: config.stt_model.clone(),
@@ -683,84 +684,20 @@ async fn pipeline_stop_and_transcribe_inner(
 
     // Create an in-progress history entry so the History view shows a running request.
     if let Some(req_id) = active_request_id.as_deref() {
-        if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
-            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-        }
-    }
-
-    // Emit transcription started *only if* the pipeline actually enters the
-    // Transcribing state.
-    //
-    // This prevents the overlay from briefly showing "TRANSCRIBING..." when the
-    // quiet-audio gate (hallucination protection) decides to skip STT.
-    {
-        let app_clone = app.clone();
-        let pipeline_clone = pipeline.inner().clone();
-        let request_id_for_history = active_request_id.clone();
-        tauri::async_runtime::spawn(
-            async move {
-                let start = Instant::now();
-                loop {
-                    match pipeline_clone.state() {
-                        PipelineState::Transcribing
-                        | PipelineState::Routing
-                        | PipelineState::Rewriting => {
-                            // Now that transcription has begun, copy the *actual* profile metadata
-                            // from the request log into History.
-                            //
-                            // Why not resolve from the foreground app here?
-                            // On Windows, our always-on-top overlay windows can briefly become the
-                            // foreground window during stop/transcribe, which can incorrectly record
-                            // the profile as Default. The pipeline writes the chosen profile into the
-                            // request log as part of starting transcription.
-                            if let Some(req_id) = request_id_for_history.as_deref() {
-                                let profile_meta =
-                                    app_clone.try_state::<RequestLogStore>().and_then(|store| {
-                                        store.with_current(|log| {
-                                            (log.profile_id.clone(), log.profile_name.clone())
-                                        })
-                                    });
-
-                                let (pid, pname) = profile_meta.unwrap_or_else(|| {
-                                    let cfg = pipeline_clone.config();
-                                    resolve_profile_for_foreground_app(&cfg)
-                                });
-
-                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                    let _ = history.set_request_profile(req_id, pid, pname);
-                                    let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
-                                }
-                            }
-
-                            let _ =
-                                app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
-                            let _ = app_clone.emit(
-                                events::EVENT_PIPELINE_STATE_CHANGED,
-                                PipelineStateEvent::Transcribing,
-                            );
-                            break;
-                        }
-                        PipelineState::Idle | PipelineState::Error => {
-                            // Quiet-audio skip resets to Idle; errors also shouldn't show
-                            // a "transcribing" phase.
-                            break;
-                        }
-                        PipelineState::Recording => {
-                            // Still finalizing stop.
-                        }
-                    }
-
-                    if start.elapsed() > Duration::from_secs(2) {
-                        break;
-                    }
-
-                    tokio::time::sleep(Duration::from_millis(15)).await;
-                }
-            }
-            .in_current_span(),
+        let _ = history_request_lifecycle::apply_request_history_update(
+            &app,
+            RequestHistoryUpdate::CreateInProgress {
+                request_id: req_id.to_string(),
+                model_info,
+                max_entries: max_history_entries,
+            },
         );
     }
+
+    crate::recording_orchestration::spawn_transcription_started_watcher(
+        app.clone(),
+        pipeline.inner().clone(),
+    );
 
     crate::recording_orchestration::spawn_routing_started_watcher(
         app.clone(),
@@ -815,17 +752,15 @@ async fn pipeline_stop_and_transcribe_inner(
             // Best-effort: remove the in-progress history entry so it doesn't linger as
             // "Transcribing..." forever.
             if let Some(req_id) = active_request_id.as_deref() {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.delete(req_id);
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
+                let _ = history_request_lifecycle::apply_request_history_update(
+                    &app,
+                    RequestHistoryUpdate::Delete {
+                        request_id: req_id.to_string(),
+                    },
+                );
             }
 
-            let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
-            let _ = app.emit(
-                events::EVENT_PIPELINE_STATE_CHANGED,
-                PipelineStateEvent::Idle,
-            );
+            recording_completion::emit_cancelled(&app);
             return Ok(String::new());
         }
         Err(e) => {
@@ -844,6 +779,11 @@ async fn pipeline_stop_and_transcribe_inner(
                 });
             }
 
+            let _ = history_request_lifecycle::sync_request_profile_from_current_log(
+                &app,
+                active_request_id.as_deref(),
+            );
+
             recording_finalization::complete_current_request_with_cost(
                 &app,
                 pipeline.inner(),
@@ -854,36 +794,33 @@ async fn pipeline_stop_and_transcribe_inner(
 
             // Update history entry with error (keep it visible for retry)
             if let Some(req_id) = active_request_id.as_deref() {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.complete_request_error(req_id, e.to_string());
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
+                let _ = history_request_lifecycle::apply_request_history_update(
+                    &app,
+                    RequestHistoryUpdate::CompleteError {
+                        request_id: req_id.to_string(),
+                        error_message: e.to_string(),
+                    },
+                );
             }
 
             // Time-based retention (best-effort). Runs only after a transcription attempt.
             apply_transcription_retention(&app);
 
             // Persist audio for retry (best-effort)
-            if let (Some(req_id), Some(store)) = (
+            if let Err(err) = recording_completion::persist_request_recording(
+                &app,
                 active_request_id.as_deref(),
-                app.try_state::<RecordingStore>(),
+                wav_bytes.as_deref(),
+                max_saved_recordings,
             ) {
-                if let Some(wav) = wav_bytes {
-                    if store.save_wav(req_id, &wav).is_ok() {
-                        let _ = store.prune_to_max_files(max_saved_recordings);
-                    }
-                }
+                log::warn!("{}", err);
             }
 
             // Emit pipeline-error event with request_id so the overlay can show a retry button.
-            let payload = serde_json::json!({
-                "message": e.to_string(),
-                "request_id": active_request_id.clone(),
-            });
-            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
-            let _ = app.emit(
-                events::EVENT_PIPELINE_STATE_CHANGED,
-                PipelineStateEvent::Error,
+            recording_completion::emit_pipeline_error(
+                &app,
+                &e.to_string(),
+                active_request_id.as_deref(),
             );
 
             let mut error = CommandError::from(e);
@@ -920,6 +857,11 @@ async fn pipeline_stop_and_transcribe_inner(
         });
     }
 
+    let _ = history_request_lifecycle::sync_request_profile_from_current_log(
+        &app,
+        active_request_id.as_deref(),
+    );
+
     // The finalization Module keeps log closure/cost/OCR ordering consistent across command flows.
     recording_finalization::persist_current_request_preset_to_history(
         &app,
@@ -939,40 +881,31 @@ async fn pipeline_stop_and_transcribe_inner(
     );
 
     // Persist audio for retry (best-effort)
-    if let (Some(req_id), Some(store)) = (
+    if let Err(err) = recording_completion::persist_request_recording(
+        &app,
         active_request_id.as_deref(),
-        app.try_state::<RecordingStore>(),
+        wav_bytes.as_deref(),
+        max_saved_recordings,
     ) {
-        if let Some(wav) = wav_bytes {
-            if store.save_wav(req_id, &wav).is_ok() {
-                let _ = store.prune_to_max_files(max_saved_recordings);
-
-                // Mark that this history entry has a recording available (it is stored under req_id).
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.set_request_recording_id(req_id, Some(req_id.to_string()));
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
-            }
-        }
+        log::warn!("{}", err);
     }
 
     // Update history entry with success text
     if let Some(req_id) = active_request_id.as_deref() {
-        if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.complete_request_success(req_id, final_text.clone());
-            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-        }
+        let _ = history_request_lifecycle::apply_request_history_update(
+            &app,
+            RequestHistoryUpdate::CompleteSuccess {
+                request_id: req_id.to_string(),
+                text: final_text.clone(),
+            },
+        );
     }
 
     // Time-based retention (best-effort). Runs only after a transcription attempt.
     apply_transcription_retention(&app);
 
     // Emit transcript ready event
-    let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, &final_text);
-    let _ = app.emit(
-        events::EVENT_PIPELINE_STATE_CHANGED,
-        PipelineStateEvent::Idle,
-    );
+    recording_completion::emit_transcript_ready(&app, &final_text);
 
     // Done transcribing - stop stealing Escape.
     #[cfg(desktop)]
@@ -1099,14 +1032,21 @@ pub(crate) async fn pipeline_retry_transcription_impl(
 
     // Create a history entry for the retry attempt.
     if let Some(req_id) = new_request_id.as_deref() {
-        if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
-
-            // Ensure play/rerun for this new entry points at the original recording.
-            let _ = history.set_request_recording_id(req_id, Some(recording_source_id.clone()));
-
-            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-        }
+        let _ = history_request_lifecycle::apply_request_history_update(
+            &app,
+            RequestHistoryUpdate::CreateInProgress {
+                request_id: req_id.to_string(),
+                model_info,
+                max_entries: max_history_entries,
+            },
+        );
+        let _ = history_request_lifecycle::apply_request_history_update(
+            &app,
+            RequestHistoryUpdate::SetRecordingSource {
+                request_id: req_id.to_string(),
+                recording_request_id: Some(recording_source_id.clone()),
+            },
+        );
     }
 
     let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
@@ -1167,11 +1107,7 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 new_request_id.as_deref(),
             );
 
-            let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
-            let _ = app.emit(
-                events::EVENT_PIPELINE_STATE_CHANGED,
-                PipelineStateEvent::Idle,
-            );
+            recording_completion::emit_cancelled(&app);
             return Ok(String::new());
         }
         Err(e) => {
@@ -1188,6 +1124,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
                 });
             }
 
+            let _ = history_request_lifecycle::sync_request_profile_from_current_log(
+                &app,
+                new_request_id.as_deref(),
+            );
+
             recording_finalization::complete_current_request_with_cost(
                 &app,
                 &pipeline,
@@ -1197,21 +1138,20 @@ pub(crate) async fn pipeline_retry_transcription_impl(
             );
 
             if let Some(req_id) = new_request_id.as_deref() {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.complete_request_error(req_id, e.to_string());
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
+                let _ = history_request_lifecycle::apply_request_history_update(
+                    &app,
+                    RequestHistoryUpdate::CompleteError {
+                        request_id: req_id.to_string(),
+                        error_message: e.to_string(),
+                    },
+                );
             }
 
             // Also emit pipeline-error so the overlay can present the always-on-top retry UI.
-            let payload = serde_json::json!({
-                "message": e.to_string(),
-                "request_id": new_request_id,
-            });
-            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
-            let _ = app.emit(
-                events::EVENT_PIPELINE_STATE_CHANGED,
-                PipelineStateEvent::Error,
+            recording_completion::emit_pipeline_error(
+                &app,
+                &e.to_string(),
+                new_request_id.as_deref(),
             );
 
             let mut error = CommandError::from(e);
@@ -1246,6 +1186,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         });
     }
 
+    let _ = history_request_lifecycle::sync_request_profile_from_current_log(
+        &app,
+        new_request_id.as_deref(),
+    );
+
     recording_finalization::persist_current_request_preset_to_history(
         &app,
         new_request_id.as_deref(),
@@ -1261,18 +1206,17 @@ pub(crate) async fn pipeline_retry_transcription_impl(
 
     // Update history on success
     if let Some(req_id) = new_request_id.as_deref() {
-        if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.complete_request_success(req_id, final_text.clone());
-            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-        }
+        let _ = history_request_lifecycle::apply_request_history_update(
+            &app,
+            RequestHistoryUpdate::CompleteSuccess {
+                request_id: req_id.to_string(),
+                text: final_text.clone(),
+            },
+        );
     }
 
     // Emit transcript ready event
-    let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPT_READY, &final_text);
-    let _ = app.emit(
-        events::EVENT_PIPELINE_STATE_CHANGED,
-        PipelineStateEvent::Idle,
-    );
+    recording_completion::emit_transcript_ready(&app, &final_text);
 
     #[cfg(desktop)]
     crate::set_escape_cancel_shortcut_enabled(&app, false);
@@ -1482,10 +1426,14 @@ async fn pipeline_dictate_inner(
 
     // Create an in-progress history entry so the History view shows a running request.
     if let Some(req_id) = active_request_id.as_deref() {
-        if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.add_request_entry(req_id.to_string(), model_info, max_history_entries);
-            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-        }
+        let _ = history_request_lifecycle::apply_request_history_update(
+            &app,
+            RequestHistoryUpdate::CreateInProgress {
+                request_id: req_id.to_string(),
+                model_info,
+                max_entries: max_history_entries,
+            },
+        );
     }
 
     // Log transcription start
@@ -1499,42 +1447,10 @@ async fn pipeline_dictate_inner(
         });
     }
 
-    // Emit transcription started *only if* the pipeline actually enters the
-    // Transcribing state (avoid flashing "TRANSCRIBING..." on quiet-audio skips).
-    {
-        let app_clone = app.clone();
-        let pipeline_clone = pipeline.inner().clone();
-        tauri::async_runtime::spawn(
-            async move {
-                let start = Instant::now();
-                loop {
-                    match pipeline_clone.state() {
-                        PipelineState::Transcribing
-                        | PipelineState::Routing
-                        | PipelineState::Rewriting => {
-                            let _ =
-                                app_clone.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
-                            let _ = app_clone.emit(
-                                events::EVENT_PIPELINE_STATE_CHANGED,
-                                PipelineStateEvent::Transcribing,
-                            );
-                            break;
-                        }
-                        PipelineState::Idle | PipelineState::Error => {
-                            break;
-                        }
-                        PipelineState::Recording => {}
-                    }
-
-                    if start.elapsed() > Duration::from_secs(2) {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(15)).await;
-                }
-            }
-            .in_current_span(),
-        );
-    }
+    crate::recording_orchestration::spawn_transcription_started_watcher(
+        app.clone(),
+        pipeline.inner().clone(),
+    );
 
     crate::recording_orchestration::spawn_routing_started_watcher(
         app.clone(),
@@ -1546,11 +1462,7 @@ async fn pipeline_dictate_inner(
         Err(PipelineError::Cancelled) => {
             #[cfg(desktop)]
             crate::set_escape_cancel_shortcut_enabled(&app, false);
-            let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
-            let _ = app.emit(
-                events::EVENT_PIPELINE_STATE_CHANGED,
-                PipelineStateEvent::Idle,
-            );
+            recording_completion::emit_cancelled(&app);
 
             // Best-effort: mark request as cancelled in logs + history.
             if let Some(log_store) = app.try_state::<RequestLogStore>() {
@@ -1567,10 +1479,13 @@ async fn pipeline_dictate_inner(
             );
 
             if let Some(req_id) = active_request_id.as_deref() {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.complete_request_error(req_id, "Cancelled".to_string());
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
+                let _ = history_request_lifecycle::apply_request_history_update(
+                    &app,
+                    RequestHistoryUpdate::CompleteError {
+                        request_id: req_id.to_string(),
+                        error_message: "Cancelled".to_string(),
+                    },
+                );
             }
 
             return Ok(String::new());
@@ -1593,6 +1508,11 @@ async fn pipeline_dictate_inner(
                 });
             }
 
+            let _ = history_request_lifecycle::sync_request_profile_from_current_log(
+                &app,
+                active_request_id.as_deref(),
+            );
+
             recording_finalization::complete_current_request_with_cost_best_effort(
                 &app,
                 pipeline.inner(),
@@ -1602,41 +1522,41 @@ async fn pipeline_dictate_inner(
             );
 
             // Persist audio for retry (best-effort)
-            if let (Some(req_id), Some(store)) = (
+            if let Err(err) = recording_completion::persist_request_recording(
+                &app,
                 active_request_id.as_deref(),
-                app.try_state::<RecordingStore>(),
+                wav_bytes.as_deref(),
+                max_saved_recordings,
             ) {
-                if let Some(wav) = wav_bytes {
-                    if store.save_wav(req_id, &wav).is_ok() {
-                        let _ = store.prune_to_max_files(max_saved_recordings);
-                    } else if let Some(log_store) = app.try_state::<RequestLogStore>() {
-                        log_store.with_current(|log| {
-                            log.warn("Failed to persist audio for retry");
-                        });
-                    }
+                if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                    let warning = err.clone();
+                    log_store.with_current(|log| {
+                        log.warn(warning);
+                    });
+                } else {
+                    log::warn!("{}", err);
                 }
             }
 
             // Update history entry with error (keep it visible for retry)
             if let Some(req_id) = active_request_id.as_deref() {
-                if let Some(history) = app.try_state::<HistoryStorage>() {
-                    let _ = history.complete_request_error(req_id, e.to_string());
-                    let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-                }
+                let _ = history_request_lifecycle::apply_request_history_update(
+                    &app,
+                    RequestHistoryUpdate::CompleteError {
+                        request_id: req_id.to_string(),
+                        error_message: e.to_string(),
+                    },
+                );
             }
 
             // Time-based retention (best-effort). Still apply even on failures.
             apply_transcription_retention(&app);
 
             // Emit pipeline-error event with request_id so the overlay can show a retry button.
-            let payload = serde_json::json!({
-                "message": e.to_string(),
-                "request_id": active_request_id.clone(),
-            });
-            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
-            let _ = app.emit(
-                events::EVENT_PIPELINE_STATE_CHANGED,
-                PipelineStateEvent::Error,
+            recording_completion::emit_pipeline_error(
+                &app,
+                &e.to_string(),
+                active_request_id.as_deref(),
             );
 
             let mut error = CommandError::from(e);
@@ -1702,6 +1622,11 @@ async fn pipeline_dictate_inner(
         });
     }
 
+    let _ = history_request_lifecycle::sync_request_profile_from_current_log(
+        &app,
+        active_request_id.as_deref(),
+    );
+
     // NOTE: `pipeline_stop_and_transcribe` and `pipeline_retry_transcription` already emit cost,
     // but `pipeline_dictate` is a separate hotkey/toggle flow and must be tracked too.
     recording_finalization::persist_current_request_preset_to_history(
@@ -1722,23 +1647,24 @@ async fn pipeline_dictate_inner(
     );
 
     // Persist audio for retry/playback (best-effort)
-    if let (Some(req_id), Some(store)) = (
+    if let Err(err) = recording_completion::persist_request_recording(
+        &app,
         active_request_id.as_deref(),
-        app.try_state::<RecordingStore>(),
+        wav_bytes.as_deref(),
+        max_saved_recordings,
     ) {
-        if let Some(wav) = wav_bytes.clone() {
-            if store.save_wav(req_id, &wav).is_ok() {
-                let _ = store.prune_to_max_files(max_saved_recordings);
-            }
-        }
+        log::warn!("{}", err);
     }
 
     // Update history entry with success text
     if let Some(req_id) = active_request_id.as_deref() {
-        if let Some(history) = app.try_state::<HistoryStorage>() {
-            let _ = history.complete_request_success(req_id, final_text.clone());
-            let _ = app.emit(events::EVENT_HISTORY_CHANGED, ());
-        }
+        let _ = history_request_lifecycle::apply_request_history_update(
+            &app,
+            RequestHistoryUpdate::CompleteSuccess {
+                request_id: req_id.to_string(),
+                text: final_text.clone(),
+            },
+        );
     }
 
     // Time-based retention (best-effort). Runs only after a transcription attempt.

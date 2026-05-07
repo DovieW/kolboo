@@ -1,4 +1,4 @@
-use crate::history::{HistoryStatus, HistoryStorage, RequestModelInfo};
+use crate::history::{HistoryStatus, HistoryStorage, RequestHistoryUpdate, RequestModelInfo};
 use chrono::{Duration as ChronoDuration, Utc};
 use std::fs;
 use std::path::PathBuf;
@@ -56,6 +56,84 @@ fn test_history_prune_older_than() {
     let removed = history.prune_older_than(cutoff).unwrap();
     assert_eq!(removed, vec![entry.id]);
     assert_eq!(history.get_all(None).unwrap().len(), 0);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_request_history_update_api_keeps_request_metadata_together() {
+    let dir = make_temp_dir("history-request-update");
+    let history = HistoryStorage::new(dir.clone());
+    let req_id = "req-lifecycle".to_string();
+
+    history
+        .apply_request_update(RequestHistoryUpdate::CreateInProgress {
+            request_id: req_id.clone(),
+            model_info: RequestModelInfo {
+                stt_provider: Some("groq".to_string()),
+                stt_model: Some("whisper-large-v3".to_string()),
+                llm_provider: Some("openai".to_string()),
+                llm_model: Some("gpt-4o-mini".to_string()),
+                profile_id: None,
+                profile_name: None,
+                preset_id: None,
+                preset_name: None,
+            },
+            max_entries: Some(10),
+        })
+        .unwrap();
+
+    history
+        .apply_request_update(RequestHistoryUpdate::SetProfile {
+            request_id: req_id.clone(),
+            profile_id: Some("profile-1".to_string()),
+            profile_name: Some("Terminal".to_string()),
+        })
+        .unwrap();
+    history
+        .apply_request_update(RequestHistoryUpdate::SetPreset {
+            request_id: req_id.clone(),
+            preset_id: Some("preset-1".to_string()),
+            preset_name: Some("Brevity".to_string()),
+        })
+        .unwrap();
+    history
+        .apply_request_update(RequestHistoryUpdate::SetRecordingSource {
+            request_id: req_id.clone(),
+            recording_request_id: Some("rec-1".to_string()),
+        })
+        .unwrap();
+    history
+        .apply_request_update(RequestHistoryUpdate::SetLlmModel {
+            request_id: req_id.clone(),
+            llm_provider: Some("anthropic".to_string()),
+            llm_model: Some("claude-test".to_string()),
+        })
+        .unwrap();
+    history
+        .apply_request_update(RequestHistoryUpdate::CompleteSuccess {
+            request_id: req_id.clone(),
+            text: "finished".to_string(),
+        })
+        .unwrap();
+
+    let entry = history.get_by_id(&req_id).unwrap().expect("entry");
+    assert_eq!(entry.status, HistoryStatus::Success);
+    assert_eq!(entry.text, "finished");
+    assert_eq!(entry.profile_id.as_deref(), Some("profile-1"));
+    assert_eq!(entry.profile_name.as_deref(), Some("Terminal"));
+    assert_eq!(entry.preset_id.as_deref(), Some("preset-1"));
+    assert_eq!(entry.preset_name.as_deref(), Some("Brevity"));
+    assert_eq!(entry.recording_request_id.as_deref(), Some("rec-1"));
+    assert_eq!(entry.llm_provider.as_deref(), Some("anthropic"));
+    assert_eq!(entry.llm_model.as_deref(), Some("claude-test"));
+
+    history
+        .apply_request_update(RequestHistoryUpdate::Delete {
+            request_id: req_id.clone(),
+        })
+        .unwrap();
+    assert!(history.get_by_id(&req_id).unwrap().is_none());
 
     let _ = fs::remove_dir_all(&dir);
 }

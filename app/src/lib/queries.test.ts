@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	applySettingsQueryInvalidations,
-	createLicenseStateQueryFn,
-	createPolicySyncMutationFn,
-	createRefreshLicenseEntitlementMutationFn,
-	invalidateLicenseRelatedQueries,
-	invalidateLogoutRelatedQueries,
-	invalidatePolicyRelatedQueries,
+  applySettingsQueryInvalidations,
+  createLicenseStateQueryFn,
+  createPolicySyncMutationFn,
+  createRefreshLicenseEntitlementMutationFn,
+  invalidateLicenseRelatedQueries,
+  invalidateLogoutRelatedQueries,
+  invalidatePolicyRelatedQueries,
+  invalidateSettingsQueries,
 } from "./queries";
 
 describe("license query-layer function builders", () => {
@@ -77,6 +78,21 @@ describe("license query-layer function builders", () => {
 			queryKey: ["policyState"],
 		});
 	});
+
+	it("invalidates settings plus any extra query keys for shared settings mutations", async () => {
+    const invalidateQueries = vi.fn(async () => undefined);
+
+    await invalidateSettingsQueries({ invalidateQueries }, [
+      { queryKey: ["requestLogs"], reason: "settings" },
+    ]);
+
+    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+      queryKey: ["settings"],
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: ["requestLogs"],
+    });
+  });
 
 	it("invalidates license queries when auth state changes", async () => {
 		const invalidateQueries = vi.fn(async () => undefined);

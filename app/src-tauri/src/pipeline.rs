@@ -20,6 +20,8 @@ use crate::audio_capture::{
     AudioLevelSnapshot,
 };
 use crate::llm::{LlmConfig, LlmProvider, ProgramPreset, ProgramPromptProfile};
+use crate::settings::store::SettingsReadMode;
+use crate::settings_view;
 use crate::stt::{StreamingSttSession, SttError, SttProvider, SttRegistry};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -1081,7 +1083,7 @@ impl SharedPipeline {
         };
 
         // 1. Resolve STT provider under the lock (brief).
-        let (stt_provider, sample_rate, use_simulated) = {
+        let (stt_provider, sample_rate, use_simulated, proxy_settings) = {
             let mut inner = match self.inner.lock() {
                 Ok(inner) => inner,
                 Err(e) => {
@@ -1127,7 +1129,12 @@ impl SharedPipeline {
             }
 
             let sr = inner.audio_capture.capture_sample_rate();
-            (provider, sr, use_simulated)
+            (
+                provider,
+                sr,
+                use_simulated,
+                inner.config.proxy_settings.clone(),
+            )
         };
 
         // 2. Start the streaming session (async, outside the lock).
@@ -1149,6 +1156,12 @@ impl SharedPipeline {
                 "Concurrent streaming: starting session (sample_rate={})",
                 sample_rate
             );
+            if let Some(message) =
+                crate::stt::streaming::describe_websocket_transport_policy_gap(&proxy_settings)
+            {
+                log::warn!("{}", message);
+                log_to_request(app_handle, message);
+            }
             log_to_request(
                 app_handle,
                 format!(
@@ -1218,19 +1231,8 @@ impl SharedPipeline {
 
             // Read output settings once (won't change mid-recording).
             let (output_mode, output_hit_enter) = if stt_live_output {
-                #[cfg(desktop)]
-                {
-                    use crate::app_shared::get_setting_from_store;
-                    let mode_str: String =
-                        get_setting_from_store(&app, "output_mode", "paste".to_string());
-                    let mode = crate::text::inject::OutputMode::from_str(&mode_str);
-                    let hit_enter: bool = get_setting_from_store(&app, "output_hit_enter", false);
-                    (mode, hit_enter)
-                }
-                #[cfg(not(desktop))]
-                {
-                    (crate::text::inject::OutputMode::Paste, false)
-                }
+                let view = settings_view::read_output_settings_view(&app, SettingsReadMode::Cached);
+                (view.mode, view.hit_enter)
             } else {
                 (crate::text::inject::OutputMode::Paste, false)
             };

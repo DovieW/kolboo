@@ -2,50 +2,18 @@
 
 use crate::request_log::{
     strip_request_log_text_and_payloads, RequestLog, RequestLogStore, RequestLogsRetentionConfig,
-    RequestLogsRetentionMode,
 };
-use chrono::Duration as ChronoDuration;
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
 #[cfg(desktop)]
-use crate::settings::store::get_fresh_settings_store;
-
+use crate::settings::store::SettingsReadMode;
 #[cfg(desktop)]
-fn get_setting_from_store<T: serde::de::DeserializeOwned>(
-    app: &AppHandle,
-    key: &str,
-    default: T,
-) -> T {
-    get_fresh_settings_store(app)
-        .and_then(|store| store.get(key))
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or(default)
-}
+use crate::settings_view;
 
 #[cfg(desktop)]
 fn read_request_logs_retention(app: &AppHandle) -> RequestLogsRetentionConfig {
-    let mode: String = get_setting_from_store(app, "request_logs_retention_mode", "amount".into());
-    let amount: u64 = get_setting_from_store(app, "request_logs_retention_amount", 50u64);
-    let days: u64 = get_setting_from_store(app, "request_logs_retention_days", 7u64);
-
-    let mode = if mode == "time" {
-        RequestLogsRetentionMode::Time
-    } else {
-        RequestLogsRetentionMode::Amount
-    };
-
-    let time_retention = if days == 0 {
-        None
-    } else {
-        Some(ChronoDuration::days(days as i64))
-    };
-
-    RequestLogsRetentionConfig {
-        mode,
-        amount: amount.clamp(1, 200) as usize,
-        time_retention,
-    }
+    settings_view::read_request_logs_retention(app, SettingsReadMode::Fresh)
 }
 
 #[cfg(not(desktop))]

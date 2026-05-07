@@ -98,6 +98,50 @@ pub struct RequestModelInfo {
     pub preset_name: Option<String>,
 }
 
+/// Request-history lifecycle updates applied on top of the low-level storage helpers.
+///
+/// `HistoryStorage` remains responsible for persistence/corruption recovery. This enum exists so
+/// higher-level flows can describe *what* happened to a request row without re-remembering which
+/// individual setter/terminal method to call next.
+#[derive(Debug, Clone)]
+pub enum RequestHistoryUpdate {
+    CreateInProgress {
+        request_id: String,
+        model_info: RequestModelInfo,
+        max_entries: Option<usize>,
+    },
+    SetProfile {
+        request_id: String,
+        profile_id: Option<String>,
+        profile_name: Option<String>,
+    },
+    SetPreset {
+        request_id: String,
+        preset_id: Option<String>,
+        preset_name: Option<String>,
+    },
+    SetRecordingSource {
+        request_id: String,
+        recording_request_id: Option<String>,
+    },
+    SetLlmModel {
+        request_id: String,
+        llm_provider: Option<String>,
+        llm_model: Option<String>,
+    },
+    CompleteSuccess {
+        request_id: String,
+        text: String,
+    },
+    CompleteError {
+        request_id: String,
+        error_message: String,
+    },
+    Delete {
+        request_id: String,
+    },
+}
+
 impl HistoryEntry {
     pub fn new(text: String) -> Self {
         Self {
@@ -539,6 +583,51 @@ impl HistoryStorage {
             }
         }
         self.save()
+    }
+
+    /// Apply one request-row lifecycle update.
+    ///
+    /// Keep this as a thin orchestration layer over the storage primitives above. The goal is not
+    /// to hide persistence behavior; it is to give command/session flows a single, testable
+    /// request-history surface so they stop duplicating mutation ordering by hand.
+    pub fn apply_request_update(&self, update: RequestHistoryUpdate) -> Result<(), String> {
+        match update {
+            RequestHistoryUpdate::CreateInProgress {
+                request_id,
+                model_info,
+                max_entries,
+            } => {
+                self.add_request_entry(request_id, model_info, max_entries)?;
+                Ok(())
+            }
+            RequestHistoryUpdate::SetProfile {
+                request_id,
+                profile_id,
+                profile_name,
+            } => self.set_request_profile(&request_id, profile_id, profile_name),
+            RequestHistoryUpdate::SetPreset {
+                request_id,
+                preset_id,
+                preset_name,
+            } => self.set_request_preset(&request_id, preset_id, preset_name),
+            RequestHistoryUpdate::SetRecordingSource {
+                request_id,
+                recording_request_id,
+            } => self.set_request_recording_id(&request_id, recording_request_id),
+            RequestHistoryUpdate::SetLlmModel {
+                request_id,
+                llm_provider,
+                llm_model,
+            } => self.set_request_llm_model(&request_id, llm_provider, llm_model),
+            RequestHistoryUpdate::CompleteSuccess { request_id, text } => {
+                self.complete_request_success(&request_id, text)
+            }
+            RequestHistoryUpdate::CompleteError {
+                request_id,
+                error_message,
+            } => self.complete_request_error(&request_id, error_message),
+            RequestHistoryUpdate::Delete { request_id } => self.delete(&request_id).map(|_| ()),
+        }
     }
 
     /// Get all history entries (newest first), optionally limited

@@ -26,6 +26,8 @@ use crate::sessions::quick_action_lifecycle::{
 };
 use crate::sessions::recording_finalization;
 use crate::sessions::{context_collection, quick_ask};
+use crate::settings::store::SettingsReadMode;
+use crate::settings_view;
 use crate::state::QuickAskConversationMemory;
 use crate::stats;
 
@@ -88,56 +90,9 @@ pub(crate) fn resolve_quick_ask_config(
     app: &AppHandle,
     profile_config: &QuickAskProfileConfig,
 ) -> QuickAskEffectiveConfig {
-    QuickAskEffectiveConfig::resolve(
-        profile_config,
-        QuickAskGlobalConfig {
-            provider: crate::get_setting_from_store(app, "quick_ask_provider", None::<String>),
-            model: crate::get_setting_from_store(app, "quick_ask_model", None::<String>),
-            system_prompt: crate::get_setting_from_store(
-                app,
-                "quick_ask_system_prompt",
-                None::<String>,
-            ),
-            openai_reasoning_effort: crate::get_setting_from_store(
-                app,
-                "quick_ask_openai_reasoning_effort",
-                None::<String>,
-            ),
-            gemini_thinking_budget: crate::get_setting_from_store(
-                app,
-                "quick_ask_gemini_thinking_budget",
-                None::<i64>,
-            ),
-            gemini_thinking_level: crate::get_setting_from_store(
-                app,
-                "quick_ask_gemini_thinking_level",
-                None::<String>,
-            ),
-            anthropic_thinking_budget: crate::get_setting_from_store(
-                app,
-                "quick_ask_anthropic_thinking_budget",
-                None::<i64>,
-            ),
-            fallback_provider: crate::get_setting_from_store(app, "llm_provider", None::<String>),
-            // Quick Ask conversation history is in-memory only; this setting only controls how
-            // many turns are prepended to the next request.
-            conversation_history_enabled: crate::get_setting_from_store(
-                app,
-                "quick_ask_conversation_history_enabled",
-                true,
-            ),
-            conversation_history_count_raw: crate::get_setting_from_store(
-                app,
-                "quick_ask_conversation_history_count",
-                3u64,
-            ),
-            request_logs_privacy_mode: crate::get_setting_from_store(
-                app,
-                "request_logs_privacy_mode",
-                false,
-            ),
-        },
-    )
+    let global: QuickAskGlobalConfig =
+        settings_view::read_quick_ask_global_config(app, SettingsReadMode::Cached);
+    QuickAskEffectiveConfig::resolve(profile_config, global)
 }
 
 pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {

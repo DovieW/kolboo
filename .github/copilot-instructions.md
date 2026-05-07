@@ -63,11 +63,13 @@
   - Cancellation is part of the UX (escape-to-cancel is registered only while active). Avoid re-entrant shortcut registration; follow the existing lock/async pattern in `app/src-tauri/src/shortcuts/mod.rs`.
   - Hotkey startup/runtime registration decisions live in `app/src-tauri/src/shortcuts/lifecycle.rs`; Windows modifier-only hook mechanics stay in `app/src-tauri/src/windows_modifier_hotkeys.rs`, and shortcut dispatch stays in `shortcuts/mod.rs`.
   - Shared audio format normalization (downmixing, PCM conversion, streaming chunk sizing, latency-friendly streaming resampling, and VAD-quality 16 kHz resampling) lives in `app/src-tauri/src/audio_normalization.rs`; STT streaming transport/session lifecycle helpers (WS connect/read/send/close and `StreamingSttSession`) live in `app/src-tauri/src/stt/streaming.rs`; provider protocol state machines stay in provider adapters.
+  - History request-row transitions live in `app/src-tauri/src/history_request_lifecycle.rs`, while `app/src-tauri/src/history.rs` continues to own persistence/querying. Prefer `RequestHistoryUpdate` + the lifecycle helper over hand-rolled `add_request_entry` / `set_request_*` / `complete_request_*` / `delete` sequences in app-facing flows.
   - Shared OCR usage policy for stop-time auto-start and Quick Ask / Quick Replace OCR consumption lives in `app/src-tauri/src/sessions/ocr_usage.rs`; keep OCR session/task ownership in `app/src-tauri/src/pipeline/ocr_session_state.rs` and `ocr_session.rs`.
   - Telemetry Mapping from rich request logs into narrow read models lives in `app/src-tauri/src/telemetry.rs`; keep request-log storage/redaction/export stripping in `app/src-tauri/src/request_log.rs`.
   - Use `RequestLogStore::start_request_with(...)` when a command starts a request and immediately seeds profile/model/kind metadata; this keeps request-log lifecycle initialization atomic instead of `start_request(...)` plus a separate `with_current(...)` pass.
-  - Terminal recording finalization (request-log success metadata, cost completion, OCR cleanup, and History preset/LLM metadata mirroring) lives in `app/src-tauri/src/sessions/recording_finalization.rs`; keep platform output in `normal_dictation_output.rs` and Quick Ask/Quick Replace execution in `quick_action_execution.rs`.
+  - Command-facing recording completion helpers (saved WAV persistence plus final transcript/cancel/error event shapes) live in `app/src-tauri/src/recording_completion.rs`; request-log success metadata, cost completion, OCR cleanup, and History preset/LLM metadata mirroring remain in `app/src-tauri/src/sessions/recording_finalization.rs`; keep platform output in `normal_dictation_output.rs` and Quick Ask/Quick Replace execution in `quick_action_execution.rs`.
   - Cost Reporting event assembly (provider response parsing, token mapping, duration fallback, and event-level estimate selection) lives in `app/src-tauri/src/cost/reporting.rs`; provider pricing tables/formulas stay in provider-specific `app/src-tauri/src/cost/**` modules, and `stats.rs` owns persistence/aggregation/retention/UI invalidation.
+  - Backend feature-shaped settings reads live in `app/src-tauri/src/settings_view.rs`; use them for output settings, Quick Ask config, retention, and free-tier reads instead of repeating raw settings-store keys in each caller.
   - Embeddings routing should call through the `EmbeddingsProvider` interface in `app/src-tauri/src/embeddings/mod.rs`; do not bypass it with provider-specific routing HTTP calls unless a new two-adapter proof updates the seam evidence.
   - Cloud STT provider constructor quirks live in `app/src-tauri/src/pipeline/stt_cloud_adapters.rs`; STT Provider Resolution remains in `pipeline/stt_provider_resolver.rs`, and local-whisper/whisper-server lifecycle special cases should stay explicit.
   - Batch STT request orchestration (managed-auth refresh retry, `stt_complete` bookkeeping, and shared failure handling for normal batch, streaming fallback, and retry transcription) lives in `app/src-tauri/src/pipeline.rs`; keep provider selection in `pipeline/stt_provider_resolver.rs` and execution/timeout/retry transport in `pipeline/stt_flow.rs`.
@@ -97,6 +99,7 @@ Implemented slice conventions from this initiative:
 
 - OCR session ownership is centralized in `app/src-tauri/src/pipeline/ocr_session_state.rs`.
 - Settings runtime side effects and settings-related query invalidation intent are classified by `app/src/lib/tauri/settingsSync.ts`.
+- Simple local settings mutations in `app/src/lib/queries.ts` should prefer the shared `useSettingsInvalidatingMutation(...)` helper; optimistic/runtime-sync-heavy mutations can stay bespoke.
 - Overlay settings-change refresh behavior lives in `app/src/lib/overlay/overlaySettings.ts` and intentionally does not perform runtime pipeline sync.
 - Routing strategy outputs flow through the strategy-independent `RoutingDecision` type in `app/src-tauri/src/pipeline/routing.rs`.
 - Profile behavior is split between `app/src-tauri/src/pipeline/profile_matcher.rs` and `app/src-tauri/src/pipeline/profile_resolution.rs`.
@@ -107,6 +110,9 @@ Implemented slice conventions from this initiative:
 - Embeddings routing uses the `EmbeddingsProvider` interface and shared cache-key helper instead of direct provider HTTP calls in routing.
 - Cloud STT provider construction adapters live in `app/src-tauri/src/pipeline/stt_cloud_adapters.rs`.
 - Recording phase notification watchers live in `app/src-tauri/src/recording_orchestration.rs`.
+- History request-row lifecycle orchestration lives in `app/src-tauri/src/history_request_lifecycle.rs` while `history.rs` stays focused on persistence and querying.
+- Command-facing recording completion helpers live in `app/src-tauri/src/recording_completion.rs` while request-log/cost/OCR completion remains in `app/src-tauri/src/sessions/recording_finalization.rs`.
+- Backend feature-shaped settings reads live in `app/src-tauri/src/settings_view.rs`.
 - Hotkey lifecycle registration decisions live in `app/src-tauri/src/shortcuts/lifecycle.rs`.
 - Terminal recording finalization lives in `app/src-tauri/src/sessions/recording_finalization.rs`.
 - STT streaming transport/session lifecycle helpers live in `app/src-tauri/src/stt/streaming.rs`, while pure audio normalization lives in `app/src-tauri/src/audio_normalization.rs`.

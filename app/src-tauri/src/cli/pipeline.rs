@@ -518,7 +518,11 @@ fn handle_stream(
     }
 
     // Create the STT provider.
-    let proxy_settings = crate::settings::ProxySettings::default();
+    let proxy_settings: crate::settings::ProxySettings = crate::get_setting_from_store(
+        app,
+        "proxy_settings",
+        crate::settings::ProxySettings::default(),
+    );
     let client = crate::pipeline::stt_provider::build_stt_client(&proxy_settings)
         .map_err(|e| CliError::Runtime(format!("Failed to create HTTP client: {e}")))?;
 
@@ -545,7 +549,15 @@ fn handle_stream(
 
     // Run the streaming session on the async runtime.
     let result = tauri::async_runtime::block_on(async {
-        run_stream_session(provider, &mono_f32, sample_rate, speed, request_log_store).await
+        run_stream_session(
+            provider,
+            &mono_f32,
+            sample_rate,
+            speed,
+            request_log_store,
+            proxy_settings,
+        )
+        .await
     })
     .map_err(|e| CliError::Runtime(e.to_string()))?;
 
@@ -584,7 +596,20 @@ async fn run_stream_session(
     sample_rate: u32,
     speed: f64,
     request_log_store: Option<RequestLogStore>,
+    proxy_settings: crate::settings::ProxySettings,
 ) -> Result<StreamResult, crate::stt::SttError> {
+    if let Some(message) =
+        crate::stt::streaming::describe_websocket_transport_policy_gap(&proxy_settings)
+    {
+        eprintln!("{}", message);
+        if let Some(store) = &request_log_store {
+            let warning = message.clone();
+            let _ = store.with_current(|log| {
+                log.warn(warning);
+            });
+        }
+    }
+
     // Start the streaming session.
     let mut session = provider.start_streaming(sample_rate).await?;
     let audio_tx = session.audio_tx.clone();

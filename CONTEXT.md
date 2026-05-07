@@ -38,6 +38,12 @@ A source-aware, normalized read model for persisted settings.
 
 Settings View preserves explicit-null semantics, falls back safely for missing or malformed values, and identifies whether an effective value came from stored/global/profile/preset/default inputs.
 
+### History Request Lifecycle
+
+The app-facing sequence of request-row transitions for History entries.
+
+History Request Lifecycle turns command/session events into deterministic History updates such as create-in-progress, profile/preset/model mirroring, recording-source attachment, terminal success/error, and cancellation cleanup. `history.rs` still owns persistence and querying; the lifecycle layer exists so callers stop hand-stitching low-level History mutations.
+
 ### Runtime Sync Policy
 
 The frontend policy that classifies settings mutations by runtime side effect and deduplicates pipeline config syncs and secondary-window `settings-changed` events for one logical settings batch.
@@ -83,3 +89,9 @@ The Embeddings Module owns provider defaults, query-vs-document input roles, and
 The command-facing coordination that translates pipeline state transitions into user-visible recording phase events and related side effects.
 
 Recording Orchestration does not own the pipeline state machine, STT execution, Transcription Flow, or Quick Ask / Quick Replace execution. It keeps repeated command-side watchers and phase-notification policies local while preserving the pipeline as the source of truth.
+
+### Recording Completion
+
+The narrow command-facing tail work that happens after a recording request reaches a terminal outcome.
+
+Recording Completion covers saved-WAV persistence for retry/playback and the shared final transcript / cancelled / error event shapes. It does not own request-log success stamping, cost emission, OCR cleanup, or platform text output.

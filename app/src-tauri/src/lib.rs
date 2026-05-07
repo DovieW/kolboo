@@ -29,6 +29,7 @@ mod embeddings;
 pub mod events;
 mod fs;
 mod history;
+mod history_request_lifecycle;
 mod http;
 mod licensing;
 mod llm;
@@ -39,6 +40,7 @@ mod overlay;
 mod pipeline;
 mod policy;
 mod prompt_builders;
+mod recording_completion;
 mod recording_orchestration;
 mod recordings;
 mod request_log;
@@ -48,6 +50,7 @@ mod sentry_init;
 mod sessions;
 #[path = "settings.rs"]
 mod settings;
+mod settings_view;
 mod shortcuts;
 mod shortcuts_lock;
 mod state;
@@ -595,14 +598,14 @@ pub(crate) fn stop_recording(
             // Quick Ask uses a separate UI surface and should not pollute the main dictation history.
             if !is_quick_ask_session {
                 if let Some(req_id) = request_id.as_ref() {
-                    if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                        let _ = history.add_request_entry(
-                            req_id.clone(),
+                    let _ = history_request_lifecycle::apply_request_history_update(
+                        &app_clone,
+                        history::RequestHistoryUpdate::CreateInProgress {
+                            request_id: req_id.clone(),
                             model_info,
-                            commands::history::get_history_max_entries(&app_clone),
-                        );
-                        let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
-                    }
+                            max_entries: commands::history::get_history_max_entries(&app_clone),
+                        },
+                    );
                 }
             }
 
@@ -676,24 +679,24 @@ pub(crate) fn stop_recording(
                     }
 
                     // Persist audio for retry (best-effort)
-                    if let (Some(req_id), Some(store)) = (
-                        request_id.as_deref(),
-                        app_clone.try_state::<RecordingStore>(),
-                    ) {
-                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                            if store.save_wav(req_id, &wav).is_ok() {
-                                let max_saved_recordings: usize =
-                                    crate::settings::store::get_u64_setting_clamped(
-                                        &app_clone,
-                                        crate::settings::store::SettingsReadMode::Cached,
-                                        "max_saved_recordings",
-                                        1000u64,
-                                        1,
-                                        100_000,
-                                    ) as usize;
+                    if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                        let max_saved_recordings: usize =
+                            crate::settings::store::get_u64_setting_clamped(
+                                &app_clone,
+                                crate::settings::store::SettingsReadMode::Cached,
+                                "max_saved_recordings",
+                                1000u64,
+                                1,
+                                100_000,
+                            ) as usize;
 
-                                let _ = store.prune_to_max_files(max_saved_recordings);
-                            }
+                        if let Err(e) = recording_completion::persist_request_recording(
+                            &app_clone,
+                            request_id.as_deref(),
+                            Some(wav.as_slice()),
+                            max_saved_recordings,
+                        ) {
+                            log::warn!("{}", e);
                         }
                     }
 
@@ -798,9 +801,13 @@ pub(crate) fn stop_recording(
                         // Mark history entry as success with empty text (keeps timeline consistent)
                         if !is_quick_ask_session {
                             if let Some(req_id) = request_id.as_ref() {
-                                if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                    let _ = history.complete_request_success(req_id, String::new());
-                                }
+                                let _ = history_request_lifecycle::apply_request_history_update(
+                                    &app_clone,
+                                    history::RequestHistoryUpdate::CompleteSuccess {
+                                        request_id: req_id.clone(),
+                                        text: String::new(),
+                                    },
+                                );
                             }
 
                             sessions::recording_finalization::persist_history_llm_metadata(
@@ -883,19 +890,17 @@ pub(crate) fn stop_recording(
                         );
 
                         // Notify frontend and hide overlay if needed.
-                        let _ = app_clone.emit(events::EVENT_PIPELINE_CANCELLED, ());
-                        let _ = app_clone.emit(
-                            events::EVENT_PIPELINE_STATE_CHANGED,
-                            PipelineStateEvent::Idle,
-                        );
+                        recording_completion::emit_cancelled(&app_clone);
 
                         // Best-effort: remove any in-progress history entry for this request
                         // so it doesn't remain stuck in "in_progress".
                         if let Some(req_id) = request_id.as_ref() {
-                            if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                                let _ = history.delete(req_id);
-                                let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
-                            }
+                            let _ = history_request_lifecycle::apply_request_history_update(
+                                &app_clone,
+                                history::RequestHistoryUpdate::Delete {
+                                    request_id: req_id.clone(),
+                                },
+                            );
                         }
 
                         if overlay_mode_clone == "recording_only" {
@@ -920,14 +925,10 @@ pub(crate) fn stop_recording(
                     }
 
                     log::error!("Transcription failed: {}", e);
-                    let payload = PipelineErrorPayload {
-                        message: e.to_string(),
-                        request_id: request_id.clone(),
-                    };
-                    let _ = app_clone.emit(events::EVENT_PIPELINE_ERROR, payload);
-                    let _ = app_clone.emit(
-                        events::EVENT_PIPELINE_STATE_CHANGED,
-                        PipelineStateEvent::Error,
+                    recording_completion::emit_pipeline_error(
+                        &app_clone,
+                        &e.to_string(),
+                        request_id.as_deref(),
                     );
 
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
@@ -948,31 +949,30 @@ pub(crate) fn stop_recording(
                     );
 
                     // Persist audio for retry (best-effort)
-                    if let (Some(req_id), Some(store)) = (
-                        request_id.as_deref(),
-                        app_clone.try_state::<RecordingStore>(),
-                    ) {
-                        if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
-                            if store.save_wav(req_id, &wav).is_ok() {
-                                let max_saved_recordings: usize = (get_setting_from_store(
-                                    &app_clone,
-                                    "max_saved_recordings",
-                                    1000u64,
-                                ))
-                                .clamp(1, 100_000)
-                                    as usize;
+                    if let Some(wav) = pipeline_clone.clone_last_wav_bytes() {
+                        let max_saved_recordings: usize =
+                            (get_setting_from_store(&app_clone, "max_saved_recordings", 1000u64))
+                                .clamp(1, 100_000) as usize;
 
-                                let _ = store.prune_to_max_files(max_saved_recordings);
-                            }
+                        if let Err(err) = recording_completion::persist_request_recording(
+                            &app_clone,
+                            request_id.as_deref(),
+                            Some(wav.as_slice()),
+                            max_saved_recordings,
+                        ) {
+                            log::warn!("{}", err);
                         }
                     }
 
                     // Mark history entry as error and keep it
                     if let Some(req_id) = request_id.as_ref() {
-                        if let Some(history) = app_clone.try_state::<HistoryStorage>() {
-                            let _ = history.complete_request_error(req_id, e.to_string());
-                            let _ = app_clone.emit(events::EVENT_HISTORY_CHANGED, ());
-                        }
+                        let _ = history_request_lifecycle::apply_request_history_update(
+                            &app_clone,
+                            history::RequestHistoryUpdate::CompleteError {
+                                request_id: req_id.clone(),
+                                error_message: e.to_string(),
+                            },
+                        );
                     }
 
                     // Time-based retention (best-effort). Still apply even on failures.

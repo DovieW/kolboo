@@ -10,8 +10,10 @@ use crate::history::HistoryStorage;
 use crate::llm;
 use crate::pipeline;
 use crate::pipeline::normalize_stt_language_setting;
-use crate::request_log::{RequestLogStore, RequestLogsRetentionConfig, RequestLogsRetentionMode};
+use crate::request_log::{RequestLogStore, RequestLogsRetentionConfig};
+use crate::settings::store::SettingsReadMode;
 use crate::settings::{self, default_values};
+use crate::settings_view;
 use crate::state::TrayKeepAlive;
 use crate::stt;
 use crate::{get_setting_from_store, stats};
@@ -952,28 +954,8 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
 
 #[cfg(desktop)]
 pub(crate) fn initialize_request_log_store(app: &AppHandle) {
-    use chrono::Duration as ChronoDuration;
-
-    let mode: String =
-        get_setting_from_store(app, "request_logs_retention_mode", "amount".to_string());
-    let amount: u64 = get_setting_from_store(app, "request_logs_retention_amount", 50u64);
-    let days: u64 = get_setting_from_store(app, "request_logs_retention_days", 7u64);
-
-    let mode = if mode == "time" {
-        RequestLogsRetentionMode::Time
-    } else {
-        RequestLogsRetentionMode::Amount
-    };
-
-    let retention = RequestLogsRetentionConfig {
-        mode,
-        amount: amount.clamp(1, 200) as usize,
-        time_retention: if days == 0 {
-            None
-        } else {
-            Some(ChronoDuration::days(days as i64))
-        },
-    };
+    let retention: RequestLogsRetentionConfig =
+        settings_view::read_request_logs_retention(app, SettingsReadMode::Fresh);
 
     let request_log_store = RequestLogStore::new_with_retention(retention);
     app.manage(request_log_store);

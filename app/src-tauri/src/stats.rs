@@ -22,6 +22,8 @@ use crate::cost::openai as openai_cost;
 use crate::cost::reporting as cost_reporting;
 use crate::events;
 use crate::request_log::RequestLogStore;
+use crate::settings::store::SettingsReadMode;
+use crate::settings_view;
 use tauri::AppHandle;
 use tauri::{Emitter, Manager};
 
@@ -125,15 +127,7 @@ impl CostEvent {
 fn is_free_tier_call(app: &AppHandle, provider: &str) -> bool {
     #[cfg(desktop)]
     {
-        // Default to true, matching UI expectations.
-        match provider {
-            "cerebras" => crate::get_setting_from_store(app, "cerebras_free_tier", true),
-            "groq" => crate::get_setting_from_store(app, "groq_free_tier", true),
-            "cohere" => crate::get_setting_from_store(app, "cohere_free_tier", true),
-            "assemblyai" => crate::get_setting_from_store(app, "assemblyai_free_tier", true),
-            "speechmatics" => crate::get_setting_from_store(app, "speechmatics_free_tier", true),
-            _ => false,
-        }
+        settings_view::is_provider_free_tier_enabled(app, provider, SettingsReadMode::Cached)
     }
 
     #[cfg(not(desktop))]
@@ -1101,34 +1095,7 @@ mod cost_index {
 
 #[cfg(desktop)]
 pub fn read_stats_retention_config(app: &tauri::AppHandle) -> StatsRetentionConfig {
-    let unit: String = crate::get_setting_from_store(app, "stats_retention_unit", "days".into());
-    let value: f64 = crate::get_setting_from_store(app, "stats_retention_value", 30.0f64);
-    let max_bytes: u64 =
-        crate::get_setting_from_store(app, "stats_retention_max_bytes", 50_000_000u64);
-
-    let value = if value.is_finite() {
-        value.max(0.0)
-    } else {
-        0.0
-    };
-
-    let time_retention = if value == 0.0 {
-        None
-    } else if unit == "hours" {
-        Some(ChronoDuration::milliseconds(
-            (value * 3600.0 * 1000.0) as i64,
-        ))
-    } else {
-        // Default: days
-        Some(ChronoDuration::milliseconds(
-            (value * 24.0 * 3600.0 * 1000.0) as i64,
-        ))
-    };
-
-    StatsRetentionConfig {
-        time_retention,
-        max_bytes,
-    }
+    settings_view::read_stats_retention_config(app, SettingsReadMode::Fresh)
 }
 
 #[cfg(not(desktop))]

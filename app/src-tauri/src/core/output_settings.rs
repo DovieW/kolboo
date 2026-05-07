@@ -1,4 +1,6 @@
 use crate::commands::text::OutputMode;
+use crate::settings::store::SettingsReadMode;
+use crate::settings_view;
 use tauri::AppHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -80,22 +82,15 @@ pub(crate) fn resolve_output_intent_from_store(
     profile_output_mode: Option<&str>,
     profile_hit_enter: Option<bool>,
 ) -> ResolvedOutputIntent {
-    let global_mode_str: String =
-        crate::get_setting_from_store(app, "output_mode", "paste".to_string());
-    let global_mode = OutputMode::from_str(&global_mode_str);
-    let global_hit_enter: bool = crate::get_setting_from_store(app, "output_hit_enter", false);
-    let clipboard_privacy_mode: bool =
-        crate::get_setting_from_store(app, "output_clipboard_privacy_mode", false);
-    let smart_paste_protection: bool =
-        crate::get_setting_from_store(app, "output_smart_paste_protection", false);
+    let view = settings_view::read_output_settings_view(app, SettingsReadMode::Cached);
 
     resolve_output_intent(
-        global_mode,
-        global_hit_enter,
+        view.mode,
+        view.hit_enter,
         profile_output_mode,
         profile_hit_enter,
-        clipboard_privacy_mode,
-        smart_paste_protection,
+        view.clipboard_privacy_mode,
+        view.smart_paste_protection,
     )
 }
 
