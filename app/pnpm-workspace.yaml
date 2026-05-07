@@ -1,5 +1,9 @@
 packages:
   - .
 
+# Keep installs at least 7 days behind published versions to reduce supply-chain risk.
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
+
 onlyBuiltDependencies:
   - esbuild
