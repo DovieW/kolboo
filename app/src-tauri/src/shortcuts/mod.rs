@@ -4,12 +4,16 @@ use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(desktop)]
 mod lifecycle;
+#[cfg(desktop)]
+mod retry_last;
 
 #[cfg(desktop)]
 pub(crate) use lifecycle::{
     is_windows_hook_handled_hotkey, register_hotkey_cards, sync_windows_modifier_hook_flags,
     HotkeyRegistrationMode,
 };
+#[cfg(desktop)]
+pub(crate) use retry_last::spawn_retry_last_recording_and_output;
 
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
@@ -22,7 +26,6 @@ use crate::commands;
 use crate::events;
 use crate::history::HistoryStorage;
 use crate::pipeline;
-use crate::recordings::RecordingStore;
 use crate::request_log::RequestLogStore;
 use crate::settings::HotkeyAction;
 use crate::settings::HotkeyConfig as InternalHotkeyConfig;
@@ -34,112 +37,6 @@ use crate::{
     emit_system_event, get_playing_audio_handling, get_setting_from_store, start_recording,
     stop_recording, toggle_media_play_pause, AudioMuteManager, PipelineStateEvent,
 };
-
-// ============================================================================
-// Retry-last-recording hotkey support
-// ============================================================================
-
-/// Resolve the most recent history entry id that has a persisted recording available.
-///
-/// This is used by the Retry hotkey to pick "the last recording".
-#[cfg(desktop)]
-fn resolve_last_recording_history_entry_id(app: &AppHandle) -> Option<String> {
-    let history = app.try_state::<HistoryStorage>()?;
-    let store = app.try_state::<RecordingStore>()?;
-
-    // Be conservative on work done inside shortcut-triggered paths.
-    let entries = history.get_all(Some(50)).ok()?;
-    for entry in entries.iter() {
-        // Prefer an explicit recording pointer (covers reruns), but fall back to
-        // legacy storage where the WAV is stored under the entry id.
-        let candidate_ids = [
-            entry.recording_request_id.as_deref(),
-            Some(entry.id.as_str()),
-        ];
-
-        if candidate_ids
-            .iter()
-            .flatten()
-            .any(|rid| store.has(rid.trim()))
-        {
-            return Some(entry.id.clone());
-        }
-    }
-
-    None
-}
-
-/// Retry the last available recording and output the result.
-///
-/// Intended for use by the global Retry hotkey (so it shows the overlay loading state
-/// even when the overlay is normally hidden).
-#[cfg(desktop)]
-pub(crate) fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &str) {
-    let app = app.clone();
-    let source = source.to_string();
-
-    tauri::async_runtime::spawn(async move {
-        let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() else {
-            log::warn!("{source}: pipeline not available; cannot retry");
-            return;
-        };
-        let pipeline = (*pipeline).clone();
-
-        let pipeline_state = pipeline.state();
-        if !matches!(
-            pipeline_state,
-            pipeline::PipelineState::Idle | pipeline::PipelineState::Error
-        ) {
-            log::info!(
-                "{source}: retry ignored (pipeline busy: {:?})",
-                pipeline_state
-            );
-            return;
-        }
-
-        let Some(history_entry_id) = resolve_last_recording_history_entry_id(&app) else {
-            log::info!("{source}: no recording available to retry");
-            emit_system_event(&app, "shortcut", "Retry: no recording available", None);
-            return;
-        };
-
-        // Force-show overlay so the user gets the loading state UX.
-        if let Err(e) = commands::overlay::show_overlay_with_reset_if_not_always(&app) {
-            log::warn!("{source}: failed to show overlay for retry: {}", e);
-        }
-
-        let transcript = match commands::recording::pipeline_retry_transcription_impl(
-            app.clone(),
-            pipeline.clone(),
-            history_entry_id,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                log::warn!("{source}: retry failed: {}", e.message);
-                return;
-            }
-        };
-
-        let Some(text) = crate::sanitize_transcript(&transcript) else {
-            log::info!("{source}: retry returned empty transcript; nothing to output");
-            return;
-        };
-
-        let output_intent =
-            crate::core::output_settings::resolve_output_intent_from_store(&app, None, None);
-
-        if let Err(e) = commands::text::output_text_with_mode_options(
-            &text,
-            output_intent.mode(),
-            output_intent.hit_enter(),
-            !output_intent.clipboard_privacy_mode(),
-        ) {
-            log::error!("{source}: failed to output retry transcript: {}", e);
-        }
-    });
-}
 
 /// Normalize a shortcut string for comparison (handles "ctrl" vs "control" differences)
 #[cfg(desktop)]

@@ -17,6 +17,7 @@ pub mod overlay;
 pub mod policy;
 pub mod pricing;
 pub mod recording;
+mod recording_errors;
 pub mod router;
 pub mod secrets;
 pub mod settings;

@@ -27,8 +27,6 @@ import {
 import { useClipboard, useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Store } from "@tauri-apps/plugin-store";
-import { format, isToday, isYesterday } from "date-fns";
 import {
 	Bot,
 	Check,
@@ -52,6 +50,18 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
+import {
+	type AnalysisPromptStyle,
+	analysisStyleLabel,
+	buildAnalysisPrompt,
+	estimateTokenCount,
+	formatHistoryTime,
+	groupHistoryByDate,
+	HISTORY_PAGE_SIZE,
+	type PersistedHistoryFilters,
+	readPersistedHistoryFilters,
+	writePersistedHistoryFilters,
+} from "../lib/history/readModel";
 import { getRetryLastFailedCandidate } from "../lib/historyRetry";
 import { listAllLlmModelKeys, listAllSttModelKeys } from "../lib/modelOptions";
 import {
@@ -71,282 +81,6 @@ import {
 	tauriAPI,
 } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
-
-const HISTORY_FILTERS_STORE_FILE = "ui.json";
-const HISTORY_FILTERS_STORE_KEY = "history_feed_filters_v1";
-
-type PersistedHistoryFilters = {
-	filterText: string;
-	showFailed: boolean;
-	showEmptyTranscript: boolean;
-	selectedSttModelKeys: string[];
-	selectedLlmModelKeys: string[];
-};
-
-let historyFiltersStore: Store | null = null;
-
-async function getHistoryFiltersStore(): Promise<Store> {
-	if (!historyFiltersStore) {
-		historyFiltersStore = await Store.load(HISTORY_FILTERS_STORE_FILE);
-	}
-	return historyFiltersStore;
-}
-
-function normalizeStringArray(value: unknown): string[] {
-	if (!Array.isArray(value)) return [];
-	return value.filter((item): item is string => typeof item === "string");
-}
-
-function normalizePersistedHistoryFilters(
-	value: unknown,
-): PersistedHistoryFilters | null {
-	if (!value || typeof value !== "object") return null;
-	const v = value as Record<string, unknown>;
-
-	const filterText = typeof v.filterText === "string" ? v.filterText : "";
-	const showFailed = typeof v.showFailed === "boolean" ? v.showFailed : true;
-	const showEmptyTranscript =
-		typeof v.showEmptyTranscript === "boolean" ? v.showEmptyTranscript : false;
-
-	const rawSelectedSttModelKeys = normalizeStringArray(v.selectedSttModelKeys);
-	const rawSelectedLlmModelKeys = normalizeStringArray(v.selectedLlmModelKeys);
-
-	// Defensive: drop unknown keys so the checkbox UI doesn't get stuck with
-	// selections that it can't render/unselect.
-	const knownSttKeys = new Set(listAllSttModelKeys().map((o) => o.key));
-	const knownLlmKeys = new Set(listAllLlmModelKeys().map((o) => o.key));
-
-	const selectedSttModelKeys = rawSelectedSttModelKeys.filter((k) =>
-		knownSttKeys.has(k),
-	);
-	const selectedLlmModelKeys = rawSelectedLlmModelKeys.filter((k) =>
-		knownLlmKeys.has(k),
-	);
-
-	return {
-		filterText,
-		showFailed,
-		showEmptyTranscript,
-		selectedSttModelKeys,
-		selectedLlmModelKeys,
-	};
-}
-
-const HISTORY_PAGE_SIZE = 25;
-
-function formatTime(timestamp: string): string {
-	return format(new Date(timestamp), "h:mm a");
-}
-
-function formatDate(timestamp: string): string {
-	const date = new Date(timestamp);
-	if (isToday(date)) return "Today";
-	if (isYesterday(date)) return "Yesterday";
-	return format(date, "MMM d");
-}
-
-interface GroupedHistory {
-	date: string;
-	items: Array<{
-		id: string;
-		text: string;
-		timestamp: string;
-		status?: "in_progress" | "success" | "error";
-		error_message?: string | null;
-		profile_id?: string | null;
-		profile_name?: string | null;
-		preset_id?: string | null;
-		preset_name?: string | null;
-		stt_provider?: string | null;
-		stt_model?: string | null;
-		llm_provider?: string | null;
-		llm_model?: string | null;
-		recording_request_id?: string | null;
-	}>;
-}
-
-function groupHistoryByDate(
-	history: Array<{
-		id: string;
-		text: string;
-		timestamp: string;
-		status?: "in_progress" | "success" | "error";
-		error_message?: string | null;
-		profile_id?: string | null;
-		profile_name?: string | null;
-		preset_id?: string | null;
-		preset_name?: string | null;
-		stt_provider?: string | null;
-		stt_model?: string | null;
-		llm_provider?: string | null;
-		llm_model?: string | null;
-	}>,
-): GroupedHistory[] {
-	const groups: Record<string, GroupedHistory> = {};
-
-	for (const item of history) {
-		const dateKey = formatDate(item.timestamp);
-		if (!groups[dateKey]) {
-			groups[dateKey] = { date: dateKey, items: [] };
-		}
-		groups[dateKey].items.push(item);
-	}
-
-	return Object.values(groups);
-}
-
-function estimateTokenCount(text: string): number {
-	// Heuristic: ~4 characters per token for English-ish text.
-	// Good enough for an on-screen estimate.
-	const normalized = (text ?? "").trim();
-	if (!normalized) return 0;
-	return Math.max(1, Math.ceil(normalized.length / 4));
-}
-
-type AnalysisPromptStyle = "productive" | "insightful" | "structured";
-
-function analysisStyleLabel(style: AnalysisPromptStyle): string {
-	switch (style) {
-		case "productive":
-			return "Productive";
-		case "insightful":
-			return "Insightful";
-		case "structured":
-			return "Structured";
-	}
-}
-
-function buildAnalysisSystemPrompt(style: AnalysisPromptStyle): string {
-	switch (style) {
-		case "productive":
-			return (
-				"You are an expert assistant. Analyze the following voice dictation transcripts." +
-				"\n\nGoals:" +
-				"\n- Identify recurring themes, priorities, open questions, and next actions." +
-				"\n- Produce a concise summary and a structured list of action items." +
-				"\n- Call out contradictions, missing context, and risks." +
-				"\n\nOutput format:" +
-				"\n1) Executive summary (5-10 bullets)" +
-				"\n2) Themes (grouped)" +
-				"\n3) Action items (with suggested owners + priority)" +
-				"\n4) Open questions" +
-				"\n5) Notable quotes (optional)"
-			);
-		case "insightful":
-			return (
-				"You are an insightful analyst. Read the transcripts and infer intent, context, and patterns." +
-				"\n\nFocus:" +
-				"\n- Hidden assumptions and recurring frustrations" +
-				"\n- Opportunities, risks, and what to do next" +
-				"\n- What seems important but unstated" +
-				"\n\nOutput format:" +
-				"\n1) Key insights (bullets)" +
-				"\n2) Themes & evidence (quotes or references)" +
-				"\n3) Recommendations" +
-				"\n4) Open questions"
-			);
-		case "structured":
-			return (
-				"You are a meticulous organizer. Turn these transcripts into a clean plan." +
-				"\n\nRules:" +
-				"\n- Be concise." +
-				"\n- Use headings and bullet lists." +
-				"\n- Prefer concrete next steps." +
-				"\n\nOutput format:" +
-				"\n## Summary" +
-				"\n## Goals" +
-				"\n## Tasks (priority-ordered)" +
-				"\n## Decisions needed" +
-				"\n## Questions"
-			);
-	}
-}
-
-function buildTranscriptsUserPrompt(args: {
-	transcripts: Array<{ timestamp: string; text: string }>;
-}): string {
-	const lines: string[] = [];
-	lines.push("---\nTRANSCRIPTS\n---");
-	args.transcripts.forEach((entry, idx) => {
-		const ts = format(new Date(entry.timestamp), "yyyy-MM-dd HH:mm");
-		lines.push(`\n[Recording ${idx + 1} • ${ts}]\n${entry.text}`);
-	});
-	return lines.join("\n");
-}
-
-function buildAnalysisPrompt(
-	history: Array<{
-		id: string;
-		text: string;
-		timestamp: string;
-		status?: "in_progress" | "success" | "error";
-	}>,
-	options?: {
-		includeFromLastHours?: number | null;
-		style?: AnalysisPromptStyle;
-	},
-): {
-	prompt: string;
-	systemPrompt: string;
-	userPrompt: string;
-	includedCount: number;
-	totalCount: number;
-	availableTranscriptsCount: number;
-} {
-	const totalCount = history.length;
-	const style: AnalysisPromptStyle = options?.style ?? "productive";
-
-	const allTranscripts = history
-		.filter((e) => (e.status ?? "success") === "success")
-		.map((e) => ({ ...e, text: (e.text ?? "").trim() }))
-		.filter((e) => e.text.length > 0);
-
-	const availableTranscriptsCount = allTranscripts.length;
-
-	const includeFromLastHours = options?.includeFromLastHours;
-	const cutoffMs =
-		typeof includeFromLastHours === "number" &&
-		Number.isFinite(includeFromLastHours) &&
-		includeFromLastHours > 0
-			? Date.now() - includeFromLastHours * 60 * 60 * 1000
-			: null;
-
-	const filtered =
-		typeof cutoffMs === "number"
-			? allTranscripts.filter(
-					(t) => new Date(t.timestamp).getTime() >= cutoffMs,
-				)
-			: allTranscripts;
-
-	const transcripts = [...filtered].sort(
-		(a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-	);
-
-	const includedCount = transcripts.length;
-	const systemPrompt = buildAnalysisSystemPrompt(style);
-	const userPrompt = buildTranscriptsUserPrompt({
-		transcripts: transcripts.map((t) => ({
-			timestamp: t.timestamp,
-			text: t.text,
-		})),
-	});
-
-	const promptParts = [systemPrompt, userPrompt];
-	if (includedCount === 0) {
-		promptParts.push(
-			"(No non-empty transcripts matched your filter. Record something first, then try again.)",
-		);
-	}
-
-	return {
-		prompt: promptParts.join("\n\n"),
-		systemPrompt,
-		userPrompt,
-		includedCount,
-		totalCount,
-		availableTranscriptsCount,
-	};
-}
 
 export function HistoryFeed({
 	onJumpToLog,
@@ -651,9 +385,7 @@ export function HistoryFeed({
 
 		const hydrate = async () => {
 			try {
-				const store = await getHistoryFiltersStore();
-				const raw = await store.get(HISTORY_FILTERS_STORE_KEY);
-				const normalized = normalizePersistedHistoryFilters(raw);
+				const normalized = await readPersistedHistoryFilters();
 
 				if (!normalized || cancelled) return;
 
@@ -683,7 +415,6 @@ export function HistoryFeed({
 		const timeout = setTimeout(() => {
 			const persist = async () => {
 				try {
-					const store = await getHistoryFiltersStore();
 					const payload: PersistedHistoryFilters = {
 						filterText,
 						showFailed,
@@ -691,8 +422,7 @@ export function HistoryFeed({
 						selectedSttModelKeys,
 						selectedLlmModelKeys,
 					};
-					await store.set(HISTORY_FILTERS_STORE_KEY, payload);
-					await store.save();
+					await writePersistedHistoryFilters(payload);
 				} catch (e) {
 					console.warn("Failed to persist history filters:", e);
 				}
@@ -2061,7 +1791,7 @@ export function HistoryFeed({
 											disabled={!hasCopyValue}
 										>
 											<span className="history-time">
-												{formatTime(entry.timestamp)}
+												{formatHistoryTime(entry.timestamp)}
 											</span>
 											<div className="history-text">
 												{status === "in_progress" ? (

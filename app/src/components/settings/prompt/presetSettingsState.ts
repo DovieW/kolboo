@@ -1,3 +1,4 @@
+import { normalizePresetRoutingHints } from "../../../lib/tauri/presetDefaults";
 import type {
 	AppSettings,
 	RewritePreset,
@@ -47,12 +48,7 @@ export function presetRoutingHintsToText(
  * Convert the preset editor's textarea back into normalized routing hints.
  */
 export function presetRoutingHintsFromText(text: string): string[] | null {
-	const hints = text
-		.split(/\r?\n/)
-		.map((value) => value.trim())
-		.filter(Boolean);
-
-	return hints.length === 0 ? null : hints;
+	return normalizePresetRoutingHints(text.split(/\r?\n/));
 }
 
 /**

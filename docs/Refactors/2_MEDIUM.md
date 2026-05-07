@@ -10,7 +10,7 @@
 
 `app/src-tauri/src/commands/recording.rs` still owns some broad side-effect clusters:
 
-- time-based retention calls
+- terminal-flow decisions about when to apply time-based retention
 - a few flow-specific request-log messages / command return-shape details
 
 Follow-up idea:
@@ -18,6 +18,30 @@ Follow-up idea:
 - Extract only one proven cluster at a time, with characterization tests around request id/history/recording invariants before moving behavior.
 - Keep the pipeline state machine, STT Execution, Transcription Flow, and Quick Ask / Quick Replace execution ownership in their current Modules.
 - Avoid a generic "recording session manager" unless the deletion test proves it removes real duplicated caller logic rather than hiding Tauri side effects.
+
+Progress (2026-05-07):
+
+- Extracted command-facing `PipelineError` → `CommandError` classification into `app/src-tauri/src/commands/recording_errors.rs`, with pure tests for auth/rate-limit/state error codes. This narrows stable command return-shape ownership without hiding recording side effects.
+- Existing source also has `app/src-tauri/src/sessions/retention.rs`, which owns transcription-retention settings parsing, legacy fallback, History pruning, optional recording deletion, and `history-changed` emission. `commands/recording.rs` now only decides which terminal transcription outcomes should apply that policy.
+- Existing source also has `app/src-tauri/src/pipeline/profile_query.rs`, which owns command-facing profile chips, retry/test-transcription profile identity preservation, and safe program-basename logging.
+- Follow-up remains: a few flow-specific request-log messages / command return-shape details still live in `commands/recording.rs`; move only when a tested cluster has a clear deletion test.
+
+## Deepen Audio Capture internal modules
+
+**Status:** Addressed for pure internals by phase 4 cleanup work (2026-05-07)
+
+`app/src-tauri/src/audio_capture.rs` had microphone selection, stop-time preprocessing, realtime meters, buffering, CPAL stream/runtime logic, VAD worker setup, and public capture Interfaces in one large file.
+
+Progress (2026-05-07):
+
+- Added `app/src-tauri/src/audio_capture/device_selection.rs` for session-stable mic IDs, duplicate-name ordinal selection, legacy contains fallback, device list read models, and default-device info.
+- Added `app/src-tauri/src/audio_capture/preprocessing.rs` for capture cleanup controls: high-pass/DC block, AGC, light noise suppression, noise-gate strength mapping, and interleaved noise gate.
+- Added `app/src-tauri/src/audio_capture/meters.rs` for realtime level/waveform snapshots, RMS/peak calculation, and speech-presence detection helpers.
+- Preserved the external `AudioCaptureBackend` / `AudioCapture` Interfaces and left CPAL stream/runtime lifecycle in `audio_capture.rs` because moving it would be higher risk and tied to CPAL lifetimes.
+
+Follow-up remains:
+
+- If capture-thread lifecycle becomes painful again, consider a separate `audio_capture/runtime.rs` only after fake-device/channel characterization tests prove the CPAL lifetime deletion test passes.
 
 ## Centralize setting default values (DRY violation)
 
@@ -82,6 +106,11 @@ Progress (2026-05-06):
 - Added backend `app/src-tauri/src/settings_view.rs` so Rust callers now share typed Settings View reads for output settings, Quick Ask config, request-log retention, stats retention, and free-tier toggles instead of repeating raw store keys.
 - Follow-up remains: route preset-specific editor state through `presetSettingView(...)` when preset editing gets touched again.
 
+Progress (2026-05-07):
+
+- Split raw persisted preset normalization out of `app/src/lib/tauri/settings.ts` into `app/src/lib/tauri/settingsNormalizers/presets.ts`, while keeping `app/src/lib/tauri/presetDefaults.ts` as the typed canonical preset default/write-path normalizer.
+- Preset editor routing-hint parsing now reuses the canonical routing-hint normalizer so settings reads, shared-preset edits, and textarea edits keep the same trim/drop-empty semantics.
+
 ## Reduce repetitive settings mutation hooks in `queries.ts`
 
 **Status:** Partially addressed by architecture-deepening work (2026-05-06)
@@ -93,10 +122,33 @@ Progress (2026-05-06):
 - Added `useSettingsInvalidatingMutation(...)` and `invalidateSettingsQueries(...)` so simple settings writes share one query-invalidation path.
 - Migrated a large block of plain settings mutations (output/audio/OCR/proxy/STT/LLM/Quick Ask/free-tier settings) to the helper.
 
+Progress (2026-05-07):
+
+- Split query-function factories by domain under `app/src/lib/queries/queryFns/**` and kept `app/src/lib/queries/queryFns.ts` as the compatibility barrel. The hook monolith still exists, but query normalization/factory logic now has clearer Locality for cost, history, settings, providers, recordings, logs, and transcription tests.
+
 Follow-up remains:
 
 - Continue migrating bespoke-but-nearly-identical hooks when they are touched.
+- Continue splitting `app/src/lib/queries.ts` hook exports into domain hook Modules when a larger UI slice touches those imports.
 - Keep optimistic updates and runtime-sync-heavy flows bespoke when the helper would hide meaningful behavior.
+
+## Extract Data and History UI read models
+
+**Status:** Addressed by phase 1-3 cleanup work (2026-05-07)
+
+The large settings/history components had deterministic read-model logic mixed into UI rendering and mutation wiring.
+
+Progress (2026-05-07):
+
+- Added `app/src/lib/settings/dataLifecycle.ts` for Data Lifecycle read-model helpers: cloud-sync UI-state normalization, retention unit conversion, recordings storage summaries, and byte formatting.
+- `app/src/components/settings/DataSettings.tsx` now consumes those helpers and remains the UI Adapter over Mantine controls and settings/data mutations.
+- Added `app/src/lib/history/readModel.ts` for History Feed read-model helpers: persisted filter normalization/store access, date grouping, token estimates, and analysis prompt construction.
+- `app/src/components/HistoryFeed.tsx` now consumes the read model while keeping playback, query hooks, and destructive-action UI local.
+- Added deterministic Vitest coverage for corrupted history filters, grouping, prompt construction, cloud-sync defaults, retention conversion, and storage formatting.
+
+Follow-up remains:
+
+- `DataSettings.tsx` and `HistoryFeed.tsx` are still large UI Adapters. If touched again, extract presentational subcomponents one section at a time rather than introducing a generic settings/history framework.
 
 ## Reduce maintenance cost of schema registry
 
@@ -219,6 +271,8 @@ Progress (2026-05-07):
 - Added `app/src-tauri/src/stt/websocket_transport.rs` so realtime WS providers now share one transport-policy seam for manual proxy CONNECT tunnelling, manual `no_proxy` bypass, and TLS override handling (trusted CA + invalid-cert mode).
 - OpenAI, Deepgram, ElevenLabs, Speechmatics, AssemblyAI, and Fireworks now receive `ProxySettings` through cloud-provider construction and use the shared transport path rather than silently ignoring configured WS transport policy.
 - `stt/streaming.rs` remains the provider-independent WS/session lifecycle Module; provider adapters still own request headers, URL/query construction, and protocol-specific message handling.
+- Strengthened `stt/websocket_transport.rs` characterization tests for anchored/wildcard `no_proxy` matching, unsupported HTTPS proxy diagnostics, and local loopback HTTP proxy CONNECT request shape with Basic auth.
+- Recorded WebSocket Transport Policy as an implemented Provider-Family Seam in `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` so the seam evidence and decision log now agree.
 
 Remaining gaps:
 
@@ -272,6 +326,12 @@ Remaining ideas:
 - If `pipeline.rs` still has too much repeated batch STT → routing → rewrite choreography, consider a follow-up wrapper in `transcription_flow.rs` that composes `stt_flow::run_stt_transcription(...)` with `complete_transcription_flow(...)`.
 - Keep streaming finalization and managed-auth retry behavior explicit unless characterization tests make it safe to consolidate them.
 
+Progress (2026-05-07):
+
+- Moved Batch STT Orchestration into `app/src-tauri/src/pipeline/batch_stt_orchestration.rs`: managed-auth refresh retry, `stt_complete` bookkeeping, and shared failed-attempt state handling for normal batch, streaming fallback, retry, and CLI transcription paths now have one owner.
+- Kept provider choice in `pipeline/stt_provider_resolver.rs`, and kept provider transport/retry/timeout execution in `pipeline/stt_flow.rs`.
+- Added pure classification tests for managed-auth token error detection.
+
 ## Consolidate duplicated Settings shell components
 
 **Status:** Completed by architecture-deepening work (2026-05-06)
@@ -324,7 +384,7 @@ Progress (2026-05-05):
 
 ## Revisit provider-family seams only with a real two-adapter proof
 
-**Status:** Deferred by Spec Kit architecture-deepening work (2026-05-03)
+**Status:** Updated by phase 1 provider-family reconciliation (2026-05-07)
 
 The provider-family pre-flight reviewed four possible seams and intentionally did **not** add new production abstractions where they would be pass-through or lossy:
 
@@ -336,6 +396,11 @@ The provider-family pre-flight reviewed four possible seams and intentionally di
 Reopen a provider-family seam only when at least two concrete adapters can share behavior without erasing provider-specific semantics, and when deleting the seam would clearly reintroduce duplicated caller complexity.
 
 Reference: `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md`.
+
+Progress (2026-05-07):
+
+- Recorded WebSocket Transport Policy as an implemented real Provider-Family Seam with six realtime STT adapters and a deletion test.
+- Added explicit deferrals for LLM provider client configuration, STT streaming transcript event parsing, LLM structured output fallback/parsing, and OCR provider adapters. The LLM client-config candidate remains worth reopening, but this slice stopped before adding a shallow pass-through wrapper.
 
 ## Deepen Local Provider Lifecycle ownership beyond helper rules
 
@@ -388,3 +453,19 @@ Remaining smaller cleanup ideas, if this area gets touched again:
 - Keep expanding pure tests around lifecycle decisions instead of unit-testing Tauri/AppHandle side effects directly.
 
 Keep this separate from provider-family seams. The shared behavior here is about feature request ownership, not generic provider behavior.
+
+## Deepen Shortcut Retry Last ownership
+
+**Status:** Addressed for the Retry Last slice by phase 5 cleanup work (2026-05-07)
+
+Shortcut dispatch had Retry Last history/recording lookup and retry output orchestration inline with global-shortcut and modifier-only event handling.
+
+Progress (2026-05-07):
+
+- Added `app/src-tauri/src/shortcuts/retry_last.rs` for resolving the most recent retryable recording, force-showing overlay loading UX, running retry transcription, and outputting the sanitized retry transcript.
+- Kept startup/runtime registration decisions in `shortcuts/lifecycle.rs`, Windows modifier-only hook mechanics in `windows_modifier_hotkeys.rs`, and remaining action dispatch in `shortcuts/mod.rs`.
+- Added pure tests for retryable history-entry selection, including explicit recording-source preference, legacy entry-id fallback, and whitespace trimming.
+
+Follow-up remains:
+
+- Extract broader `shortcuts/dispatch.rs` only after characterization tests cover both global-shortcut and modifier-only paths. Do not hide Tauri side effects behind a generic event framework.

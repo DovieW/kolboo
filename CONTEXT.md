@@ -32,6 +32,12 @@ The deterministic behavior that matches a foreground program to a prompt profile
 
 Profile Resolution is split into program matching (path normalization and first-match ordering) and effective behavior (default profile fallback, active preset selection, and Active Window OCR mode precedence).
 
+### Profile Query
+
+The command-facing read model for lightweight profile identity lookups used outside request-time Profile Resolution.
+
+Profile Query owns foreground-profile chips, retry/test-transcription profile identity preservation, and safe program-basename logging. It does not decide effective runtime behavior for a request; that remains in Profile Resolution and Transcription Flow.
+
 ### Settings View
 
 A source-aware, normalized read model for persisted settings.
@@ -66,6 +72,24 @@ A shared provider abstraction that is only introduced when at least two concrete
 
 Provider-family concerns without a real two-adapter proof are documented as deferred rather than implemented as pass-through abstractions.
 
+### WebSocket Transport Policy
+
+The provider-family connection policy for realtime STT WebSocket transports.
+
+WebSocket Transport Policy owns manual HTTP proxy CONNECT tunnelling, manual `no_proxy` bypass, trusted CA certificates, and invalid-cert override handling. It does not own provider URLs, headers, protocol messages, partial transcript semantics, or streaming state machines; those remain in concrete STT adapters and provider-independent session helpers.
+
+### Data Lifecycle
+
+The frontend read model for user-visible app data retention, storage, and sync state.
+
+Data Lifecycle owns UI-safe normalization for data/storage settings such as retention unit conversions, recordings storage summaries, cloud-sync display state, and byte formatting. Data settings components consume this read model and remain UI adapters over Mantine controls and mutation hooks.
+
+### History Feed Read Model
+
+The frontend read model for History tab filtering, grouping, and transcript-analysis prompt preparation.
+
+History Feed Read Model owns persisted filter normalization, date grouping, token-count estimates, and deterministic analysis prompt construction. `HistoryFeed.tsx` remains the UI adapter over query hooks, playback controls, and destructive-action modals.
+
 ### Telemetry Mapping
 
 The conversion from rich, request-scoped diagnostics into narrow read models for downstream systems.
@@ -95,3 +119,33 @@ Recording Orchestration does not own the pipeline state machine, STT execution, 
 The narrow command-facing tail work that happens after a recording request reaches a terminal outcome.
 
 Recording Completion covers saved-WAV persistence for retry/playback and the shared final transcript / cancelled / error event shapes. It does not own request-log success stamping, cost emission, OCR cleanup, or platform text output.
+
+### Transcription Retention
+
+The backend policy that interprets persisted transcription-retention settings and prunes old History rows plus optional recording WAV files.
+
+Transcription Retention owns raw settings parsing, legacy fallback, cutoff calculation, best-effort pruning, and History invalidation. Command flows decide when a terminal transcription attempt should apply the policy; they should not repeat retention setting reads or prune logic inline.
+
+### Audio Capture Internals
+
+The backend Modules inside Audio Capture that keep microphone selection, stop-time preprocessing, and realtime meters local without changing the external `AudioCaptureBackend` Interface.
+
+Audio Capture Internals owns session-stable mic selection tokens, capture cleanup controls such as high-pass/AGC/noise suppression/noise gate, and atomic level/waveform meter snapshots. It does not own provider-independent audio format conversion; that remains in Audio Normalization.
+
+### Batch STT Orchestration
+
+The cross-flow wrapper around already-resolved batch STT attempts.
+
+Batch STT Orchestration owns managed-auth refresh retry, `stt_complete` bookkeeping, and shared failed-attempt state handling for normal batch, streaming fallback, retry, and CLI transcription paths. STT Provider Resolution still chooses providers, and STT Execution still performs provider transport/retry/timeout work.
+
+### Retry Last Shortcut
+
+The Shortcut Dispatch slice that resolves the most recent saved recording and starts a retry transcription/output action.
+
+Retry Last Shortcut owns retryable history-entry selection, recording-source fallback rules, overlay loading UX, and retry output. It does not own hotkey registration decisions or Windows modifier-only hook mechanics.
+
+### Recording Command Error Mapping
+
+The command-facing translation from rich pipeline errors into stable UI error codes, retryability flags, and error categories.
+
+Recording Command Error Mapping keeps Tauri command return shapes consistent without adding that classification logic back into the large recording command flow.

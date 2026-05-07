@@ -6,126 +6,42 @@
 //! Supports optional Voice Activity Detection (VAD) for auto-stop functionality.
 
 use crate::vad::{VadConfig, VadEvent, VadFrameProcessor};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use crossbeam_queue::ArrayQueue;
 use hound::{WavSpec, WavWriter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
 
-const MIC_DEVICE_ID_PREFIX: &str = "mic:v1:";
+mod device_selection;
+mod meters;
+mod preprocessing;
 
-/// Public device descriptor for the frontend.
+pub use device_selection::{
+    get_default_input_device_info, list_input_devices, list_input_devices_v2, AudioInputDeviceInfo,
+};
+pub use meters::{
+    AudioLevelSnapshot, AudioLevelStats, AudioWaveformSnapshot, SharedAudioLevelMeter,
+    SharedAudioWaveformMeter,
+};
+
+/// Number of min/max buckets sent to the overlay for waveform rendering.
 ///
-/// NOTE: `id` is a stable-ish *selection token* for this session, not a true OS device ID.
-/// It is guaranteed unique within the returned list.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AudioInputDeviceInfo {
-    pub id: String,
-    pub name: String,
-}
+/// Re-exported from the meter Module to preserve the existing `audio_capture` API.
+#[allow(dead_code)]
+pub const WAVEFORM_BINS: usize = meters::WAVEFORM_BINS;
 
-fn encode_mic_device_id(name: &str, ordinal_for_name: usize) -> String {
-    // Base64url without padding so it is easy to embed in a string.
-    let name_b64 = URL_SAFE_NO_PAD.encode(name.as_bytes());
-    format!("{MIC_DEVICE_ID_PREFIX}{name_b64}:{ordinal_for_name}")
-}
-
-fn decode_mic_device_id(id: &str) -> Option<(String, usize)> {
-    // Format: mic:v1:<base64url(name)>:<ordinal>
-    let rest = id.strip_prefix(MIC_DEVICE_ID_PREFIX)?;
-    let (name_b64, ordinal_str) = rest.rsplit_once(':')?;
-    let ordinal = ordinal_str.parse::<usize>().ok()?;
-    let name_bytes = URL_SAFE_NO_PAD.decode(name_b64).ok()?;
-    let name = String::from_utf8(name_bytes).ok()?;
-    Some((name, ordinal))
-}
-
-fn normalize_input_device_selection(input_device: Option<&str>) -> Option<(String, usize, bool)> {
-    // Returns (desired_name, desired_ordinal, is_encoded_id)
-    let raw = input_device
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && *s != "default")?;
-
-    if let Some((name, ordinal)) = decode_mic_device_id(raw) {
-        return Some((name, ordinal, true));
-    }
-
-    Some((raw.to_string(), 0, false))
-}
-
-fn select_input_device_index_from_names(
-    names: &[String],
-    selection: Option<&str>,
-) -> Option<usize> {
-    let (desired_name, desired_ordinal, is_encoded) = normalize_input_device_selection(selection)?;
-
-    // Prefer exact-name matching with ordinal disambiguation.
-    let mut ordinal_for_name: usize = 0;
-    for (idx, name) in names.iter().enumerate() {
-        if name == &desired_name {
-            if ordinal_for_name == desired_ordinal {
-                return Some(idx);
-            }
-            ordinal_for_name = ordinal_for_name.saturating_add(1);
-        }
-    }
-
-    // Legacy fallback: some older stored values used partial matches.
-    // For encoded IDs, do NOT do a contains() fallback (could pick the wrong device).
-    if is_encoded {
-        return None;
-    }
-
-    for (idx, name) in names.iter().enumerate() {
-        if name.contains(&desired_name) {
-            return Some(idx);
-        }
-    }
-
-    None
-}
-
-fn select_input_device_from_host(
-    host: &cpal::Host,
-    selection: Option<&str>,
-) -> Option<cpal::Device> {
-    let Ok(devices) = host.input_devices() else {
-        return None;
-    };
-
-    let mut device_list: Vec<(cpal::Device, String)> = Vec::new();
-    for d in devices {
-        let Ok(desc) = d.description() else { continue };
-        let name = desc.to_string();
-        device_list.push((d, name));
-    }
-
-    let names: Vec<String> = device_list.iter().map(|(_, name)| name.clone()).collect();
-    let idx = select_input_device_index_from_names(&names, selection)?;
-
-    device_list.into_iter().nth(idx).map(|(device, _)| device)
-}
-
-fn clamp_u8_0_100(v: u8) -> u8 {
-    v.min(100)
-}
-
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
-fn db_to_amp(db: f32) -> f32 {
-    // db is dBFS; 0 dBFS == full-scale amplitude (1.0).
-    10.0_f32.powf(db / 20.0)
-}
+use device_selection::select_input_device_from_host;
+use meters::{compute_rms_peak, detect_speech_presence, AudioLevelMeter, AudioWaveformMeter};
+use preprocessing::{
+    apply_agc, apply_highpass_dc_block, apply_light_noise_suppression,
+    apply_noise_gate_interleaved, noise_gate_threshold_dbfs_from_strength,
+};
 
 use crate::audio_normalization::{
     downmix_interleaved_chunk_to_mono_into, downmix_interleaved_to_mono,
@@ -139,174 +55,6 @@ fn estimate_callback_interleaved_capacity(config: &cpal::StreamConfig, channels:
         cpal::BufferSize::Default => 2048,
     };
     frames.saturating_mul(channels.max(1))
-}
-
-fn apply_highpass_dc_block(samples: &mut [f32], sample_rate: u32) {
-    // Simple DC-blocking high-pass filter.
-    // Good enough to reduce rumble / DC offset without heavy DSP.
-    let sr = sample_rate.max(1) as f32;
-    // Choose r based on a rough cutoff. Keep stable across SR.
-    // r close to 1.0 => lower cutoff.
-    let cutoff_hz = 80.0_f32;
-    let r = (-2.0 * std::f32::consts::PI * cutoff_hz / sr).exp();
-    let mut y_prev = 0.0_f32;
-    let mut x_prev = 0.0_f32;
-    for x in samples.iter_mut() {
-        let y = *x - x_prev + r * y_prev;
-        x_prev = *x;
-        y_prev = y;
-        *x = y;
-    }
-}
-
-fn apply_agc(samples: &mut [f32]) {
-    // Lightweight gain normalization.
-    // Target a strong peak while capping max gain to avoid crazy amplification.
-    let mut peak = 0.0_f32;
-    let mut sum_sq = 0.0_f64;
-    for &s in samples.iter() {
-        peak = peak.max(s.abs());
-        sum_sq += (s as f64) * (s as f64);
-    }
-    if samples.is_empty() {
-        return;
-    }
-    let rms = (sum_sq / samples.len() as f64).sqrt() as f32;
-
-    // Avoid amplifying true silence.
-    if peak < 1e-6 && rms < 1e-6 {
-        return;
-    }
-
-    let target_peak = 0.90_f32;
-    let target_rms = 0.10_f32; // ~ -20 dBFS
-    let max_gain = 8.0_f32;
-
-    let gain_peak = if peak > 0.0 { target_peak / peak } else { 1.0 };
-    let gain_rms = if rms > 0.0 { target_rms / rms } else { 1.0 };
-    let gain = gain_peak.min(gain_rms).clamp(0.1, max_gain);
-
-    for s in samples.iter_mut() {
-        *s = (*s * gain).clamp(-1.0, 1.0);
-    }
-}
-
-fn apply_light_noise_suppression(samples: &mut [f32], sample_rate: u32) {
-    // Extremely lightweight noise suppression:
-    // estimate a noise floor from the first ~200ms and apply soft subtraction.
-    if samples.is_empty() {
-        return;
-    }
-
-    let sr = sample_rate.max(1) as usize;
-    let window = (sr as f32 * 0.20) as usize; // ~200ms
-    let n = window.clamp(1, samples.len());
-
-    let mut sum_sq = 0.0_f64;
-    for &s in samples.iter().take(n) {
-        sum_sq += (s as f64) * (s as f64);
-    }
-    let floor_rms = (sum_sq / n as f64).sqrt() as f32;
-    if !floor_rms.is_finite() || floor_rms <= 0.0 {
-        return;
-    }
-
-    // Subtract most of the estimated floor; keep some to avoid pumping.
-    let subtract = floor_rms * 0.8;
-    for s in samples.iter_mut() {
-        let a = s.abs();
-        let sign = if *s >= 0.0 { 1.0 } else { -1.0 };
-        let out = (a - subtract).max(0.0);
-        *s = (sign * out).clamp(-1.0, 1.0);
-    }
-}
-
-/// Apply a simple noise gate to interleaved samples.
-///
-/// - `samples` are interleaved f32 in [-1, 1]
-/// - `channels` is the interleaving width
-/// - `threshold_dbfs` is a negative dBFS value (e.g. -60). `None` => bypass.
-///
-/// This is intentionally lightweight and runs at stop-time (offline), not in the
-/// real-time capture callback.
-fn apply_noise_gate_interleaved(
-    samples: &[f32],
-    sample_rate: u32,
-    channels: u16,
-    threshold_dbfs: Option<f32>,
-) -> Vec<f32> {
-    let Some(threshold_dbfs) = threshold_dbfs else {
-        return samples.to_vec();
-    };
-    if samples.is_empty() {
-        return samples.to_vec();
-    }
-
-    // UI-range clamp. Keep conservative.
-    let threshold_dbfs = if threshold_dbfs.is_finite() {
-        threshold_dbfs.clamp(-75.0, -30.0)
-    } else {
-        -60.0
-    };
-
-    let channels_usize = channels.max(1) as usize;
-    let frames = samples.len() / channels_usize;
-
-    let threshold_amp = db_to_amp(threshold_dbfs);
-
-    // Hysteresis reduces "chattering" around the threshold.
-    let close_threshold_amp = threshold_amp * 0.85;
-
-    // Attack/release smoothing on the *gain* to avoid clicks.
-    let fs = sample_rate.max(1) as f32;
-    let attack_s = 0.005_f32;
-    let release_s = 0.120_f32;
-
-    let attack_alpha = (-1.0 / (attack_s * fs)).exp();
-    let release_alpha = (-1.0 / (release_s * fs)).exp();
-
-    let mut out = Vec::with_capacity(samples.len());
-    let mut gate_open = false;
-    let mut gain: f32 = 0.0;
-
-    for frame_idx in 0..frames {
-        let base = frame_idx * channels_usize;
-
-        // Envelope: max abs across channels for this frame.
-        let mut env = 0.0_f32;
-        for c in 0..channels_usize {
-            env = env.max(samples[base + c].abs());
-        }
-
-        if gate_open {
-            if env < close_threshold_amp {
-                gate_open = false;
-            }
-        } else if env > threshold_amp {
-            gate_open = true;
-        }
-
-        let target = if gate_open { 1.0_f32 } else { 0.0_f32 };
-        let alpha = if target > gain {
-            attack_alpha
-        } else {
-            release_alpha
-        };
-        gain = target + alpha * (gain - target);
-
-        for c in 0..channels_usize {
-            out.push(samples[base + c] * gain);
-        }
-    }
-
-    // If there were trailing samples not forming a whole frame, just copy them.
-    // (Shouldn't happen in normal capture, but keep it safe.)
-    let consumed = frames * channels_usize;
-    if consumed < samples.len() {
-        out.extend_from_slice(&samples[consumed..]);
-    }
-
-    out
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -610,16 +358,8 @@ impl AudioBuffer {
         &self,
         noise_gate_strength: u8,
     ) -> Result<Vec<u8>, AudioCaptureError> {
-        let strength = clamp_u8_0_100(noise_gate_strength);
-        let threshold_dbfs = if strength == 0 {
-            None
-        } else {
-            let t = strength as f32 / 100.0;
-            Some(lerp(-75.0, -30.0, t))
-        };
-
         let (wav_bytes, _diagnostics) = self.to_wav_bytes_with_config(AudioEncodeConfig {
-            noise_gate_threshold_dbfs: threshold_dbfs,
+            noise_gate_threshold_dbfs: noise_gate_threshold_dbfs_from_strength(noise_gate_strength),
             ..Default::default()
         })?;
         Ok(wav_bytes)
@@ -849,113 +589,6 @@ impl RollingBuffer {
     }
 }
 
-/// Basic audio level metrics for gating/diagnostics.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
-pub struct AudioLevelStats {
-    pub duration_secs: f32,
-    /// Root-mean-square amplitude in [0, 1].
-    pub rms: f32,
-    /// Peak (max absolute) amplitude in [0, 1].
-    pub peak: f32,
-}
-
-fn detect_speech_presence(samples: &[f32], sample_rate: u32, channels: u16) -> bool {
-    if samples.is_empty() {
-        return false;
-    }
-
-    let mono = downmix_interleaved_to_mono(samples, channels.max(1) as usize);
-    let mut processor = VadFrameProcessor::new(VadConfig::default(), sample_rate.max(1));
-
-    for event in processor.process(&mono) {
-        if matches!(event, VadEvent::SpeechStart { .. }) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Realtime-safe snapshot of the most recent input level.
-///
-/// Updated by the CPAL input callback using atomics (no allocations, no event emission).
-#[derive(Debug, Clone, Copy)]
-pub struct AudioLevelSnapshot {
-    pub seq: u64,
-    /// Root-mean-square amplitude in [0, 1] for the most recent callback chunk.
-    pub rms: f32,
-    /// Peak (max abs) amplitude in [0, 1] for the most recent callback chunk.
-    pub peak: f32,
-}
-
-/// Number of min/max buckets sent to the overlay for waveform rendering.
-///
-/// Keep this modest: payload size is 2 * N floats per frame.
-pub const WAVEFORM_BINS: usize = 64;
-
-/// Realtime-safe snapshot of the most recent min/max waveform buckets.
-///
-/// `mins[i]` and `maxes[i]` are in [-1, 1] representing the min/max sample value
-/// for that bucket.
-#[derive(Debug, Clone)]
-pub struct AudioWaveformSnapshot {
-    pub seq: u64,
-    pub mins: Vec<f32>,
-    pub maxes: Vec<f32>,
-}
-
-/// A cheap-to-clone handle for reading realtime waveform buckets without needing
-/// to borrow the full `AudioCapture`.
-#[derive(Clone)]
-pub struct SharedAudioWaveformMeter {
-    inner: Arc<AudioWaveformMeter>,
-}
-
-impl SharedAudioWaveformMeter {
-    pub fn snapshot(&self) -> AudioWaveformSnapshot {
-        self.inner.snapshot()
-    }
-
-    #[cfg(test)]
-    pub fn new_for_tests() -> Self {
-        Self {
-            inner: Arc::new(AudioWaveformMeter::default()),
-        }
-    }
-
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn set_from_samples_for_tests(&self, samples: &[f32], channels: usize) {
-        self.inner.update_from_f32_interleaved(samples, channels);
-    }
-}
-
-/// A cheap-to-clone handle for reading realtime audio levels without needing to
-/// borrow the full `AudioCapture`.
-///
-/// This wrapper avoids exposing the internal `AudioLevelMeter` implementation.
-#[derive(Clone)]
-pub struct SharedAudioLevelMeter {
-    inner: Arc<AudioLevelMeter>,
-}
-
-impl SharedAudioLevelMeter {
-    pub fn snapshot(&self) -> AudioLevelSnapshot {
-        self.inner.snapshot()
-    }
-
-    #[cfg(test)]
-    pub fn new_for_tests() -> Self {
-        Self {
-            inner: Arc::new(AudioLevelMeter::default()),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn set_for_tests(&self, rms: f32, peak: f32) {
-        self.inner.update(rms, peak);
-    }
-}
-
 /// Minimal interface used by the pipeline so we can unit test state transitions
 /// without requiring a real CPAL device.
 ///
@@ -1001,111 +634,6 @@ pub trait AudioCaptureBackend: Send {
 
     /// Current sample rate of the active capture session (or the default).
     fn capture_sample_rate(&self) -> u32;
-}
-
-#[derive(Debug)]
-struct AudioWaveformMeter {
-    seq: AtomicU64,
-    min_bits: [AtomicU32; WAVEFORM_BINS],
-    max_bits: [AtomicU32; WAVEFORM_BINS],
-}
-
-impl Default for AudioWaveformMeter {
-    fn default() -> Self {
-        Self {
-            seq: AtomicU64::new(0),
-            min_bits: std::array::from_fn(|_| AtomicU32::new(0f32.to_bits())),
-            max_bits: std::array::from_fn(|_| AtomicU32::new(0f32.to_bits())),
-        }
-    }
-}
-
-impl AudioWaveformMeter {
-    fn snapshot(&self) -> AudioWaveformSnapshot {
-        let seq = self.seq.load(Ordering::Relaxed);
-        let mut mins = Vec::with_capacity(WAVEFORM_BINS);
-        let mut maxes = Vec::with_capacity(WAVEFORM_BINS);
-        for i in 0..WAVEFORM_BINS {
-            mins.push(f32::from_bits(self.min_bits[i].load(Ordering::Relaxed)));
-            maxes.push(f32::from_bits(self.max_bits[i].load(Ordering::Relaxed)));
-        }
-        AudioWaveformSnapshot { seq, mins, maxes }
-    }
-
-    fn update_from_f32_interleaved(&self, data: &[f32], channels: usize) {
-        let channels = channels.max(1);
-        let frames = data.len() / channels;
-        if frames == 0 {
-            return;
-        }
-
-        for bin in 0..WAVEFORM_BINS {
-            let start = (bin * frames) / WAVEFORM_BINS;
-            let end = ((bin + 1) * frames) / WAVEFORM_BINS;
-            if start >= end {
-                self.min_bits[bin].store(0f32.to_bits(), Ordering::Relaxed);
-                self.max_bits[bin].store(0f32.to_bits(), Ordering::Relaxed);
-                continue;
-            }
-
-            let mut min_v: f32 = 1.0;
-            let mut max_v: f32 = -1.0;
-
-            for frame in start..end {
-                let base = frame * channels;
-                let mut acc: f32 = 0.0;
-                for c in 0..channels {
-                    acc += data.get(base + c).copied().unwrap_or(0.0);
-                }
-                let s = (acc / channels as f32).clamp(-1.0, 1.0);
-                if s < min_v {
-                    min_v = s;
-                }
-                if s > max_v {
-                    max_v = s;
-                }
-            }
-
-            self.min_bits[bin].store(min_v.to_bits(), Ordering::Relaxed);
-            self.max_bits[bin].store(max_v.to_bits(), Ordering::Relaxed);
-        }
-
-        self.seq.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-#[derive(Debug, Default)]
-struct AudioLevelMeter {
-    seq: AtomicU64,
-    rms_bits: AtomicU32,
-    peak_bits: AtomicU32,
-}
-
-impl AudioLevelMeter {
-    fn snapshot(&self) -> AudioLevelSnapshot {
-        let seq = self.seq.load(Ordering::Relaxed);
-        let rms = f32::from_bits(self.rms_bits.load(Ordering::Relaxed));
-        let peak = f32::from_bits(self.peak_bits.load(Ordering::Relaxed));
-        AudioLevelSnapshot { seq, rms, peak }
-    }
-
-    fn update(&self, rms: f32, peak: f32) {
-        // Clamp to sane range and avoid NaNs propagating into the UI.
-        let rms = if rms.is_finite() {
-            rms.clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let peak = if peak.is_finite() {
-            peak.clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-
-        self.rms_bits.store(rms.to_bits(), Ordering::Relaxed);
-        self.peak_bits.store(peak.to_bits(), Ordering::Relaxed);
-        self.seq.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 /// Commands sent to the audio capture thread
@@ -1230,15 +758,11 @@ impl AudioCapture {
     }
 
     pub fn shared_level_meter(&self) -> SharedAudioLevelMeter {
-        SharedAudioLevelMeter {
-            inner: self.level_meter.clone(),
-        }
+        SharedAudioLevelMeter::from_meter(self.level_meter.clone())
     }
 
     pub fn shared_waveform_meter(&self) -> SharedAudioWaveformMeter {
-        SharedAudioWaveformMeter {
-            inner: self.waveform_meter.clone(),
-        }
+        SharedAudioWaveformMeter::from_meter(self.waveform_meter.clone())
     }
 
     /// Update VAD configuration
@@ -1542,15 +1066,7 @@ impl AudioCapture {
 
         let stats = buffer.level_stats();
         let (wav_bytes, _diag) = buffer.to_wav_bytes_with_config(AudioEncodeConfig {
-            noise_gate_threshold_dbfs: {
-                let strength = clamp_u8_0_100(noise_gate_strength);
-                if strength == 0 {
-                    None
-                } else {
-                    let t = strength as f32 / 100.0;
-                    Some(lerp(-75.0, -30.0, t))
-                }
-            },
+            noise_gate_threshold_dbfs: noise_gate_threshold_dbfs_from_strength(noise_gate_strength),
             ..Default::default()
         })?;
 
@@ -1902,25 +1418,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         let live_audio_tx = live_audio_tx.clone();
 
         thread::spawn(move || {
-            fn compute_rms_peak(data: &[f32]) -> (f32, f32) {
-                let mut peak: f32 = 0.0;
-                let mut sum_sq: f64 = 0.0;
-                for &s in data {
-                    let a = s.abs();
-                    if a > peak {
-                        peak = a;
-                    }
-                    sum_sq += (s as f64) * (s as f64);
-                }
-                let n = data.len() as u64;
-                let rms = if n == 0 {
-                    0.0
-                } else {
-                    (sum_sq / n as f64).sqrt() as f32
-                };
-                (rms, peak)
-            }
-
             let mut last_pre_roll_capacity: usize = 0;
 
             let mut process_one = |chunk: CapturedChunk| {
@@ -2413,79 +1910,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
     Ok(())
 }
 
-/// Get the list of available input devices
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn list_input_devices() -> Vec<String> {
-    let host = cpal::default_host();
-    host.input_devices()
-        .map(|devices| {
-            // Defensive: CPAL device descriptions are not guaranteed unique on Windows.
-            // The legacy API returns names only; dedupe to avoid downstream UI crashes
-            // in case a caller uses names as unique keys.
-            let mut out: Vec<String> = Vec::new();
-            let mut seen: HashSet<String> = HashSet::new();
-
-            for name in devices.filter_map(|d| d.description().ok().map(|desc| desc.to_string())) {
-                if seen.insert(name.clone()) {
-                    out.push(name);
-                }
-            }
-
-            out
-        })
-        .unwrap_or_default()
-}
-
-/// Get the list of available input devices, with unique IDs suitable for UI option values.
-///
-/// The ID format is `mic:v1:<base64url(name)>:<ordinal>` where ordinal is the 0-based
-/// occurrence index for that exact name in the CPAL enumeration order.
-pub fn list_input_devices_v2() -> Vec<AudioInputDeviceInfo> {
-    let host = cpal::default_host();
-
-    let Ok(devices) = host.input_devices() else {
-        return Vec::new();
-    };
-
-    let mut name_ordinals: HashMap<String, usize> = HashMap::new();
-    let mut out: Vec<AudioInputDeviceInfo> = Vec::new();
-
-    for d in devices {
-        let Ok(desc) = d.description() else { continue };
-        let name = desc.to_string();
-        let ordinal = name_ordinals.get(&name).copied().unwrap_or(0);
-        name_ordinals.insert(name.clone(), ordinal.saturating_add(1));
-
-        out.push(AudioInputDeviceInfo {
-            id: encode_mic_device_id(&name, ordinal),
-            name,
-        });
-    }
-
-    // Extra defensive: ensure uniqueness even if encoding logic changes.
-    // (Should never trigger, but guarantees the UI can't crash.)
-    let mut seen_ids: HashMap<String, usize> = HashMap::new();
-    for device in &mut out {
-        let n = seen_ids.get(&device.id).copied().unwrap_or(0);
-        if n > 0 {
-            device.id = format!("{}:dup{}", device.id, n);
-        }
-        seen_ids.insert(device.id.clone(), n.saturating_add(1));
-    }
-
-    out
-}
-
-/// Get information about the default input device
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn get_default_input_device_info() -> Option<(String, u32, u16)> {
-    let host = cpal::default_host();
-    let device = host.default_input_device()?;
-    let name = device.description().ok()?.to_string();
-    let config = device.default_input_config().ok()?;
-    Some((name, config.sample_rate(), config.channels()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2533,61 +1957,5 @@ mod tests {
         buffer.append(&[0.0; 2000]);
         // Should be trimmed to 1 second
         assert_eq!(buffer.len(), 1000);
-    }
-
-    #[test]
-    fn test_mic_device_id_roundtrip() {
-        let name = "Built-in Mic";
-        let id = encode_mic_device_id(name, 2);
-        let decoded = decode_mic_device_id(&id).expect("Expected valid mic device id");
-        assert_eq!(decoded, (name.to_string(), 2));
-    }
-
-    #[test]
-    fn test_normalize_input_device_selection() {
-        assert_eq!(normalize_input_device_selection(None), None);
-        assert_eq!(normalize_input_device_selection(Some("")), None);
-        assert_eq!(normalize_input_device_selection(Some("default")), None);
-
-        let encoded = encode_mic_device_id("USB Mic", 1);
-        assert_eq!(
-            normalize_input_device_selection(Some(&encoded)),
-            Some(("USB Mic".to_string(), 1, true))
-        );
-
-        assert_eq!(
-            normalize_input_device_selection(Some("Plantronics")),
-            Some(("Plantronics".to_string(), 0, false))
-        );
-    }
-
-    #[test]
-    fn test_select_input_device_index_from_names() {
-        let names = vec!["Mic A", "Mic B", "Mic A"]
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            select_input_device_index_from_names(&names, Some("Mic A")),
-            Some(0)
-        );
-
-        let encoded = encode_mic_device_id("Mic A", 1);
-        assert_eq!(
-            select_input_device_index_from_names(&names, Some(&encoded)),
-            Some(2)
-        );
-
-        assert_eq!(
-            select_input_device_index_from_names(&names, Some("Mic")),
-            Some(0)
-        );
-
-        let missing = encode_mic_device_id("Unknown", 0);
-        assert_eq!(
-            select_input_device_index_from_names(&names, Some(&missing)),
-            None
-        );
     }
 }

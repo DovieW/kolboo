@@ -32,7 +32,7 @@
       - `tauri/commands.ts` (invoke wrappers)
       - `tauri/settings.ts` (settings read/write + normalization/migrations)
       - `tauri/types.ts` (shared TS types)
-  - UI state is mostly TanStack Query hooks in `app/src/lib/queries.ts`.
+  - UI state is mostly TanStack Query hooks in `app/src/lib/queries.ts`; query-function factories are split by domain under `app/src/lib/queries/queryFns/**`, with `queries/queryFns.ts` kept as the compatibility barrel.
   - When changing any setting that affects runtime behavior, persist to the Tauri store **and** call `configAPI.syncPipelineConfig()` so the Rust `PipelineConfig` updates immediately.
   - After changing settings that overlays depend on (accent, widget position, overlay mode, etc.), emit `settings-changed` so secondary windows refresh cached settings (see `tauriAPI.update*` helpers).
   - Secondary windows should respond to `settings-changed` by reloading/invalidation only; do **not** call `sync_pipeline_config` from overlay listeners because the owning settings mutation path already applies the Runtime Sync Policy.
@@ -61,22 +61,26 @@
 
   - The backend pipeline is a state machine; prefer explicit guard methods/transitions over ad-hoc flags.
   - Cancellation is part of the UX (escape-to-cancel is registered only while active). Avoid re-entrant shortcut registration; follow the existing lock/async pattern in `app/src-tauri/src/shortcuts/mod.rs`.
-  - Hotkey startup/runtime registration decisions live in `app/src-tauri/src/shortcuts/lifecycle.rs`; Windows modifier-only hook mechanics stay in `app/src-tauri/src/windows_modifier_hotkeys.rs`, and shortcut dispatch stays in `shortcuts/mod.rs`.
-  - Shared audio format normalization (downmixing, PCM conversion, streaming chunk sizing, latency-friendly streaming resampling, and VAD-quality 16 kHz resampling) lives in `app/src-tauri/src/audio_normalization.rs`; realtime WebSocket transport policy (manual proxy CONNECT, `no_proxy` bypass, TLS override handling) lives in `app/src-tauri/src/stt/websocket_transport.rs`; provider-independent WS/session lifecycle helpers (`connect_ws_split_with_timeout`, read/send/close helpers, and `StreamingSttSession`) live in `app/src-tauri/src/stt/streaming.rs`; provider protocol state machines stay in provider adapters.
+  - Hotkey startup/runtime registration decisions live in `app/src-tauri/src/shortcuts/lifecycle.rs`; Windows modifier-only hook mechanics stay in `app/src-tauri/src/windows_modifier_hotkeys.rs`; Retry Last shortcut resolution/output lives in `app/src-tauri/src/shortcuts/retry_last.rs`; remaining shortcut dispatch stays in `shortcuts/mod.rs`.
+  - Shared audio format normalization (downmixing, PCM conversion, streaming chunk sizing, latency-friendly streaming resampling, and VAD-quality 16 kHz resampling) lives in `app/src-tauri/src/audio_normalization.rs`; Audio Capture internal device selection, stop-time preprocessing, and realtime meters live under `app/src-tauri/src/audio_capture/**`; realtime WebSocket transport policy (manual proxy CONNECT, `no_proxy` bypass, TLS override handling) lives in `app/src-tauri/src/stt/websocket_transport.rs`; provider-independent WS/session lifecycle helpers (`connect_ws_split_with_timeout`, read/send/close helpers, and `StreamingSttSession`) live in `app/src-tauri/src/stt/streaming.rs`; provider protocol state machines stay in provider adapters.
   - History request-row transitions live in `app/src-tauri/src/history_request_lifecycle.rs`, while `app/src-tauri/src/history.rs` continues to own persistence/querying. Prefer `RequestHistoryUpdate` + the lifecycle helper over hand-rolled `add_request_entry` / `set_request_*` / `complete_request_*` / `delete` sequences in app-facing flows.
   - Shared OCR usage policy for stop-time auto-start and Quick Ask / Quick Replace OCR consumption lives in `app/src-tauri/src/sessions/ocr_usage.rs`; keep OCR session/task ownership in `app/src-tauri/src/pipeline/ocr_session_state.rs` and `ocr_session.rs`.
+  - Command-facing profile read models live in `app/src-tauri/src/pipeline/profile_query.rs`; keep UI chips, retry/test-transcription profile identity lookups, and safe basename logging there instead of repeating profile-list scans in command modules.
   - Telemetry Mapping from rich request logs into narrow read models lives in `app/src-tauri/src/telemetry.rs`; keep request-log storage/redaction/export stripping in `app/src-tauri/src/request_log.rs`.
   - Use `RequestLogStore::start_request_with(...)` when a command starts a request and immediately seeds profile/model/kind metadata; this keeps request-log lifecycle initialization atomic instead of `start_request(...)` plus a separate `with_current(...)` pass.
+  - Shared transcription-retention parsing/pruning lives in `app/src-tauri/src/sessions/retention.rs`; command flows should only choose the terminal points that apply retention, not repeat settings-store reads or prune logic inline.
   - Command-facing recording completion helpers (saved WAV persistence plus final transcript/cancel/error event shapes) live in `app/src-tauri/src/recording_completion.rs`; request-log success metadata, cost completion, OCR cleanup, and History preset/LLM metadata mirroring remain in `app/src-tauri/src/sessions/recording_finalization.rs`; keep platform output in `normal_dictation_output.rs` and Quick Ask/Quick Replace execution in `quick_action_execution.rs`.
   - Cost Reporting event assembly (provider response parsing, token mapping, duration fallback, and event-level estimate selection) lives in `app/src-tauri/src/cost/reporting.rs`; provider pricing tables/formulas stay in provider-specific `app/src-tauri/src/cost/**` modules, and `stats.rs` owns persistence/aggregation/retention/UI invalidation.
   - Backend feature-shaped settings reads live in `app/src-tauri/src/settings_view.rs`; use them for output settings, Quick Ask config, retention, and free-tier reads instead of repeating raw settings-store keys in each caller.
+  - Frontend Data Lifecycle read models live in `app/src/lib/settings/dataLifecycle.ts`; keep retention unit conversion, cloud-sync display-state normalization, recordings storage summaries, and byte formatting there instead of inside `DataSettings.tsx`.
+  - Frontend History Feed read models live in `app/src/lib/history/readModel.ts`; keep persisted filter normalization, date grouping, token estimates, and transcript-analysis prompt construction there instead of inside `HistoryFeed.tsx`.
   - Embeddings routing should call through the `EmbeddingsProvider` interface in `app/src-tauri/src/embeddings/mod.rs`; do not bypass it with provider-specific routing HTTP calls unless a new two-adapter proof updates the seam evidence.
   - Cloud STT provider constructor quirks live in `app/src-tauri/src/pipeline/stt_cloud_adapters.rs`; STT Provider Resolution remains in `pipeline/stt_provider_resolver.rs`, and local-whisper/whisper-server lifecycle special cases should stay explicit.
-  - Batch STT request orchestration (managed-auth refresh retry, `stt_complete` bookkeeping, and shared failure handling for normal batch, streaming fallback, and retry transcription) lives in `app/src-tauri/src/pipeline.rs`; keep provider selection in `pipeline/stt_provider_resolver.rs` and execution/timeout/retry transport in `pipeline/stt_flow.rs`.
+  - Batch STT request orchestration (managed-auth refresh retry, `stt_complete` bookkeeping, and shared failure handling for normal batch, streaming fallback, retry, and CLI transcription) lives in `app/src-tauri/src/pipeline/batch_stt_orchestration.rs`; keep provider selection in `pipeline/stt_provider_resolver.rs` and execution/timeout/retry transport in `pipeline/stt_flow.rs`.
   - Command-facing recording phase notification watchers live in `app/src-tauri/src/recording_orchestration.rs`; the pipeline state machine remains the source of truth for actual transitions.
   - Prompt formatting for rewrite/Quick Ask/Quick Replace lives in `app/src-tauri/src/prompt_builders.rs`; keep clipboard transport and context capping in `app/src-tauri/src/clipboard_context.rs`.
   - Quick Ask / Quick Replace context-source collection (selection probe, clipboard context, OCR fetch) lives in `app/src-tauri/src/sessions/context_collection.rs`; provider execution and Quick Action request-log completion live in `app/src-tauri/src/sessions/quick_action_execution.rs`.
-  - Normal dictation final output and non-empty success finalization live in `app/src-tauri/src/sessions/normal_dictation_output.rs`; `lib.rs::stop_recording(...)` should remain orchestration rather than owning platform paste/type branches.
+  - Normal dictation final output and non-empty success finalization live in `app/src-tauri/src/sessions/normal_dictation_output.rs`; command-facing recording error-code/retryability mapping lives in `app/src-tauri/src/commands/recording_errors.rs`; `lib.rs::stop_recording(...)` should remain orchestration rather than owning platform paste/type branches.
 
 - Spec Kit/git workflow:
 
@@ -103,6 +107,7 @@ Implemented slice conventions from this initiative:
 - Overlay settings-change refresh behavior lives in `app/src/lib/overlay/overlaySettings.ts` and intentionally does not perform runtime pipeline sync.
 - Routing strategy outputs flow through the strategy-independent `RoutingDecision` type in `app/src-tauri/src/pipeline/routing.rs`.
 - Profile behavior is split between `app/src-tauri/src/pipeline/profile_matcher.rs` and `app/src-tauri/src/pipeline/profile_resolution.rs`.
+- Command-facing profile read models live in `app/src-tauri/src/pipeline/profile_query.rs`.
 - Local provider cache/readiness/bypass decisions live in `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`.
 - Prompt formatting is centralized in `app/src-tauri/src/prompt_builders.rs`.
 - Telemetry Mapping lives in `app/src-tauri/src/telemetry.rs`.
@@ -112,11 +117,17 @@ Implemented slice conventions from this initiative:
 - Recording phase notification watchers live in `app/src-tauri/src/recording_orchestration.rs`.
 - History request-row lifecycle orchestration lives in `app/src-tauri/src/history_request_lifecycle.rs` while `history.rs` stays focused on persistence and querying.
 - Command-facing recording completion helpers live in `app/src-tauri/src/recording_completion.rs` while request-log/cost/OCR completion remains in `app/src-tauri/src/sessions/recording_finalization.rs`.
+- Transcription retention parsing/pruning lives in `app/src-tauri/src/sessions/retention.rs`; command flows only call it at terminal transcription boundaries.
 - Backend feature-shaped settings reads live in `app/src-tauri/src/settings_view.rs`.
 - Hotkey lifecycle registration decisions live in `app/src-tauri/src/shortcuts/lifecycle.rs`.
 - Terminal recording finalization lives in `app/src-tauri/src/sessions/recording_finalization.rs`.
 - STT WebSocket transport policy lives in `app/src-tauri/src/stt/websocket_transport.rs`, while provider-independent WS/session lifecycle helpers live in `app/src-tauri/src/stt/streaming.rs` and pure audio normalization lives in `app/src-tauri/src/audio_normalization.rs`.
+- Audio Capture internal Modules live under `app/src-tauri/src/audio_capture/**` for device selection, stop-time preprocessing, and realtime meters while preserving the external `AudioCaptureBackend` Interface.
+- Retry Last shortcut resolution/output lives in `app/src-tauri/src/shortcuts/retry_last.rs`; registration remains in `shortcuts/lifecycle.rs` and Windows hook mechanics remain in `windows_modifier_hotkeys.rs`.
+- Batch STT Orchestration lives in `app/src-tauri/src/pipeline/batch_stt_orchestration.rs`, while provider resolution stays in `pipeline/stt_provider_resolver.rs` and STT execution stays in `pipeline/stt_flow.rs`.
 - Quick Action context-source collection is centralized in `app/src-tauri/src/sessions/context_collection.rs`.
 - Normal dictation final output/non-empty success finalization is centralized in `app/src-tauri/src/sessions/normal_dictation_output.rs`.
+- Recording command error mapping is centralized in `app/src-tauri/src/commands/recording_errors.rs`.
+- Frontend Data Lifecycle normalization lives in `app/src/lib/settings/dataLifecycle.ts`, History Feed read-model logic lives in `app/src/lib/history/readModel.ts`, and query-function factories are domain-shaped under `app/src/lib/queries/queryFns/**`.
 - Do not add provider-family seams unless `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` records a two-adapter proof and deletion-test pass; follow-up seam evidence for the remaining module-deepening slice lives under `specs/018-remaining-module-deepening/validation/`.
 <!-- SPECKIT END -->

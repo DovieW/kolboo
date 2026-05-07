@@ -25,6 +25,7 @@ import {
 } from "../sttLanguages";
 import { emitTyped } from "./events";
 import { DEFAULT_SETTINGS_VALUES } from "./settingsDefaults";
+import { normalizeRawRewritePreset } from "./settingsNormalizers/presets";
 import { applySettingsRuntimeSyncPolicy } from "./settingsSync";
 import { settingValueView } from "./settingsViews";
 import type {
@@ -425,114 +426,6 @@ function normalizeIntentRouterSettings(value: unknown): IntentRouterSettings {
 	};
 }
 
-function normalizeRewritePreset(value: unknown): RewritePreset | null {
-	const p = isRecord(value) ? value : null;
-	if (!p) return null;
-	const id = typeof p.id === "string" ? p.id : "";
-	const name = typeof p.name === "string" ? p.name : "";
-	if (!id) return null;
-
-	const description =
-		typeof p.description === "string" && p.description.trim().length > 0
-			? p.description
-			: null;
-	const routing_hints = Array.isArray(p.routing_hints)
-		? p.routing_hints
-				.map((x) => (typeof x === "string" ? x.trim() : ""))
-				.filter(Boolean)
-		: null;
-
-	const cleanup_prompt_sections =
-		p.cleanup_prompt_sections && typeof p.cleanup_prompt_sections === "object"
-			? // NOTE: This is normalized again inside getSettings(). Here we only ensure
-				// it's either a well-formed override or null.
-				(p.cleanup_prompt_sections as CleanupPromptSectionsOverride)
-			: null;
-
-	// Backward compatible: older settings may omit this field or write null.
-	// Backend defaults missing/null to true.
-	const rewrite_llm_enabled =
-		typeof p.rewrite_llm_enabled === "boolean" ? p.rewrite_llm_enabled : true;
-	const stt_provider =
-		typeof p.stt_provider === "string" ? p.stt_provider : null;
-	const stt_model = typeof p.stt_model === "string" ? p.stt_model : null;
-	const stt_language = normalizeSttLanguageOverride(p.stt_language);
-	const stt_timeout_seconds =
-		typeof p.stt_timeout_seconds === "number" &&
-		Number.isFinite(p.stt_timeout_seconds)
-			? p.stt_timeout_seconds
-			: null;
-	const llm_provider =
-		typeof p.llm_provider === "string" ? p.llm_provider : null;
-	const llm_model = typeof p.llm_model === "string" ? p.llm_model : null;
-
-	const openai_reasoning_effort = normalizeOpenAiReasoningEffort(
-		p.openai_reasoning_effort,
-	);
-	const gemini_thinking_budget = normalizeGeminiThinkingBudget(
-		p.gemini_thinking_budget,
-	);
-	const gemini_thinking_level = normalizeGeminiThinkingLevel(
-		p.gemini_thinking_level,
-	);
-	const anthropic_thinking_budget = normalizeAnthropicThinkingBudget(
-		p.anthropic_thinking_budget,
-	);
-
-	const sound_enabled =
-		typeof p.sound_enabled === "boolean" ? p.sound_enabled : null;
-	const playing_audio_handling =
-		typeof p.playing_audio_handling === "string"
-			? normalizePlayingAudioHandling(p.playing_audio_handling)
-			: null;
-	const overlay_mode =
-		typeof p.overlay_mode === "string"
-			? normalizeOverlayMode(p.overlay_mode)
-			: null;
-	const widget_position =
-		typeof p.widget_position === "string" &&
-		(p.widget_position === "center" ||
-			p.widget_position === "top-left" ||
-			p.widget_position === "top-center" ||
-			p.widget_position === "top-right" ||
-			p.widget_position === "bottom-left" ||
-			p.widget_position === "bottom-center" ||
-			p.widget_position === "bottom-right")
-			? (p.widget_position as WidgetPosition)
-			: null;
-	const output_mode =
-		typeof p.output_mode === "string"
-			? normalizeOutputMode(p.output_mode)
-			: null;
-	const output_hit_enter =
-		typeof p.output_hit_enter === "boolean" ? p.output_hit_enter : null;
-
-	return {
-		id,
-		name,
-		description,
-		routing_hints,
-		cleanup_prompt_sections,
-		rewrite_llm_enabled,
-		stt_provider,
-		stt_model,
-		stt_language,
-		stt_timeout_seconds,
-		llm_provider,
-		llm_model,
-		openai_reasoning_effort,
-		gemini_thinking_budget,
-		gemini_thinking_level,
-		anthropic_thinking_budget,
-		sound_enabled,
-		playing_audio_handling,
-		overlay_mode,
-		widget_position,
-		output_mode,
-		output_hit_enter,
-	};
-}
-
 function normalizeOutputMode(value: unknown): OutputMode {
 	if (
 		value === "paste" ||
@@ -554,10 +447,6 @@ function normalizeOverlayModeValue(value: unknown): OverlayMode | null {
 		return value;
 	}
 	return null;
-}
-
-function normalizeOverlayMode(value: unknown): OverlayMode {
-	return normalizeOverlayModeValue(value) ?? "recording_only";
 }
 
 function normalizeBooleanSetting(value: unknown): boolean | null {
@@ -1561,7 +1450,7 @@ export const tauriSettingsAPI = {
 			const presets_raw = p.presets;
 			const presets: RewritePreset[] | null = Array.isArray(presets_raw)
 				? presets_raw
-						.map(normalizeRewritePreset)
+						.map(normalizeRawRewritePreset)
 						.filter((x): x is RewritePreset => x !== null)
 				: null;
 

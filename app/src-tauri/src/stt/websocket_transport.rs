@@ -350,6 +350,32 @@ mod tests {
             "api.example.test",
             443
         ));
+
+        // Keep suffix matching anchored on a hostname dot so `badexample.test`
+        // does not accidentally bypass a proxy entry for `example.test`.
+        let manual = ManualProxySettings {
+            no_proxy: "example.test".to_string(),
+            ..manual
+        };
+        assert!(manual_proxy_bypasses_host(&manual, "api.example.test", 443));
+        assert!(!manual_proxy_bypasses_host(&manual, "badexample.test", 443));
+    }
+
+    #[test]
+    fn no_proxy_wildcard_bypasses_every_host() {
+        let manual = ManualProxySettings {
+            proxy_url: "http://proxy.example.test:8080".to_string(),
+            no_proxy: "*".to_string(),
+            username: String::new(),
+            password: String::new(),
+        };
+
+        assert!(manual_proxy_bypasses_host(
+            &manual,
+            "anything.example.test",
+            443
+        ));
+        assert!(manual_proxy_bypasses_host(&manual, "localhost", 80));
     }
 
     #[test]
@@ -377,5 +403,61 @@ mod tests {
         let message = describe_websocket_transport_policy_gap(&proxy_settings)
             .expect("expected unsupported https-proxy note");
         assert!(message.contains("HTTPS proxy URLs"));
+    }
+
+    #[tokio::test]
+    async fn proxy_connect_request_includes_authority_and_basic_auth() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback proxy listener");
+        let proxy_addr = listener.local_addr().expect("local proxy address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept proxy client");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 256];
+
+            loop {
+                let read = socket.read(&mut buffer).await.expect("read CONNECT");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            socket
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .await
+                .expect("write CONNECT response");
+            String::from_utf8(request).expect("CONNECT request is utf8")
+        });
+
+        let mut stream = TcpStream::connect(proxy_addr)
+            .await
+            .expect("connect to test proxy");
+        let endpoint = WsEndpoint {
+            host: "api.example.test".to_string(),
+            port: 443,
+            authority: "api.example.test:443".to_string(),
+            is_tls: true,
+        };
+        let manual = ManualProxySettings {
+            proxy_url: "http://127.0.0.1:8080".to_string(),
+            no_proxy: String::new(),
+            username: "user".to_string(),
+            password: "pass".to_string(),
+        };
+
+        send_proxy_connect_request(&mut stream, &endpoint, &manual, Duration::from_secs(1))
+            .await
+            .expect("CONNECT succeeds");
+
+        let request = server.await.expect("proxy task completes");
+        assert!(request.starts_with("CONNECT api.example.test:443 HTTP/1.1\r\n"));
+        assert!(request.contains("Host: api.example.test:443\r\n"));
+        assert!(request.contains("Proxy-Connection: Keep-Alive\r\n"));
+        assert!(request.contains("Proxy-Authorization: Basic dXNlcjpwYXNz\r\n"));
     }
 }

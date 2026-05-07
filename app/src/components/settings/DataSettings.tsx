@@ -17,7 +17,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Store } from "@tauri-apps/plugin-store";
 import {
 	BarChart2,
 	Download,
@@ -42,6 +41,16 @@ import {
 	useUpdateTranscriptionRetentionDeleteRecordings,
 } from "../../lib/queries";
 import {
+	formatDataBytes,
+	preserveRetentionDurationOnUnitChange,
+	type RequestLogsRetentionMode,
+	type RetentionMode,
+	type RetentionUnit,
+	readCloudSyncUiState,
+	retentionDaysFromUnitValue,
+	summarizeRecordingsStorage,
+} from "../../lib/settings/dataLifecycle";
+import {
 	backupAPI,
 	dataAPI,
 	logsAPI,
@@ -53,48 +62,8 @@ import {
 import { trackProductEvent } from "../../lib/telemetry/posthog";
 import { SettingsRow } from "./SettingsRow";
 
-type RequestLogsRetentionMode = "amount" | "time";
-type RetentionMode = "amount" | "time";
-type RetentionUnit = "days" | "hours";
-
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
-
-type CloudSyncUiState = {
-	enabled: boolean;
-	autoPush: boolean;
-	lastPushedAt: string | null;
-	lastPulledAt: string | null;
-	lastError: string | null;
-	remoteRevision: string | null;
-	posthogAnalyticsEnabled: boolean;
-};
-
-async function readCloudSyncUiState(): Promise<CloudSyncUiState> {
-	const store = await Store.load("settings.json");
-	const enabled = (await store.get<boolean>("cloud_sync_enabled")) ?? false;
-	const autoPush = (await store.get<boolean>("cloud_sync_auto_push")) ?? true;
-	const lastPushedAt =
-		(await store.get<string | null>("cloud_sync_last_pushed_at")) ?? null;
-	const lastPulledAt =
-		(await store.get<string | null>("cloud_sync_last_pulled_at")) ?? null;
-	const lastError =
-		(await store.get<string | null>("cloud_sync_last_error")) ?? null;
-	const remoteRevision =
-		(await store.get<string | null>("cloud_sync_remote_revision")) ?? null;
-	const posthogAnalyticsEnabled =
-		(await store.get<boolean>("posthog_analytics_enabled")) ?? true;
-
-	return {
-		enabled,
-		autoPush,
-		lastPushedAt,
-		lastPulledAt,
-		lastError,
-		remoteRevision,
-		posthogAnalyticsEnabled,
-	};
-}
 
 export function DataSettings({
 	editingProfileId,
@@ -347,7 +316,7 @@ export function DataSettings({
 
 	const cloudSyncState = useQuery({
 		queryKey: ["cloudSyncUiState"],
-		queryFn: readCloudSyncUiState,
+		queryFn: () => readCloudSyncUiState(),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
 	});
@@ -499,8 +468,7 @@ export function DataSettings({
 		value: number;
 	}) => {
 		setLogsRetentionDraft(next);
-		const days =
-			next.unit === "hours" ? next.value / 24 : Math.max(0, next.value);
+		const days = retentionDaysFromUnitValue(next);
 		updateRequestLogsRetention.mutate({
 			mode: next.mode,
 			amount: next.amount,
@@ -592,34 +560,7 @@ export function DataSettings({
 		}
 	};
 
-	const recordingsSummary = (() => {
-		const stats = recordingsStats.data;
-		if (!stats) return null;
-		if (typeof stats.count !== "number" || !Number.isFinite(stats.count))
-			return null;
-		if (typeof stats.bytes !== "number" || !Number.isFinite(stats.bytes))
-			return null;
-
-		const gb = stats.bytes / 1024 ** 3;
-		return {
-			count: Math.max(0, Math.round(stats.count)),
-			gb,
-		};
-	})();
-
-	const formatBytes = (bytes: number) => {
-		const b =
-			typeof bytes === "number" && Number.isFinite(bytes)
-				? Math.max(0, bytes)
-				: 0;
-		if (b < 1024) return `${Math.round(b)} B`;
-		const kb = b / 1024;
-		if (kb < 1024) return `${kb.toFixed(1)} KB`;
-		const mb = kb / 1024;
-		if (mb < 1024) return `${mb.toFixed(1)} MB`;
-		const gb = mb / 1024;
-		return `${gb.toFixed(2)} GB`;
-	};
+	const recordingsSummary = summarizeRecordingsStorage(recordingsStats.data);
 
 	// ---------------------------------------------------------------------------
 	// Danger zone (destructive actions)
@@ -837,21 +778,11 @@ export function DataSettings({
 									value={logsRetentionUnit}
 									onChange={(next) => {
 										const nextUnit = next === "hours" ? "hours" : "days";
-
-										const current =
-											typeof logsRetentionValue === "number"
-												? logsRetentionValue
-												: 0;
-
-										// Preserve the underlying duration when switching units.
-										const nextValue =
-											current === 0
-												? 0
-												: logsRetentionUnit === "days" && nextUnit === "hours"
-													? current * 24
-													: logsRetentionUnit === "hours" && nextUnit === "days"
-														? Math.round(current / 24)
-														: current;
+										const nextValue = preserveRetentionDurationOnUnitChange({
+											currentUnit: logsRetentionUnit,
+											nextUnit,
+											currentValue: logsRetentionValue,
+										});
 
 										commitLogsRetention({
 											mode: "time",
@@ -1039,23 +970,11 @@ export function DataSettings({
 									value={recordingsRetentionUnit}
 									onChange={(next) => {
 										const nextUnit = next === "hours" ? "hours" : "days";
-
-										const current =
-											typeof recordingsRetentionValue === "number"
-												? recordingsRetentionValue
-												: 0;
-
-										// Preserve the underlying duration when switching units.
-										const nextValue =
-											current === 0
-												? 0
-												: recordingsRetentionUnit === "days" &&
-														nextUnit === "hours"
-													? current * 24
-													: recordingsRetentionUnit === "hours" &&
-															nextUnit === "days"
-														? Math.round(current / 24)
-														: current;
+										const nextValue = preserveRetentionDurationOnUnitChange({
+											currentUnit: recordingsRetentionUnit,
+											nextUnit,
+											currentValue: recordingsRetentionValue,
+										});
 
 										commitRecordingsRetention({
 											mode: "time",
@@ -1179,23 +1098,11 @@ export function DataSettings({
 									onChange={(next) => {
 										const nextUnit =
 											next === "hours" ? ("hours" as const) : ("days" as const);
-
-										const current =
-											typeof transcriptionRetentionValue === "number"
-												? transcriptionRetentionValue
-												: 0;
-
-										// Preserve the underlying duration when switching units.
-										const nextValue =
-											current === 0
-												? 0
-												: transcriptionRetentionUnit === "days" &&
-														nextUnit === "hours"
-													? current * 24
-													: transcriptionRetentionUnit === "hours" &&
-															nextUnit === "days"
-														? Math.round(current / 24)
-														: current;
+										const nextValue = preserveRetentionDurationOnUnitChange({
+											currentUnit: transcriptionRetentionUnit,
+											nextUnit,
+											currentValue: transcriptionRetentionValue,
+										});
 
 										commitTranscriptionRetentionPolicy({
 											mode: "time",
@@ -1304,20 +1211,11 @@ export function DataSettings({
 							onChange={(next) => {
 								const nextUnit =
 									next === "hours" ? ("hours" as const) : ("days" as const);
-
-								const current =
-									typeof statsRetentionValue === "number"
-										? statsRetentionValue
-										: 0;
-
-								const nextValue =
-									current === 0
-										? 0
-										: statsRetentionUnit === "days" && nextUnit === "hours"
-											? current * 24
-											: statsRetentionUnit === "hours" && nextUnit === "days"
-												? Math.round(current / 24)
-												: current;
+								const nextValue = preserveRetentionDurationOnUnitChange({
+									currentUnit: statsRetentionUnit,
+									nextUnit,
+									currentValue: statsRetentionValue,
+								});
 
 								commitStatsRetention({ unit: nextUnit, value: nextValue });
 							}}
@@ -1621,7 +1519,7 @@ export function DataSettings({
 									</Text>
 									<Text size="xs" c="dimmed">
 										{dataStorageSummary.data.recordings_count} (
-										{formatBytes(dataStorageSummary.data.recordings_bytes)})
+										{formatDataBytes(dataStorageSummary.data.recordings_bytes)})
 									</Text>
 
 									<Text size="xs" c="dimmed">
@@ -1629,7 +1527,7 @@ export function DataSettings({
 									</Text>
 									<Text size="xs" c="dimmed">
 										{dataStorageSummary.data.history_count} (
-										{formatBytes(dataStorageSummary.data.history_bytes)})
+										{formatDataBytes(dataStorageSummary.data.history_bytes)})
 									</Text>
 
 									<Text size="xs" c="dimmed">
@@ -1644,14 +1542,14 @@ export function DataSettings({
 									</Text>
 									<Text size="xs" c="dimmed">
 										{dataStorageSummary.data.stats_files_count} files (
-										{formatBytes(dataStorageSummary.data.stats_bytes)})
+										{formatDataBytes(dataStorageSummary.data.stats_bytes)})
 									</Text>
 
 									<Text size="xs" c="dimmed">
 										Settings
 									</Text>
 									<Text size="xs" c="dimmed">
-										{formatBytes(dataStorageSummary.data.settings_bytes)}
+										{formatDataBytes(dataStorageSummary.data.settings_bytes)}
 									</Text>
 
 									<Text size="xs" c="dimmed">
