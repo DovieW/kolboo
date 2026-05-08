@@ -6,6 +6,7 @@
 use crate::audio_capture::{AudioCaptureDiagnostics, VadAutoStopConfig};
 use crate::commands::event_sink::AppEventSink;
 use crate::commands::history::{get_history_max_entries, get_max_saved_recordings};
+use crate::commands::recording_lifecycle;
 use crate::commands::CommandError;
 use crate::events;
 use crate::history::{HistoryStorage, RequestHistoryUpdate};
@@ -16,8 +17,8 @@ use crate::pipeline::{
 };
 use crate::recording_completion;
 use crate::recording_request_initialization::{
-    create_in_progress_history_update, record_request_id_on_current_span,
-    start_request_log_with_seed, HistorySelectionMode, LogLlmSeedMode, RecordingRequestSeed,
+    record_request_id_on_current_span, start_request_log_with_seed, HistorySelectionMode,
+    LogLlmSeedMode, RecordingRequestSeed,
 };
 use crate::recordings::{RecordingStore, RecordingsStats};
 use crate::request_log::RequestLogStore;
@@ -236,18 +237,15 @@ pub fn pipeline_start_recording(
         .with_profile(profile_id.clone(), profile_name.clone());
 
     // Start request logging.
-    let request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
-        let id = start_request_log_with_seed(
-            &log_store,
-            &request_seed,
-            LogLlmSeedMode::PreserveConfigured,
-            |log| {
-                log.info("Recording started");
-            },
-        );
-        record_request_id_on_current_span(Some(id.as_str()));
-        id
-    });
+    let request_log_store = app.try_state::<RequestLogStore>();
+    let request_id = recording_lifecycle::start_recording_request(
+        request_log_store.as_ref().map(|state| state.inner()),
+        &request_seed,
+        LogLlmSeedMode::PreserveConfigured,
+        |log| {
+            log.info("Recording started");
+        },
+    );
 
     // Bind OCR to this request id so OCR survives internal pipeline transitions and cannot
     // leak across requests.
@@ -320,72 +318,25 @@ async fn pipeline_stop_and_transcribe_inner(
     // In some edge cases (e.g., backend-initiated recordings or unexpected state
     // resets), request logging may not have been started at recording-start.
     // For UX consistency, ensure we still create a request log + history entry.
-    let mut active_request_id: Option<String> = app
-        .try_state::<RequestLogStore>()
-        .and_then(|store| store.with_current(|log| log.id.clone()));
-
-    if active_request_id.is_none() {
-        if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let id = start_request_log_with_seed(
-                &log_store,
-                &request_seed,
-                LogLlmSeedMode::PreserveConfigured,
-                |log| {
-                    log.warn("Request log was missing at stop; started a new request log entry");
-                },
-            );
-            active_request_id = Some(id);
-        }
-    }
-
-    record_request_id_on_current_span(active_request_id.as_deref());
-
-    // Bind OCR to this request id so OCR survives internal pipeline transitions and
-    // cannot leak across requests. This also handles edge cases where request logging
-    // begins at stop rather than recording-start.
-    if let Some(id) = active_request_id.clone() {
-        pipeline.begin_ocr_session(id);
-
-        // NEW: Capture screenshot immediately if timing is "on_start" and any mode is auto.
-        // This allows OCR to run in parallel with recording, so results are ready by stop time.
-        let ocr_config = config.ocr_config.clone();
-        if ocr_config.auto_capture_timing == "on_start" && ocr_config.has_any_auto_mode() {
-            pipeline.start_ocr_task(&ocr_config);
-        }
-    }
-
-    // Create an in-progress history entry so the History view shows a running request.
-    if let Some(req_id) = active_request_id.as_deref() {
-        let _ = history_request_lifecycle::apply_request_history_update(
-            &app,
-            create_in_progress_history_update(
-                req_id,
-                &request_seed,
-                HistorySelectionMode::OmitSeededSelection,
-                max_history_entries,
-            ),
-        );
-    }
-
-    crate::recording_orchestration::spawn_transcription_started_watcher(
-        app.clone(),
-        pipeline.inner().clone(),
+    let request_log_store = app.try_state::<RequestLogStore>();
+    let active_request = recording_lifecycle::ensure_current_transcription_request(
+        request_log_store.as_ref().map(|state| state.inner()),
+        &request_seed,
+        HistorySelectionMode::OmitSeededSelection,
+        max_history_entries,
+        "Request log was missing at stop; started a new request log entry",
     );
+    let active_request_id = active_request.request_id.clone();
 
-    crate::recording_orchestration::spawn_routing_started_watcher(
+    // Bind OCR to this request id so OCR survives internal pipeline transitions and cannot leak
+    // across requests. This also handles edge cases where request logging begins at stop rather
+    // than recording-start.
+    active_request.bind_ocr_session_for_transcription(pipeline.inner(), &config.ocr_config);
+    active_request.apply_history_updates(&app);
+    active_request.spawn_watchers(
         app.clone(),
         pipeline.inner().clone(),
-    );
-
-    // Emit rewriting started once the pipeline actually enters the optional LLM phase.
-    //
-    // Why not rely on the overlay's `pipeline_get_state` polling?
-    // The overlay may be awaiting a long-running `invoke("pipeline_stop_and_transcribe")`,
-    // which can prevent intermediate polling updates from being observed. A dedicated event
-    // keeps the UI honest about the rewrite duration.
-    crate::recording_orchestration::spawn_rewriting_started_watcher(
-        app.clone(),
-        pipeline.inner().clone(),
+        crate::recording_orchestration::RecordingPhaseWatcherBundle::StopAndTranscribe,
     );
 
     // Log transcription start
@@ -666,41 +617,18 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         .with_profile(profile_id.clone(), profile_name.clone())
         .with_preset(original_preset_id.clone(), original_preset_name.clone());
 
-    let new_request_id: Option<String> = app.try_state::<RequestLogStore>().map(|log_store| {
-        start_request_log_with_seed(
-            &log_store,
-            &request_seed,
-            LogLlmSeedMode::OmitConfigured,
-            |_| {},
-        )
-    });
+    let request_log_store = app.try_state::<RequestLogStore>();
+    let retry_request = recording_lifecycle::start_retry_transcription_request(
+        request_log_store.as_ref().map(|state| state.inner()),
+        &request_seed,
+        &recording_source_id,
+        max_history_entries,
+    );
+    let new_request_id = retry_request.request_id.clone();
 
     // Bind OCR to this retry request id so OCR cannot leak across requests.
-    if let Some(id) = new_request_id.clone() {
-        pipeline.begin_ocr_session(id);
-    }
-
-    record_request_id_on_current_span(new_request_id.as_deref());
-
-    // Create a history entry for the retry attempt.
-    if let Some(req_id) = new_request_id.as_deref() {
-        let _ = history_request_lifecycle::apply_request_history_update(
-            &app,
-            create_in_progress_history_update(
-                req_id,
-                &request_seed,
-                HistorySelectionMode::PreserveSeededSelection,
-                max_history_entries,
-            ),
-        );
-        let _ = history_request_lifecycle::apply_request_history_update(
-            &app,
-            RequestHistoryUpdate::SetRecordingSource {
-                request_id: req_id.to_string(),
-                recording_request_id: Some(recording_source_id.clone()),
-            },
-        );
-    }
+    retry_request.bind_ocr_session(&pipeline);
+    retry_request.apply_history_updates(&app);
 
     let _ = app.emit(events::EVENT_PIPELINE_TRANSCRIPTION_STARTED, ());
     let _ = app.emit(
@@ -733,9 +661,11 @@ pub(crate) async fn pipeline_retry_transcription_impl(
         None
     };
 
-    crate::recording_orchestration::spawn_rewriting_started_watcher(app.clone(), pipeline.clone());
-
-    crate::recording_orchestration::spawn_routing_started_watcher(app.clone(), pipeline.clone());
+    retry_request.spawn_watchers(
+        app.clone(),
+        pipeline.clone(),
+        crate::recording_orchestration::RecordingPhaseWatcherBundle::RetryTranscription,
+    );
 
     // Run the retry transcription (STT + optional LLM)
     let result = match pipeline
@@ -1030,38 +960,16 @@ async fn pipeline_dictate_inner(
 
     // Ensure there is a request log (pipeline_toggle starts one on recording-start,
     // but other flows can reach here without an active log).
-    let mut active_request_id: Option<String> = app
-        .try_state::<RequestLogStore>()
-        .and_then(|store| store.with_current(|log| log.id.clone()));
-
-    if active_request_id.is_none() {
-        if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let id = start_request_log_with_seed(
-                &log_store,
-                &request_seed,
-                LogLlmSeedMode::PreserveConfigured,
-                |log| {
-                    log.warn("Request log was missing at dictate; started a new request log entry");
-                },
-            );
-            active_request_id = Some(id);
-        }
-    }
-
-    record_request_id_on_current_span(active_request_id.as_deref());
-
-    // Create an in-progress history entry so the History view shows a running request.
-    if let Some(req_id) = active_request_id.as_deref() {
-        let _ = history_request_lifecycle::apply_request_history_update(
-            &app,
-            create_in_progress_history_update(
-                req_id,
-                &request_seed,
-                HistorySelectionMode::PreserveSeededSelection,
-                max_history_entries,
-            ),
-        );
-    }
+    let request_log_store = app.try_state::<RequestLogStore>();
+    let active_request = recording_lifecycle::ensure_current_transcription_request(
+        request_log_store.as_ref().map(|state| state.inner()),
+        &request_seed,
+        HistorySelectionMode::PreserveSeededSelection,
+        max_history_entries,
+        "Request log was missing at dictate; started a new request log entry",
+    );
+    let active_request_id = active_request.request_id.clone();
+    active_request.apply_history_updates(&app);
 
     // Log transcription start
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
@@ -1073,14 +981,10 @@ async fn pipeline_dictate_inner(
         });
     }
 
-    crate::recording_orchestration::spawn_transcription_started_watcher(
+    active_request.spawn_watchers(
         app.clone(),
         pipeline.inner().clone(),
-    );
-
-    crate::recording_orchestration::spawn_routing_started_watcher(
-        app.clone(),
-        pipeline.inner().clone(),
+        crate::recording_orchestration::RecordingPhaseWatcherBundle::Dictate,
     );
 
     let result = match pipeline.stop_and_transcribe_detailed().await {

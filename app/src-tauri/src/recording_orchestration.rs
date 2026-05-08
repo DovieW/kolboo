@@ -15,6 +15,20 @@ use crate::pipeline::{PipelineState, SharedPipeline};
 use crate::PipelineStateEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordingPhaseWatcherBundle {
+    StopAndTranscribe,
+    RetryTranscription,
+    Dictate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RecordingPhaseWatcherPlan {
+    transcription_started: bool,
+    routing_started: bool,
+    rewriting_started: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PhaseWatchDecision {
     Emit,
     Stop,
@@ -32,6 +46,46 @@ fn classify_phase_watch_state(state: PipelineState, target: PipelineState) -> Ph
         | PipelineState::Transcribing
         | PipelineState::Routing
         | PipelineState::Rewriting => PhaseWatchDecision::Continue,
+    }
+}
+
+fn recording_phase_watcher_plan(bundle: RecordingPhaseWatcherBundle) -> RecordingPhaseWatcherPlan {
+    match bundle {
+        RecordingPhaseWatcherBundle::StopAndTranscribe => RecordingPhaseWatcherPlan {
+            transcription_started: true,
+            routing_started: true,
+            rewriting_started: true,
+        },
+        RecordingPhaseWatcherBundle::RetryTranscription => RecordingPhaseWatcherPlan {
+            transcription_started: false,
+            routing_started: true,
+            rewriting_started: true,
+        },
+        RecordingPhaseWatcherBundle::Dictate => RecordingPhaseWatcherPlan {
+            transcription_started: true,
+            routing_started: true,
+            rewriting_started: false,
+        },
+    }
+}
+
+pub(crate) fn spawn_recording_phase_watchers(
+    app: AppHandle,
+    pipeline: SharedPipeline,
+    bundle: RecordingPhaseWatcherBundle,
+) {
+    let plan = recording_phase_watcher_plan(bundle);
+
+    if plan.transcription_started {
+        spawn_transcription_started_watcher(app.clone(), pipeline.clone());
+    }
+
+    if plan.routing_started {
+        spawn_routing_started_watcher(app.clone(), pipeline.clone());
+    }
+
+    if plan.rewriting_started {
+        spawn_rewriting_started_watcher(app, pipeline);
     }
 }
 
@@ -146,6 +200,34 @@ mod tests {
         assert_eq!(
             classify_phase_watch_state(PipelineState::Routing, PipelineState::Transcribing),
             PhaseWatchDecision::Continue
+        );
+    }
+
+    #[test]
+    fn watcher_bundle_plans_match_command_flow_expectations() {
+        assert_eq!(
+            recording_phase_watcher_plan(RecordingPhaseWatcherBundle::StopAndTranscribe),
+            RecordingPhaseWatcherPlan {
+                transcription_started: true,
+                routing_started: true,
+                rewriting_started: true,
+            }
+        );
+        assert_eq!(
+            recording_phase_watcher_plan(RecordingPhaseWatcherBundle::RetryTranscription),
+            RecordingPhaseWatcherPlan {
+                transcription_started: false,
+                routing_started: true,
+                rewriting_started: true,
+            }
+        );
+        assert_eq!(
+            recording_phase_watcher_plan(RecordingPhaseWatcherBundle::Dictate),
+            RecordingPhaseWatcherPlan {
+                transcription_started: true,
+                routing_started: true,
+                rewriting_started: false,
+            }
         );
     }
 }

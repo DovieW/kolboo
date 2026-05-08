@@ -17,6 +17,9 @@ use crate::event_payloads::{
     QuickAskStartedPayload,
 };
 use crate::llm;
+use crate::pipeline::llm_provider_request::{
+    resolve_one_off_llm_request, OneOffLlmProviderRequestLayer,
+};
 use crate::pipeline::{OcrConfig, SharedPipeline, TranscriptionResult};
 use crate::prompt_builders;
 use crate::request_log::{RequestLogStore, RequestStatus};
@@ -139,50 +142,50 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
     );
 
     let pipeline_config = input.pipeline.config();
-    let provider_impl =
-        match crate::pipeline::llm_provider::create_one_off_llm_provider_unstructured(
-            &pipeline_config.llm_config,
-            &pipeline_config.llm_api_keys,
-            provider.as_str(),
-            crate::pipeline::llm_provider::LlmProviderParams {
-                model: model.clone(),
-                timeout: pipeline_config.llm_config.timeout,
-                ollama_url: pipeline_config.llm_config.ollama_url.clone(),
-                openai_reasoning_effort: quick_ask_config.openai_reasoning_effort.clone(),
-                gemini_thinking_budget: quick_ask_config.gemini_thinking_budget,
-                gemini_thinking_level: quick_ask_config.gemini_thinking_level.clone(),
-                anthropic_thinking_budget: quick_ask_config.anthropic_thinking_budget,
-            },
-        ) {
-            Ok(provider) => provider,
-            Err(e) => {
-                let err = e.to_string();
-                if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
-                    log_store.with_current(|log| {
-                        log.kind = QuickActionKind::QuickAsk.request_kind();
-                        log.error(format!("Quick Ask failed: {}", err));
-                        log.complete_error(err.clone());
-                    });
-                }
-
-                complete_current_request_with_cost(
-                    input.app,
-                    input.pipeline,
-                    input.request_id,
-                    stats::EventStatus::Error,
-                );
-
-                quick_ask::emit_to_quick_ask(
-                    input.app,
-                    quick_ask::EVENT_QUICK_ASK_ANSWER,
-                    QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
-                        ok: false,
-                        error: err,
-                    }),
-                );
-                return;
+    let provider_request = resolve_one_off_llm_request(
+        &pipeline_config.llm_config,
+        &[OneOffLlmProviderRequestLayer {
+            provider: Some(provider.clone()),
+            model: model.clone(),
+            openai_reasoning_effort: quick_ask_config.openai_reasoning_effort.clone(),
+            gemini_thinking_budget: quick_ask_config.gemini_thinking_budget,
+            gemini_thinking_level: quick_ask_config.gemini_thinking_level.clone(),
+            anthropic_thinking_budget: quick_ask_config.anthropic_thinking_budget,
+            ..Default::default()
+        }],
+    );
+    let provider_impl = match provider_request
+        .create_unstructured(&pipeline_config.llm_config, &pipeline_config.llm_api_keys)
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            let err = e.to_string();
+            if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
+                log_store.with_current(|log| {
+                    log.kind = QuickActionKind::QuickAsk.request_kind();
+                    log.error(format!("Quick Ask failed: {}", err));
+                    log.complete_error(err.clone());
+                });
             }
-        };
+
+            complete_current_request_with_cost(
+                input.app,
+                input.pipeline,
+                input.request_id,
+                stats::EventStatus::Error,
+            );
+
+            quick_ask::emit_to_quick_ask(
+                input.app,
+                quick_ask::EVENT_QUICK_ASK_ANSWER,
+                QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+                    ok: false,
+                    error: err,
+                }),
+            );
+            return;
+        }
+    };
 
     let request_context = context_collection::collect_quick_ask_context(
         input.app,
@@ -431,49 +434,40 @@ pub(crate) async fn try_quick_replace(
 
             record_quick_replace_context(input.app, clipboard_text.clone(), &ocr_context);
 
-            let provider_impl =
-                match crate::pipeline::llm_provider::create_one_off_llm_provider_unstructured(
-                    &pipeline_config.llm_config,
-                    &pipeline_config.llm_api_keys,
-                    provider.as_str(),
-                    crate::pipeline::llm_provider::LlmProviderParams {
-                        model: model.clone(),
-                        timeout: pipeline_config.llm_config.timeout,
-                        ollama_url: pipeline_config.llm_config.ollama_url.clone(),
-                        openai_reasoning_effort: pipeline_config
-                            .llm_config
-                            .openai_reasoning_effort
-                            .clone(),
-                        gemini_thinking_budget: pipeline_config.llm_config.gemini_thinking_budget,
-                        gemini_thinking_level: pipeline_config
-                            .llm_config
-                            .gemini_thinking_level
-                            .clone(),
-                        anthropic_thinking_budget: pipeline_config
-                            .llm_config
-                            .anthropic_thinking_budget,
-                    },
-                ) {
-                    Ok(provider_impl) => provider_impl,
-                    Err(_) => {
-                        let err = format!(
-                            "Quick Replace failed: no API key configured for provider: {}",
-                            provider
-                        );
-                        record_quick_replace_missing_key(input.app, &provider, input.config, &err);
-                        failure = Some(err);
-                        finalize_quick_replace_attempt(
-                            input.app,
-                            input.pipeline,
-                            input.request_id,
-                            failure.as_ref(),
-                        );
-                        return QuickReplaceExecutionResult {
-                            output_value,
-                            failure,
-                        };
-                    }
-                };
+            let provider_request = resolve_one_off_llm_request(
+                &pipeline_config.llm_config,
+                &[OneOffLlmProviderRequestLayer {
+                    provider: Some(provider.clone()),
+                    model: model.clone(),
+                    ..Default::default()
+                }],
+            );
+
+            let provider_impl = match provider_request
+                .create_unstructured(&pipeline_config.llm_config, &pipeline_config.llm_api_keys)
+            {
+                Ok(provider_impl) => provider_impl,
+                Err(e) => {
+                    let err = format!("Quick Replace failed: {}", e);
+                    record_quick_replace_provider_init_failure(
+                        input.app,
+                        &provider,
+                        input.config,
+                        &err,
+                    );
+                    failure = Some(err);
+                    finalize_quick_replace_attempt(
+                        input.app,
+                        input.pipeline,
+                        input.request_id,
+                        failure.as_ref(),
+                    );
+                    return QuickReplaceExecutionResult {
+                        output_value,
+                        failure,
+                    };
+                }
+            };
             let t0 = Instant::now();
 
             match provider_impl.complete(&system_prompt, &user_prompt).await {
@@ -728,7 +722,7 @@ fn record_quick_replace_selection_start(app: &AppHandle, selected: &str, output_
     }
 }
 
-fn record_quick_replace_missing_key(
+fn record_quick_replace_provider_init_failure(
     app: &AppHandle,
     provider: &str,
     config: &QuickReplaceConfig,
@@ -737,8 +731,8 @@ fn record_quick_replace_missing_key(
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
             log.warn(format!(
-                "Quick replace: skipped (no API key configured for provider: {})",
-                provider
+                "Quick replace: skipped (provider init failed for {}: {})",
+                provider, err
             ));
             log.quick_replace_provider = Some(provider.to_string());
             log.quick_replace_model = config.model.clone();

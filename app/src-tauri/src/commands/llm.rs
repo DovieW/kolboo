@@ -2,10 +2,10 @@
 
 use crate::commands::CommandError;
 use crate::llm::format_text;
-use crate::llm::{LlmConfig, PromptSections, SYSTEM_PROMPT_DEFAULT};
-use crate::pipeline::llm_provider::{
-    create_one_off_llm_provider_unstructured, create_one_off_llm_provider_without_timeout,
-    LlmProviderParams,
+use crate::llm::{LlmConfig, ProgramPromptProfile, PromptSections, SYSTEM_PROMPT_DEFAULT};
+use crate::pipeline::llm_provider_request::{
+    resolve_one_off_llm_request, resolve_one_off_llm_request_for_profile,
+    OneOffLlmProviderRequestLayer,
 };
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
@@ -17,6 +17,48 @@ use tauri::{AppHandle, Manager, State};
 
 fn llm_error(message: impl Into<String>) -> CommandError {
     CommandError::new(message, "llm")
+}
+
+fn resolve_requested_profile(
+    llm_config: &LlmConfig,
+    profile_id: Option<&str>,
+) -> Result<Option<ProgramPromptProfile>, CommandError> {
+    // Unknown ids should stay loud here instead of silently drifting to the global/default path.
+    // These commands are debugging and prompt-lab surfaces, so explicit failures are easier to
+    // understand than "it used some other provider/model than I expected".
+    profile_id
+        .and_then(|id| if id == "default" { None } else { Some(id) })
+        .map(|id| {
+            llm_config
+                .program_prompt_profiles
+                .iter()
+                .find(|p| p.id == id)
+                .cloned()
+                .ok_or_else(|| llm_error(format!("Unknown profile_id: {}", id)))
+        })
+        .transpose()
+}
+
+fn record_request_log_profile_usage(
+    request_log_store: Option<&RequestLogStore>,
+    resolved_profile: Option<&ProgramPromptProfile>,
+) {
+    let Some(store) = request_log_store else {
+        return;
+    };
+
+    let (used_id, used_name) = if let Some(profile) = resolved_profile {
+        (Some(profile.id.clone()), Some(profile.name.clone()))
+    } else {
+        // These commands intentionally treat the non-profile path as the Default/global rewrite
+        // configuration so the request log is still easy to interpret later.
+        (Some("default".to_string()), Some("Default".to_string()))
+    };
+
+    store.with_current(|log| {
+        log.profile_id = used_id;
+        log.profile_name = used_name;
+    });
 }
 
 /// LLM configuration payload from frontend
@@ -282,93 +324,31 @@ pub async fn test_llm_rewrite(
 
     // Resolve the requested profile (if any). For unknown ids we error instead of silently
     // falling back to Default; this prevents confusing test results.
-    let resolved_profile = profile_id
-        .as_deref()
-        .and_then(|id| if id == "default" { None } else { Some(id) })
-        .map(|id| {
-            config
-                .llm_config
-                .program_prompt_profiles
-                .iter()
-                .find(|p| p.id == id)
-                .cloned()
-                .ok_or_else(|| llm_error(format!("Unknown profile_id: {}", id)))
-        })
-        .transpose()?;
+    let resolved_profile = resolve_requested_profile(&config.llm_config, profile_id.as_deref())?;
 
     // Persist which profile was used into the request log so the Logs UI and raw payloads
     // are easier to interpret.
-    if let Some(store) = request_log_store.as_ref() {
-        let (used_id, used_name) = if let Some(p) = resolved_profile.as_ref() {
-            (Some(p.id.clone()), Some(p.name.clone()))
-        } else {
-            (Some("default".to_string()), Some("Default".to_string()))
-        };
-
-        store.with_current(|log| {
-            log.profile_id = used_id;
-            log.profile_name = used_name;
-        });
-    }
+    record_request_log_profile_usage(request_log_store.as_ref(), resolved_profile.as_ref());
 
     // IMPORTANT: This is a *test* endpoint. It intentionally ignores the
     // "Rewrite Transcription" enable toggle so users can validate prompts/
     // provider/model without changing runtime behavior.
-    let (desired_provider, desired_model, prompts) =
-        if let Some(profile) = resolved_profile.as_ref() {
-            let provider = profile
-                .llm_provider
-                .clone()
-                .unwrap_or_else(|| config.llm_config.provider.clone());
-            let model = profile
-                .llm_model
-                .clone()
-                .or_else(|| config.llm_config.model.clone());
+    let prompts = resolved_profile
+        .as_ref()
+        .map(|profile| profile.prompts.clone())
+        .unwrap_or_else(|| config.llm_config.prompts.clone());
 
-            (provider, model, profile.prompts.clone())
-        } else {
-            (
-                config.llm_config.provider.clone(),
-                config.llm_config.model.clone(),
-                config.llm_config.prompts.clone(),
-            )
-        };
-
-    // Apply provider-specific thinking/reasoning knobs (profile overrides -> global defaults).
-    let effective_openai_reasoning_effort = resolved_profile
-        .as_ref()
-        .and_then(|p| p.openai_reasoning_effort.clone())
-        .or_else(|| config.llm_config.openai_reasoning_effort.clone());
-    let effective_gemini_thinking_budget = resolved_profile
-        .as_ref()
-        .and_then(|p| p.gemini_thinking_budget)
-        .or(config.llm_config.gemini_thinking_budget);
-    let effective_gemini_thinking_level = resolved_profile
-        .as_ref()
-        .and_then(|p| p.gemini_thinking_level.clone())
-        .or_else(|| config.llm_config.gemini_thinking_level.clone());
-    let effective_anthropic_thinking_budget = resolved_profile
-        .as_ref()
-        .and_then(|p| p.anthropic_thinking_budget)
-        .or(config.llm_config.anthropic_thinking_budget);
+    let provider_request =
+        resolve_one_off_llm_request_for_profile(&config.llm_config, resolved_profile.as_ref(), &[]);
 
     // This is a *test* endpoint: do not enforce request timeouts.
-    let provider = create_one_off_llm_provider_without_timeout(
-        &config.llm_config,
-        &config.llm_api_keys,
-        desired_provider.as_str(),
-        LlmProviderParams {
-            model: desired_model,
-            timeout: config.llm_config.timeout,
-            ollama_url: config.llm_config.ollama_url.clone(),
-            openai_reasoning_effort: effective_openai_reasoning_effort,
-            gemini_thinking_budget: effective_gemini_thinking_budget,
-            gemini_thinking_level: effective_gemini_thinking_level,
-            anthropic_thinking_budget: effective_anthropic_thinking_budget,
-        },
-        request_log_store.clone(),
-    )
-    .map_err(|e| llm_error(e.to_string()))?;
+    let provider = provider_request
+        .create_without_timeout(
+            &config.llm_config,
+            &config.llm_api_keys,
+            request_log_store.clone(),
+        )
+        .map_err(|e| llm_error(e.to_string()))?;
 
     let output_res = format_text(provider.as_ref(), &transcript, &prompts).await;
 
@@ -495,123 +475,32 @@ pub async fn iterate_rewrite_prompt(
 
     let config = pipeline.config();
 
-    let resolved_profile = profile_id
-        .as_deref()
-        .and_then(|id| if id == "default" { None } else { Some(id) })
-        .map(|id| {
-            config
-                .llm_config
-                .program_prompt_profiles
-                .iter()
-                .find(|p| p.id == id)
-                .cloned()
-                .ok_or_else(|| llm_error(format!("Unknown profile_id: {}", id)))
-        })
-        .transpose()?;
+    let resolved_profile = resolve_requested_profile(&config.llm_config, profile_id.as_deref())?;
 
-    if let Some(store) = request_log_store.as_ref() {
-        let (used_id, used_name) = if let Some(p) = resolved_profile.as_ref() {
-            (Some(p.id.clone()), Some(p.name.clone()))
-        } else {
-            (Some("default".to_string()), Some("Default".to_string()))
-        };
+    record_request_log_profile_usage(request_log_store.as_ref(), resolved_profile.as_ref());
 
-        store.with_current(|log| {
-            log.profile_id = used_id;
-            log.profile_name = used_name;
-        });
-    }
-
-    let (base_provider, base_model) = if let Some(profile) = resolved_profile.as_ref() {
-        let provider = profile
-            .llm_provider
-            .clone()
-            .unwrap_or_else(|| config.llm_config.provider.clone());
-        let model = profile
-            .llm_model
-            .clone()
-            .or_else(|| config.llm_config.model.clone());
-        (provider, model)
-    } else {
-        (
-            config.llm_config.provider.clone(),
-            config.llm_config.model.clone(),
-        )
-    };
-
-    let desired_provider = llm_provider
-        .as_deref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or(base_provider);
-
-    let desired_model = llm_model
-        .as_deref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| Some(s.to_string()))
-        .unwrap_or(base_model);
-
-    // Apply provider-specific thinking/reasoning knobs.
-    // Precedence: Prompt Lab override -> profile override -> global defaults.
-    let effective_openai_reasoning_effort = open_ai_reasoning_effort
-        .as_deref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            resolved_profile
-                .as_ref()
-                .and_then(|p| p.openai_reasoning_effort.clone())
-        })
-        .or_else(|| config.llm_config.openai_reasoning_effort.clone());
-
-    let effective_gemini_thinking_budget = gemini_thinking_budget
-        .or_else(|| {
-            resolved_profile
-                .as_ref()
-                .and_then(|p| p.gemini_thinking_budget)
-        })
-        .or(config.llm_config.gemini_thinking_budget);
-
-    let effective_gemini_thinking_level = gemini_thinking_level
-        .as_deref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            resolved_profile
-                .as_ref()
-                .and_then(|p| p.gemini_thinking_level.clone())
-        })
-        .or_else(|| config.llm_config.gemini_thinking_level.clone());
-
-    let effective_anthropic_thinking_budget = anthropic_thinking_budget
-        .or_else(|| {
-            resolved_profile
-                .as_ref()
-                .and_then(|p| p.anthropic_thinking_budget)
-        })
-        .or(config.llm_config.anthropic_thinking_budget);
+    let provider_request = resolve_one_off_llm_request_for_profile(
+        &config.llm_config,
+        resolved_profile.as_ref(),
+        &[OneOffLlmProviderRequestLayer {
+            provider: llm_provider,
+            model: llm_model,
+            openai_reasoning_effort: open_ai_reasoning_effort,
+            gemini_thinking_budget,
+            gemini_thinking_level,
+            anthropic_thinking_budget,
+            ..Default::default()
+        }],
+    );
 
     // This is a Settings UI helper: do not enforce request timeouts.
-    let provider = create_one_off_llm_provider_without_timeout(
-        &config.llm_config,
-        &config.llm_api_keys,
-        desired_provider.as_str(),
-        LlmProviderParams {
-            model: desired_model,
-            timeout: config.llm_config.timeout,
-            ollama_url: config.llm_config.ollama_url.clone(),
-            openai_reasoning_effort: effective_openai_reasoning_effort,
-            gemini_thinking_budget: effective_gemini_thinking_budget,
-            gemini_thinking_level: effective_gemini_thinking_level,
-            anthropic_thinking_budget: effective_anthropic_thinking_budget,
-        },
-        request_log_store.clone(),
-    )
-    .map_err(|e| llm_error(e.to_string()))?;
+    let provider = provider_request
+        .create_without_timeout(
+            &config.llm_config,
+            &config.llm_api_keys,
+            request_log_store.clone(),
+        )
+        .map_err(|e| llm_error(e.to_string()))?;
 
     let mode = mode.as_deref().unwrap_or("fixed");
 
@@ -792,83 +681,20 @@ pub async fn test_rewrite_with_prompt(
 
     let config = pipeline.config();
 
-    let resolved_profile = profile_id
-        .as_deref()
-        .and_then(|id| if id == "default" { None } else { Some(id) })
-        .map(|id| {
-            config
-                .llm_config
-                .program_prompt_profiles
-                .iter()
-                .find(|p| p.id == id)
-                .cloned()
-                .ok_or_else(|| llm_error(format!("Unknown profile_id: {}", id)))
-        })
-        .transpose()?;
+    let resolved_profile = resolve_requested_profile(&config.llm_config, profile_id.as_deref())?;
 
-    if let Some(store) = request_log_store.as_ref() {
-        let (used_id, used_name) = if let Some(p) = resolved_profile.as_ref() {
-            (Some(p.id.clone()), Some(p.name.clone()))
-        } else {
-            (Some("default".to_string()), Some("Default".to_string()))
-        };
+    record_request_log_profile_usage(request_log_store.as_ref(), resolved_profile.as_ref());
 
-        store.with_current(|log| {
-            log.profile_id = used_id;
-            log.profile_name = used_name;
-        });
-    }
+    let provider_request =
+        resolve_one_off_llm_request_for_profile(&config.llm_config, resolved_profile.as_ref(), &[]);
 
-    let (desired_provider, desired_model) = if let Some(profile) = resolved_profile.as_ref() {
-        let provider = profile
-            .llm_provider
-            .clone()
-            .unwrap_or_else(|| config.llm_config.provider.clone());
-        let model = profile
-            .llm_model
-            .clone()
-            .or_else(|| config.llm_config.model.clone());
-        (provider, model)
-    } else {
-        (
-            config.llm_config.provider.clone(),
-            config.llm_config.model.clone(),
+    let provider = provider_request
+        .create_without_timeout(
+            &config.llm_config,
+            &config.llm_api_keys,
+            request_log_store.clone(),
         )
-    };
-
-    let effective_openai_reasoning_effort = resolved_profile
-        .as_ref()
-        .and_then(|p| p.openai_reasoning_effort.clone())
-        .or_else(|| config.llm_config.openai_reasoning_effort.clone());
-    let effective_gemini_thinking_budget = resolved_profile
-        .as_ref()
-        .and_then(|p| p.gemini_thinking_budget)
-        .or(config.llm_config.gemini_thinking_budget);
-    let effective_gemini_thinking_level = resolved_profile
-        .as_ref()
-        .and_then(|p| p.gemini_thinking_level.clone())
-        .or_else(|| config.llm_config.gemini_thinking_level.clone());
-    let effective_anthropic_thinking_budget = resolved_profile
-        .as_ref()
-        .and_then(|p| p.anthropic_thinking_budget)
-        .or(config.llm_config.anthropic_thinking_budget);
-
-    let provider = create_one_off_llm_provider_without_timeout(
-        &config.llm_config,
-        &config.llm_api_keys,
-        desired_provider.as_str(),
-        LlmProviderParams {
-            model: desired_model,
-            timeout: config.llm_config.timeout,
-            ollama_url: config.llm_config.ollama_url.clone(),
-            openai_reasoning_effort: effective_openai_reasoning_effort,
-            gemini_thinking_budget: effective_gemini_thinking_budget,
-            gemini_thinking_level: effective_gemini_thinking_level,
-            anthropic_thinking_budget: effective_anthropic_thinking_budget,
-        },
-        request_log_store.clone(),
-    )
-    .map_err(|e| llm_error(e.to_string()))?;
+        .map_err(|e| llm_error(e.to_string()))?;
 
     let output_res = provider
         .complete(prompt.as_str(), transcript.as_str())
@@ -959,36 +785,35 @@ pub async fn llm_complete(
 ) -> Result<LlmCompleteResponse, CommandError> {
     let config = pipeline.config();
 
-    let desired_provider = args.provider;
-    let desired_model = args.model;
+    let LlmCompleteArgs {
+        provider,
+        model,
+        openai_reasoning_effort,
+        gemini_thinking_budget,
+        gemini_thinking_level,
+        anthropic_thinking_budget,
+        system_prompt,
+        user_prompt,
+    } = args;
 
-    let provider = create_one_off_llm_provider_unstructured(
+    let provider_request = resolve_one_off_llm_request(
         &config.llm_config,
-        &config.llm_api_keys,
-        desired_provider.as_str(),
-        LlmProviderParams {
-            model: desired_model,
-            timeout: config.llm_config.timeout,
-            ollama_url: config.llm_config.ollama_url.clone(),
-            openai_reasoning_effort: args
-                .openai_reasoning_effort
-                .clone()
-                .or_else(|| config.llm_config.openai_reasoning_effort.clone()),
-            gemini_thinking_budget: args
-                .gemini_thinking_budget
-                .or(config.llm_config.gemini_thinking_budget),
-            gemini_thinking_level: args
-                .gemini_thinking_level
-                .clone()
-                .or_else(|| config.llm_config.gemini_thinking_level.clone()),
-            anthropic_thinking_budget: args
-                .anthropic_thinking_budget
-                .or(config.llm_config.anthropic_thinking_budget),
-        },
-    )
-    .map_err(|e| llm_error(e.to_string()))?;
+        &[OneOffLlmProviderRequestLayer {
+            provider: Some(provider),
+            model,
+            openai_reasoning_effort,
+            gemini_thinking_budget,
+            gemini_thinking_level,
+            anthropic_thinking_budget,
+            ..Default::default()
+        }],
+    );
+
+    let provider = provider_request
+        .create_unstructured(&config.llm_config, &config.llm_api_keys)
+        .map_err(|e| llm_error(e.to_string()))?;
     let output = provider
-        .complete(args.system_prompt.as_str(), args.user_prompt.as_str())
+        .complete(system_prompt.as_str(), user_prompt.as_str())
         .await
         .map_err(|e| llm_error(e.to_string()))?;
 

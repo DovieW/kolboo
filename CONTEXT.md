@@ -62,6 +62,12 @@ The command-facing setup logic that shapes request metadata before STT/LLM work 
 
 Recording Request Initialization owns request-log seed metadata, initial in-progress History payload construction, and request-id tracing for recording command flows. It does not own the atomic request-log store primitive (`RequestLogStore::start_request_with(...)`), History mutation application (`history_request_lifecycle.rs`), or terminal completion/cost/retention behavior.
 
+### Recording Command Lifecycle
+
+The command-facing orchestration that prepares a recording/transcription attempt before the actual pipeline work runs.
+
+Recording Command Lifecycle owns request-log recovery/creation, initial History Request Lifecycle updates, OCR Session binding for command flows, and standard watcher-bundle startup. It reuses Recording Request Initialization for request-log seed shaping and request-id tracing, Recording Orchestration for watcher implementation, and recording finalization Modules for terminal cleanup instead of replacing them.
+
 ### Runtime Sync Policy
 
 The frontend policy that classifies settings mutations by runtime side effect and deduplicates pipeline config syncs and secondary-window `settings-changed` events for one logical settings batch.
@@ -179,3 +185,9 @@ Shortcut Recording Actions owns debounce/latch behavior, pipeline busy/start/sto
 The command-facing translation from rich pipeline errors into stable UI error codes, retryability flags, and error categories.
 
 Recording Command Error Mapping keeps Tauri command return shapes consistent without adding that classification logic back into the large recording command flow.
+
+### One-Off LLM Provider Request
+
+The normalized one-off LLM provider selection used by command and quick-action flows that create a provider outside the pipeline cache.
+
+One-Off LLM Provider Request owns provider/model/ollama-url/thinking-knob precedence across global defaults, optional profile overrides, and per-invocation overrides. It does not own concrete provider construction behavior (`llm_provider.rs`), prompt text selection, or Quick Ask / Quick Replace feature-specific config resolution.

@@ -18,6 +18,7 @@ pub mod policy;
 pub mod pricing;
 pub mod recording;
 mod recording_errors;
+mod recording_lifecycle;
 pub mod router;
 pub mod secrets;
 pub mod settings;

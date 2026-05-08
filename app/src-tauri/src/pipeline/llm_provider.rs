@@ -29,7 +29,7 @@ fn managed_llm_api_base_url(provider: &str, gateway_url: &str) -> Option<String>
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct LlmProviderParams {
     pub model: Option<String>,
     pub timeout: Duration,
