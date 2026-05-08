@@ -5,6 +5,15 @@
   - If your change is significant enough (or it overlaps with guidance here or in `.github/instructions/**`), update the relevant instruction file(s) in the same PR.
   - Typical triggers: renamed/moved files, changed recommended commands, updated settings behavior, added/renamed Tauri commands/events, changed testing/CI expectations.
 
+- Architecture guardrails:
+
+  - The architecture-deepening initiative established the current seam ownership. Unless the user explicitly asks for architecture work, default to shipping features through those seams rather than reopening refactors by default.
+  - Before introducing a new Module or seam, apply the deletion test: if deleting the Module would not re-spread real caller complexity, it is probably shallow and should not be introduced.
+  - Prefer adding behavior to the existing deep Module for a concept instead of creating pass-through wrappers, generic managers, or one-off abstraction layers that make callers learn another Interface without gaining leverage.
+  - Provider-family seams still require a real two-adapter proof recorded in `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md`; otherwise keep provider-specific protocol/state behavior in concrete adapters.
+  - When a follow-up refactor is real but out of scope for the current task, add it to `docs/Refactors/*.md` instead of broadening the task.
+  - For a human-readable summary of these guardrails, see `docs/Dev Docs/ARCHITECTURE_GUARDRAILS.md`.
+
 - Common commands:
 
   - `pnpm -C app dev` (Tauri dev)

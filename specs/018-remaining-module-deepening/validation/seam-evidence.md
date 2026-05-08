@@ -48,6 +48,46 @@
 - Deletion test: removing the Module restores the long OpenAI realtime protocol state machine to `stt/openai.rs`, mixing batch-path selection with provider-specific WebSocket event handling again.
 - Characterization: unit tests in `stt/openai/realtime.rs` cover delta/completed/error event parsing, transcript accumulation/finalization, and realtime model/URL conventions with synthetic JSON payloads only.
 
+## Deepgram realtime STT provider-local module
+
+- Interface: `stt::deepgram::realtime::{streaming_ws_url, start_streaming_session}` called from `stt/deepgram.rs`.
+- Implementation: owns Deepgram-specific realtime WebSocket URL/auth setup, `Results` / `Metadata` / `Error` event parsing, transcript accumulation, and finalize/close behavior.
+- Depth: `stt/deepgram.rs` stays focused on batch `/v1/listen` request construction, model/language normalization, and `SttProvider` trait wiring while provider-independent WS/session helpers remain in `stt/streaming.rs`.
+- Deletion test: removing the Module restores the long Deepgram realtime protocol state machine to `stt/deepgram.rs`, mixing batch-path HTTP behavior with provider-specific WebSocket event handling again.
+- Characterization: unit tests in `stt/deepgram/realtime.rs` cover URL shaping, realtime event parsing, transcript accumulation/finalization, and empty/whitespace segment handling with synthetic JSON payloads only.
+
+## ElevenLabs realtime STT provider-local module
+
+- Interface: `stt::elevenlabs::realtime::{speech_to_text_realtime_ws_url, transcribe_realtime_ws, start_streaming_session}` called from `stt/elevenlabs.rs`.
+- Implementation: owns ElevenLabs-specific realtime WS URL/query construction, buffered realtime transcription flow, concurrent streaming session flow, VAD/manual commit semantics, PCM/WAV decode for the realtime batch path, and `partial_transcript` / `committed_transcript` event parsing.
+- Depth: `stt/elevenlabs.rs` stays focused on provider construction, model/language normalization, HTTP multipart fallback, and `SttProvider` trait wiring while provider-independent WS/session lifecycle helpers remain in `stt/streaming.rs`.
+- Deletion test: removing the Module restores both ElevenLabs realtime protocol loops to `stt/elevenlabs.rs`, mixing legacy HTTP fallback selection with provider-specific WebSocket URL/auth logic, VAD/manual commit behavior, and transcript accumulation again.
+- Characterization: unit tests in `stt/elevenlabs/realtime.rs` cover WS URL shaping, event parsing, partial/committed transcript accumulation, and empty/whitespace segment joining with synthetic payloads only.
+
+## AssemblyAI realtime STT provider-local module
+
+- Interface: `stt::assemblyai::realtime::{streaming_ws_url, start_streaming_session}` called from `stt/assemblyai.rs`.
+- Implementation: owns AssemblyAI-specific realtime WS URL/query construction, `Begin` / `Turn` / `Termination` event parsing, turn accumulation/finalization, and `Terminate` shutdown behavior.
+- Depth: `stt/assemblyai.rs` stays focused on batch upload/submit/poll request construction, language normalization, and `SttProvider` trait wiring while provider-independent WS/session lifecycle helpers remain in `stt/streaming.rs`.
+- Deletion test: removing the Module restores the long AssemblyAI realtime protocol loop to `stt/assemblyai.rs`, mixing batch workflow ownership with provider-specific WebSocket URL/auth logic, `Turn` semantics, and transcript accumulation again.
+- Characterization: unit tests in `stt/assemblyai/realtime.rs` cover WS URL shaping, event parsing, transcript accumulation/finalization, and empty/whitespace turn joining with synthetic payloads only.
+
+## Speechmatics realtime STT provider-local module
+
+- Interface: `stt::speechmatics::realtime::{transcribe_ws, start_streaming_session}` called from `stt/speechmatics.rs`.
+- Implementation: owns Speechmatics-specific batch-via-WS and concurrent streaming startup/task flows, `RecognitionStarted` / `AudioAdded` / transcript event parsing, and sentence-level transcript accumulation based on `is_eos`.
+- Depth: `stt/speechmatics.rs` stays focused on provider construction, WAV/PCM decode helpers, language normalization, and `SttProvider` trait wiring while provider-independent WS/session lifecycle helpers remain in `stt/streaming.rs`.
+- Deletion test: removing the Module restores both Speechmatics WS protocol loops to `stt/speechmatics.rs`, mixing provider construction and decode helpers with provider-specific startup, transcript parsing, and sentence-boundary accumulation again.
+- Characterization: unit tests in `stt/speechmatics/realtime.rs` cover event parsing, sentence-commit accumulation/finalization, and empty/whitespace segment joining with synthetic payloads only.
+
+## Fireworks realtime STT provider-local module
+
+- Interface: `stt::fireworks::realtime::{streaming_ws_url, start_streaming_session}` called from `stt/fireworks.rs`.
+- Implementation: owns Fireworks-specific streaming WS URL/auth setup, 16 kHz resampling send loop, segment/checkpoint parsing, segment-id parsing, and stability/age commit heuristics.
+- Depth: `stt/fireworks.rs` stays focused on provider construction, batch OpenAI-compatible multipart transcription, model/language normalization, and `SttProvider` trait wiring while provider-independent WS/session lifecycle helpers remain in `stt/streaming.rs`.
+- Deletion test: removing the Module restores the Fireworks streaming protocol loop to `stt/fireworks.rs`, mixing batch multipart behavior with provider-specific checkpoint handling and stability heuristics again.
+- Characterization: unit tests in `stt/fireworks/realtime.rs` cover WS URL shaping, checkpoint/error parsing, segment-id parsing, stability-based commit behavior, and empty/whitespace segment joining with synthetic payloads only.
+
 ## Recording Orchestration
 
 - Interface: `recording_orchestration::{spawn_routing_started_watcher, spawn_rewriting_started_watcher}`.
@@ -79,6 +119,46 @@
 - Depth: duplicated recording/output action branches moved out of generic shortcut dispatch while registration decisions, Windows hook mechanics, Retry Last, and Escape cancel remain separate.
 - Deletion test: removing these Modules restores duplicated toggle/hold/paste-last release handling, pipeline-state guards, and source-label/output logic in both global-shortcut and modifier-only branches.
 - Characterization: unit tests in `shortcuts/toggle_recording.rs`, `shortcuts/hold_recording.rs`, and `shortcuts/paste_last.rs` cover global and modifier-only release gating, start/stop decisions, suppressed modifier releases, and source-label shaping.
+
+## Quick Ask Shortcut Actions
+
+- Interface: `shortcuts::{quick_ask_hold::handle_quick_ask_hold_shortcut_event, quick_ask_toggle::handle_quick_ask_toggle_shortcut_event}` called from `shortcuts/mod.rs` after action matching.
+- Implementation: owns Quick Ask hold/toggle press/release debounce, pipeline busy/start/stop decisions, Quick Ask session-intent guarding, and source-label diagnostics across both global-shortcut and modifier-only hook paths.
+- Depth: duplicated Quick Ask recording branches moved out of generic shortcut dispatch while registration decisions, Windows hook mechanics, Retry Last, and Escape cancel remain separate.
+- Deletion test: removing these Modules restores duplicated Quick Ask hold/toggle release handling, busy-state guards, Quick Ask session checks, and source-label logic in both global-shortcut and modifier-only branches.
+- Characterization: unit tests in `shortcuts/quick_ask_hold.rs` and `shortcuts/quick_ask_toggle.rs` cover busy states, unlatched releases, suppressed modifier releases, non-Quick-Ask stop suppression, and source-label shaping.
+
+## History Feed Orchestration
+
+- Interface: `useHistoryFeedOrchestration(...)` in `app/src/lib/history/orchestration.ts`, called from `app/src/components/HistoryFeed.tsx` after query hooks/mutations are created.
+- Implementation: owns recording-availability probing, hidden-entry optimistic UI state, copied-entry timing, retry-last-failed coordination, and shared-recording delete-mode coordination for the History tab.
+- Depth: non-rendering History tab coordination moved out of `HistoryFeed.tsx` while query hooks, notifications, playback wiring, analysis modal wiring, and presentational sections remain visible in the Adapter.
+- Deletion test: removing the Module pushes recording probe polling, hidden-entry rollback, retry-last-failed branching, and shared-recording delete coordination back into `HistoryFeed.tsx` rather than into the deterministic read model or filter-state Modules.
+- Characterization: unit tests in `app/src/lib/history/orchestration.test.ts` cover recording probe prioritization, hidden-entry rollback helpers, retry action state, and delete/shared-recording helper decisions without real recordings or network.
+
+## Data Backup / Cloud Sync Orchestration
+
+- Interface: `useDataBackupCloudSyncOrchestration(...)` in `app/src/lib/settings/dataBackupCloudSync.ts`, called from `app/src/components/settings/DataSettings.tsx` with adapter-owned invalidation and shortcut re-registration callbacks.
+- Implementation: owns settings export/import orchestration, GitHub token mutation plumbing, Gist push/pull, cloud-sync push/pull, analytics opt-in mutation wiring, and cloud-sync UI-state refresh for Data Settings.
+- Depth: backup/cloud-sync mutation coordination moved out of `DataSettings.tsx` while file dialogs, notifications, destructive confirmations, and presentational sections remain visible in the Adapter.
+- Deletion test: removing the Module pushes GitHub token/gist draft state, backup/cloud-sync mutation wiring, import re-register flow, and cloud-sync refresh/tracking behavior back into `DataSettings.tsx` rather than into the read-model Module.
+- Characterization: unit tests in `app/src/lib/settings/dataBackupCloudSync.test.ts` cover import/re-register invalidation flow, gist-id normalization, gist push/pull orchestration, cloud-sync success/failure refresh behavior, and analytics opt-in tracking without real GitHub, network, or cloud sync.
+
+## Data Retention Orchestration
+
+- Interface: `useDataRetentionOrchestration(...)` in `app/src/lib/settings/dataRetention.ts`, called from `app/src/components/settings/DataSettings.tsx` with adapter-owned query invalidation callbacks.
+- Implementation: owns request-log retention, recordings retention, transcription retention, stats retention, draft reset rules, unit-preserving retention transitions, and targeted settings/query invalidation for Data Settings.
+- Depth: retention draft/mutation coordination moved out of `DataSettings.tsx`, while folder-opening actions, backup/cloud-sync actions, notifications, destructive confirmations, and presentational sections remain visible in the Adapter.
+- Deletion test: removing the Module pushes retention source defaults, draft reset effects, logs/recordings/stats invalidation branching, legacy `max_saved_recordings` syncing, and unit-preserving transition logic back into `DataSettings.tsx` or `DataRetentionSection.tsx` instead of keeping `DataRetentionSection.tsx` presentational.
+- Characterization: unit tests in `app/src/lib/settings/dataRetention.test.ts` cover source defaults, draft reset detection, unit-preserving unit changes, global-only disable behavior, and logs/recordings/stats invalidation intent without real Tauri writes.
+
+## Logs View Orchestration
+
+- Interface: `useLogsViewOrchestration(...)` in `app/src/lib/logs/orchestration.ts`, called from `app/src/components/LogsView.tsx` after request-log/settings queries are read.
+- Implementation: owns export option selection, export popover state, clear-log mutation coordination, export notification intent shaping, and hotkey-debug cleanup for the Logs page.
+- Depth: non-rendering toolbar/export coordination moved out of `LogsView.tsx`, while request-log queries, system-event listening, playback wiring, notifications, and page-level filter state remain visible in the Adapter.
+- Deletion test: removing the Module pushes export mode selection, save-dialog branching, request-log invalidation intent, and hotkey-debug cleanup back into `LogsView.tsx` rather than into the deterministic read-model or presentational toolbar Module.
+- Characterization: unit tests in `app/src/lib/logs/orchestration.test.ts` cover privacy-safe/full export selection, cancelled export handling, export notification intent, clear-log invalidation intent, and cleanup-only hotkey-debug shutdown without real dialogs or Tauri writes.
 
 ## Batch STT Orchestration
 

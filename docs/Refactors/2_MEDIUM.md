@@ -179,14 +179,33 @@ Progress (2026-05-07):
 - `app/src/components/HistoryFeed.tsx` now consumes the read model, filter-state hook, and `app/src/components/history/**` presentational sections while keeping playback, query hooks, and destructive-action orchestration local.
 - Added deterministic Vitest coverage for corrupted history filters, display metadata, grouping, prompt construction, query shaping, cloud-sync defaults, retention conversion, and storage formatting.
 
+Progress (2026-05-07, Phase 11):
+
+- Added `app/src/lib/history/orchestration.ts` for History Feed orchestration that owns recording-availability probing, hidden-entry optimistic UI state, copied-entry timing, retry-last-failed coordination, and shared-recording delete-mode coordination.
+- `HistoryFeed.tsx` now stays the UI Adapter over TanStack Query hooks, notifications, playback wiring, analysis modal wiring, and presentational sections while delegating the non-rendering History tab coordination to the new Module.
+- Added deterministic Vitest coverage for recording probe prioritization, hidden-entry rollback helpers, retry quick-action state, and delete-mode/shared-recording helper decisions without touching real recordings or network.
+
+Progress (2026-05-07, Phase 12):
+
+- Added `app/src/lib/settings/dataBackupCloudSync.ts` for Data Settings backup/cloud-sync orchestration: settings export/import, GitHub token mutation plumbing, Gist push/pull, cloud-sync push/pull, analytics opt-in, and cloud-sync UI-state refresh.
+- `DataSettings.tsx` now stays the Adapter over file dialogs, notifications, destructive confirmations, and section composition while delegating backup/cloud-sync mutation wiring and draft/query state to the new Module.
+- Added deterministic Vitest coverage for settings import/re-register flow, gist-id normalization, gist push/pull orchestration, cloud-sync success/failure refresh behavior, and analytics opt-in tracking without real GitHub, network, or cloud sync.
+
+Progress (2026-05-07, Phase 13):
+
+- Added `app/src/lib/settings/dataRetention.ts` for Data Settings retention orchestration: request-log retention, recordings retention, transcription retention, stats retention, draft reset rules, unit-preserving retention changes, and targeted query invalidation.
+- `DataSettings.tsx` now stays the Adapter over folder-opening actions, backup/cloud-sync actions, notifications, destructive confirmations, and section composition while delegating retention draft/mutation plumbing to the new Module.
+- `DataRetentionSection.tsx` now stays presentational: Mantine layout plus simple NumberInput coercion, with retention transition logic moved into the orchestration Module.
+- Added deterministic Vitest coverage for retention source defaults, draft reset detection, unit-preserving unit changes, global-only disable behavior, and logs/recordings/stats invalidation intent without real Tauri writes.
+
 Follow-up remains:
 
-- `DataSettings.tsx` is slimmer now, but if backup/cloud-sync mutation orchestration grows again, prefer a feature-shaped hook over re-inlining section UI or adding a generic settings framework.
-- `HistoryFeed.tsx` is slimmer now, but future work should keep history playback/retry/delete flows visible in the adapter while pushing only deterministic display state into the read model and filter hook.
+- `DataSettings.tsx` is slimmer now; keep future Data Settings work split by feature (retention vs backup/cloud-sync vs danger zone) instead of broadening either orchestration Module into a catch-all settings framework.
+- `HistoryFeed.tsx` is slimmer now, but future work should keep notifications, playback wiring, analysis modal wiring, and query hooks visible in the adapter while pushing only non-rendering History coordination into `history/orchestration.ts`.
 
-## Extract a Logs View read model and presentational sections
+## Extract a Logs View read model and presentational/orchestration sections
 
-**Status:** Addressed by phase 8 cleanup work (2026-05-07)
+**Status:** Addressed by phase 8 and phase 5 cleanup work (2026-05-08)
 
 `app/src/components/LogsView.tsx` had accumulated deterministic request-log formatting, badge metadata, filtering, pagination, empty-state handling, and large request-details rendering alongside the view's query/export/playback wiring.
 
@@ -197,9 +216,15 @@ Progress (2026-05-07):
 - Split the request-log UI into `app/src/components/logs/**` (`LogsToolbar.tsx`, `LogsSystemEventsPanel.tsx`, `LogsRequestList.tsx`, and `RequestLogItem.tsx`) so large display-only sections live outside the adapter.
 - Slimmed `app/src/components/LogsView.tsx` into an adapter over request-log queries, export dialogs, playback wiring, hotkey-debug settings, system-event listening, and page-level filter state.
 
+Progress (2026-05-08):
+
+- Added `app/src/lib/logs/orchestration.ts` for Logs View export/toolbar orchestration: export option selection, export popover state, clear-log mutation coordination, export notification intent, and hotkey-debug cleanup.
+- Added deterministic Vitest coverage in `app/src/lib/logs/orchestration.test.ts` for privacy-safe vs full export selection, cancellation behavior, export error/success notification intent, clear-log invalidation intent, and hotkey-debug cleanup without real dialogs or Tauri writes.
+- Slimmed `app/src/components/LogsView.tsx` further so request-log queries, system-event listening, playback wiring, notifications, and page-level filter state stay visible in the Adapter while export/toolbar coordination lives in the new Module.
+
 Follow-up remains:
 
-- If the Logs toolbar/export flows grow significantly, prefer a small feature-shaped hook or another narrow presentational split instead of re-growing a single monolithic `LogsView.tsx`.
+- Keep future Logs work using the current split: deterministic display shaping in `logs/readModel.ts`, export/toolbar coordination in `logs/orchestration.ts`, and page wiring in `LogsView.tsx`.
 - Keep backend request-log redaction, payload stripping, and persistence behavior in `app/src-tauri/src/request_log.rs` / existing log commands; the frontend should only shape already-sanitized display data.
 
 ## Reduce maintenance cost of schema registry
@@ -455,6 +480,49 @@ Progress (2026-05-07):
 - Added explicit deferrals for LLM provider client configuration, STT streaming transcript event parsing, LLM structured output fallback/parsing, and OCR provider adapters. The LLM client-config candidate remains worth reopening, but this slice stopped before adding a shallow pass-through wrapper.
 - Deepened OpenAI locally by moving its realtime session/parser/task implementation into `app/src-tauri/src/stt/openai/realtime.rs` with synthetic JSON event tests, while keeping STT streaming transcript parsing deferred as a Provider-Family Seam.
 
+Progress (2026-05-07, Phase 6 audit):
+
+- Added `specs/018-remaining-module-deepening/validation/provider-adapter-audit.md` as a read-only size/responsibility audit of the concrete STT adapters.
+- Measured the current provider adapters and confirmed the next leverage is **provider-local**, not a provider-family parser seam: Deepgram (`804` lines) is the clearest next extraction, ElevenLabs (`904` lines) is the second-best candidate, and Speechmatics / AssemblyAI / Fireworks remain later concrete-adapter deepening work.
+- Updated `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` so the deferred STT streaming parser decision now reflects the current evidence: shared WS/session helpers are enough, while the remaining protocol state machines stay provider-specific.
+
+Progress (2026-05-07, Phase 7):
+
+- Added `app/src-tauri/src/stt/deepgram/realtime.rs` as a provider-local Module for Deepgram realtime WS URL/auth setup, event parsing, transcript accumulation, and finalize/close behavior.
+- Slimmed `app/src-tauri/src/stt/deepgram.rs` back to the batch `/v1/listen` adapter plus provider construction/model-language normalization and trait wiring.
+- Added synthetic Deepgram realtime tests for event parsing, transcript accumulation/finalization, and WS URL conventions without network calls or API keys.
+- The next provider-local extraction is now ElevenLabs rather than Deepgram; the provider-family parser seam remains deferred.
+
+Progress (2026-05-07, Phase 8):
+
+- Added `app/src-tauri/src/stt/elevenlabs/realtime.rs` as a provider-local Module for ElevenLabs realtime WS URL/query construction, buffered realtime transcription, concurrent streaming, VAD/manual commit behavior, and transcript accumulation.
+- Slimmed `app/src-tauri/src/stt/elevenlabs.rs` back to provider construction, model/language normalization, HTTP multipart fallback, and `SttProvider` trait wiring.
+- Added synthetic ElevenLabs realtime tests for WS URL shaping, event parsing, and transcript accumulation without network calls or API keys.
+- The next provider-local extraction is now AssemblyAI rather than ElevenLabs; the provider-family parser seam remains deferred.
+
+Progress (2026-05-07, Phase 9):
+
+- Added `app/src-tauri/src/stt/assemblyai/realtime.rs` as a provider-local Module for AssemblyAI realtime WS URL/query construction, `Begin` / `Turn` / `Termination` parsing, turn accumulation/finalization, and `Terminate` shutdown handling.
+- Slimmed `app/src-tauri/src/stt/assemblyai.rs` back to provider construction, batch upload/submit/poll workflow, language normalization, and `SttProvider` trait wiring.
+- Added synthetic AssemblyAI realtime tests for WS URL shaping, event parsing, and turn accumulation without network calls or API keys.
+- The next provider-local extraction is now Speechmatics rather than AssemblyAI; the provider-family parser seam remains deferred.
+
+Progress (2026-05-07, combined provider follow-up):
+
+- Added `app/src-tauri/src/stt/speechmatics/realtime.rs` as a provider-local Module for Speechmatics batch-via-WS and concurrent streaming flows, startup/event parsing, and sentence-level `is_eos` accumulation.
+- Slimmed `app/src-tauri/src/stt/speechmatics.rs` back to provider construction, WAV/PCM decode helpers, language normalization, and `SttProvider` trait wiring.
+- Added `app/src-tauri/src/stt/fireworks/realtime.rs` as a provider-local Module for Fireworks streaming WS URL/auth setup, 16 kHz resampling send loop, segment/checkpoint parsing, and stability/age commit heuristics.
+- Slimmed `app/src-tauri/src/stt/fireworks.rs` back to provider construction, batch multipart transcription, model/language normalization, and `SttProvider` trait wiring.
+- Added synthetic Speechmatics and Fireworks realtime tests without network calls or API keys.
+- The provider-family parser seam remains deferred, and the current STT provider-local audit no longer has a remaining concrete-adapter extraction candidate.
+
+Progress (2026-05-07, post-audit comparison):
+
+- Re-read the full set of provider-local realtime adapters (`openai`, `deepgram`, `elevenlabs`, `assemblyai`, `speechmatics`, `fireworks`) after the final extractions.
+- Upgraded the decision for the **broad** STT provider-family parser seam from “defer” to **reject** in `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md`.
+- Reason: callers already consume the normalized `StreamingSttSession` / `PartialTranscript` seam, while provider differences still dominate event semantics, audio-send choreography, commit/finalization policy, and shutdown behavior.
+- Follow-up remains intentionally narrow: only reopen if a smaller two-adapter subproblem shows real leverage with its own deletion test; do **not** build a generic realtime parser layer just because the loops rhyme.
+
 ## Deepen Local Provider Lifecycle ownership beyond helper rules
 
 **Status:** Addressed further by architecture-deepening work (2026-05-05)
@@ -525,7 +593,7 @@ Follow-up remains:
 
 ## Broaden Shortcut action ownership carefully
 
-**Status:** Partially addressed by phase 7 cleanup work (2026-05-07)
+**Status:** Addressed further by phase 10 cleanup work (2026-05-07)
 
 `app/src-tauri/src/shortcuts/mod.rs` still owned duplicated Toggle, Hold, and Paste Last behavior across both global-shortcut callbacks and Windows modifier-only hook events.
 
@@ -537,7 +605,13 @@ Progress (2026-05-07):
 - Kept startup/runtime registration decisions in `shortcuts/lifecycle.rs`, Windows modifier-only hook mechanics in `windows_modifier_hotkeys.rs`, Retry Last in `shortcuts/retry_last.rs`, and Quick Ask / Escape cancel routing visible in `shortcuts/mod.rs`.
 - Added pure characterization tests for the new action Modules so release suppression, latch handling, pipeline-state decisions, and source labels are covered without needing real hotkey hooks.
 
+Progress (2026-05-07, Phase 10):
+
+- Added `app/src-tauri/src/shortcuts/quick_ask_hold.rs` for Quick Ask hold-specific press/release routing, busy-state guards, and Quick Ask session-intent cleanup across both global and modifier-only paths.
+- Added `app/src-tauri/src/shortcuts/quick_ask_toggle.rs` for Quick Ask toggle debounce, pipeline busy/start/stop decisions, non-Quick-Ask stop suppression, and source-label diagnostics across both global and modifier-only paths.
+- `app/src-tauri/src/shortcuts/mod.rs` now routes Quick Ask Hold/Toggle through these Modules while keeping action matching, Retry Last, and Escape cancel visible in the main dispatcher.
+- Added pure characterization tests for Quick Ask Hold/Toggle decision matrices so busy states, unlatched releases, suppressed modifier releases, and Quick Ask session checks are covered without real hotkey hooks.
+
 Follow-up remains:
 
-- Quick Ask hold/toggle dispatch still duplicates across global and modifier-only paths; only extract it if a similarly clear deletion test remains after this slice.
 - Keep the main dispatcher as a visible router over Tauri side effects. Do not introduce a generic shortcut event framework.

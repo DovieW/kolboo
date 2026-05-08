@@ -126,35 +126,6 @@ export function useUpdateSoundEnabled() {
 	);
 }
 
-export function useUpdateHotkeyDebugEnabled() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (enabled: boolean) =>
-			tauriAPI.updateHotkeyDebugEnabled(enabled),
-		onMutate: async (enabled: boolean) => {
-			await queryClient.cancelQueries({ queryKey: ["settings"] });
-
-			const previous = queryClient.getQueryData<AppSettings>(["settings"]);
-			if (previous) {
-				queryClient.setQueryData<AppSettings>(["settings"], {
-					...previous,
-					hotkey_debug_enabled: enabled,
-				});
-			}
-
-			return { previous };
-		},
-		onError: (_error, _enabled, context) => {
-			if (context?.previous) {
-				queryClient.setQueryData<AppSettings>(["settings"], context.previous);
-			}
-		},
-		onSettled: () => {
-			queryClient.invalidateQueries({ queryKey: ["settings"] });
-		},
-	});
-}
-
 export function useUpdateAudioCue() {
 	return useSettingsInvalidatingMutation((cue: AudioCue) =>
 		tauriAPI.updateAudioCue(cue),
@@ -328,18 +299,6 @@ export function useUpdateAudioAgcEnabled() {
 export function useUpdateAudioNoiseSuppressionEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
 		tauriAPI.updateAudioNoiseSuppressionEnabled(enabled),
-	);
-}
-
-export function useUpdateMaxSavedRecordings() {
-	return useSettingsInvalidatingMutation((max: number) =>
-		tauriAPI.updateMaxSavedRecordings(max),
-	);
-}
-
-export function useUpdateTranscriptionRetentionDeleteRecordings() {
-	return useSettingsInvalidatingMutation((enabled: boolean) =>
-		tauriAPI.updateTranscriptionRetentionDeleteRecordings(enabled),
 	);
 }
 

@@ -10,66 +10,18 @@ import { FolderOpen } from "lucide-react";
 import {
 	describeRecordingsRetention,
 	getRetentionTimeInputConfig,
-	preserveRetentionDurationOnUnitChange,
 	type RecordingsStorageSummary,
-	type RequestLogsRetentionMode,
-	type RetentionMode,
 	type RetentionTimeUnit,
-	type RetentionUnit,
-	shouldDisableTranscriptionDeleteRecordings,
 } from "../../../lib/settings/dataLifecycle";
-import type { TranscriptionRetentionUnit } from "../../../lib/tauri";
+import type {
+	LogsRetentionControls,
+	RecordingsRetentionControls,
+	StatsRetentionControls,
+	TranscriptionRetentionControls,
+} from "../../../lib/settings/dataRetention";
 import { SettingsRow } from "../SettingsRow";
 
-type LogsRetentionControls = {
-	mode: RequestLogsRetentionMode;
-	amount: number;
-	unit: RetentionUnit;
-	value: number;
-	onCommit: (next: {
-		mode: RequestLogsRetentionMode;
-		amount: number;
-		unit: RetentionUnit;
-		value: number;
-	}) => void;
-};
-
-type RecordingsRetentionControls = {
-	mode: RetentionMode;
-	amount: number;
-	unit: RetentionUnit;
-	value: number;
-	onCommit: (next: {
-		mode: RetentionMode;
-		amount: number;
-		unit: RetentionUnit;
-		value: number;
-	}) => void;
-};
-
-type TranscriptionRetentionControls = {
-	mode: RetentionMode;
-	amount: number;
-	unit: TranscriptionRetentionUnit;
-	value: number;
-	deleteRecordings: boolean;
-	onCommit: (next: {
-		mode: RetentionMode;
-		amount: number;
-		unit: TranscriptionRetentionUnit;
-		value: number;
-	}) => void;
-	onDeleteRecordingsChange: (checked: boolean) => void;
-};
-
-type StatsRetentionControls = {
-	unit: TranscriptionRetentionUnit;
-	value: number;
-	onCommit: (next: { unit: TranscriptionRetentionUnit; value: number }) => void;
-};
-
 type DataRetentionSectionProps = {
-	isProfileScope: boolean;
 	logsRetention: LogsRetentionControls;
 	recordingsRetention: RecordingsRetentionControls;
 	transcriptionRetention: TranscriptionRetentionControls;
@@ -183,7 +135,6 @@ function RetentionTimeControls({
 }
 
 export function DataRetentionSection({
-	isProfileScope,
 	logsRetention,
 	recordingsRetention,
 	transcriptionRetention,
@@ -193,9 +144,9 @@ export function DataRetentionSection({
 	onOpenAppLogsFolder,
 	onOpenRecordingsFolder,
 }: DataRetentionSectionProps) {
-	// Keep this section presentational and mutation-agnostic: the parent owns
-	// query/mutation wiring, while this file owns the Mantine layout for the
-	// data-retention controls.
+	// Keep this section presentational and mutation-agnostic: the orchestration
+	// hook owns retention state transitions, while this file owns the Mantine
+	// layout for the data-retention controls.
 	return (
 		<>
 			<SettingsRow
@@ -208,63 +159,35 @@ export function DataRetentionSection({
 								value={logsRetention.amount}
 								onChange={(value) => {
 									const nextAmount = typeof value === "number" ? value : 10;
-									logsRetention.onCommit({
-										mode: "amount",
-										amount: nextAmount,
-										unit: logsRetention.unit,
-										value: logsRetention.value,
-									});
+									logsRetention.onAmountChange(nextAmount);
 								}}
 								min={1}
 								max={1000}
 								step={1}
 								clampBehavior="strict"
-								disabled={isProfileScope}
+								disabled={logsRetention.disabled}
 								styles={retentionInputStyles}
 							/>
 						) : (
 							<RetentionTimeControls
 								unit={logsRetention.unit}
 								value={logsRetention.value}
-								disabled={isProfileScope}
-								onValueChange={(nextValue) => {
-									logsRetention.onCommit({
-										mode: "time",
-										amount: logsRetention.amount,
-										unit: logsRetention.unit,
-										value: nextValue,
-									});
-								}}
-								onUnitChange={(nextUnit) => {
-									logsRetention.onCommit({
-										mode: "time",
-										amount: logsRetention.amount,
-										unit: nextUnit,
-										value: preserveRetentionDurationOnUnitChange({
-											currentUnit: logsRetention.unit,
-											nextUnit,
-											currentValue: logsRetention.value,
-										}),
-									});
-								}}
+								disabled={logsRetention.disabled}
+								onValueChange={logsRetention.onValueChange}
+								onUnitChange={logsRetention.onUnitChange}
 							/>
 						)}
 
 						<SegmentedControl
 							value={logsRetention.mode}
 							onChange={(next) => {
-								logsRetention.onCommit({
-									mode: next === "time" ? "time" : "amount",
-									amount: logsRetention.amount,
-									unit: logsRetention.unit,
-									value: logsRetention.value,
-								});
+								logsRetention.onModeChange(next === "time" ? "time" : "amount");
 							}}
 							data={[
 								{ label: "Amount", value: "amount" },
 								{ label: "Time", value: "time" },
 							]}
-							disabled={isProfileScope}
+							disabled={logsRetention.disabled}
 							styles={segmentedControlStyles}
 						/>
 					</Group>
@@ -302,63 +225,37 @@ export function DataRetentionSection({
 								value={recordingsRetention.amount}
 								onChange={(value) => {
 									const nextAmount = typeof value === "number" ? value : 50;
-									recordingsRetention.onCommit({
-										mode: "amount",
-										amount: nextAmount,
-										unit: recordingsRetention.unit,
-										value: recordingsRetention.value,
-									});
+									recordingsRetention.onAmountChange(nextAmount);
 								}}
 								min={1}
 								max={100000}
 								step={10}
 								clampBehavior="strict"
-								disabled={isProfileScope}
+								disabled={recordingsRetention.disabled}
 								styles={retentionInputStyles}
 							/>
 						) : (
 							<RetentionTimeControls
 								unit={recordingsRetention.unit}
 								value={recordingsRetention.value}
-								disabled={isProfileScope}
-								onValueChange={(nextValue) => {
-									recordingsRetention.onCommit({
-										mode: "time",
-										amount: recordingsRetention.amount,
-										unit: recordingsRetention.unit,
-										value: nextValue,
-									});
-								}}
-								onUnitChange={(nextUnit) => {
-									recordingsRetention.onCommit({
-										mode: "time",
-										amount: recordingsRetention.amount,
-										unit: nextUnit,
-										value: preserveRetentionDurationOnUnitChange({
-											currentUnit: recordingsRetention.unit,
-											nextUnit,
-											currentValue: recordingsRetention.value,
-										}),
-									});
-								}}
+								disabled={recordingsRetention.disabled}
+								onValueChange={recordingsRetention.onValueChange}
+								onUnitChange={recordingsRetention.onUnitChange}
 							/>
 						)}
 
 						<SegmentedControl
 							value={recordingsRetention.mode}
 							onChange={(next) => {
-								recordingsRetention.onCommit({
-									mode: next === "time" ? "time" : "amount",
-									amount: recordingsRetention.amount,
-									unit: recordingsRetention.unit,
-									value: recordingsRetention.value,
-								});
+								recordingsRetention.onModeChange(
+									next === "time" ? "time" : "amount",
+								);
 							}}
 							data={[
 								{ label: "Amount", value: "amount" },
 								{ label: "Time", value: "time" },
 							]}
-							disabled={isProfileScope}
+							disabled={recordingsRetention.disabled}
 							styles={segmentedControlStyles}
 						/>
 					</Group>
@@ -375,63 +272,37 @@ export function DataRetentionSection({
 								value={transcriptionRetention.amount}
 								onChange={(value) => {
 									const nextAmount = typeof value === "number" ? value : 1000;
-									transcriptionRetention.onCommit({
-										mode: "amount",
-										amount: nextAmount,
-										unit: transcriptionRetention.unit,
-										value: transcriptionRetention.value,
-									});
+									transcriptionRetention.onAmountChange(nextAmount);
 								}}
 								min={1}
 								max={100000}
 								step={10}
 								clampBehavior="strict"
-								disabled={isProfileScope}
+								disabled={transcriptionRetention.disabled}
 								styles={retentionInputStyles}
 							/>
 						) : (
 							<RetentionTimeControls
 								unit={transcriptionRetention.unit}
 								value={transcriptionRetention.value}
-								disabled={isProfileScope}
-								onValueChange={(nextValue) => {
-									transcriptionRetention.onCommit({
-										mode: "time",
-										amount: transcriptionRetention.amount,
-										unit: transcriptionRetention.unit,
-										value: nextValue,
-									});
-								}}
-								onUnitChange={(nextUnit) => {
-									transcriptionRetention.onCommit({
-										mode: "time",
-										amount: transcriptionRetention.amount,
-										unit: nextUnit,
-										value: preserveRetentionDurationOnUnitChange({
-											currentUnit: transcriptionRetention.unit,
-											nextUnit,
-											currentValue: transcriptionRetention.value,
-										}),
-									});
-								}}
+								disabled={transcriptionRetention.disabled}
+								onValueChange={transcriptionRetention.onValueChange}
+								onUnitChange={transcriptionRetention.onUnitChange}
 							/>
 						)}
 
 						<SegmentedControl
 							value={transcriptionRetention.mode}
 							onChange={(next) => {
-								transcriptionRetention.onCommit({
-									mode: next === "time" ? "time" : "amount",
-									amount: transcriptionRetention.amount,
-									unit: transcriptionRetention.unit,
-									value: transcriptionRetention.value,
-								});
+								transcriptionRetention.onModeChange(
+									next === "time" ? "time" : "amount",
+								);
 							}}
 							data={[
 								{ label: "Amount", value: "amount" },
 								{ label: "Time", value: "time" },
 							]}
-							disabled={isProfileScope}
+							disabled={transcriptionRetention.disabled}
 							styles={segmentedControlStyles}
 						/>
 
@@ -442,12 +313,7 @@ export function DataRetentionSection({
 									event.currentTarget.checked,
 								);
 							}}
-							disabled={shouldDisableTranscriptionDeleteRecordings({
-								isProfileScope,
-								mode: transcriptionRetention.mode,
-								amount: transcriptionRetention.amount,
-								value: transcriptionRetention.value,
-							})}
+							disabled={transcriptionRetention.deleteRecordingsDisabled}
 							label="Also delete recordings"
 							color="gray"
 						/>
@@ -463,23 +329,9 @@ export function DataRetentionSection({
 						<RetentionTimeControls
 							unit={statsRetention.unit}
 							value={statsRetention.value}
-							disabled={isProfileScope}
-							onValueChange={(nextValue) => {
-								statsRetention.onCommit({
-									unit: statsRetention.unit,
-									value: nextValue,
-								});
-							}}
-							onUnitChange={(nextUnit) => {
-								statsRetention.onCommit({
-									unit: nextUnit,
-									value: preserveRetentionDurationOnUnitChange({
-										currentUnit: statsRetention.unit,
-										nextUnit,
-										currentValue: statsRetention.value,
-									}),
-								});
-							}}
+							disabled={statsRetention.disabled}
+							onValueChange={statsRetention.onValueChange}
+							onUnitChange={statsRetention.onUnitChange}
 						/>
 					</Group>
 				}

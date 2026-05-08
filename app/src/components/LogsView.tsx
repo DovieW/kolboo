@@ -1,22 +1,21 @@
 import { Stack } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { listen } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+	getLogsExportFailureNotification,
+	getLogsExportSuccessNotification,
+	type LogsExportKind,
+	useLogsViewOrchestration,
+} from "../lib/logs/orchestration";
 import {
 	filterRequestLogs,
 	getLogsPage,
 	getLogsPageCount,
 	hasActiveLogsFilters,
 } from "../lib/logs/readModel";
-import {
-	useClearRequestLogs,
-	useRequestLogs,
-	useSettings,
-	useUpdateHotkeyDebugEnabled,
-} from "../lib/queries";
-import { logsAPI, type SystemEvent, tauriAPI } from "../lib/tauri";
+import { useRequestLogs, useSettings } from "../lib/queries";
+import type { SystemEvent } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
 import { LogsRequestList } from "./logs/LogsRequestList";
 import { LogsSystemEventsPanel } from "./logs/LogsSystemEventsPanel";
@@ -28,9 +27,6 @@ export function LogsView(
 	const { jumpToLogId = null, onJumpHandled } = props;
 	const { data: logs } = useRequestLogs(50);
 	const { data: settings } = useSettings();
-	const updateHotkeyDebugEnabled = useUpdateHotkeyDebugEnabled();
-	const clearLogsMutation = useClearRequestLogs();
-	const [exportOpened, exportPopover] = useDisclosure(false);
 	const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([]);
 	const [filterText, setFilterText] = useState("");
 	const [filtersOpened, setFiltersOpened] = useState(false);
@@ -145,74 +141,21 @@ export function LogsView(
 	}, [totalPages]);
 
 	const hotkeyDebugEnabled = settings?.hotkey_debug_enabled ?? false;
-	const hotkeyDebugEnabledRef = useRef(hotkeyDebugEnabled);
+	const logsOrchestration = useLogsViewOrchestration({ hotkeyDebugEnabled });
 
-	useEffect(() => {
-		hotkeyDebugEnabledRef.current = hotkeyDebugEnabled;
-	}, [hotkeyDebugEnabled]);
+	const handleExport = (kind: LogsExportKind) => {
+		logsOrchestration.exportLogs.mutate(kind, {
+			onSuccess: (result) => {
+				if (result.kind !== "exported") {
+					return;
+				}
 
-	useEffect(() => {
-		return () => {
-			if (hotkeyDebugEnabledRef.current) {
-				// Hotkey debug is intentionally ephemeral. If the user leaves the page,
-				// switch the noisy stream back off without blocking unmount.
-				void tauriAPI.updateHotkeyDebugEnabled(false);
-			}
-		};
-	}, []);
-
-	const exportPrivacySafe = async () => {
-		try {
-			const path = await save({
-				defaultPath: "kolboo-request-logs.json",
-				filters: [{ name: "JSON", extensions: ["json"] }],
-			});
-			if (!path) return;
-
-			await logsAPI.exportRequestLogsToFile({
-				path,
-				stripTextAndPayloads: true,
-			});
-			exportPopover.close();
-			notifications.show({
-				title: "Export",
-				message: "Exported privacy-safe request logs.",
-				color: "teal",
-			});
-		} catch (error) {
-			notifications.show({
-				title: "Export failed",
-				message: String(error),
-				color: "red",
-			});
-		}
-	};
-
-	const exportFull = async () => {
-		try {
-			const path = await save({
-				defaultPath: "kolboo-request-logs-full.json",
-				filters: [{ name: "JSON", extensions: ["json"] }],
-			});
-			if (!path) return;
-
-			await logsAPI.exportRequestLogsToFile({
-				path,
-				stripTextAndPayloads: false,
-			});
-			exportPopover.close();
-			notifications.show({
-				title: "Export",
-				message: "Exported full request logs.",
-				color: "teal",
-			});
-		} catch (error) {
-			notifications.show({
-				title: "Export failed",
-				message: String(error),
-				color: "red",
-			});
-		}
+				notifications.show(getLogsExportSuccessNotification(result.exportKind));
+			},
+			onError: (error) => {
+				notifications.show(getLogsExportFailureNotification(error));
+			},
+		});
 	};
 
 	return (
@@ -251,29 +194,24 @@ export function LogsView(
 						setPage((current) => Math.min(totalPages, current + 1))
 					}
 					onLastPage={() => setPage(totalPages)}
-					exportOpened={exportOpened}
-					onExportOpenedChange={(opened) => {
-						if (opened) exportPopover.open();
-						else exportPopover.close();
-					}}
+					exportOpened={logsOrchestration.exportOpened}
+					onExportOpenedChange={logsOrchestration.setExportOpened}
 					hasLogs={(logs?.length ?? 0) > 0}
-					onExportPrivacySafe={() => {
-						void exportPrivacySafe();
-					}}
-					onExportFull={() => {
-						void exportFull();
-					}}
-					onClearAll={() => clearLogsMutation.mutate()}
-					clearAllPending={clearLogsMutation.isPending}
+					onExportPrivacySafe={() => handleExport("privacySafe")}
+					onExportFull={() => handleExport("full")}
+					onClearAll={() => logsOrchestration.clearLogs.mutate()}
+					clearAllPending={logsOrchestration.clearLogs.isPending}
 				/>
 
 				<LogsSystemEventsPanel
 					systemEvents={systemEvents}
 					hotkeyDebugEnabled={hotkeyDebugEnabled}
-					hotkeyDebugPending={updateHotkeyDebugEnabled.isPending}
+					hotkeyDebugPending={
+						logsOrchestration.updateHotkeyDebugEnabled.isPending
+					}
 					settingsLoaded={Boolean(settings)}
 					onHotkeyDebugChange={(enabled) =>
-						updateHotkeyDebugEnabled.mutate(enabled)
+						logsOrchestration.updateHotkeyDebugEnabled.mutate(enabled)
 					}
 					onClear={() => setSystemEvents([])}
 				/>

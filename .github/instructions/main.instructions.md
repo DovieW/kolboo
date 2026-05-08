@@ -9,6 +9,17 @@ applyTo: '**'
 - Do not cut corners when making changes. When adding new things or fixing things, try to do it in a robust way.
   - Don't create massive files that do many different things.
 
+- Default to feature delivery once the existing seam ownership is healthy. Do not start speculative refactors unless the user asks for architecture work or the current task clearly fails the deletion test.
+
+- When touching an area that already has a deep Module/Interface split, prefer extending the current ownership line instead of adding a new pass-through helper, generic manager, or frameworky wrapper.
+
+- Only introduce a new seam when it creates real leverage/locality:
+  - deleting it would clearly re-spread complexity across multiple callers, or
+  - at least two concrete adapters/callers need the shared Interface.
+  Otherwise keep behavior feature-local or provider-local.
+
+- If you find a real refactor opportunity that is out of scope, record it in `docs/Refactors/*.md` with specific files and pain points instead of widening the current task.
+
 - Always run the format commands before test/check commands.
 
 - Use the smallest validating command set first, then escalate only if needed.

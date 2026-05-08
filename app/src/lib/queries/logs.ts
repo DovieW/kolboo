@@ -1,6 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
-import { logsAPI } from "../tauri";
 import { createRequestLogsQueryFn } from "./queryFns";
 import { queryFnDeps } from "./shared";
 
@@ -11,15 +10,5 @@ export function useRequestLogs(limit?: number) {
 		queryKey: ["requestLogs", limit],
 		queryFn: createRequestLogsQueryFn(queryFnDeps, limit),
 		refetchInterval: 2000,
-	});
-}
-
-export function useClearRequestLogs() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: () => logsAPI.clearRequestLogs(),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
-		},
 	});
 }

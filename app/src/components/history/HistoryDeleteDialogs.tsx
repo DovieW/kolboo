@@ -1,10 +1,5 @@
 import { Button, Group, Modal, Text } from "@mantine/core";
-
-export interface HistoryDeleteOneContext {
-	entryId: string;
-	recordingId: string;
-	refCount: number;
-}
+import type { HistoryDeleteOneContext } from "../../lib/history/orchestration";
 
 export function HistoryDeleteDialogs({
 	confirmOpened,

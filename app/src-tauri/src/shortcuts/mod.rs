@@ -9,6 +9,10 @@ mod lifecycle;
 #[cfg(desktop)]
 mod paste_last;
 #[cfg(desktop)]
+mod quick_ask_hold;
+#[cfg(desktop)]
+mod quick_ask_toggle;
+#[cfg(desktop)]
 mod retry_last;
 #[cfg(desktop)]
 mod toggle_recording;
@@ -22,6 +26,10 @@ pub(crate) use lifecycle::{
 };
 #[cfg(desktop)]
 use paste_last::{handle_paste_last_shortcut_event, PasteLastShortcutSource};
+#[cfg(desktop)]
+use quick_ask_hold::{handle_quick_ask_hold_shortcut_event, QuickAskHoldShortcutSource};
+#[cfg(desktop)]
+use quick_ask_toggle::{handle_quick_ask_toggle_shortcut_event, QuickAskToggleShortcutSource};
 #[cfg(desktop)]
 pub(crate) use retry_last::spawn_retry_last_recording_and_output;
 #[cfg(desktop)]
@@ -45,8 +53,8 @@ use crate::settings::HotkeyShortcutCard;
 use crate::shortcuts_lock;
 use crate::state::AppState;
 use crate::{
-    emit_system_event, get_playing_audio_handling, get_setting_from_store, start_recording,
-    stop_recording, toggle_media_play_pause, AudioMuteManager, PipelineStateEvent,
+    emit_system_event, get_playing_audio_handling, get_setting_from_store, toggle_media_play_pause,
+    AudioMuteManager, PipelineStateEvent,
 };
 
 /// Normalize a shortcut string for comparison (handles "ctrl" vs "control" differences)
@@ -514,9 +522,6 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
     let cards = get_hotkey_cards_from_store(app);
     let action_shortcuts = build_action_shortcut_strings(&cards);
 
-    // Get audio mute manager if available
-    let audio_mute_manager = app.try_state::<AudioMuteManager>();
-
     // Compare normalized strings directly
     let matches_action = |action: HotkeyAction| {
         action_shortcuts
@@ -572,194 +577,25 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
             }
         }
     } else if is_quick_ask_hold {
-        // Quick Ask Hold: hold-to-record.
-        // Start capture on press; stop on release, then branch into the Quick Ask answer flow.
-        match event.state {
-            ShortcutState::Pressed => {
-                if !state.quick_ask_key_held.swap(true, Ordering::SeqCst) {
-                    // Only start if pipeline is not already recording/transcribing
-                    let pipeline_state = app
-                        .try_state::<pipeline::SharedPipeline>()
-                        .map(|p| p.state());
-
-                    log::info!(
-                        "QuickAskHold pressed: pipeline state = {:?}",
-                        pipeline_state
-                    );
-                    emit_system_event(
-                        app,
-                        "shortcut",
-                        "Quick Ask Hold pressed",
-                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
-                    );
-
-                    // Do not allow starting while we are processing a previous capture.
-                    if matches!(
-                        pipeline_state,
-                        Some(
-                            pipeline::PipelineState::Transcribing
-                                | pipeline::PipelineState::Rewriting
-                        )
-                    ) {
-                        log::info!("QuickAskHold ignored (pipeline busy: {:?})", pipeline_state);
-                        return;
-                    }
-
-                    let can_start = pipeline_state
-                        .map(|s| s.can_start_recording())
-                        .unwrap_or(false);
-
-                    if can_start {
-                        state.quick_ask_session_active.store(true, Ordering::SeqCst);
-                        start_recording(
-                            app,
-                            &state,
-                            sound_enabled,
-                            audio_cue,
-                            &audio_mute_manager,
-                            playing_audio_handling,
-                            "QuickAskHold",
-                        );
-
-                        // Defensive: if we failed to enter Recording, clear the intent.
-                        let is_recording = app
-                            .try_state::<pipeline::SharedPipeline>()
-                            .map(|p| p.state() == pipeline::PipelineState::Recording)
-                            .unwrap_or(false);
-                        if !is_recording {
-                            state
-                                .quick_ask_session_active
-                                .store(false, Ordering::SeqCst);
-                        }
-                    }
-                }
-            }
-            ShortcutState::Released => {
-                if state.quick_ask_key_held.swap(false, Ordering::SeqCst) {
-                    // Only stop if pipeline is actually recording
-                    let is_recording = app
-                        .try_state::<pipeline::SharedPipeline>()
-                        .map(|p| p.state() == pipeline::PipelineState::Recording)
-                        .unwrap_or(false);
-
-                    if is_recording {
-                        stop_recording(
-                            app,
-                            &state,
-                            sound_enabled,
-                            audio_cue,
-                            &audio_mute_manager,
-                            playing_audio_handling,
-                            "QuickAskHold",
-                        );
-                    } else {
-                        // If we never actually started capture, clear the intent.
-                        state
-                            .quick_ask_session_active
-                            .store(false, Ordering::SeqCst);
-                    }
-                }
-            }
-        }
+        handle_quick_ask_hold_shortcut_event(
+            app,
+            &state,
+            matches!(event.state, ShortcutState::Pressed),
+            QuickAskHoldShortcutSource::Global,
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
     } else if is_quick_ask_toggle {
-        // Quick Ask Toggle: press once to start, press again to stop.
-        // Debounce: action happens on key release.
-        match event.state {
-            ShortcutState::Pressed => {
-                state.quick_ask_toggle_key_held.swap(true, Ordering::SeqCst);
-            }
-            ShortcutState::Released => {
-                if state
-                    .quick_ask_toggle_key_held
-                    .swap(false, Ordering::SeqCst)
-                {
-                    let pipeline_state = app
-                        .try_state::<pipeline::SharedPipeline>()
-                        .map(|p| p.state());
-
-                    log::info!(
-                        "QuickAskToggle released: pipeline state = {:?}",
-                        pipeline_state
-                    );
-                    emit_system_event(
-                        app,
-                        "shortcut",
-                        "Quick Ask Toggle released",
-                        Some(&format!("Pipeline state: {:?}", pipeline_state)),
-                    );
-
-                    // Do not allow starting while we are processing a previous capture.
-                    if matches!(
-                        pipeline_state,
-                        Some(
-                            pipeline::PipelineState::Transcribing
-                                | pipeline::PipelineState::Rewriting
-                        )
-                    ) {
-                        log::info!(
-                            "QuickAskToggle ignored (pipeline busy: {:?})",
-                            pipeline_state
-                        );
-                        return;
-                    }
-
-                    let can_stop = pipeline_state
-                        .map(|s| s.can_stop_recording())
-                        .unwrap_or(false);
-                    let can_start = pipeline_state
-                        .map(|s| s.can_start_recording())
-                        .unwrap_or(false);
-
-                    if can_stop {
-                        // Only stop if this recording session is actually a Quick Ask.
-                        let is_quick_ask_session =
-                            state.quick_ask_session_active.load(Ordering::SeqCst);
-                        if is_quick_ask_session {
-                            stop_recording(
-                                app,
-                                &state,
-                                sound_enabled,
-                                audio_cue,
-                                &audio_mute_manager,
-                                playing_audio_handling,
-                                "QuickAskToggle",
-                            );
-                        } else {
-                            log::info!(
-                                "QuickAskToggle stop ignored (active session is not Quick Ask)"
-                            );
-                        }
-                    } else if can_start {
-                        state.quick_ask_session_active.store(true, Ordering::SeqCst);
-                        start_recording(
-                            app,
-                            &state,
-                            sound_enabled,
-                            audio_cue,
-                            &audio_mute_manager,
-                            playing_audio_handling,
-                            "QuickAskToggle",
-                        );
-
-                        // Defensive: if we failed to enter Recording, clear the intent.
-                        let is_recording = app
-                            .try_state::<pipeline::SharedPipeline>()
-                            .map(|p| p.state() == pipeline::PipelineState::Recording)
-                            .unwrap_or(false);
-                        if !is_recording {
-                            state
-                                .quick_ask_session_active
-                                .store(false, Ordering::SeqCst);
-                        }
-                    } else {
-                        log::info!(
-                            "QuickAskToggle ignored (pipeline state: {:?})",
-                            pipeline_state
-                        );
-                    }
-                }
-            }
-        }
+        handle_quick_ask_toggle_shortcut_event(
+            app,
+            &state,
+            matches!(event.state, ShortcutState::Pressed),
+            QuickAskToggleShortcutSource::Global,
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
     } else {
         log::warn!("Unknown shortcut: {}", shortcut_str);
     }
@@ -776,9 +612,6 @@ pub(crate) fn handle_modifier_key_event(
     suppress_release_actions: bool,
 ) {
     let state = app.state::<AppState>();
-
-    let quick_ask_hold_label = format!("QuickAskHold({key})");
-    let quick_ask_toggle_label = format!("QuickAskToggle({key})");
 
     let hotkey_debug = crate::windows_modifier_hotkeys::hotkey_debug_runtime_enabled();
 
@@ -862,7 +695,6 @@ pub(crate) fn handle_modifier_key_event(
     let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "kolboo".to_string());
     let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
     let playing_audio_handling = get_playing_audio_handling(app);
-    let audio_mute_manager = app.try_state::<AudioMuteManager>();
 
     if is_toggle {
         handle_toggle_shortcut_event(
@@ -935,161 +767,33 @@ pub(crate) fn handle_modifier_key_event(
     }
 
     if is_quick_ask_hold {
-        // Quick Ask Hold: start on press, stop on release.
-        if is_down {
-            if !state.quick_ask_key_held.swap(true, Ordering::SeqCst) {
-                let pipeline_state = app
-                    .try_state::<pipeline::SharedPipeline>()
-                    .map(|p| p.state());
-
-                // Do not allow starting while we are processing a previous capture.
-                if matches!(
-                    pipeline_state,
-                    Some(
-                        pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting
-                    )
-                ) {
-                    log::info!(
-                        "{} ignored (pipeline busy: {:?})",
-                        quick_ask_hold_label,
-                        pipeline_state
-                    );
-                    return;
-                }
-
-                let can_start = pipeline_state
-                    .map(|s| s.can_start_recording())
-                    .unwrap_or(false);
-                if can_start {
-                    state.quick_ask_session_active.store(true, Ordering::SeqCst);
-                    start_recording(
-                        app,
-                        &state,
-                        sound_enabled,
-                        audio_cue,
-                        &audio_mute_manager,
-                        playing_audio_handling,
-                        &quick_ask_hold_label,
-                    );
-
-                    let is_recording = app
-                        .try_state::<pipeline::SharedPipeline>()
-                        .map(|p| p.state() == pipeline::PipelineState::Recording)
-                        .unwrap_or(false);
-                    if !is_recording {
-                        state
-                            .quick_ask_session_active
-                            .store(false, Ordering::SeqCst);
-                    }
-                }
-            }
-        } else if state.quick_ask_key_held.swap(false, Ordering::SeqCst) {
-            let is_recording = app
-                .try_state::<pipeline::SharedPipeline>()
-                .map(|p| p.state() == pipeline::PipelineState::Recording)
-                .unwrap_or(false);
-            if is_recording {
-                stop_recording(
-                    app,
-                    &state,
-                    sound_enabled,
-                    audio_cue,
-                    &audio_mute_manager,
-                    playing_audio_handling,
-                    &quick_ask_hold_label,
-                );
-            } else {
-                state
-                    .quick_ask_session_active
-                    .store(false, Ordering::SeqCst);
-            }
-        }
+        handle_quick_ask_hold_shortcut_event(
+            app,
+            &state,
+            is_down,
+            QuickAskHoldShortcutSource::ModifierOnly { key, hotkey_debug },
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
 
         return;
     }
 
     if is_quick_ask_toggle {
-        // Quick Ask Toggle: action on release (debounced).
-        if is_down {
-            state.quick_ask_toggle_key_held.swap(true, Ordering::SeqCst);
-            return;
-        }
-
-        let was_held = state
-            .quick_ask_toggle_key_held
-            .swap(false, Ordering::SeqCst);
-        if !was_held {
-            return;
-        }
-
-        if suppress_release_actions {
-            return;
-        }
-
-        let pipeline_state = app
-            .try_state::<pipeline::SharedPipeline>()
-            .map(|p| p.state());
-
-        // Do not allow starting while we are processing a previous capture.
-        if matches!(
-            pipeline_state,
-            Some(pipeline::PipelineState::Transcribing | pipeline::PipelineState::Rewriting)
-        ) {
-            log::info!(
-                "{} ignored (pipeline busy: {:?})",
-                quick_ask_toggle_label,
-                pipeline_state
-            );
-            return;
-        }
-
-        let can_stop = pipeline_state
-            .map(|s| s.can_stop_recording())
-            .unwrap_or(false);
-        let can_start = pipeline_state
-            .map(|s| s.can_start_recording())
-            .unwrap_or(false);
-
-        if can_stop {
-            let is_quick_ask_session = state.quick_ask_session_active.load(Ordering::SeqCst);
-            if is_quick_ask_session {
-                stop_recording(
-                    app,
-                    &state,
-                    sound_enabled,
-                    audio_cue,
-                    &audio_mute_manager,
-                    playing_audio_handling,
-                    &quick_ask_toggle_label,
-                );
-            } else {
-                log::info!(
-                    "{} stop ignored (active session is not Quick Ask)",
-                    quick_ask_toggle_label
-                );
-            }
-        } else if can_start {
-            state.quick_ask_session_active.store(true, Ordering::SeqCst);
-            start_recording(
-                app,
-                &state,
-                sound_enabled,
-                audio_cue,
-                &audio_mute_manager,
-                playing_audio_handling,
-                &quick_ask_toggle_label,
-            );
-
-            let is_recording = app
-                .try_state::<pipeline::SharedPipeline>()
-                .map(|p| p.state() == pipeline::PipelineState::Recording)
-                .unwrap_or(false);
-            if !is_recording {
-                state
-                    .quick_ask_session_active
-                    .store(false, Ordering::SeqCst);
-            }
-        }
+        handle_quick_ask_toggle_shortcut_event(
+            app,
+            &state,
+            is_down,
+            QuickAskToggleShortcutSource::ModifierOnly {
+                key,
+                suppress_release_actions,
+                hotkey_debug,
+            },
+            sound_enabled,
+            audio_cue,
+            playing_audio_handling,
+        );
     }
 }
 

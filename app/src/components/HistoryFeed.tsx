@@ -1,8 +1,9 @@
 import { useClipboard, useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
+import { useHistoryFeedOrchestration } from "../lib/history/orchestration";
 import {
 	type AnalysisPromptStyle,
 	buildAnalysisPrompt,
@@ -15,7 +16,6 @@ import {
 	getHistoryPageCount,
 	useHistoryFeedFilters,
 } from "../lib/history/useHistoryFeedFilters";
-import { getRetryLastFailedCandidate } from "../lib/historyRetry";
 import { listAllLlmModelKeys, listAllSttModelKeys } from "../lib/modelOptions";
 import {
 	useHistoryAll,
@@ -34,10 +34,7 @@ import {
 } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
 import { HistoryAnalysisPanel } from "./history/HistoryAnalysisPanel";
-import {
-	HistoryDeleteDialogs,
-	type HistoryDeleteOneContext,
-} from "./history/HistoryDeleteDialogs";
+import { HistoryDeleteDialogs } from "./history/HistoryDeleteDialogs";
 import { HistoryFeedFilterToolbar } from "./history/HistoryFeedFilterToolbar";
 import { HistoryFeedList } from "./history/HistoryFeedList";
 import { HistoryFeedPagination } from "./history/HistoryFeedPagination";
@@ -99,71 +96,6 @@ export function HistoryFeed({
 	const retryMutation = useRetryTranscription();
 	const clipboard = useClipboard();
 
-	// Cache whether a recording exists for a given request id (used to decide whether to show Rerun).
-	const [recordingExistsById, setRecordingExistsById] = useState<
-		Map<string, { exists: boolean; checkedAt: number }>
-	>(new Map());
-
-	// Internal tick to allow short polling for newly-created/in-progress entries.
-	// Without this, a "missing" cache entry would only re-check when some other state changes.
-	const [recordingsProbeTick, setRecordingsProbeTick] = useState(0);
-
-	// Optimistic UI: hide deleted entries immediately, delete in background.
-	const [hiddenEntryIds, setHiddenEntryIds] = useState<Set<string>>(
-		() => new Set(),
-	);
-
-	const hideEntries = (ids: Iterable<string>) => {
-		setHiddenEntryIds((prev) => {
-			const next = new Set(prev);
-			for (const id of ids) next.add(id);
-			return next;
-		});
-	};
-
-	const unhideEntries = (ids: Iterable<string>) => {
-		setHiddenEntryIds((prev) => {
-			const next = new Set(prev);
-			for (const id of ids) next.delete(id);
-			return next;
-		});
-	};
-
-	const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
-	const copiedTimerRef = useRef<number | null>(null);
-
-	useEffect(() => {
-		return () => {
-			if (copiedTimerRef.current !== null) {
-				window.clearTimeout(copiedTimerRef.current);
-				copiedTimerRef.current = null;
-			}
-		};
-	}, []);
-
-	const triggerCopiedFx = (entryId: string) => {
-		setCopiedEntryId(entryId);
-
-		if (copiedTimerRef.current !== null) {
-			window.clearTimeout(copiedTimerRef.current);
-		}
-
-		copiedTimerRef.current = window.setTimeout(() => {
-			setCopiedEntryId((cur) => (cur === entryId ? null : cur));
-			copiedTimerRef.current = null;
-		}, 900);
-	};
-
-	const handleCopyEntry = (
-		entryId: string,
-		text: string | null | undefined,
-	) => {
-		const value = text?.trim() ?? "";
-		if (!value) return;
-		clipboard.copy(value);
-		triggerCopiedFx(entryId);
-	};
-
 	const { data: settings } = useSettings();
 	const requestLogsLimit = (() => {
 		const fallback = 50;
@@ -221,17 +153,24 @@ export function HistoryFeed({
 		includeUsageCounts: false,
 	});
 
-	const retryLastFailedCandidate = useMemo(() => {
-		const items = retryActionHistoryQuery.data?.items ?? [];
-		return getRetryLastFailedCandidate(items);
-	}, [retryActionHistoryQuery.data?.items]);
+	const getRecordingAssetUrl = useCallback(
+		(requestId: string) => recordingsAPI.getRecordingAssetUrl({ requestId }),
+		[],
+	);
+	const historyOrchestration = useHistoryFeedOrchestration({
+		pageEntries: historyPage?.items ?? [],
+		retryActionEntries: retryActionHistoryQuery.data?.items ?? [],
+		copyToClipboard: clipboard.copy,
+		getRecordingAssetUrl,
+		getDeleteOptions: tauriAPI.getHistoryDeleteOptions,
+		deleteHistoryEntry: (args) => deleteHistoryEntryEx.mutateAsync(args),
+		retryEntry: (entryId) => retryMutation.mutateAsync(entryId),
+	});
 
 	// Optional: fetch full history only when the analysis modal is opened.
 	const allHistoryQuery = useHistoryAll({ enabled: analysisOpened });
 
-	const pageHistory = (historyPage?.items ?? []).filter(
-		(e) => !hiddenEntryIds.has(e.id),
-	);
+	const pageHistory = historyOrchestration.pageHistory;
 	const totalHistoryCount = historyPage?.totalAll ?? 0;
 	const totalFilteredCount = historyPage?.totalFiltered ?? 0;
 	const totalPages = getHistoryPageCount(
@@ -262,11 +201,6 @@ export function HistoryFeed({
 
 	const [sendDrawerOpened, sendDrawerHandlers] = useDisclosure(false);
 	const isNarrow = useMediaQuery("(max-width: 900px)");
-
-	const [deleteOneOpened, deleteOneHandlers] = useDisclosure(false);
-	const [deleteOneContext, setDeleteOneContext] =
-		useState<HistoryDeleteOneContext | null>(null);
-	const [deleteOneBusy, setDeleteOneBusy] = useState(false);
 
 	const { data: llmProviders } = useQuery({
 		queryKey: ["llmProviders"],
@@ -324,69 +258,28 @@ export function HistoryFeed({
 	const handleDelete = (id: string) => {
 		void (async () => {
 			try {
-				const options = await tauriAPI.getHistoryDeleteOptions(id);
+				const outcome = await historyOrchestration.requestDeleteEntry(id);
 
-				const recordingId = (options.recording_id ?? "").trim();
-				const hasRecording = Boolean(recordingId) && options.recording_exists;
-				const refCount = options.recording_ref_count ?? 0;
-
-				// No recording: delete transcript only.
-				if (!hasRecording) {
-					hideEntries([id]);
-					deleteHistoryEntryEx.mutate(
-						{ id, mode: "entry_only" },
-						{
-							onSuccess: () => {
-								notifications.show({
-									title: "History",
-									message: "Deleted transcript.",
-									color: "green",
-								});
-							},
-							onError: (e) => {
-								unhideEntries([id]);
-								notifications.show({
-									title: "History",
-									message: formatErrorMessage(e),
-									color: "red",
-								});
-							},
-						},
-					);
-					return;
+				switch (outcome.kind) {
+					case "opened_shared_dialog":
+						return;
+					case "deleted_entry":
+						notifications.show({
+							title: "History",
+							message: "Deleted transcript.",
+							color: "green",
+						});
+						return;
+					case "deleted_entry_and_recording":
+						notifications.show({
+							title: "History",
+							message: outcome.result.deleted_recording
+								? "Deleted transcript and recording."
+								: "Deleted transcript.",
+							color: "green",
+						});
+						return;
 				}
-
-				// Unshared recording: delete transcript + recording immediately.
-				if (refCount <= 1) {
-					hideEntries([id]);
-					deleteHistoryEntryEx.mutate(
-						{ id, mode: "entry_and_recording" },
-						{
-							onSuccess: (res) => {
-								notifications.show({
-									title: "History",
-									message: res.deleted_recording
-										? "Deleted transcript and recording."
-										: "Deleted transcript.",
-									color: "green",
-								});
-							},
-							onError: (e) => {
-								unhideEntries([id]);
-								notifications.show({
-									title: "History",
-									message: formatErrorMessage(e),
-									color: "red",
-								});
-							},
-						},
-					);
-					return;
-				}
-
-				// Shared recording: ask what to delete.
-				setDeleteOneContext({ entryId: id, recordingId, refCount });
-				deleteOneHandlers.open();
 			} catch (e) {
 				notifications.show({
 					title: "History",
@@ -494,117 +387,8 @@ export function HistoryFeed({
 				})
 			: null;
 
-	// Probe recordings for currently visible entries (best-effort).
-	useEffect(() => {
-		void recordingsProbeTick;
-		let cancelled = false;
-
-		let timeout: number | null = null;
-
-		const now = Date.now();
-		const retryMissingAfterMs = 650;
-		const pollIntervalMs = 650;
-		const recentWindowMs = 30_000;
-		const maxChecksPerTick = 12;
-
-		const isEntryRecentOrInProgress = (entry: {
-			timestamp?: string;
-			status?: string;
-		}) => {
-			const status = (entry.status ?? "success").toString();
-			if (status === "in_progress") return true;
-			if (status === "error") return false;
-			const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : NaN;
-			return Number.isFinite(ts) ? now - ts < recentWindowMs : false;
-		};
-
-		const candidates: Array<{ id: string; priority: number }> = [];
-		let shouldPollAgain = false;
-
-		for (const entry of pageHistory) {
-			const recordingId =
-				(entry.recording_request_id ?? entry.id)?.trim?.() ?? "";
-			if (!recordingId) continue;
-
-			const shouldPoll = isEntryRecentOrInProgress(entry);
-			const cached = recordingExistsById.get(recordingId);
-
-			if (shouldPoll && (!cached || !cached.exists)) {
-				shouldPollAgain = true;
-			}
-
-			// Probe on first-seen.
-			if (!cached) {
-				candidates.push({ id: recordingId, priority: shouldPoll ? 2 : 1 });
-				continue;
-			}
-
-			// Re-check quickly for recent/in-progress entries when previously missing.
-			if (
-				shouldPoll &&
-				!cached.exists &&
-				now - cached.checkedAt > retryMissingAfterMs
-			) {
-				candidates.push({ id: recordingId, priority: 2 });
-			}
-		}
-
-		if (shouldPollAgain) {
-			timeout = window.setTimeout(() => {
-				setRecordingsProbeTick((t) => t + 1);
-			}, pollIntervalMs);
-		}
-
-		if (candidates.length === 0) {
-			return () => {
-				cancelled = true;
-				if (timeout !== null) window.clearTimeout(timeout);
-			};
-		}
-
-		// De-dupe + prioritize newer/in-progress checks.
-		const seen = new Set<string>();
-		const selected: string[] = [];
-		candidates
-			.sort((a, b) => b.priority - a.priority)
-			.forEach((x) => {
-				if (seen.has(x.id)) return;
-				seen.add(x.id);
-				selected.push(x.id);
-			});
-
-		const batch = selected.slice(0, maxChecksPerTick);
-
-		void (async () => {
-			await Promise.all(
-				batch.map(async (id) => {
-					try {
-						const url = await recordingsAPI.getRecordingAssetUrl({
-							requestId: id,
-						});
-						if (cancelled) return;
-						setRecordingExistsById((prev) => {
-							const next = new Map(prev);
-							next.set(id, { exists: Boolean(url), checkedAt: Date.now() });
-							return next;
-						});
-					} catch {
-						// Treat errors as "unknown"; don't force-hide actions.
-					}
-				}),
-			);
-		})();
-
-		return () => {
-			cancelled = true;
-			if (timeout !== null) window.clearTimeout(timeout);
-		};
-	}, [pageHistory, recordingExistsById, recordingsProbeTick]);
-
-	const canRetryLastFailed = Boolean(retryLastFailedCandidate);
-	const retryLastFailedTooltip = canRetryLastFailed
-		? "Retry the most recent failed request (copies result)"
-		: "No failed requests with saved audio found";
+	const canRetryLastFailed = historyOrchestration.canRetryLastFailed;
+	const retryLastFailedTooltip = historyOrchestration.retryLastFailedTooltip;
 	const openRecordingsTooltip =
 		recordingsStats.isLoading || recordingsGbForTooltip === null
 			? "Open recordings folder"
@@ -612,31 +396,29 @@ export function HistoryFeed({
 
 	const handleRetryLastFailed = () => {
 		void (async () => {
-			const candidate = retryLastFailedCandidate;
-			if (!candidate) return;
-
 			try {
-				// Quick guard so we don't kick off an expensive retry if the WAV isn't there.
-				const url = await recordingsAPI.getRecordingAssetUrl({
-					requestId: candidate.recordingRequestId,
-				});
-				if (!url) {
-					notifications.show({
-						title: "Retry",
-						message: "No saved audio found for the most recent failed request.",
-						color: "yellow",
-					});
-					return;
-				}
+				const outcome = await historyOrchestration.retryLastFailed();
 
-				const transcript = await retryMutation.mutateAsync(candidate.entryId);
-				clipboard.copy(transcript);
-				notifications.show({
-					title: "Retry",
-					message:
-						"Retried the most recent failed request and copied the result.",
-					color: "green",
-				});
+				switch (outcome.kind) {
+					case "no_candidate":
+						return;
+					case "missing_recording":
+						notifications.show({
+							title: "Retry",
+							message:
+								"No saved audio found for the most recent failed request.",
+							color: "yellow",
+						});
+						return;
+					case "retried":
+						notifications.show({
+							title: "Retry",
+							message:
+								"Retried the most recent failed request and copied the result.",
+							color: "green",
+						});
+						return;
+				}
 			} catch (e) {
 				notifications.show({
 					title: "Retry failed",
@@ -673,88 +455,53 @@ export function HistoryFeed({
 	};
 
 	const handleCloseDeleteOneDialog = () => {
-		if (deleteOneBusy || deleteHistoryEntryEx.isPending) return;
-		deleteOneHandlers.close();
-		setDeleteOneContext(null);
+		if (historyOrchestration.deleteOneBusy || deleteHistoryEntryEx.isPending)
+			return;
+		historyOrchestration.closeDeleteOneDialog();
 	};
 
 	const handleDeleteOnlyThisTranscript = () => {
-		if (!deleteOneContext) return;
+		void (async () => {
+			try {
+				const outcome = await historyOrchestration.deleteOnlyThisTranscript();
+				if (outcome.kind !== "deleted_entry") return;
 
-		setDeleteOneBusy(true);
-		hideEntries([deleteOneContext.entryId]);
-
-		deleteHistoryEntryEx.mutate(
-			{ id: deleteOneContext.entryId, mode: "entry_only" },
-			{
-				onSuccess: () => {
-					notifications.show({
-						title: "History",
-						message: "Deleted transcript.",
-						color: "green",
-					});
-					deleteOneHandlers.close();
-					setDeleteOneContext(null);
-				},
-				onError: (error) => {
-					unhideEntries([deleteOneContext.entryId]);
-					notifications.show({
-						title: "History",
-						message: formatErrorMessage(error),
-						color: "red",
-					});
-				},
-				onSettled: () => setDeleteOneBusy(false),
-			},
-		);
+				notifications.show({
+					title: "History",
+					message: "Deleted transcript.",
+					color: "green",
+				});
+			} catch (error) {
+				notifications.show({
+					title: "History",
+					message: formatErrorMessage(error),
+					color: "red",
+				});
+			}
+		})();
 	};
 
 	const handleDeleteAllUsingRecording = () => {
-		if (!deleteOneContext) return;
+		void (async () => {
+			try {
+				const outcome = await historyOrchestration.deleteAllUsingRecording();
+				if (outcome.kind !== "deleted_recording_and_all_entries") return;
 
-		setDeleteOneBusy(true);
-
-		const recordingId = deleteOneContext.recordingId;
-		const visibleIdsToHide: string[] = [];
-		for (const entry of historyPage?.items ?? []) {
-			const source = (entry.recording_request_id ?? entry.id)?.trim?.() ?? "";
-			if (source && source === recordingId) visibleIdsToHide.push(entry.id);
-		}
-
-		const idsToHide =
-			visibleIdsToHide.length > 0
-				? visibleIdsToHide
-				: [deleteOneContext.entryId];
-		hideEntries(idsToHide);
-
-		deleteHistoryEntryEx.mutate(
-			{
-				id: deleteOneContext.entryId,
-				mode: "recording_and_all_entries",
-			},
-			{
-				onSuccess: (result) => {
-					notifications.show({
-						title: "History",
-						message: `Deleted ${result.deleted_entries.toLocaleString()} transcript${
-							result.deleted_entries === 1 ? "" : "s"
-						}${result.deleted_recording ? " and recording" : ""}.`,
-						color: "green",
-					});
-					deleteOneHandlers.close();
-					setDeleteOneContext(null);
-				},
-				onError: (error) => {
-					unhideEntries(idsToHide);
-					notifications.show({
-						title: "History",
-						message: formatErrorMessage(error),
-						color: "red",
-					});
-				},
-				onSettled: () => setDeleteOneBusy(false),
-			},
-		);
+				notifications.show({
+					title: "History",
+					message: `Deleted ${outcome.result.deleted_entries.toLocaleString()} transcript${
+						outcome.result.deleted_entries === 1 ? "" : "s"
+					}${outcome.result.deleted_recording ? " and recording" : ""}.`,
+					color: "green",
+				});
+			} catch (error) {
+				notifications.show({
+					title: "History",
+					message: formatErrorMessage(error),
+					color: "red",
+				});
+			}
+		})();
 	};
 
 	const handleOpenSendDrawer = () => {
@@ -832,12 +579,13 @@ export function HistoryFeed({
 			? retryMutation.variables
 			: undefined;
 	const deleteOnlyThisTranscriptLoading =
-		deleteOneBusy && deleteHistoryEntryEx.variables?.mode === "entry_only";
+		historyOrchestration.deleteOneBusy &&
+		deleteHistoryEntryEx.variables?.mode === "entry_only";
 	const deleteAllUsingRecordingLoading =
-		deleteOneBusy &&
+		historyOrchestration.deleteOneBusy &&
 		deleteHistoryEntryEx.variables?.mode === "recording_and_all_entries";
 	const deleteOneActionsDisabled =
-		deleteOneBusy || deleteHistoryEntryEx.isPending;
+		historyOrchestration.deleteOneBusy || deleteHistoryEntryEx.isPending;
 
 	return (
 		<div className="animate-in animate-in-delay-2">
@@ -898,9 +646,9 @@ export function HistoryFeed({
 				}}
 				onDeleteAll={handleDeleteAll}
 				isDeleteAllPending={deleteAllHistoryAndRecordings.isPending}
-				deleteOneOpened={deleteOneOpened}
+				deleteOneOpened={historyOrchestration.deleteOneOpened}
 				onCloseDeleteOne={handleCloseDeleteOneDialog}
-				deleteOneContext={deleteOneContext}
+				deleteOneContext={historyOrchestration.deleteOneContext}
 				disableDeleteOneActions={deleteOneActionsDisabled}
 				deleteOnlyThisTranscriptLoading={deleteOnlyThisTranscriptLoading}
 				deleteAllUsingRecordingLoading={deleteAllUsingRecordingLoading}
@@ -949,12 +697,12 @@ export function HistoryFeed({
 				hasError={Boolean(error)}
 				emptyState={emptyState}
 				groupedHistory={groupedHistory}
-				copiedEntryId={copiedEntryId}
-				onCopyEntry={handleCopyEntry}
+				copiedEntryId={historyOrchestration.copiedEntryId}
+				onCopyEntry={historyOrchestration.handleCopyEntry}
 				onRetryEntry={handleRetryEntry}
 				isRetryPending={retryMutation.isPending}
 				retryPendingEntryId={retryPendingEntryId}
-				recordingExistsById={recordingExistsById}
+				recordingExistsById={historyOrchestration.recordingExistsById}
 				isRecordingPlaying={(recordingId) => player.isPlaying(recordingId)}
 				isRecordingLoading={(recordingId) => player.isLoading(recordingId)}
 				onToggleRecording={(recordingId) => {
@@ -963,7 +711,9 @@ export function HistoryFeed({
 				requestLogIds={requestLogIds}
 				onJumpToLog={onJumpToLog}
 				onDeleteEntry={handleDelete}
-				isDeleteDisabled={deleteHistoryEntryEx.isPending || deleteOneBusy}
+				isDeleteDisabled={
+					deleteHistoryEntryEx.isPending || historyOrchestration.deleteOneBusy
+				}
 			/>
 		</div>
 	);
