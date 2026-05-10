@@ -85,6 +85,7 @@
 		"@types/react-dom": "19.2.3",
 		"@vitejs/plugin-react": "5.1.2",
 		"@vitest/coverage-v8": "4.0.17",
+		"baseline-browser-mapping": "2.10.25",
 		"husky": "^9.1.7",
 		"json-schema-to-typescript": "^15.0.4",
 		"knip": "^5.80.1",

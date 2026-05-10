@@ -7,23 +7,13 @@ import {
 	usePolicyState,
 	usePolicySync,
 } from "../../lib/queries";
+import { PolicyDiagnosticsCard } from "./PolicyDiagnosticsCard";
 import {
+	diagnosticsToJson,
 	formatPolicySourceLabel,
-	formatPolicyTimestampLabel,
-	PolicyDiagnosticsCard,
 	policyStatusSummary,
-} from "./PolicyDiagnosticsCard";
+} from "./policyDiagnostics";
 import { SettingsRow } from "./SettingsRow";
-
-export {
-	formatPolicySourceLabel,
-	formatPolicyTimestampLabel,
-	policyStatusSummary,
-};
-
-export function diagnosticsToJson(payload: unknown): string {
-	return JSON.stringify(payload, null, 2);
-}
 
 export function PolicySettings() {
 	const policy = usePolicyState();

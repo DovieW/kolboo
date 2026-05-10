@@ -4,7 +4,7 @@ import {
 	formatPolicySourceLabel,
 	formatPolicyTimestampLabel,
 	policyStatusSummary,
-} from "./PolicySettings";
+} from "./policyDiagnostics";
 
 describe("PolicySettings helpers", () => {
 	it("renders policy source labels", () => {

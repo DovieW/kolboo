@@ -4,7 +4,7 @@ import {
 	formatPolicyTimestampLabel,
 	policyStatusColor,
 	policyStatusSummary,
-} from "./PolicyDiagnosticsCard";
+} from "./policyDiagnostics";
 
 describe("PolicyDiagnosticsCard helpers", () => {
 	it("formats policy source labels including degraded modes", () => {

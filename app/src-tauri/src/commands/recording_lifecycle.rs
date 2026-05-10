@@ -25,6 +25,7 @@ pub(crate) struct PreparedRecordingCommandRequest {
 }
 
 impl PreparedRecordingCommandRequest {
+    #[cfg(test)]
     pub(crate) fn request_id(&self) -> Option<&str> {
         self.request_id.as_deref()
     }
