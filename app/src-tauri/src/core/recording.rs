@@ -4,10 +4,12 @@ use crate::commands;
 use crate::events;
 use crate::get_setting_from_store;
 use crate::pipeline;
+use crate::recording_request_initialization::{
+    start_request_log_with_seed, LogLlmSeedMode, RecordingRequestSeed,
+};
 use crate::request_log::RequestLogStore;
 use crate::state::AppState;
 use crate::OverlayAudioLevelPayload;
-use crate::PipelineErrorPayload;
 use crate::PipelineStateEvent;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -138,6 +140,23 @@ pub(crate) fn start_recording(
             *slot = profile_id.clone();
         }
 
+        // Seed a request-log entry *before* asking the audio layer to start.
+        // That way "failed to start" attempts still show up on the Logs page instead of
+        // disappearing into the Rust log stream with no user-visible breadcrumb.
+        let request_seed = RecordingRequestSeed::from_config(&config)
+            .with_profile(profile_id.clone(), profile_name.clone());
+        let request_log_store = app.try_state::<RequestLogStore>();
+        let request_id = request_log_store.as_ref().map(|state| {
+            start_request_log_with_seed(
+                state.inner(),
+                &request_seed,
+                LogLlmSeedMode::PreserveConfigured,
+                |log| {
+                    log.info(format!("Recording started ({})", source));
+                },
+            )
+        });
+
         if let Err(e) = pipeline.start_recording() {
             log::error!(
                 "{}: Failed to start pipeline recording: {} (state was: {:?})",
@@ -146,6 +165,29 @@ pub(crate) fn start_recording(
                 current_state
             );
             let _ = pipeline.set_session_profile_override(None);
+
+            // We took a best-effort snapshot at start time; clear it when start never actually
+            // happened so the next recording can't inherit stale profile metadata.
+            if let Ok(mut slot) = state.recording_session_profile_id.lock() {
+                *slot = None;
+            }
+
+            if let Some(log_store) = app.try_state::<RequestLogStore>() {
+                log_store.with_current(|log| {
+                    log.error_with_details(
+                        format!("Failed to start recording: {}", e),
+                        crate::request_log::format_error_chain(&e),
+                    );
+                    log.complete_error(e.to_string());
+                });
+            }
+
+            crate::sessions::recording_finalization::complete_current_request_without_cost(
+                app,
+                pipeline.inner(),
+                request_id.as_deref(),
+            );
+
             let error_msg = format!("{} (pipeline state: {:?})", e, current_state);
             crate::emit_system_event(
                 app,
@@ -153,43 +195,25 @@ pub(crate) fn start_recording(
                 &format!("{}: Failed to start recording", source),
                 Some(&error_msg),
             );
-            let payload = PipelineErrorPayload {
-                message: error_msg,
-                request_id: None,
-            };
-            let _ = app.emit(events::EVENT_PIPELINE_ERROR, payload);
-            let _ = app.emit(
-                events::EVENT_PIPELINE_STATE_CHANGED,
-                PipelineStateEvent::Error,
-            );
+
+            // Keep the overlay payload concise. The detailed causal chain lives in request logs.
+            crate::recording_completion::emit_pipeline_error(app, &e.to_string(), None);
+
+            // Match the later-stage transcription failure behavior: even when the user normally
+            // keeps overlays hidden, force-show the overlay so a startup failure isn't invisible.
+            if let Err(show_err) = commands::overlay::show_overlay_with_reset_if_not_always(app) {
+                log::warn!(
+                    "Failed to force-show overlay after start error: {}",
+                    show_err
+                );
+            }
             return;
         }
 
-        // Pipeline started successfully - now start request logging.
-        if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let request_id =
-                log_store.start_request(config.stt_provider.clone(), config.stt_model.clone());
-
-            // Begin an OCR session tied to this request id so OCR can survive internal
-            // pipeline transitions (e.g. reset-to-idle) and still be consumable later.
-            pipeline.begin_ocr_session(request_id.clone());
-            log_store.with_current(|log| {
-                log.profile_id = profile_id;
-                log.profile_name = profile_name;
-                log.llm_provider = if config.llm_config.enabled {
-                    Some(config.llm_config.provider.clone())
-                } else {
-                    None
-                };
-                // Avoid confusing logs: if LLM rewrite is disabled, do not record an LLM model.
-                // (The settings store may still contain a previously-selected model.)
-                log.llm_model = if config.llm_config.enabled {
-                    config.llm_config.model.clone()
-                } else {
-                    None
-                };
-                log.info(format!("Recording started ({})", source));
-            });
+        // Begin an OCR session tied to this request id so OCR can survive internal
+        // pipeline transitions (e.g. reset-to-idle) and still be consumable later.
+        if let Some(request_id) = request_id {
+            pipeline.begin_ocr_session(request_id);
         }
 
         // Attempt to start concurrent streaming STT in the background.

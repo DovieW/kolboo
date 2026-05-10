@@ -1114,7 +1114,6 @@ pub fn run() {
             commands::recording::pipeline_is_error,
             commands::recording::pipeline_update_config,
             commands::recording::pipeline_dictate,
-            commands::recording::pipeline_toggle,
             commands::recording::pipeline_force_reset,
             commands::recording::pipeline_test_transcribe_last_audio,
             commands::recording::pipeline_has_last_audio,

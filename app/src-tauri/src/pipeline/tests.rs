@@ -55,6 +55,91 @@ impl FakeAudioCapture {
     }
 }
 
+/// A fake audio capture backend that fails immediately when recording starts.
+///
+/// This gives us a deterministic regression seam for "no input device" style failures
+/// without requiring real hardware setup on the test machine.
+struct FailingStartAudioCapture {
+    level_meter: SharedAudioLevelMeter,
+    waveform_meter: SharedAudioWaveformMeter,
+}
+
+impl FailingStartAudioCapture {
+    fn new() -> Self {
+        Self {
+            level_meter: SharedAudioLevelMeter::new_for_tests(),
+            waveform_meter: SharedAudioWaveformMeter::new_for_tests(),
+        }
+    }
+}
+
+impl AudioCaptureBackend for FailingStartAudioCapture {
+    fn shared_level_meter(&self) -> SharedAudioLevelMeter {
+        self.level_meter.clone()
+    }
+
+    fn shared_waveform_meter(&self) -> SharedAudioWaveformMeter {
+        self.waveform_meter.clone()
+    }
+
+    fn level_snapshot(&self) -> AudioLevelSnapshot {
+        self.level_meter.snapshot()
+    }
+
+    fn set_vad_config(&mut self, _config: crate::audio_capture::VadAutoStopConfig) {}
+
+    fn set_capture_behavior(
+        &mut self,
+        _hot_mic_enabled: bool,
+        _hot_mic_pre_roll_ms: u32,
+        _mic_auto_recover_enabled: bool,
+        _input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
+        Ok(())
+    }
+
+    fn start_recording_session(
+        &mut self,
+        _max_duration_secs: f32,
+        _input_device_name: Option<&str>,
+    ) -> Result<(), AudioCaptureError> {
+        Err(AudioCaptureError::NoInputDevice)
+    }
+
+    fn stop_and_get_wav_with_diagnostics(
+        &mut self,
+        _cfg: AudioEncodeConfig,
+    ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+        Err(AudioCaptureError::NoInputDevice)
+    }
+
+    fn stop_and_get_wav_before_after(
+        &mut self,
+        _after_cfg: AudioEncodeConfig,
+    ) -> Result<(Vec<u8>, Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+        Err(AudioCaptureError::NoInputDevice)
+    }
+
+    fn stop_recording(&mut self) {}
+    fn stop(&mut self) {}
+
+    fn poll_vad_event(&self) -> Option<AudioCaptureEvent> {
+        None
+    }
+
+    fn is_vad_auto_stop_enabled(&self) -> bool {
+        false
+    }
+
+    fn set_live_audio_tx(&mut self, _tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+        // No-op for tests.
+    }
+
+    fn capture_sample_rate(&self) -> u32 {
+        16000
+    }
+}
+
 impl AudioCaptureBackend for FakeAudioCapture {
     fn shared_level_meter(&self) -> SharedAudioLevelMeter {
         self.level_meter.clone()
@@ -658,6 +743,22 @@ fn pipeline_can_start_and_stop_without_cpal() {
     let wav = p.stop_recording().expect("stop recording should succeed");
     assert_eq!(wav, vec![1, 2, 3]);
     assert_eq!(p.try_state(), Some(PipelineState::Idle));
+}
+
+#[test]
+fn start_recording_failure_transitions_pipeline_to_error() {
+    let config = test_config_with_max_recording_bytes();
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FailingStartAudioCapture::new()));
+
+    let result = pipeline.start_recording();
+
+    assert!(matches!(
+        result,
+        Err(crate::pipeline::PipelineError::AudioCapture(
+            AudioCaptureError::NoInputDevice
+        ))
+    ));
+    assert_eq!(pipeline.state(), PipelineState::Error);
 }
 
 #[tokio::test]

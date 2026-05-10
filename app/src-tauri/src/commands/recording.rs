@@ -958,8 +958,8 @@ async fn pipeline_dictate_inner(
     let request_seed = RecordingRequestSeed::from_config(&cfg)
         .with_profile(profile_id.clone(), profile_name.clone());
 
-    // Ensure there is a request log (pipeline_toggle starts one on recording-start,
-    // but other flows can reach here without an active log).
+    // Ensure there is a request log. Some flows can reach here without an active
+    // recording-start log, so we recover one here for consistent history/log UX.
     let request_log_store = app.try_state::<RequestLogStore>();
     let active_request = recording_lifecycle::ensure_current_transcription_request(
         request_log_store.as_ref().map(|state| state.inner()),
@@ -1393,46 +1393,6 @@ pub fn pipeline_get_last_recording_diagnostics(
     pipeline: State<'_, SharedPipeline>,
 ) -> Result<Option<AudioCaptureDiagnostics>, CommandError> {
     Ok(pipeline.last_recording_diagnostics())
-}
-
-/// Full pipeline helper: Start recording if not recording, or stop and transcribe if recording
-#[tauri::command]
-pub async fn pipeline_toggle(
-    app: AppHandle,
-    pipeline: State<'_, SharedPipeline>,
-) -> Result<String, CommandError> {
-    if pipeline.is_recording() {
-        pipeline_dictate(app, pipeline).await
-    } else {
-        // Try to start the pipeline FIRST - don't create a log if it fails
-        pipeline.start_recording().map_err(|e| {
-            log::warn!("Toggle: Failed to start recording: {}", e);
-            CommandError::from(e)
-        })?;
-
-        #[cfg(desktop)]
-        crate::set_escape_cancel_shortcut_enabled(&app, true);
-
-        // Pipeline started successfully - now create the request log
-        if let Some(log_store) = app.try_state::<RequestLogStore>() {
-            let config = pipeline.config();
-            let request_seed = RecordingRequestSeed::from_config(&config);
-            let request_id = start_request_log_with_seed(
-                &log_store,
-                &request_seed,
-                LogLlmSeedMode::PreserveConfigured,
-                |log| {
-                    log.info("Recording started (toggle)");
-                },
-            );
-
-            // Bind OCR to this request id so OCR cannot leak across requests.
-            pipeline.begin_ocr_session(request_id);
-        }
-
-        recording_completion::emit_pipeline_recording_started(&AppEventSink(&app));
-        Ok(String::new())
-    }
 }
 
 /// Check if the pipeline is in an error state
