@@ -102,9 +102,6 @@ importers:
       '@vitest/coverage-v8':
         specifier: 4.0.17
         version: 4.0.17(vitest@4.0.17(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2))
-      baseline-browser-mapping:
-        specifier: 2.10.25
-        version: 2.10.25
       husky:
         specifier: ^9.1.7
         version: 9.1.7

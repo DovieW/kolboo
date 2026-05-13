@@ -26,5 +26,6 @@ applyTo: '**'
   - Docs-only or spec-only changes: no app test/check commands required.
   - TS/UI-only changes under `app/src/**`: run `pnpm -C app lint` then `pnpm -C app test`.
   - Rust-only changes under `app/src-tauri/**`: after setting `RUSTC_WRAPPER`/`CARGO_BUILD_JOBS` as above, run `pnpm -C app cargo:fmt` then `pnpm -C app cargo:test`.
+  - If the task is specifically about Rust dead code or unused Cargo dependencies, also run `pnpm -C app cargo:deadcode`; run `pnpm -C app cargo:deaddeps` too when `cargo-machete` is installed locally (GitHub Rust CI installs it explicitly).
   - TS + Rust changes (or uncertain impact): after setting `RUSTC_WRAPPER`/`CARGO_BUILD_JOBS` as above, run `pnpm -C app test:all` after formatting.
   - Run `pnpm -C app check:ci` once at the end (or when explicitly requested), not repeatedly during iteration. Set `RUSTC_WRAPPER` and `CARGO_BUILD_JOBS` first because this command runs Cargo steps.

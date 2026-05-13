@@ -19,7 +19,9 @@
   - `pnpm -C app dev` (Tauri dev)
   - `pnpm -C app build` (Tauri build)
   - `pnpm -C app check` (aggregates Biome/tsc/knip/vitest + Rust helpers)
-  - `pnpm -C app check:ci` (CI gate; preferred before merging)
+  - `pnpm -C app check:ci` (CI gate; preferred before merging; includes strict Rust dead-code detection)
+  - `pnpm -C app cargo:deadcode` (strict Rust dead-code check for all targets)
+  - `pnpm -C app cargo:deaddeps` (unused Cargo dependencies via `cargo-machete`; install locally with `cargo install cargo-machete --locked`)
 
 - Local Rust build cache (important for agent-run commands):
 

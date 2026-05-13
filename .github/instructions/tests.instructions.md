@@ -15,8 +15,12 @@ applyTo: '**'
 	- Coverage: `pnpm -C app coverage`
 - For **Rust (Tauri backend)** tests:
 	- `pnpm -C app cargo:test`
+- For **Rust dead-code / unused dependency checks**:
+	- `pnpm -C app cargo:deadcode`
+	- `pnpm -C app cargo:deaddeps` (requires `cargo install cargo-machete --locked`; GitHub Rust CI installs it explicitly)
 - For “everything that CI cares about” (preferred gate):
 	- `pnpm -C app check:ci`
+	- Note: GitHub Rust CI also runs `cargo machete app/src-tauri` for unused Cargo dependencies.
 
 When iterating locally during a ticket, it’s okay to run the smallest thing that proves your change:
 

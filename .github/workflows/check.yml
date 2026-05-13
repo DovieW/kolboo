@@ -160,14 +160,39 @@ jobs:
         if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          # Match our CI target dir usage so clippy/tests are cached consistently.
+          # Match our CI target dir usage so dead-code/clippy/tests are cached consistently.
           workspaces: |
             app/src-tauri -> target-ci
+
+      - name: Install cargo-machete
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        shell: bash
+        run: cargo install cargo-machete --locked --version 0.9.2
+
+      - name: Run Rust dead dependency check
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The repo root is not itself a Cargo project, so point cargo-machete at
+          # the Tauri backend workspace explicitly.
+          cargo machete app/src-tauri
 
       - name: Verify Rust formatting
         if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
         shell: bash
         run: cargo fmt --manifest-path app/src-tauri/Cargo.toml -- --check
+
+      - name: Run Rust dead-code check
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SCCACHE_NO_DAEMON="1"
+          export RUSTC_WRAPPER=sccache
+          sccache --show-stats || true
+          cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml --target-dir app/src-tauri/target-ci -- -D dead-code
+          sccache --show-stats || true
 
       - name: Run Rust clippy (CI flags)
         if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'

@@ -157,6 +157,79 @@ All commands below are run from the repo root, and use the `app/` package:
 
 > Note: These are run through `pnpm` scripts, but they execute Cargo commands against `app/src-tauri/Cargo.toml`.
 
+### `pnpm -C app cargo:deadcode`
+**Runs:** `cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D dead-code`
+
+**What it does:**
+- Runs a strict Rust dead-code pass for the default backend feature set.
+- Treats Rust’s `dead_code` lint as a hard failure without turning every Clippy warning into an error.
+
+**What a failure usually means:**
+- A private Rust item (function, field, helper, etc.) is no longer used.
+
+**What it’s meant to accomplish:**
+- Catch backend dead code before it quietly piles up.
+
+**When to use it:**
+- When cleaning up backend code.
+- When a task is specifically about dead code.
+
+---
+
+### `pnpm -C app cargo:deadcode:ci`
+**Runs:** `cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci -- -D dead-code`
+
+**What it does:**
+- Same as `cargo:deadcode`, but uses the CI target directory.
+
+**What it’s meant to accomplish:**
+- Keep the CI-style Rust dead-code gate deterministic and cache-friendly.
+
+---
+
+### `pnpm -C app cargo:deadcode:local-whisper`
+**Runs:** `cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --features local-whisper -- -D dead-code`
+
+**What it does:**
+- Runs the strict Rust dead-code pass with the optional `local-whisper` feature enabled.
+
+**What it’s meant to accomplish:**
+- Catch dead code that only shows up (or disappears) when the local Whisper path is compiled.
+
+---
+
+### `pnpm -C app cargo:deadcode:local-whisper:ci`
+**Runs:** `cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --features local-whisper --target-dir src-tauri/target-ci -- -D dead-code`
+
+**What it does:**
+- CI-style strict Rust dead-code check for the `local-whisper` feature.
+
+---
+
+### `pnpm -C app cargo:deaddeps`
+**Runs:** `cargo machete src-tauri` (via a small helper script)
+
+**What it does:**
+- Uses `cargo-machete` to find unused Rust dependencies declared in Cargo manifests.
+- Prints a friendlier install hint if `cargo-machete` is not installed locally.
+
+**What a failure usually means:**
+- A Cargo dependency appears unused.
+- Or `cargo-machete` is missing locally.
+
+**What it’s meant to accomplish:**
+- Keep the Rust dependency graph from growing stale barnacles.
+
+**When to use it:**
+- When you add/remove Rust dependencies.
+- During Rust cleanup passes.
+
+**One-time local setup:**
+- `cargo install cargo-machete --locked`
+
+**CI note:**
+- GitHub Rust CI installs `cargo-machete` explicitly and runs this check there too.
+
 ### `pnpm -C app cargo:clippy`
 **Runs:** `cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml`
 
@@ -266,8 +339,9 @@ All commands below are run from the repo root, and use the `app/` package:
 
 ### `pnpm -C app cargo`
 **Runs:**
-- `pnpm -C app cargo:clippy`
 - `pnpm -C app cargo:fmt`
+- `pnpm -C app cargo:deadcode`
+- `pnpm -C app cargo:clippy`
 - `pnpm -C app cargo:test`
 
 **Meant to accomplish:**
@@ -305,6 +379,7 @@ All commands below are run from the repo root, and use the `app/` package:
 - `pnpm -C app typecheck`
 - `pnpm -C app knip`
 - `pnpm -C app test`
+- `pnpm -C app cargo:deadcode:ci`
 - `pnpm -C app cargo:clippy:ci`
 - `pnpm -C app cargo:fmt:check`
 - `pnpm -C app cargo:test:ci`
@@ -312,11 +387,15 @@ All commands below are run from the repo root, and use the `app/` package:
 **Meant to accomplish:**
 - The CI gate: “Everything must pass, and nothing should modify files.”
 
+**Additional CI note:**
+- The GitHub Rust workflow also runs `pnpm -C app cargo:deaddeps` after installing `cargo-machete`, because unused Cargo dependencies need that extra tool.
+
 ---
 
 ### `pnpm -C app check:ci:local-whisper`
 **Runs:**
 - `pnpm -C app check:ci`
+- then `pnpm -C app cargo:deadcode:local-whisper:ci`
 - then `pnpm -C app cargo:clippy:local-whisper:ci`
 
 **Meant to accomplish:**
