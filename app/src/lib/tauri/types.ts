@@ -555,6 +555,11 @@ export interface MicTestAudioLevelPayload {
 	peak: number;
 }
 
+export interface AudioInputDeviceInfo {
+	id: string;
+	name: string;
+}
+
 export type QuickAskStartedPayload = {
 	question?: string;
 	provider?: string;

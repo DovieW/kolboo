@@ -211,7 +211,7 @@ export function HistoryFeedFilterToolbar({
 	pagination: ReactNode;
 }) {
 	return (
-		<>
+		<div className="history-feed-toolbar">
 			<div className="section-header">
 				<span className="section-title section-title--no-accent">History</span>
 				<Group gap={6}>
@@ -271,15 +271,7 @@ export function HistoryFeedFilterToolbar({
 				</Group>
 			</div>
 
-			<div
-				style={{
-					display: "flex",
-					gap: 12,
-					alignItems: "center",
-					marginBottom: 16,
-					flexWrap: "wrap",
-				}}
-			>
+			<div className="history-feed-toolbar__controls">
 				<TextInput
 					value={filterText}
 					onChange={(event) => onFilterTextChange(event.currentTarget.value)}
@@ -427,6 +419,6 @@ export function HistoryFeedFilterToolbar({
 					{pagination}
 				</Group>
 			</div>
-		</>
+		</div>
 	);
 }

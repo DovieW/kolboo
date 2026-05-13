@@ -93,6 +93,8 @@ const createDeps = (): QueryFnDeps => {
 			getCostSummary: vi.fn(async () => emptyCostSummary),
 			getCostByProvider: vi.fn(async () => emptyCostByProvider),
 			getSettings: vi.fn(async () => emptySettings),
+			listAudioInputDevicesV2: vi.fn(async () => []),
+			getDefaultAudioInputDeviceName: vi.fn(async () => null),
 			getSystemProxyInfo: vi.fn(async () => emptySystemProxy),
 			getSettingsGuideState: vi.fn(async () => "pending" as SettingsGuideState),
 			isAudioMuteSupported: vi.fn(async () => true),

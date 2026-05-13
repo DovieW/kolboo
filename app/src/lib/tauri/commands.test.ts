@@ -44,6 +44,31 @@ describe("tauri command wrappers", () => {
 	});
 
 	itWithImportTimeout(
+		"audio device wrappers call the backend commands with typed params",
+		async () => {
+			const { tauriAPI } = await import("./commands");
+
+			await tauriAPI.listAudioInputDevicesV2();
+			await tauriAPI.getDefaultAudioInputDeviceName();
+			await tauriAPI.startMicTestMeter("mic:v1:abc:0");
+			await tauriAPI.stopMicTestMeter();
+
+			expect(invokeMock).toHaveBeenNthCalledWith(
+				1,
+				"list_audio_input_devices_v2",
+			);
+			expect(invokeMock).toHaveBeenNthCalledWith(
+				2,
+				"get_default_audio_input_device_name",
+			);
+			expect(invokeMock).toHaveBeenNthCalledWith(3, "mic_test_start_meter", {
+				args: { inputDeviceId: "mic:v1:abc:0" },
+			});
+			expect(invokeMock).toHaveBeenNthCalledWith(4, "mic_test_stop_meter");
+		},
+	);
+
+	itWithImportTimeout(
 		"typeText returns success false when invoke fails",
 		async () => {
 			invokeMock.mockRejectedValueOnce(new Error("boom"));

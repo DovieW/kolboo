@@ -487,6 +487,34 @@ a:focus-visible {
 	gap: 2px;
 }
 
+.history-feed-toolbar {
+	position: sticky;
+	/* Home injects the real page-header height here so this bar never clips. */
+	/* Overlap by 1px to avoid any hairline seam from sub-pixel layout rounding. */
+	top: calc(var(--history-feed-sticky-top, 1px) - 1px);
+	z-index: 15;
+	margin: 0 calc(var(--main-pad-x) * -1) 16px;
+	padding: 12px var(--main-pad-x) 16px;
+	background: rgba(0, 0, 0, 0.94);
+	backdrop-filter: blur(10px);
+}
+
+@supports not (
+		(backdrop-filter: blur(1px)) or
+		(-webkit-backdrop-filter: blur(1px))
+	) {
+	.history-feed-toolbar {
+		background: var(--bg-primary);
+	}
+}
+
+.history-feed-toolbar__controls {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+
 .history-item {
 	display: flex;
 	align-items: flex-start;
@@ -1223,6 +1251,82 @@ a:focus-visible {
 	--input-bd: #2a2a2a;
 }
 
+.microphone-control-alerts {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.microphone-row--settings {
+	align-items: center;
+	gap: 18px;
+}
+
+.microphone-row--settings > div:first-child {
+	flex: 1 1 160px;
+	min-width: 0;
+}
+
+.microphone-row--settings .settings-row-actions {
+	width: min(100%, 700px);
+	justify-content: flex-end;
+}
+
+.microphone-control-panel {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 10px;
+	width: min(100%, 700px);
+	flex-wrap: wrap;
+}
+
+.microphone-control-select {
+	width: 420px;
+	max-width: 100%;
+	min-width: 260px;
+	flex: 1 1 320px;
+}
+
+.microphone-home-card {
+	margin-bottom: 20px;
+	border: 1px solid var(--border-default);
+	border-radius: 14px;
+	padding: 0 20px;
+}
+
+.microphone-home-card .settings-row {
+	align-items: center;
+	min-height: 68px;
+	padding: 14px 0;
+	gap: 18px;
+}
+
+.microphone-home-card .settings-row > div:first-child {
+	flex: 0 0 auto;
+}
+
+.microphone-home-card .settings-row-actions {
+	flex: 1 1 auto;
+	justify-content: flex-end;
+	min-width: 0;
+}
+
+.microphone-refresh-icon--busy svg {
+	animation: microphone-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes microphone-refresh-spin {
+	from {
+		transform: rotate(0deg);
+	}
+
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 /* Microphone test meter (Settings → Audio) */
 .mic-test-meter {
 	position: relative;
@@ -1308,6 +1412,33 @@ a:focus-visible {
 
 .device-selector .mantine-Select-option[data-hovered] {
 	background-color: rgba(var(--accent-rgb) / 0.08);
+}
+
+@media (max-width: 900px) {
+	.history-feed-toolbar__controls {
+		align-items: flex-start;
+	}
+
+	.microphone-control-panel,
+	.microphone-control-select {
+		width: 100%;
+	}
+
+	.microphone-control-panel {
+		justify-content: flex-start;
+	}
+
+	.microphone-row--settings,
+	.microphone-home-card .settings-row {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+
+	.microphone-row--settings .settings-row-actions,
+	.microphone-home-card .settings-row-actions {
+		width: 100%;
+		justify-content: flex-start;
+	}
 }
 
 /* Sliders: orange bar + thumb accents */

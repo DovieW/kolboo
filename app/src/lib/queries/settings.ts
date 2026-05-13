@@ -1,6 +1,6 @@
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
+import type { AudioInputDevicesQueryData } from "../audioDevices";
 import { updateHotkeyShortcutCardWithValidation } from "../hotkeyMutations";
 import type { HotkeyShortcutCard } from "../hotkeys";
 import {
@@ -18,6 +18,7 @@ import {
 	tauriAPI,
 } from "../tauri";
 import {
+	createAudioInputDevicesQueryFn,
 	createSettingsGuideStateQueryFn,
 	createSettingsQueryFn,
 } from "./queryFns";
@@ -30,6 +31,15 @@ export function useSettings() {
 		queryKey: ["settings"],
 		queryFn: createSettingsQueryFn(queryFnDeps),
 		staleTime: Number.POSITIVE_INFINITY,
+	});
+}
+
+export function useAudioInputDevices() {
+	return useQuery<AudioInputDevicesQueryData>({
+		queryKey: ["audioInputDevices"],
+		queryFn: createAudioInputDevicesQueryFn(queryFnDeps),
+		staleTime: 0,
+		refetchOnWindowFocus: true,
 	});
 }
 

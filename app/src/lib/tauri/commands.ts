@@ -9,6 +9,7 @@ import { tauriPolicyAPI } from "./policy";
 import { applySettingsRuntimeSyncPolicy } from "./settingsSync";
 import type {
 	AudioCaptureDiagnostics,
+	AudioInputDeviceInfo,
 	AudioSettingsTestWavs,
 	CacheRouterEmbeddingsResponse,
 	ConnectionState,
@@ -193,6 +194,26 @@ export const tauriAPI = {
 
 	async isAudioMuteSupported(): Promise<boolean> {
 		return invoke("is_audio_mute_supported");
+	},
+
+	async listAudioInputDevicesV2(): Promise<AudioInputDeviceInfo[]> {
+		return invoke<AudioInputDeviceInfo[]>("list_audio_input_devices_v2");
+	},
+
+	async getDefaultAudioInputDeviceName(): Promise<string | null> {
+		return invoke<string | null>("get_default_audio_input_device_name");
+	},
+
+	async startMicTestMeter(inputDeviceId?: string | null): Promise<void> {
+		await invoke("mic_test_start_meter", {
+			args: {
+				inputDeviceId: inputDeviceId ?? null,
+			},
+		});
+	},
+
+	async stopMicTestMeter(): Promise<void> {
+		await invoke("mic_test_stop_meter");
 	},
 
 	// API Key management

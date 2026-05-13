@@ -29,12 +29,20 @@ import {
 	Settings,
 	UserRound,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import appPackageJson from "../package.json";
 import { AccountView } from "./components/account";
 import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
+import { MicStatusCard } from "./components/MicStatusCard";
 import { SettingsShell } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
 import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
@@ -242,9 +250,57 @@ function _InstructionsCard() {
 }
 
 function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
+	const homeHeaderRef = useRef<HTMLElement | null>(null);
+	const [homeHeaderHeight, setHomeHeaderHeight] = useState(0);
+
+	useLayoutEffect(() => {
+		const header = homeHeaderRef.current;
+		if (!header) return;
+
+		// Keep the History sticky bar aligned to the *actual* header height.
+		// The Home header is taller than other pages, so a guessed magic number
+		// will clip the History toolbar under it as soon as fonts/layout shift.
+		const updateHistoryStickyTop = () => {
+			// Preserve sub-pixel height instead of rounding up. Rounding can create
+			// a tiny visible seam between the page header and the sticky History bar.
+			const nextHeight = Number.parseFloat(
+				header.getBoundingClientRect().height.toFixed(2),
+			);
+			setHomeHeaderHeight((current) =>
+				current === nextHeight ? current : nextHeight,
+			);
+		};
+
+		updateHistoryStickyTop();
+
+		if (typeof ResizeObserver === "undefined") {
+			window.addEventListener("resize", updateHistoryStickyTop);
+			return () => {
+				window.removeEventListener("resize", updateHistoryStickyTop);
+			};
+		}
+
+		const observer = new ResizeObserver(() => {
+			updateHistoryStickyTop();
+		});
+		observer.observe(header);
+
+		return () => {
+			observer.disconnect();
+		};
+	}, []);
+
+	const homeStickyStyle = useMemo(
+		() =>
+			({
+				"--history-feed-sticky-top": `${homeHeaderHeight}px`,
+			}) as CSSProperties,
+		[homeHeaderHeight],
+	);
+
 	return (
-		<div className="main-content">
-			<header className="tv-page-header animate-in">
+		<div className="main-content" style={homeStickyStyle}>
+			<header ref={homeHeaderRef} className="tv-page-header animate-in">
 				<Title order={1} mb={4}>
 					Welcome to Kolboo
 				</Title>
@@ -255,6 +311,7 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 
 			<div className="main-content-inner">
 				{/* <InstructionsCard /> */}
+				<MicStatusCard />
 				<HistoryFeed onJumpToLog={onJumpToLog} />
 			</div>
 		</div>

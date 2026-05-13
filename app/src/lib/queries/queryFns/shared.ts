@@ -20,6 +20,8 @@ export type QueryFnDeps = {
 		| "getCostSummary"
 		| "getCostByProvider"
 		| "getSettings"
+		| "listAudioInputDevicesV2"
+		| "getDefaultAudioInputDeviceName"
 		| "getSystemProxyInfo"
 		| "getSettingsGuideState"
 		| "isAudioMuteSupported"
