@@ -1071,6 +1071,7 @@ pub fn run() {
             commands::licensing::license_get_auth_context,
             commands::licensing::license_get_session_access_token,
             commands::licensing::license_start_login,
+            commands::licensing::license_sign_up,
             commands::licensing::license_exchange_session,
             commands::licensing::license_logout,
             commands::licensing::license_refresh_entitlement,

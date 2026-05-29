@@ -41,10 +41,18 @@ pub struct UsageStats {
     pub requests_today: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OrgInferenceMode {
+    OrgByok,
+    Managed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct OrgContext {
     pub org_id: String,
     pub org_name: String,
+    pub inference_mode: Option<OrgInferenceMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -59,6 +67,7 @@ pub struct LicenseState {
     pub last_validated_at: Option<DateTime<Utc>>,
     pub usage: UsageStats,
     pub limits: TierLimits,
+    pub portal_available: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -140,6 +149,7 @@ impl LicenseState {
             last_validated_at: None,
             usage: UsageStats::default(),
             limits: TierLimits::default(),
+            portal_available: false,
         }
     }
 }
@@ -150,6 +160,19 @@ pub struct LoginRequest {
     pub auth_provider: Option<String>,
     pub email: Option<String>,
     pub password: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct SignupRequest {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct SignupResponse {
+    pub state: LicenseState,
+    pub confirmation_required: bool,
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,8 +225,10 @@ pub fn telemetry_context_for_state(state: &LicenseState) -> Value {
         "has_org": state.org.is_some(),
         "org_id": redact_identifier(state.org.as_ref().map(|org| org.org_id.as_str())),
         "org_name": redact_identifier(state.org.as_ref().map(|org| org.org_name.as_str())),
+        "org_inference_mode": state.org.as_ref().and_then(|org| serde_json::to_value(org.inference_mode).ok()),
         "has_expires_at": state.expires_at.is_some(),
         "has_last_validated_at": state.last_validated_at.is_some(),
+        "portal_available": state.portal_available,
     })
 }
 
@@ -334,18 +359,26 @@ fn parse_u64(value: Option<&Value>) -> u64 {
     value.and_then(|v| v.as_u64()).unwrap_or(0)
 }
 
+fn parse_org_inference_mode(value: Option<&Value>) -> Option<OrgInferenceMode> {
+    match value.and_then(|x| x.as_str()) {
+        Some("org_byok") => Some(OrgInferenceMode::OrgByok),
+        Some("managed") => Some(OrgInferenceMode::Managed),
+        _ => None,
+    }
+}
+
 fn tier_limits_for(tier: LicenseTier) -> TierLimits {
     match tier {
         LicenseTier::Community => TierLimits::default(),
         LicenseTier::Personal => TierLimits {
-            stt_seconds_monthly: 21_600,
-            llm_tokens_monthly: 5_000_000,
-            requests_per_day: 1_000,
+            stt_seconds_monthly: 18_000,
+            llm_tokens_monthly: 500_000,
+            requests_per_day: 500,
         },
         LicenseTier::Enterprise => TierLimits {
-            stt_seconds_monthly: 216_000,
-            llm_tokens_monthly: 100_000_000,
-            requests_per_day: 50_000,
+            stt_seconds_monthly: 120_000,
+            llm_tokens_monthly: 2_000_000,
+            requests_per_day: 5_000,
         },
     }
 }
@@ -367,6 +400,13 @@ pub fn evaluate_status(state: &LicenseState, now: DateTime<Utc>, grace_days: i64
             .is_empty()
     {
         return LicenseStatus::SignedOut;
+    }
+
+    // A signed-in community account is still a real authenticated desktop session.
+    // We keep it active so BYOK/local usage remains available even when no managed
+    // entitlement rows exist yet or the hydration path is temporarily unavailable.
+    if matches!(state.tier, LicenseTier::Community) {
+        return LicenseStatus::Active;
     }
 
     let not_expired = state
@@ -412,7 +452,11 @@ pub fn normalize_license_state(raw: Option<Value>, now: DateTime<Utc>) -> Licens
             if org_id.is_empty() || org_name.is_empty() {
                 return None;
             }
-            Some(OrgContext { org_id, org_name })
+            Some(OrgContext {
+                org_id,
+                org_name,
+                inference_mode: parse_org_inference_mode(org.get("inference_mode")),
+            })
         }),
         expires_at: parse_datetime(map.get("expires_at")),
         cached_at: parse_datetime(map.get("cached_at")).unwrap_or(now),
@@ -435,6 +479,10 @@ pub fn normalize_license_state(raw: Option<Value>, now: DateTime<Utc>) -> Licens
                 requests_per_day: parse_u64(limits.get("requests_per_day")),
             })
             .unwrap_or_else(|| tier_limits_for(tier)),
+        portal_available: map
+            .get("portal_available")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
     };
 
     if matches!(state.tier, LicenseTier::Community) {
@@ -446,35 +494,23 @@ pub fn normalize_license_state(raw: Option<Value>, now: DateTime<Utc>) -> Licens
 }
 
 pub fn build_login_state(provider_hint: Option<&str>, now: DateTime<Utc>) -> LicenseState {
-    let wants_enterprise = provider_hint
-        .map(|hint| hint.to_ascii_lowercase())
-        .map(|hint| hint.contains("enterprise") || hint.contains("org"))
-        .unwrap_or(false);
+    let _ = provider_hint;
 
-    let tier = if wants_enterprise {
-        LicenseTier::Enterprise
-    } else {
-        LicenseTier::Personal
-    };
-
+    // We intentionally do not infer plan/org access from the provider hint anymore.
+    // Real access must come back from api-edge so the desktop does not fabricate
+    // enterprise/personal state before the durable backend confirms it.
     LicenseState {
-        tier,
+        tier: LicenseTier::Community,
         status: LicenseStatus::Active,
         user_id: None,
         email: None,
-        org: if wants_enterprise {
-            Some(OrgContext {
-                org_id: "org-kolboo-enterprise".to_string(),
-                org_name: "Kolboo Enterprise".to_string(),
-            })
-        } else {
-            None
-        },
-        expires_at: Some(now + Duration::days(30)),
+        org: None,
+        expires_at: None,
         cached_at: now,
         last_validated_at: Some(now),
         usage: UsageStats::default(),
-        limits: tier_limits_for(tier),
+        limits: tier_limits_for(LicenseTier::Community),
+        portal_available: false,
     }
 }
 
@@ -482,7 +518,11 @@ pub fn apply_refresh_success(mut state: LicenseState, now: DateTime<Utc>) -> Lic
     state.status = LicenseStatus::Active;
     state.cached_at = now;
     state.last_validated_at = Some(now);
-    state.expires_at = Some(now + Duration::days(30));
+    state.expires_at = if matches!(state.tier, LicenseTier::Community) {
+        None
+    } else {
+        Some(now + Duration::days(30))
+    };
     state
 }
 
@@ -510,9 +550,22 @@ mod tests {
     fn maps_org_context_for_enterprise_login() {
         let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
         let state = build_login_state(Some("enterprise"), now);
-        assert_eq!(state.tier, LicenseTier::Enterprise);
-        assert!(state.org.is_some());
+        assert_eq!(state.tier, LicenseTier::Community);
+        assert!(state.org.is_none());
         assert_eq!(state.status, LicenseStatus::Active);
+        assert!(!state.portal_available);
+    }
+
+    #[test]
+    fn signed_in_community_state_stays_active() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
+        let mut state = build_login_state(None, now);
+        state.user_id = Some("user-123".to_string());
+
+        assert_eq!(
+            evaluate_status(&state, now, DEFAULT_GRACE_DAYS),
+            LicenseStatus::Active
+        );
     }
 
     #[test]
@@ -537,9 +590,10 @@ mod tests {
     }
 
     #[test]
-    fn refresh_success_resets_to_active() {
+    fn refresh_success_resets_paid_state_to_active() {
         let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
         let mut state = LicenseState::signed_out(now);
+        state.tier = LicenseTier::Personal;
         state.user_id = Some("u1".to_string());
         state.email = Some("u1@example.com".to_string());
         state.status = LicenseStatus::Expired;
@@ -551,9 +605,24 @@ mod tests {
     }
 
     #[test]
-    fn refresh_failure_keeps_grace_when_window_valid() {
+    fn refresh_success_keeps_signed_in_community_without_expiry() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
+        let mut state = build_login_state(None, now);
+        state.user_id = Some("u1".to_string());
+        state.email = Some("u1@example.com".to_string());
+        state.status = LicenseStatus::Grace;
+
+        let next = apply_refresh_success(state, now);
+        assert_eq!(next.status, LicenseStatus::Active);
+        assert!(next.expires_at.is_none());
+        assert!(next.last_validated_at.is_some());
+    }
+
+    #[test]
+    fn refresh_failure_keeps_paid_state_in_grace_when_window_valid() {
         let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
         let mut state = LicenseState::signed_out(now);
+        state.tier = LicenseTier::Personal;
         state.user_id = Some("u1".to_string());
         state.email = Some("u1@example.com".to_string());
         state.status = LicenseStatus::Active;
@@ -562,6 +631,20 @@ mod tests {
 
         let next = apply_refresh_failure(state, now);
         assert_eq!(next.status, LicenseStatus::Grace);
+    }
+
+    #[test]
+    fn refresh_failure_keeps_signed_in_community_active() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
+        let mut state = build_login_state(None, now);
+        state.user_id = Some("u1".to_string());
+        state.email = Some("u1@example.com".to_string());
+        state.status = LicenseStatus::Grace;
+        state.expires_at = Some(now - Duration::days(30));
+        state.last_validated_at = Some(now - Duration::days(30));
+
+        let next = apply_refresh_failure(state, now);
+        assert_eq!(next.status, LicenseStatus::Active);
     }
 
     #[test]
@@ -575,12 +658,14 @@ mod tests {
             org: Some(OrgContext {
                 org_id: "org-sensitive".to_string(),
                 org_name: "Confidential Org".to_string(),
+                inference_mode: Some(OrgInferenceMode::Managed),
             }),
             expires_at: Some(now + Duration::days(7)),
             cached_at: now,
             last_validated_at: Some(now),
             usage: UsageStats::default(),
             limits: TierLimits::default(),
+            portal_available: false,
         };
 
         let payload = telemetry_context_for_state(&state);
@@ -601,6 +686,43 @@ mod tests {
             Some("present:16")
         );
         assert_eq!(payload.get("has_org").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn normalizes_hydrated_org_inference_mode_and_portal_availability() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
+        let state = normalize_license_state(
+            Some(json!({
+                "tier": "enterprise",
+                "status": "active",
+                "user_id": "user-123",
+                "email": "user@example.com",
+                "org": {
+                    "org_id": "org-123",
+                    "org_name": "Kolboo Shared Dev Pilot Org",
+                    "inference_mode": "org_byok"
+                },
+                "cached_at": "2026-02-13T12:00:00Z",
+                "last_validated_at": "2026-02-13T12:00:00Z",
+                "portal_available": false,
+                "limits": {
+                    "stt_seconds_monthly": 0,
+                    "llm_tokens_monthly": 0,
+                    "requests_per_day": 0
+                }
+            })),
+            now,
+        );
+
+        assert_eq!(
+            state.org.as_ref().map(|org| org.org_name.as_str()),
+            Some("Kolboo Shared Dev Pilot Org")
+        );
+        assert_eq!(
+            state.org.as_ref().and_then(|org| org.inference_mode),
+            Some(OrgInferenceMode::OrgByok)
+        );
+        assert!(!state.portal_available);
     }
 
     #[test]

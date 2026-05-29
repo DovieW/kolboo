@@ -341,6 +341,29 @@ describe("tauri settings side effects", () => {
 			enforced: true,
 			reason: "Managed by organization policy",
 		});
+
+		expect(
+			getPolicyPathEnforcement(
+				{
+					source: "cloud",
+					is_valid: true,
+					last_updated: null,
+					expires_at: null,
+					version: "1",
+					enforced_fields: [
+						{
+							path: "disable_product_analytics",
+							reason: "Enterprise telemetry policy",
+						},
+					],
+				},
+				"posthog_analytics_enabled",
+			),
+		).toEqual({
+			path: "posthog_analytics_enabled",
+			enforced: true,
+			reason: "Enterprise telemetry policy",
+		});
 	});
 
 	it("unlocks aliased path after policy removal", async () => {
@@ -378,5 +401,35 @@ describe("tauri settings side effects", () => {
 		);
 		expect(after.enforced).toBe(false);
 		expect(after.reason).toBeNull();
+	});
+
+	it("keeps disclosure acknowledgement writes while stripping policy-blocked analytics opt-in", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({
+			policy_state: {
+				source: "cloud",
+				is_valid: true,
+				enforced_fields: [
+					{
+						path: "disable_product_analytics",
+						reason: "Enterprise telemetry policy",
+					},
+				],
+			},
+		});
+		const { tauriSettingsAPI } = await import("./settings");
+
+		await tauriSettingsAPI.resolveTelemetryDisclosure({
+			analyticsEnabled: true,
+			acknowledgedAt: "2026-05-13T18:30:00.000Z",
+		});
+
+		expect(invokeMock).toHaveBeenNthCalledWith(1, "settings_apply_patch", {
+			patch: {
+				telemetry_disclosure_acknowledged_at: "2026-05-13T18:30:00.000Z",
+				telemetry_disclosure_version: "2026-05-phase6b-v1",
+			},
+			deleteKeys: [],
+		});
 	});
 });

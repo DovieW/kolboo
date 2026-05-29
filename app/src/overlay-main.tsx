@@ -90,6 +90,7 @@ void initSentry("overlay").finally(() => {
 				</OverlayErrorBoundary>
 			</AppMantineProvider>
 		</QueryClientProvider>,
+		{ sentrySurface: "overlay" },
 	);
 });
 

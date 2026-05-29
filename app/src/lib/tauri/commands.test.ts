@@ -370,6 +370,38 @@ describe("tauri command wrappers", () => {
 	);
 
 	itWithImportTimeout("license wrappers invoke backend commands", async () => {
+		invokeMock.mockImplementation(async (command: string) => {
+			if (command === "license_sign_up") {
+				return {
+					confirmation_required: false,
+					email: "new@example.com",
+					state: {
+						tier: "community",
+						status: "active",
+						user_id: "user_123",
+						email: "new@example.com",
+						org: null,
+						expires_at: null,
+						cached_at: "2026-01-01T00:00:00Z",
+						last_validated_at: "2026-01-01T00:00:00Z",
+						usage: {
+							stt_seconds_used: 0,
+							llm_tokens_used: 0,
+							requests_today: 0,
+						},
+						limits: {
+							stt_seconds_monthly: 0,
+							llm_tokens_monthly: 0,
+							requests_per_day: 0,
+						},
+						portal_available: false,
+					},
+				};
+			}
+
+			return undefined;
+		});
+
 		const { tauriAPI, licenseAPI } = await import("./commands");
 		const transitionHandler = vi.fn();
 
@@ -380,6 +412,10 @@ describe("tauri command wrappers", () => {
 			email: "user@example.com",
 			password: "password123",
 		});
+		await tauriAPI.signUpLicense({
+			email: "new@example.com",
+			password: "password123",
+		});
 		await tauriAPI.exchangeLicenseSession("upstream-token-123");
 		await tauriAPI.logoutLicense();
 		await tauriAPI.refreshLicenseEntitlement(true);
@@ -387,6 +423,10 @@ describe("tauri command wrappers", () => {
 
 		await licenseAPI.getState();
 		await licenseAPI.startLogin();
+		await licenseAPI.signUp({
+			email: "newer@example.com",
+			password: "password456",
+		});
 		await licenseAPI.exchangeSession("upstream-token-456");
 		await licenseAPI.onTransition(transitionHandler);
 
@@ -396,6 +436,12 @@ describe("tauri command wrappers", () => {
 				provider_hint: "enterprise",
 				auth_provider: "google",
 				email: "user@example.com",
+				password: "password123",
+			},
+		});
+		expect(invokeMock).toHaveBeenCalledWith("license_sign_up", {
+			request: {
+				email: "new@example.com",
 				password: "password123",
 			},
 		});
@@ -415,6 +461,12 @@ describe("tauri command wrappers", () => {
 				auth_provider: null,
 				email: null,
 				password: null,
+			},
+		});
+		expect(invokeMock).toHaveBeenCalledWith("license_sign_up", {
+			request: {
+				email: "newer@example.com",
+				password: "password456",
 			},
 		});
 		expect(invokeMock).toHaveBeenCalledWith("license_exchange_session", {

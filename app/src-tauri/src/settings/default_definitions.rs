@@ -189,6 +189,20 @@ pub(crate) fn seedable_settings(
             json!(default_values::DEFAULT_REQUEST_LOGS_PRIVACY_MODE),
         ),
         SettingDefaultDefinition::missing_or_null(
+            "posthog_analytics_enabled",
+            json!(default_values::DEFAULT_POSTHOG_ANALYTICS_ENABLED),
+        ),
+        // Explicit null means "disclosure still unresolved". Keep that state
+        // meaningful so upgrades can intentionally re-show future wording.
+        SettingDefaultDefinition::missing_only(
+            "telemetry_disclosure_acknowledged_at",
+            json!(default_values::DEFAULT_TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT),
+        ),
+        SettingDefaultDefinition::missing_only(
+            "telemetry_disclosure_version",
+            json!(default_values::DEFAULT_TELEMETRY_DISCLOSURE_VERSION),
+        ),
+        SettingDefaultDefinition::missing_or_null(
             "transcription_retention_mode",
             json!(default_values::DEFAULT_TRANSCRIPTION_RETENTION_MODE),
         ),
@@ -458,6 +472,18 @@ mod tests {
         );
         assert_eq!(
             definition_for(&definitions, "github_backup_gist_id").seed_rule,
+            SeedRule::MissingOnly
+        );
+        assert_eq!(
+            definition_for(&definitions, "posthog_analytics_enabled").seed_rule,
+            SeedRule::MissingOrNull
+        );
+        assert_eq!(
+            definition_for(&definitions, "telemetry_disclosure_acknowledged_at").seed_rule,
+            SeedRule::MissingOnly
+        );
+        assert_eq!(
+            definition_for(&definitions, "telemetry_disclosure_version").seed_rule,
             SeedRule::MissingOnly
         );
         assert_eq!(

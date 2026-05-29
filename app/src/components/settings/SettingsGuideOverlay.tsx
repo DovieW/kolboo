@@ -4,25 +4,49 @@ import {
 	Group,
 	Kbd,
 	PasswordInput,
+	SegmentedControl,
 	Text,
 	Textarea,
+	TextInput,
 	Title,
 } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type FormEvent,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { formatErrorMessage } from "../../lib/formatError";
 import { frontendLog } from "../../lib/frontendLog";
-import { useSettings } from "../../lib/queries";
+import {
+	useLicenseState,
+	useSettings,
+	useSignUpLicense,
+	useStartLicenseLogin,
+} from "../../lib/queries";
 import { type HotkeyConfig, tauriAPI } from "../../lib/tauri";
 import { Logo } from "../Logo";
+import {
+	buildSettingsGuideAccountViewModel,
+	buildSettingsGuideGroqStepViewModel,
+	buildSettingsGuideWrapupViewModel,
+	SETTINGS_GUIDE_STEPS,
+	type SettingsGuideStep,
+} from "./settingsGuideAccount";
 
 type Phase = "welcome" | "guide";
 
-type Step = "groq" | "dictation" | "wrapup";
+type Step = SettingsGuideStep;
 
 type NavStep = "welcome" | Step;
 
-const GUIDE_STEPS: Step[] = ["groq", "dictation", "wrapup"];
+type AccountAuthMode = "sign_up" | "sign_in";
+
+const GUIDE_STEPS: Step[] = [...SETTINGS_GUIDE_STEPS];
 const NAV_STEPS: NavStep[] = ["welcome", ...GUIDE_STEPS];
 
 function HotkeyCombo({ config }: { config: HotkeyConfig | null }) {
@@ -66,7 +90,15 @@ export function SettingsGuideOverlay({
 	const queryClient = useQueryClient();
 
 	const { data: settings } = useSettings();
+	const licenseState = useLicenseState();
+	const startLicenseLogin = useStartLicenseLogin();
+	const signUpLicense = useSignUpLicense();
 	const toggleHotkey = settings?.toggle_hotkey ?? null;
+	const accountView = buildSettingsGuideAccountViewModel(licenseState.data);
+	const groqView = buildSettingsGuideGroqStepViewModel(accountView);
+	const wrapupView = buildSettingsGuideWrapupViewModel(accountView);
+	const accountAuthPending =
+		startLicenseLogin.isPending || signUpLicense.isPending;
 
 	const recommendedToggleKeyLabel =
 		typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
@@ -76,7 +108,7 @@ export function SettingsGuideOverlay({
 	const welcomeTimersRef = useRef<number[]>([]);
 
 	const [phase, setPhase] = useState<Phase>("welcome");
-	const [step, setStep] = useState<Step>("groq");
+	const [step, setStep] = useState<Step>("account");
 
 	const [welcomeIconVisible, setWelcomeIconVisible] = useState(false);
 	const [welcomeTextVisible, setWelcomeTextVisible] = useState(false);
@@ -85,6 +117,13 @@ export function SettingsGuideOverlay({
 	const [welcomeContinueSeen, setWelcomeContinueSeen] = useState(false);
 
 	const [skipVisible, setSkipVisible] = useState(false);
+	const [showInlineSignIn, setShowInlineSignIn] = useState(false);
+	const [accountAuthMode, setAccountAuthMode] =
+		useState<AccountAuthMode>("sign_up");
+	const [accountEmail, setAccountEmail] = useState("");
+	const [accountPassword, setAccountPassword] = useState("");
+	const [accountMessage, setAccountMessage] = useState<string | null>(null);
+	const [accountError, setAccountError] = useState<string | null>(null);
 
 	const { data: groqApiKeyValue } = useQuery({
 		queryKey: ["apiKeyValue", "groq_api_key"],
@@ -140,7 +179,7 @@ export function SettingsGuideOverlay({
 
 		// Always restart the intro from scratch.
 		setPhase("welcome");
-		setStep("groq");
+		setStep("account");
 		setSkipVisible(false);
 
 		setWelcomeIconVisible(false);
@@ -181,6 +220,12 @@ export function SettingsGuideOverlay({
 		setFinishSeen(false);
 		setWelcomeContinueSeen(false);
 		setDictationText("");
+		setShowInlineSignIn(false);
+		setAccountAuthMode("sign_up");
+		setAccountEmail("");
+		setAccountPassword("");
+		setAccountMessage(null);
+		setAccountError(null);
 		return () => {
 			clearWelcomeTimers();
 		};
@@ -315,6 +360,93 @@ export function SettingsGuideOverlay({
 		}
 	};
 
+	const handleBrowserAccountAuth = () => {
+		setAccountError(null);
+		setAccountMessage(
+			"Opening your browser for Kolboo account sign-in or sign-up…",
+		);
+		startLicenseLogin.mutate(
+			{ provider_hint: "personal" },
+			{
+				onSuccess: (state) => {
+					const model = buildSettingsGuideAccountViewModel(state);
+					setAccountMessage(
+						model.hasPaidAccess
+							? "Signed in. Pro-only features will be available where enabled. If a new invite or upgrade still looks missing, you can refresh it later from Account."
+							: "Signed in. No payment is required, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
+					);
+				},
+				onError: (error) => {
+					setAccountMessage(null);
+					setAccountError(formatErrorMessage(error));
+				},
+			},
+		);
+	};
+
+	const handleInlineAccountAuth = (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		setAccountError(null);
+
+		if (accountAuthMode === "sign_up") {
+			setAccountMessage("Creating your free Kolboo account…");
+			signUpLicense.mutate(
+				{
+					email: accountEmail,
+					password: accountPassword,
+				},
+				{
+					onSuccess: (response) => {
+						setAccountPassword("");
+						if (response.confirmation_required) {
+							setAccountAuthMode("sign_in");
+							setAccountMessage(
+								"Account created. Check your email to confirm it, then come back here or use browser auth to finish sign-in. No payment is required.",
+							);
+							return;
+						}
+
+						const model = buildSettingsGuideAccountViewModel(response.state);
+						setAccountMessage(
+							model.hasPaidAccess
+								? "Account created and signed in. Pro-only features will be available where enabled. If a new invite or upgrade still looks missing, you can refresh it later from Account."
+								: "Account created and signed in. Payment is optional, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
+						);
+					},
+					onError: (error) => {
+						setAccountMessage(null);
+						setAccountError(formatErrorMessage(error));
+					},
+				},
+			);
+			return;
+		}
+
+		setAccountMessage("Signing in…");
+		startLicenseLogin.mutate(
+			{
+				provider_hint: "personal",
+				email: accountEmail,
+				password: accountPassword,
+			},
+			{
+				onSuccess: (state) => {
+					const model = buildSettingsGuideAccountViewModel(state);
+					setAccountPassword("");
+					setAccountMessage(
+						model.hasPaidAccess
+							? "Signed in. Pro-only features will be available where enabled. If a new invite or upgrade still looks missing, you can refresh it later from Account."
+							: "Signed in. Payment is optional, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
+					);
+				},
+				onError: (error) => {
+					setAccountMessage(null);
+					setAccountError(formatErrorMessage(error));
+				},
+			},
+		);
+	};
+
 	if (!opened) return null;
 
 	return (
@@ -349,7 +481,7 @@ export function SettingsGuideOverlay({
 								Welcome to Kolboo
 							</Title>
 							<Text c="dimmed" size="sm" style={{ marginTop: 6 }}>
-								Let’s get your voice dictation set up.
+								Let’s set up your account options and voice dictation.
 							</Text>
 						</div>
 					</div>
@@ -362,7 +494,7 @@ export function SettingsGuideOverlay({
 								? " tang-guide-fade-in"
 								: "")
 						}
-						onClick={() => enterGuideAt("groq")}
+						onClick={() => enterGuideAt("account")}
 					>
 						<span>Start</span>
 						<ChevronRight size={16} />
@@ -395,12 +527,131 @@ export function SettingsGuideOverlay({
 					)}
 
 					<div className="tang-guide-content tang-guide-fade-in">
+						{step === "account" && (
+							<div className="tang-guide-step">
+								<Title order={3}>{accountView.title}</Title>
+								<Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
+									{accountView.description}
+								</Text>
+
+								<div className="tang-guide-account-card">
+									<Text className="tang-guide-account-status">
+										{accountView.statusLabel}
+									</Text>
+									<Text size="sm" c="dimmed" style={{ marginTop: 6 }}>
+										{accountView.detail}
+									</Text>
+									<Text size="xs" c="dimmed" style={{ marginTop: 10 }}>
+										{accountView.proSyncLine}
+									</Text>
+								</div>
+
+								{accountMessage ? (
+									<Text size="sm" className="tang-guide-account-message">
+										{accountMessage}
+									</Text>
+								) : null}
+								{accountError ? (
+									<Text size="sm" className="tang-guide-account-error">
+										{accountError}
+									</Text>
+								) : null}
+
+								{accountView.isSignedIn ? (
+									<Group justify="center" mt="lg">
+										<Button color="orange" onClick={() => enterGuideAt("groq")}>
+											Continue setup
+										</Button>
+									</Group>
+								) : (
+									<>
+										<Group justify="center" mt="lg">
+											<Button
+												color="orange"
+												onClick={handleBrowserAccountAuth}
+												loading={startLicenseLogin.isPending}
+											>
+												Sign in or create account
+											</Button>
+											<Button
+												variant="default"
+												onClick={() => setShowInlineSignIn((value) => !value)}
+											>
+												Sign in here
+											</Button>
+											<Button
+												variant="subtle"
+												onClick={() => enterGuideAt("groq")}
+											>
+												Continue without account
+											</Button>
+										</Group>
+
+										{showInlineSignIn ? (
+											<form
+												className="tang-guide-account-form"
+												onSubmit={handleInlineAccountAuth}
+											>
+												<SegmentedControl
+													value={accountAuthMode}
+													onChange={(value) =>
+														setAccountAuthMode(value as AccountAuthMode)
+													}
+													data={[
+														{ value: "sign_up", label: "Create account" },
+														{ value: "sign_in", label: "Sign in" },
+													]}
+													disabled={accountAuthPending}
+												/>
+												<Text size="xs" c="dimmed">
+													{accountAuthMode === "sign_up"
+														? "Create a free account without starting billing. If email confirmation is required, you’ll confirm the email first, then come back here or use browser auth to finish sign-in."
+														: "Sign in with an existing account. No subscription is required for signed-in Community/BYOK mode."}
+												</Text>
+												<TextInput
+													label="Email"
+													type="email"
+													value={accountEmail}
+													onChange={(event) =>
+														setAccountEmail(event.currentTarget.value)
+													}
+													autoComplete="email"
+													disabled={accountAuthPending}
+													required
+												/>
+												<PasswordInput
+													label="Password"
+													value={accountPassword}
+													onChange={(event) =>
+														setAccountPassword(event.currentTarget.value)
+													}
+													autoComplete={
+														accountAuthMode === "sign_up"
+															? "new-password"
+															: "current-password"
+													}
+													disabled={accountAuthPending}
+													required
+												/>
+												<Group justify="flex-end">
+													<Button type="submit" loading={accountAuthPending}>
+														{accountAuthMode === "sign_up"
+															? "Create free account"
+															: "Sign in"}
+													</Button>
+												</Group>
+											</form>
+										) : null}
+									</>
+								)}
+							</div>
+						)}
+
 						{step === "groq" && (
 							<div className="tang-guide-step">
-								<Title order={3}>Create a Groq API key</Title>
+								<Title order={3}>{groqView.title}</Title>
 								<Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
-									Groq provides free voice dictation (Whisper) and fast LLM
-									rewriting. Create an API key here:{" "}
+									{groqView.description}{" "}
 									<Anchor
 										href="https://console.groq.com/keys"
 										target="_blank"
@@ -409,6 +660,11 @@ export function SettingsGuideOverlay({
 										https://console.groq.com/keys
 									</Anchor>
 								</Text>
+								{groqView.helper ? (
+									<Text c="dimmed" size="xs" style={{ marginTop: 10 }}>
+										{groqView.helper}
+									</Text>
+								) : null}
 
 								<div style={{ marginTop: 18 }}>
 									<div style={{ marginTop: 12 }}>
@@ -439,7 +695,7 @@ export function SettingsGuideOverlay({
 													isGroqKeyUnchanged
 												}
 											>
-												Set key
+												{groqView.submitLabel}
 											</Button>
 										</Group>
 									</div>
@@ -501,11 +757,12 @@ export function SettingsGuideOverlay({
 
 						{step === "wrapup" && (
 							<div className="tang-guide-step">
-								<Title order={3}>You’re good to go</Title>
+								<Title order={3}>{wrapupView.title}</Title>
 								<Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
-									Next, explore Settings to add AI providers, add an LLM rewrite
-									step with custom prompts, change settings per program, adjust
-									the accent color, and more.
+									{wrapupView.description}
+								</Text>
+								<Text c="dimmed" size="sm" style={{ marginTop: 12 }}>
+									{wrapupView.detail}
 								</Text>
 							</div>
 						)}

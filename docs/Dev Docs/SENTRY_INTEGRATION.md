@@ -1,8 +1,16 @@
 # Sentry Integration (Kolboo)
 
-Last updated: 2026-02-13
+Last updated: 2026-05-29
 
 This document captures current Sentry research notes, implementation decisions, and operating guidance for the `kolboo` OSS desktop app.
+
+Canonical-plan note:
+
+- The cross-repo Sentry plan now lives in
+  `kol-software/plans/KOLBOO_SENTRY_END_TO_END_PLAN.md`.
+- This file is intentionally desktop-specific. Keep it focused on `kolboo`
+  implementation details, validation notes, and operating guidance rather than
+  turning it into the master multi-repo plan.
 
 ## Goals
 
@@ -23,11 +31,22 @@ Current integration includes **frontend Sentry** for desktop UI surfaces:
 Initialization is DSN-gated and implemented in:
 
 - `app/src/lib/telemetry/sentry.ts`
+- `app/src/lib/bootstrap/renderRoot.tsx` (React 19 root error hooks)
 - Entry points:
   - `app/src/main.tsx`
   - `app/src/overlay-main.tsx`
   - `app/src/overlay-hover-main.tsx`
   - `app/src/quick-ask-main.tsx`
+
+The app intentionally keeps its custom fallback UI / panic overlays. React 19
+root error hooks are wired in so Sentry still observes uncaught, caught, and
+recoverable render failures without replacing those UX paths.
+
+Current integration also includes **backend Sentry** for the Tauri runtime:
+
+- DSN-gated init in `app/src-tauri/src/sentry_init.rs`
+- startup wiring from `app/src-tauri/src/lib.rs`
+- deterministic backend smoke command in `app/src-tauri/src/commands/logs.rs`
 
 License/account flows route capture via:
 
@@ -35,19 +54,21 @@ License/account flows route capture via:
 
 ## Environment variables
 
-Configured via Vite env:
+Configured via backend runtime env and surfaced to the frontend through
+`get_runtime_config`:
 
-- `VITE_SENTRY_DSN`
-- `VITE_SENTRY_ENV`
-- `VITE_APP_VERSION`
+- `TAURI_SENTRY_DSN`
+- `TAURI_SENTRY_ENV`
+- `TAURI_SENTRY_RELEASE`
 
-Local placeholders live in:
+Local placeholders/defaults live in:
 
 - `app/.env`
+- repo-local CLI helper defaults in `.sentryclirc`
 
 Behavior:
 
-- If `VITE_SENTRY_DSN` is empty/missing, Sentry does not initialize.
+- If `TAURI_SENTRY_DSN` is empty/missing, frontend and backend Sentry stay disabled.
 - App behavior must remain unchanged with Sentry disabled/unavailable.
 
 ## Privacy and redaction rules (required)
@@ -66,7 +87,12 @@ Current protections:
 - redaction helper in `app/src/lib/telemetry/sentry.ts`
 - event sanitation in `beforeSend`
 - network breadcrumbs filtered (`xhr`/`fetch`)
+- React 19 root hooks capture renderer failures without adding replay/autocapture
 - license telemetry context redaction in both TS and Rust helper paths
+- backend `before_send` scrubbing in `app/src-tauri/src/sentry_init.rs`
+  - drops `user`, `request`, and `server_name`
+  - redacts sensitive event messages / exception values / tags
+  - recursively redacts sensitive `extra` payloads and breadcrumb data by key or content markers
 
 ## Testing and validation notes
 
@@ -80,22 +106,37 @@ Primary checks used for this rollout:
 
 Deterministic redaction tests added in:
 
+- `app/src/lib/telemetry/sentry.test.ts`
 - `app/src/lib/tauri/license.test.ts`
 - `app/src-tauri/src/licensing.rs` (`telemetry_context_redacts_sensitive_fields`)
+- `app/src-tauri/src/sentry_init.rs`
 
 Manual smoke test (with DSN enabled):
 
 1. Trigger a test frontend exception.
 2. Verify event appears in Sentry with expected `environment` and surface tags.
 3. Inspect event payload to confirm no sensitive/user-content leakage.
+4. Trigger `logsAPI.sentryBackendSmokeTest(...)` and confirm the backend smoke
+  event arrives with `runtime=tauri-backend`, the expected surface tag, and no
+  request/user payloads.
 
 ## Project setup guidance (Sentry account)
 
-For temporary pre-prod setup:
+Current org topology is split by surface family and environment:
 
-- Start with a single Sentry project for desktop app telemetry.
-- Platform selection can be React/JavaScript because current integration uses `@sentry/react`.
-- Use a dedicated environment label (example: `preprod-personal`).
+- `kolboo-public-dev`
+- `kolboo-public-prod`
+- `kolboo-private-dev`
+- `kolboo-private-prod`
+
+Repo-local CLI defaults in `kolboo/.sentryclirc` point local commands at
+`kolboo-public-dev`.
+
+The public project currently uses a React/JavaScript platform choice because the
+desktop app's user-facing surfaces are React entrypoints. That platform choice
+does **not** prevent the shared DSN from also receiving Tauri backend events; the
+DSN routes events to the project, while the selected project platform mainly
+drives setup guidance and defaults.
 
 ## Release/dist guidance
 
@@ -106,18 +147,17 @@ Recommended pattern:
 - release: `kolboo@<version>`
 - dist: `<platform>-<arch>-<build_or_sha>`
 
-## Backend Sentry research direction
+## Backend next-capture direction
 
-This repo does not yet initialize Sentry in Rust/Tauri backend runtime paths.
+Backend Sentry is now initialized for the Tauri runtime, but the launch-hardening
+work should still stay conservative:
 
-If/when backend Sentry is added in `kolboo`, keep these decisions:
-
-- use DSN-gated initialization (same safety posture as frontend)
+- keep DSN-gated initialization (same safety posture as frontend)
 - capture reliability failures only (no content telemetry)
 - keep strict redaction and whitelist-style metadata
 - preserve normal app behavior when Sentry is unavailable
 
-Candidate backend capture points:
+Candidate future backend capture points:
 
 - Tauri command failures with sanitized context
 - startup/bootstrap failures

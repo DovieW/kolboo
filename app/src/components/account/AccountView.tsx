@@ -7,6 +7,7 @@ import {
 	useLicenseState,
 	useLogoutLicense,
 	useRefreshLicenseEntitlement,
+	useSignUpLicense,
 	useStartLicenseLogin,
 } from "../../lib/queries";
 import { tauriAPI } from "../../lib/tauri";
@@ -37,6 +38,7 @@ export function AccountView() {
 	const state = licenseState.data;
 	const context = authContext.data;
 	const signedIn = Boolean(state && state.status !== "signed_out");
+	const signUp = useSignUpLicense();
 	const reauthRequired = isReauthRequiredForSession(
 		signedIn,
 		context?.reason_code,
@@ -54,6 +56,7 @@ export function AccountView() {
 		status: state?.status,
 		reauthRequired,
 	});
+	const manageAvailable = state?.portal_available === true;
 	const internalTierLabel = state
 		? formatInternalTierLabel(state.tier)
 		: "Loading…";
@@ -83,7 +86,7 @@ export function AccountView() {
 						title: reauthRequired ? "Re-authenticated" : "Signed in",
 						message: reauthRequired
 							? "Managed access has been restored."
-							: "Your account is now connected.",
+							: "Your account is now connected. If organization access or a paid entitlement was just added, use Refresh access to load the latest state.",
 						color: "green",
 					});
 				},
@@ -92,6 +95,41 @@ export function AccountView() {
 						title: reauthRequired
 							? "Re-authentication failed"
 							: "Sign-in failed",
+						message: formatErrorMessage(error),
+						color: "red",
+					});
+				},
+			},
+		);
+	};
+
+	const handlePasswordSignUp = (email: string, password: string) => {
+		signUp.mutate(
+			{ email, password },
+			{
+				onSuccess: (response) => {
+					if (response.confirmation_required) {
+						notifications.show({
+							title: "Check your email",
+							message:
+								"Your free account was created. Confirm the email you receive, then sign in here or use browser auth. No payment is required.",
+							color: "blue",
+						});
+						return;
+					}
+
+					notifications.show({
+						title: "Account created",
+						message:
+							response.state.tier === "community"
+								? "You’re signed in and still in Community/BYOK mode."
+								: "You’re signed in and your account access has been loaded.",
+						color: "green",
+					});
+				},
+				onError: (error) => {
+					notifications.show({
+						title: "Account creation failed",
 						message: formatErrorMessage(error),
 						color: "red",
 					});
@@ -109,7 +147,7 @@ export function AccountView() {
 						title: reauthRequired ? "Re-authenticated" : "Signed in",
 						message: reauthRequired
 							? "Managed access has been restored."
-							: "Your account is now connected.",
+							: "Your account is now connected. If organization access or a paid entitlement was just added, use Refresh access to load the latest state.",
 						color: "green",
 					});
 				},
@@ -131,7 +169,8 @@ export function AccountView() {
 			onSuccess: () => {
 				notifications.show({
 					title: "Access refreshed",
-					message: "Latest entitlement data has been loaded.",
+					message:
+						"Latest entitlement and organization access data has been loaded.",
 					color: "green",
 				});
 			},
@@ -256,10 +295,13 @@ export function AccountView() {
 						signedIn={signedIn}
 						reauthRequired={reauthRequired}
 						loginPending={startLogin.isPending}
+						signupPending={signUp.isPending}
 						refreshPending={refresh.isPending}
 						logoutPending={logout.isPending}
 						managePending={managePending}
+						manageAvailable={manageAvailable}
 						onPasswordSignIn={handlePasswordSignIn}
+						onPasswordSignUp={handlePasswordSignUp}
 						onBrowserSignIn={handleBrowserSignIn}
 						onRefresh={handleRefresh}
 						onManage={handleManage}

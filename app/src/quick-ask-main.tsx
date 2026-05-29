@@ -35,6 +35,7 @@ void initSentry("quick_ask").finally(() => {
 				<QuickAskApp />
 			</AppMantineProvider>
 		</CodeHighlightAdapterProvider>,
+		{ sentrySurface: "quick_ask" },
 	);
 });
 

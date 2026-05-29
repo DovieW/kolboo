@@ -25,6 +25,10 @@ Current redaction behavior strips effective values for fields whose path include
 - `secret`
 - `credential`
 
+The current support bundle may include request IDs, app/Sentry release metadata,
+and hashed operator-correlation targets, but it must not include raw org names,
+raw internal IDs, transcript content, or provider credentials.
+
 ### Failure-mode behavior
 
 When sync fails:

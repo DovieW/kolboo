@@ -422,9 +422,12 @@ export interface UsageStats {
 	requests_today: number;
 }
 
+export type OrgInferenceMode = "org_byok" | "managed";
+
 export interface OrgContext {
 	org_id: string;
 	org_name: string;
+	inference_mode: OrgInferenceMode | null;
 }
 
 export interface LicenseState {
@@ -438,6 +441,7 @@ export interface LicenseState {
 	last_validated_at: string | null;
 	usage: UsageStats;
 	limits: TierLimits;
+	portal_available: boolean;
 }
 
 export type AuthReasonCode =
@@ -954,6 +958,13 @@ export interface AppSettings {
 	request_logs_retention_days: number;
 	// When true, hide full request payloads in the UI (privacy mode).
 	request_logs_privacy_mode: boolean;
+
+	// Product analytics / telemetry disclosure.
+	// Analytics stay opt-out-by-default, but disclosure must still be resolved
+	// before the frontend may emit any product analytics events.
+	posthog_analytics_enabled: boolean;
+	telemetry_disclosure_acknowledged_at: string | null;
+	telemetry_disclosure_version: string | null;
 
 	// Backups
 	// Optional: GitHub Gist id used for "push/pull" backups.

@@ -7,8 +7,11 @@ import {
 	usePolicyState,
 	usePolicySync,
 } from "../../lib/queries";
+import { logsAPI, tauriAPI } from "../../lib/tauri";
+import { loadRuntimeConfig } from "../../lib/tauri/runtimeConfig";
 import { PolicyDiagnosticsCard } from "./PolicyDiagnosticsCard";
 import {
+	buildSupportDiagnosticsBundle,
 	diagnosticsToJson,
 	formatPolicySourceLabel,
 	policyStatusSummary,
@@ -39,20 +42,52 @@ export function PolicySettings() {
 
 	const handleExportDiagnostics = async () => {
 		try {
-			const payload = await exportDiagnostics.mutateAsync();
+			const policyPayload = await exportDiagnostics.mutateAsync();
+			const [
+				licenseStateResult,
+				authContextResult,
+				requestLogsResult,
+				runtimeConfigResult,
+			] = await Promise.allSettled([
+				tauriAPI.getLicenseState(),
+				tauriAPI.getLicenseAuthContext(),
+				logsAPI.getRequestLogs(10),
+				loadRuntimeConfig(),
+			]);
+
+			const payload = await buildSupportDiagnosticsBundle({
+				policyExport: policyPayload,
+				runtimeConfig:
+					runtimeConfigResult.status === "fulfilled"
+						? runtimeConfigResult.value
+						: null,
+				licenseState:
+					licenseStateResult.status === "fulfilled"
+						? licenseStateResult.value
+						: null,
+				authContext:
+					authContextResult.status === "fulfilled"
+						? authContextResult.value
+						: null,
+				requestLogs:
+					requestLogsResult.status === "fulfilled"
+						? requestLogsResult.value
+						: [],
+			});
 			const json = diagnosticsToJson(payload);
 			try {
 				await navigator.clipboard.writeText(json);
 				notifications.show({
 					title: "Diagnostics copied",
-					message: "Redacted policy diagnostics JSON copied to your clipboard.",
+					message:
+						"Redacted support diagnostics bundle copied to your clipboard.",
 					color: "green",
 				});
 			} catch {
 				notifications.show({
 					title: "Diagnostics ready",
 					message:
-						"Could not access clipboard. Open browser devtools and copy from network response.",
+						"Could not access the clipboard. Please retry after granting clipboard access.",
 					color: "yellow",
 				});
 			}
@@ -101,7 +136,7 @@ export function PolicySettings() {
 
 			<SettingsRow
 				label="Diagnostics export"
-				description="Copies a redacted JSON diagnostics payload for support workflows."
+				description="Copies a redacted support bundle with policy state, request IDs, and operator handoff hints."
 				right={
 					<Button
 						variant="default"
@@ -120,8 +155,8 @@ export function PolicySettings() {
 			<Group gap={8} align="center">
 				<Shield size={14} />
 				<Text size="xs" c="dimmed">
-					Diagnostics are redacted and exclude API keys, auth tokens, and
-					transcript content.
+					Diagnostics are redacted and exclude API keys, auth tokens, transcript
+					content, raw org names, and raw internal IDs.
 				</Text>
 			</Group>
 		</Stack>

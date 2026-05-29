@@ -4,7 +4,7 @@ import { loadRuntimeConfig } from "../tauri/runtimeConfig";
 export type SentrySurface = "main" | "overlay" | "overlay_hover" | "quick_ask";
 
 const SENSITIVE_KEY_PATTERN =
-	/(?:api[-_]?key|access[-_]?client[-_]?id|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code)/i;
+	/(?:api[-_]?key|access[-_]?client[-_]?id|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code|clipboard|transcript|prompt|completion|audio|wav|ocr)/i;
 
 const JWT_LIKE_PATTERN =
 	/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9._~+\-/=]+$/;
@@ -19,6 +19,12 @@ type SentryLicenseIdentityInput = {
 	org?: {
 		org_id?: string | null;
 	} | null;
+};
+
+export type SentryReactRootOptions = {
+	onUncaughtError: ReturnType<typeof Sentry.reactErrorHandler>;
+	onCaughtError: ReturnType<typeof Sentry.reactErrorHandler>;
+	onRecoverableError: ReturnType<typeof Sentry.reactErrorHandler>;
 };
 
 export function isSentryConfigured(): boolean {
@@ -129,6 +135,23 @@ export async function initSentry(surface: SentrySurface): Promise<boolean> {
 	Sentry.setTag("surface", surface);
 	initialized = true;
 	return true;
+}
+
+export function getSentryReactRootOptions(
+	surface: SentrySurface,
+): SentryReactRootOptions | undefined {
+	if (!initialized || !isSentryConfigured()) return undefined;
+
+	// We intentionally keep our custom fallback UIs, but React 19's root hooks let
+	// Sentry observe caught/uncaught/recoverable render failures across each
+	// surface without replacing those UX paths.
+	Sentry.setTag("surface", surface);
+
+	return {
+		onUncaughtError: Sentry.reactErrorHandler(),
+		onCaughtError: Sentry.reactErrorHandler(),
+		onRecoverableError: Sentry.reactErrorHandler(),
+	};
 }
 
 function hashFallback(value: string): string {

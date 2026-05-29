@@ -4,6 +4,12 @@ import type {
 	RecordingsStats,
 	TranscriptionRetentionUnit,
 } from "../tauri/types";
+import {
+	isTelemetryDisclosureResolved,
+	POSTHOG_ANALYTICS_ENABLED_KEY,
+	TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT_KEY,
+	TELEMETRY_DISCLOSURE_VERSION_KEY,
+} from "./telemetryDisclosure";
 
 export type RequestLogsRetentionMode = "amount" | "time";
 export type RetentionMode = "amount" | "time";
@@ -18,6 +24,8 @@ export type CloudSyncUiState = {
 	lastError: string | null;
 	remoteRevision: string | null;
 	posthogAnalyticsEnabled: boolean;
+	telemetryDisclosureAcknowledgedAt: string | null;
+	telemetryDisclosureVersion: string | null;
 };
 
 type CloudSyncReadableStore = Pick<Store, "get">;
@@ -37,6 +45,8 @@ const DEFAULT_CLOUD_SYNC_UI_STATE: CloudSyncUiState = {
 	lastError: null,
 	remoteRevision: null,
 	posthogAnalyticsEnabled: true,
+	telemetryDisclosureAcknowledgedAt: null,
+	telemetryDisclosureVersion: null,
 };
 
 function booleanOrDefault(value: unknown, fallback: boolean): boolean {
@@ -77,8 +87,14 @@ export async function readCloudSyncUiState(
 		await store.get("cloud_sync_remote_revision"),
 	);
 	const posthogAnalyticsEnabled = booleanOrDefault(
-		await store.get("posthog_analytics_enabled"),
+		await store.get(POSTHOG_ANALYTICS_ENABLED_KEY),
 		DEFAULT_CLOUD_SYNC_UI_STATE.posthogAnalyticsEnabled,
+	);
+	const telemetryDisclosureAcknowledgedAt = stringOrNull(
+		await store.get(TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT_KEY),
+	);
+	const telemetryDisclosureVersion = stringOrNull(
+		await store.get(TELEMETRY_DISCLOSURE_VERSION_KEY),
 	);
 
 	return {
@@ -89,6 +105,8 @@ export async function readCloudSyncUiState(
 		lastError,
 		remoteRevision,
 		posthogAnalyticsEnabled,
+		telemetryDisclosureAcknowledgedAt,
+		telemetryDisclosureVersion,
 	};
 }
 
@@ -97,6 +115,7 @@ export type CloudSyncDisplayState = CloudSyncUiState & {
 	lastPulledLabel: string;
 	footerLabel: string;
 	footerTone: "red" | "dimmed";
+	telemetryDisclosureResolved: boolean;
 };
 
 export function getCloudSyncDisplayState(
@@ -112,6 +131,11 @@ export function getCloudSyncDisplayState(
 			? `Last error: ${safeState.lastError}`
 			: `Revision: ${safeState.remoteRevision ?? "n/a"}`,
 		footerTone: safeState.lastError ? "red" : "dimmed",
+		telemetryDisclosureResolved: isTelemetryDisclosureResolved({
+			telemetryDisclosureAcknowledgedAt:
+				safeState.telemetryDisclosureAcknowledgedAt,
+			telemetryDisclosureVersion: safeState.telemetryDisclosureVersion,
+		}),
 	};
 }
 

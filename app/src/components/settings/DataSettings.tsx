@@ -17,11 +17,13 @@ import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
 import { formatErrorMessage } from "../../lib/formatError";
 import {
 	useDataStorageSummary,
+	useLicenseState,
 	useRecordingsStats,
 	useSettings,
 } from "../../lib/queries";
 import {
 	type CloudSyncAction,
+	type CloudSyncMutationResult,
 	type GithubBackupGistResult,
 	type SettingsBackupFileResult,
 	useDataBackupCloudSyncOrchestration,
@@ -33,6 +35,7 @@ import {
 import { useDataRetentionOrchestration } from "../../lib/settings/dataRetention";
 import {
 	dataAPI,
+	getPolicyPathEnforcement,
 	logsAPI,
 	type RewriteProgramPromptProfile,
 	recordingsAPI,
@@ -58,6 +61,7 @@ export function DataSettings({
 	editingProfileId?: string;
 }) {
 	const { data: settings } = useSettings();
+	const licenseState = useLicenseState();
 
 	const queryClient = useQueryClient();
 	const invalidateSettingsQuery = () => {
@@ -107,6 +111,9 @@ export function DataSettings({
 
 	const dataBackupCloudSync = useDataBackupCloudSyncOrchestration({
 		gistIdFromSettings: settings?.github_backup_gist_id ?? "",
+		licenseState: licenseState.isLoading
+			? undefined
+			: (licenseState.data ?? null),
 		effects: {
 			onSettingsChanged: invalidateSettingsQuery,
 			onImportedSettingsApplied: invalidateImportedSettingsQueries,
@@ -119,6 +126,10 @@ export function DataSettings({
 		editingProfileId && editingProfileId !== "default"
 			? (profiles.find((entry) => entry.id === editingProfileId) ?? null)
 			: null;
+	const analyticsPolicy = getPolicyPathEnforcement(
+		settings?.policy_state,
+		"posthog_analytics_enabled",
+	);
 
 	const isProfileScope = profile !== null;
 
@@ -289,7 +300,19 @@ export function DataSettings({
 
 	const handleCloudSyncAction = (action: CloudSyncAction) => {
 		dataBackupCloudSync.runCloudSyncAction.mutate(action, {
-			onSuccess: () => {
+			onSuccess: (result: CloudSyncMutationResult) => {
+				if (result.kind === "blocked_by_plan") {
+					notifications.show({
+						title:
+							result.accessStatus === "upgrade_required"
+								? "Upgrade required"
+								: "Cloud sync unavailable",
+						message: result.reason,
+						color: "yellow",
+					});
+					return;
+				}
+
 				notifications.show({
 					title: action === "push" ? "Cloud sync pushed" : "Cloud sync pulled",
 					message:
@@ -589,6 +612,8 @@ export function DataSettings({
 			<DataCloudSyncSection
 				isProfileScope={isProfileScope}
 				globalOnlyTooltip={GLOBAL_ONLY_TOOLTIP}
+				analyticsPolicyEnforced={analyticsPolicy.enforced}
+				analyticsPolicyReason={analyticsPolicy.reason}
 				cloudSyncState={dataBackupCloudSync.cloudSyncState.data}
 				cloudSyncStateLoading={dataBackupCloudSync.cloudSyncState.isLoading}
 				runCloudSyncActionPending={
@@ -599,14 +624,45 @@ export function DataSettings({
 				updateCloudSyncEnabledPending={
 					dataBackupCloudSync.updateCloudSyncEnabled.isPending
 				}
+				cloudSyncAccess={dataBackupCloudSync.cloudSyncAccess}
 				onCloudSyncEnabledChange={(enabled) => {
-					dataBackupCloudSync.updateCloudSyncEnabled.mutate(enabled);
+					dataBackupCloudSync.updateCloudSyncEnabled.mutate(enabled, {
+						onSuccess: (result: CloudSyncMutationResult) => {
+							if (result.kind !== "blocked_by_plan") {
+								return;
+							}
+
+							notifications.show({
+								title:
+									result.accessStatus === "upgrade_required"
+										? "Upgrade required"
+										: "Cloud sync unavailable",
+								message: result.reason,
+								color: "yellow",
+							});
+						},
+					});
 				}}
 				updateCloudSyncAutoPushPending={
 					dataBackupCloudSync.updateCloudSyncAutoPush.isPending
 				}
 				onCloudSyncAutoPushChange={(enabled) => {
-					dataBackupCloudSync.updateCloudSyncAutoPush.mutate(enabled);
+					dataBackupCloudSync.updateCloudSyncAutoPush.mutate(enabled, {
+						onSuccess: (result: CloudSyncMutationResult) => {
+							if (result.kind !== "blocked_by_plan") {
+								return;
+							}
+
+							notifications.show({
+								title:
+									result.accessStatus === "upgrade_required"
+										? "Upgrade required"
+										: "Cloud sync unavailable",
+								message: result.reason,
+								color: "yellow",
+							});
+						},
+					});
 				}}
 				updatePosthogAnalyticsEnabledPending={
 					dataBackupCloudSync.updatePosthogAnalyticsEnabled.isPending

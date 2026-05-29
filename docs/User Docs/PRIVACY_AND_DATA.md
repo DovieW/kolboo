@@ -18,7 +18,9 @@ Common categories of local data include:
 
 - **Settings** (via the Tauri store)
   - includes your chosen providers/models and feature toggles
-  - may include **API keys** depending on current implementation
+  - API keys and session secrets are intended to live in your OS secure
+    storage / credential manager; legacy installs may still have old fallback
+    values until they are migrated forward
 - **History** (your transcription history)
 - **Recordings** (if you enable saving audio recordings)
 - **Usage/cost stats** (a local ledger of cost events)
@@ -50,11 +52,39 @@ Depending on your configuration, Kolboo may send:
 
 Third-party providers have their own privacy policies and retention behavior.
 
+## Product analytics and crash telemetry
+
+Kolboo currently separates telemetry into two buckets:
+
+- **Product analytics (PostHog)**
+  - event-only and intentionally small in scope
+  - no transcripts, prompts, completions, audio, OCR payloads, or clipboard
+    contents are sent
+  - desktop session replay and desktop autocapture stay off
+  - nothing is sent until the first-run disclosure is reviewed
+  - you can disable analytics later in **Settings → Data**
+  - if your organization manages the app with policy, that policy can keep
+    product analytics disabled and lock the toggle off
+- **Crash/error monitoring (Sentry)**
+  - used for reliability failures rather than product-behavior analytics
+  - should not include raw user content or secrets
+  - is DSN-gated, so environments without Sentry configuration do not send it
+
+Current desktop product analytics scope is limited to a small set of settings /
+cloud-sync events. Kolboo uses a locally generated random distinct ID for those
+events; it is not your transcript text or provider credentials.
+
 ## Controlling your data
 
-Kolboo includes controls for deleting locally stored data (history/recordings/stats/logs) and for data retention.
+Kolboo includes controls for deleting locally stored data
+(history/recordings/stats/logs), adjusting retention, and reviewing the current
+analytics toggle in **Settings → Data**.
 
-If you are a maintainer, the code-grounded backlog includes several privacy-hardening items (for example: secure API key storage and stricter redaction). See `docs/TODO.md`.
+If your organization manages Kolboo, **Settings → Policy** can explain why a
+particular setting is locked.
+
+If you are a maintainer, see `docs/Dev Docs/TELEMETRY_GOVERNANCE.md` and
+`docs/Dev Docs/SENTRY_INTEGRATION.md` for the current telemetry posture.
 
 ## Reporting concerns
 

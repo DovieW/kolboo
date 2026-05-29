@@ -1,14 +1,19 @@
 import { Store } from "@tauri-apps/plugin-store";
+import {
+	POSTHOG_ANALYTICS_ENABLED_KEY,
+	shouldSendProductAnalytics,
+	TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT_KEY,
+	TELEMETRY_DISCLOSURE_VERSION_KEY,
+} from "../settings/telemetryDisclosure";
 import { loadRuntimeConfig } from "../tauri/runtimeConfig";
 
 const SENSITIVE_KEY_PATTERN =
-	/(?:api[-_]?key|access[-_]?client[-_]?id|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code|text|transcript|prompt|completion|audio|wav|ocr)/i;
+	/(?:api[-_]?key|access[-_]?client[-_]?id|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|password|passwd|authorization|bearer|cookie|set-cookie|code[-_]?verifier|code[-_]?challenge|auth(?:orization)?[-_]?code|clipboard|text|transcript|prompt|completion|audio|wav|ocr)/i;
 
 const JWT_LIKE_PATTERN =
 	/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9._~+\-/=]+$/;
 const BEARER_TOKEN_PATTERN = /^bearer\s+[A-Za-z0-9._~+\-/=]+$/i;
 
-const ANALYTICS_ENABLED_KEY = "posthog_analytics_enabled";
 const DISTINCT_ID_STORAGE_KEY = "kolboo_posthog_distinct_id_v1";
 
 function trimOrEmpty(value: string | undefined): string {
@@ -92,12 +97,26 @@ export async function isPosthogConfigured(): Promise<boolean> {
 	return apiKey.length > 0 && host.length > 0;
 }
 
-async function isAnalyticsEnabled(): Promise<boolean> {
+async function canSendAnalytics(): Promise<boolean> {
 	try {
+		// Re-read the store for each event instead of caching the answer. This
+		// keeps the transport honest: if the user disables analytics in Settings,
+		// the very next event should already be blocked.
 		const store = await Store.load("settings.json");
-		return (await store.get<boolean>(ANALYTICS_ENABLED_KEY)) ?? true;
+		return shouldSendProductAnalytics({
+			posthogAnalyticsEnabled:
+				(await store.get<boolean>(POSTHOG_ANALYTICS_ENABLED_KEY)) ?? true,
+			telemetryDisclosureAcknowledgedAt:
+				(await store.get<string | null>(
+					TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT_KEY,
+				)) ?? null,
+			telemetryDisclosureVersion:
+				(await store.get<string | null>(TELEMETRY_DISCLOSURE_VERSION_KEY)) ??
+				null,
+		});
 	} catch {
-		return true;
+		// Privacy wins if we can't read the disclosure state confidently.
+		return false;
 	}
 }
 
@@ -108,7 +127,7 @@ export async function trackProductEvent(
 	const eventName = event.trim();
 	if (!eventName) return;
 	if (!(await isPosthogConfigured())) return;
-	if (!(await isAnalyticsEnabled())) return;
+	if (!(await canSendAnalytics())) return;
 	if (typeof fetch !== "function") return;
 
 	const config = await loadRuntimeConfig();

@@ -43,6 +43,7 @@
       - `tauri/commands.ts` (invoke wrappers)
       - `tauri/settings.ts` (settings read/write + migration orchestration; raw concept-shaped normalizers live under `tauri/settingsNormalizers/**`)
       - `tauri/types.ts` (shared TS types)
+    - Desktop account auth commands currently include `license_start_login` for password sign-in plus browser handoff (hosted public auth page when configured, direct provider OAuth fallback) and `license_sign_up` for email/password account creation.
   - UI state is mostly TanStack Query hooks split by domain under `app/src/lib/queries/**`, with `app/src/lib/queries.ts` kept as the compatibility barrel.
   - Query-function factories remain split by domain under `app/src/lib/queries/queryFns/**`, with `queries/queryFns.ts` kept as the compatibility barrel for factory builders.
   - When changing any setting that affects runtime behavior, persist to the Tauri store **and** call `configAPI.syncPipelineConfig()` so the Rust `PipelineConfig` updates immediately.

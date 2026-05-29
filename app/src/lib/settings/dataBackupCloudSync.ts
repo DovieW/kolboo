@@ -2,12 +2,78 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { backupAPI, tauriAPI } from "../tauri";
+import type { LicenseState } from "../tauri/types";
 import { trackProductEvent as trackProductEventDefault } from "../telemetry/posthog";
 import { type CloudSyncUiState, readCloudSyncUiState } from "./dataLifecycle";
+import { POSTHOG_ANALYTICS_ENABLED_KEY } from "./telemetryDisclosure";
 
 type MaybePromise<T> = T | Promise<T>;
 
 export type CloudSyncAction = "push" | "pull";
+
+export type CloudSyncAccessStatus =
+	| "loading"
+	| "included"
+	| "sign_in_required"
+	| "upgrade_required";
+
+export interface CloudSyncAccessState {
+	status: CloudSyncAccessStatus;
+	canUseCloudSync: boolean;
+	badgeLabel: string;
+	badgeColor: "teal" | "gray" | "orange";
+	helperLabel: string;
+}
+
+// Keep desktop copy in one place so the settings surface and any future
+// notifications stay aligned with the same Community/BYOK vs Personal/Pro rule.
+export function getCloudSyncAccessState(
+	licenseState: LicenseState | null | undefined,
+): CloudSyncAccessState {
+	if (licenseState === undefined) {
+		return {
+			status: "loading",
+			canUseCloudSync: false,
+			badgeLabel: "Checking account",
+			badgeColor: "gray",
+			helperLabel: "Checking whether this account can use cloud sync.",
+		};
+	}
+
+	if (
+		!licenseState ||
+		licenseState.status === "signed_out" ||
+		!licenseState.user_id
+	) {
+		return {
+			status: "sign_in_required",
+			canUseCloudSync: false,
+			badgeLabel: "Sign in required",
+			badgeColor: "gray",
+			helperLabel:
+				"Cloud sync is a Personal/Pro feature. Sign in for free now, then upgrade later if you want settings sync. Local backups and BYOK workflows still work without it.",
+		};
+	}
+
+	if (licenseState.tier === "community") {
+		return {
+			status: "upgrade_required",
+			canUseCloudSync: false,
+			badgeLabel: "Upgrade required",
+			badgeColor: "orange",
+			helperLabel:
+				"You're signed in in Community/BYOK mode. Local backups and your own providers still work; upgrade to Personal/Pro or Managed Business to turn on settings sync.",
+		};
+	}
+
+	return {
+		status: "included",
+		canUseCloudSync: true,
+		badgeLabel: "Included",
+		badgeColor: "teal",
+		helperLabel: "Cloud sync is available for this account.",
+	};
+}
 
 export interface DataBackupCloudSyncDependencies {
 	exportSettingsBackupToFile: (params: { path: string }) => Promise<void>;
@@ -39,6 +105,7 @@ export interface DataBackupCloudSyncActionEffects {
 
 type UseDataBackupCloudSyncOrchestrationArgs = {
 	gistIdFromSettings: string;
+	licenseState?: LicenseState | null;
 	effects: Pick<
 		DataBackupCloudSyncActionEffects,
 		"onSettingsChanged" | "onImportedSettingsApplied" | "reRegisterShortcuts"
@@ -58,7 +125,14 @@ export type GithubBackupGistResult =
 	| { kind: "saved"; gistId: string | null }
 	| { kind: "pushed" | "pulled"; gistId: string };
 
+export type CloudSyncBlockedResult = {
+	kind: "blocked_by_plan";
+	accessStatus: CloudSyncAccessStatus;
+	reason: string;
+};
+
 export type CloudSyncMutationResult =
+	| CloudSyncBlockedResult
 	| { kind: "completed"; action: CloudSyncAction }
 	| { kind: "cloud_sync_enabled_updated"; enabled: boolean }
 	| { kind: "cloud_sync_auto_push_updated"; enabled: boolean }
@@ -100,6 +174,21 @@ function trimOrNull(value: string | null | undefined): string | null {
 
 function errorKind(error: unknown): string {
 	return error instanceof Error ? error.name : typeof error;
+}
+
+function getCloudSyncBlockedResult(
+	licenseState: LicenseState | null | undefined,
+): CloudSyncBlockedResult | null {
+	const access = getCloudSyncAccessState(licenseState);
+	if (access.canUseCloudSync) {
+		return null;
+	}
+
+	return {
+		kind: "blocked_by_plan",
+		accessStatus: access.status,
+		reason: access.helperLabel,
+	};
 }
 
 export function normalizeOptionalGistId(
@@ -212,7 +301,13 @@ export async function runCloudSyncActionRequest(
 	action: CloudSyncAction,
 	deps: DataBackupCloudSyncDependencies,
 	effects: DataBackupCloudSyncActionEffects,
+	licenseState?: LicenseState | null,
 ): Promise<CloudSyncMutationResult> {
+	const blocked = getCloudSyncBlockedResult(licenseState);
+	if (blocked) {
+		return blocked;
+	}
+
 	try {
 		await deps.applySettingsPatch({ __cloud_sync_action: action });
 		await effects.onCloudSyncStateRefresh();
@@ -236,7 +331,15 @@ export async function updateCloudSyncEnabledSetting(
 	enabled: boolean,
 	deps: DataBackupCloudSyncDependencies,
 	effects: DataBackupCloudSyncActionEffects,
+	licenseState?: LicenseState | null,
 ): Promise<CloudSyncMutationResult> {
+	if (enabled) {
+		const blocked = getCloudSyncBlockedResult(licenseState);
+		if (blocked) {
+			return blocked;
+		}
+	}
+
 	await deps.applySettingsPatch({ cloud_sync_enabled: enabled });
 	await effects.onCloudSyncStateRefresh();
 	await effects.onSettingsChanged();
@@ -251,7 +354,15 @@ export async function updateCloudSyncAutoPushSetting(
 	enabled: boolean,
 	deps: DataBackupCloudSyncDependencies,
 	effects: DataBackupCloudSyncActionEffects,
+	licenseState?: LicenseState | null,
 ): Promise<CloudSyncMutationResult> {
+	if (enabled) {
+		const blocked = getCloudSyncBlockedResult(licenseState);
+		if (blocked) {
+			return blocked;
+		}
+	}
+
 	await deps.applySettingsPatch({ cloud_sync_auto_push: enabled });
 	await effects.onCloudSyncStateRefresh();
 	await effects.onSettingsChanged();
@@ -267,10 +378,13 @@ export async function updatePosthogAnalyticsEnabledSetting(
 	deps: DataBackupCloudSyncDependencies,
 	effects: DataBackupCloudSyncActionEffects,
 ): Promise<CloudSyncMutationResult> {
-	await deps.applySettingsPatch({ posthog_analytics_enabled: enabled });
+	await deps.applySettingsPatch({ [POSTHOG_ANALYTICS_ENABLED_KEY]: enabled });
 	await effects.onCloudSyncStateRefresh();
 	await effects.onSettingsChanged();
 
+	// Intentionally avoid an `analytics_opted_out` event here. Once a user opts
+	// out, the safer posture is silence rather than a last telemetry breadcrumb
+	// that could be surprising during privacy review.
 	if (enabled) {
 		await effects.trackProductEvent?.("analytics_opted_in", {
 			surface: "settings",
@@ -282,6 +396,7 @@ export async function updatePosthogAnalyticsEnabledSetting(
 
 export function useDataBackupCloudSyncOrchestration({
 	gistIdFromSettings,
+	licenseState,
 	effects,
 	deps = defaultDataBackupCloudSyncDependencies,
 }: UseDataBackupCloudSyncOrchestrationArgs) {
@@ -291,6 +406,7 @@ export function useDataBackupCloudSyncOrchestration({
 	const [githubTokenModalOpen, setGithubTokenModalOpen] = useState(false);
 	const [githubTokenDraft, setGithubTokenDraft] = useState("");
 	const [gistIdDraft, setGistIdDraft] = useState(gistIdFromSettings);
+	const cloudSyncAccess = getCloudSyncAccessState(licenseState);
 
 	useEffect(() => {
 		setGistIdDraft(gistIdFromSettings);
@@ -371,17 +487,22 @@ export function useDataBackupCloudSyncOrchestration({
 
 	const runCloudSyncAction = useMutation({
 		mutationFn: (action: CloudSyncAction) =>
-			runCloudSyncActionRequest(action, deps, actionEffects),
+			runCloudSyncActionRequest(action, deps, actionEffects, licenseState),
 	});
 
 	const updateCloudSyncEnabled = useMutation({
 		mutationFn: (enabled: boolean) =>
-			updateCloudSyncEnabledSetting(enabled, deps, actionEffects),
+			updateCloudSyncEnabledSetting(enabled, deps, actionEffects, licenseState),
 	});
 
 	const updateCloudSyncAutoPush = useMutation({
 		mutationFn: (enabled: boolean) =>
-			updateCloudSyncAutoPushSetting(enabled, deps, actionEffects),
+			updateCloudSyncAutoPushSetting(
+				enabled,
+				deps,
+				actionEffects,
+				licenseState,
+			),
 	});
 
 	const updatePosthogAnalyticsEnabled = useMutation({
@@ -396,6 +517,7 @@ export function useDataBackupCloudSyncOrchestration({
 		setGithubTokenDraft,
 		gistIdDraft,
 		setGistIdDraft,
+		cloudSyncAccess,
 		githubBackupHasToken,
 		cloudSyncState,
 		exportSettingsBackup,

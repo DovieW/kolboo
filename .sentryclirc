@@ -1,0 +1,6 @@
+; Repo-local Sentry defaults for Kolboo desktop/public work.
+; Auth stays in the Sentry CLI local database, not in this file.
+[defaults]
+url=https://sentry.io/
+org=dov-weinstock
+project=kolboo-public-dev

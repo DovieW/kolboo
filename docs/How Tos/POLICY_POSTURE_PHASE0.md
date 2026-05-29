@@ -32,12 +32,16 @@ Included:
 - policy source/status/timestamps/version
 - enforced field list + reason
 - redaction marker
+- app version + Sentry release/environment summary
+- recent request IDs and support-safe request-log summaries
+- support-safe hashed `user` / `org` targets for restricted operator handoff
 
 Excluded/redacted:
 
 - API keys
 - tokens / secrets / credentials
 - transcript or audio content
+- raw org names and raw internal IDs
 
 ## Troubleshooting quick checks
 

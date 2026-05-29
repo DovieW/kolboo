@@ -16,6 +16,7 @@ const SUPPORTED_POLICY_PATHS: &[&str] = &[
     "output_mode",
     "output_hit_enter",
     "request_logs_privacy_mode",
+    "disable_product_analytics",
     "quick_ask_provider",
     "quick_ask_model",
     "quick_ask_system_prompt",
@@ -37,6 +38,20 @@ const SUPPORTED_POLICY_PATHS: &[&str] = &[
     "quick_replace_active_window_ocr_mode",
     "quick_ask_active_window_ocr_mode",
 ];
+
+const DISABLE_ONLY_POLICY_PATHS: &[&str] = &["disable_product_analytics"];
+
+fn should_enforce_constraint(path: &str, raw_value: &Value) -> bool {
+    if !DISABLE_ONLY_POLICY_PATHS.contains(&path) {
+        return true;
+    }
+
+    match raw_value {
+        Value::Bool(enabled) => *enabled,
+        Value::Object(obj) => matches!(obj.get("value"), Some(Value::Bool(true))),
+        _ => false,
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -171,6 +186,10 @@ fn parse_constraints(
     for (path, raw_value) in map {
         if !SUPPORTED_POLICY_PATHS.contains(&path.as_str()) {
             return Err(format!("Unsupported policy path: {path}"));
+        }
+
+        if !should_enforce_constraint(path, raw_value) {
+            continue;
         }
 
         match raw_value {
@@ -542,6 +561,60 @@ mod tests {
         assert_eq!(result.policy_state.enforced_count, 2);
         assert_eq!(
             result.effective_values.get("rewrite_llm_enabled"),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn disable_only_constraint_is_ignored_when_false() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 14, 10, 0, 0).unwrap();
+        let current = PolicyState::default();
+
+        let candidate = json!({
+            "policy_id": "policy-analytics-1",
+            "version": 1,
+            "constraints": {
+                "disable_product_analytics": false
+            }
+        });
+
+        let result = validate_cloud_policy_candidate(&candidate, &current, now)
+            .expect("candidate should stay valid when disable-only flag is false");
+
+        assert_eq!(result.policy_state.enforced_count, 0);
+        assert!(result.policy_state.enforced_fields.is_empty());
+        assert!(result.effective_values.is_empty());
+    }
+
+    #[test]
+    fn disable_only_constraint_is_enforced_when_true() {
+        let now = Utc.with_ymd_and_hms(2026, 2, 14, 10, 0, 0).unwrap();
+        let current = PolicyState::default();
+
+        let candidate = json!({
+            "policy_id": "policy-analytics-2",
+            "version": 2,
+            "constraints": {
+                "disable_product_analytics": {
+                    "value": true,
+                    "reason": "Enterprise telemetry policy"
+                }
+            }
+        });
+
+        let result = validate_cloud_policy_candidate(&candidate, &current, now)
+            .expect("candidate should enforce disable-only analytics policy");
+
+        assert_eq!(result.policy_state.enforced_count, 1);
+        assert_eq!(
+            result.policy_state.enforced_fields,
+            vec![PolicyEnforcedField {
+                path: "disable_product_analytics".to_string(),
+                reason: Some("Enterprise telemetry policy".to_string()),
+            }]
+        );
+        assert_eq!(
+            result.effective_values.get("disable_product_analytics"),
             Some(&Value::Bool(true))
         );
     }

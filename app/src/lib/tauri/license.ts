@@ -23,6 +23,17 @@ export type LicenseLoginRequest = {
 	password?: string | null;
 };
 
+export type LicenseSignupRequest = {
+	email: string;
+	password: string;
+};
+
+export type LicenseSignupResponse = {
+	state: LicenseState;
+	confirmation_required: boolean;
+	email: string | null;
+};
+
 export function buildLicenseSentryContext(
 	context: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -173,6 +184,27 @@ export const tauriLicenseAPI = {
 			reportLicenseSentryError("license_start_login", error, {
 				provider_hint: request?.provider_hint ?? null,
 				auth_provider: request?.auth_provider ?? null,
+			});
+			throw error;
+		}
+	},
+
+	signUp: async (
+		request: LicenseSignupRequest,
+	): Promise<LicenseSignupResponse> => {
+		try {
+			const response = await invoke<LicenseSignupResponse>("license_sign_up", {
+				request: {
+					email: request.email,
+					password: request.password,
+				},
+			});
+			await setSentryLicenseIdentityTags(response.state);
+			return response;
+		} catch (error) {
+			reportLicenseSentryError("license_sign_up", error, {
+				email_present: request.email.trim().length > 0,
+				password_present: request.password.length > 0,
 			});
 			throw error;
 		}

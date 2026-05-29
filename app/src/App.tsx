@@ -20,7 +20,7 @@ import {
 	Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BarChart2,
 	FileText,
@@ -45,6 +45,7 @@ import { LogsView } from "./components/LogsView";
 import { MicStatusCard } from "./components/MicStatusCard";
 import { SettingsShell } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
+import { TelemetryDisclosureModal } from "./components/settings/TelemetryDisclosureModal";
 import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
 import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import { applyAccentColor } from "./lib/accentColor";
@@ -65,7 +66,13 @@ import {
 	useSettings,
 	useSettingsGuideState,
 } from "./lib/queries";
-import { type CostTimeframe, type HotkeyConfig, tauriAPI } from "./lib/tauri";
+import { isTelemetryDisclosureResolved } from "./lib/settings/telemetryDisclosure";
+import {
+	type CostTimeframe,
+	getPolicyPathEnforcement,
+	type HotkeyConfig,
+	tauriAPI,
+} from "./lib/tauri";
 import { listenTyped } from "./lib/tauri/events";
 import { compareSemver, fetchLatestGithubReleaseVersion } from "./lib/updates";
 import "./styles.css";
@@ -757,6 +764,28 @@ export default function App() {
 	const guideQuery = useSettingsGuideState();
 	const guideState = guideQuery.data;
 	const setGuideState = useSetSettingsGuideState();
+	const { data: settings } = useSettings();
+	const resolveTelemetryDisclosure = useMutation({
+		mutationFn: (analyticsEnabled: boolean) =>
+			tauriAPI.resolveTelemetryDisclosure({ analyticsEnabled }),
+		onSuccess: async () => {
+			await queryClient.invalidateQueries({ queryKey: ["settings"] });
+			await queryClient.invalidateQueries({ queryKey: ["cloudSyncUiState"] });
+		},
+	});
+	const telemetryDisclosureResolved = settings
+		? isTelemetryDisclosureResolved({
+				telemetryDisclosureAcknowledgedAt:
+					settings.telemetry_disclosure_acknowledged_at,
+				telemetryDisclosureVersion: settings.telemetry_disclosure_version,
+			})
+		: false;
+	const analyticsPolicy = getPolicyPathEnforcement(
+		settings?.policy_state,
+		"posthog_analytics_enabled",
+	);
+	const shouldShowTelemetryDisclosure =
+		!settingsGuideOpen && Boolean(settings) && !telemetryDisclosureResolved;
 
 	// Keep the cost summary cache in sync even when the Stats view isn't mounted.
 	useEffect(() => {
@@ -984,6 +1013,22 @@ export default function App() {
 				}}
 				onGoHome={() => {
 					setActiveView("home");
+				}}
+			/>
+
+			<TelemetryDisclosureModal
+				opened={shouldShowTelemetryDisclosure}
+				analyticsEnabled={settings?.posthog_analytics_enabled ?? true}
+				analyticsPolicyEnforced={analyticsPolicy.enforced}
+				analyticsPolicyReason={analyticsPolicy.reason}
+				loading={resolveTelemetryDisclosure.isPending}
+				onDisableAnalytics={() => {
+					resolveTelemetryDisclosure.mutate(false);
+				}}
+				onContinue={() => {
+					resolveTelemetryDisclosure.mutate(
+						settings?.posthog_analytics_enabled ?? true,
+					);
 				}}
 			/>
 		</div>

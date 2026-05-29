@@ -28,6 +28,8 @@ describe("Data Lifecycle read model", () => {
 			lastError: null,
 			remoteRevision: null,
 			posthogAnalyticsEnabled: true,
+			telemetryDisclosureAcknowledgedAt: null,
+			telemetryDisclosureVersion: null,
 		});
 	});
 
@@ -42,6 +44,8 @@ describe("Data Lifecycle read model", () => {
 					cloud_sync_last_error: "offline",
 					cloud_sync_remote_revision: "rev-1",
 					posthog_analytics_enabled: false,
+					telemetry_disclosure_acknowledged_at: "2026-05-13T00:00:00Z",
+					telemetry_disclosure_version: "2026-05-phase6b-v1",
 				}),
 			),
 		).resolves.toMatchObject({
@@ -52,6 +56,8 @@ describe("Data Lifecycle read model", () => {
 			lastError: "offline",
 			remoteRevision: "rev-1",
 			posthogAnalyticsEnabled: false,
+			telemetryDisclosureAcknowledgedAt: "2026-05-13T00:00:00Z",
+			telemetryDisclosureVersion: "2026-05-phase6b-v1",
 		});
 	});
 
@@ -62,12 +68,16 @@ describe("Data Lifecycle read model", () => {
 					cloud_sync_enabled: "yes",
 					cloud_sync_auto_push: 123,
 					posthog_analytics_enabled: "nope",
+					telemetry_disclosure_acknowledged_at: 123,
+					telemetry_disclosure_version: false,
 				}),
 			),
 		).resolves.toMatchObject({
 			enabled: false,
 			autoPush: true,
 			posthogAnalyticsEnabled: true,
+			telemetryDisclosureAcknowledgedAt: null,
+			telemetryDisclosureVersion: null,
 		});
 	});
 
@@ -77,6 +87,7 @@ describe("Data Lifecycle read model", () => {
 			lastPulledLabel: "never",
 			footerLabel: "Revision: n/a",
 			footerTone: "dimmed",
+			telemetryDisclosureResolved: false,
 		});
 
 		expect(
@@ -88,12 +99,15 @@ describe("Data Lifecycle read model", () => {
 				lastError: "offline",
 				remoteRevision: "rev-42",
 				posthogAnalyticsEnabled: false,
+				telemetryDisclosureAcknowledgedAt: "2026-05-13T00:00:00Z",
+				telemetryDisclosureVersion: "2026-05-phase6b-v1",
 			}),
 		).toMatchObject({
 			lastPushedLabel: "2026-05-07T01:00:00Z",
 			lastPulledLabel: "never",
 			footerLabel: "Last error: offline",
 			footerTone: "red",
+			telemetryDisclosureResolved: true,
 		});
 	});
 

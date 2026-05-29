@@ -34,6 +34,7 @@ describe("policy and license settings normalizer", () => {
 			org: {
 				org_id: " org-1 ",
 				org_name: " Kolboo ",
+				inference_mode: "managed",
 			},
 			usage: {
 				stt_seconds_used: 10.9,
@@ -44,7 +45,11 @@ describe("policy and license settings normalizer", () => {
 			},
 		});
 
-		expect(normalized.org).toEqual({ org_id: "org-1", org_name: "Kolboo" });
+		expect(normalized.org).toEqual({
+			org_id: "org-1",
+			org_name: "Kolboo",
+			inference_mode: "managed",
+		});
 		expect(normalized.usage).toEqual({
 			stt_seconds_used: 10,
 			llm_tokens_used: 0,
@@ -55,6 +60,7 @@ describe("policy and license settings normalizer", () => {
 			llm_tokens_monthly: 0,
 			requests_per_day: 200,
 		});
+		expect(normalized.portal_available).toBe(false);
 	});
 
 	it("normalizes token-exchange trigger booleans and reviewed timestamps", () => {

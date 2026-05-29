@@ -17,6 +17,12 @@ import {
 	type HotkeyType,
 	normalizeHotkeyConfig,
 } from "../hotkeys";
+import {
+	buildTelemetryDisclosureResolutionPatch,
+	POSTHOG_ANALYTICS_ENABLED_KEY,
+	TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT_KEY,
+	TELEMETRY_DISCLOSURE_VERSION_KEY,
+} from "../settings/telemetryDisclosure";
 import { DEFAULT_STT_LANGUAGE, normalizeSttLanguage } from "../sttLanguages";
 import { emitTyped } from "./events";
 import { DEFAULT_SETTINGS_VALUES } from "./settingsDefaults";
@@ -244,6 +250,8 @@ export type PolicyPathEnforcement = {
 const POLICY_PATH_ALIASES: Readonly<Record<string, string[]>> = {
 	quick_ask_hotkey: ["quick_ask_hold_hotkey"],
 	quick_ask_hold_hotkey: ["quick_ask_hotkey"],
+	posthog_analytics_enabled: ["disable_product_analytics"],
+	disable_product_analytics: [POSTHOG_ANALYTICS_ENABLED_KEY],
 	transcription_retention_days: [
 		"transcription_retention_value",
 		"transcription_retention_unit",
@@ -890,6 +898,21 @@ export const tauriSettingsAPI = {
 			request_logs_privacy_mode:
 				(await store.get<boolean>("request_logs_privacy_mode")) ??
 				DEFAULT_SETTINGS_VALUES.request_logs_privacy_mode,
+			posthog_analytics_enabled: await readSettingValue(
+				POSTHOG_ANALYTICS_ENABLED_KEY,
+				DEFAULT_SETTINGS_VALUES.posthog_analytics_enabled,
+				normalizeBooleanSetting,
+			),
+			telemetry_disclosure_acknowledged_at: await readSettingValue(
+				TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT_KEY,
+				DEFAULT_SETTINGS_VALUES.telemetry_disclosure_acknowledged_at,
+				normalizeNonEmptyStringSetting,
+			),
+			telemetry_disclosure_version: await readSettingValue(
+				TELEMETRY_DISCLOSURE_VERSION_KEY,
+				DEFAULT_SETTINGS_VALUES.telemetry_disclosure_version,
+				normalizeNonEmptyStringSetting,
+			),
 
 			transcription_retention_mode: transcriptionRetentionMode,
 			transcription_retention_amount: transcriptionRetentionAmount,
@@ -1762,6 +1785,21 @@ export const tauriSettingsAPI = {
 		}
 
 		// No explicit event emit here; the backend patch command emits settings-changed.
+	},
+
+	async resolveTelemetryDisclosure(params: {
+		analyticsEnabled: boolean;
+		acknowledgedAt?: string;
+	}): Promise<void> {
+		// Keep the first-run disclosure write on the shared backend patch path so
+		// multi-window updates stay serialized and the stored version marker cannot
+		// drift from the transport gate.
+		await applySettingsPatch({
+			patch: buildTelemetryDisclosureResolutionPatch({
+				analyticsEnabled: params.analyticsEnabled,
+				acknowledgedAt: params.acknowledgedAt,
+			}),
+		});
 	},
 
 	async resetHotkeysToDefaults(): Promise<void> {

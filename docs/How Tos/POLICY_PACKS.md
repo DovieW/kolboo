@@ -36,8 +36,14 @@ The exported JSON includes:
 - policy state metadata
 - enforced field list
 - redaction marker
+- app version + Sentry release/environment summary
+- recent request IDs and support-safe request-log summaries
+- support-safe hashed user/org correlation targets for operator handoff
 
 The export **redacts sensitive values** for paths that look like secrets (API keys, tokens, passwords, credentials).
+
+The export also excludes raw org names, raw internal IDs, transcript content,
+and other customer content payloads.
 
 ## Outage/degraded handling
 
@@ -50,4 +56,5 @@ The export **redacts sensitive values** for paths that look like secrets (API ke
 - Verify `license_state` indicates org eligibility.
 - Inspect `policy_state` and `policy_effective_values` in `settings.json`.
 - Watch for `policy-state-changed` and `settings-changed` events.
-- Use diagnostics export for support handoff (redacted by design).
+- Use diagnostics export for support handoff (redacted by design, but now rich
+   enough to carry request IDs and operator-correlation hashes).

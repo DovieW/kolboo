@@ -67,7 +67,7 @@ export function getAccountModeDescription(params: {
 	reauthRequired: boolean;
 }): string {
 	if (!params.signedIn) {
-		return "Sign in to connect managed Personal or Business access. Until then, Kolboo uses your own provider keys.";
+		return "Sign in to save a Community/BYOK session now. Upgrade later to Personal/Pro or Managed Business for settings sync and managed inference.";
 	}
 	if (params.reauthRequired) {
 		return "Your managed session needs attention. Re-authenticate to restore managed access.";
@@ -78,7 +78,7 @@ export function getAccountModeDescription(params: {
 	if (params.modeLabel === "Personal") {
 		return "Managed personal access is active for this account.";
 	}
-	return "You're currently running in BYOK mode using your own providers and keys.";
+	return "You're signed in and currently running in Community/BYOK mode using your own providers and keys. Upgrade to Personal/Pro or Managed Business later for settings sync and managed inference.";
 }
 
 export function getAccountStatusColor(params: {

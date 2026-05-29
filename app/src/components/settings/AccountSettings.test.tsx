@@ -27,6 +27,7 @@ const baseLicenseState = {
 		llm_tokens_monthly: 0,
 		requests_per_day: 0,
 	},
+	portal_available: false,
 };
 
 describe("AccountSettings helpers", () => {
@@ -60,6 +61,7 @@ describe("AccountSettings helpers", () => {
 				org: {
 					org_id: "org_123",
 					org_name: "Acme Co",
+					inference_mode: null,
 				},
 			}),
 		).toBe("Acme Co");
@@ -73,6 +75,7 @@ describe("AccountSettings helpers", () => {
 				org: {
 					org_id: "org_123",
 					org_name: "Acme Co",
+					inference_mode: null,
 				},
 			}),
 		).toBe(true);

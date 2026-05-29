@@ -31,6 +31,9 @@ pub const DEFAULT_REQUEST_LOGS_RETENTION_MODE: &str = "amount";
 pub const DEFAULT_REQUEST_LOGS_RETENTION_AMOUNT: u32 = 50;
 pub const DEFAULT_REQUEST_LOGS_RETENTION_DAYS: u32 = 7;
 pub const DEFAULT_REQUEST_LOGS_PRIVACY_MODE: bool = false;
+pub const DEFAULT_POSTHOG_ANALYTICS_ENABLED: bool = true;
+pub const DEFAULT_TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT: Option<&str> = None;
+pub const DEFAULT_TELEMETRY_DISCLOSURE_VERSION: Option<&str> = None;
 pub const DEFAULT_TRANSCRIPTION_RETENTION_MODE: &str = "time";
 pub const DEFAULT_TRANSCRIPTION_RETENTION_AMOUNT: u32 = 1000;
 pub const DEFAULT_TRANSCRIPTION_RETENTION_UNIT: &str = "days";
@@ -108,7 +111,8 @@ pub fn default_license_state_value() -> Value {
             "stt_seconds_monthly": 0,
             "llm_tokens_monthly": 0,
             "requests_per_day": 0
-        }
+        },
+        "portal_available": false
     })
 }
 

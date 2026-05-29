@@ -27,6 +27,12 @@ export function createRefreshLicenseEntitlementMutationFn(
 	return (simulateFailure?: boolean) => api.refreshEntitlement(simulateFailure);
 }
 
+export function createSignUpLicenseMutationFn(
+	api: Pick<typeof licenseAPI, "signUp"> = licenseAPI,
+) {
+	return (request: { email: string; password: string }) => api.signUp(request);
+}
+
 export function useLicenseState() {
 	return useQuery({
 		queryKey: ["licenseState"],
@@ -54,6 +60,16 @@ export function useStartLicenseLogin() {
 			email?: string | null;
 			password?: string | null;
 		}) => licenseAPI.startLogin(request),
+		onSuccess: () => {
+			void invalidateLicenseRelatedQueries(queryClient);
+		},
+	});
+}
+
+export function useSignUpLicense() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: createSignUpLicenseMutationFn(),
 		onSuccess: () => {
 			void invalidateLicenseRelatedQueries(queryClient);
 		},

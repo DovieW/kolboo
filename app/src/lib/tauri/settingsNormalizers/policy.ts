@@ -1,6 +1,7 @@
 import { evaluateTokenExchangeDecision } from "../../auth/tokenExchangeGate";
 import type {
 	LicenseState,
+	OrgInferenceMode,
 	PolicyState,
 	TokenExchangeTriggerSet,
 } from "../types";
@@ -143,8 +144,13 @@ export function normalizeLicenseState(value: unknown): LicenseState {
 					typeof v.org.org_id === "string" ? v.org.org_id.trim() : "";
 				const org_name =
 					typeof v.org.org_name === "string" ? v.org.org_name.trim() : "";
+				const inference_mode: OrgInferenceMode | null =
+					v.org.inference_mode === "org_byok" ||
+					v.org.inference_mode === "managed"
+						? v.org.inference_mode
+						: null;
 				if (!org_id || !org_name) return null;
-				return { org_id, org_name };
+				return { org_id, org_name, inference_mode };
 			})()
 		: null;
 
@@ -207,6 +213,7 @@ export function normalizeLicenseState(value: unknown): LicenseState {
 		last_validated_at: normalizeLicenseTimestamp(v.last_validated_at),
 		usage,
 		limits,
+		portal_available: v.portal_available === true,
 	};
 }
 

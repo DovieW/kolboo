@@ -3,5 +3,5 @@ import { renderRoot } from "./lib/bootstrap/renderRoot";
 import { initSentry } from "./lib/telemetry/sentry";
 
 void initSentry("main").finally(() => {
-	renderRoot(<MainAppRoot />);
+	renderRoot(<MainAppRoot />, { sentrySurface: "main" });
 });

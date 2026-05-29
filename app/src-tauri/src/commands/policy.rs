@@ -14,6 +14,20 @@ const POLICY_STATE_KEY: &str = "policy_state";
 const POLICY_EFFECTIVE_VALUES_KEY: &str = "policy_effective_values";
 const POLICY_CLOUD_CANDIDATE_KEY: &str = "policy_cloud_candidate";
 const LICENSE_STATE_KEY: &str = "license_state";
+const DISABLE_PRODUCT_ANALYTICS_POLICY_PATH: &str = "disable_product_analytics";
+const POSTHOG_ANALYTICS_ENABLED_KEY: &str = "posthog_analytics_enabled";
+
+fn policy_setting_targets(path: &str, value: &Value) -> Vec<(String, Value)> {
+    match (path, value) {
+        // Keep the policy contract product-oriented while translating it onto the
+        // concrete desktop setting that the current analytics transport reads.
+        (DISABLE_PRODUCT_ANALYTICS_POLICY_PATH, Value::Bool(true)) => vec![(
+            POSTHOG_ANALYTICS_ENABLED_KEY.to_string(),
+            Value::Bool(false),
+        )],
+        _ => vec![(path.to_string(), value.clone())],
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,7 +85,9 @@ fn persist_policy(
     );
 
     for (path, value) in effective_values {
-        store.set(path.to_string(), value.clone());
+        for (target_path, target_value) in policy_setting_targets(path, value) {
+            store.set(target_path, target_value);
+        }
     }
 
     store
@@ -227,4 +243,30 @@ pub async fn policy_export_diagnostics(
         Utc::now(),
         None,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::policy_setting_targets;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn maps_disable_product_analytics_to_posthog_setting() {
+        let targets = policy_setting_targets("disable_product_analytics", &Value::Bool(true));
+
+        assert_eq!(
+            targets,
+            vec![("posthog_analytics_enabled".to_string(), Value::Bool(false))]
+        );
+    }
+
+    #[test]
+    fn passes_through_direct_setting_paths() {
+        let targets = policy_setting_targets("request_logs_privacy_mode", &json!(true));
+
+        assert_eq!(
+            targets,
+            vec![("request_logs_privacy_mode".to_string(), Value::Bool(true))]
+        );
+    }
 }

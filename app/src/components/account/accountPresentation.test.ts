@@ -17,6 +17,7 @@ const baseState: LicenseState = {
 	org: {
 		org_id: "org-123",
 		org_name: "Kolboo Labs",
+		inference_mode: "managed",
 	},
 	expires_at: null,
 	cached_at: "2026-04-21T12:00:00.000Z",
@@ -31,6 +32,7 @@ const baseState: LicenseState = {
 		llm_tokens_monthly: 10000,
 		requests_per_day: 50,
 	},
+	portal_available: false,
 };
 
 const activeContext: LicenseAuthContext = {
@@ -82,7 +84,38 @@ describe("accountPresentation", () => {
 				signedIn: false,
 				reauthRequired: true,
 			}),
-		).toContain("Sign in");
+		).toContain("Community/BYOK");
+		expect(
+			getAccountModeDescription({
+				modeLabel: "BYOK",
+				signedIn: false,
+				reauthRequired: true,
+			}),
+		).toContain("settings sync");
+	});
+
+	it("describes signed-in BYOK users as a valid community state", () => {
+		expect(
+			getAccountModeDescription({
+				modeLabel: "BYOK",
+				signedIn: true,
+				reauthRequired: false,
+			}),
+		).toContain("You're signed in");
+		expect(
+			getAccountModeDescription({
+				modeLabel: "BYOK",
+				signedIn: true,
+				reauthRequired: false,
+			}),
+		).toContain("Community/BYOK");
+		expect(
+			getAccountModeDescription({
+				modeLabel: "BYOK",
+				signedIn: true,
+				reauthRequired: false,
+			}),
+		).toContain("settings sync");
 	});
 
 	it("returns a warning description when reauthentication is needed", () => {

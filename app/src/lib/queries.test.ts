@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createLicenseStateQueryFn,
 	createRefreshLicenseEntitlementMutationFn,
+	createSignUpLicenseMutationFn,
 } from "./queries/license";
 import { createPolicySyncMutationFn } from "./queries/policy";
 import {
@@ -33,6 +34,7 @@ describe("license query-layer function builders", () => {
 				llm_tokens_monthly: 0,
 				requests_per_day: 0,
 			},
+			portal_available: false,
 		}));
 		const queryFn = createLicenseStateQueryFn({ getLicenseState });
 
@@ -50,6 +52,43 @@ describe("license query-layer function builders", () => {
 
 		await expect(mutationFn(true)).rejects.toThrow("refresh failed");
 		expect(refreshEntitlement).toHaveBeenCalledWith(true);
+	});
+
+	it("forwards license signup requests", async () => {
+		const signUp = vi.fn(async () => ({
+			confirmation_required: true,
+			email: "new@example.com",
+			state: {
+				tier: "community" as const,
+				status: "signed_out" as const,
+				user_id: null,
+				email: null,
+				org: null,
+				expires_at: null,
+				cached_at: "2026-01-01T00:00:00Z",
+				last_validated_at: null,
+				usage: {
+					stt_seconds_used: 0,
+					llm_tokens_used: 0,
+					requests_today: 0,
+				},
+				limits: {
+					stt_seconds_monthly: 0,
+					llm_tokens_monthly: 0,
+					requests_per_day: 0,
+				},
+				portal_available: false,
+			},
+		}));
+		const mutationFn = createSignUpLicenseMutationFn({ signUp });
+
+		await expect(
+			mutationFn({ email: "new@example.com", password: "password123" }),
+		).resolves.toMatchObject({ confirmation_required: true });
+		expect(signUp).toHaveBeenCalledWith({
+			email: "new@example.com",
+			password: "password123",
+		});
 	});
 
 	it("invalidates policy and settings queries when policy lock state changes", async () => {

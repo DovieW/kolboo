@@ -22,6 +22,7 @@ void initSentry("overlay_hover").finally(() => {
 				<OverlayHoverApp />
 			</AppMantineProvider>
 		</QueryClientProvider>,
+		{ sentrySurface: "overlay_hover" },
 	);
 });
 
