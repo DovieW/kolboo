@@ -722,7 +722,10 @@ pub async fn download_whisper_model(
 
             match result {
                 Ok(()) => {}
-                Err(e) if e.message == "cancelled" => {
+                // CommandError now stores messages as Box<str>, so compare through
+                // the borrowed string view here instead of relying on older String-based
+                // equality. This keeps the explicit cancelled branch intact for the UI.
+                Err(e) if e.message.as_ref() == "cancelled" => {
                     let _ = tokio::fs::remove_file(&tmp_path).await;
                     send_progress(
                         WhisperModelDownloadStatus::Cancelled,
@@ -733,7 +736,14 @@ pub async fn download_whisper_model(
                 }
                 Err(e) => {
                     let _ = tokio::fs::remove_file(&tmp_path).await;
-                    send_progress(WhisperModelDownloadStatus::Error, 0, None, Some(e.message));
+                    // Progress payloads still expect String, so convert the boxed error
+                    // message at the edge rather than changing the shared error type.
+                    send_progress(
+                        WhisperModelDownloadStatus::Error,
+                        0,
+                        None,
+                        Some(e.message.to_string()),
+                    );
                 }
             }
 
