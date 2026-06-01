@@ -29,17 +29,20 @@ local-whisper = ["dep:whisper-rs", "dep:dirs"]
 local-whisper-cuda = ["local-whisper", "whisper-rs/cuda"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.3", features = [] }
+# Keep Rust-side Tauri crates on the 2.9/2.5 minor lines that the JS packages
+# in app/package.json are intentionally pinned to. Cargo's default caret ranges
+# can drift to newer minors and then `tauri build` rejects the mismatch.
+tauri-build = { version = "~2.5.3", features = [] }
 serde_json = "1.0.145"
 
 [dependencies]
-tauri = { version = "2.9.5", features = [
+tauri = { version = "~2.9.5", features = [
     "tray-icon",
     "macos-private-api",
     "image-png",
     "devtools",
 ] }
-tauri-utils = "2.8.1"
+tauri-utils = "~2.8.1"
 tauri-plugin-opener = "2.5.2"
 tauri-plugin-store = "2.4.1"
 tauri-plugin-single-instance = "2.3.1"

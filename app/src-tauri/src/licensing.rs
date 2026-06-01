@@ -514,6 +514,11 @@ pub fn build_login_state(provider_hint: Option<&str>, now: DateTime<Utc>) -> Lic
     }
 }
 
+// This pure helper mirrors the successful refresh transition and is exercised by
+// unit tests to keep the state-machine expectations explicit. The current
+// command path mutates a richer hydrated state directly, so allow it outside
+// tests until that flow converges on this shared transition helper.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn apply_refresh_success(mut state: LicenseState, now: DateTime<Utc>) -> LicenseState {
     state.status = LicenseStatus::Active;
     state.cached_at = now;

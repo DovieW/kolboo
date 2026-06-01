@@ -100,8 +100,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            # pnpm check:ci uses `--target-dir src-tauri/target-ci` for dead-code/clippy/tests.
-            # Cache that directory so PR checks don't rebuild Rust from scratch every run.
             app/src-tauri -> target-ci
 
       - name: Run checks (check:ci)
@@ -290,8 +288,9 @@ jobs:
             echo "sccache not available; building without compiler cache"
           fi
 
-          # Forward cargo args after `--`.
-          pnpm tauri build -- --features local-whisper
+          # Reuse the repo's own local-whisper build script so CI follows the
+          # exact same invocation path developers use locally.
+          pnpm build:local-whisper
 
           sccache --show-stats || true
 
