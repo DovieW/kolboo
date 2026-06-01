@@ -52,7 +52,10 @@ Desktop.ini
 
 # Logs
 *.log
-logs/
+# Ignore only a real repo-root logs folder. A bare `logs/` pattern also hides
+# source directories like `app/src/lib/logs` and `app/src/components/logs`,
+# which then disappear from Git and break CI/typecheck on clean clones.
+/logs/
 
 # Temporary/profiling artifacts
 *.tmp

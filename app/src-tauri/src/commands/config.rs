@@ -37,6 +37,7 @@ pub struct RuntimeConfigResponse {
     pub sentry_dsn: Option<String>,
     pub sentry_env: Option<String>,
     pub sentry_release: Option<String>,
+    pub sentry_smoke: Option<bool>,
     pub posthog_api_key: Option<String>,
     pub posthog_host: Option<String>,
 }
@@ -55,6 +56,21 @@ pub(crate) fn read_first_non_empty_env(keys: &[&str]) -> Option<String> {
 
 fn normalize_optional_base_url(value: Option<String>) -> Option<String> {
     value.map(|v| v.trim_end_matches('/').to_string())
+}
+
+fn read_optional_bool_env(keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        if let Ok(value) = std::env::var(key) {
+            let normalized = value.trim().to_lowercase();
+            match normalized.as_str() {
+                "1" | "true" | "yes" | "on" => return Some(true),
+                "0" | "false" | "no" | "off" => return Some(false),
+                _ => continue,
+            }
+        }
+    }
+
+    None
 }
 
 fn renderer_dev_only_env(keys: &[&str]) -> Option<String> {
@@ -93,6 +109,10 @@ pub fn get_runtime_config() -> RuntimeConfigResponse {
         sentry_dsn: read_first_non_empty_env(&["TAURI_SENTRY_DSN"]),
         sentry_env: read_first_non_empty_env(&["TAURI_SENTRY_ENV"]),
         sentry_release: read_first_non_empty_env(&["TAURI_SENTRY_RELEASE"]),
+        // Keep the packaged/browser smoke gate explicit so operators can enable
+        // it only for rehearsal launches without normalizing fake crashes in
+        // regular desktop sessions.
+        sentry_smoke: read_optional_bool_env(&["TAURI_SENTRY_SMOKE"]),
         posthog_api_key: read_first_non_empty_env(&["TAURI_POSTHOG_API_KEY"]),
         posthog_host: normalize_optional_base_url(read_first_non_empty_env(&[
             "TAURI_POSTHOG_HOST",

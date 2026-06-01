@@ -204,9 +204,39 @@ jobs:
           workspaces: |
             app/src-tauri -> target
 
+      - name: Compute Sentry build metadata
+        id: sentry-meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version=$(node -p "require('./app/package.json').version")
+          short_sha="${GITHUB_SHA::7}"
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            project="kolboo-public-prod"
+            environment="production"
+            release="kolboo@${GITHUB_REF_NAME#v}"
+          else
+            project="kolboo-public-dev"
+            environment="development"
+            release="kolboo@${version}-dev.${short_sha}"
+          fi
+
+          echo "project=${project}" >> "$GITHUB_OUTPUT"
+          echo "environment=${environment}" >> "$GITHUB_OUTPUT"
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
+
       - name: Build Tauri app (release) - default
         working-directory: app
         shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: dov-weinstock
+          SENTRY_PROJECT: ${{ steps.sentry-meta.outputs.project }}
+          SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
+          TAURI_SENTRY_ENV: ${{ steps.sentry-meta.outputs.environment }}
+          TAURI_SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
         run: |
           set -euo pipefail
           export SCCACHE_NO_DAEMON="1"
@@ -236,6 +266,13 @@ jobs:
         if: ${{ inputs.build_local_whisper }}
         working-directory: app
         shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: dov-weinstock
+          SENTRY_PROJECT: ${{ steps.sentry-meta.outputs.project }}
+          SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
+          TAURI_SENTRY_ENV: ${{ steps.sentry-meta.outputs.environment }}
+          TAURI_SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
         run: |
           set -euo pipefail
           export SCCACHE_NO_DAEMON="1"
@@ -274,6 +311,39 @@ jobs:
           else
             echo "artifact_name_local_whisper=" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Write Windows build evidence summary
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          sentry_upload_enabled=false
+          if [[ -n "${SENTRY_AUTH_TOKEN}" ]]; then
+            sentry_upload_enabled=true
+          fi
+
+          cat <<EOF > windows-build-evidence.txt
+          sentry_project=${{ steps.sentry-meta.outputs.project }}
+          sentry_environment=${{ steps.sentry-meta.outputs.environment }}
+          sentry_release=${{ steps.sentry-meta.outputs.release }}
+          sentry_upload_enabled=${sentry_upload_enabled}
+          bundle_artifact_default=${{ steps.artifact-meta.outputs.artifact_name_default }}
+          bundle_artifact_local_whisper=${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}
+          build_local_whisper=${{ inputs.build_local_whisper }}
+          git_ref=${{ github.ref }}
+          git_sha=${{ github.sha }}
+          run_id=${{ github.run_id }}
+          run_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+
+      - name: Upload Windows build evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-build-evidence
+          if-no-files-found: error
+          path: windows-build-evidence.txt
 
       - name: Upload bundles (default)
         uses: actions/upload-artifact@v6

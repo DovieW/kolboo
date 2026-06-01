@@ -1,5 +1,8 @@
 # Logs
-logs
+# Ignore only the top-level runtime log folder. A bare `logs` pattern also
+# swallows source directories like `src/lib/logs` and `src/components/logs`,
+# which makes those modules vanish from Git and then from CI.
+/logs
 *.log
 npm-debug.log*
 yarn-debug.log*

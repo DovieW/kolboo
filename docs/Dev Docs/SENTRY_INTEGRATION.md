@@ -48,6 +48,12 @@ Current integration also includes **backend Sentry** for the Tauri runtime:
 - startup wiring from `app/src-tauri/src/lib.rs`
 - deterministic backend smoke command in `app/src-tauri/src/commands/logs.rs`
 
+Packaged desktop delivery also now depends on the Tauri webview CSP allowing
+the Sentry ingest origin. The 2026-05-29 packaged rehearsal proved that a
+restrictive packaged `connect-src` can surface as frontend
+`transport send failed Failed to fetch`, even when DSN/runtime-config/init/capture
+all succeed locally.
+
 License/account flows route capture via:
 
 - `app/src/lib/tauri/license.ts`
@@ -60,6 +66,15 @@ Configured via backend runtime env and surfaced to the frontend through
 - `TAURI_SENTRY_DSN`
 - `TAURI_SENTRY_ENV`
 - `TAURI_SENTRY_RELEASE`
+- `TAURI_SENTRY_SMOKE` (manual packaged-app rehearsal only)
+
+For browser-only frontend verification via `pnpm -C app dev:vite`, the desktop
+frontend also accepts optional Vite env fallbacks when the Tauri runtime bridge
+is unavailable:
+
+- `VITE_SENTRY_DSN`
+- `VITE_SENTRY_ENV`
+- `VITE_SENTRY_RELEASE`
 
 Local placeholders/defaults live in:
 
@@ -69,6 +84,18 @@ Local placeholders/defaults live in:
 Behavior:
 
 - If `TAURI_SENTRY_DSN` is empty/missing, frontend and backend Sentry stay disabled.
+- If `TAURI_SENTRY_SMOKE=1`, the packaged desktop app can emit the explicit
+  non-production frontend smoke event during a manual rehearsal launch.
+- If the frontend is running outside Tauri (for example `pnpm -C app dev:vite`),
+  the browser surface may opt in via `VITE_SENTRY_*` for smoke verification.
+- Frontend runtime-config loading now treats real Tauri sessions differently from
+  browser-only sessions: it retries the `get_runtime_config` bridge for longer in
+  packaged/desktop startup races, but falls back quickly outside Tauri so browser
+  smoke runs do not stall.
+- If that startup bridge still fails after the retry window, the frontend no
+  longer permanently memoizes the all-default fallback; later callers can retry
+  runtime-config loading instead of getting stuck with an empty config for the
+  rest of the session.
 - App behavior must remain unchanged with Sentry disabled/unavailable.
 
 ## Privacy and redaction rules (required)
@@ -93,6 +120,10 @@ Current protections:
   - drops `user`, `request`, and `server_name`
   - redacts sensitive event messages / exception values / tags
   - recursively redacts sensitive `extra` payloads and breadcrumb data by key or content markers
+- frontend Sentry init/smoke flow now also emits sanitized breadcrumbs into the
+  desktop rolling log via the frontend log bridge (`scope=sentry`), so packaged
+  rehearsals can distinguish “no runtime config / no DSN” from “smoke capture
+  attempted and flushed” without relying on DevTools
 
 ## Testing and validation notes
 
@@ -119,6 +150,152 @@ Manual smoke test (with DSN enabled):
 4. Trigger `logsAPI.sentryBackendSmokeTest(...)` and confirm the backend smoke
   event arrives with `runtime=tauri-backend`, the expected surface tag, and no
   request/user payloads.
+
+Desktop frontend now also supports an explicit non-production browser smoke
+trigger via `?kolboo_sentry_smoke=1` on the `main` surface. This is especially
+useful with `pnpm -C app dev:vite`, where `VITE_SENTRY_*` can verify the
+browser-side release/tag wiring without launching the full Tauri shell. In that
+browser-only smoke mode, the `main` entrypoint intentionally stops before the
+normal desktop boot/render path when `core.isTauri === false` so expected
+missing-bridge noise does not create extra fake issues. The smoke helper also
+waits for `Sentry.flush(2000)` before returning so short-lived/headless
+verification runs do not drop the event on page exit.
+
+## Verified non-production frontend smoke evidence
+
+Verified on 2026-05-29 via `pnpm -C app dev:vite` + headless Edge:
+
+- project: `kolboo-public-dev`
+- release: `kolboo@preview.localsmoke.2026-05-29-c`
+- smoke URL: `http://127.0.0.1:4191/?kolboo_sentry_smoke=1`
+- issue: `KOLBOO-PUBLIC-DEV-E`
+- issue link: <https://dov-weinstock.sentry.io/issues/7513048876/>
+- latest verified event id: `11df1e65f17f4a52bbfd0c16eab28c22`
+- durable evidence note: `../../kol-software/plans/KOLBOO_SENTRY_REHEARSAL_EVIDENCE_2026-05-29.md`
+
+What this proves:
+
+- the desktop frontend can emit a real non-production browser smoke event into
+  `kolboo-public-dev`
+- the smoke tags (`surface=main`, `action=smoke_test`, `smoke_test=true`,
+  `smoke_trigger=query-param`) and release metadata are searchable in Sentry
+- the browser-side `VITE_SENTRY_*` fallback is sufficient for frontend-only
+  verification when the full Tauri runtime is intentionally absent
+
+Known limitation of this evidence path:
+
+- even after short-circuiting the main render path, browser-only `dev:vite`
+  verification can still produce some expected Tauri-bridge TypeErrors from
+  modules that assume the desktop runtime exists. Treat those as verification
+  noise, not launch evidence. The smoke issue above is the durable proof item.
+
+## Verified uploaded-release/source-map artifact proof
+
+Verified on 2026-05-29 via a rebuilt static desktop artifact + manual Sentry
+release upload flow:
+
+- project: `kolboo-public-dev`
+- release: `kolboo@artifactproof.2026-05-29-c`
+- local artifact URL: `http://127.0.0.1:4301/index.html?kolboo_sentry_smoke=1`
+- issue: `KOLBOO-PUBLIC-DEV-F`
+- issue link: <https://dov-weinstock.sentry.io/issues/7513688933/>
+- latest verified event id: `c392b8d3b813484bad9a9882cd8b7529`
+- durable evidence note: `../../kol-software/plans/KOLBOO_SENTRY_REHEARSAL_EVIDENCE_2026-05-29.md`
+- verified mapped locations:
+  - `../../src/lib/telemetry/sentry.ts:230:7`
+  - `../../src/lib/telemetry/sentry.ts:218:3`
+  - `../../src/main.tsx:8:26`
+
+What this proves:
+
+- the uploaded release `kolboo@artifactproof.2026-05-29-c` received a real
+  browser event from the built static bundle, not only the dev-server path
+- the uploaded source maps resolve the minified bundle back to readable source
+  locations in `src/lib/telemetry/sentry.ts` and `src/main.tsx`
+- the desktop frontend release/source-map artifact path is now proven locally
+  for the public-dev project
+
+Known limitation of this artifact-proof path:
+
+- browser-only artifact verification still produces some expected Tauri-bridge
+  noise (`Cannot read properties of undefined (reading 'invoke')`) because the
+  full desktop runtime is absent; treat those as verification noise, not the
+  proof item
+
+What this does **not** prove yet:
+
+- uploaded source-map evidence from an actual shipped/deployed desktop package
+- preview/prod release rehearsal evidence tied to the real desktop delivery path
+
+For the packaged Windows follow-up path, use:
+
+- `docs/Dev Docs/SENTRY_WINDOWS_PACKAGE_REHEARSAL.md`
+
+## Verified packaged Windows delivery proof
+
+Verified on 2026-05-29 in a real packaged Windows Tauri install after patching
+`app/src-tauri/tauri.conf.json` so packaged `connect-src` allows Sentry ingest:
+
+- project: `kolboo-public-dev`
+- release: `kolboo@packagerehearsal.2026-05-29-e`
+- issue: `KOLBOO-PUBLIC-DEV-H`
+- issue link: <https://dov-weinstock.sentry.io/issues/7513912680/>
+- latest verified event id: `ad3b36c90018461eb6117e75cde83175`
+- event link: <https://dov-weinstock.sentry.io/issues/7513912680/events/ad3b36c90018461eb6117e75cde83175/>
+- installed executable:
+  `C:\Users\Dovie\AppData\Local\Programs\Kolboo-Packagerehearsal-e\Kolboo.exe`
+- durable evidence note:
+  `../../kol-software/plans/KOLBOO_SENTRY_REHEARSAL_EVIDENCE_2026-05-29.md`
+- decisive packaged log proof:
+  - `[ui:sentry] initialized surface=main env=preview release=kolboo@packagerehearsal.2026-05-29-e smoke_requested=true`
+  - `[ui:sentry] smoke capture surface=main trigger=runtime-env release=kolboo@packagerehearsal.2026-05-29-e`
+  - `[ui:sentry] transport send status=200 rate_limits=none retry_after=none`
+  - `[ui:sentry] smoke flushed surface=main trigger=runtime-env release=kolboo@packagerehearsal.2026-05-29-e`
+  - secondary surfaces `overlay`, `overlay_hover`, and `quick_ask` also logged
+    `transport send status=200`
+
+What this proves:
+
+- the real packaged Windows/Tauri shell now delivers frontend Sentry envelopes
+  successfully
+- the packaged smoke event is also visible upstream in Sentry with the expected
+  `release`, `environment=preview`, `surface=main`, and `smoke_trigger=runtime-env`
+- the earlier packaged failure (`transport send failed Failed to fetch` on
+  release `kolboo@packagerehearsal.2026-05-29-d`) was caused by packaged CSP,
+  not by DSN resolution, runtime-config loading, or local capture/flush logic
+
+## Build-time source maps
+
+The desktop Vite build now wires `@sentry/vite-plugin` for browser-source-map
+upload when build-time auth is configured.
+
+Build-time env contract:
+
+- `SENTRY_AUTH_TOKEN` — required to enable upload
+- `SENTRY_ORG` — defaults to `dov-weinstock`
+- `SENTRY_PROJECT` — optional explicit override; otherwise the Vite build
+  derives `kolboo-public-dev` vs `kolboo-public-prod` from
+  `TAURI_SENTRY_ENV`
+- `SENTRY_RELEASE` — optional explicit override; otherwise the build uses
+  `TAURI_SENTRY_RELEASE` and falls back to a deterministic `kolboo@...` value
+
+Behavior:
+
+- without `SENTRY_AUTH_TOKEN`, the plugin stays disabled and release builds keep
+  behaving normally
+- with `SENTRY_AUTH_TOKEN`, the Vite build emits **hidden** source maps,
+  uploads them to Sentry, and deletes the generated `.map` files from `dist`
+  after upload completes
+- the Windows release workflow now computes release metadata and passes the
+  matching public dev/prod project + release name into the build so release
+  artifacts and uploaded source maps stay aligned
+- the Windows release workflow now also uploads a `windows-build-evidence`
+  artifact containing the computed Sentry project/release and the uploaded
+  bundle artifact names, so shipped-package rehearsal notes can link back to the
+  exact browser-source-map release metadata
+- the packaged desktop app now also supports a manual rehearsal-only smoke gate
+  via `TAURI_SENTRY_SMOKE=1`, which is the supported trigger for proving the
+  Windows installer/bundle path in a real Tauri shell
 
 ## Project setup guidance (Sentry account)
 
