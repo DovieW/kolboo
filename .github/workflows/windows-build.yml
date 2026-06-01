@@ -140,6 +140,11 @@ jobs:
       # Use a local sccache directory and cache it via actions/cache.
       # This avoids relying on GitHub's artifact cache service, which can be flaky.
       SCCACHE_DIR: ${{ github.workspace }}\\.sccache
+      # Release bundling now hard-fails when the desktop cloud endpoints are missing.
+      # These are public, non-secret origins, so keep CI explicit instead of relying on
+      # a developer-local .env file that GitHub Actions will never see.
+      TAURI_API_BASE_URL: https://kolboo.dovie.dev
+      TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
 
     steps:
       - name: Checkout

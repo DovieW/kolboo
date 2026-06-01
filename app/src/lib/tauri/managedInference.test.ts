@@ -13,6 +13,7 @@ const { invokeMock, loadRuntimeConfigMock } = vi.hoisted(() => ({
 			sentry_dsn: null,
 			sentry_env: null,
 			sentry_release: null,
+			sentry_smoke: null,
 			posthog_api_key: null,
 			posthog_host: null,
 		}),
@@ -44,6 +45,7 @@ describe("managedInference", () => {
 			sentry_dsn: null,
 			sentry_env: null,
 			sentry_release: null,
+			sentry_smoke: null,
 			posthog_api_key: null,
 			posthog_host: null,
 		});
@@ -88,6 +90,7 @@ describe("managedInference", () => {
 			sentry_dsn: null,
 			sentry_env: null,
 			sentry_release: null,
+			sentry_smoke: null,
 			posthog_api_key: null,
 			posthog_host: null,
 		});
@@ -209,6 +212,7 @@ describe("managedInference", () => {
 			sentry_dsn: null,
 			sentry_env: null,
 			sentry_release: null,
+			sentry_smoke: null,
 			posthog_api_key: null,
 			posthog_host: null,
 		});
@@ -259,6 +263,7 @@ describe("managedInference", () => {
 			sentry_dsn: null,
 			sentry_env: null,
 			sentry_release: null,
+			sentry_smoke: null,
 			posthog_api_key: null,
 			posthog_host: null,
 		});

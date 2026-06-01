@@ -76,6 +76,7 @@ describe("PolicySettings helpers", () => {
 					sentry_dsn: null,
 					sentry_env: "preview",
 					sentry_release: "kolboo-desktop@0.2.4-test",
+					sentry_smoke: null,
 					posthog_api_key: null,
 					posthog_host: null,
 				},
