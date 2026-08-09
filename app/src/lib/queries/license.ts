@@ -76,6 +76,12 @@ export function useSignUpLicense() {
 	});
 }
 
+export function useRequestLicensePasswordReset() {
+	return useMutation({
+		mutationFn: (email: string) => licenseAPI.requestPasswordReset(email),
+	});
+}
+
 export function useLogoutLicense() {
 	const queryClient = useQueryClient();
 	return useMutation({

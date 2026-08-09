@@ -210,6 +210,17 @@ export const tauriLicenseAPI = {
 		}
 	},
 
+	requestPasswordReset: async (email: string): Promise<void> => {
+		try {
+			await invoke("license_request_password_reset", { email });
+		} catch (error) {
+			reportLicenseSentryError("license_request_password_reset", error, {
+				email_present: email.trim().length > 0,
+			});
+			throw error;
+		}
+	},
+
 	exchangeSession: async (
 		upstreamAccessToken: string,
 	): Promise<SessionExchangeResponse> => {

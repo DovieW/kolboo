@@ -416,6 +416,10 @@ export const tauriAPI = {
 		return tauriLicenseAPI.signUp(request);
 	},
 
+	async requestLicensePasswordReset(email: string): Promise<void> {
+		return tauriLicenseAPI.requestPasswordReset(email);
+	},
+
 	async exchangeLicenseSession(
 		upstreamAccessToken: string,
 	): Promise<import("./types").SessionExchangeResponse> {
@@ -658,6 +662,8 @@ export const licenseAPI = {
 	}) => tauriLicenseAPI.startLogin(request),
 	signUp: (request: { email: string; password: string }) =>
 		tauriLicenseAPI.signUp(request),
+	requestPasswordReset: (email: string) =>
+		tauriLicenseAPI.requestPasswordReset(email),
 	exchangeSession: (upstreamAccessToken: string) =>
 		tauriLicenseAPI.exchangeSession(upstreamAccessToken),
 	logout: () => tauriLicenseAPI.logout(),

@@ -23,6 +23,7 @@ import { formatErrorMessage } from "../../lib/formatError";
 import { frontendLog } from "../../lib/frontendLog";
 import {
 	useLicenseState,
+	useRequestLicensePasswordReset,
 	useSettings,
 	useSignUpLicense,
 	useStartLicenseLogin,
@@ -92,6 +93,7 @@ export function SettingsGuideOverlay({
 	const licenseState = useLicenseState();
 	const startLicenseLogin = useStartLicenseLogin();
 	const signUpLicense = useSignUpLicense();
+	const requestPasswordReset = useRequestLicensePasswordReset();
 	const toggleHotkey = settings?.toggle_hotkey ?? null;
 	const accountView = buildSettingsGuideAccountViewModel(licenseState.data);
 	const groqView = buildSettingsGuideGroqStepViewModel(accountView);
@@ -451,6 +453,47 @@ export function SettingsGuideOverlay({
 		);
 	};
 
+	const handlePasswordReset = () => {
+		const email = accountEmail.trim();
+		setAccountError(null);
+		setAccountMessage(null);
+		if (!email) {
+			setAccountError("Enter your email address first.");
+			return;
+		}
+
+		requestPasswordReset.mutate(email, {
+			onSuccess: () => {
+				setAccountMessage(
+					"Check your email for a link to choose a new password.",
+				);
+			},
+			onError: (error) => setAccountError(formatErrorMessage(error)),
+		});
+	};
+
+	const handleBrowserAccountAuth = () => {
+		setAccountError(null);
+		setAccountMessage("Opening Kolboo account sign-in in your browser…");
+		startLicenseLogin.mutate(
+			{ provider_hint: "personal" },
+			{
+				onSuccess: (state) => {
+					const model = buildSettingsGuideAccountViewModel(state);
+					setAccountMessage(
+						model.hasPaidAccess
+							? "Signed in. Your managed features are ready where enabled."
+							: "Signed in. Kolboo will continue in Community/BYOK mode.",
+					);
+				},
+				onError: (error) => {
+					setAccountMessage(null);
+					setAccountError(formatErrorMessage(error));
+				},
+			},
+		);
+	};
+
 	if (!opened) return null;
 
 	return (
@@ -647,6 +690,50 @@ export function SettingsGuideOverlay({
 													disabled={accountAuthPending}
 													required
 												/>
+												{accountAuthMode === "sign_in" ? (
+													<Group justify="space-between">
+														<Button
+															type="button"
+															variant="subtle"
+															onClick={handlePasswordReset}
+															loading={requestPasswordReset.isPending}
+															disabled={accountAuthPending}
+															style={{ paddingInline: 0 }}
+														>
+															Forgot password?
+														</Button>
+														<Button
+															type="button"
+															variant="subtle"
+															onClick={handleBrowserAccountAuth}
+															loading={
+																startLicenseLogin.isPending &&
+																accountAuthSubmittingMode === null
+															}
+															disabled={
+																accountAuthPending ||
+																requestPasswordReset.isPending
+															}
+															style={{ paddingInline: 0 }}
+														>
+															Use browser instead
+														</Button>
+													</Group>
+												) : (
+													<Button
+														type="button"
+														variant="subtle"
+														onClick={handleBrowserAccountAuth}
+														loading={startLicenseLogin.isPending}
+														disabled={accountAuthPending}
+														style={{
+															alignSelf: "flex-start",
+															paddingInline: 0,
+														}}
+													>
+														Use browser instead
+													</Button>
+												)}
 												<Group justify="flex-end">
 													<Button
 														type="submit"

@@ -411,6 +411,57 @@ fn password_sign_up_error(status: StatusCode, body: &str) -> CommandError {
         .with_retryable(status.is_server_error())
 }
 
+fn password_recovery_error(status: StatusCode, body: &str) -> CommandError {
+    let upstream_code = supabase_auth_error_code(body);
+    log::warn!(
+        "Supabase password recovery failed: status={} code={}",
+        status,
+        upstream_code.as_deref().unwrap_or("unknown")
+    );
+
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        return CommandError::new(
+            "Please wait a minute before requesting another reset email.",
+            "auth",
+        )
+        .with_code("auth_recovery_rate_limited");
+    }
+
+    CommandError::new(
+        "Unable to send a reset email right now. Please try again.",
+        "auth",
+    )
+    .with_code("auth_recovery_failed")
+    .with_retryable(status.is_server_error())
+}
+
+async fn request_supabase_password_recovery(email: &str) -> CommandResult<()> {
+    let (supabase_url, publishable_key) = supabase_auth_config()?;
+    let url = format!("{supabase_url}/auth/v1/recover");
+    let response = license_api_client()
+        .post(url)
+        .header("apikey", publishable_key)
+        .header("content-type", "application/json")
+        .json(&json!({ "email": email }))
+        .send()
+        .await
+        .map_err(|_| {
+            CommandError::new(
+                "Unable to reach the account service. Check your connection and try again.",
+                "auth",
+            )
+            .with_code("auth_service_unavailable")
+            .with_retryable(true)
+        })?;
+
+    if !response.status().is_success() {
+        let (status, text) = crate::http::status_and_text(response).await;
+        return Err(password_recovery_error(status, &text));
+    }
+
+    Ok(())
+}
+
 async fn sign_up_supabase_with_password(
     email: &str,
     password: &str,
@@ -1300,6 +1351,17 @@ pub async fn license_sign_up(
 }
 
 #[tauri::command]
+pub async fn license_request_password_reset(email: String) -> CommandResult<()> {
+    let email = email.trim();
+    if email.is_empty() || !email.contains('@') {
+        return Err(CommandError::new("Enter a valid email address.", "auth")
+            .with_code("auth_email_invalid"));
+    }
+
+    request_supabase_password_recovery(email).await
+}
+
+#[tauri::command]
 pub async fn license_logout(app: AppHandle) -> CommandResult<LicenseState> {
     clear_session_material(&app)
         .map_err(|e| CommandError::new("Failed to clear session", "auth").with_code(e))?;
@@ -1509,8 +1571,8 @@ mod tests {
         build_auth_context, build_license_refresh_failure_error, build_pkce_code_challenge,
         build_public_auth_page_url, build_session_exchange_placeholder_response,
         build_supabase_authorize_url, extract_auth_code_from_callback_target,
-        extract_public_auth_session_from_callback_request, password_sign_in_error,
-        password_sign_up_error, refresh_error_requires_reauthentication,
+        extract_public_auth_session_from_callback_request, password_recovery_error,
+        password_sign_in_error, password_sign_up_error, refresh_error_requires_reauthentication,
         resolve_password_login_credentials, resolve_signup_credentials, SupabaseSignupAuthResponse,
     };
 
@@ -1538,6 +1600,21 @@ mod tests {
             "An account already exists for this email. Sign in instead."
         );
         assert_eq!(error.code.as_deref(), Some("auth_account_exists"));
+    }
+
+    #[test]
+    fn password_recovery_error_hides_upstream_json() {
+        let error = password_recovery_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error_code":"over_email_send_rate_limit","msg":"wait 51 seconds"}"#,
+        );
+
+        assert_eq!(
+            error.message.as_ref(),
+            "Please wait a minute before requesting another reset email."
+        );
+        assert_eq!(error.code.as_deref(), Some("auth_recovery_rate_limited"));
+        assert!(!error.message.contains("over_email_send_rate_limit"));
     }
 
     #[test]

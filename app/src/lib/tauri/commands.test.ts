@@ -101,7 +101,9 @@ describe("tauri command wrappers", () => {
 	itWithImportTimeout(
 		"normalizes missing secret values and optional microphone identifiers",
 		async () => {
-			invokeMock.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+			invokeMock
+				.mockResolvedValueOnce(undefined)
+				.mockResolvedValueOnce(undefined);
 			const { tauriAPI } = await import("./commands");
 
 			await expect(tauriAPI.getApiKey("openai_api_key")).resolves.toBeNull();
@@ -434,6 +436,7 @@ describe("tauri command wrappers", () => {
 			email: "new@example.com",
 			password: "password123",
 		});
+		await tauriAPI.requestLicensePasswordReset("user@example.com");
 		await tauriAPI.exchangeLicenseSession("upstream-token-123");
 		await tauriAPI.logoutLicense();
 		await tauriAPI.refreshLicenseEntitlement(true);
@@ -445,6 +448,7 @@ describe("tauri command wrappers", () => {
 			email: "newer@example.com",
 			password: "password456",
 		});
+		await licenseAPI.requestPasswordReset("newer@example.com");
 		await licenseAPI.exchangeSession("upstream-token-456");
 		await licenseAPI.onTransition(transitionHandler);
 
@@ -462,6 +466,9 @@ describe("tauri command wrappers", () => {
 				email: "new@example.com",
 				password: "password123",
 			},
+		});
+		expect(invokeMock).toHaveBeenCalledWith("license_request_password_reset", {
+			email: "user@example.com",
 		});
 		expect(invokeMock).toHaveBeenCalledWith("license_logout");
 		expect(invokeMock).toHaveBeenCalledWith("license_exchange_session", {
@@ -486,6 +493,9 @@ describe("tauri command wrappers", () => {
 				email: "newer@example.com",
 				password: "password456",
 			},
+		});
+		expect(invokeMock).toHaveBeenCalledWith("license_request_password_reset", {
+			email: "newer@example.com",
 		});
 		expect(invokeMock).toHaveBeenCalledWith("license_exchange_session", {
 			request: {
