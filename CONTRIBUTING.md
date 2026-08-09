@@ -133,4 +133,6 @@ Please include:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project license (AGPL-3.0).
+By contributing, you agree that your contributions will be licensed under the project license (AGPL-3.0). You represent that you have the right to submit the contribution and that it does not knowingly include secrets, customer data, or code incompatible with that license.
+
+You retain copyright in your contribution unless a separate written agreement says otherwise. Opening or merging a pull request does not silently assign copyright or grant Kol Software a separate commercial relicensing right. Preserve upstream and third-party attribution when modifying inherited work.

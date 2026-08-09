@@ -4,7 +4,7 @@
 
 Please **do not** open a public GitHub issue for security-sensitive reports.
 
-- Contact the maintainer(s) via GitHub (for example, ping `@DovieW`) and ask for a private channel to share details.
+- Open a private [GitHub Security Advisory](https://github.com/DovieW/kolboo/security/advisories/new), or email [security@kol.software](mailto:security@kol.software) if advisories are unavailable.
 
 When reporting, please include:
 
@@ -18,6 +18,7 @@ When reporting, please include:
 
 - We’ll acknowledge receipt as soon as practical.
 - We’ll work on a fix and, when appropriate, publish a release.
+- Please allow a reasonable remediation window before public disclosure. We will coordinate status and credit with good-faith reporters.
 
 ## Security notes (app-specific)
 

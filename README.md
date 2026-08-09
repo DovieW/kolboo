@@ -119,6 +119,8 @@ Notes:
 
 [AGPL-3.0](LICENSE)
 
+Kolboo is derived from Tambourine Voice and includes work from multiple contributors. See [NOTICE](NOTICE), [third-party notices](THIRD_PARTY_NOTICES.md), and the [commercial-license/AGPL explanation](https://kol.software/legal/commercial-license) before redistributing or requesting commercial terms. The public legal URL is a launch gate and may not resolve while this repository remains private.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
