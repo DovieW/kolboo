@@ -142,12 +142,8 @@ pub const DEFAULT_HOTKEY_MODIFIERS: &[&str] = &[];
 
 /// Default key for toggle recording.
 ///
-/// - Windows: modifier-only hotkey (Right Alt / AltGr) handled by the low-level hook.
-/// - Other: F3 (portable, supported by tauri-plugin-global-shortcut).
-#[cfg(target_os = "windows")]
-pub const DEFAULT_TOGGLE_KEY: &str = "AltRight";
-
-#[cfg(not(target_os = "windows"))]
+/// F3 is portable and supported by tauri-plugin-global-shortcut on every
+/// desktop platform Kolboo supports.
 pub const DEFAULT_TOGGLE_KEY: &str = "F3";
 
 // ============================================================================

@@ -8,14 +8,11 @@ import type { HotkeyConfig } from "./hotkeys";
 /** Default modifiers for the toggle hotkey (none) */
 export const DEFAULT_HOTKEY_MODIFIERS: string[] = [];
 
-const IS_WINDOWS =
-	typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
-
 /** Default key for toggle recording.
- * - Windows: modifier-only hotkey (Right Alt / AltGr)
- * - Other: F3 (portable, supported by global shortcut plugin)
+ * F3 is portable and supported by the global shortcut plugin on every
+ * desktop platform Kolboo supports.
  */
-export const DEFAULT_TOGGLE_KEY = IS_WINDOWS ? "AltRight" : "F3";
+export const DEFAULT_TOGGLE_KEY = "F3";
 
 // ============================================================================
 

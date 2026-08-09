@@ -272,7 +272,7 @@ mod tests {
             default_token_exchange_trigger_set_value()["decision"],
             "direct_idp_token"
         );
-        assert_eq!(default_settings_version_value(), json!(8));
+        assert_eq!(default_settings_version_value(), json!(9));
         assert!(default_proxy_settings_value().is_ok());
     }
 }

@@ -133,7 +133,7 @@ let storeInstance: Store | null = null;
 const SETTINGS_GUIDE_STATE_KEY = "settings_guide_state";
 const SETTINGS_VERSION_KEY = "settings_version";
 // Bump when adding settings migrations; keep TS/Rust/tests in sync.
-const SETTINGS_VERSION_LATEST = 8;
+const SETTINGS_VERSION_LATEST = 9;
 // Legacy fixtures/settings files may predate `settings_version` being written.
 // For UI normalization and tests, treat a missing/invalid version as the last
 // pre-versioning schema we can reasonably assume.

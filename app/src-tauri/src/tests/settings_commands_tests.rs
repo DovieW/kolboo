@@ -4,10 +4,6 @@ use crate::settings::HotkeyConfig;
 #[test]
 fn test_default_toggle_hotkey() {
     let hotkey = HotkeyConfig::default_toggle();
-    #[cfg(target_os = "windows")]
-    assert_eq!(hotkey.key, "AltRight");
-
-    #[cfg(not(target_os = "windows"))]
     assert_eq!(hotkey.key, "F3");
     assert!(hotkey.modifiers.is_empty());
 }
