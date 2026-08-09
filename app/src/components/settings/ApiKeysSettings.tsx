@@ -845,7 +845,7 @@ function LocalWhisperModelsCard() {
 						Observed shows what nvidia-smi reports for this process.
 					</Text>
 
-					<Collapse in={showDiagnostics}>
+					<Collapse expanded={showDiagnostics}>
 						<Stack gap={6} mt={10}>
 							{observed ? (
 								<Alert

@@ -221,7 +221,8 @@ function HotkeyDisplay({ config }: { config: HotkeyConfig | null }) {
 	);
 }
 
-function _InstructionsCard() {
+// biome-ignore lint/correctness/noUnusedVariables: retained as a disabled design reference
+function InstructionsCard() {
 	const { data: settings } = useSettings();
 
 	const toggleHotkey = settings

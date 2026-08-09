@@ -293,9 +293,14 @@ export default function RecordingControl() {
 	const setWidgetRef = useCallback(
 		(el: HTMLDivElement | null) => {
 			widgetRef.current = el;
-			// Mantine's useResizeObserver returns a ref object.
-			(containerRef as React.MutableRefObject<HTMLDivElement | null>).current =
-				el;
+			// Mantine 9 exposes a callback ref; retaining the runtime object branch
+			// keeps this compatible with older hook implementations as well.
+			if (typeof containerRef === "function") {
+				containerRef(el);
+			} else {
+				(containerRef as React.MutableRefObject<HTMLDivElement | null>).current =
+					el;
+			}
 		},
 		[containerRef],
 	);

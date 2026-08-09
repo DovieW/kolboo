@@ -401,7 +401,7 @@ export function RequestLogItem({ log, player }: RequestLogItemProps) {
 										{entriesOpened ? "Hide entries" : "Show entries"}
 									</Button>
 								</Group>
-								<Collapse in={entriesOpened}>
+								<Collapse expanded={entriesOpened}>
 									<Stack gap="xs">
 										{view.logEntries.map((entry) => (
 											<LogEntryItem key={entry.key} entry={entry} />

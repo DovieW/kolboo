@@ -4,7 +4,14 @@
 		"src/overlay-main.tsx",
 		"src/overlay-hover-main.tsx",
 		"src/quick-ask-main.tsx",
-		"src/app.css"
+		"src/app.css",
+		"src/components/account/index.ts",
+		"src/components/settings/index.ts",
+		"src/lib/historyRetry.ts",
+		"src/lib/overlay/overlayUiReducer.ts",
+		"src/lib/queries.ts",
+		"src/lib/tauri.ts",
+		"src/lib/tauri/settingsNormalizers/index.ts"
 	],
 	"project": ["**/*.{js,ts,jsx,tsx}"],
 	"ignore": ["src/lib/tauri/types.generated.ts"],

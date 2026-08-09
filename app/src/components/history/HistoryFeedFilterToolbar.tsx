@@ -84,7 +84,7 @@ function HistoryModelFilterSection({
 					}}
 				/>
 			</UnstyledButton>
-			<Collapse in={expanded}>
+			<Collapse expanded={expanded}>
 				<Box px="xs" pb="xs">
 					{options.length === 0 ? (
 						<Text c="dimmed" size="xs">

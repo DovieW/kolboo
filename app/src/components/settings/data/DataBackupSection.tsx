@@ -1,5 +1,5 @@
 import { Button, Group, Stack, Text, TextInput } from "@mantine/core";
-import { Download, Github, Upload } from "lucide-react";
+import { Download, GitBranch, Upload } from "lucide-react";
 import { SettingsRow } from "../SettingsRow";
 
 type DataBackupSectionProps = {
@@ -94,7 +94,7 @@ export function DataBackupSection({
 							<Button
 								variant="default"
 								size="xs"
-								leftSection={<Github size={14} />}
+								leftSection={<GitBranch size={14} />}
 								onClick={onOpenGithubTokenModal}
 							>
 								Set token

@@ -4,6 +4,10 @@ packages:
 # Keep installs at least 7 days behind published versions to reduce supply-chain risk.
 minimumReleaseAge: 10080
 minimumReleaseAgeStrict: true
+minimumReleaseAgeExclude:
+  # Patched releases required by the high-severity audit gate.
+  - nanoid@3.3.17
+  - rollup@4.59.0
 
 onlyBuiltDependencies:
   - esbuild
