@@ -96,8 +96,6 @@ export function SettingsGuideOverlay({
 	const accountView = buildSettingsGuideAccountViewModel(licenseState.data);
 	const groqView = buildSettingsGuideGroqStepViewModel(accountView);
 	const wrapupView = buildSettingsGuideWrapupViewModel(accountView);
-	const accountAuthPending =
-		startLicenseLogin.isPending || signUpLicense.isPending;
 
 	const recommendedToggleKeyLabel =
 		typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
@@ -119,6 +117,9 @@ export function SettingsGuideOverlay({
 	const [showInlineSignIn, setShowInlineSignIn] = useState(false);
 	const [accountAuthMode, setAccountAuthMode] =
 		useState<AccountAuthMode>("sign_up");
+	const [accountAuthSubmittingMode, setAccountAuthSubmittingMode] =
+		useState<AccountAuthMode | null>(null);
+	const accountAuthPending = accountAuthSubmittingMode !== null;
 	const [accountEmail, setAccountEmail] = useState("");
 	const [accountPassword, setAccountPassword] = useState("");
 	const [accountMessage, setAccountMessage] = useState<string | null>(null);
@@ -221,6 +222,7 @@ export function SettingsGuideOverlay({
 		setDictationText("");
 		setShowInlineSignIn(false);
 		setAccountAuthMode("sign_up");
+		setAccountAuthSubmittingMode(null);
 		setAccountEmail("");
 		setAccountPassword("");
 		setAccountMessage(null);
@@ -377,6 +379,7 @@ export function SettingsGuideOverlay({
 
 	const showAccountForm = (mode: AccountAuthMode) => {
 		setAccountAuthMode(mode);
+		setAccountAuthSubmittingMode(null);
 		setShowInlineSignIn(true);
 		setAccountMessage(null);
 		setAccountError(null);
@@ -384,6 +387,7 @@ export function SettingsGuideOverlay({
 
 	const handleInlineAccountAuth = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
+		setAccountAuthSubmittingMode(accountAuthMode);
 		setAccountError(null);
 
 		if (accountAuthMode === "sign_up") {
@@ -399,7 +403,7 @@ export function SettingsGuideOverlay({
 						if (response.confirmation_required) {
 							setAccountAuthMode("sign_in");
 							setAccountMessage(
-								"Account created. Check your email to confirm it, then come back here or use browser auth to finish sign-in. No payment is required.",
+								"Account created. Check your email to confirm it, then return here to sign in.",
 							);
 							return;
 						}
@@ -415,6 +419,7 @@ export function SettingsGuideOverlay({
 						setAccountMessage(null);
 						setAccountError(formatErrorMessage(error));
 					},
+					onSettled: () => setAccountAuthSubmittingMode(null),
 				},
 			);
 			return;
@@ -441,6 +446,7 @@ export function SettingsGuideOverlay({
 					setAccountMessage(null);
 					setAccountError(formatErrorMessage(error));
 				},
+				onSettled: () => setAccountAuthSubmittingMode(null),
 			},
 		);
 	};
@@ -520,6 +526,7 @@ export function SettingsGuideOverlay({
 							type="button"
 							className="tang-guide-back tang-guide-fade-in"
 							onClick={handleBack}
+							disabled={accountAuthPending}
 						>
 							<ChevronLeft size={16} />
 							<span>Back</span>
@@ -641,7 +648,12 @@ export function SettingsGuideOverlay({
 													required
 												/>
 												<Group justify="flex-end">
-													<Button type="submit" loading={accountAuthPending}>
+													<Button
+														type="submit"
+														loading={
+															accountAuthSubmittingMode === accountAuthMode
+														}
+													>
 														{accountAuthMode === "sign_up"
 															? "Create free account"
 															: "Sign in"}

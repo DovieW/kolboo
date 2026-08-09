@@ -1807,7 +1807,8 @@ a:focus-visible {
 	color: rgba(var(--accent-rgb) / 0.98);
 }
 
-.tang-guide-skip:disabled {
+.tang-guide-skip:disabled,
+.tang-guide-back:disabled {
 	opacity: 0.35;
 	cursor: not-allowed;
 }
