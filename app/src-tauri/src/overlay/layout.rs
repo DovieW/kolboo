@@ -85,7 +85,9 @@ impl PhysicalRect {
     }
 }
 
-const WIDGET_EDGE_MARGIN_LOGICAL: f64 = 24.0;
+// Preserve the established visual offset from the screen edge. The work-area
+// clamp still keeps the widget clear when a dock or taskbar consumes more room.
+const WIDGET_EDGE_MARGIN_LOGICAL: f64 = 50.0;
 
 fn valid_scale(scale: f64) -> f64 {
     if scale.is_finite() && scale > 0.0 {
@@ -93,6 +95,25 @@ fn valid_scale(scale: f64) -> f64 {
     } else {
         1.0
     }
+}
+
+/// Reconcile the native window scale with an optional fractional desktop scale.
+///
+/// Windows, macOS, and native Wayland normally report the full effective scale
+/// through the window system. X11/XWayland may only report an integer, so the
+/// desktop DPI is allowed to raise (but never lower) it.
+pub(crate) fn effective_layout_scale(native_scale: f64, desktop_scale: Option<f64>) -> f64 {
+    let native_scale = valid_scale(native_scale);
+    desktop_scale
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .map(|scale| native_scale.max(scale))
+        .unwrap_or(native_scale)
+}
+
+/// Zoom required for a webview's logical CSS viewport to match a window sized
+/// with `effective_layout_scale` physical pixels.
+pub(crate) fn webview_zoom(native_scale: f64, layout_scale: f64) -> f64 {
+    valid_scale(layout_scale) / valid_scale(native_scale)
 }
 
 fn scaled_dimension(value: f64, scale: f64, maximum: u32) -> u32 {
@@ -239,8 +260,18 @@ mod tests {
             WidgetAnchor::BottomCenter,
         );
 
-        assert_eq!(rect, PhysicalRect::new(1244, 1580, 392, 98));
+        assert_eq!(rect, PhysicalRect::new(1244, 1534, 392, 98));
         assert_eq!(rect.x + rect.width as i32 / 2, 1440);
+    }
+
+    #[test]
+    fn fractional_desktop_scale_fills_an_xwayland_gap() {
+        let layout_scale = effective_layout_scale(1.0, Some(1.75));
+
+        assert_eq!(layout_scale, 1.75);
+        assert_eq!(webview_zoom(1.0, layout_scale), 1.75);
+        assert_eq!(effective_layout_scale(2.0, Some(1.75)), 2.0);
+        assert_eq!(webview_zoom(2.0, 2.0), 1.0);
     }
 
     #[test]
@@ -253,7 +284,7 @@ mod tests {
             WidgetAnchor::BottomRight,
         );
 
-        assert_eq!(rect, PhysicalRect::new(-80, 1000, 56, 56));
+        assert_eq!(rect, PhysicalRect::new(-106, 974, 56, 56));
     }
 
     #[test]
@@ -266,8 +297,8 @@ mod tests {
             WidgetAnchor::BottomCenter,
         );
 
-        assert_eq!(rect.y + rect.height as i32, 1364);
-        assert_eq!(1400 - (rect.y + rect.height as i32), 36);
+        assert_eq!(rect.y + rect.height as i32, 1325);
+        assert_eq!(1400 - (rect.y + rect.height as i32), 75);
     }
 
     #[test]

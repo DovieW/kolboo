@@ -37,6 +37,21 @@ fn non_empty(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.trim().is_empty())
 }
 
+pub(crate) fn desktop_scale_from_dpi(dpi: f64) -> Option<f64> {
+    let scale = dpi / 96.0;
+    (scale.is_finite() && (0.5..=8.0).contains(&scale)).then_some(scale)
+}
+
+/// Read the fractional desktop scale after GTK has initialized.
+///
+/// GTK's monitor scale is integer-valued on X11, while XSettings retains the
+/// user's fractional DPI (for example 168 DPI = 1.75x). This must only be called
+/// from Tauri's setup thread because GDK requires its initialized main thread.
+#[cfg(target_os = "linux")]
+pub(crate) fn current_linux_desktop_scale() -> Option<f64> {
+    gdk::Screen::default().and_then(|screen| desktop_scale_from_dpi(screen.resolution()))
+}
+
 pub(crate) fn detect_linux_display_server(
     session_type: Option<&str>,
     wayland_display: Option<&str>,
@@ -230,6 +245,14 @@ mod tests {
             detect_linux_display_server(Some("tty"), Some(" "), Some("")),
             LinuxDisplayServer::Unknown
         );
+    }
+
+    #[test]
+    fn xsettings_dpi_maps_to_fractional_desktop_scale() {
+        assert_eq!(desktop_scale_from_dpi(168.0), Some(1.75));
+        assert_eq!(desktop_scale_from_dpi(192.0), Some(2.0));
+        assert_eq!(desktop_scale_from_dpi(-1.0), None);
+        assert_eq!(desktop_scale_from_dpi(f64::NAN), None);
     }
 
     #[test]

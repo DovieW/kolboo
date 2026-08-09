@@ -38,7 +38,16 @@ pub struct AppState {
     /// Last complete physical rectangle submitted to the native window system.
     /// Repeated frontend state notifications with the same target are ignored.
     #[cfg(desktop)]
-    pub overlay_last_applied_rect: Mutex<Option<(i32, i32, u32, u32)>>,
+    pub overlay_last_applied_rect: Mutex<Option<(i32, i32, u32, u32, u64)>>,
+
+    /// Fractional desktop UI scale reported through GTK/XSettings on Linux.
+    ///
+    /// XWayland exposes an integer native window scale (often 1) even when the
+    /// compositor uses fractional scaling. Retaining the desktop scale lets the
+    /// overlay preserve its intended logical size without abandoning absolute
+    /// X11 placement.
+    #[cfg(target_os = "linux")]
+    pub overlay_linux_desktop_scale: Mutex<Option<f64>>,
 
     /// Monotonic token bumped every time we show/refresh the overlay hover window.
     /// Used to cancel delayed-hide timers when the pointer moves between windows.

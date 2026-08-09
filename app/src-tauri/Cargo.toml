@@ -171,6 +171,7 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "a3122e
 keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+gdk = "0.18.2"
 keyring = { version = "3", features = ["linux-native"] }
 
 [dev-dependencies]

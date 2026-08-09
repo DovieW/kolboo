@@ -232,6 +232,25 @@ fn monitor_work_area(monitor: &Monitor) -> PhysicalRect {
 }
 
 #[cfg(desktop)]
+fn overlay_display_scale(app: &AppHandle, monitor: &Monitor) -> (f64, f64, f64) {
+    let native_scale = monitor.scale_factor();
+
+    #[cfg(target_os = "linux")]
+    let desktop_scale = app
+        .state::<AppState>()
+        .overlay_linux_desktop_scale
+        .lock()
+        .ok()
+        .and_then(|scale| *scale);
+    #[cfg(not(target_os = "linux"))]
+    let desktop_scale = None;
+
+    let layout_scale = layout::effective_layout_scale(native_scale, desktop_scale);
+    let zoom = layout::webview_zoom(native_scale, layout_scale);
+    (native_scale, layout_scale, zoom)
+}
+
+#[cfg(desktop)]
 fn format_monitor_summary(monitor: Option<&Monitor>) -> String {
     match monitor {
         Some(m) => format!(
@@ -302,15 +321,15 @@ fn apply_overlay_layout_at_anchor(
         .map_err(|_| "Overlay layout lock poisoned".to_string())?;
 
     let monitor = resolve_target_monitor(&window, app).ok_or("No monitor found")?;
-    let scale = monitor.scale_factor();
+    let (native_scale, layout_scale, zoom) = overlay_display_scale(app, &monitor);
     let work_area = monitor_work_area(&monitor);
-    let rect = layout::widget_rect(work_area, scale, widget_layout, anchor);
+    let rect = layout::widget_rect(work_area, layout_scale, widget_layout, anchor);
 
     app_state
         .overlay_expanded
         .store(widget_layout == WidgetLayout::Expanded, Ordering::SeqCst);
 
-    let rect_key = (rect.x, rect.y, rect.width, rect.height);
+    let rect_key = (rect.x, rect.y, rect.width, rect.height, zoom.to_bits());
     {
         let last_rect = app_state
             .overlay_last_applied_rect
@@ -330,6 +349,7 @@ fn apply_overlay_layout_at_anchor(
     // Physical size and position share the same coordinate system and are
     // issued under one lock. Borderless utility windows have no intended
     // decoration delta, so the semantic CSS size maps directly through DPI.
+    window.set_zoom(zoom).map_err(|e| e.to_string())?;
     window
         .set_size(tauri::Size::Physical(tauri::PhysicalSize {
             width: rect.width,
@@ -349,10 +369,13 @@ fn apply_overlay_layout_at_anchor(
         .map_err(|_| "Overlay rectangle cache lock poisoned".to_string())? = Some(rect_key);
 
     log::debug!(
-        "[overlay] layout applied (layout={:?}, anchor={:?}, rect={:?}, monitor={})",
+        "[overlay] layout applied (layout={:?}, anchor={:?}, rect={:?}, native_scale={}, layout_scale={}, zoom={}, monitor={})",
         widget_layout,
         anchor,
         rect,
+        native_scale,
+        layout_scale,
+        zoom,
         format_monitor_summary(Some(&monitor))
     );
     Ok(())
@@ -635,7 +658,7 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
         .flatten()
         .or_else(|| resolve_target_monitor(&overlay, &app))
         .ok_or("No monitor found for overlay hover")?;
-    let scale = monitor.scale_factor();
+    let (_native_scale, layout_scale, zoom) = overlay_display_scale(&app, &monitor);
     let widget_rect = PhysicalRect::new(
         overlay_pos.x,
         overlay_pos.y,
@@ -646,11 +669,12 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
         monitor_work_area(&monitor),
         widget_rect,
         LogicalSize::new(320.0, 220.0),
-        scale,
+        layout_scale,
         10.0,
         12.0,
     );
 
+    hover.set_zoom(zoom).map_err(|e| e.to_string())?;
     hover
         .set_size(tauri::Size::Physical(tauri::PhysicalSize {
             width: rect.width,
@@ -887,15 +911,16 @@ pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()
     };
 
     let monitor = resolve_target_monitor(&win, app).ok_or("No monitor found")?;
-    let scale = monitor.scale_factor();
+    let (_native_scale, layout_scale, zoom) = overlay_display_scale(app, &monitor);
     let rect = layout::anchored_rect(
         monitor_work_area(&monitor),
         LogicalSize::new(520.0, 260.0),
-        scale,
+        layout_scale,
         WidgetAnchor::BottomCenter,
         4.0,
     );
 
+    win.set_zoom(zoom).map_err(|e| e.to_string())?;
     win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
         width: rect.width,
         height: rect.height,

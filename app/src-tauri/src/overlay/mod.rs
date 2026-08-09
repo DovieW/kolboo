@@ -225,6 +225,20 @@ pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error
     // This is a separate transparent webview that renders an answer + copy button.
     let _quick_ask = overlay_window_builder_preset(app, OverlayWindowPreset::QuickAsk).build()?;
 
+    #[cfg(target_os = "linux")]
+    {
+        let desktop_scale = crate::platform_capabilities::current_linux_desktop_scale();
+        *app.state::<crate::state::AppState>()
+            .overlay_linux_desktop_scale
+            .lock()
+            .map_err(|_| "Overlay desktop scale lock poisoned")? = desktop_scale;
+        log::info!(
+            "Linux overlay desktop scale: {:?} (native_window_scale={})",
+            desktop_scale,
+            overlay.scale_factor().unwrap_or(1.0)
+        );
+    }
+
     // On macOS, convert to NSPanel for better fullscreen app behavior
     #[cfg(target_os = "macos")]
     {

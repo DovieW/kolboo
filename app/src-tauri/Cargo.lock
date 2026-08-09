@@ -2962,6 +2962,7 @@ dependencies = [
  "dotenvy",
  "enigo",
  "futures-util",
+ "gdk",
  "hound",
  "image",
  "keyring",
