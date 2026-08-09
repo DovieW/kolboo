@@ -43,6 +43,8 @@ This is not a promise of perfect parity. Platform limitations—especially Wayla
 - Document required system packages, architectures, bundle formats, install/uninstall, and cache behavior.
 - Keep platform release channels private while public distribution is deferred.
 
+Linux development prerequisites, build commands, and current X11/Wayland behavior are documented in [Linux development](../How%20Tos/LINUX_DEVELOPMENT.md). The `Linux Build` workflow now compiles the native default-feature binary on Ubuntu; installable packaging and the acceptance matrix remain open.
+
 ### Audio capture
 
 - Verify device enumeration, default-device changes, sample formats, resampling, meters, hot-mic behavior, and device-loss recovery.

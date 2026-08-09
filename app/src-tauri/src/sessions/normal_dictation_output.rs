@@ -243,7 +243,8 @@ fn output_text_for_platform(
         return None;
     }
 
-    if let Err(e) = commands::text::output_text_with_mode_options(
+    if let Err(e) = crate::text::inject::output_text_with_app(
+        app,
         output_value,
         output_intent.mode(),
         output_intent.hit_enter(),

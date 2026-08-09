@@ -123,7 +123,8 @@ pub(crate) fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &st
         let output_intent =
             crate::core::output_settings::resolve_output_intent_from_store(&app, None, None);
 
-        if let Err(e) = commands::text::output_text_with_mode_options(
+        if let Err(e) = crate::text::inject::output_text_with_app(
+            &app,
             &text,
             output_intent.mode(),
             output_intent.hit_enter(),

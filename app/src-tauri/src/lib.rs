@@ -38,6 +38,7 @@ mod network;
 mod ocr;
 mod overlay;
 mod pipeline;
+mod platform_capabilities;
 mod policy;
 mod prompt_builders;
 mod recording_completion;

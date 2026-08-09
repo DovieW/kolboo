@@ -10,12 +10,23 @@ use crate::text::key_inject::{release_common_modifiers_best_effort, with_pressed
 use tauri::AppHandle;
 #[cfg(desktop)]
 use tauri::Emitter;
+#[cfg(desktop)]
+use tauri::Manager;
 
 #[cfg(desktop)]
 use crate::events::EVENT_TRANSCRIPT_COPIED_TO_CLIPBOARD;
 
 /// Delay between keyboard key press and release events
 const KEY_EVENT_DELAY_MS: u64 = 50;
+
+pub(crate) const WAYLAND_CLIPBOARD_FALLBACK_MESSAGE: &str =
+    "Automatic text insertion is unavailable in this Wayland session; the transcript was copied to the clipboard instead";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputDelivery {
+    RequestedMode,
+    ClipboardFallback,
+}
 
 /// Global lock to ensure we never run multiple output injections concurrently.
 ///
@@ -97,6 +108,41 @@ pub fn output_text_with_mode_options(
         OutputMode::PasteAndClipboard => paste_and_keep_clipboard(text, hit_enter),
         OutputMode::Clipboard => copy_to_clipboard(text),
     }
+}
+
+/// Apply a user-facing platform fallback before invoking synthetic input.
+///
+/// Wayland intentionally prevents applications from injecting global keyboard
+/// input through the X11-style path Kolboo currently uses. Copy the completed
+/// transcript once and notify the renderer instead of failing or pretending the
+/// paste succeeded.
+#[cfg(desktop)]
+pub(crate) fn output_text_with_app(
+    app: &AppHandle,
+    text: &str,
+    mode: OutputMode,
+    hit_enter: bool,
+    preserve_clipboard: bool,
+) -> Result<OutputDelivery, String> {
+    let automatic_insertion_requested = !matches!(mode, OutputMode::Clipboard);
+    if crate::platform_capabilities::should_use_clipboard_fallback(automatic_insertion_requested) {
+        let _guard = output_injection_lock()
+            .lock()
+            .map_err(|_| "Output lock poisoned".to_string())?;
+        copy_to_clipboard_and_notify(app, text)?;
+        log::warn!("{}", WAYLAND_CLIPBOARD_FALLBACK_MESSAGE);
+
+        if let Some(log_store) = app.try_state::<crate::request_log::RequestLogStore>() {
+            log_store.with_current(|request_log| {
+                request_log.warn(WAYLAND_CLIPBOARD_FALLBACK_MESSAGE);
+            });
+        }
+
+        return Ok(OutputDelivery::ClipboardFallback);
+    }
+
+    output_text_with_mode_options(text, mode, hit_enter, preserve_clipboard)?;
+    Ok(OutputDelivery::RequestedMode)
 }
 
 /// Copy text to clipboard and paste, keeping text in clipboard (no restore)

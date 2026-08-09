@@ -1076,7 +1076,7 @@ impl SharedPipeline {
             let app = app_handle.clone();
 
             // Read live output config under a brief lock.
-            let (stt_live_output, live_output_flag) = {
+            let (configured_live_output, live_output_flag) = {
                 let inner = match self.inner.lock() {
                     Ok(inner) => inner,
                     Err(_) => {
@@ -1094,6 +1094,21 @@ impl SharedPipeline {
             live_output_flag.store(false, std::sync::atomic::Ordering::SeqCst);
 
             // Read output settings once (won't change mid-recording).
+            let stt_live_output = configured_live_output
+                && crate::platform_capabilities::automatic_text_injection_supported();
+            if configured_live_output && !stt_live_output {
+                log::warn!(
+                    "Live output disabled: {}",
+                    crate::text::inject::WAYLAND_CLIPBOARD_FALLBACK_MESSAGE
+                );
+                crate::emit_system_event(
+                    &app,
+                    "warning",
+                    "Live output is unavailable in this Wayland session",
+                    Some("The completed transcript will be copied to the clipboard."),
+                );
+            }
+
             let (output_mode, output_hit_enter) = if stt_live_output {
                 let view = settings_view::read_output_settings_view(&app, SettingsReadMode::Cached);
                 (view.mode, view.hit_enter)

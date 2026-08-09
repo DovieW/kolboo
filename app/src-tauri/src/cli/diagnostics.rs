@@ -22,12 +22,22 @@ pub(crate) fn handle_diagnostics(
         )
         .map_err(|err| CliError::Runtime(err.to_string()))?;
     let audio_mute_supported = crate::audio_mute::is_supported();
+    let automatic_text_injection_supported =
+        crate::platform_capabilities::automatic_text_injection_supported();
+
+    #[cfg(target_os = "linux")]
+    let linux_display_server =
+        crate::platform_capabilities::current_linux_display_server().as_str();
+    #[cfg(not(target_os = "linux"))]
+    let linux_display_server: Option<&str> = None;
 
     let payload = json!({
         "app_version": app_version,
         "os": os,
         "pipeline_state": pipeline_state,
         "audio_mute_supported": audio_mute_supported,
+        "automatic_text_injection_supported": automatic_text_injection_supported,
+        "linux_display_server": linux_display_server,
         "last_recording_diagnostics": last_recording_diagnostics,
     });
 

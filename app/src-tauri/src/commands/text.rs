@@ -56,18 +56,24 @@ pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
-    use crate::text::inject::run_with_output_injection_lock;
     use std::sync::mpsc;
 
     // macOS HIToolbox APIs (used by enigo) must run on the main thread
     // Use a channel to get the result back from the main thread
     let (tx, rx) = mpsc::channel::<Result<(), CommandError>>();
 
+    let app_for_output = app.clone();
     app.run_on_main_thread(move || {
-        // Serialize output across all modes to avoid interleaving key events.
         let _ = tx.send(
-            run_with_output_injection_lock(|| type_text_blocking(&text, false))
-                .map_err(CommandError::from),
+            crate::text::inject::output_text_with_app(
+                &app_for_output,
+                &text,
+                OutputMode::Paste,
+                false,
+                true,
+            )
+            .map(|_| ())
+            .map_err(CommandError::from),
         );
     })
     .map_err(|e| CommandError::from(e.to_string()))?;

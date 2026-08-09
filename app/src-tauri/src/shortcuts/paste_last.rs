@@ -9,7 +9,6 @@ use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Manager};
 
-use crate::commands;
 use crate::history::HistoryStorage;
 use crate::state::AppState;
 
@@ -80,7 +79,8 @@ fn output_last_transcription(app: &AppHandle, label: &str) {
 
     if let Ok(entries) = history_storage.get_all(Some(1)) {
         if let Some(entry) = entries.first() {
-            if let Err(e) = commands::text::output_text_with_mode_options(
+            if let Err(e) = crate::text::inject::output_text_with_app(
+                app,
                 &entry.text,
                 output_intent.mode(),
                 output_intent.hit_enter(),
