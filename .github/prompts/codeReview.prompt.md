@@ -14,14 +14,11 @@ You are doing an **ideal, thorough pull request review** for the Kolboo repo.
 
 Do **not** restate project rules from memory.
 
-Before you begin reviewing, read and follow the repo’s instruction files (they are the source of truth for conventions, testing commands, and expectations). In this repo they live under:
+Before you begin reviewing, read and follow the root `AGENTS.md` and the current documents it references. They are the source of truth for stewardship, architecture, testing commands, and expectations.
 
-- `.github/instructions/**` (project + testing guidance)
-- `.github/copilot-instructions.md` (Kolboo-specific architecture + conventions)
+If your review recommendation depends on a rule (for example settings synchronization, overlay refresh, or validation cadence), cite the exact current file and section.
 
-If your review recommendation depends on a “rule” (e.g. how settings syncing works, how overlay windows refresh, which commands CI runs), **cite the exact instruction file and section**.
-
-If the PR changes something that these instructions document (file locations, commands, conventions, settings behavior, contracts, etc.), you must **call that out explicitly** in the review and request an update to the relevant instruction file(s). (Don’t fix it in this first pass—just report it.)
+If the PR changes something that `AGENTS.md` or its referenced documents describe, call that out explicitly and request the corresponding documentation update. Do not fix it during this review-only pass.
 
 ## What to review (checklist)
 

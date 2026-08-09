@@ -349,7 +349,7 @@ Progress (2026-05-07):
 - OpenAI, Deepgram, ElevenLabs, Speechmatics, AssemblyAI, and Fireworks now receive `ProxySettings` through cloud-provider construction and use the shared transport path rather than silently ignoring configured WS transport policy.
 - `stt/streaming.rs` remains the provider-independent WS/session lifecycle Module; provider adapters still own request headers, URL/query construction, and protocol-specific message handling.
 - Strengthened `stt/websocket_transport.rs` characterization tests for anchored/wildcard `no_proxy` matching, unsupported HTTPS proxy diagnostics, and local loopback HTTP proxy CONNECT request shape with Basic auth.
-- Recorded WebSocket Transport Policy as an implemented Provider-Family Seam in `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` so the seam evidence and decision log now agree.
+- Recorded WebSocket Transport Policy as an implemented Provider-Family Seam; the durable decision now lives in `docs/Dev Docs/ARCHITECTURE_GUARDRAILS.md`.
 
 Remaining gaps:
 
@@ -472,7 +472,7 @@ The provider-family pre-flight reviewed four possible seams and intentionally di
 
 Reopen a provider-family seam only when at least two concrete adapters can share behavior without erasing provider-specific semantics, and when deleting the seam would clearly reintroduce duplicated caller complexity.
 
-Reference: `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md`.
+Reference: `docs/Dev Docs/ARCHITECTURE_GUARDRAILS.md`.
 
 Progress (2026-05-07):
 
@@ -482,9 +482,9 @@ Progress (2026-05-07):
 
 Progress (2026-05-07, Phase 6 audit):
 
-- Added `specs/018-remaining-module-deepening/validation/provider-adapter-audit.md` as a read-only size/responsibility audit of the concrete STT adapters.
+- Completed a read-only size/responsibility audit of the concrete STT adapters.
 - Measured the current provider adapters and confirmed the next leverage is **provider-local**, not a provider-family parser seam: Deepgram (`804` lines) is the clearest next extraction, ElevenLabs (`904` lines) is the second-best candidate, and Speechmatics / AssemblyAI / Fireworks remain later concrete-adapter deepening work.
-- Updated `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md` so the deferred STT streaming parser decision now reflects the current evidence: shared WS/session helpers are enough, while the remaining protocol state machines stay provider-specific.
+- Updated the durable architecture decision so the STT streaming parser decision reflects the current evidence: shared WS/session helpers are enough, while protocol state machines stay provider-specific.
 
 Progress (2026-05-07, Phase 7):
 
@@ -519,7 +519,7 @@ Progress (2026-05-07, combined provider follow-up):
 Progress (2026-05-07, post-audit comparison):
 
 - Re-read the full set of provider-local realtime adapters (`openai`, `deepgram`, `elevenlabs`, `assemblyai`, `speechmatics`, `fireworks`) after the final extractions.
-- Upgraded the decision for the **broad** STT provider-family parser seam from “defer” to **reject** in `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md`.
+- Upgraded the decision for the **broad** STT provider-family parser seam from “defer” to **reject**.
 - Reason: callers already consume the normalized `StreamingSttSession` / `PartialTranscript` seam, while provider differences still dominate event semantics, audio-send choreography, commit/finalization policy, and shutdown behavior.
 - Follow-up remains intentionally narrow: only reopen if a smaller two-adapter subproblem shows real leverage with its own deletion test; do **not** build a generic realtime parser layer just because the loops rhyme.
 
@@ -527,7 +527,7 @@ Progress (2026-05-07, post-audit comparison):
 
 **Status:** Addressed further by architecture-deepening work (2026-05-05)
 
-The Spec Kit architecture-deepening slice extracted deterministic Local Whisper rules into `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`, but `pipeline.rs` still owns the mutable cache operations and UI-facing load/unload commands because those operations need `PipelineInner` state and provider construction.
+The architecture-deepening work extracted deterministic Local Whisper rules into `app/src-tauri/src/pipeline/local_provider_lifecycle.rs`, but `pipeline.rs` still owns the mutable cache operations and UI-facing load/unload commands because those operations need `PipelineInner` state and provider construction.
 
 Future cleanup could introduce a small cache-controller seam around:
 

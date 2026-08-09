@@ -15,7 +15,7 @@ agent: agent
 
 5. Remove the item completely from the refactor doc (do not mark done).
 
-6. Run the smallest relevant format/validation command set from `.github/instructions/**`.
+6. Run the smallest relevant format/validation command set from `AGENTS.md` and `docs/Dev Docs/TESTING.md`.
 
 7. Do not commit or push unless I explicitly ask for that in the same invocation. If I do ask, keep the commit focused and summarize exactly what will be pushed first.
 

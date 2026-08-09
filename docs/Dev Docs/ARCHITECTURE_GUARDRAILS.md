@@ -50,9 +50,13 @@ A provider-family seam is only real when at least two concrete Adapters need the
 
 Until then, keep provider-specific protocol/state behavior in the concrete Adapter.
 
-Reference decision log:
+Current decisions:
 
-- `specs/017-architecture-deepening-plan/validation/provider-family-decisions.md`
+- Realtime WebSocket proxy, TLS, and `no_proxy` behavior is a proven shared transport seam in `app/src-tauri/src/stt/websocket_transport.rs`.
+- Provider-independent WebSocket/session lifecycle belongs in `app/src-tauri/src/stt/streaming.rs`.
+- Realtime transcript protocol state machines remain provider-local under `app/src-tauri/src/stt/*/realtime.rs`; a broad cross-provider parser interface was considered and rejected because provider event, commit, and shutdown semantics dominate the similarity.
+- `LlmProvider::complete_json_schema(...)` remains the caller-facing structured-output seam. Do not wrap it in another family abstraction without new duplicated behavior in at least two adapters.
+- Shared LLM client configuration and any OCR provider interface remain deferred until two adapters demonstrate a concrete shared concern.
 
 ## How to handle out-of-scope architecture pain
 
