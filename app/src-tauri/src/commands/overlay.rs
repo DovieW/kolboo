@@ -35,6 +35,23 @@ fn overlay_frontend_needs_reload(
 }
 
 #[cfg(desktop)]
+fn overlay_positioning_size(
+    current_width_px: f64,
+    current_height_px: f64,
+    scale: f64,
+    recording_only: bool,
+) -> (f64, f64) {
+    // Recording-only is always rendered as the expanded 224x56 widget. The
+    // native resize is asynchronous on some window managers, so outer_size()
+    // can still report the hidden 48x48 startup size while we position it.
+    if recording_only || current_width_px < 20.0 || current_height_px < 20.0 {
+        return ((224.0 * scale).round(), (56.0 * scale).round());
+    }
+
+    (current_width_px, current_height_px)
+}
+
+#[cfg(desktop)]
 pub fn maybe_reload_overlay_webview(
     app: &AppHandle,
     label: &str,
@@ -316,16 +333,14 @@ fn set_widget_position_impl(app: &AppHandle, position: &str) -> CommandResult<()
 
     // Get current window size
     let window_size = window.outer_size().map_err(|e| e.to_string())?;
-    let mut window_width_px = window_size.width as f64;
-    let mut window_height_px = window_size.height as f64;
-
-    // When the window is hidden (recording_only/never), some platforms can report
-    // a near-zero outer_size. Using that would place the window partially or fully
-    // off-screen. Prefer a conservative estimate that matches the overlay UI.
-    if window_width_px < 20.0 || window_height_px < 20.0 {
-        window_width_px = (224.0 * scale).round();
-        window_height_px = (56.0 * scale).round();
-    }
+    let overlay_mode: String =
+        get_setting_from_store(app, "overlay_mode", "recording_only".to_string());
+    let (window_width_px, window_height_px) = overlay_positioning_size(
+        window_size.width as f64,
+        window_size.height as f64,
+        scale,
+        overlay_mode == "recording_only",
+    );
 
     // Calculate margins (pixels from edge)
     let margin_px = (50.0 * scale).round();
@@ -1259,7 +1274,7 @@ pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()
 
 #[cfg(all(test, desktop))]
 mod tests {
-    use super::overlay_frontend_needs_reload;
+    use super::{overlay_frontend_needs_reload, overlay_positioning_size};
 
     #[test]
     fn one_shot_ready_overlay_does_not_expire() {
@@ -1275,5 +1290,21 @@ mod tests {
     #[test]
     fn overlay_that_never_reported_ready_is_reloaded() {
         assert!(overlay_frontend_needs_reload(0, 0, None));
+    }
+
+    #[test]
+    fn recording_only_position_uses_expanded_widget_size() {
+        assert_eq!(
+            overlay_positioning_size(48.0, 48.0, 1.5, true),
+            (336.0, 84.0)
+        );
+    }
+
+    #[test]
+    fn other_overlay_modes_keep_the_current_window_size() {
+        assert_eq!(
+            overlay_positioning_size(84.0, 84.0, 1.5, false),
+            (84.0, 84.0)
+        );
     }
 }
