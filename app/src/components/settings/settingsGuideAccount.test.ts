@@ -44,7 +44,7 @@ describe("buildSettingsGuideAccountViewModel", () => {
 
 		expect(model.mode).toBe("signed_out");
 		expect(model.isSignedIn).toBe(false);
-		expect(model.title).toBe("How would you like to continue?");
+		expect(model.title).toBe("Account setup");
 		expect(model.description).toContain("Local and bring-your-own-key");
 		expect(model.description).toContain("without one");
 	});

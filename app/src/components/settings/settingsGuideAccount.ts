@@ -56,7 +56,7 @@ export function buildSettingsGuideAccountViewModel(
 			mode: "signed_out",
 			isSignedIn: false,
 			hasPaidAccess: false,
-			title: "How would you like to continue?",
+			title: "Account setup",
 			statusLabel: "Not signed in",
 			description:
 				"An account is the path to settings sync and managed models. Local and bring-your-own-key features work without one.",

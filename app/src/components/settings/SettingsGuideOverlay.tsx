@@ -303,6 +303,11 @@ export function SettingsGuideOverlay({
 
 		return true;
 	})();
+	const accountAuthFormVisible =
+		phase === "guide" &&
+		step === "account" &&
+		!accountView.isSignedIn &&
+		showInlineSignIn;
 
 	const goBack = () => {
 		if (!canGoBack) return;
@@ -316,6 +321,17 @@ export function SettingsGuideOverlay({
 		}
 
 		enterGuideAt(next);
+	};
+
+	const handleBack = () => {
+		if (accountAuthFormVisible) {
+			setShowInlineSignIn(false);
+			setAccountError(null);
+			setAccountMessage(null);
+			return;
+		}
+
+		goBack();
 	};
 
 	const goForward = () => {
@@ -357,30 +373,6 @@ export function SettingsGuideOverlay({
 		} finally {
 			setIsSavingGroqKey(false);
 		}
-	};
-
-	const handleBrowserAccountAuth = () => {
-		setAccountError(null);
-		setAccountMessage(
-			"Opening your browser for Kolboo account sign-in or sign-up…",
-		);
-		startLicenseLogin.mutate(
-			{ provider_hint: "personal" },
-			{
-				onSuccess: (state) => {
-					const model = buildSettingsGuideAccountViewModel(state);
-					setAccountMessage(
-						model.hasPaidAccess
-							? "Signed in. Pro-only features will be available where enabled. If a new invite or upgrade still looks missing, you can refresh it later from Account."
-							: "Signed in. No payment is required, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
-					);
-				},
-				onError: (error) => {
-					setAccountMessage(null);
-					setAccountError(formatErrorMessage(error));
-				},
-			},
-		);
 	};
 
 	const showAccountForm = (mode: AccountAuthMode) => {
@@ -510,22 +502,24 @@ export function SettingsGuideOverlay({
 
 			{phase === "guide" && (
 				<>
-					{skipVisible && navIndex < NAV_STEPS.length - 1 && (
-						<button
-							type="button"
-							className="tang-guide-skip tang-guide-fade-in"
-							onClick={nextStep}
-						>
-							<span>Next</span>
-							<ChevronRight size={16} />
-						</button>
-					)}
+					{skipVisible &&
+						navIndex < NAV_STEPS.length - 1 &&
+						step !== "account" && (
+							<button
+								type="button"
+								className="tang-guide-skip tang-guide-fade-in"
+								onClick={nextStep}
+							>
+								<span>Next</span>
+								<ChevronRight size={16} />
+							</button>
+						)}
 
 					{canGoBack && (
 						<button
 							type="button"
 							className="tang-guide-back tang-guide-fade-in"
-							onClick={goBack}
+							onClick={handleBack}
 						>
 							<ChevronLeft size={16} />
 							<span>Back</span>
@@ -536,9 +530,15 @@ export function SettingsGuideOverlay({
 						{step === "account" && (
 							<div className="tang-guide-step">
 								<Title order={3}>{accountView.title}</Title>
-								<Text className="tang-guide-account-intro" c="dimmed" size="sm">
-									{accountView.description}
-								</Text>
+								{!accountAuthFormVisible ? (
+									<Text
+										className="tang-guide-account-intro"
+										c="dimmed"
+										size="sm"
+									>
+										{accountView.description}
+									</Text>
+								) : null}
 
 								{accountView.isSignedIn ? (
 									<div className="tang-guide-account-card">
@@ -572,7 +572,13 @@ export function SettingsGuideOverlay({
 										</Button>
 									</Group>
 								) : (
-									<div className="tang-guide-account-choice">
+									<div
+										className={`tang-guide-account-choice${
+											accountAuthFormVisible
+												? " tang-guide-account-choice--form"
+												: ""
+										}`}
+									>
 										{!showInlineSignIn ? (
 											<div className="tang-guide-account-actions">
 												<Button
@@ -605,27 +611,10 @@ export function SettingsGuideOverlay({
 												<div className="tang-guide-account-form-heading">
 													<Text fw={700} size="lg">
 														{accountAuthMode === "sign_up"
-															? "Create your account"
-															: "Welcome back"}
+															? "Create account"
+															: "Sign in"}
 													</Text>
-													<Button
-														type="button"
-														variant="subtle"
-														size="compact-sm"
-														onClick={() => {
-															setShowInlineSignIn(false);
-															setAccountError(null);
-														}}
-														disabled={accountAuthPending}
-													>
-														Back
-													</Button>
 												</div>
-												<Text size="sm" c="dimmed">
-													{accountAuthMode === "sign_up"
-														? "Create a free account. No payment is required."
-														: "Use your existing Kolboo account."}
-												</Text>
 												<TextInput
 													label="Email"
 													type="email"
@@ -651,15 +640,7 @@ export function SettingsGuideOverlay({
 													disabled={accountAuthPending}
 													required
 												/>
-												<Group justify="space-between">
-													<Button
-														type="button"
-														variant="subtle"
-														onClick={handleBrowserAccountAuth}
-														loading={startLicenseLogin.isPending}
-													>
-														Use browser instead
-													</Button>
+												<Group justify="flex-end">
 													<Button type="submit" loading={accountAuthPending}>
 														{accountAuthMode === "sign_up"
 															? "Create free account"

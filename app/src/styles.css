@@ -1688,6 +1688,10 @@ a:focus-visible {
 	margin: 28px auto 0;
 }
 
+.tang-guide-account-choice--form {
+	margin-top: 20px;
+}
+
 .tang-guide-account-actions {
 	display: grid;
 	gap: 10px;
@@ -1719,6 +1723,11 @@ a:focus-visible {
 	margin: 14px auto 0;
 	padding: 10px 12px;
 	border-radius: 10px;
+}
+
+.tang-guide-account-message + .tang-guide-account-choice,
+.tang-guide-account-error + .tang-guide-account-choice {
+	margin-top: 14px;
 }
 
 .tang-guide-account-message {
@@ -1754,7 +1763,7 @@ a:focus-visible {
 
 .tang-guide-skip {
 	position: fixed;
-	right: 22px;
+	right: max(22px, calc((100vw - 1600px) / 2));
 	bottom: 18px;
 	background: transparent;
 	border: none;
@@ -1770,7 +1779,7 @@ a:focus-visible {
 
 .tang-guide-back {
 	position: fixed;
-	left: 22px;
+	left: max(22px, calc((100vw - 1600px) / 2));
 	bottom: 18px;
 	appearance: none;
 	border: none;
