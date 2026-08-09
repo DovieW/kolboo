@@ -43,7 +43,7 @@ pub(crate) fn ensure_quick_ask_window_visible(app: &AppHandle) {
             app,
             QUICK_ASK_WINDOW_LABEL,
             last_ready_ms,
-            45_000,
+            Some(45_000),
             "quick_ask_show",
         );
     }

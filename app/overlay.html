@@ -80,6 +80,19 @@
 				}
 			})();
 		</script>
+		<style>
+			@keyframes reveal-overlay-fallback {
+				to {
+					opacity: 1;
+				}
+			}
+
+			/* Do not flash a loading badge during an ordinary fast mount. */
+			#overlay-fallback {
+				opacity: 0;
+				animation: reveal-overlay-fallback 0s 2s forwards;
+			}
+		</style>
 		<title>Kolboo Mic</title>
 	</head>
 	<body>

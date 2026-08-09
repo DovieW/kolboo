@@ -23,15 +23,27 @@ fn now_ms() -> u64 {
 }
 
 #[cfg(desktop)]
+fn overlay_frontend_needs_reload(
+    last_ready_ms: u64,
+    age_ms: u64,
+    stale_after_ms: Option<u64>,
+) -> bool {
+    last_ready_ms == 0
+        || stale_after_ms
+            .map(|threshold_ms| age_ms > threshold_ms)
+            .unwrap_or(false)
+}
+
+#[cfg(desktop)]
 pub fn maybe_reload_overlay_webview(
     app: &AppHandle,
     label: &str,
     last_ready_ms: u64,
-    stale_after_ms: u64,
+    stale_after_ms: Option<u64>,
     reason: &str,
 ) {
     let age_ms = now_ms().saturating_sub(last_ready_ms);
-    let stale = last_ready_ms == 0 || age_ms > stale_after_ms;
+    let stale = overlay_frontend_needs_reload(last_ready_ms, age_ms, stale_after_ms);
     if !stale {
         return;
     }
@@ -419,7 +431,9 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
             .state::<AppState>()
             .overlay_frontend_ready_at_ms
             .load(Ordering::SeqCst);
-        maybe_reload_overlay_webview(app, "overlay", last_ready_ms, 45_000, "show");
+        // The main overlay intentionally reports readiness once when mounted.
+        // Reload only if it never mounted; elapsed time alone does not mean it is stale.
+        maybe_reload_overlay_webview(app, "overlay", last_ready_ms, None, "show");
 
         window.show().map_err(|e| e.to_string())?;
 
@@ -937,7 +951,7 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
         &app,
         "overlay_hover",
         last_ready_ms,
-        45_000,
+        Some(45_000),
         "show_overlay_hover",
     );
 
@@ -1241,4 +1255,25 @@ pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[cfg(all(test, desktop))]
+mod tests {
+    use super::overlay_frontend_needs_reload;
+
+    #[test]
+    fn one_shot_ready_overlay_does_not_expire() {
+        assert!(!overlay_frontend_needs_reload(1, 120_000, None));
+    }
+
+    #[test]
+    fn heartbeat_overlay_expires_after_threshold() {
+        assert!(!overlay_frontend_needs_reload(1, 45_000, Some(45_000)));
+        assert!(overlay_frontend_needs_reload(1, 45_001, Some(45_000)));
+    }
+
+    #[test]
+    fn overlay_that_never_reported_ready_is_reloaded() {
+        assert!(overlay_frontend_needs_reload(0, 0, None));
+    }
 }
