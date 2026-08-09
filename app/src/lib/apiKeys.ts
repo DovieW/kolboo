@@ -7,33 +7,33 @@ export interface ApiKeyConfig {
 }
 
 export type ApiKeyMutationIntent =
-  | {
-      kind: "save";
-      value: string;
-    }
-  | {
-      kind: "clear";
-    };
+	| {
+			kind: "save";
+			value: string;
+	  }
+	| {
+			kind: "clear";
+	  };
 
 export function resolveApiKeyMutationIntent(params: {
-  draftValue: string;
-  savedValue: string | null | undefined;
+	draftValue: string;
+	savedValue: string | null | undefined;
 }): ApiKeyMutationIntent | null {
-  const trimmedDraft = params.draftValue.trim();
-  const trimmedSaved = (params.savedValue ?? "").trim();
+	const trimmedDraft = params.draftValue.trim();
+	const trimmedSaved = (params.savedValue ?? "").trim();
 
-  if (trimmedDraft.length === 0) {
-    return trimmedSaved.length > 0 ? { kind: "clear" } : null;
-  }
+	if (trimmedDraft.length === 0) {
+		return trimmedSaved.length > 0 ? { kind: "clear" } : null;
+	}
 
-  if (trimmedDraft === trimmedSaved) {
-    return null;
-  }
+	if (trimmedDraft === trimmedSaved) {
+		return null;
+	}
 
-  return {
-    kind: "save",
-    value: trimmedDraft,
-  };
+	return {
+		kind: "save",
+		value: trimmedDraft,
+	};
 }
 
 export const API_KEYS: ApiKeyConfig[] = [

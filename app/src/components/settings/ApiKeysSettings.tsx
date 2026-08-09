@@ -25,10 +25,10 @@ import { Link as LinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
-  API_KEYS,
-  type ApiKeyConfig,
-  type ApiKeyMutationIntent,
-  resolveApiKeyMutationIntent,
+	API_KEYS,
+	type ApiKeyConfig,
+	type ApiKeyMutationIntent,
+	resolveApiKeyMutationIntent,
 } from "../../lib/apiKeys";
 import { formatErrorMessage } from "../../lib/formatError";
 import {
@@ -167,262 +167,262 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 	}, [savedKeyValue]);
 
 	const saveKey = useMutation({
-    mutationFn: async (intent: ApiKeyMutationIntent) => {
-      if (intent.kind === "clear") {
-        await tauriAPI.clearApiKey(config.storeKey);
-        return "";
-      }
+		mutationFn: async (intent: ApiKeyMutationIntent) => {
+			if (intent.kind === "clear") {
+				await tauriAPI.clearApiKey(config.storeKey);
+				return "";
+			}
 
-      await tauriAPI.setApiKey(config.storeKey, intent.value);
-      return intent.value;
-    },
-    onSuccess: async (normalizedValue) => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["apiKey", config.storeKey],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["apiKeyValue", config.storeKey],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["availableProviders"] }),
-      ]);
+			await tauriAPI.setApiKey(config.storeKey, intent.value);
+			return intent.value;
+		},
+		onSuccess: async (normalizedValue) => {
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: ["apiKey", config.storeKey],
+				}),
+				queryClient.invalidateQueries({
+					queryKey: ["apiKeyValue", config.storeKey],
+				}),
+				queryClient.invalidateQueries({ queryKey: ["availableProviders"] }),
+			]);
 
-      // Keep the normalized value in the field so blur/Enter stays idempotent
-      // and a cleared key looks cleared immediately, even before the query
-      // refetch resolves.
-      setValue(normalizedValue);
-      hasHydratedRef.current = true;
-    },
-    onError: (error, intent) => {
-      notifications.show({
-        title:
-          intent.kind === "clear"
-            ? `Unable to clear ${config.label} API key`
-            : `Unable to save ${config.label} API key`,
-        message: formatErrorMessage(error),
-        color: "red",
-      });
-    },
-  });
+			// Keep the normalized value in the field so blur/Enter stays idempotent
+			// and a cleared key looks cleared immediately, even before the query
+			// refetch resolves.
+			setValue(normalizedValue);
+			hasHydratedRef.current = true;
+		},
+		onError: (error, intent) => {
+			notifications.show({
+				title:
+					intent.kind === "clear"
+						? `Unable to clear ${config.label} API key`
+						: `Unable to save ${config.label} API key`,
+				message: formatErrorMessage(error),
+				color: "red",
+			});
+		},
+	});
 
 	const handleCommit = () => {
-    if (saveKey.isPending) return;
+		if (saveKey.isPending) return;
 
-    const intent = resolveApiKeyMutationIntent({
-      draftValue: value,
-      savedValue: savedKeyValue,
-    });
+		const intent = resolveApiKeyMutationIntent({
+			draftValue: value,
+			savedValue: savedKeyValue,
+		});
 
-    if (!intent) return;
+		if (!intent) return;
 
-    saveKey.mutate(intent);
-  };
+		saveKey.mutate(intent);
+	};
 
 	const modelCountsLabel = formatProviderModelCounts(config.id);
 	const modelsTooltip = formatProviderModelsTooltip(config.id);
 
 	return (
-    <SettingsRow
-      className="api-keys-row"
-      left={
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <p className="settings-label">{config.label}</p>
-          <Text
-            size="xs"
-            c="var(--text-muted)"
-            className="settings-description--single-line"
-            title="Stored securely in your OS credential vault. Leave the field blank to remove the saved key."
-          >
-            Stored securely. Leave blank to clear.
-          </Text>
-          {config.id === "groq" && (
-            <Group gap={10} align="center" wrap="nowrap" mt={2}>
-              <Switch
-                size="sm"
-                checked={settings?.groq_free_tier ?? true}
-                onChange={(e) =>
-                  updateGroqFreeTier.mutate(e.currentTarget.checked)
-                }
-                aria-label="Groq free tier"
-              />
-              <Text size="xs" c="var(--text-secondary)" fw={600}>
-                Free tier
-              </Text>
-              <Text
-                size="xs"
-                c="var(--text-muted)"
-                className="settings-description--single-line"
-                style={{ flex: 1 }}
-                title="Assume Groq calls cost $0 for stats"
-              >
-                Assume Groq calls cost $0 for stats
-              </Text>
-            </Group>
-          )}
-          {config.id === "cerebras" && (
-            <Group gap={10} align="center" wrap="nowrap" mt={2}>
-              <Switch
-                size="sm"
-                checked={settings?.cerebras_free_tier ?? true}
-                onChange={(e) =>
-                  updateCerebrasFreeTier.mutate(e.currentTarget.checked)
-                }
-                aria-label="Cerebras free tier"
-              />
-              <Text size="xs" c="var(--text-secondary)" fw={600}>
-                Free tier
-              </Text>
-              <Text
-                size="xs"
-                c="var(--text-muted)"
-                className="settings-description--single-line"
-                style={{ flex: 1 }}
-                title="Assume Cerebras calls cost $0 for stats"
-              >
-                Assume Cerebras calls cost $0 for stats
-              </Text>
-            </Group>
-          )}
-          {config.id === "assemblyai" && (
-            <Group gap={10} align="center" wrap="nowrap" mt={2}>
-              <Switch
-                size="sm"
-                checked={settings?.assemblyai_free_tier ?? true}
-                onChange={(e) =>
-                  updateAssemblyAiFreeTier.mutate(e.currentTarget.checked)
-                }
-                aria-label="AssemblyAI free tier"
-              />
-              <Text size="xs" c="var(--text-secondary)" fw={600}>
-                Free tier
-              </Text>
-              <Text
-                size="xs"
-                c="var(--text-muted)"
-                className="settings-description--single-line"
-                style={{ flex: 1 }}
-                title="Assume AssemblyAI calls cost $0 for stats"
-              >
-                Assume AssemblyAI calls cost $0 for stats
-              </Text>
-            </Group>
-          )}
-          {config.id === "speechmatics" && (
-            <Group gap={10} align="center" wrap="nowrap" mt={2}>
-              <Switch
-                size="sm"
-                checked={settings?.speechmatics_free_tier ?? true}
-                onChange={(e) =>
-                  updateSpeechmaticsFreeTier.mutate(e.currentTarget.checked)
-                }
-                aria-label="Speechmatics free tier"
-              />
-              <Text size="xs" c="var(--text-secondary)" fw={600}>
-                Free tier
-              </Text>
-              <Text
-                size="xs"
-                c="var(--text-muted)"
-                className="settings-description--single-line"
-                style={{ flex: 1 }}
-                title="Assume Speechmatics calls cost $0 for stats"
-              >
-                Assume Speechmatics calls cost $0 for stats
-              </Text>
-            </Group>
-          )}
-          {config.id === "cohere" && (
-            <Group gap={10} align="center" wrap="nowrap" mt={2}>
-              <Switch
-                size="sm"
-                checked={settings?.cohere_free_tier ?? true}
-                onChange={(e) =>
-                  updateCohereFreeTier.mutate(e.currentTarget.checked)
-                }
-                aria-label="Cohere free tier"
-              />
-              <Text size="xs" c="var(--text-secondary)" fw={600}>
-                Free tier
-              </Text>
-              <Text
-                size="xs"
-                c="var(--text-muted)"
-                className="settings-description--single-line"
-                style={{ flex: 1 }}
-                title="Assume Cohere calls cost $0 for stats"
-              >
-                Assume Cohere calls cost $0 for stats
-              </Text>
-            </Group>
-          )}
-        </div>
-      }
-      right={
-        <>
-          {modelCountsLabel && (
-            <Tooltip
-              label={modelsTooltip ?? ""}
-              withArrow
-              multiline
-              disabled={!modelsTooltip}
-              position="bottom"
-              styles={{
-                tooltip: {
-                  backgroundColor: "var(--bg-elevated)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border-default)",
-                },
-              }}
-            >
-              <Text
-                size="xs"
-                c="var(--text-muted)"
-                style={{ alignSelf: "center", whiteSpace: "nowrap" }}
-              >
-                {modelCountsLabel}
-              </Text>
-            </Tooltip>
-          )}
-          <Tooltip label="Get key" withArrow>
-            <ActionIcon
-              component="a"
-              href={config.getKeyUrl}
-              target="_blank"
-              rel="noreferrer"
-              variant="subtle"
-              color="gray"
-              size={36}
-            >
-              <LinkIcon size={16} />
-            </ActionIcon>
-          </Tooltip>
-          <PasswordInput
-            value={value}
-            onChange={(e) => setValue(e.currentTarget.value)}
-            onBlur={handleCommit}
-            placeholder={config.placeholder}
-            size="sm"
-            disabled={isPrefilling || saveKey.isPending}
-            styles={{
-              input: {
-                backgroundColor: "var(--bg-elevated)",
-                borderColor: "var(--border-default)",
-                color: "var(--text-primary)",
-                height: 36,
-                width: 200,
-              },
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-            }}
-          />
-        </>
-      }
-    />
-  );
+		<SettingsRow
+			className="api-keys-row"
+			left={
+				<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+					<p className="settings-label">{config.label}</p>
+					<Text
+						size="xs"
+						c="var(--text-muted)"
+						className="settings-description--single-line"
+						title="Stored securely in your OS credential vault. Leave the field blank to remove the saved key."
+					>
+						Stored securely. Leave blank to clear.
+					</Text>
+					{config.id === "groq" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.groq_free_tier ?? true}
+								onChange={(e) =>
+									updateGroqFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Groq free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Groq calls cost $0 for stats"
+							>
+								Assume Groq calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "cerebras" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.cerebras_free_tier ?? true}
+								onChange={(e) =>
+									updateCerebrasFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Cerebras free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Cerebras calls cost $0 for stats"
+							>
+								Assume Cerebras calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "assemblyai" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.assemblyai_free_tier ?? true}
+								onChange={(e) =>
+									updateAssemblyAiFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="AssemblyAI free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume AssemblyAI calls cost $0 for stats"
+							>
+								Assume AssemblyAI calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "speechmatics" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.speechmatics_free_tier ?? true}
+								onChange={(e) =>
+									updateSpeechmaticsFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Speechmatics free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Speechmatics calls cost $0 for stats"
+							>
+								Assume Speechmatics calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+					{config.id === "cohere" && (
+						<Group gap={10} align="center" wrap="nowrap" mt={2}>
+							<Switch
+								size="sm"
+								checked={settings?.cohere_free_tier ?? true}
+								onChange={(e) =>
+									updateCohereFreeTier.mutate(e.currentTarget.checked)
+								}
+								aria-label="Cohere free tier"
+							/>
+							<Text size="xs" c="var(--text-secondary)" fw={600}>
+								Free tier
+							</Text>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								className="settings-description--single-line"
+								style={{ flex: 1 }}
+								title="Assume Cohere calls cost $0 for stats"
+							>
+								Assume Cohere calls cost $0 for stats
+							</Text>
+						</Group>
+					)}
+				</div>
+			}
+			right={
+				<>
+					{modelCountsLabel && (
+						<Tooltip
+							label={modelsTooltip ?? ""}
+							withArrow
+							multiline
+							disabled={!modelsTooltip}
+							position="bottom"
+							styles={{
+								tooltip: {
+									backgroundColor: "var(--bg-elevated)",
+									color: "var(--text-primary)",
+									border: "1px solid var(--border-default)",
+								},
+							}}
+						>
+							<Text
+								size="xs"
+								c="var(--text-muted)"
+								style={{ alignSelf: "center", whiteSpace: "nowrap" }}
+							>
+								{modelCountsLabel}
+							</Text>
+						</Tooltip>
+					)}
+					<Tooltip label="Get key" withArrow>
+						<ActionIcon
+							component="a"
+							href={config.getKeyUrl}
+							target="_blank"
+							rel="noreferrer"
+							variant="subtle"
+							color="gray"
+							size={36}
+						>
+							<LinkIcon size={16} />
+						</ActionIcon>
+					</Tooltip>
+					<PasswordInput
+						value={value}
+						onChange={(e) => setValue(e.currentTarget.value)}
+						onBlur={handleCommit}
+						placeholder={config.placeholder}
+						size="sm"
+						disabled={isPrefilling || saveKey.isPending}
+						styles={{
+							input: {
+								backgroundColor: "var(--bg-elevated)",
+								borderColor: "var(--border-default)",
+								color: "var(--text-primary)",
+								height: 36,
+								width: 200,
+							},
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") {
+								e.preventDefault();
+								e.currentTarget.blur();
+							}
+						}}
+					/>
+				</>
+			}
+		/>
+	);
 }
 
 const WHISPER_MODEL_DOWNLOAD_PROGRESS_EVENT = "whisper-model-download-progress";
