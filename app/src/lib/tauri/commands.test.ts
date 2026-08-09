@@ -99,6 +99,24 @@ describe("tauri command wrappers", () => {
 	});
 
 	itWithImportTimeout(
+		"normalizes missing secret values and optional microphone identifiers",
+		async () => {
+			invokeMock.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+			const { tauriAPI } = await import("./commands");
+
+			await expect(tauriAPI.getApiKey("openai_api_key")).resolves.toBeNull();
+			await tauriAPI.startMicTestMeter();
+
+			expect(invokeMock).toHaveBeenNthCalledWith(1, "secrets_get_api_key", {
+				storeKey: "openai_api_key",
+			});
+			expect(invokeMock).toHaveBeenNthCalledWith(2, "mic_test_start_meter", {
+				args: { inputDeviceId: null },
+			});
+		},
+	);
+
+	itWithImportTimeout(
 		"getCostByProvider maps kind=all to undefined",
 		async () => {
 			const { tauriAPI } = await import("./commands");

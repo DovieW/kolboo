@@ -432,4 +432,75 @@ describe("tauri settings side effects", () => {
 			deleteKeys: [],
 		});
 	});
+
+	it("persists the simple settings wrappers through the backend patch command", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+		const api = tauriSettingsAPI as unknown as Record<
+			string,
+			(...args: unknown[]) => Promise<void>
+		>;
+		const calls: Array<[string, ...unknown[]]> = [
+			["updateSelectedMic", "mic-1"],
+			["updateSoundEnabled", true],
+			["updateRewriteLlmEnabled", true],
+			["updateQuickAskProvider", "openai"],
+			["updateQuickAskModel", "gpt-test"],
+			["updateQuickAskSystemPrompt", "Be concise"],
+			["updateQuickAskIncludeSelectedText", true],
+			["updateWindowsClipboardFallbackForContextCapture", true],
+			["updateQuickAskConversationHistoryEnabled", true],
+			["updateQuickAskConversationHistoryCount", 7],
+			["updateSTTProvider", "deepgram"],
+			["updateSTTModel", "nova"],
+			["updateSTTLiveOutput", true],
+			["updateSTTSimulatedStreaming", false],
+			["updateSTTTranscriptionPrompt", "names"],
+			["updateLLMProvider", "openai"],
+			["updateLLMModel", "gpt-test"],
+			["updateSTTTimeout", 30],
+			["updateOverlayShowDetailedLoading", true],
+			["updateOutputHitEnter", false],
+			["updateQuietAudioGateEnabled", true],
+			["updateQuietAudioMinDurationSecs", 0.5],
+			["updateQuietAudioRmsDbfsThreshold", -52],
+			["updateQuietAudioPeakDbfsThreshold", -42],
+			["updateQuietAudioRequireSpeech", true],
+			["updateHotMicEnabled", false],
+			["updateMicAutoRecoverEnabled", true],
+			["updateAudioDownmixToMono", true],
+			["updateAudioResampleTo16khz", true],
+			["updateAudioHighpassEnabled", true],
+			["updateAudioAgcEnabled", true],
+			["updateAudioNoiseSuppressionEnabled", true],
+			["updateMaxSavedRecordings", 25],
+			["updateTranscriptionRetentionDays", 14],
+			["updateTranscriptionRetentionDeleteRecordings", true],
+			["updateOcrBaseUrl", " https://ocr.example.test "],
+			["updateOcrModel", " vision-test "],
+			["updateOcrPrompt", " Read the window "],
+			["updateOcrMaxTokens", 500],
+			["updateOcrTemperature", 0.2],
+			["updateOcrTopP", 0.9],
+			["updateOcrRequestTimeoutMs", 5_000],
+			["updateOcrContextMaxChars", 2_000],
+			["updateOcrHallucinationProtection", true],
+			["updateOcrHallucinationThreshold", 100],
+			["updateOcrResizeMaxDimension", 1_920],
+		];
+
+		for (const [method, ...args] of calls) {
+			const wrapper = api[method];
+			expect(wrapper).toBeTypeOf("function");
+			await wrapper?.(...args);
+		}
+
+		expect(
+			invokeMock.mock.calls.filter(([command]) => command === "settings_apply_patch"),
+		).toHaveLength(calls.length);
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: { ocr_resize_max_dimension: 1_920 },
+			deleteKeys: [],
+		});
+	});
 });
