@@ -1,14 +1,16 @@
 # Public repository publication audit
 
-> **Deferred evidence:** Repository publication is not an active objective. Retain this audit for provenance, but rerun the complete review against the final commit if publication is explicitly resumed.
+> **Completed source-publication evidence:** This audit covers repository visibility only. It does not approve public binaries, updater delivery, managed-service signup, or a public product launch.
 
 **Audit date:** 2026-08-09
 
-**Audited commit:** `59bdd36` (audit documentation follows in a later commit)
+**Audited commit:** `e05f6a939219db89db48002d3fdcc92496839a93` (audit documentation follows in a later commit)
 
 **Visibility during audit:** Private
 
-This audit records technical publication evidence. It does not authorize changing visibility; the company launch checklist remains the controlling gate.
+**Visibility after audit:** Public
+
+This audit records the technical evidence used for the explicitly authorized source-publication decision. Public source visibility remains separate from product release and launch gates.
 
 ## Full-history credential scans
 
@@ -52,10 +54,11 @@ The locked production JavaScript inventory contained 200 package entries and no 
 - Releases: Windows-only, updater-signed, and fail-closed on missing Authenticode credentials; ordinary development builds remain unsigned and available.
 - Metadata: description and topics identify Windows, Tauri, Rust, dictation, and speech-to-text without making unsupported cross-platform claims.
 
-## Remaining publication blockers
+## Remaining product-release blockers
 
 - Acquire and provision the Windows Authenticode certificate.
 - Publish legal pages at stable unauthenticated URLs and wire those links into app/checkout.
 - Activate and rehearse the real Merchant-of-Record flow.
 - Complete the exact-SHA Windows desktop-to-operator support rehearsal.
-- Re-run both history scanners on the final visibility-change commit and retain redacted reports outside the public repository.
+
+These blockers do not prevent public source access. They continue to block public binaries, updater delivery, managed-service promotion, and a broad product launch.
