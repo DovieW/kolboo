@@ -31,6 +31,15 @@
 		}
 	},
 	"plugins": {
+		"updater": {
+			"endpoints": [
+				"https://github.com/DovieW/kolboo/releases/latest/download/latest.json"
+			],
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI1M0RENDI4QzIwMkNGMTUKUldRVnp3TENLTlE5SlM5eHJJdWRvSFpKb3FJaUZKT01BcWhDZXZJbmdlaWFJL0cxL0xiaC9oSW4K",
+			"windows": {
+				"installMode": "passive"
+			}
+		},
 		"cli": {
 			"description": "Kolboo CLI",
 			"subcommands": {
@@ -407,6 +416,7 @@
 	},
 	"bundle": {
 		"active": true,
+		"createUpdaterArtifacts": true,
 		"targets": "all",
 		"shortDescription": "Customizable AI-powered voice dictation tool",
 		"longDescription": "Open-source alternative to Wispr Flow and SuperWhisper. Speak and your words are typed wherever your cursor is.",

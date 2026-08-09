@@ -1041,6 +1041,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .manage(QuickAskConversationMemory::default())
         .manage(TrayKeepAlive::default())

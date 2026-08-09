@@ -1,5 +1,26 @@
-// Minimal semver utilities + GitHub release version lookup.
-// We intentionally keep this dependency-free.
+// Minimal semver utilities plus the opt-in signed Tauri updater path.
+
+export const signedUpdaterEnabled =
+	import.meta.env.VITE_SIGNED_UPDATER_ENABLED === "true";
+
+export async function checkSignedUpdateVersion(): Promise<string | null> {
+	if (!signedUpdaterEnabled) return null;
+
+	const { check } = await import("@tauri-apps/plugin-updater");
+	const update = await check();
+	return update?.version ?? null;
+}
+
+export async function installSignedUpdate(): Promise<boolean> {
+	if (!signedUpdaterEnabled) return false;
+
+	const { check } = await import("@tauri-apps/plugin-updater");
+	const update = await check();
+	if (!update) return false;
+
+	await update.downloadAndInstall();
+	return true;
+}
 
 export function normalizeVersion(input: string): string | null {
 	const trimmed = input.trim();
@@ -55,30 +76,4 @@ export function compareSemver(a: string, b: string): number {
 	if (aMin !== bMin) return aMin > bMin ? 1 : -1;
 	if (aPatch !== bPatch) return aPatch > bPatch ? 1 : -1;
 	return 0;
-}
-
-export async function fetchLatestGithubReleaseVersion(params: {
-	owner: string;
-	repo: string;
-}): Promise<string | null> {
-	const url = `https://api.github.com/repos/${params.owner}/${params.repo}/releases/latest`;
-
-	const response = await fetch(url, {
-		headers: {
-			Accept: "application/vnd.github+json",
-		},
-	});
-
-	if (!response.ok) {
-		// Fail closed (no update indicator) on any network / rate-limit issue.
-		return null;
-	}
-
-	const json: unknown = await response.json();
-	if (!json || typeof json !== "object") return null;
-
-	const tagName = (json as { tag_name?: unknown }).tag_name;
-	if (typeof tagName !== "string") return null;
-
-	return normalizeVersion(tagName);
 }

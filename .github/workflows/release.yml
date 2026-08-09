@@ -30,6 +30,9 @@ jobs:
       - name: Verify versions match (and match tag)
         run: node .github/scripts/verify-versions.mjs
 
+      - name: Test updater manifest generation
+        run: node --test .github/scripts/generate-updater-manifest.test.mjs
+
       - name: Generate release notes from changelog.d
         run: node .github/scripts/generate-release-notes.mjs RELEASE_NOTES.md
 
@@ -44,6 +47,8 @@ jobs:
     name: Build Windows bundles
     needs: verify
     uses: ./.github/workflows/windows-build.yml
+    with:
+      release_signing: true
     secrets: inherit
 
   publish:
@@ -82,6 +87,9 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: .release/windows/**
+
+      - name: Generate signed updater manifest
+        run: node .github/scripts/generate-updater-manifest.mjs .release/windows/default .release/RELEASE_NOTES.md .release/windows/default/latest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

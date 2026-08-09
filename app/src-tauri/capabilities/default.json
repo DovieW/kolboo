@@ -13,6 +13,7 @@
 		"dialog:default",
 		"opener:default",
 		"global-shortcut:default",
-		"store:default"
+		"store:default",
+		"updater:default"
 	]
 }

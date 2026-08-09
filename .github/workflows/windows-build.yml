@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: true
+      release_signing:
+        description: "Generate signed updater artifacts for a public release"
+        required: false
+        type: boolean
+        default: false
     outputs:
       artifact-name-default:
         description: "Name of the uploaded Windows bundle artifact (default build)"
@@ -22,6 +27,11 @@ on:
         required: false
         type: boolean
         default: true
+      release_signing:
+        description: "Generate signed updater artifacts for a public release"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: windows-build-${{ github.ref }}
@@ -144,6 +154,9 @@ jobs:
       TAURI_API_BASE_URL: https://kolboo.dovie.dev
       TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -230,6 +243,19 @@ jobs:
           echo "environment=${environment}" >> "$GITHUB_OUTPUT"
           echo "release=${release}" >> "$GITHUB_OUTPUT"
 
+      - name: Require updater signing credentials for releases
+        if: ${{ inputs.release_signing }}
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TAURI_SIGNING_PRIVATE_KEY}" || -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}" ]]; then
+            echo "Release blocked: Tauri updater signing secrets are not configured." >&2
+            exit 1
+          fi
+
       - name: Build Tauri app (release) - default
         working-directory: app
         shell: bash
@@ -240,6 +266,9 @@ jobs:
           SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
           TAURI_SENTRY_ENV: ${{ steps.sentry-meta.outputs.environment }}
           TAURI_SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          VITE_SIGNED_UPDATER_ENABLED: ${{ inputs.release_signing && 'true' || 'false' }}
         run: |
           set -euo pipefail
           export SCCACHE_NO_DAEMON="1"
@@ -252,7 +281,11 @@ jobs:
             echo "sccache not available; building without compiler cache"
           fi
 
-          pnpm build
+          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            pnpm build:release
+          else
+            pnpm build
+          fi
 
           sccache --show-stats || true
 
@@ -276,6 +309,9 @@ jobs:
           SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
           TAURI_SENTRY_ENV: ${{ steps.sentry-meta.outputs.environment }}
           TAURI_SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          VITE_SIGNED_UPDATER_ENABLED: ${{ inputs.release_signing && 'true' || 'false' }}
         run: |
           set -euo pipefail
           export SCCACHE_NO_DAEMON="1"
@@ -290,7 +326,11 @@ jobs:
 
           # Reuse the repo's own local-whisper build script so CI follows the
           # exact same invocation path developers use locally.
-          pnpm build:local-whisper
+          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            pnpm build:release:local-whisper
+          else
+            pnpm build:local-whisper
+          fi
 
           sccache --show-stats || true
 

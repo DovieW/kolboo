@@ -74,7 +74,12 @@ import {
 	tauriAPI,
 } from "./lib/tauri";
 import { listenTyped } from "./lib/tauri/events";
-import { compareSemver, fetchLatestGithubReleaseVersion } from "./lib/updates";
+import {
+	checkSignedUpdateVersion,
+	compareSemver,
+	installSignedUpdate,
+	signedUpdaterEnabled,
+} from "./lib/updates";
 import "./styles.css";
 
 type View = "home" | "settings" | "logs" | "usage-stats" | "account";
@@ -89,9 +94,9 @@ function Sidebar({
 	const currentVersion = appPackageJson.version;
 
 	const { data: latestReleaseVersion } = useQuery({
-		queryKey: ["latestReleaseVersion", "DovieW", "kolboo"],
-		queryFn: () =>
-			fetchLatestGithubReleaseVersion({ owner: "DovieW", repo: "kolboo" }),
+		queryKey: ["signedUpdateVersion"],
+		queryFn: checkSignedUpdateVersion,
+		enabled: signedUpdaterEnabled,
 		staleTime: 6 * 60 * 60 * 1000,
 		refetchOnWindowFocus: false,
 		retry: false,
@@ -102,6 +107,17 @@ function Sidebar({
 		compareSemver(latestReleaseVersion, currentVersion) > 0;
 
 	const releaseUrl = "https://github.com/DovieW/kolboo/releases";
+	const installUpdate = async () => {
+		try {
+			await installSignedUpdate();
+		} catch (error) {
+			notifications.show({
+				title: "Update failed",
+				message: error instanceof Error ? error.message : "Try again later.",
+				color: "red",
+			});
+		}
+	};
 
 	return (
 		<aside className="sidebar">
@@ -178,8 +194,11 @@ function Sidebar({
 						<a
 							className="sidebar-footer-link"
 							href={releaseUrl}
-							target="_blank"
-							rel="noreferrer"
+							onClick={(event) => {
+								if (!signedUpdaterEnabled) return;
+								event.preventDefault();
+								void installUpdate();
+							}}
 						>
 							v{currentVersion}
 						</a>
