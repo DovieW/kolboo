@@ -232,7 +232,7 @@ fn monitor_work_area(monitor: &Monitor) -> PhysicalRect {
 }
 
 #[cfg(desktop)]
-fn overlay_display_scale(app: &AppHandle, monitor: &Monitor) -> (f64, f64, f64) {
+fn overlay_display_scale(app: &AppHandle, monitor: &Monitor) -> (f64, f64) {
     let native_scale = monitor.scale_factor();
 
     #[cfg(target_os = "linux")]
@@ -246,8 +246,7 @@ fn overlay_display_scale(app: &AppHandle, monitor: &Monitor) -> (f64, f64, f64) 
     let desktop_scale = None;
 
     let layout_scale = layout::effective_layout_scale(native_scale, desktop_scale);
-    let zoom = layout::webview_zoom(native_scale, layout_scale);
-    (native_scale, layout_scale, zoom)
+    (native_scale, layout_scale)
 }
 
 #[cfg(desktop)]
@@ -321,7 +320,7 @@ fn apply_overlay_layout_at_anchor(
         .map_err(|_| "Overlay layout lock poisoned".to_string())?;
 
     let monitor = resolve_target_monitor(&window, app).ok_or("No monitor found")?;
-    let (native_scale, layout_scale, zoom) = overlay_display_scale(app, &monitor);
+    let (native_scale, layout_scale) = overlay_display_scale(app, &monitor);
     let work_area = monitor_work_area(&monitor);
     let rect = layout::widget_rect(work_area, layout_scale, widget_layout, anchor);
 
@@ -329,7 +328,7 @@ fn apply_overlay_layout_at_anchor(
         .overlay_expanded
         .store(widget_layout == WidgetLayout::Expanded, Ordering::SeqCst);
 
-    let rect_key = (rect.x, rect.y, rect.width, rect.height, zoom.to_bits());
+    let rect_key = (rect.x, rect.y, rect.width, rect.height);
     {
         let last_rect = app_state
             .overlay_last_applied_rect
@@ -349,7 +348,8 @@ fn apply_overlay_layout_at_anchor(
     // Physical size and position share the same coordinate system and are
     // issued under one lock. Borderless utility windows have no intended
     // decoration delta, so the semantic CSS size maps directly through DPI.
-    window.set_zoom(zoom).map_err(|e| e.to_string())?;
+    // Do not also call set_zoom here: WebKit inherits GTK/XSettings DPI, and an
+    // extra zoom would apply Linux fractional scaling twice.
     window
         .set_size(tauri::Size::Physical(tauri::PhysicalSize {
             width: rect.width,
@@ -369,13 +369,12 @@ fn apply_overlay_layout_at_anchor(
         .map_err(|_| "Overlay rectangle cache lock poisoned".to_string())? = Some(rect_key);
 
     log::debug!(
-        "[overlay] layout applied (layout={:?}, anchor={:?}, rect={:?}, native_scale={}, layout_scale={}, zoom={}, monitor={})",
+        "[overlay] layout applied (layout={:?}, anchor={:?}, rect={:?}, native_scale={}, layout_scale={}, monitor={})",
         widget_layout,
         anchor,
         rect,
         native_scale,
         layout_scale,
-        zoom,
         format_monitor_summary(Some(&monitor))
     );
     Ok(())
@@ -658,7 +657,7 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
         .flatten()
         .or_else(|| resolve_target_monitor(&overlay, &app))
         .ok_or("No monitor found for overlay hover")?;
-    let (_native_scale, layout_scale, zoom) = overlay_display_scale(&app, &monitor);
+    let (_native_scale, layout_scale) = overlay_display_scale(&app, &monitor);
     let widget_rect = PhysicalRect::new(
         overlay_pos.x,
         overlay_pos.y,
@@ -674,7 +673,6 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
         12.0,
     );
 
-    hover.set_zoom(zoom).map_err(|e| e.to_string())?;
     hover
         .set_size(tauri::Size::Physical(tauri::PhysicalSize {
             width: rect.width,
@@ -911,7 +909,7 @@ pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()
     };
 
     let monitor = resolve_target_monitor(&win, app).ok_or("No monitor found")?;
-    let (_native_scale, layout_scale, zoom) = overlay_display_scale(app, &monitor);
+    let (_native_scale, layout_scale) = overlay_display_scale(app, &monitor);
     let rect = layout::anchored_rect(
         monitor_work_area(&monitor),
         LogicalSize::new(520.0, 260.0),
@@ -920,7 +918,6 @@ pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()
         4.0,
     );
 
-    win.set_zoom(zoom).map_err(|e| e.to_string())?;
     win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
         width: rect.width,
         height: rect.height,

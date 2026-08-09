@@ -38,7 +38,7 @@ pub struct AppState {
     /// Last complete physical rectangle submitted to the native window system.
     /// Repeated frontend state notifications with the same target are ignored.
     #[cfg(desktop)]
-    pub overlay_last_applied_rect: Mutex<Option<(i32, i32, u32, u32, u64)>>,
+    pub overlay_last_applied_rect: Mutex<Option<(i32, i32, u32, u32)>>,
 
     /// Fractional desktop UI scale reported through GTK/XSettings on Linux.
     ///

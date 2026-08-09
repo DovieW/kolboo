@@ -110,12 +110,6 @@ pub(crate) fn effective_layout_scale(native_scale: f64, desktop_scale: Option<f6
         .unwrap_or(native_scale)
 }
 
-/// Zoom required for a webview's logical CSS viewport to match a window sized
-/// with `effective_layout_scale` physical pixels.
-pub(crate) fn webview_zoom(native_scale: f64, layout_scale: f64) -> f64 {
-    valid_scale(layout_scale) / valid_scale(native_scale)
-}
-
 fn scaled_dimension(value: f64, scale: f64, maximum: u32) -> u32 {
     ((value.max(1.0) * valid_scale(scale)).round() as u64).clamp(1, maximum.max(1) as u64) as u32
 }
@@ -269,9 +263,7 @@ mod tests {
         let layout_scale = effective_layout_scale(1.0, Some(1.75));
 
         assert_eq!(layout_scale, 1.75);
-        assert_eq!(webview_zoom(1.0, layout_scale), 1.75);
         assert_eq!(effective_layout_scale(2.0, Some(1.75)), 2.0);
-        assert_eq!(webview_zoom(2.0, 2.0), 1.0);
     }
 
     #[test]
