@@ -1719,10 +1719,11 @@ a:focus-visible {
 
 .tang-guide-account-message,
 .tang-guide-account-error {
-	max-width: 620px;
+	max-width: 420px;
 	margin: 14px auto 0;
 	padding: 10px 12px;
 	border-radius: 10px;
+	line-height: 1.45;
 }
 
 .tang-guide-account-message + .tang-guide-account-choice,

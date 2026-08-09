@@ -1,7 +1,6 @@
 use base64::Engine;
 use chrono::Utc;
-use reqwest::Method;
-use reqwest::Url;
+use reqwest::{Method, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -60,6 +59,11 @@ struct SupabaseSignupAuthResponse {
     user: Option<SupabaseAuthUser>,
     id: Option<String>,
     email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SupabaseAuthErrorResponse {
+    error_code: Option<String>,
 }
 
 impl SupabaseSignupAuthResponse {
@@ -327,17 +331,18 @@ async fn sign_in_supabase_with_password(
         }))
         .send()
         .await
-        .map_err(|e| {
-            CommandError::new(format!("Email sign-in request failed: {e}"), "auth")
-                .with_code("auth_sign_in_failed")
+        .map_err(|_| {
+            CommandError::new(
+                "Unable to reach the account service. Check your connection and try again.",
+                "auth",
+            )
+            .with_code("auth_service_unavailable")
+            .with_retryable(true)
         })?;
 
     if !response.status().is_success() {
         let (status, text) = crate::http::status_and_text(response).await;
-        return Err(
-            CommandError::new(format!("Email sign-in failed ({status}): {text}"), "auth")
-                .with_code("auth_sign_in_failed"),
-        );
+        return Err(password_sign_in_error(status, &text));
     }
 
     response
@@ -347,6 +352,63 @@ async fn sign_in_supabase_with_password(
             CommandError::new(format!("Failed to parse sign in response: {e}"), "auth")
                 .with_code("auth_response_parse_failed")
         })
+}
+
+fn supabase_auth_error_code(body: &str) -> Option<String> {
+    serde_json::from_str::<SupabaseAuthErrorResponse>(body)
+        .ok()
+        .and_then(|response| response.error_code)
+}
+
+fn password_sign_in_error(status: StatusCode, body: &str) -> CommandError {
+    let upstream_code = supabase_auth_error_code(body);
+    log::warn!(
+        "Supabase password sign-in failed: status={} code={}",
+        status,
+        upstream_code.as_deref().unwrap_or("unknown")
+    );
+
+    if upstream_code.as_deref() == Some("invalid_credentials") {
+        return CommandError::new("Email or password is incorrect.", "auth")
+            .with_code("auth_invalid_credentials");
+    }
+
+    CommandError::new("Unable to sign in right now. Please try again.", "auth")
+        .with_code("auth_sign_in_failed")
+        .with_retryable(status.is_server_error())
+}
+
+fn password_sign_up_error(status: StatusCode, body: &str) -> CommandError {
+    let upstream_code = supabase_auth_error_code(body);
+    log::warn!(
+        "Supabase password sign-up failed: status={} code={}",
+        status,
+        upstream_code.as_deref().unwrap_or("unknown")
+    );
+
+    let (message, code) = match upstream_code.as_deref() {
+        Some("user_already_exists") => (
+            "An account already exists for this email. Sign in instead.",
+            "auth_account_exists",
+        ),
+        Some("weak_password") => (
+            "Choose a stronger password and try again.",
+            "auth_weak_password",
+        ),
+        Some("email_address_invalid") => ("Enter a valid email address.", "auth_email_invalid"),
+        Some("signup_disabled") => (
+            "Account creation is currently unavailable.",
+            "auth_signup_disabled",
+        ),
+        _ => (
+            "Unable to create the account right now. Please try again.",
+            "auth_sign_up_failed",
+        ),
+    };
+
+    CommandError::new(message, "auth")
+        .with_code(code)
+        .with_retryable(status.is_server_error())
 }
 
 async fn sign_up_supabase_with_password(
@@ -366,17 +428,18 @@ async fn sign_up_supabase_with_password(
         }))
         .send()
         .await
-        .map_err(|e| {
-            CommandError::new(format!("Email sign-up request failed: {e}"), "auth")
-                .with_code("auth_sign_up_failed")
+        .map_err(|_| {
+            CommandError::new(
+                "Unable to reach the account service. Check your connection and try again.",
+                "auth",
+            )
+            .with_code("auth_service_unavailable")
+            .with_retryable(true)
         })?;
 
     if !response.status().is_success() {
         let (status, text) = crate::http::status_and_text(response).await;
-        return Err(
-            CommandError::new(format!("Email sign-up failed ({status}): {text}"), "auth")
-                .with_code("auth_sign_up_failed"),
-        );
+        return Err(password_sign_up_error(status, &text));
     }
 
     response
@@ -1438,7 +1501,7 @@ pub async fn license_get_management_url(app: AppHandle) -> CommandResult<String>
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, TimeZone, Utc};
-    use reqwest::Url;
+    use reqwest::{StatusCode, Url};
 
     use crate::licensing::{LicenseTier, OrgContext, OrgInferenceMode, PolicyStatus};
 
@@ -1446,9 +1509,36 @@ mod tests {
         build_auth_context, build_license_refresh_failure_error, build_pkce_code_challenge,
         build_public_auth_page_url, build_session_exchange_placeholder_response,
         build_supabase_authorize_url, extract_auth_code_from_callback_target,
-        extract_public_auth_session_from_callback_request, refresh_error_requires_reauthentication,
+        extract_public_auth_session_from_callback_request, password_sign_in_error,
+        password_sign_up_error, refresh_error_requires_reauthentication,
         resolve_password_login_credentials, resolve_signup_credentials, SupabaseSignupAuthResponse,
     };
+
+    #[test]
+    fn password_sign_in_error_hides_upstream_json() {
+        let error = password_sign_in_error(
+            StatusCode::BAD_REQUEST,
+            r#"{"code":400,"error_code":"invalid_credentials","msg":"Invalid login credentials"}"#,
+        );
+
+        assert_eq!(error.message.as_ref(), "Email or password is incorrect.");
+        assert_eq!(error.code.as_deref(), Some("auth_invalid_credentials"));
+        assert!(!error.message.contains("invalid_credentials"));
+    }
+
+    #[test]
+    fn password_sign_up_error_explains_existing_account() {
+        let error = password_sign_up_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            r#"{"error_code":"user_already_exists"}"#,
+        );
+
+        assert_eq!(
+            error.message.as_ref(),
+            "An account already exists for this email. Sign in instead."
+        );
+        assert_eq!(error.code.as_deref(), Some("auth_account_exists"));
+    }
 
     #[test]
     fn auth_context_denies_when_signed_out() {
