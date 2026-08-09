@@ -39,7 +39,7 @@ Windows is the currently supported tester platform. Linux and macOS support are 
 | macOS | In development; not yet supported |
 | Linux | In development; not yet supported |
 
-The repository remains private and public distribution is deferred. Current priorities are documented in the [desktop roadmap](docs/ROADMAP.md), with platform detail in the [cross-platform roadmap](docs/Plans/CROSS_PLATFORM_COMPATIBILITY.md).
+The source repository is public, but public binaries, updater delivery, and product-launch promotion remain deferred. Current priorities are documented in the [desktop roadmap](docs/ROADMAP.md), with platform detail in the [cross-platform roadmap](docs/Plans/CROSS_PLATFORM_COMPATIBILITY.md).
 
 Private Windows artifacts continue to use the [release operations guide](docs/Dev%20Docs/RELEASE_OPERATIONS.md) for build evidence, updater, rollback, and cache-cleaning procedures.
 
@@ -119,7 +119,7 @@ Notes:
 
 [AGPL-3.0](LICENSE)
 
-Kolboo is derived from Tambourine Voice and includes work from multiple contributors. See [NOTICE](NOTICE), [third-party notices](THIRD_PARTY_NOTICES.md), and the [commercial-license/AGPL explanation](https://kol.software/legal/commercial-license) before redistributing or requesting commercial terms. The public legal URL is a launch gate and may not resolve while this repository remains private.
+Kolboo is derived from Tambourine Voice and includes work from multiple contributors. See [NOTICE](NOTICE), [third-party notices](THIRD_PARTY_NOTICES.md), and the [commercial-license/AGPL explanation](https://kol.software/legal/commercial-license) before redistributing or requesting commercial terms. Public legal-page hosting remains a product-launch gate and the external legal URL may not resolve yet.
 
 ## Contributing
 

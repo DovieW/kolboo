@@ -69,13 +69,12 @@ Source code compiling conditionally is not sufficient.
 
 Deferred without a date:
 
-- changing repository visibility to public;
 - public release promotion and unauthenticated updater distribution;
 - public OSS/community launch;
 - public legal/marketing link promotion;
 - enterprise-specific desktop UX, SSO, or SLA claims.
 
-Updater, signing, license, and publication code may be maintained for correctness, but public-launch completion is not a current priority.
+The source repository is public. That visibility decision does not make any platform supported, publish binaries, open managed signup, or complete a product launch. Updater, signing, license, and publication code may be maintained for correctness, but public-launch completion is not a current priority.
 
 ## Backlog rule
 
