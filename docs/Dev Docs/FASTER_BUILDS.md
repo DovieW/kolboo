@@ -60,3 +60,7 @@ Cargo compiles crates in parallel by default, but you can force the job count by
 - `CARGO_BUILD_JOBS` (e.g. to your logical core count)
 
 Note: linking on Windows can still dominate rebuild time and doesn’t scale as well with cores.
+
+## 4) Reclaim Cargo target disk space safely
+
+Use `pnpm -C app clean:rust-cache` to preview the exact known Cargo target directories and their sizes. Use `pnpm -C app clean:rust-cache:apply` only when you are ready to discard those rebuildable outputs. See [Windows v1 release operations](RELEASE_OPERATIONS.md#cargo-cache-disk-usage) for the deletion boundary and rebuild impact.

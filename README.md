@@ -33,11 +33,15 @@ This is a fork of [Tambourine](https://github.com/kstonekuan/tambourine-voice) m
 
 Download Windows installer from the [latest release](https://github.com/DovieW/kolboo/releases).
 
-| Platform | Compatibility    |
-| -------- | -------------    |
-| Windows  | ✅               |
-| macOS    | ⚠️ (need tester) |
-| Linux    | ⚠️ (need tester) |
+Windows is the only supported v1 platform. The release workflow and manual acceptance process cover Windows installers only.
+
+| Platform | v1 status |
+| --- | --- |
+| Windows | Supported |
+| macOS | Unsupported; development experiments only |
+| Linux | Unsupported; development experiments only |
+
+There is no committed macOS or Linux release timeline. See the [Windows release operations guide](docs/Dev%20Docs/RELEASE_OPERATIONS.md) for signing, updater, rollback, and cache-cleaning procedures.
 
 ## Development build variants
 

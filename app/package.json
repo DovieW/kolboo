@@ -29,6 +29,8 @@
 		"audit:js": "pnpm audit --audit-level high",
 		"audit:rust": "cargo audit --file src-tauri/Cargo.lock",
 		"audit": "pnpm audit:js && pnpm audit:rust",
+		"clean:rust-cache": "node scripts/clean-rust-cache.mjs",
+		"clean:rust-cache:apply": "node scripts/clean-rust-cache.mjs --apply",
 		"test:watch": "node scripts/run-with-timing.mjs vitest",
 		"schemas:generate": "node scripts/run-with-timing.mjs node scripts/generate-schemas.mjs",
 		"schemas:check": "node scripts/run-with-timing.mjs --shell \"pnpm run schemas:generate && git diff --exit-code -- src-tauri/gen/schemas\"",

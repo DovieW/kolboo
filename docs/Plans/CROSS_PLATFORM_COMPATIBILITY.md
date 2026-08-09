@@ -1,5 +1,7 @@
 # Cross-platform compatibility roadmap
 
+> Exploratory only: Kolboo v1 supports Windows. This document records possible future engineering work and does not promise macOS or Linux releases or a delivery date.
+
 This is the living plan for **platform-specific behavior** in Kolboo.
 
 Purpose:

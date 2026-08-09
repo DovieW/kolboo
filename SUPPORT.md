@@ -2,6 +2,8 @@
 
 ## Getting help
 
+Kolboo v1 support covers Windows only. macOS and Linux reports are welcome as development feedback, but they do not carry compatibility or response commitments.
+
 - For bugs and feature requests: open a GitHub issue.
 - For questions: use GitHub Discussions or open an issue labeled “question”.
 
