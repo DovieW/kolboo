@@ -56,10 +56,10 @@ export function buildSettingsGuideAccountViewModel(
 			mode: "signed_out",
 			isSignedIn: false,
 			hasPaidAccess: false,
-			title: "Create an account when you’re ready",
+			title: "How would you like to continue?",
 			statusLabel: "Not signed in",
 			description:
-				"Kolboo works free in Community/BYOK mode without an account. Signing in is optional and does not require payment.",
+				"An account is the path to settings sync and managed models. Local and bring-your-own-key features work without one.",
 			detail:
 				"Continue without an account to finish local/BYOK setup, or sign in now so your account is ready for Pro later.",
 			proSyncLine,

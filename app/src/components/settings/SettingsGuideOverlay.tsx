@@ -4,7 +4,6 @@ import {
 	Group,
 	Kbd,
 	PasswordInput,
-	SegmentedControl,
 	Text,
 	Textarea,
 	TextInput,
@@ -384,6 +383,13 @@ export function SettingsGuideOverlay({
 		);
 	};
 
+	const showAccountForm = (mode: AccountAuthMode) => {
+		setAccountAuthMode(mode);
+		setShowInlineSignIn(true);
+		setAccountMessage(null);
+		setAccountError(null);
+	};
+
 	const handleInlineAccountAuth = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		setAccountError(null);
@@ -530,21 +536,23 @@ export function SettingsGuideOverlay({
 						{step === "account" && (
 							<div className="tang-guide-step">
 								<Title order={3}>{accountView.title}</Title>
-								<Text c="dimmed" size="sm" style={{ marginTop: 8 }}>
+								<Text className="tang-guide-account-intro" c="dimmed" size="sm">
 									{accountView.description}
 								</Text>
 
-								<div className="tang-guide-account-card">
-									<Text className="tang-guide-account-status">
-										{accountView.statusLabel}
-									</Text>
-									<Text size="sm" c="dimmed" style={{ marginTop: 6 }}>
-										{accountView.detail}
-									</Text>
-									<Text size="xs" c="dimmed" style={{ marginTop: 10 }}>
-										{accountView.proSyncLine}
-									</Text>
-								</div>
+								{accountView.isSignedIn ? (
+									<div className="tang-guide-account-card">
+										<Text className="tang-guide-account-status">
+											{accountView.statusLabel}
+										</Text>
+										<Text size="sm" c="dimmed" style={{ marginTop: 6 }}>
+											{accountView.detail}
+										</Text>
+										<Text size="xs" c="dimmed" style={{ marginTop: 10 }}>
+											{accountView.proSyncLine}
+										</Text>
+									</div>
+								) : null}
 
 								{accountMessage ? (
 									<Text size="sm" className="tang-guide-account-message">
@@ -564,49 +572,59 @@ export function SettingsGuideOverlay({
 										</Button>
 									</Group>
 								) : (
-									<>
-										<Group justify="center" mt="lg">
-											<Button
-												color="orange"
-												onClick={handleBrowserAccountAuth}
-												loading={startLicenseLogin.isPending}
-											>
-												Sign in or create account
-											</Button>
-											<Button
-												variant="default"
-												onClick={() => setShowInlineSignIn((value) => !value)}
-											>
-												Sign in here
-											</Button>
-											<Button
-												variant="subtle"
-												onClick={() => enterGuideAt("groq")}
-											>
-												Continue without account
-											</Button>
-										</Group>
-
-										{showInlineSignIn ? (
+									<div className="tang-guide-account-choice">
+										{!showInlineSignIn ? (
+											<div className="tang-guide-account-actions">
+												<Button
+													type="button"
+													color="orange"
+													onClick={() => showAccountForm("sign_up")}
+												>
+													Create account
+												</Button>
+												<Button
+													type="button"
+													variant="default"
+													onClick={() => showAccountForm("sign_in")}
+												>
+													Sign in
+												</Button>
+												<Button
+													type="button"
+													variant="subtle"
+													onClick={() => enterGuideAt("groq")}
+												>
+													Continue without an account
+												</Button>
+											</div>
+										) : (
 											<form
 												className="tang-guide-account-form"
 												onSubmit={handleInlineAccountAuth}
 											>
-												<SegmentedControl
-													value={accountAuthMode}
-													onChange={(value) =>
-														setAccountAuthMode(value as AccountAuthMode)
-													}
-													data={[
-														{ value: "sign_up", label: "Create account" },
-														{ value: "sign_in", label: "Sign in" },
-													]}
-													disabled={accountAuthPending}
-												/>
-												<Text size="xs" c="dimmed">
+												<div className="tang-guide-account-form-heading">
+													<Text fw={700} size="lg">
+														{accountAuthMode === "sign_up"
+															? "Create your account"
+															: "Welcome back"}
+													</Text>
+													<Button
+														type="button"
+														variant="subtle"
+														size="compact-sm"
+														onClick={() => {
+															setShowInlineSignIn(false);
+															setAccountError(null);
+														}}
+														disabled={accountAuthPending}
+													>
+														Back
+													</Button>
+												</div>
+												<Text size="sm" c="dimmed">
 													{accountAuthMode === "sign_up"
-														? "Create a free account without starting billing. If email confirmation is required, you’ll confirm the email first, then come back here or use browser auth to finish sign-in."
-														: "Sign in with an existing account. No subscription is required for signed-in Community/BYOK mode."}
+														? "Create a free account. No payment is required."
+														: "Use your existing Kolboo account."}
 												</Text>
 												<TextInput
 													label="Email"
@@ -633,7 +651,15 @@ export function SettingsGuideOverlay({
 													disabled={accountAuthPending}
 													required
 												/>
-												<Group justify="flex-end">
+												<Group justify="space-between">
+													<Button
+														type="button"
+														variant="subtle"
+														onClick={handleBrowserAccountAuth}
+														loading={startLicenseLogin.isPending}
+													>
+														Use browser instead
+													</Button>
 													<Button type="submit" loading={accountAuthPending}>
 														{accountAuthMode === "sign_up"
 															? "Create free account"
@@ -641,8 +667,8 @@ export function SettingsGuideOverlay({
 													</Button>
 												</Group>
 											</form>
-										) : null}
-									</>
+										)}
+									</div>
 								)}
 							</div>
 						)}

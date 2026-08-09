@@ -44,8 +44,9 @@ describe("buildSettingsGuideAccountViewModel", () => {
 
 		expect(model.mode).toBe("signed_out");
 		expect(model.isSignedIn).toBe(false);
-		expect(model.description).toContain("Community/BYOK");
-		expect(model.description).toContain("does not require payment");
+		expect(model.title).toBe("How would you like to continue?");
+		expect(model.description).toContain("Local and bring-your-own-key");
+		expect(model.description).toContain("without one");
 	});
 
 	it("treats signed-in unpaid users as Community/BYOK", () => {
