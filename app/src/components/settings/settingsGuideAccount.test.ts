@@ -3,6 +3,7 @@ import type { LicenseState } from "../../lib/tauri";
 import {
 	buildSettingsGuideAccountViewModel,
 	buildSettingsGuideGroqStepViewModel,
+	buildSettingsGuideSteps,
 	buildSettingsGuideWrapupViewModel,
 	SETTINGS_GUIDE_STEPS,
 } from "./settingsGuideAccount";
@@ -37,6 +38,15 @@ describe("buildSettingsGuideAccountViewModel", () => {
 			"dictation",
 			"wrapup",
 		]);
+	});
+
+	it("skips BYOK provider onboarding for signed-in users", () => {
+		expect(buildSettingsGuideSteps(true)).toEqual([
+			"account",
+			"dictation",
+			"wrapup",
+		]);
+		expect(buildSettingsGuideSteps(false)).toEqual(SETTINGS_GUIDE_STEPS);
 	});
 
 	it("does not require an account for Community/BYOK setup", () => {
@@ -79,7 +89,7 @@ describe("buildSettingsGuideAccountViewModel", () => {
 		const groq = buildSettingsGuideGroqStepViewModel(account);
 
 		expect(groq.title).toContain("Optional BYOK");
-		expect(groq.description).toContain("paid access");
+		expect(groq.description).toContain("BYOK fallback");
 		expect(groq.helper).toContain("Skipping this step is fine");
 		expect(groq.submitLabel).toBe("Save key");
 	});

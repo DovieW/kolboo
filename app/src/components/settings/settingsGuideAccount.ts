@@ -11,6 +11,14 @@ export const SETTINGS_GUIDE_STEPS = [
 
 export type SettingsGuideStep = (typeof SETTINGS_GUIDE_STEPS)[number];
 
+export function buildSettingsGuideSteps(
+	isSignedIn: boolean,
+): SettingsGuideStep[] {
+	return isSignedIn
+		? ["account", "dictation", "wrapup"]
+		: [...SETTINGS_GUIDE_STEPS];
+}
+
 export type SettingsGuideAccountMode =
 	| "signed_out"
 	| "signed_in_community"
@@ -74,7 +82,7 @@ export function buildSettingsGuideAccountViewModel(
 			title: "You’re signed in with Pro",
 			statusLabel: "Pro active",
 			description:
-				"This account has paid Personal/Pro access. Pro-only features can use settings sync and managed inference once their launch paths are enabled.",
+				"Your Pro account includes settings sync and managed models.",
 			detail: `Signed in as ${accountEmailLabel(state)}.`,
 			proSyncLine,
 		};
@@ -88,7 +96,7 @@ export function buildSettingsGuideAccountViewModel(
 			title: "You’re signed in with managed business access",
 			statusLabel: "Managed Business active",
 			description:
-				"This account is connected to an organization. Enterprise setup remains a later lane, but this session is already authenticated.",
+				"Your Managed Business account includes organization-managed settings and models.",
 			detail: `Signed in as ${accountEmailLabel(state)}.`,
 			proSyncLine,
 		};
@@ -114,7 +122,7 @@ export function buildSettingsGuideGroqStepViewModel(
 		return {
 			title: "Optional BYOK provider setup",
 			description:
-				"Your account is already signed in with paid access. Managed launch paths can use that where enabled, but you can still add a Groq key now if you want a BYOK fallback.",
+				"You can add a Groq key as an optional BYOK fallback from Settings.",
 			helper:
 				"Skipping this step is fine. You can keep using your managed account path where available and add API keys later in Settings.",
 			submitLabel: "Save key",
@@ -146,14 +154,14 @@ export function buildSettingsGuideWrapupViewModel(
 			return {
 				title: "You’re good to go with Pro",
 				description:
-					"You finished setup with paid Personal/Pro access. Managed and sync features can light up where their launch paths are enabled, and BYOK providers stay available too.",
+					"Your Pro account includes settings sync and managed models. BYOK providers remain available in Settings.",
 				detail: account.detail,
 			};
 		case "enterprise":
 			return {
 				title: "You’re signed in with managed business access",
 				description:
-					"You finished setup with an authenticated organization-backed session. Enterprise admin flows remain a later lane, but this desktop session is already signed in.",
+					"Your Managed Business account includes organization-managed settings and models.",
 				detail: account.detail,
 			};
 		default:

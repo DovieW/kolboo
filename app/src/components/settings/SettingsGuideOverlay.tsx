@@ -34,8 +34,8 @@ import { Logo } from "../Logo";
 import {
 	buildSettingsGuideAccountViewModel,
 	buildSettingsGuideGroqStepViewModel,
+	buildSettingsGuideSteps,
 	buildSettingsGuideWrapupViewModel,
-	SETTINGS_GUIDE_STEPS,
 	type SettingsGuideStep,
 } from "./settingsGuideAccount";
 
@@ -46,9 +46,6 @@ type Step = SettingsGuideStep;
 type NavStep = "welcome" | Step;
 
 type AccountAuthMode = "sign_up" | "sign_in";
-
-const GUIDE_STEPS: Step[] = [...SETTINGS_GUIDE_STEPS];
-const NAV_STEPS: NavStep[] = ["welcome", ...GUIDE_STEPS];
 
 function HotkeyCombo({ config }: { config: HotkeyConfig | null }) {
 	const parts = useMemo(() => {
@@ -97,6 +94,10 @@ export function SettingsGuideOverlay({
 	const requestPasswordReset = useRequestLicensePasswordReset();
 	const toggleHotkey = settings?.toggle_hotkey ?? null;
 	const accountView = buildSettingsGuideAccountViewModel(licenseState.data);
+	const navSteps = useMemo<NavStep[]>(
+		() => ["welcome", ...buildSettingsGuideSteps(accountView.isSignedIn)],
+		[accountView.isSignedIn],
+	);
 	const groqView = buildSettingsGuideGroqStepViewModel(accountView);
 	const wrapupView = buildSettingsGuideWrapupViewModel(accountView);
 	const accountTierLabel =
@@ -276,6 +277,12 @@ export function SettingsGuideOverlay({
 	}, [opened, phase, step]);
 
 	useEffect(() => {
+		if (accountView.isSignedIn && step === "groq") {
+			setStep("dictation");
+		}
+	}, [accountView.isSignedIn, step]);
+
+	useEffect(() => {
 		if (!opened) return;
 		if (step !== "wrapup") {
 			setFinishVisible(false);
@@ -302,12 +309,12 @@ export function SettingsGuideOverlay({
 	};
 
 	const navStep: NavStep = phase === "welcome" ? "welcome" : step;
-	const navIndex = NAV_STEPS.indexOf(navStep);
+	const navIndex = navSteps.indexOf(navStep);
 
 	const canGoBack = navIndex > 0;
 	const canGoForward = (() => {
 		if (navIndex < 0) return false;
-		if (navIndex >= NAV_STEPS.length - 1) return false;
+		if (navIndex >= navSteps.length - 1) return false;
 
 		// From the welcome slide, always allow moving forward.
 		if (navStep === "welcome") return true;
@@ -323,7 +330,7 @@ export function SettingsGuideOverlay({
 	const goBack = () => {
 		if (!canGoBack) return;
 
-		const next = NAV_STEPS[navIndex - 1];
+		const next = navSteps[navIndex - 1];
 		if (!next) return;
 
 		if (next === "welcome") {
@@ -348,7 +355,7 @@ export function SettingsGuideOverlay({
 	const goForward = () => {
 		if (!canGoForward) return;
 
-		const next = NAV_STEPS[navIndex + 1];
+		const next = navSteps[navIndex + 1];
 		if (!next) return;
 
 		if (next === "welcome") {
@@ -420,7 +427,7 @@ export function SettingsGuideOverlay({
 						const model = buildSettingsGuideAccountViewModel(response.state);
 						setAccountMessage(
 							model.hasPaidAccess
-								? "Account created and signed in. Pro-only features will be available where enabled. If a new invite or upgrade still looks missing, you can refresh it later from Account."
+								? "Account created and signed in. Your Pro account includes settings sync and managed models."
 								: "Account created and signed in. Payment is optional, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
 						);
 					},
@@ -447,7 +454,7 @@ export function SettingsGuideOverlay({
 					setAccountPassword("");
 					setAccountMessage(
 						model.hasPaidAccess
-							? "Signed in. Pro-only features will be available where enabled. If a new invite or upgrade still looks missing, you can refresh it later from Account."
+							? "Signed in. Your Pro account includes settings sync and managed models."
 							: "Signed in. Payment is optional, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
 					);
 				},
@@ -489,7 +496,7 @@ export function SettingsGuideOverlay({
 					const model = buildSettingsGuideAccountViewModel(state);
 					setAccountMessage(
 						model.hasPaidAccess
-							? "Signed in. Your managed features are ready where enabled."
+							? "Signed in. Your account includes settings sync and managed models."
 							: "Signed in. Kolboo will continue in Community/BYOK mode.",
 					);
 				},
@@ -559,7 +566,7 @@ export function SettingsGuideOverlay({
 			{phase === "guide" && (
 				<>
 					{skipVisible &&
-						navIndex < NAV_STEPS.length - 1 &&
+						navIndex < navSteps.length - 1 &&
 						step !== "account" && (
 							<button
 								type="button"
@@ -623,7 +630,7 @@ export function SettingsGuideOverlay({
 
 								{accountView.isSignedIn ? (
 									<Group justify="center" mt="lg">
-										<Button color="orange" onClick={() => enterGuideAt("groq")}>
+										<Button color="orange" onClick={goForward}>
 											Continue setup
 										</Button>
 									</Group>
