@@ -224,8 +224,8 @@ Known limitation of this artifact-proof path:
 
 What this does **not** prove yet:
 
-- uploaded source-map evidence from an actual shipped/deployed desktop package
-- preview/prod release rehearsal evidence tied to the real desktop delivery path
+- final public-prod release-cut evidence tied to the exact production desktop
+  delivery path
 
 For the packaged Windows follow-up path, use:
 
@@ -263,6 +263,51 @@ What this proves:
 - the earlier packaged failure (`transport send failed Failed to fetch` on
   release `kolboo@packagerehearsal.2026-05-29-d`) was caused by packaged CSP,
   not by DSN resolution, runtime-config loading, or local capture/flush logic
+
+## Verified GitHub-built Windows bundle proof
+
+Verified on 2026-06-07 using the successful Windows workflow build artifact and
+its matching `windows-build-evidence` metadata from run `26787316293`:
+
+- project: `kolboo-public-dev`
+- release: `kolboo@0.2.4-dev.80dcfa8`
+- workflow run: `26787316293`
+- workflow link: <https://github.com/DovieW/kolboo/actions/runs/26787316293>
+- evidence artifact: `windows-build-evidence`
+- bundle artifact: `kolboo-windows-bundles`
+- launch path used for rehearsal:
+  `C:\Users\Dovie\AppData\Local\Temp\kolboo-windows-bundles-26787316293\kolboo.exe`
+- note: this used the loose bundled exe fallback from the GitHub artifact
+  instead of an installed MSI/NSIS path; the installed-path proof remains the
+  2026-05-29 packaged rehearsal above
+- issue: `KOLBOO-PUBLIC-DEV-F`
+- issue link: <https://dov-weinstock.sentry.io/issues/7513688933/>
+- latest verified event id: `7d02628843724cf3b0cebee232e1cc9a`
+- event link:
+  <https://dov-weinstock.sentry.io/issues/7513688933/events/7d02628843724cf3b0cebee232e1cc9a/>
+- verified mapped locations:
+  - `../../src/lib/telemetry/sentry.ts:399:4`
+  - `../../src/lib/telemetry/sentry.ts:383:2`
+  - `../../src/main.tsx:8:25`
+- decisive local log proof:
+  - `Backend Sentry initialized`
+  - `[ui:sentry] initialized surface=main env=development release=kolboo@0.2.4-dev.80dcfa8 smoke_requested=true`
+  - `[ui:sentry] smoke capture surface=main trigger=runtime-env release=kolboo@0.2.4-dev.80dcfa8`
+  - `[ui:sentry] transport send status=200 rate_limits=none retry_after=none`
+  - `[ui:sentry] smoke flushed surface=main trigger=runtime-env release=kolboo@0.2.4-dev.80dcfa8`
+
+What this proves:
+
+- the GitHub-produced Windows bundle artifact and the `windows-build-evidence`
+  release metadata now line up with a real upstream Sentry event in
+  `kolboo-public-dev`
+- the public-dev desktop browser/source-map path is no longer only a local
+  rebuild proof; a real GitHub workflow artifact now resolves back to readable
+  source frames in `src/lib/telemetry/sentry.ts` and `src/main.tsx`
+- the remaining desktop Sentry gap is no longer "can GitHub-produced Windows
+  artifacts prove the release/source-map path?"; it is only whether we still
+  want an explicit public-prod/final-release rehearsal in addition to the
+  existing public-dev evidence
 
 ## Build-time source maps
 
