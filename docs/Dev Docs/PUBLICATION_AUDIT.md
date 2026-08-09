@@ -14,12 +14,12 @@ This audit records the technical evidence used for the explicitly authorized sou
 
 ## Full-history credential scans
 
-The complete 700-commit history (about 14.4 MB of decoded content) was scanned with two independent engines:
+The complete repository history (about 14.5 MB of decoded content at the final scan) was scanned with two independent engines:
 
 | Scanner | Version | Scope | Result |
 | --- | --- | --- | --- |
 | Gitleaks | 8.30.1 | Git history, `--all`, 100% redaction | Eight duplicate detector hits, all adjudicated false positives |
-| TruffleHog | 3.96.0 | Git history, verified/unknown/unverified detectors | Seven “verified” Lob hits, all adjudicated false positives |
+| TruffleHog | 3.96.0 | Git history, verified and unknown results | Seven “verified” Lob hits, all adjudicated false positives |
 
 Gitleaks’ AWS detector matched JWT query parameters on four historical `private-user-images.githubusercontent.com` screenshot URLs in `README.md` at commit `32515fd0`. They are GitHub-generated image delivery URLs, not AWS access credentials or Kolboo secrets. The duplicates were decoder/occurrence duplicates.
 
