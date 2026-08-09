@@ -29,63 +29,66 @@ local-whisper = ["dep:whisper-rs", "dep:dirs"]
 local-whisper-cuda = ["local-whisper", "whisper-rs/cuda"]
 
 [build-dependencies]
-# Keep Rust-side Tauri crates on the 2.9/2.5 minor lines that the JS packages
+# Keep Rust-side Tauri crates on the 2.11/2.6 minor lines that the JS packages
 # in app/package.json are intentionally pinned to. Cargo's default caret ranges
 # can drift to newer minors and then `tauri build` rejects the mismatch.
-tauri-build = { version = "~2.5.3", features = [] }
-serde_json = "1.0.145"
+tauri-build = { version = "~2.6.3", features = [] }
+serde_json = "1.0.151"
 
 [dependencies]
-tauri = { version = "~2.9.5", features = [
+tauri = { version = "~2.11.5", default-features = false, features = [
+    "wry",
+    "compression",
+    "common-controls-v6",
     "tray-icon",
     "macos-private-api",
     "image-png",
     "devtools",
 ] }
-tauri-utils = "~2.8.1"
-tauri-plugin-opener = "2.5.2"
-tauri-plugin-store = "2.4.1"
-tauri-plugin-single-instance = "2.3.1"
+tauri-utils = "~2.9.3"
+tauri-plugin-opener = "2.5.4"
+tauri-plugin-store = "2.4.4"
+tauri-plugin-single-instance = "2.4.3"
 tauri-plugin-cli = "~2.4.1"
 # IMPORTANT: Tauri CLI enforces that the JS package (@tauri-apps/plugin-dialog)
 # and the Rust crate (tauri-plugin-dialog) match on major/minor. Cargo's default
-# caret requirement would allow 2.5.x, which can break CI when the JS side is
-# still 2.4.x.
-tauri-plugin-dialog = "~2.5.0"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+# caret requirement can drift to a newer minor and break CI when the JS plugin
+# has not moved with it.
+tauri-plugin-dialog = "~2.7.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
-log = "0.4.29"
+log = "0.4.33"
 schemars = { version = "0.8.22", features = ["derive", "chrono"] }
 
 # Structured tracing (spans + JSON logs). We keep `log` for third-party crates,
 # but route it into `tracing` so spans/fields can correlate everything.
 tracing = "0.1"
 tracing-log = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-tracing-appender = "0.2"
-sentry = "0.45"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2.5"
+sentry = "0.49.1"
 
 # Keyboard automation
 enigo = "0.6.1"
 arboard = "3.6.1"
 
 # Async runtime
-tokio = { version = "1.48.0", features = ["rt", "sync", "time", "net", "io-util"] }
-tokio-util = { version = "0.7", features = ["rt"] }  # CancellationToken
+tokio = { version = "1.53.1", features = ["rt", "sync", "time", "net", "io-util"] }
+tokio-util = { version = "0.7.19", features = ["rt"] }  # CancellationToken
 
 # Settings and history
-chrono = { version = "0.4.42", features = ["serde"] }
-uuid = { version = "1.19.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
 
 # Audio playback
-rodio = { version = "0.21.1", default-features = false, features = [
+rodio = { version = "0.22.2", default-features = false, features = [
     "mp3",
     "playback",
 ] }
 
 # Audio capture
-cpal = "0.17"
+cpal = "0.17.3"
 hound = "3.5"  # WAV encoding
 
 # Voice Activity Detection
@@ -94,19 +97,19 @@ rubato = "1.0"  # High-quality audio resampling
 audioadapter-buffers = "2.0"  # Adapters for rubato 1.x buffer API
 
 # Local Whisper (whisper.cpp bindings) - Optional feature
-whisper-rs = { version = "0.15", optional = true }
+whisper-rs = { version = "0.16", optional = true }
 dirs = { version = "6.0", optional = true }  # For model storage paths
 
 # HTTP client for STT/LLM API calls
-reqwest = { version = "0.13", features = ["json", "multipart", "stream"] }
+reqwest = { version = "0.13.4", features = ["json", "multipart", "stream"] }
 dotenvy = "0.15"
 
 # Hashing (used for validating downloaded local Whisper model files)
 sha2 = "0.10"
 
 # WebSocket client (Speechmatics realtime STT)
-tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
-native-tls = "0.2"
+tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
+native-tls = { version = "0.2.18", features = ["vendored"] }
 futures-util = "0.3"
 
 # Base64 encoding for audio data
@@ -129,7 +132,7 @@ thiserror = "2.0"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2.3.1"
-open = "5.3.2"
+open = "5.4.1"
 
 # Windows audio control (WASAPI)
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -163,14 +166,14 @@ keyring = { version = "3", features = ["windows-native"] }
 # macOS audio control (CoreAudio) and NSPanel for overlay
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-audio = "0.3.2"
-tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "a3122e894383aa068ec5365a42994e3ac94ba1b6" }
 keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["linux-native"] }
 
 [dev-dependencies]
-wiremock = "0.6"
+wiremock = "0.6.5"
 
 # Compile dependencies with optimizations even in dev/test builds.
 # This dramatically speeds up `cargo test` for heavy deps (windows, tauri,

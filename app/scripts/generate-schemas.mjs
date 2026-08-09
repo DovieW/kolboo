@@ -22,6 +22,7 @@ const runCargo = (args, { stdio = ["ignore", "pipe", "pipe"] } = {}) =>
 const result = runCargo(
 	[
 		"run",
+		"--locked",
 		"-p",
 		"xtask",
 		"--manifest-path",
