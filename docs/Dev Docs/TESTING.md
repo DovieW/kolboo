@@ -6,6 +6,14 @@
 
 This is the canonical desktop testing guide. The scripts in `app/package.json` and the workflows under `.github/workflows/` remain executable sources of truth if this guide drifts.
 
+## Development cadence
+
+Kolboo uses a fast, risk-based validation loop. During ordinary feature and bug-fix work, run the narrowest tests plus lint, typechecking, or generated-contract checks for the subsystem changed. Aim to keep this local loop near five minutes, then commit and continue while longer CI jobs run asynchronously.
+
+Use the full local gate at a coherent milestone, before handing work to real users, or when a shared architecture, release, migration, security, billing, quota, or generated-contract boundary changes. Do not expand a focused change to repair unrelated warnings or failures; record them and keep the current scope clear.
+
+Tests should protect important behavior, risky boundaries, or known regressions. Prefer unit, integration, contract, and component tests over end-to-end automation. Use a short manual smoke check for hardware, permissions, packaging, or platform behavior that cheaper automation cannot represent reliably.
+
 ## Toolchain
 
 - Node.js 24 or newer
@@ -59,6 +67,8 @@ pnpm check:ci
 
 This runs non-mutating lint, TypeScript, Knip, generated schema/event/type checks, frontend tests, Rust dead-code/clippy/format checks, and Rust tests. It can be expensive because the Tauri dependency graph is large.
 
+This is a checkpoint command, not a requirement after every small change.
+
 Use this additional gate when changing local Whisper behavior:
 
 ```sh
@@ -89,6 +99,19 @@ Automated tests should be deterministic by default:
 - generated contracts for Rust/TypeScript command, event, and payload alignment.
 
 Manual tests remain necessary for audio hardware, global shortcuts, text insertion, permissions, overlays, packaging, secure storage, updates, and full managed-user rehearsals.
+
+## End-to-end browser policy
+
+Do not add Playwright coverage for every screen, visual variation, or setting. Add an automated browser journey only when it protects a critical real-user outcome, crosses boundaries cheaper tests cannot cover, has deterministic fixtures, and will produce actionable failures.
+
+Keep the golden-path suite small:
+
+- account sign-in and onboarding;
+- a Personal user initiating a managed request;
+- an authorized operator locating and supporting that request;
+- release or updater behavior once public distribution becomes active.
+
+Cover permutations beneath those journeys with API integration and rendered component tests. During private-cohort development, a documented manual rehearsal is acceptable when browser automation would be disproportionately expensive or flaky.
 
 ## Coverage policy
 

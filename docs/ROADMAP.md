@@ -6,6 +6,8 @@
 
 This document translates the cross-repository Kolboo roadmap into desktop-owned work. Company priorities and deferrals are controlled by `kol-software/ROADMAP.md`; this file owns implementation detail for the Tauri application.
 
+Development uses focused subsystem checks by default. Full desktop and platform gates run at milestones, before delivery to real users, or asynchronously; browser automation is reserved for a few critical cross-surface journeys. See [Testing and validation](Dev%20Docs/TESTING.md).
+
 ## Current priorities
 
 ### Reliability and Sentry
