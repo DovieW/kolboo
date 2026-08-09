@@ -256,6 +256,45 @@ jobs:
             exit 1
           fi
 
+      - name: Require Windows publisher credentials for releases
+        if: ${{ inputs.release_signing }}
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${WINDOWS_CERTIFICATE}" || -z "${WINDOWS_CERTIFICATE_PASSWORD}" ]]; then
+            echo "Release blocked: provision WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD before publishing Windows installers." >&2
+            exit 1
+          fi
+
+      - name: Import Windows publisher certificate
+        if: ${{ inputs.release_signing }}
+        id: windows-certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $certificatePath = Join-Path $env:RUNNER_TEMP "kolboo-release-certificate.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $securePassword = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
+          if (-not $certificate.HasPrivateKey) { throw "Imported certificate has no private key." }
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+          Remove-Item -LiteralPath $certificatePath -Force
+
+      - name: Write Windows signing configuration
+        if: ${{ inputs.release_signing }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_path="${RUNNER_TEMP}/kolboo-windows-signing.json"
+          node .github/scripts/write-windows-signing-config.mjs "$config_path" "${{ steps.windows-certificate.outputs.thumbprint }}"
+          echo "WINDOWS_SIGNING_CONFIG=${config_path}" >> "$GITHUB_ENV"
+
       - name: Build Tauri app (release) - default
         working-directory: app
         shell: bash
@@ -282,7 +321,7 @@ jobs:
           fi
 
           if [[ "${{ inputs.release_signing }}" == "true" ]]; then
-            pnpm build:release
+            pnpm tauri build --config "${WINDOWS_SIGNING_CONFIG}"
           else
             pnpm build
           fi
@@ -327,7 +366,7 @@ jobs:
           # Reuse the repo's own local-whisper build script so CI follows the
           # exact same invocation path developers use locally.
           if [[ "${{ inputs.release_signing }}" == "true" ]]; then
-            pnpm build:release:local-whisper
+            pnpm tauri build --config "${WINDOWS_SIGNING_CONFIG}" --features local-whisper
           else
             pnpm build:local-whisper
           fi
@@ -343,6 +382,20 @@ jobs:
           cp -R app/src-tauri/target/release/bundle artifacts/windows-local-whisper/ || true
           shopt -s nullglob
           cp app/src-tauri/target/release/*.exe artifacts/windows-local-whisper/ || true
+
+      - name: Verify Authenticode signatures
+        if: ${{ inputs.release_signing }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artifacts = Get-ChildItem -Path artifacts -Recurse -File | Where-Object { $_.Extension -in @(".exe", ".msi") }
+          if (-not $artifacts) { throw "No Windows executables or installers were collected." }
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Authenticode verification failed for $($artifact.Name): $($signature.Status)"
+            }
+          }
 
       - name: Set artifact metadata
         id: artifact-meta
