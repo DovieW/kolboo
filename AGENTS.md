@@ -26,6 +26,26 @@ Use the deletion test before adding an abstraction: if deleting the proposed mod
 
 Follow `docs/Dev Docs/ARCHITECTURE_GUARDRAILS.md`. Put a concrete, out-of-scope architecture problem in `docs/Refactors/*.md` only when it cannot reasonably be handled with the current work. Do not use the refactor backlog to avoid a necessary small cleanup.
 
+## Safety and escalation
+
+Autonomy does not authorize drastic action. Never take an irreversible, destructive, broadly scoped, externally visible, production-impacting, security-sensitive, or materially cost-incurring action unless the human clearly authorized that exact action and scope.
+
+Examples requiring explicit authority include deleting user data or repositories, rewriting published history, changing repository visibility, rotating or exposing credentials, altering billing state, publishing a release, deploying to production, contacting users, and weakening a security or privacy control. Authorization to build a feature does not imply authorization for an adjacent drastic action.
+
+- Prefer reversible changes and narrow, verified targets.
+- Inspect current state, affected scope, and rollback options before a risky operation.
+- Do not use a destructive operation merely because it is the fastest way around a problem.
+- Never conceal uncertainty, bypass a safety boundary, fabricate success, or silently weaken requirements to finish.
+
+An agent may always stop and return control to the human. If safe progress is blocked by missing authority, ambiguous scope, credentials, unexpected repository or production state, conflicting requirements, failed validation, or unacceptable risk, do not force completion. Preserve the work, avoid further mutation, and report:
+
+- the intended outcome and what was completed;
+- the concrete blocker and supporting evidence;
+- any state already changed;
+- the safest options and the exact decision or authority needed next.
+
+Returning a precise blocker report is responsible completion, not failure.
+
 ## Product invariants
 
 - Community/local/BYOK operation must remain useful without an account, payment, or Kolboo cloud availability.
