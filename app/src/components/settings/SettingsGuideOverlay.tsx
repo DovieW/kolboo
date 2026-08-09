@@ -1,5 +1,6 @@
 import {
 	Anchor,
+	Badge,
 	Button,
 	Group,
 	Kbd,
@@ -98,6 +99,12 @@ export function SettingsGuideOverlay({
 	const accountView = buildSettingsGuideAccountViewModel(licenseState.data);
 	const groqView = buildSettingsGuideGroqStepViewModel(accountView);
 	const wrapupView = buildSettingsGuideWrapupViewModel(accountView);
+	const accountTierLabel =
+		accountView.mode === "pro"
+			? "Pro"
+			: accountView.mode === "enterprise"
+				? "Managed"
+				: "Community";
 
 	const recommendedToggleKeyLabel =
 		typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
@@ -579,7 +586,9 @@ export function SettingsGuideOverlay({
 					<div className="tang-guide-content tang-guide-fade-in">
 						{step === "account" && (
 							<div className="tang-guide-step">
-								<Title order={3}>{accountView.title}</Title>
+								<Title order={3}>
+									{accountView.isSignedIn ? "Account setup" : accountView.title}
+								</Title>
 								{!accountAuthFormVisible ? (
 									<Text
 										className="tang-guide-account-intro"
@@ -591,20 +600,17 @@ export function SettingsGuideOverlay({
 								) : null}
 
 								{accountView.isSignedIn ? (
-									<div className="tang-guide-account-card">
-										<Text className="tang-guide-account-status">
-											{accountView.statusLabel}
-										</Text>
-										<Text size="sm" c="dimmed" style={{ marginTop: 6 }}>
+									<Group justify="center" gap="xs" mt="md">
+										<Text size="sm" c="dimmed">
 											{accountView.detail}
 										</Text>
-										<Text size="xs" c="dimmed" style={{ marginTop: 10 }}>
-											{accountView.proSyncLine}
-										</Text>
-									</div>
+										<Badge color="green" variant="light" size="sm">
+											{accountTierLabel}
+										</Badge>
+									</Group>
 								) : null}
 
-								{accountMessage ? (
+								{accountMessage && !accountView.isSignedIn ? (
 									<Text size="sm" className="tang-guide-account-message">
 										{accountMessage}
 									</Text>
