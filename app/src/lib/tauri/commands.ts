@@ -293,8 +293,8 @@ export const tauriAPI = {
 	},
 
 	// Overlay API
-	async resizeOverlay(width: number, height: number): Promise<void> {
-		return invoke("resize_overlay", { width, height });
+	async setOverlayLayout(expanded: boolean): Promise<void> {
+		return invoke("set_overlay_layout", { expanded });
 	},
 
 	async showOverlayHover(): Promise<void> {

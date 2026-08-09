@@ -8,6 +8,8 @@ use crate::events;
 use crate::pipeline;
 use crate::{get_setting_from_store, OverlayAudioLevelPayload};
 
+pub(crate) mod layout;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OverlayWindowPreset {
     Overlay,
@@ -42,17 +44,16 @@ impl OverlayWindowPreset {
 
     fn size(self) -> (f64, f64) {
         match self {
-            Self::Overlay => (48.0, 48.0),
+            Self::Overlay => (56.0, 56.0),
             Self::Hover => (320.0, 220.0),
             Self::QuickAsk => (520.0, 340.0),
         }
     }
 
     fn visible(self) -> bool {
-        match self {
-            Self::Overlay => true,
-            Self::Hover | Self::QuickAsk => false,
-        }
+        // Position and size every utility window before its first show. This
+        // prevents a startup flash at the window manager's default location.
+        false
     }
 
     fn focusable(self) -> bool {
@@ -252,11 +253,8 @@ pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error
         }
     }
 
-    // Best-effort: position overlay + quick-ask windows using persisted settings.
-    // This includes monitor targeting (main/cursor/active window).
-    if let Err(e) = commands::overlay::snap_overlay_to_saved_position(app.handle()) {
-        log::warn!("Failed to position overlay at startup: {}", e);
-    }
+    // Position hidden windows before their first show. The layout controller
+    // owns both size and position, including monitor targeting and DPI.
     if let Err(e) = commands::overlay::position_quick_ask_to_target_monitor(app.handle()) {
         log::warn!("Failed to position Quick Ask at startup: {}", e);
     }
@@ -264,11 +262,22 @@ pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error
     // Set initial overlay visibility based on saved settings
     let overlay_mode: String =
         get_setting_from_store(app.handle(), "overlay_mode", "recording_only".to_string());
+    let initial_layout = if overlay_mode == "recording_only" {
+        layout::WidgetLayout::Expanded
+    } else {
+        layout::WidgetLayout::Compact
+    };
+    if let Err(e) = commands::overlay::apply_overlay_layout(app.handle(), initial_layout) {
+        log::warn!("Failed to lay out overlay at startup: {}", e);
+    }
+
     match overlay_mode.as_str() {
         "never" | "recording_only" => {
             let _ = overlay.hide();
         }
-        _ => {} // "always" - keep visible (default)
+        _ => {
+            let _ = overlay.show();
+        }
     }
 
     Ok(())
@@ -284,8 +293,8 @@ mod tests {
         assert_eq!(overlay.label(), "overlay");
         assert_eq!(overlay.html_path(), "overlay.html");
         assert_eq!(overlay.title(), "Kolboo Overlay");
-        assert_eq!(overlay.size(), (48.0, 48.0));
-        assert!(overlay.visible());
+        assert_eq!(overlay.size(), (56.0, 56.0));
+        assert!(!overlay.visible());
 
         let hover = OverlayWindowPreset::Hover;
         assert_eq!(hover.label(), "overlay_hover");

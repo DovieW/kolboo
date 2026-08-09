@@ -1006,9 +1006,23 @@ fn is_audio_mute_supported() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Standard Wayland toplevels cannot be placed at absolute screen
+    // coordinates. Select the Linux window backend before GTK/Tao initializes;
+    // on Wayland sessions with XWayland available this keeps Kolboo's anchored
+    // overlay deterministic while session capability checks remain Wayland-aware.
+    #[cfg(target_os = "linux")]
+    let linux_window_backend = platform_capabilities::configure_linux_window_backend();
+
     // Initialize structured tracing (JSON logs + request spans).
     tracing_init::init();
     sentry_init::init();
+
+    #[cfg(target_os = "linux")]
+    log::info!(
+        "Linux window backend policy: {:?} (session={})",
+        linux_window_backend,
+        platform_capabilities::current_linux_display_server().as_str()
+    );
 
     // If we're invoked with a CLI subcommand, we want to behave like a normal CLI tool:
     // - allow running even while the GUI app is already running
@@ -1091,7 +1105,7 @@ pub fn run() {
             commands::history::get_history_delete_options,
             commands::history::delete_history_entry_ex,
             commands::history::clear_history,
-            commands::overlay::resize_overlay,
+            commands::overlay::set_overlay_layout,
             commands::overlay::show_overlay,
             commands::overlay::hide_overlay,
             commands::overlay::overlay_frontend_ready,

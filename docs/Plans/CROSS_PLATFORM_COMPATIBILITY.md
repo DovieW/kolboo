@@ -21,11 +21,12 @@ This is not a promise of perfect parity. Platform limitations—especially Wayla
 2. **No surprise permissions**
    - If a feature requires Accessibility / Screen Recording / similar permissions, we must be explicit in UI copy and error handling.
 
-3. **Physical-pixel window placement**
-   - For overlays, prefer physical coordinates to avoid DPI double-scaling issues (especially on Windows, and mixed-DPI multi-monitor setups).
+3. **Single-owner physical-pixel window placement**
+   - The frontend requests semantic compact/expanded layout only. Rust owns the complete native size and position transaction.
+   - Calculate each rectangle from the selected monitor's usable work area, a stable anchor, and one DPI conversion. Never derive a new rectangle from the last reported window rectangle.
 
-4. **Never off-screen**
-   - Always clamp to monitor bounds with a small safety margin.
+4. **Never off-screen or under system UI**
+   - Always clamp to the monitor work area so taskbars, docks, and menu bars are respected.
 
 5. **Capabilities before assumptions**
    - Detect platform/session capabilities at runtime where behavior can vary.
@@ -90,7 +91,9 @@ For each platform, record native evidence for:
 - Values: `main` | `cursor` | `active_window`
 - Affects windows:
   - `overlay` (recording widget)
-  - `quick_ask` (full-monitor transparent overlay)
+  - `quick_ask` (answer panel)
+
+The recording widget currently uses a backend-owned anchor layout. Compact and expanded sizes are constants, bottom-center is the default, and reapplying the same layout is idempotent. The hover and Quick Ask panels share the same work-area geometry helpers.
 
 #### Current behavior
 
@@ -127,6 +130,10 @@ Backend reference: `app/src-tauri/src/commands/overlay.rs` (`resolve_target_moni
 ##### Linux
 
 Linux splits into **X11** vs **Wayland**:
+
+- Main overlay placement:
+  - X11/XWayland: use the same work-area anchor controller as Windows and macOS.
+  - Native Wayland: standard `xdg-shell` toplevels cannot request absolute global placement. Kolboo automatically selects XWayland when available and documents the compositor-placement fallback when it is not.
 
 - `cursor`:
   - X11: implement global pointer query.

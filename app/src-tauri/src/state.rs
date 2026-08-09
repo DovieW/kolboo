@@ -24,6 +24,22 @@ pub struct AppState {
     /// a hide, but a new recording/error shows the overlay before that timer fires.
     pub overlay_visibility_epoch: AtomicU64,
 
+    /// Semantic layout currently requested for the main overlay.
+    ///
+    /// Rust owns the corresponding native size and position. The frontend only
+    /// asks for compact or expanded, which avoids competing geometry writers.
+    pub overlay_expanded: AtomicBool,
+
+    /// Serializes native overlay size/position transactions so a rapid state
+    /// transition cannot interleave two layouts.
+    #[cfg(desktop)]
+    pub overlay_layout_lock: Mutex<()>,
+
+    /// Last complete physical rectangle submitted to the native window system.
+    /// Repeated frontend state notifications with the same target are ignored.
+    #[cfg(desktop)]
+    pub overlay_last_applied_rect: Mutex<Option<(i32, i32, u32, u32)>>,
+
     /// Monotonic token bumped every time we show/refresh the overlay hover window.
     /// Used to cancel delayed-hide timers when the pointer moves between windows.
     pub overlay_hover_epoch: AtomicU64,

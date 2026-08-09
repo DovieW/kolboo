@@ -1,4 +1,3 @@
-import { useResizeObserver } from "@mantine/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useDrag } from "@use-gesture/react";
@@ -287,23 +286,7 @@ export default function RecordingControl() {
 		setActiveProfile,
 	} = useOverlayController();
 
-	const [containerRef, rect] = useResizeObserver<HTMLDivElement>();
 	const widgetRef = useRef<HTMLDivElement | null>(null);
-
-	const setWidgetRef = useCallback(
-		(el: HTMLDivElement | null) => {
-			widgetRef.current = el;
-			// Mantine 9 exposes a callback ref; retaining the runtime object branch
-			// keeps this compatible with older hook implementations as well.
-			if (typeof containerRef === "function") {
-				containerRef(el);
-			} else {
-				(containerRef as React.MutableRefObject<HTMLDivElement | null>).current =
-					el;
-			}
-		},
-		[containerRef],
-	);
 
 	// Load settings (overlay mode + selected mic)
 	const { data: settings } = useSettings();
@@ -652,58 +635,15 @@ export default function RecordingControl() {
 		setHoldPhaseText,
 	]);
 
-	// Resize the native window for the target widget, and only then render it.
-	// This avoids the "intermediate step" where the widget is wider than the window
-	// (or vice versa) for a frame.
+	// The frontend owns only semantic UI state. Rust maps compact/expanded to one
+	// complete, work-area-aware native rectangle so resize observers and stale
+	// native measurements can never compete with window positioning.
 	useEffect(() => {
-		if (expanded) {
-			// In recording-only mode, the backend controls show/hide. Never render a blank
-			// transparent window while we wait for resize observer/pipeline polling.
-			if (settings?.overlay_mode === "recording_only") {
-				setRenderExpanded(true);
-				tauriAPI.resizeOverlay(224, 56);
-				return;
-			}
-
-			// During an active capture cycle, prioritize responsiveness over avoiding a
-			// one-frame clipped border: render immediately so the waveform can warm up.
-			if (pipelineState !== "idle") {
-				setRenderExpanded(true);
-			} else {
-				setRenderExpanded(false);
-			}
-			tauriAPI.resizeOverlay(224, 56);
-			return;
-		}
-
-		// Collapse: hide expanded immediately, then shrink window.
-		setRenderExpanded(false);
-		tauriAPI.resizeOverlay(56, 56);
-	}, [expanded, pipelineState, setRenderExpanded, settings?.overlay_mode]);
-
-	useEffect(() => {
-		if (!expanded) return;
-
-		// Recording-only mode should always show the full widget when visible.
-		if (settings?.overlay_mode === "recording_only") {
-			if (!renderExpanded) setRenderExpanded(true);
-			return;
-		}
-
-		// If we're active, we already rendered immediately above.
-		if (pipelineState !== "idle") return;
-
-		if (rect.width >= 220) {
-			setRenderExpanded(true);
-		}
-	}, [
-		expanded,
-		pipelineState,
-		rect.width,
-		renderExpanded,
-		setRenderExpanded,
-		settings?.overlay_mode,
-	]);
+		const effectiveExpanded =
+			expanded || settings?.overlay_mode === "recording_only";
+		setRenderExpanded(effectiveExpanded);
+		void tauriAPI.setOverlayLayout(effectiveExpanded);
+	}, [expanded, setRenderExpanded, settings?.overlay_mode]);
 
 	// Keep expanded while active; collapse when returning to idle.
 	useEffect(() => {
@@ -1359,7 +1299,7 @@ export default function RecordingControl() {
 
 	return (
 		<div
-			ref={setWidgetRef}
+			ref={widgetRef}
 			role="application"
 			{...bindDrag()}
 			className="overlay-widget"
