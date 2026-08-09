@@ -149,13 +149,11 @@ pub fn init() {
         .or_else(|| env_non_empty("TAURI_APP_VERSION"))
         .map(Cow::Owned);
 
-    let options = sentry::ClientOptions {
-        dsn: Some(dsn),
-        release,
-        environment: Some(Cow::Owned(sentry_environment())),
-        before_send: Some(Arc::new(scrub_event)),
-        ..Default::default()
-    };
+    let mut options = sentry::ClientOptions::default();
+    options.dsn = Some(dsn);
+    options.release = release;
+    options.environment = Some(Cow::Owned(sentry_environment()));
+    options.before_send = Some(Arc::new(scrub_event));
 
     let guard = sentry::init(options);
 

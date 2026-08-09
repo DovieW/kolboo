@@ -1,9 +1,9 @@
-# NOTE: This repo is commonly used behind corporate proxies / MITM TLS setups.
-# On Windows (schannel), Cargo may fail with:
-#   CRYPT_E_NO_REVOCATION_CHECK
-# when it cannot reach certificate revocation endpoints.
+# Keep the normal cross-platform path on Cargo's sparse registry. A full Git index
+# is substantially slower and more disk-intensive on a clean Linux checkout.
 #
-# These settings trade some security checks for build reliability on such networks.
+# On a Windows network where sparse HTTPS fails behind a corporate proxy, retry
+# that command with CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git rather than making the
+# expensive fallback the default for every developer and CI runner.
 
 [http]
 check-revoke = false
@@ -11,10 +11,7 @@ multiplexing = false
 timeout = 600
 
 [registries.crates-io]
-# Use the git index instead of the sparse HTTP index.
-# This often works better in corporate/proxied networks where HTTPS connections
-# to index.crates.io are interrupted (e.g. missing close_notify).
-protocol = "git"
+protocol = "sparse"
 
 [net]
 git-fetch-with-cli = true

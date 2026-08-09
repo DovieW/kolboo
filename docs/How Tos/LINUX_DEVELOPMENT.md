@@ -34,6 +34,10 @@ pnpm -C app install --frozen-lockfile
 pnpm -C app tauri build --no-bundle
 ```
 
+For an interactive development launch, run `pnpm -C app dev`. The repository uses
+Cargo's sparse registry so a clean Linux checkout does not download the full Git
+index before compiling.
+
 The `Linux Build` GitHub workflow performs the same native build on Ubuntu and retains the development binary plus its shared-library report for seven days.
 
 ## X11 and Wayland behavior

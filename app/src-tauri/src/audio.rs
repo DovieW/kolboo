@@ -1,6 +1,7 @@
 use rodio::buffer::SamplesBuffer;
-use rodio::{Decoder, OutputStreamBuilder, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Source};
 use std::io::Cursor;
+use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::thread;
@@ -47,16 +48,16 @@ const STOP_SOUND: &[u8] = include_bytes!("assets/stop.mp3");
 /// Why: rapidly opening/closing default output streams (especially on Windows/WASAPI)
 /// can cause audible pops/cut-offs when the user starts/stops recordings quickly.
 /// Keeping a single stream alive and feeding the mixer tends to be much more stable.
-static CUE_STREAM: OnceLock<Mutex<Option<rodio::OutputStream>>> = OnceLock::new();
+static CUE_STREAM: OnceLock<Mutex<Option<MixerDeviceSink>>> = OnceLock::new();
 
 fn cue_stream() -> Result<
-    std::sync::MutexGuard<'static, Option<rodio::OutputStream>>,
+    std::sync::MutexGuard<'static, Option<MixerDeviceSink>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let cell = CUE_STREAM.get_or_init(|| Mutex::new(None));
     let mut guard = cell.lock().map_err(|_| "Cue stream mutex poisoned")?;
     if guard.is_none() {
-        *guard = Some(OutputStreamBuilder::open_default_stream()?);
+        *guard = Some(DeviceSinkBuilder::open_default_sink()?);
     }
     Ok(guard)
 }
@@ -410,6 +411,8 @@ fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffe
         AudioCue::Legacy => {}
     }
 
-    let seq = SamplesBuffer::new(CHANNELS, SAMPLE_RATE, samples);
+    let channels = NonZeroU16::new(CHANNELS).expect("cue channel count must be non-zero");
+    let sample_rate = NonZeroU32::new(SAMPLE_RATE).expect("cue sample rate must be non-zero");
+    let seq = SamplesBuffer::new(channels, sample_rate, samples);
     (seq, duration)
 }
