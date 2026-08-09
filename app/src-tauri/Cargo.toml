@@ -172,6 +172,7 @@ keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gdk = "0.18.2"
+gtk = "0.18.2"
 keyring = { version = "3", features = ["linux-native"] }
 
 [dev-dependencies]

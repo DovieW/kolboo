@@ -425,8 +425,13 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
         apply_overlay_layout_at_anchor(app, widget_layout, anchor, force_layout)?;
 
         let _ = window.unminimize();
-        let _ = window.set_always_on_top(true);
         window.show().map_err(|e| e.to_string())?;
+        // Apply this after show as well as in the builder. X11/XWayland window
+        // managers can discard pre-map stacking requests; the Linux native map
+        // handler also raises the realized surface without taking focus.
+        if let Err(err) = window.set_always_on_top(true) {
+            log::warn!("[overlay] always-on-top reassertion failed: {}", err);
+        }
 
         #[cfg(all(desktop, target_os = "windows"))]
         let raise_status = match raise_overlay_without_focus(&window) {

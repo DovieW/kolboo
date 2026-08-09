@@ -110,6 +110,39 @@ fn overlay_window_builder_preset<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     }
 }
 
+/// Apply Linux window-manager hints at the native map boundary.
+///
+/// GTK can accept `keep_above` while a hidden window is being built, but some
+/// X11/XWayland window managers do not persist that request when the window is
+/// subsequently mapped. Reasserting it from the map signal gives the window
+/// manager a realized surface to update, while `raise` changes stacking without
+/// activating the non-focusable recording overlay.
+#[cfg(target_os = "linux")]
+fn configure_linux_overlay_stacking(
+    window: &tauri::WebviewWindow,
+    preset: OverlayWindowPreset,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use gtk::prelude::{GtkWindowExt, WidgetExt};
+
+    let gtk_window = window.gtk_window()?;
+    let type_hint = match preset {
+        OverlayWindowPreset::Overlay => gdk::WindowTypeHint::Notification,
+        OverlayWindowPreset::Hover | OverlayWindowPreset::QuickAsk => gdk::WindowTypeHint::Utility,
+    };
+
+    gtk_window.set_type_hint(type_hint);
+    gtk_window.set_keep_above(true);
+    gtk_window.connect_map(|gtk_window| {
+        gtk_window.set_keep_above(true);
+        if let Some(surface) = gtk_window.window() {
+            surface.set_keep_above(true);
+            surface.raise();
+        }
+    });
+
+    Ok(())
+}
+
 /// Backend-driven overlay waveform publisher.
 ///
 /// This avoids browser getUserMedia startup latency and stays aligned with the
@@ -219,11 +252,18 @@ pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error
     // Create hover panel window (hidden by default).
     // This avoids resizing the main overlay window on hover, which can cause
     // cursor flicker and position drift on Windows.
-    let _overlay_hover = overlay_window_builder_preset(app, OverlayWindowPreset::Hover).build()?;
+    let overlay_hover = overlay_window_builder_preset(app, OverlayWindowPreset::Hover).build()?;
 
     // Create Quick Ask answer window (hidden by default).
     // This is a separate transparent webview that renders an answer + copy button.
-    let _quick_ask = overlay_window_builder_preset(app, OverlayWindowPreset::QuickAsk).build()?;
+    let quick_ask = overlay_window_builder_preset(app, OverlayWindowPreset::QuickAsk).build()?;
+
+    #[cfg(target_os = "linux")]
+    {
+        configure_linux_overlay_stacking(&overlay, OverlayWindowPreset::Overlay)?;
+        configure_linux_overlay_stacking(&overlay_hover, OverlayWindowPreset::Hover)?;
+        configure_linux_overlay_stacking(&quick_ask, OverlayWindowPreset::QuickAsk)?;
+    }
 
     #[cfg(target_os = "linux")]
     {
