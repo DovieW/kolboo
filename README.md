@@ -29,19 +29,19 @@ This is a fork of [Tambourine](https://github.com/kstonekuan/tambourine-voice) m
 - Customize accent color.
 - And more.
 
-## Installation
+## Platform status
 
-Download Windows installer from the [latest release](https://github.com/DovieW/kolboo/releases).
-
-Windows is the only supported v1 platform. The release workflow and manual acceptance process cover Windows installers only.
+Windows is the currently supported tester platform. Linux and macOS support are active engineering work, but neither is supported until its native build, packaging, permissions, and manual acceptance gates pass.
 
 | Platform | v1 status |
 | --- | --- |
 | Windows | Supported |
-| macOS | Unsupported; development experiments only |
-| Linux | Unsupported; development experiments only |
+| macOS | In development; not yet supported |
+| Linux | In development; not yet supported |
 
-There is no committed macOS or Linux release timeline. See the [Windows release operations guide](docs/Dev%20Docs/RELEASE_OPERATIONS.md) for signing, updater, rollback, and cache-cleaning procedures.
+The repository remains private and public distribution is deferred. Current priorities are documented in the [desktop roadmap](docs/ROADMAP.md), with platform detail in the [cross-platform roadmap](docs/Plans/CROSS_PLATFORM_COMPATIBILITY.md).
+
+Private Windows artifacts continue to use the [release operations guide](docs/Dev%20Docs/RELEASE_OPERATIONS.md) for build evidence, updater, rollback, and cache-cleaning procedures.
 
 ## Development build variants
 
@@ -124,6 +124,8 @@ Kolboo is derived from Tambourine Voice and includes work from multiple contribu
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The canonical validation commands are in [Testing and validation](docs/Dev%20Docs/TESTING.md).
 
 ## Security
 

@@ -1,5 +1,7 @@
 # Public repository publication audit
 
+> **Deferred evidence:** Repository publication is not an active objective. Retain this audit for provenance, but rerun the complete review against the final commit if publication is explicitly resumed.
+
 **Audit date:** 2026-08-09
 
 **Audited commit:** `59bdd36` (audit documentation follows in a later commit)

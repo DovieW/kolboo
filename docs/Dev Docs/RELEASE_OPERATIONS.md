@@ -1,5 +1,7 @@
 # Windows v1 release operations
 
+> **Private-development scope:** Public distribution is deferred. These procedures remain applicable to private Windows tester builds and to maintaining release/update code safely; public signing and promotion are not current milestones.
+
 Kolboo v1 supports Windows only. macOS and Linux source may compile for development, but neither platform is release-tested, distributed, or covered by the v1 support commitment. The cross-platform roadmap is exploratory and is not a release promise.
 
 ## Release gates

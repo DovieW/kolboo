@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-29
 
-This document captures current Sentry research notes, implementation decisions, and operating guidance for the `kolboo` OSS desktop app.
+This document captures current Sentry research notes, implementation decisions, and operating guidance for the private `kolboo` desktop app. Sentry reliability work remains active while repository publication is deferred.
 
 Canonical-plan note:
 

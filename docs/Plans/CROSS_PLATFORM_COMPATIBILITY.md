@@ -1,6 +1,6 @@
 # Cross-platform compatibility roadmap
 
-> Exploratory only: Kolboo v1 supports Windows. This document records possible future engineering work and does not promise macOS or Linux releases or a delivery date.
+> **Active engineering plan:** Windows remains the currently supported tester platform while Linux and macOS are being built and validated. This work does not create a public release promise or delivery date.
 
 This is the living plan for **platform-specific behavior** in Kolboo.
 
@@ -10,7 +10,7 @@ Purpose:
 - Record constraints (permissions, OS APIs, Wayland limitations, etc.).
 - Outline staged implementation milestones so we can improve parity over time.
 
-This is *not* a promise that every feature can be perfectly supported on every platform; some things are fundamentally limited (notably on Wayland).
+This is not a promise of perfect parity. Platform limitations—especially Wayland global-input/window restrictions and macOS permissions—must produce explicit, deterministic fallbacks.
 
 ## Principles
 
@@ -26,6 +26,57 @@ This is *not* a promise that every feature can be perfectly supported on every p
 
 4. **Never off-screen**
    - Always clamp to monitor bounds with a small safety margin.
+
+5. **Capabilities before assumptions**
+   - Detect platform/session capabilities at runtime where behavior can vary.
+   - Do not present a control as working when the current platform cannot implement it.
+
+6. **Native validation**
+   - Add native Linux and macOS CI jobs early.
+   - Do not call a platform supported until packaging and the manual acceptance matrix pass on real hardware or a representative native runner.
+
+## Platform workstreams
+
+### Build and packaging
+
+- Add native default-feature lint, test, and build jobs for Linux and macOS.
+- Document required system packages, architectures, bundle formats, install/uninstall, and cache behavior.
+- Keep platform release channels private while public distribution is deferred.
+
+### Audio capture
+
+- Verify device enumeration, default-device changes, sample formats, resampling, meters, hot-mic behavior, and device-loss recovery.
+- Test PipeWire/PulseAudio behavior on Linux and CoreAudio behavior on macOS.
+- Show actionable permission/device errors rather than generic recording failures.
+
+### Global shortcuts and text insertion
+
+- Separate Windows hooks/input insertion from macOS and Linux adapters.
+- Document macOS Accessibility permission requirements.
+- Support X11 where global input is available and provide honest Wayland fallbacks when compositor protocols do not allow equivalent behavior.
+
+### Permissions and secure storage
+
+- Add permission-state diagnostics for microphone, Accessibility, Screen Recording, notifications, and startup registration.
+- Verify macOS Keychain and Linux secret-service behavior, including unavailable/locked-store errors.
+- Never fall back to silent plaintext secret storage.
+
+### Windows, tray, startup, and updates
+
+- Validate overlay focus/always-on-top behavior, tray lifecycle, startup registration, notifications, and updater behavior per platform.
+- Keep updater/public distribution separate from the platform-support acceptance decision while publication is deferred.
+
+### Acceptance matrix
+
+For each platform, record native evidence for:
+
+- install, first launch, and permissions;
+- account-free Community/local/BYOK dictation;
+- managed Personal dictation;
+- shortcuts, overlay, output insertion, tray, and startup;
+- secure storage and account session recovery;
+- logs, Sentry crash/error capture, and support-safe request correlation;
+- upgrade/rollback behavior appropriate to the private tester channel.
 
 ## Known cross-platform work items
 

@@ -36,9 +36,9 @@ Streaming is toggled by the **"Live Output (experimental)"** setting (`stt_live_
 
 ### Key types
 
-- **`SttProvider` trait** ([stt/mod.rs](app/src-tauri/src/stt/mod.rs)) — every provider implements `transcribe()` (batch). Providers that support streaming also override `supports_streaming()` → `true` and implement `start_streaming()`.
-- **`StreamingSttSession`** ([stt/streaming.rs](app/src-tauri/src/stt/streaming.rs)) — holds `audio_tx` (send chunks) and `partial_rx` (receive transcripts). Call `finalize()` when recording stops to get the final text.
-- **`Pipeline`** ([pipeline.rs](app/src-tauri/src/pipeline.rs)) — orchestrates everything. During recording, it routes live audio to the session's `audio_tx` and reads `partial_rx` to drive live output. On stop, it calls `finalize()` and falls back to batch if streaming failed (unless `requires_streaming()` is true).
+- **`SttProvider` trait** ([stt/mod.rs](../../app/src-tauri/src/stt/mod.rs)) — every provider implements `transcribe()` (batch). Providers that support streaming also override `supports_streaming()` → `true` and implement `start_streaming()`.
+- **`StreamingSttSession`** ([stt/streaming.rs](../../app/src-tauri/src/stt/streaming.rs)) — holds `audio_tx` (send chunks) and `partial_rx` (receive transcripts). Call `finalize()` when recording stops to get the final text.
+- **`Pipeline`** ([pipeline.rs](../../app/src-tauri/src/pipeline.rs)) — orchestrates everything. During recording, it routes live audio to the session's `audio_tx` and reads `partial_rx` to drive live output. On stop, it calls `finalize()` and falls back to batch if streaming failed (unless `requires_streaming()` is true).
 
 ### Pipeline flow (streaming enabled)
 
@@ -205,15 +205,15 @@ The UI marks this as "(experimental)" because:
 
 | File | What it does |
 |------|-------------|
-| [stt/mod.rs](app/src-tauri/src/stt/mod.rs) | `SttProvider` trait, `SttRegistry`, `AudioFormat` |
-| [stt/streaming.rs](app/src-tauri/src/stt/streaming.rs) | `StreamingSttSession` struct |
-| [stt/deepgram.rs](app/src-tauri/src/stt/deepgram.rs) | Deepgram batch (HTTP) + streaming (WSS) |
-| [stt/fireworks.rs](app/src-tauri/src/stt/fireworks.rs) | Fireworks batch (HTTP) + streaming (WSS) with stability algorithm |
-| [stt/speechmatics.rs](app/src-tauri/src/stt/speechmatics.rs) | Speechmatics batch (WSS) + streaming (WSS) |
-| [stt/elevenlabs.rs](app/src-tauri/src/stt/elevenlabs.rs) | ElevenLabs batch (HTTP) + streaming (WSS) |
-| [stt/openai.rs](app/src-tauri/src/stt/openai.rs) | OpenAI batch (HTTP) + streaming (Realtime WSS) |
-| [stt/assemblyai.rs](app/src-tauri/src/stt/assemblyai.rs) | AssemblyAI batch (HTTP) + streaming (WSS v3) |
-| [stt/simulated_streaming.rs](app/src-tauri/src/stt/simulated_streaming.rs) | Test helper that simulates streaming from batch providers |
-| [pipeline.rs](app/src-tauri/src/pipeline.rs) | Recording state machine, streaming session lifecycle, live output |
-| [cli/pipeline.rs](app/src-tauri/src/cli/pipeline.rs) | CLI `pipeline transcribe` and `pipeline stream` subcommands |
-| [scripts/benchmark-streaming-vs-batch.ps1](scripts/benchmark-streaming-vs-batch.ps1) | Benchmark script for comparing batch vs streaming across providers |
+| [stt/mod.rs](../../app/src-tauri/src/stt/mod.rs) | `SttProvider` trait, `SttRegistry`, `AudioFormat` |
+| [stt/streaming.rs](../../app/src-tauri/src/stt/streaming.rs) | `StreamingSttSession` struct |
+| [stt/deepgram.rs](../../app/src-tauri/src/stt/deepgram.rs) and [realtime.rs](../../app/src-tauri/src/stt/deepgram/realtime.rs) | Deepgram batch (HTTP) + streaming (WSS) |
+| [stt/fireworks.rs](../../app/src-tauri/src/stt/fireworks.rs) and [realtime.rs](../../app/src-tauri/src/stt/fireworks/realtime.rs) | Fireworks batch (HTTP) + streaming (WSS) with stability algorithm |
+| [stt/speechmatics.rs](../../app/src-tauri/src/stt/speechmatics.rs) and [realtime.rs](../../app/src-tauri/src/stt/speechmatics/realtime.rs) | Speechmatics batch (WSS) + streaming (WSS) |
+| [stt/elevenlabs.rs](../../app/src-tauri/src/stt/elevenlabs.rs) and [realtime.rs](../../app/src-tauri/src/stt/elevenlabs/realtime.rs) | ElevenLabs batch (HTTP) + streaming (WSS) |
+| [stt/openai.rs](../../app/src-tauri/src/stt/openai.rs) and [realtime.rs](../../app/src-tauri/src/stt/openai/realtime.rs) | OpenAI batch (HTTP) + streaming (Realtime WSS) |
+| [stt/assemblyai.rs](../../app/src-tauri/src/stt/assemblyai.rs) and [realtime.rs](../../app/src-tauri/src/stt/assemblyai/realtime.rs) | AssemblyAI batch (HTTP) + streaming (WSS v3) |
+| [stt/simulated_streaming.rs](../../app/src-tauri/src/stt/simulated_streaming.rs) | Test helper that simulates streaming from batch providers |
+| [pipeline.rs](../../app/src-tauri/src/pipeline.rs) | Recording state machine, streaming session lifecycle, live output |
+| [cli/pipeline.rs](../../app/src-tauri/src/cli/pipeline.rs) | CLI `pipeline transcribe` and `pipeline stream` subcommands |
+| [scripts/benchmark-streaming-vs-batch.ps1](../../scripts/benchmark-streaming-vs-batch.ps1) | Benchmark script for comparing batch vs streaming across providers |
