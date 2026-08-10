@@ -22,11 +22,42 @@ fn managed_gateway_ready_requires_non_empty_gateway_and_token() {
 fn stt_provider_falls_back_when_managed_gateway_unavailable() {
     let config = PipelineConfig {
         managed_inference_enabled: true,
+        managed_inference_fallback_stt_provider: Some("assemblyai".to_string()),
+        ..Default::default()
+    };
+
+    let provider =
+        super::resolve_stt_provider_for_runtime(&config, "groq", Some("whisper-large-v3-turbo"));
+    assert_eq!(provider, "assemblyai");
+}
+
+#[test]
+fn stt_provider_does_not_fall_back_when_byok_is_selected() {
+    let config = PipelineConfig {
+        managed_inference_enabled: true,
+        managed_stt_preferred: false,
         managed_inference_fallback_stt_provider: Some("groq".to_string()),
         ..Default::default()
     };
 
-    let provider = super::resolve_stt_provider_for_runtime(&config, "openai");
+    let provider = super::resolve_stt_provider_for_runtime(&config, "openai", Some("whisper-1"));
+    assert_eq!(provider, "openai");
+}
+
+#[test]
+fn stt_provider_does_not_fall_back_for_a_non_managed_model() {
+    let config = PipelineConfig {
+        managed_inference_enabled: true,
+        managed_stt_preferred: true,
+        managed_inference_fallback_stt_provider: Some("groq".to_string()),
+        ..Default::default()
+    };
+
+    let provider = super::resolve_stt_provider_for_runtime(
+        &config,
+        "groq",
+        Some("distil-whisper-large-v3-en"),
+    );
     assert_eq!(provider, "groq");
 }
 

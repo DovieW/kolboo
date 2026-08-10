@@ -11,6 +11,37 @@ export function managedChatModelOptions(models: ManagedModel[]): ModelOption[] {
 		}));
 }
 
+export function managedTranscriptionModelOptions(
+	models: ManagedModel[],
+	provider?: string | null,
+): ModelOption[] {
+	return models
+		.filter(
+			(model) =>
+				model.capabilities.includes("transcription") &&
+				(!provider || model.provider === provider),
+		)
+		.map((model) => ({
+			value: model.id,
+			label: model.display_name,
+		}));
+}
+
+export function isManagedModelSelection(
+	models: ManagedModel[],
+	capability: "chat_completions" | "transcription",
+	provider: string | null | undefined,
+	model: string | null | undefined,
+): boolean {
+	if (!provider || !model) return false;
+	return models.some(
+		(entry) =>
+			entry.provider === provider &&
+			entry.id === model &&
+			entry.capabilities.includes(capability),
+	);
+}
+
 // Model options for embedding providers (used by intent router).
 export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
 	openai: [

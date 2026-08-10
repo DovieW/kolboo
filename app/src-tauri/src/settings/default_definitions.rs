@@ -93,6 +93,10 @@ pub(crate) fn seedable_settings(
         SettingDefaultDefinition::missing_or_null("assemblyai_free_tier", json!(true)),
         SettingDefaultDefinition::missing_or_null("speechmatics_free_tier", json!(true)),
         SettingDefaultDefinition::missing_or_null("stt_transcription_prompt", json!(null)),
+        SettingDefaultDefinition::missing_or_null(
+            "stt_use_managed_inference",
+            json!(default_values::DEFAULT_STT_USE_MANAGED_INFERENCE),
+        ),
         SettingDefaultDefinition::missing_or_null("whisper_server_base_url", json!(null)),
         SettingDefaultDefinition::missing_or_null("ollama_url", json!(null)),
         SettingDefaultDefinition::missing_or_null("ocr_base_url", json!(null)),

@@ -28,7 +28,7 @@ export interface ManagedModel {
 	id: string;
 	display_name: string;
 	provider: string;
-	capabilities: Array<"chat_completions" | "responses">;
+	capabilities: Array<"chat_completions" | "responses" | "transcription">;
 	default_for_provider: boolean;
 }
 

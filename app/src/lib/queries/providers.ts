@@ -94,6 +94,12 @@ export function useUpdateSTTModel() {
 	);
 }
 
+export function useUpdateSTTUseManagedInference() {
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+		tauriAPI.updateSTTUseManagedInference(enabled),
+	);
+}
+
 export function useUpdateSTTLiveOutput() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
 		tauriAPI.updateSTTLiveOutput(enabled),

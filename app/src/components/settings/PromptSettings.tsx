@@ -1,4 +1,12 @@
-import { Accordion, Button, Group, Loader, Select, Text } from "@mantine/core";
+import {
+	Accordion,
+	Button,
+	Group,
+	Loader,
+	Select,
+	Switch,
+	Text,
+} from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
@@ -43,6 +51,7 @@ import {
 	useUpdateSTTProvider,
 	useUpdateSTTTimeout,
 	useUpdateSTTTranscriptionPrompt,
+	useUpdateSTTUseManagedInference,
 } from "../../lib/queries";
 import {
 	DEFAULT_STT_LANGUAGE,
@@ -53,11 +62,12 @@ import {
 	type AppSettings,
 	type CleanupPromptSections,
 	type CleanupPromptSectionsOverride,
+	hasManagedInferenceAccess,
 	type IntentRouterSettings,
+	type ManagedModel,
 	type QuickAskDismissMode,
 	type RewritePreset,
 	type RewriteProgramPromptProfile,
-	hasManagedInferenceAccess,
 	tauriAPI,
 } from "../../lib/tauri";
 import { PresetEditorModal } from "./prompt/PresetEditorModal";
@@ -95,6 +105,7 @@ import {
 } from "./prompt/useThinkingOptions";
 import { QuickReplaceSettings } from "./QuickReplaceSettings";
 import { RewritePromptLabModal } from "./RewritePromptLabModal";
+import { SettingsRow } from "./SettingsRow";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
 
@@ -125,6 +136,22 @@ function _createId(): string {
 	);
 }
 
+function managedModelByokTarget(
+	model: ManagedModel,
+): { provider: string; model: string } | null {
+	if (model.provider === "cloudflare") return null;
+	if (model.provider === "google") {
+		return {
+			provider: "gemini",
+			model:
+				model.id === "gemini-3-flash"
+					? "models/gemini-3-flash-preview"
+					: model.id,
+		};
+	}
+	return { provider: model.provider, model: model.id };
+}
+
 export function PromptSettings({
 	editingProfileId,
 }: {
@@ -140,6 +167,8 @@ export function PromptSettings({
 		useAvailableProviders();
 	const { data: licenseAuthContext } = useLicenseAuthContext();
 	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
+	const [showAllProvidersAndModels, setShowAllProvidersAndModels] =
+		useState(false);
 	const updateCleanupPromptSections = useUpdateCleanupPromptSections();
 	const updateRewriteLlmEnabled = useUpdateRewriteLlmEnabled();
 	const updateRewriteProgramPromptProfiles =
@@ -153,6 +182,7 @@ export function PromptSettings({
 	// Default profile (global) provider settings
 	const updateSTTProvider = useUpdateSTTProvider();
 	const updateSTTModel = useUpdateSTTModel();
+	const updateSTTUseManagedInference = useUpdateSTTUseManagedInference();
 	const updateSTTLanguage = useUpdateSTTLanguage();
 	const updateSTTTranscriptionPrompt = useUpdateSTTTranscriptionPrompt();
 	const updateLLMProvider = useUpdateLLMProvider();
@@ -431,12 +461,15 @@ export function PromptSettings({
 		quickAskIncludeSelectedText,
 		quickAskConversationHistoryEnabled,
 		quickAskConversationHistoryCount,
+		managedModels,
+		managedModelsLoading,
 		ollamaModelsQuery,
 		getLlmModelOptionsForProvider,
 	} = usePromptProviderOptions({
 		activeProfileId,
 		isDefaultScope,
 		managedAccessEnabled,
+		showAllProvidersAndModels,
 		availableProviders,
 		settings,
 		profiles,
@@ -838,6 +871,7 @@ export function PromptSettings({
 		isLoadingSettings ||
 		isLoadingDefaultSections ||
 		isLoadingProviders ||
+		managedModelsLoading ||
 		settings === undefined ||
 		defaultSections === undefined ||
 		localSections === null;
@@ -935,6 +969,73 @@ export function PromptSettings({
 		saveProfileMetadata,
 		openDisableOverrideDialog,
 	});
+
+	const managedSttCompatible = Boolean(
+		managedModels?.some(
+			(model) =>
+				model.provider === effectiveSttProvider &&
+				model.id === selectedSttModelForUi &&
+				model.capabilities.includes("transcription"),
+		),
+	);
+	const sttOwnKeyConfigured = Boolean(
+		availableProviders?.stt.some(
+			(provider) =>
+				!provider.is_local && provider.value === effectiveSttProvider,
+		),
+	);
+
+	const managedLlmSelection = managedModels?.find((model) => {
+		if (!model.capabilities.includes("chat_completions")) return false;
+		if (effectiveLlmProvider === "managed") {
+			return model.id === selectedLlmModelForUi;
+		}
+		const target = managedModelByokTarget(model);
+		return (
+			target?.provider === effectiveLlmProvider &&
+			target.model === selectedLlmModelForUi
+		);
+	});
+	const managedLlmCompatible = Boolean(managedLlmSelection);
+	const managedLlmByokTarget = managedLlmSelection
+		? managedModelByokTarget(managedLlmSelection)
+		: null;
+	const llmUsingOwnKey =
+		managedLlmCompatible && effectiveLlmProvider !== "managed";
+	const llmOwnKeyConfigured = Boolean(
+		managedLlmByokTarget &&
+			availableProviders?.llm.some(
+				(provider) =>
+					!provider.is_local &&
+					provider.value === managedLlmByokTarget.provider,
+			),
+	);
+
+	const setRewriteProviderAndModel = (provider: string, model: string) => {
+		if (isDefaultScope) {
+			updateLLMProvider.mutate(provider, {
+				onSuccess: () => updateLLMModel.mutate(model),
+			});
+			return;
+		}
+		setLlmProviderInheriting(false);
+		setLlmModelInheriting(false);
+		setLocalProfileLlmProvider(provider);
+		setLocalProfileLlmModel(model);
+		saveProfileMetadata({ llm_provider: provider, llm_model: model });
+	};
+
+	const handleLlmUseOwnKeyChange = (useOwnKey: boolean) => {
+		if (!managedLlmSelection) return;
+		if (useOwnKey) {
+			const target = managedModelByokTarget(managedLlmSelection);
+			if (!target) return;
+			setShowAllProvidersAndModels(true);
+			setRewriteProviderAndModel(target.provider, target.model);
+			return;
+		}
+		setRewriteProviderAndModel("managed", managedLlmSelection.id);
+	};
 
 	const {
 		handleWhisperServerModelDraftBlur,
@@ -1239,6 +1340,24 @@ export function PromptSettings({
 				}}
 			/>
 
+			{managedAccessEnabled ? (
+				<SettingsRow
+					label="Provider visibility"
+					description="Managed providers and models are shown by default."
+					right={
+						<Switch
+							label="Show all providers and models"
+							checked={showAllProvidersAndModels}
+							onChange={(event) =>
+								setShowAllProvidersAndModels(event.currentTarget.checked)
+							}
+							color="gray"
+							size="md"
+						/>
+					}
+				/>
+			) : null}
+
 			<TranscribeSettingsSection
 				activeProfileId={activeProfileId}
 				isDefaultScope={isDefaultScope}
@@ -1284,6 +1403,13 @@ export function PromptSettings({
 				isSttTestRunning={testSttLastAudio.isPending}
 				onRunSttTest={handleRunSttTest}
 				hasStoredTranscriptionPrompt={hasStoredTranscriptionPrompt}
+				managedAccessEnabled={managedAccessEnabled}
+				managedModelCompatible={managedSttCompatible}
+				useManagedInference={settings?.stt_use_managed_inference ?? true}
+				ownKeyConfigured={sttOwnKeyConfigured}
+				onUseOwnKeyChange={(useOwnKey) =>
+					updateSTTUseManagedInference.mutate(!useOwnKey)
+				}
 			/>
 
 			<RewriteSettingsSection
@@ -1380,6 +1506,12 @@ export function PromptSettings({
 					handleDisableRewriteAnthropicThinkingBudgetOverride
 				}
 				formatThinkingBudgetShort={formatThinkingBudgetShort}
+				managedAccessEnabled={managedAccessEnabled}
+				managedModelCompatible={managedLlmCompatible}
+				usingOwnKey={llmUsingOwnKey}
+				ownKeyAvailable={Boolean(managedLlmByokTarget)}
+				ownKeyConfigured={llmOwnKeyConfigured}
+				onUseOwnKeyChange={handleLlmUseOwnKeyChange}
 			/>
 			{/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
 

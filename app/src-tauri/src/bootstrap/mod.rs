@@ -852,6 +852,7 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         stt_api_key,
         stt_api_keys,
         managed_inference_enabled: false,
+        managed_stt_preferred: default_values::DEFAULT_STT_USE_MANAGED_INFERENCE,
         managed_inference_gateway_url: None,
         managed_inference_access_token: None,
         managed_inference_fallback_stt_provider: None,

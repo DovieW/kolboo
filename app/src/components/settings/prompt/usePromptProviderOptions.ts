@@ -1,6 +1,8 @@
+import { API_KEYS } from "../../../lib/apiKeys";
 import {
 	LLM_MODELS,
 	managedChatModelOptions,
+	managedTranscriptionModelOptions,
 	STT_MODELS,
 } from "../../../lib/modelOptions";
 import {
@@ -29,6 +31,7 @@ type UsePromptProviderOptionsOptions = {
 	activeProfileId: string;
 	isDefaultScope: boolean;
 	managedAccessEnabled: boolean;
+	showAllProvidersAndModels: boolean;
 	availableProviders: AvailableProviders | undefined;
 	settings: AppSettings | undefined;
 	profiles: RewriteProgramPromptProfile[];
@@ -82,6 +85,8 @@ type PromptProviderOptions = {
 	quickAskIncludeSelectedText: boolean;
 	quickAskConversationHistoryEnabled: boolean;
 	quickAskConversationHistoryCount: number;
+	managedModels: ReturnType<typeof useManagedModels>["data"];
+	managedModelsLoading: boolean;
 	fireworksModelsQuery: ReturnType<typeof useFireworksModels>;
 	ollamaModelsQuery: ReturnType<typeof useOllamaModels>;
 	getLlmModelOptionsForProvider: (
@@ -93,6 +98,7 @@ export function usePromptProviderOptions({
 	activeProfileId,
 	isDefaultScope,
 	managedAccessEnabled,
+	showAllProvidersAndModels,
 	availableProviders,
 	settings,
 	profiles,
@@ -108,17 +114,49 @@ export function usePromptProviderOptions({
 }: UsePromptProviderOptionsOptions): PromptProviderOptions {
 	const managedModelsQuery = useManagedModels(managedAccessEnabled);
 	const managedModels = managedModelsQuery.data ?? [];
-	const managedProviderReady = managedAccessEnabled && managedModels.length > 0;
+	const managedProviderReady =
+		managedAccessEnabled &&
+		managedModels.some((model) =>
+			model.capabilities.includes("chat_completions"),
+		);
+	const providerLabels = new Map(
+		API_KEYS.map((provider) => [provider.id, provider.label]),
+	);
+	const allSttCloudProviders = API_KEYS.filter(
+		(provider) => STT_MODELS[provider.id] !== undefined,
+	).map((provider) => ({ value: provider.id, label: provider.label }));
+	const allLlmCloudProviders = API_KEYS.filter(
+		(provider) => LLM_MODELS[provider.id] !== undefined,
+	).map((provider) => ({ value: provider.id, label: provider.label }));
+	const managedSttProviders = Array.from(
+		new Set(
+			managedModels
+				.filter((model) => model.capabilities.includes("transcription"))
+				.map((model) => model.provider),
+		),
+	).map((provider) => ({
+		value: provider,
+		label: providerLabels.get(provider) ?? provider,
+	}));
 
 	// Provider dropdown options
-	const sttCloudProviders =
+	const configuredSttCloudProviders =
 		availableProviders?.stt
 			.filter((p) => !p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
-	const sttLocalProviders =
+	const configuredSttLocalProviders =
 		availableProviders?.stt
 			.filter((p) => p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const sttCloudProviders = managedAccessEnabled
+		? showAllProvidersAndModels
+			? allSttCloudProviders
+			: managedSttProviders
+		: configuredSttCloudProviders;
+	const sttLocalProviders =
+		managedAccessEnabled && !showAllProvidersAndModels
+			? []
+			: configuredSttLocalProviders;
 	const sttProviderOptions = [
 		{ group: "Cloud", items: sttCloudProviders },
 		{ group: "Local", items: sttLocalProviders },
@@ -128,18 +166,27 @@ export function usePromptProviderOptions({
 		availableProviders?.llm
 			.filter((p) => !p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
-	const llmCloudProviders = [
-		...(managedProviderReady
-			? [{ value: "managed", label: "Kolboo Managed" }]
-			: []),
-		...configuredLlmCloudProviders.filter(
-			(provider) => provider.value !== "managed",
-		),
-	];
-	const llmLocalProviders =
+	const managedLlmProvider = managedProviderReady
+		? [{ value: "managed", label: "Kolboo Managed" }]
+		: [];
+	const llmCloudProviders = managedAccessEnabled
+		? showAllProvidersAndModels
+			? [
+					...managedLlmProvider,
+					...allLlmCloudProviders.filter(
+						(provider) => provider.value !== "managed",
+					),
+				]
+			: managedLlmProvider
+		: configuredLlmCloudProviders;
+	const configuredLlmLocalProviders =
 		availableProviders?.llm
 			.filter((p) => p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const llmLocalProviders =
+		managedAccessEnabled && !showAllProvidersAndModels
+			? []
+			: configuredLlmLocalProviders;
 	const llmProviderOptions = [
 		{ group: "Cloud", items: llmCloudProviders },
 		{ group: "Local", items: llmLocalProviders },
@@ -265,11 +312,35 @@ export function usePromptProviderOptions({
 			const dynamic = ollamaModelsQuery.data;
 			if (Array.isArray(dynamic) && dynamic.length > 0) return dynamic;
 		}
-		return LLM_MODELS[provider] ?? [];
+		const configured = LLM_MODELS[provider] ?? [];
+		const managedAliases = managedModels
+			.filter((model) => {
+				const byokProvider =
+					model.provider === "google" ? "gemini" : model.provider;
+				return (
+					byokProvider === provider &&
+					model.capabilities.includes("chat_completions")
+				);
+			})
+			.map((model) => ({
+				value:
+					model.provider === "google" && model.id === "gemini-3-flash"
+						? "models/gemini-3-flash-preview"
+						: model.id,
+				label: model.display_name,
+			}));
+		return [
+			...configured,
+			...managedAliases.filter(
+				(alias) => !configured.some((option) => option.value === alias.value),
+			),
+		];
 	};
 
 	const sttModelOptions = effectiveSttProvider
-		? (STT_MODELS[effectiveSttProvider] ?? [])
+		? managedAccessEnabled && !showAllProvidersAndModels
+			? managedTranscriptionModelOptions(managedModels, effectiveSttProvider)
+			: (STT_MODELS[effectiveSttProvider] ?? [])
 		: [];
 
 	const llmModelOptions = getLlmModelOptionsForProvider(effectiveLlmProvider);
@@ -358,6 +429,8 @@ export function usePromptProviderOptions({
 		quickAskIncludeSelectedText,
 		quickAskConversationHistoryEnabled,
 		quickAskConversationHistoryCount,
+		managedModels: managedModelsQuery.data,
+		managedModelsLoading: managedAccessEnabled && managedModelsQuery.isLoading,
 		fireworksModelsQuery,
 		ollamaModelsQuery,
 		getLlmModelOptionsForProvider,

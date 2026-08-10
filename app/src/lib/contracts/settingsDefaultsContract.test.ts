@@ -199,6 +199,10 @@ describe("settings defaults cross-layer contract", () => {
 		] as const;
 		const booleanDefaults = [
 			[
+				"DEFAULT_STT_USE_MANAGED_INFERENCE",
+				DEFAULT_SETTINGS_VALUES.stt_use_managed_inference,
+			],
+			[
 				"DEFAULT_HOTKEY_DEBUG_ENABLED",
 				DEFAULT_SETTINGS_VALUES.hotkey_debug_enabled,
 			],

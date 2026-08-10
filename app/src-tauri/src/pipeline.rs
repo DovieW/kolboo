@@ -126,9 +126,13 @@ fn managed_gateway_ready(config: &PipelineConfig) -> bool {
 fn resolve_stt_provider_for_runtime(
     config: &PipelineConfig,
     requested_provider_id: &str,
+    requested_model: Option<&str>,
 ) -> String {
     let requested = canonicalize_stt_provider_id(requested_provider_id);
-    if !config.managed_inference_enabled {
+    if !config.managed_inference_enabled
+        || !config.managed_stt_preferred
+        || !stt_provider_resolver::managed_stt_model_supported(requested.as_str(), requested_model)
+    {
         return requested;
     }
 

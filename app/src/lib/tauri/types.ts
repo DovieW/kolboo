@@ -808,6 +808,9 @@ export interface AppSettings {
 	stt_language: string;
 	// Global STT prompt (applies to all transcriptions when supported by the selected provider/model)
 	stt_transcription_prompt: string | null;
+	// Prefer the managed STT transport for catalog-supported models when the
+	// signed-in account is entitled to managed inference.
+	stt_use_managed_inference: boolean;
 	// When true and a realtime STT model is selected, committed chunks are pasted
 	// live during recording instead of waiting until the end.
 	stt_live_output: boolean;

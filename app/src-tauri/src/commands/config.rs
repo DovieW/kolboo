@@ -351,6 +351,13 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_else(|| "groq".to_string());
 
+    let managed_stt_preferred = app
+        .store("settings.json")
+        .ok()
+        .and_then(|store| store.get("stt_use_managed_inference"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(crate::settings::default_values::DEFAULT_STT_USE_MANAGED_INFERENCE);
+
     let managed_gateway_url: Option<String> =
         normalize_optional_base_url(read_first_non_empty_env(&[
             "TAURI_MANAGED_INFERENCE_GATEWAY_URL",
@@ -1073,6 +1080,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         stt_api_key: effective_stt_api_key,
         stt_api_keys,
         managed_inference_enabled: managed_mode_active,
+        managed_stt_preferred,
         managed_inference_gateway_url: managed_gateway_url.clone(),
         managed_inference_access_token: managed_access_token.clone(),
         managed_inference_fallback_stt_provider,

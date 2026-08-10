@@ -55,6 +55,7 @@ export const DEFAULT_SETTINGS_VALUES = {
 	stt_model: null,
 	stt_language: DEFAULT_STT_LANGUAGE,
 	stt_transcription_prompt: null,
+	stt_use_managed_inference: true,
 	stt_live_output: false,
 	stt_simulated_streaming: false,
 	aquavoice_base_url: null,

@@ -38,6 +38,9 @@ pub struct PipelineConfig {
     pub stt_api_keys: HashMap<String, String>,
     /// True when managed inference routing is enabled for this runtime config.
     pub managed_inference_enabled: bool,
+    /// User preference for managed STT. Entitlement and model compatibility are
+    /// still required before the managed transport is selected.
+    pub managed_stt_preferred: bool,
     /// Optional managed gateway base URL used when managed routing is active.
     pub managed_inference_gateway_url: Option<String>,
     /// Optional managed access token used as the managed gateway bearer token.
@@ -197,6 +200,7 @@ impl Default for PipelineConfig {
             stt_api_key: String::new(),
             stt_api_keys: HashMap::new(),
             managed_inference_enabled: false,
+            managed_stt_preferred: default_values::DEFAULT_STT_USE_MANAGED_INFERENCE,
             managed_inference_gateway_url: None,
             managed_inference_access_token: None,
             managed_inference_fallback_stt_provider: None,

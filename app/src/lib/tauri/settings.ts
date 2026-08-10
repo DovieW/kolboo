@@ -682,6 +682,11 @@ export const tauriSettingsAPI = {
 			),
 			stt_transcription_prompt:
 				(await store.get<string | null>("stt_transcription_prompt")) ?? null,
+			stt_use_managed_inference: await readSettingValue(
+				"stt_use_managed_inference",
+				DEFAULT_SETTINGS_VALUES.stt_use_managed_inference,
+				normalizeBooleanSetting,
+			),
 			stt_live_output: await readSettingValue(
 				"stt_live_output",
 				DEFAULT_SETTINGS_VALUES.stt_live_output,
@@ -1345,6 +1350,12 @@ export const tauriSettingsAPI = {
 
 	async updateSTTModel(model: string | null): Promise<void> {
 		await applySettingsPatch({ patch: { stt_model: model } });
+	},
+
+	async updateSTTUseManagedInference(enabled: boolean): Promise<void> {
+		await applySettingsPatch({
+			patch: { stt_use_managed_inference: !!enabled },
+		});
 	},
 
 	async updateSTTLiveOutput(enabled: boolean): Promise<void> {

@@ -7,6 +7,7 @@ pub const DEFAULT_STT_LANGUAGE: &str = "en";
 pub const DEFAULT_STT_TIMEOUT_SECONDS: f64 = 10.0;
 pub const DEFAULT_STT_LIVE_OUTPUT: bool = false;
 pub const DEFAULT_STT_SIMULATED_STREAMING: bool = false;
+pub const DEFAULT_STT_USE_MANAGED_INFERENCE: bool = true;
 #[cfg(feature = "local-whisper")]
 pub const DEFAULT_LOCAL_WHISPER_MODEL_ID: &str = "base";
 pub const DEFAULT_LOCAL_WHISPER_LOAD_MODE: &str = "manual";

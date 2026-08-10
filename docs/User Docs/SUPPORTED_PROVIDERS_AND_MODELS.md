@@ -11,6 +11,9 @@ Notes:
 
 - Some providers support **dynamic model discovery** (e.g. Ollama, Local Whisper). Those do not have a fixed list here.
 - “Supported” here means “wired up end-to-end and selectable in Settings” (not “every possible upstream model string”).
+- For users with Managed access, Settings initially filters these lists to the
+  models returned by the authenticated Managed catalog. The full lists remain
+  available through **Show all providers and models** for BYOK/local use.
 
 ---
 
@@ -30,8 +33,8 @@ Notes:
 
 ### `groq` (Groq)
 
-- `whisper-large-v3-turbo` — Whisper Large V3 Turbo
-- `whisper-large-v3` — Whisper Large V3
+- `whisper-large-v3-turbo` — Whisper Large V3 Turbo _(Managed or BYOK)_
+- `whisper-large-v3` — Whisper Large V3 _(Managed or BYOK)_
 
 ### `assemblyai` (AssemblyAI)
 

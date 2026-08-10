@@ -56,8 +56,11 @@ pub(super) fn resolve_stt_provider_for_transcription(
         request.forced_model,
     );
 
-    let mut provider_id_used =
-        resolve_stt_provider_for_runtime(&inner.config, &effective.provider_id);
+    let mut provider_id_used = resolve_stt_provider_for_runtime(
+        &inner.config,
+        &effective.provider_id,
+        effective.model.as_deref(),
+    );
     let mut model_used = model_for_log(inner, provider_id_used.as_str(), effective.model.clone());
     let mut language_used = effective.language.clone();
 
@@ -72,7 +75,11 @@ pub(super) fn resolve_stt_provider_for_transcription(
         Ok(provider) => provider,
         Err(err) => {
             let global_provider = canonicalize_stt_provider_id(&inner.config.stt_provider);
-            let global_provider = resolve_stt_provider_for_runtime(&inner.config, &global_provider);
+            let global_provider = resolve_stt_provider_for_runtime(
+                &inner.config,
+                &global_provider,
+                inner.config.stt_model.as_deref(),
+            );
             if global_provider == provider_id_used {
                 inner.set_error(&format!("STT provider init failed: {}", err));
                 return Err(err);
@@ -160,6 +167,17 @@ fn log_stt_provider_selection(inner: &PipelineInner, provider_id: &str, model: O
     }
 }
 
+pub(super) fn managed_stt_model_supported(provider_id: &str, model: Option<&str>) -> bool {
+    if provider_id != "groq" {
+        return false;
+    }
+
+    matches!(
+        model.unwrap_or("whisper-large-v3-turbo"),
+        "whisper-large-v3-turbo" | "whisper-large-v3"
+    )
+}
+
 pub(super) fn stt_provider_cache_key(
     inner: &PipelineInner,
     provider_id: &str,
@@ -177,8 +195,12 @@ pub(super) fn stt_provider_cache_key(
     let model_key = model.unwrap_or_else(|| "<default>".to_string());
 
     format!(
-        "{}::{}::{}::live={}",
-        provider_id, model_key, language_key, inner.config.stt_live_output
+        "{}::{}::{}::live={}::managed={}",
+        provider_id,
+        model_key,
+        language_key,
+        inner.config.stt_live_output,
+        inner.config.managed_inference_enabled && inner.config.managed_stt_preferred
     )
 }
 
@@ -188,11 +210,14 @@ pub(super) fn get_or_create_stt_provider(
     model: Option<String>,
     language: Option<String>,
 ) -> Result<Arc<dyn SttProvider>, PipelineError> {
-    let provider_id = resolve_stt_provider_for_runtime(&inner.config, provider_id);
+    let provider_id =
+        resolve_stt_provider_for_runtime(&inner.config, provider_id, model.as_deref());
     let managed_ready =
         inner.config.managed_inference_enabled && managed_gateway_ready(&inner.config);
-    let managed_transport_active =
-        managed_ready && !local_provider::bypasses_managed_transport(provider_id.as_str());
+    let managed_transport_active = managed_ready
+        && inner.config.managed_stt_preferred
+        && managed_stt_model_supported(provider_id.as_str(), model.as_deref())
+        && !local_provider::bypasses_managed_transport(provider_id.as_str());
 
     if managed_transport_active {
         if let Some(store) = &inner.config.request_log_store {
@@ -490,6 +515,50 @@ mod tests {
     }
 
     #[test]
+    fn managed_stt_support_is_limited_to_cataloged_groq_models() {
+        assert!(managed_stt_model_supported(
+            "groq",
+            Some("whisper-large-v3-turbo")
+        ));
+        assert!(managed_stt_model_supported(
+            "groq",
+            Some("whisper-large-v3")
+        ));
+        assert!(!managed_stt_model_supported("openai", Some("whisper-1")));
+        assert!(!managed_stt_model_supported(
+            "groq",
+            Some("distil-whisper-large-v3-en")
+        ));
+    }
+
+    #[test]
+    fn managed_stt_preference_is_part_of_the_provider_cache_key() {
+        let mut inner = PipelineInner::new(PipelineConfig {
+            managed_inference_enabled: true,
+            managed_stt_preferred: true,
+            ..Default::default()
+        });
+        let managed_key = stt_provider_cache_key(
+            &inner,
+            "groq",
+            Some("whisper-large-v3-turbo".to_string()),
+            Some("en".to_string()),
+        );
+
+        inner.config.managed_stt_preferred = false;
+        let byok_key = stt_provider_cache_key(
+            &inner,
+            "groq",
+            Some("whisper-large-v3-turbo".to_string()),
+            Some("en".to_string()),
+        );
+
+        assert_ne!(managed_key, byok_key);
+        assert!(managed_key.ends_with("managed=true"));
+        assert!(byok_key.ends_with("managed=false"));
+    }
+
+    #[test]
     fn preset_overrides_profile_and_global_settings() {
         let mut inner = PipelineInner::new(PipelineConfig {
             stt_provider: "openai".to_string(),
@@ -599,14 +668,20 @@ mod tests {
         store.start_request("initial".to_string(), None);
 
         let mut inner = PipelineInner::new(PipelineConfig {
-            stt_provider: "openai".to_string(),
+            stt_provider: "groq".to_string(),
+            stt_model: Some("whisper-large-v3-turbo".to_string()),
             stt_language: Some("en".to_string()),
             managed_inference_enabled: true,
-            managed_inference_fallback_stt_provider: Some("groq".to_string()),
+            managed_inference_fallback_stt_provider: Some("assemblyai".to_string()),
             request_log_store: Some(store.clone()),
             ..Default::default()
         });
-        insert_cached_fake_provider(&mut inner, "groq", None, Some("en".to_string()));
+        insert_cached_fake_provider(
+            &mut inner,
+            "assemblyai",
+            Some("whisper-large-v3-turbo".to_string()),
+            Some("en".to_string()),
+        );
 
         let resolved = resolve_stt_provider_for_transcription(
             &mut inner,
@@ -619,8 +694,8 @@ mod tests {
         )
         .expect("managed fallback provider should resolve from cache");
 
-        assert_eq!(resolved.provider_id, "groq");
+        assert_eq!(resolved.provider_id, "assemblyai");
         let logged = store.with_current(|log| (log.stt_provider.clone(), log.managed_inference));
-        assert_eq!(logged, Some(("groq".to_string(), false)));
+        assert_eq!(logged, Some(("assemblyai".to_string(), false)));
     }
 }

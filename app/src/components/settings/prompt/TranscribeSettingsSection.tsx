@@ -64,6 +64,11 @@ interface TranscribeSettingsSectionProps {
 	isSttTestRunning: boolean;
 	onRunSttTest: () => void;
 	hasStoredTranscriptionPrompt: boolean;
+	managedAccessEnabled: boolean;
+	managedModelCompatible: boolean;
+	useManagedInference: boolean;
+	ownKeyConfigured: boolean;
+	onUseOwnKeyChange: (useOwnKey: boolean) => void;
 }
 
 export function TranscribeSettingsSection({
@@ -109,6 +114,11 @@ export function TranscribeSettingsSection({
 	isSttTestRunning,
 	onRunSttTest,
 	hasStoredTranscriptionPrompt,
+	managedAccessEnabled,
+	managedModelCompatible,
+	useManagedInference,
+	ownKeyConfigured,
+	onUseOwnKeyChange,
 }: TranscribeSettingsSectionProps) {
 	const { data: globalSettings } = useSettings();
 	const updateSTTLiveOutput = useUpdateSTTLiveOutput();
@@ -228,21 +238,53 @@ export function TranscribeSettingsSection({
 								}}
 							/>
 						) : (
-							<Select
-								data={sttModelOptions}
-								value={selectedSttModelForUi}
-								onChange={onSttModelChange}
-								placeholder="Select model"
-								withCheckIcon={false}
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										minWidth: 200,
-									},
+							<div
+								style={{
+									display: "flex",
+									flexDirection: "column",
+									alignItems: "flex-end",
+									gap: 6,
 								}}
-							/>
+							>
+								<Select
+									data={sttModelOptions}
+									value={selectedSttModelForUi}
+									onChange={onSttModelChange}
+									placeholder="Select model"
+									withCheckIcon={false}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											minWidth: 200,
+										},
+									}}
+								/>
+								{managedAccessEnabled && managedModelCompatible ? (
+									<>
+										<Switch
+											label="Use your own API key"
+											checked={!useManagedInference}
+											onChange={(event) =>
+												onUseOwnKeyChange(event.currentTarget.checked)
+											}
+											color="gray"
+											size="sm"
+										/>
+										{!useManagedInference && !ownKeyConfigured ? (
+											<Text size="xs" c="yellow">
+												Add this provider's API key in Providers before use.
+											</Text>
+										) : null}
+									</>
+								) : managedAccessEnabled && selectedSttModelForUi ? (
+									<Text size="xs" c="yellow">
+										This model is not available through Kolboo Managed. It
+										requires your own API key.
+									</Text>
+								) : null}
+							</div>
 						)}
 					</div>
 				</div>

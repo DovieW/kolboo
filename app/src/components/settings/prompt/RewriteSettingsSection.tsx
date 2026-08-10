@@ -84,6 +84,12 @@ type RewriteSettingsSectionProps = {
 	onAnthropicThinkingBudgetChange: (value: string | null) => void;
 	onDisableAnthropicThinkingBudgetOverride: () => void;
 	formatThinkingBudgetShort: (budget: number) => string;
+	managedAccessEnabled: boolean;
+	managedModelCompatible: boolean;
+	usingOwnKey: boolean;
+	ownKeyAvailable: boolean;
+	ownKeyConfigured: boolean;
+	onUseOwnKeyChange: (useOwnKey: boolean) => void;
 };
 
 export function RewriteSettingsSection({
@@ -155,6 +161,12 @@ export function RewriteSettingsSection({
 	onAnthropicThinkingBudgetChange,
 	onDisableAnthropicThinkingBudgetOverride,
 	formatThinkingBudgetShort,
+	managedAccessEnabled,
+	managedModelCompatible,
+	usingOwnKey,
+	ownKeyAvailable,
+	ownKeyConfigured,
+	onUseOwnKeyChange,
 }: RewriteSettingsSectionProps) {
 	const ocrModeDisabled = !ocrProviderAvailable;
 	const ocrModeDisabledTooltip =
@@ -338,25 +350,64 @@ export function RewriteSettingsSection({
 									{llmPricingLabel}
 								</Text>
 							) : null}
-							<Select
-								data={llmModelOptions}
-								value={
-									isDefaultScope
-										? (settings?.llm_model ?? llmModelOptions[0]?.value ?? null)
-										: localProfileLlmModel
-								}
-								onChange={onLlmModelChange}
-								placeholder="Select model"
-								withCheckIcon={false}
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										minWidth: 200,
-									},
+							<div
+								style={{
+									display: "flex",
+									flexDirection: "column",
+									alignItems: "flex-end",
+									gap: 6,
 								}}
-							/>
+							>
+								<Select
+									data={llmModelOptions}
+									value={
+										isDefaultScope
+											? (settings?.llm_model ??
+												llmModelOptions[0]?.value ??
+												null)
+											: localProfileLlmModel
+									}
+									onChange={onLlmModelChange}
+									placeholder="Select model"
+									withCheckIcon={false}
+									styles={{
+										input: {
+											backgroundColor: "var(--bg-elevated)",
+											borderColor: "var(--border-default)",
+											color: "var(--text-primary)",
+											minWidth: 200,
+										},
+									}}
+								/>
+								{managedAccessEnabled && managedModelCompatible ? (
+									<>
+										<Switch
+											label="Use your own API key"
+											checked={usingOwnKey}
+											disabled={!ownKeyAvailable}
+											onChange={(event) =>
+												onUseOwnKeyChange(event.currentTarget.checked)
+											}
+											color="gray"
+											size="sm"
+										/>
+										{!ownKeyAvailable ? (
+											<Text size="xs" c="dimmed">
+												This model is available only through Kolboo Managed.
+											</Text>
+										) : usingOwnKey && !ownKeyConfigured ? (
+											<Text size="xs" c="yellow">
+												Add this provider's API key in Providers before use.
+											</Text>
+										) : null}
+									</>
+								) : managedAccessEnabled ? (
+									<Text size="xs" c="yellow">
+										This model is not available through Kolboo Managed. It
+										requires your own API key.
+									</Text>
+								) : null}
+							</div>
 						</>
 					}
 				/>
