@@ -19,6 +19,26 @@ enable signed updater delivery, and is not a public release. macOS may require
 the tester to approve the application from **System Settings → Privacy &
 Security** after the first download.
 
+## Deferred native-validation checkpoint
+
+Native acceptance is paused until a Mac is available. This pauses the manual
+test pass, not the macOS implementation work or the ability to produce another
+artifact.
+
+The first Apple Silicon development bundle was produced on 2026-08-09:
+
+- desktop commit: `cb99f1f67ea3584aa7487dae0de5bd7cdfa6786e`;
+- workflow run:
+  [31347333237](https://github.com/DovieW/kolboo/actions/runs/31347333237);
+- build target: `aarch64-apple-darwin`;
+- CI evidence: the application and DMG were produced, the application passed
+  strict `codesign` verification, and the executable was confirmed as ARM64.
+
+The artifact expires and can be rebuilt from the manual workflow. No one has
+launched this bundle on a Mac, granted its permissions, or exercised its native
+behavior. Resume with the acceptance pass below and retain the Mac model,
+architecture, macOS version, workflow run, commit, and observed results.
+
 ## First native acceptance pass
 
 Record the macOS version, Mac architecture, workflow run, and commit SHA, then

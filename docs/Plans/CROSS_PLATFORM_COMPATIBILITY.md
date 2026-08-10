@@ -46,7 +46,7 @@ This is not a promise of perfect parity. Platform limitations—especially Wayla
 
 Linux development prerequisites, build commands, and current X11/Wayland behavior are documented in [Linux development](../How%20Tos/LINUX_DEVELOPMENT.md). The `Linux Build` workflow now compiles the native default-feature binary on Ubuntu; installable packaging and the acceptance matrix remain open.
 
-Private macOS artifact builds and the first native acceptance pass are documented in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md). The workflow is manual-only and produces ad-hoc-signed test bundles; signing, notarization, and platform support remain open.
+Private macOS artifact builds and the first native acceptance pass are documented in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md). The workflow is manual-only and produces ad-hoc-signed test bundles. An Apple Silicon bundle passed CI construction, signing, and architecture checks, but native acceptance is paused until a Mac is available. Signing, notarization, native behavior, and platform support remain open.
 
 ### Audio capture
 
