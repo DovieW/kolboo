@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+	managedInferenceAPI,
 	type OcrAuthMode,
 	type OcrAutoCaptureTiming,
 	type OpenAiReasoningEffort,
@@ -37,6 +38,17 @@ export function useAvailableProviders() {
 	return useQuery({
 		queryKey: ["availableProviders"],
 		queryFn: createAvailableProvidersQueryFn(queryFnDeps),
+	});
+}
+
+export function useManagedModels(enabled: boolean) {
+	return useQuery({
+		queryKey: ["managedModels"],
+		queryFn: () => managedInferenceAPI.getModels(),
+		select: (catalog) => catalog.models,
+		enabled,
+		staleTime: 5 * 60 * 1000,
+		retry: false,
 	});
 }
 

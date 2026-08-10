@@ -3,6 +3,7 @@ import { authReasonCodeToMessage, normalizeAuthReasonCode } from "./license";
 import { loadRuntimeConfig } from "./runtimeConfig";
 import type {
 	AuthReasonCode,
+	LicenseAuthContext,
 	ManagedError,
 	ManagedErrorCategory,
 	ManagedUsageState,
@@ -21,6 +22,29 @@ export interface ManagedLlmRequest {
 	operation: "rewrite" | "complete" | "quick_ask";
 	input_ref?: string | null;
 	metadata?: Record<string, unknown>;
+}
+
+export interface ManagedModel {
+	id: string;
+	display_name: string;
+	provider: string;
+	capabilities: Array<"chat_completions" | "responses">;
+	default_for_provider: boolean;
+}
+
+export interface ManagedModelCatalogResponse {
+	models: ManagedModel[];
+	request_id: string;
+}
+
+export function hasManagedInferenceAccess(
+	context: LicenseAuthContext | null | undefined,
+): boolean {
+	return (
+		context?.authenticated === true &&
+		context.policy_status === "allow" &&
+		context.entitlements.includes("managed_inference")
+	);
 }
 
 function hostnameForUrl(value: string | null): string | null {
@@ -256,6 +280,12 @@ export function createIdempotencyKey(prefix = "kolboo"): string {
 }
 
 export const managedInferenceAPI = {
+	getModels: async (): Promise<ManagedModelCatalogResponse> => {
+		return getManagedJson<ManagedModelCatalogResponse>({
+			path: "/v1/managed/models",
+		});
+	},
+
 	transcribe: async (request: ManagedSttRequest, idempotencyKey: string) => {
 		return postManagedJson<ManagedSttRequest, unknown>({
 			path: "/v1/stt/transcribe",

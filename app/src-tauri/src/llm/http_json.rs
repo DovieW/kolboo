@@ -140,3 +140,19 @@ pub(super) async fn send_json_request_logged<T: Serialize>(
     record_llm_response(request_log_store, &response_json);
     Ok(response_json)
 }
+
+pub(super) async fn send_json_request_logged_with_error_parser<T: Serialize>(
+    provider_label: &str,
+    provider_id: &str,
+    req: RequestBuilder,
+    timeout: Option<Duration>,
+    request_log_store: Option<&RequestLogStore>,
+    request: &T,
+    parse_error: fn(&str) -> Option<String>,
+) -> Result<serde_json::Value, LlmError> {
+    record_llm_request(request_log_store, provider_id, request);
+    let response_json =
+        send_json_request_with_error_parser(provider_label, req, timeout, parse_error).await?;
+    record_llm_response(request_log_store, &response_json);
+    Ok(response_json)
+}

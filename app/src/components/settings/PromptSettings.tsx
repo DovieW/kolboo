@@ -12,6 +12,7 @@ import {
 	useDefaultSections,
 	useHasLastAudioForSttTest,
 	useIterateRewritePrompt,
+	useLicenseAuthContext,
 	useModelPricing,
 	useSettings,
 	useTestLlmRewrite,
@@ -56,6 +57,7 @@ import {
 	type QuickAskDismissMode,
 	type RewritePreset,
 	type RewriteProgramPromptProfile,
+	hasManagedInferenceAccess,
 	tauriAPI,
 } from "../../lib/tauri";
 import { PresetEditorModal } from "./prompt/PresetEditorModal";
@@ -136,6 +138,8 @@ export function PromptSettings({
 		useDefaultSections();
 	const { data: availableProviders, isLoading: isLoadingProviders } =
 		useAvailableProviders();
+	const { data: licenseAuthContext } = useLicenseAuthContext();
+	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
 	const updateCleanupPromptSections = useUpdateCleanupPromptSections();
 	const updateRewriteLlmEnabled = useUpdateRewriteLlmEnabled();
 	const updateRewriteProgramPromptProfiles =
@@ -432,6 +436,7 @@ export function PromptSettings({
 	} = usePromptProviderOptions({
 		activeProfileId,
 		isDefaultScope,
+		managedAccessEnabled,
 		availableProviders,
 		settings,
 		profiles,

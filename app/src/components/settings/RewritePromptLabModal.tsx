@@ -13,7 +13,8 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
-import { llmAPI } from "../../lib/tauri";
+import { useLicenseAuthContext, useManagedModels } from "../../lib/queries";
+import { hasManagedInferenceAccess, llmAPI } from "../../lib/tauri";
 
 type OpenAiThinkingEffort = "none" | "low" | "medium" | "high";
 
@@ -94,12 +95,44 @@ export function RewritePromptLabModal(props: {
 		prompt: string;
 	}) => Promise<{ output: string; providerUsed: string; modelUsed: string }>;
 }) {
-	const { data: llmProviders } = useQuery({
+	const { data: configuredLlmProviders } = useQuery({
 		queryKey: ["llmProviders"],
 		queryFn: () => llmAPI.getLlmProviders(),
 		staleTime: 60_000,
 		refetchOnWindowFocus: false,
 	});
+	const { data: licenseAuthContext } = useLicenseAuthContext();
+	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
+	const managedModelsQuery = useManagedModels(managedAccessEnabled);
+	const llmProviders = useMemo(
+		() => [
+			...(managedAccessEnabled && (managedModelsQuery.data?.length ?? 0) > 0
+				? [
+						{
+							id: "managed",
+							name: "Kolboo Managed",
+							requires_api_key: false,
+							default_model:
+								managedModelsQuery.data?.find(
+									(model) => model.default_for_provider,
+								)?.id ??
+								managedModelsQuery.data?.[0]?.id ??
+								"gpt-4o-mini",
+							models:
+								managedModelsQuery.data
+									?.filter((model) =>
+										model.capabilities.includes("chat_completions"),
+									)
+									.map((model) => model.id) ?? [],
+						},
+					]
+				: []),
+			...(configuredLlmProviders ?? []).filter(
+				(provider) => provider.id !== "managed",
+			),
+		],
+		[configuredLlmProviders, managedAccessEnabled, managedModelsQuery.data],
+	);
 
 	const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
 	const [selectedModel, setSelectedModel] = useState<string | null>(null);

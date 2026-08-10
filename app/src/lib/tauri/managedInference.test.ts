@@ -30,11 +30,35 @@ vi.mock("./runtimeConfig", () => ({
 
 import {
 	createIdempotencyKey,
+	hasManagedInferenceAccess,
 	managedInferenceAPI,
 	postManagedJson,
 } from "./managedInference";
 
 describe("managedInference", () => {
+	it("requires authentication, policy allowance, and the managed entitlement", () => {
+		const context = {
+			authenticated: true,
+			secure_session_present: true,
+			subject_id: "user-1",
+			issuer: "https://issuer.example",
+			mode: "personal" as const,
+			org_id: null,
+			entitlements: ["managed_inference"],
+			policy_status: "allow" as const,
+			reason_code: null,
+		};
+
+		expect(hasManagedInferenceAccess(context)).toBe(true);
+		expect(
+			hasManagedInferenceAccess({ ...context, policy_status: "deny" }),
+		).toBe(false);
+		expect(hasManagedInferenceAccess({ ...context, entitlements: [] })).toBe(
+			false,
+		);
+		expect(hasManagedInferenceAccess(null)).toBe(false);
+	});
+
 	it("attaches bearer auth for relative managed gateway requests", async () => {
 		loadRuntimeConfigMock.mockResolvedValueOnce({
 			app_version: null,
@@ -78,6 +102,57 @@ describe("managedInference", () => {
 		expect(url).toBe("https://gateway.example/v1/stt/transcribe");
 		expect(init.headers.authorization).toBe("Bearer session-token");
 		expect(init.headers["x-idempotency-key"]).toBe("idem-auth");
+	});
+
+	it("loads the authenticated managed model catalog", async () => {
+		loadRuntimeConfigMock.mockResolvedValueOnce({
+			app_version: null,
+			api_base_url: null,
+			managed_inference_gateway_url: "https://gateway.example/",
+			cloudflare_access_client_id: null,
+			cloudflare_access_client_secret: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			sentry_smoke: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		});
+		invokeMock.mockImplementation(async (command) => {
+			if (command === "license_get_session_access_token") {
+				return "session-token";
+			}
+			throw new Error(`Unexpected invoke command: ${command}`);
+		});
+
+		const catalog = {
+			models: [
+				{
+					id: "gpt-5-mini",
+					display_name: "GPT-5 mini",
+					provider: "openai",
+					capabilities: ["chat_completions", "responses"],
+					default_for_provider: false,
+				},
+			],
+			request_id: "request-1",
+		};
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => catalog,
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(managedInferenceAPI.getModels()).resolves.toEqual(catalog);
+		expect(fetchMock).toHaveBeenCalledWith(
+			"https://gateway.example/v1/managed/models",
+			expect.objectContaining({
+				method: "GET",
+				headers: expect.objectContaining({
+					authorization: "Bearer session-token",
+				}),
+			}),
+		);
 	});
 
 	it("attaches Cloudflare Access headers only for configured edge hosts", async () => {

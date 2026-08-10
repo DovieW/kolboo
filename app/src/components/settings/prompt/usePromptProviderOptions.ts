@@ -1,5 +1,13 @@
-import { LLM_MODELS, STT_MODELS } from "../../../lib/modelOptions";
-import { useFireworksModels, useOllamaModels } from "../../../lib/queries";
+import {
+	LLM_MODELS,
+	managedChatModelOptions,
+	STT_MODELS,
+} from "../../../lib/modelOptions";
+import {
+	useFireworksModels,
+	useManagedModels,
+	useOllamaModels,
+} from "../../../lib/queries";
 import type {
 	AppSettings,
 	RewriteProgramPromptProfile,
@@ -20,6 +28,7 @@ type AvailableProviders = {
 type UsePromptProviderOptionsOptions = {
 	activeProfileId: string;
 	isDefaultScope: boolean;
+	managedAccessEnabled: boolean;
 	availableProviders: AvailableProviders | undefined;
 	settings: AppSettings | undefined;
 	profiles: RewriteProgramPromptProfile[];
@@ -83,6 +92,7 @@ type PromptProviderOptions = {
 export function usePromptProviderOptions({
 	activeProfileId,
 	isDefaultScope,
+	managedAccessEnabled,
 	availableProviders,
 	settings,
 	profiles,
@@ -96,6 +106,10 @@ export function usePromptProviderOptions({
 	localProfileQuickReplaceModel,
 	effectiveRouterLlmProvider,
 }: UsePromptProviderOptionsOptions): PromptProviderOptions {
+	const managedModelsQuery = useManagedModels(managedAccessEnabled);
+	const managedModels = managedModelsQuery.data ?? [];
+	const managedProviderReady = managedAccessEnabled && managedModels.length > 0;
+
 	// Provider dropdown options
 	const sttCloudProviders =
 		availableProviders?.stt
@@ -110,10 +124,18 @@ export function usePromptProviderOptions({
 		{ group: "Local", items: sttLocalProviders },
 	];
 
-	const llmCloudProviders =
+	const configuredLlmCloudProviders =
 		availableProviders?.llm
 			.filter((p) => !p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const llmCloudProviders = [
+		...(managedProviderReady
+			? [{ value: "managed", label: "Kolboo Managed" }]
+			: []),
+		...configuredLlmCloudProviders.filter(
+			(provider) => provider.value !== "managed",
+		),
+	];
 	const llmLocalProviders =
 		availableProviders?.llm
 			.filter((p) => p.is_local)
@@ -232,6 +254,9 @@ export function usePromptProviderOptions({
 
 	const getLlmModelOptionsForProvider = (provider: string | null) => {
 		if (!provider) return [];
+		if (provider === "managed") {
+			return managedChatModelOptions(managedModels);
+		}
 		if (provider === "fireworks") {
 			const dynamic = fireworksModelsQuery.data;
 			if (Array.isArray(dynamic) && dynamic.length > 0) return dynamic;

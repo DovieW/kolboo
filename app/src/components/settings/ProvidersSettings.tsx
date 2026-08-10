@@ -1,8 +1,14 @@
 import { Loader, Select, Slider, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
-import { LLM_MODELS, STT_MODELS } from "../../lib/modelOptions";
+import {
+	LLM_MODELS,
+	managedChatModelOptions,
+	STT_MODELS,
+} from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
+	useLicenseAuthContext,
+	useManagedModels,
 	useSettings,
 	useUpdateGeminiThinkingBudget,
 	useUpdateGeminiThinkingLevel,
@@ -13,7 +19,10 @@ import {
 	useUpdateSTTProvider,
 	useUpdateSTTTimeout,
 } from "../../lib/queries";
-import type { OpenAiReasoningEffort } from "../../lib/tauri";
+import {
+	hasManagedInferenceAccess,
+	type OpenAiReasoningEffort,
+} from "../../lib/tauri";
 import { HintSelectWithDefaultHint } from "../HintSelectWithDefaultHint";
 import { SettingsRow } from "./SettingsRow";
 
@@ -26,9 +35,23 @@ export function ProvidersSettings() {
 	const { data: settings, isLoading: isLoadingSettings } = useSettings();
 	const { data: availableProviders, isLoading: isLoadingProviders } =
 		useAvailableProviders();
+	const { data: licenseAuthContext } = useLicenseAuthContext();
+	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
+	const managedModelsQuery = useManagedModels(managedAccessEnabled);
+	const managedModels = managedModelsQuery.data ?? [];
+	const managedProviderReady = managedAccessEnabled && managedModels.length > 0;
+	const getLlmModelsForProvider = (provider: string) => {
+		if (provider === "managed") {
+			return managedChatModelOptions(managedModels);
+		}
+		return LLM_MODELS[provider] ?? [];
+	};
 
 	// Wait for settings (source of truth) and provider list (for options)
-	const isLoadingProviderData = isLoadingSettings || isLoadingProviders;
+	const isLoadingProviderData =
+		isLoadingSettings ||
+		isLoadingProviders ||
+		(managedAccessEnabled && managedModelsQuery.isLoading);
 	const updateSTTProvider = useUpdateSTTProvider();
 	const updateSTTModel = useUpdateSTTModel();
 	const updateLLMProvider = useUpdateLLMProvider();
@@ -66,7 +89,7 @@ export function ProvidersSettings() {
 		updateLLMProvider.mutate(value, {
 			onSuccess: () => {
 				// Reset model to first available when provider changes
-				const models = LLM_MODELS[value];
+				const models = getLlmModelsForProvider(value);
 				const firstModel = models?.[0];
 				if (firstModel) {
 					updateLLMModel.mutate(firstModel.value);
@@ -132,10 +155,18 @@ export function ProvidersSettings() {
 		{ group: "Local", items: sttLocalProviders },
 	];
 
-	const llmCloudProviders =
+	const configuredLlmCloudProviders =
 		availableProviders?.llm
 			.filter((p) => !p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
+	const llmCloudProviders = [
+		...(managedProviderReady
+			? [{ value: "managed", label: "Kolboo Managed" }]
+			: []),
+		...configuredLlmCloudProviders.filter(
+			(provider) => provider.value !== "managed",
+		),
+	];
 	const llmLocalProviders =
 		availableProviders?.llm
 			.filter((p) => p.is_local)
@@ -150,7 +181,7 @@ export function ProvidersSettings() {
 		? (STT_MODELS[settings.stt_provider] ?? [])
 		: [];
 	const llmModelOptions = settings?.llm_provider
-		? (LLM_MODELS[settings.llm_provider] ?? [])
+		? getLlmModelsForProvider(settings.llm_provider)
 		: [];
 
 	const effectiveLlmProvider = settings?.llm_provider ?? null;

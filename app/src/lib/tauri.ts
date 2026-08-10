@@ -23,6 +23,12 @@ export {
 	sttAPI,
 } from "./tauri/commands";
 export {
+	hasManagedInferenceAccess,
+	managedInferenceAPI,
+	type ManagedModel,
+	type ManagedModelCatalogResponse,
+} from "./tauri/managedInference";
+export {
 	defaultHoldHotkey,
 	defaultPasteLastHotkey,
 	defaultQuickAskHoldHotkey,

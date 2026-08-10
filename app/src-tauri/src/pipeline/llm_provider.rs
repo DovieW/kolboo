@@ -1,7 +1,7 @@
 use crate::llm::{
     AnthropicLlmProvider, CerebrasLlmProvider, CohereLlmProvider, FireworksLlmProvider,
-    GeminiLlmProvider, GroqLlmProvider, LlmConfig, LlmProvider, OllamaLlmProvider,
-    OpenAiLlmProvider, PromptSections,
+    GeminiLlmProvider, GroqLlmProvider, LlmConfig, LlmProvider, ManagedLlmProvider,
+    OllamaLlmProvider, OpenAiLlmProvider, PromptSections,
 };
 use crate::request_log::RequestLogStore;
 use crate::settings::ProxySettings;
@@ -20,6 +20,7 @@ fn managed_llm_api_base_url(provider: &str, gateway_url: &str) -> Option<String>
     }
 
     match provider {
+        "managed" => Some(format!("{gateway}/v1/chat/completions")),
         // OpenAI provider appends /v1/responses internally.
         "openai" => Some(gateway.to_string()),
         // Provider adapters that expect a full endpoint URL.
@@ -156,6 +157,15 @@ pub(crate) fn resolve_one_off_llm_config(
     let provider_id = provider_id.trim().to_string();
     let api_key = if provider_id == "ollama" {
         String::new()
+    } else if provider_id == "managed" {
+        if base_config.managed_gateway_url.as_deref().is_none()
+            || base_config.api_key.trim().is_empty()
+        {
+            return Err(PipelineError::Config(
+                "Managed inference is not available for this session".to_string(),
+            ));
+        }
+        base_config.api_key.clone()
     } else {
         llm_api_keys.get(&provider_id).cloned().unwrap_or_default()
     };
@@ -218,6 +228,17 @@ pub(crate) fn create_one_off_llm_provider_without_timeout(
 /// statements whenever a provider knob is added.
 pub(crate) fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
     match config.provider.as_str() {
+        "managed" => {
+            let api_url = config
+                .managed_gateway_url
+                .as_deref()
+                .and_then(|gateway| managed_llm_api_base_url("managed", gateway))
+                .unwrap_or_default();
+            Arc::new(
+                ManagedLlmProvider::new(config.api_key.clone(), config.model.clone(), api_url)
+                    .with_timeout(config.timeout),
+            )
+        }
         "cerebras" => {
             let provider = if let Some(model) = &config.model {
                 CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
@@ -315,6 +336,18 @@ pub(crate) fn create_llm_provider_without_timeout(
     request_log_store: Option<RequestLogStore>,
 ) -> Arc<dyn LlmProvider> {
     match config.provider.as_str() {
+        "managed" => {
+            let api_url = config
+                .managed_gateway_url
+                .as_deref()
+                .and_then(|gateway| managed_llm_api_base_url("managed", gateway))
+                .unwrap_or_default();
+            Arc::new(
+                ManagedLlmProvider::new(config.api_key.clone(), config.model.clone(), api_url)
+                    .without_timeout()
+                    .with_request_log_store(request_log_store.clone()),
+            )
+        }
         "cerebras" => {
             let provider = if let Some(model) = &config.model {
                 CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
@@ -434,6 +467,28 @@ pub(super) fn create_llm_provider(
     })?;
 
     let provider: Arc<dyn LlmProvider> = match config.provider.as_str() {
+        "managed" => {
+            let gateway = config.managed_gateway_url.as_deref().ok_or_else(|| {
+                crate::pipeline::PipelineError::Config(
+                    "Managed inference gateway is not configured".to_string(),
+                )
+            })?;
+            let api_url = managed_llm_api_base_url("managed", gateway).ok_or_else(|| {
+                crate::pipeline::PipelineError::Config(
+                    "Managed inference gateway URL is invalid".to_string(),
+                )
+            })?;
+            Arc::new(
+                ManagedLlmProvider::with_client(
+                    client.clone(),
+                    config.api_key.clone(),
+                    config.model.clone(),
+                    api_url,
+                )
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store.clone()),
+            )
+        }
         "cerebras" => Arc::new(
             CerebrasLlmProvider::with_client(
                 client.clone(),
@@ -678,5 +733,58 @@ mod tests {
         );
         assert!(resolved.prompts.system_custom.is_none());
         assert!(resolved.program_prompt_profiles.is_empty());
+    }
+
+    #[test]
+    fn resolve_one_off_managed_config_uses_session_token() {
+        let base = LlmConfig {
+            api_key: "managed-session-token".to_string(),
+            managed_gateway_url: Some("https://gateway.example.test".to_string()),
+            ..LlmConfig::default()
+        };
+
+        let resolved = resolve_one_off_llm_config(
+            &base,
+            &HashMap::new(),
+            "managed",
+            LlmProviderParams {
+                model: Some("gemini-3-flash".to_string()),
+                timeout: Duration::from_secs(30),
+                ollama_url: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+        )
+        .expect("managed one-off config should resolve");
+
+        assert_eq!(resolved.provider, "managed");
+        assert_eq!(resolved.api_key, "managed-session-token");
+        assert_eq!(resolved.model.as_deref(), Some("gemini-3-flash"));
+    }
+
+    #[test]
+    fn resolve_one_off_managed_config_fails_without_session() {
+        let error = resolve_one_off_llm_config(
+            &LlmConfig {
+                managed_gateway_url: Some("https://gateway.example.test".to_string()),
+                ..LlmConfig::default()
+            },
+            &HashMap::new(),
+            "managed",
+            LlmProviderParams {
+                model: None,
+                timeout: Duration::from_secs(30),
+                ollama_url: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+        )
+        .expect_err("managed one-off config must fail without a session token");
+
+        assert!(error.to_string().contains("not available for this session"));
     }
 }

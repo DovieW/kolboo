@@ -6,7 +6,8 @@
 
 use crate::llm::{
     format_text, AnthropicLlmProvider, CohereLlmProvider, FireworksLlmProvider, GeminiLlmProvider,
-    GroqLlmProvider, LlmError, LlmProvider, OllamaLlmProvider, OpenAiLlmProvider, PromptSections,
+    GroqLlmProvider, LlmError, LlmProvider, ManagedLlmProvider, OllamaLlmProvider,
+    OpenAiLlmProvider, PromptSections,
 };
 
 use serde_json::json;
@@ -187,6 +188,81 @@ async fn test_format_text_whitespace_input() {
     let result = format_text(&provider, "   \n\t   ", &prompts).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "");
+}
+
+#[tokio::test]
+async fn test_managed_complete_sends_catalog_model_to_api_edge() {
+    let mock_server = MockServer::start().await;
+    let expected_request = json!({
+        "model": "gemini-3-flash",
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user"}
+        ]
+    });
+
+    let guard = Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(header("authorization", "Bearer session-token"))
+        .and(body_json(&expected_request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": "hello from managed"}}]
+        })))
+        .expect(1)
+        .mount_as_scoped(&mock_server)
+        .await;
+
+    let provider = ManagedLlmProvider::new(
+        "session-token".to_string(),
+        Some("gemini-3-flash".to_string()),
+        format!("{}/v1/chat/completions", mock_server.uri()),
+    );
+
+    let output = provider.complete("sys", "user").await.unwrap();
+    assert_eq!(output, "hello from managed");
+
+    let requests = guard.received_requests().await;
+    let idempotency_key = requests[0]
+        .headers
+        .get("x-idempotency-key")
+        .expect("managed requests need an idempotency key")
+        .to_str()
+        .unwrap();
+    assert!(idempotency_key.starts_with("desktop-llm-"));
+}
+
+#[tokio::test]
+async fn test_managed_complete_parses_stable_api_edge_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "code": "MODEL_NOT_SUPPORTED",
+            "message": "Choose another managed model."
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let provider = ManagedLlmProvider::new(
+        "session-token".to_string(),
+        Some("not-catalogued".to_string()),
+        format!("{}/v1/chat/completions", mock_server.uri()),
+    );
+    let error = provider
+        .complete("sys", "user")
+        .await
+        .expect_err("uncatalogued model should fail");
+
+    match error {
+        LlmError::Api(message) => {
+            assert!(message.contains("400"));
+            assert!(message.contains("Choose another managed model."));
+            assert!(!message.contains("MODEL_NOT_SUPPORTED"));
+        }
+        other => panic!("expected LlmError::Api, got: {other:?}"),
+    }
 }
 
 #[tokio::test]

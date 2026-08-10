@@ -1,4 +1,15 @@
+import type { ManagedModel } from "./tauri";
+
 export type ModelOption = { value: string; label: string };
+
+export function managedChatModelOptions(models: ManagedModel[]): ModelOption[] {
+	return models
+		.filter((model) => model.capabilities.includes("chat_completions"))
+		.map((model) => ({
+			value: model.id,
+			label: `${model.display_name} · ${model.provider}`,
+		}));
+}
 
 // Model options for embedding providers (used by intent router).
 export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
@@ -88,6 +99,7 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 
 // Model options for each LLM provider.
 export const LLM_MODELS: Record<string, ModelOption[]> = {
+	managed: [],
 	cerebras: [
 		{ value: "llama-3.3-70b", label: "Llama 3.3 70B" },
 		{ value: "llama3.1-8b", label: "Llama 3.1 8B" },

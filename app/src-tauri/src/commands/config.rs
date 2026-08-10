@@ -625,7 +625,11 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
 
     // IMPORTANT: `enabled` is only the global toggle. The effective provider/key is resolved
     // per transcription based on the active profile.
-    let llm_enabled = rewrite_llm_enabled;
+    // Keep a persisted Managed selection ready for the next authenticated
+    // session, but do not let it break Community/BYOK transcription after
+    // logout or entitlement loss. The user can select a BYOK provider again.
+    let llm_enabled = rewrite_llm_enabled
+        && (managed_mode_active || llm_provider_effective.as_str() != "managed");
 
     // Read all available LLM API keys (for per-profile provider overrides at runtime)
     let mut llm_api_keys: std::collections::HashMap<String, String> =
