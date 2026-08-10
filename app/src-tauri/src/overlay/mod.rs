@@ -110,6 +110,36 @@ fn overlay_window_builder_preset<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     }
 }
 
+/// Advertise the overlay as a fullscreen-safe notification where supported.
+///
+/// `_KDE_NET_WM_WINDOW_TYPE_CRITICAL_NOTIFICATION` is intentionally listed
+/// first: KWin places ordinary notifications below active fullscreen windows,
+/// while its critical-notification layer is defined to remain above them. The
+/// standard EWMH type follows it so non-KDE window managers can ignore the
+/// unknown KDE atom and use the portable fallback.
+#[cfg(target_os = "linux")]
+fn apply_linux_overlay_window_type(surface: &gdk::Window, preset: OverlayWindowPreset) {
+    let property = gdk::Atom::intern("_NET_WM_WINDOW_TYPE");
+    let atom_type = gdk::Atom::intern("ATOM");
+    let mut types =
+        vec![gdk::Atom::intern("_KDE_NET_WM_WINDOW_TYPE_CRITICAL_NOTIFICATION").value() as _];
+    let portable_type = match preset {
+        OverlayWindowPreset::Overlay => "_NET_WM_WINDOW_TYPE_NOTIFICATION",
+        OverlayWindowPreset::Hover | OverlayWindowPreset::QuickAsk => "_NET_WM_WINDOW_TYPE_UTILITY",
+    };
+    types.push(gdk::Atom::intern(portable_type).value() as _);
+    types.push(gdk::Atom::intern("_NET_WM_WINDOW_TYPE_NORMAL").value() as _);
+
+    gdk::property_change(
+        surface,
+        &property,
+        &atom_type,
+        32,
+        gdk::PropMode::Replace,
+        gdk::ChangeData::ULongs(&types),
+    );
+}
+
 /// Apply Linux window-manager hints at the native map boundary.
 ///
 /// GTK can accept `keep_above` while a hidden window is being built, but some
@@ -132,9 +162,18 @@ fn configure_linux_overlay_stacking(
 
     gtk_window.set_type_hint(type_hint);
     gtk_window.set_keep_above(true);
-    gtk_window.connect_map(|gtk_window| {
+    if let Some(surface) = gtk_window.window() {
+        apply_linux_overlay_window_type(&surface, preset);
+    }
+    gtk_window.connect_realize(move |gtk_window| {
+        if let Some(surface) = gtk_window.window() {
+            apply_linux_overlay_window_type(&surface, preset);
+        }
+    });
+    gtk_window.connect_map(move |gtk_window| {
         gtk_window.set_keep_above(true);
         if let Some(surface) = gtk_window.window() {
+            apply_linux_overlay_window_type(&surface, preset);
             surface.set_keep_above(true);
             surface.raise();
         }
