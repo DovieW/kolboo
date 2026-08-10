@@ -2,7 +2,7 @@
 
 **Status:** Active engineering; not yet a supported release platform
 
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-08-10
 
 Kolboo is being built and validated natively on Linux. The current goal is a dependable private development build, followed by explicit X11 and Wayland acceptance—not a public Linux release.
 
@@ -49,7 +49,8 @@ Kolboo detects the Linux session using `XDG_SESSION_TYPE`, then falls back to `W
 - Set `KOLBOO_LINUX_WINDOW_BACKEND=wayland` to test the native Wayland window path, or `KOLBOO_LINUX_WINDOW_BACKEND=x11` to require X11/XWayland. Native Wayland uses compositor-selected placement until Kolboo adopts a broadly supported shell protocol capable of anchored utility surfaces.
 - Wayland does not promise global synthetic keyboard insertion. Completed output that requested automatic paste is copied to the clipboard once, and the UI shows an explicit fallback notification.
 - Streaming live output is disabled on Wayland so partial chunks are not repeatedly copied to the clipboard. The final completed transcript uses the clipboard fallback.
-- Global shortcuts remain best-effort while compositor-specific support is evaluated. Registration failures must remain visible in diagnostics rather than preventing app startup.
+- Native Wayland sessions register shortcuts through the compositor-owned XDG Global Shortcuts portal. This prevents a shortcut such as F3 from also reaching the focused Wayland application. The desktop may show a confirmation dialog the first time a binding is requested or after the binding changes, and the desktop remains authoritative over the final assigned trigger.
+- X11 sessions use the Tauri global-shortcut backend. Portal or X11 registration failures remain visible in diagnostics rather than preventing app startup.
 
 The fallback retains the transcript and avoids reporting a paste that did not happen. It does not make Wayland globally injected text a supported capability.
 
@@ -68,7 +69,8 @@ Manual acceptance should separately record the desktop session and verify:
 - launch and tray lifecycle;
 - microphone enumeration and recording;
 - X11 automatic paste or Wayland clipboard fallback;
-- shortcut registration behavior;
+- shortcut registration behavior, including that F3 does not also trigger the focused application's action on Wayland;
+- recording-overlay mapping without moving focus away from the previously focused input;
 - secure-storage availability and failure messaging;
 - overlay visibility and monitor placement, including work-area bottom-center placement without drift across repeated recordings;
 - Sentry release/environment/platform tags.

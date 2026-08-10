@@ -424,6 +424,10 @@ pub fn show_overlay_with_reset_if_not_always(app: &AppHandle) -> CommandResult<(
         let force_layout = overlay_mode != "always" || visible_before != Some(true);
         apply_overlay_layout_at_anchor(app, widget_layout, anchor, force_layout)?;
 
+        // GTK/X11 can treat unminimizing as an activation request. The
+        // recording overlay is never user-minimized on Linux, so mapping the
+        // explicitly non-focusable window is both sufficient and safer.
+        #[cfg(not(target_os = "linux"))]
         let _ = window.unminimize();
         window.show().map_err(|e| e.to_string())?;
         // Apply this after show as well as in the builder. X11/XWayland window

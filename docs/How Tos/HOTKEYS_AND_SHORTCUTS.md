@@ -18,15 +18,22 @@ This guide documents:
 
 ## Mental model
 
-There are **two shortcut mechanisms**:
+There are **three shortcut mechanisms**:
 
-1. **Global shortcut plugin** (cross-platform)
+1. **Global shortcut plugin** (Windows, macOS, and Linux/X11)
 
    - Implemented via `tauri-plugin-global-shortcut`.
    - Requires a “real” key (e.g. `F3`, `Ctrl+Space`, media keys, etc).
-   - Used by default on macOS/Linux and for non-modifier keys on Windows.
+   - Used by default on macOS, Linux/X11, and for non-modifier keys on Windows.
 
-2. **Windows-only modifier-only hotkeys** (Right Alt / AltGr)
+2. **XDG Global Shortcuts portal** (Linux/Wayland)
+
+   - Implemented in `app/src-tauri/src/shortcuts/wayland.rs` through `ashpd`.
+   - Registers with the compositor so a handled shortcut is consumed instead of also reaching the focused native Wayland application.
+   - The desktop can request user confirmation and owns the final binding. Changing a binding replaces the portal session because each session permits one bind operation.
+
+3. **Windows-only modifier-only hotkeys** (Right Alt / AltGr)
+
    - Implemented via a low-level keyboard hook.
    - File: `app/src-tauri/src/windows_modifier_hotkeys.rs`
    - Forwards events to:
@@ -34,7 +41,7 @@ There are **two shortcut mechanisms**:
    - This exists because OS-level hotkey APIs (and the Tauri global shortcut plugin) generally
      do **not** support “modifier-only” hotkeys.
 
-A single user hotkey setting may be handled by (1) or (2) depending on platform + key.
+A single user hotkey setting may be handled by one of these adapters depending on the platform, desktop session, and key.
 
 ---
 

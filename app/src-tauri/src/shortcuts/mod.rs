@@ -16,13 +16,16 @@ mod quick_ask_toggle;
 mod retry_last;
 #[cfg(desktop)]
 mod toggle_recording;
+#[cfg(all(desktop, target_os = "linux"))]
+mod wayland;
 
 #[cfg(desktop)]
 use hold_recording::{handle_hold_shortcut_event, HoldShortcutSource};
+#[cfg(all(desktop, target_os = "windows"))]
+pub(crate) use lifecycle::is_windows_hook_handled_hotkey;
 #[cfg(desktop)]
 pub(crate) use lifecycle::{
-    is_windows_hook_handled_hotkey, register_hotkey_cards, sync_windows_modifier_hook_flags,
-    HotkeyRegistrationMode,
+    register_hotkey_cards, sync_windows_modifier_hook_flags, HotkeyRegistrationMode,
 };
 #[cfg(desktop)]
 use paste_last::{handle_paste_last_shortcut_event, PasteLastShortcutSource};
@@ -34,6 +37,11 @@ use quick_ask_toggle::{handle_quick_ask_toggle_shortcut_event, QuickAskToggleSho
 pub(crate) use retry_last::spawn_retry_last_recording_and_output;
 #[cfg(desktop)]
 use toggle_recording::{handle_toggle_shortcut_event, ToggleShortcutSource};
+#[cfg(all(desktop, target_os = "linux"))]
+pub(crate) use wayland::{
+    register_hotkey_cards as register_wayland_hotkey_cards,
+    unregister_hotkey_cards as unregister_wayland_hotkey_cards,
+};
 
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
@@ -508,14 +516,6 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
 /// Handle a shortcut event - public so it can be called from commands/settings.rs
 #[cfg(desktop)]
 pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &ShortcutEvent) {
-    let state = app.state::<AppState>();
-
-    // Get current settings from store
-    let sound_enabled: bool = get_setting_from_store(app, "sound_enabled", true);
-    let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "kolboo".to_string());
-    let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
-    let playing_audio_handling = get_playing_audio_handling(app);
-
     // Get shortcut string for comparison (normalized to handle "ctrl" vs "control" differences)
     let shortcut_str = normalize_shortcut_string(&shortcut.to_string());
 
@@ -529,75 +529,89 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
             .is_some_and(|list| list.iter().any(|s| s == &shortcut_str))
     };
 
-    let is_toggle = matches_action(HotkeyAction::Toggle);
-    let is_hold = matches_action(HotkeyAction::Hold);
-    let is_paste_last = matches_action(HotkeyAction::PasteLast);
-    let is_retry = matches_action(HotkeyAction::Retry);
-    let is_quick_ask_hold = matches_action(HotkeyAction::QuickAskHold);
-    let is_quick_ask_toggle = matches_action(HotkeyAction::QuickAskToggle);
+    let action = [
+        HotkeyAction::Toggle,
+        HotkeyAction::Hold,
+        HotkeyAction::PasteLast,
+        HotkeyAction::Retry,
+        HotkeyAction::QuickAskHold,
+        HotkeyAction::QuickAskToggle,
+    ]
+    .into_iter()
+    .find(|action| matches_action(*action));
 
-    if is_toggle {
+    let Some(action) = action else {
+        log::warn!("Unknown shortcut: {}", shortcut_str);
+        return;
+    };
+
+    handle_hotkey_action_event(app, action, matches!(event.state, ShortcutState::Pressed));
+}
+
+/// Dispatch an already-resolved hotkey action.
+///
+/// Native shortcut backends do not all represent keys the same way. The regular
+/// Tauri backend resolves an action from its `Shortcut`; the Wayland portal gives
+/// us the stable action ID directly. Keeping side effects behind this function
+/// prevents the platform adapters from drifting.
+#[cfg(desktop)]
+pub(crate) fn handle_hotkey_action_event(app: &AppHandle, action: HotkeyAction, is_down: bool) {
+    let state = app.state::<AppState>();
+    let sound_enabled: bool = get_setting_from_store(app, "sound_enabled", true);
+    let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "kolboo".to_string());
+    let audio_cue = audio::AudioCue::from_str(&audio_cue_raw);
+    let playing_audio_handling = get_playing_audio_handling(app);
+
+    if action == HotkeyAction::Toggle {
         handle_toggle_shortcut_event(
             app,
             &state,
-            matches!(event.state, ShortcutState::Pressed),
+            is_down,
             ToggleShortcutSource::Global,
             sound_enabled,
             audio_cue,
             playing_audio_handling,
         );
-    } else if is_hold {
+    } else if action == HotkeyAction::Hold {
         handle_hold_shortcut_event(
             app,
             &state,
-            matches!(event.state, ShortcutState::Pressed),
+            is_down,
             HoldShortcutSource::Global,
             sound_enabled,
             audio_cue,
             playing_audio_handling,
         );
-    } else if is_paste_last {
-        handle_paste_last_shortcut_event(
-            app,
-            &state,
-            matches!(event.state, ShortcutState::Pressed),
-            PasteLastShortcutSource::Global,
-        );
-    } else if is_retry {
+    } else if action == HotkeyAction::PasteLast {
+        handle_paste_last_shortcut_event(app, &state, is_down, PasteLastShortcutSource::Global);
+    } else if action == HotkeyAction::Retry {
         // Retry last recording: action on release (debounced)
-        match event.state {
-            ShortcutState::Pressed => {
-                state.retry_key_held.swap(true, Ordering::SeqCst);
-            }
-            ShortcutState::Released => {
-                if state.retry_key_held.swap(false, Ordering::SeqCst) {
-                    log::info!("Retry: retrying last recording");
-                    spawn_retry_last_recording_and_output(app, "Retry");
-                }
-            }
+        if is_down {
+            state.retry_key_held.swap(true, Ordering::SeqCst);
+        } else if state.retry_key_held.swap(false, Ordering::SeqCst) {
+            log::info!("Retry: retrying last recording");
+            spawn_retry_last_recording_and_output(app, "Retry");
         }
-    } else if is_quick_ask_hold {
+    } else if action == HotkeyAction::QuickAskHold {
         handle_quick_ask_hold_shortcut_event(
             app,
             &state,
-            matches!(event.state, ShortcutState::Pressed),
+            is_down,
             QuickAskHoldShortcutSource::Global,
             sound_enabled,
             audio_cue,
             playing_audio_handling,
         );
-    } else if is_quick_ask_toggle {
+    } else if action == HotkeyAction::QuickAskToggle {
         handle_quick_ask_toggle_shortcut_event(
             app,
             &state,
-            matches!(event.state, ShortcutState::Pressed),
+            is_down,
             QuickAskToggleShortcutSource::Global,
             sound_enabled,
             audio_cue,
             playing_audio_handling,
         );
-    } else {
-        log::warn!("Unknown shortcut: {}", shortcut_str);
     }
 }
 
@@ -807,6 +821,32 @@ pub(crate) fn register_initial_shortcuts(
     // Startup and runtime registration intentionally share lifecycle decisions so adding a
     // hotkey action or Windows-hook Adapter cannot accidentally diverge after restart.
     sync_windows_modifier_hook_flags(&cards);
+
+    #[cfg(target_os = "linux")]
+    if crate::platform_capabilities::current_linux_display_server()
+        == crate::platform_capabilities::LinuxDisplayServer::Wayland
+    {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _guard = shortcuts_lock::global_shortcut_lock().lock().await;
+            if let Err(error) = register_wayland_hotkey_cards(
+                &app,
+                &cards,
+                HotkeyRegistrationMode::StartupBestEffort,
+            )
+            .await
+            {
+                emit_system_event(
+                    &app,
+                    "warning",
+                    "Wayland global shortcuts could not be registered",
+                    Some(&error),
+                );
+            }
+        });
+        return Ok(());
+    }
+
     register_hotkey_cards(app, &cards, HotkeyRegistrationMode::StartupBestEffort)
         .map_err(|e| Box::<dyn std::error::Error>::from(std::io::Error::other(e)))?;
 

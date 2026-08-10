@@ -90,6 +90,13 @@ pub async fn unregister_shortcuts(app: AppHandle) -> CommandResult<()> {
     shortcut_manager
         .unregister_all()
         .map_err(|e| format!("Failed to unregister shortcuts: {}", e))?;
+
+    #[cfg(target_os = "linux")]
+    if crate::platform_capabilities::current_linux_display_server()
+        == crate::platform_capabilities::LinuxDisplayServer::Wayland
+    {
+        crate::shortcuts::unregister_wayland_hotkey_cards().await?;
+    }
     Ok(())
 }
 
@@ -120,11 +127,29 @@ pub async fn register_shortcuts(app: AppHandle) -> CommandResult<()> {
     // - invalid => default
     let cards = crate::shortcuts::get_hotkey_cards_from_store(&app);
     crate::shortcuts::sync_windows_modifier_hook_flags(&cards);
-    crate::shortcuts::register_hotkey_cards(
-        &app,
-        &cards,
-        crate::shortcuts::HotkeyRegistrationMode::RuntimeReplaceAll,
-    )?;
+
+    #[cfg(target_os = "linux")]
+    let registered_with_wayland_portal =
+        crate::platform_capabilities::current_linux_display_server()
+            == crate::platform_capabilities::LinuxDisplayServer::Wayland;
+    #[cfg(not(target_os = "linux"))]
+    let registered_with_wayland_portal = false;
+
+    if registered_with_wayland_portal {
+        #[cfg(target_os = "linux")]
+        crate::shortcuts::register_wayland_hotkey_cards(
+            &app,
+            &cards,
+            crate::shortcuts::HotkeyRegistrationMode::RuntimeReplaceAll,
+        )
+        .await?;
+    } else {
+        crate::shortcuts::register_hotkey_cards(
+            &app,
+            &cards,
+            crate::shortcuts::HotkeyRegistrationMode::RuntimeReplaceAll,
+        )?;
+    }
 
     // If we're currently recording/transcribing, re-enable Escape-to-cancel.
     // (Registering hotkeys unregisters all shortcuts, which would otherwise drop Escape.)

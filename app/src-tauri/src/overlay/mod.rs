@@ -155,6 +155,7 @@ fn configure_linux_overlay_stacking(
     use gtk::prelude::{GtkWindowExt, WidgetExt};
 
     let gtk_window = window.gtk_window()?;
+    let accepts_focus = preset.focusable();
     let type_hint = match preset {
         OverlayWindowPreset::Overlay => gdk::WindowTypeHint::Notification,
         OverlayWindowPreset::Hover | OverlayWindowPreset::QuickAsk => gdk::WindowTypeHint::Utility,
@@ -162,6 +163,8 @@ fn configure_linux_overlay_stacking(
 
     gtk_window.set_type_hint(type_hint);
     gtk_window.set_keep_above(true);
+    gtk_window.set_accept_focus(accepts_focus);
+    gtk_window.set_focus_on_map(accepts_focus);
     if let Some(surface) = gtk_window.window() {
         apply_linux_overlay_window_type(&surface, preset);
     }
@@ -172,6 +175,8 @@ fn configure_linux_overlay_stacking(
     });
     gtk_window.connect_map(move |gtk_window| {
         gtk_window.set_keep_above(true);
+        gtk_window.set_accept_focus(accepts_focus);
+        gtk_window.set_focus_on_map(accepts_focus);
         if let Some(surface) = gtk_window.window() {
             apply_linux_overlay_window_type(&surface, preset);
             surface.set_keep_above(true);
@@ -388,6 +393,7 @@ mod tests {
         assert_eq!(overlay.title(), "Kolboo Overlay");
         assert_eq!(overlay.size(), (56.0, 56.0));
         assert!(!overlay.visible());
+        assert!(!overlay.focusable());
 
         let hover = OverlayWindowPreset::Hover;
         assert_eq!(hover.label(), "overlay_hover");
@@ -395,6 +401,7 @@ mod tests {
         assert_eq!(hover.title(), "Kolboo Presets");
         assert_eq!(hover.size(), (320.0, 220.0));
         assert!(!hover.visible());
+        assert!(!hover.focusable());
 
         let quick_ask = OverlayWindowPreset::QuickAsk;
         assert_eq!(quick_ask.label(), "quick_ask");
@@ -402,5 +409,6 @@ mod tests {
         assert_eq!(quick_ask.title(), "Kolboo Quick Ask");
         assert_eq!(quick_ask.size(), (520.0, 340.0));
         assert!(!quick_ask.visible());
+        assert!(quick_ask.focusable());
     }
 }

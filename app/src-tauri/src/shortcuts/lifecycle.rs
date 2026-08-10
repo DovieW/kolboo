@@ -66,6 +66,16 @@ pub(crate) fn register_hotkey_cards(
 ) -> Result<(), String> {
     log_hotkey_summary(cards, mode);
 
+    #[cfg(target_os = "linux")]
+    if crate::platform_capabilities::current_linux_display_server()
+        == crate::platform_capabilities::LinuxDisplayServer::Wayland
+    {
+        return Err(
+            "Wayland shortcuts must be registered through register_wayland_hotkey_cards"
+                .to_string(),
+        );
+    }
+
     let shortcut_manager = app.global_shortcut();
 
     if mode == HotkeyRegistrationMode::RuntimeReplaceAll {
