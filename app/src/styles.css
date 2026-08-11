@@ -976,6 +976,15 @@ a:focus-visible {
 	flex-shrink: 0;
 }
 
+.provider-visibility-row {
+	min-height: 0;
+	padding: 0 0 12px;
+}
+
+.provider-visibility-row + .settings-mini-header--first {
+	margin: 0 0 8px;
+}
+
 /* API key rows: keep layout stable across “set/unset” states */
 .api-keys-row {
 	/* Ensure controls don’t affect row height via stretching */

@@ -3,7 +3,6 @@ import {
 	Select,
 	type SelectProps,
 	Tabs,
-	Text,
 	Title,
 	Tooltip,
 } from "@mantine/core";
@@ -125,12 +124,7 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 				}}
 			>
 				<div>
-					<Title order={1} mb={4}>
-						Settings
-					</Title>
-					<Text c="dimmed" size="sm">
-						Configure your preferences
-					</Text>
+					<Title order={1}>Settings</Title>
 				</div>
 
 				<div

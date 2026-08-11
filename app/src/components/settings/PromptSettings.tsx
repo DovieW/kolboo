@@ -1326,6 +1326,8 @@ export function PromptSettings({
 				<SettingsRow
 					label="Provider visibility"
 					description="Managed providers and models are shown by default."
+					className="provider-visibility-row"
+					noDivider
 					right={
 						<Switch
 							label="Show all providers and models"

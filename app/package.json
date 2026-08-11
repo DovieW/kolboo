@@ -8,7 +8,7 @@
 	"packageManager": "pnpm@10.26.2",
 	"scripts": {
 		"prepare": "cd .. && husky app/.husky",
-		"dev": "tauri dev",
+		"dev": "node --env-file-if-exists=.env ./node_modules/@tauri-apps/cli/tauri.js dev",
 		"dev:sccache": "node scripts/dev-sccache.mjs",
 		"dev:local-whisper": "tauri dev --features local-whisper",
 		"dev:local-whisper:cuda": "tauri dev --features local-whisper-cuda",

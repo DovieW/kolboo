@@ -148,14 +148,15 @@ export function usePromptProviderOptions({
 		availableProviders?.stt
 			.filter((p) => p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
-	const sttCloudProviders =
-		managedAccessEnabled && managedCatalogReady
-			? showAllProvidersAndModels
-				? allSttCloudProviders
-				: managedSttProviders
-			: configuredSttCloudProviders;
+	const sttCloudProviders = managedAccessEnabled
+		? showAllProvidersAndModels
+			? allSttCloudProviders
+			: managedCatalogReady
+				? managedSttProviders
+				: configuredSttCloudProviders
+		: configuredSttCloudProviders;
 	const sttLocalProviders =
-		managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
+		managedAccessEnabled && !showAllProvidersAndModels
 			? []
 			: configuredSttLocalProviders;
 	const sttProviderOptions = [
@@ -170,23 +171,24 @@ export function usePromptProviderOptions({
 	const managedLlmProvider = managedProviderReady
 		? [{ value: "managed", label: "Kolboo Managed" }]
 		: [];
-	const llmCloudProviders =
-		managedAccessEnabled && managedCatalogReady
-			? showAllProvidersAndModels
-				? [
-						...managedLlmProvider,
-						...allLlmCloudProviders.filter(
-							(provider) => provider.value !== "managed",
-						),
-					]
-				: managedLlmProvider
-			: configuredLlmCloudProviders;
+	const llmCloudProviders = managedAccessEnabled
+		? showAllProvidersAndModels
+			? [
+					...managedLlmProvider,
+					...allLlmCloudProviders.filter(
+						(provider) => provider.value !== "managed",
+					),
+				]
+			: managedCatalogReady
+				? managedLlmProvider
+				: configuredLlmCloudProviders
+		: configuredLlmCloudProviders;
 	const configuredLlmLocalProviders =
 		availableProviders?.llm
 			.filter((p) => p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
 	const llmLocalProviders =
-		managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
+		managedAccessEnabled && !showAllProvidersAndModels
 			? []
 			: configuredLlmLocalProviders;
 	const llmProviderOptions = [
@@ -340,7 +342,7 @@ export function usePromptProviderOptions({
 	};
 
 	const sttModelOptions = effectiveSttProvider
-		? managedAccessEnabled && !showAllProvidersAndModels
+		? managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
 			? managedTranscriptionModelOptions(managedModels, effectiveSttProvider)
 			: (STT_MODELS[effectiveSttProvider] ?? [])
 		: [];
