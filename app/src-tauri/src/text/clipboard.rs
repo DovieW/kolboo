@@ -33,6 +33,16 @@ const CLIPBOARD_POST_PASTE_DELAY_MS: u64 = 250;
 #[cfg(desktop)]
 static CLIPBOARD_ONLY_LAST_TEXT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
+/// Keep ownership of the most recently copied text for the lifetime of the process on Linux.
+///
+/// X11 and Wayland clipboards are owner-served: dropping the last `Clipboard` instance can make
+/// its contents disappear before another application reads them. This is especially visible when
+/// arboard falls back to X11 under a Wayland desktop and the clipboard manager does not complete
+/// its handoff in time. Reusing one process-owned clipboard prevents a completed transcript from
+/// reverting to the previous clipboard entry.
+#[cfg(target_os = "linux")]
+static PERSISTENT_OUTPUT_CLIPBOARD: OnceLock<Mutex<Option<Clipboard>>> = OnceLock::new();
+
 #[cfg(desktop)]
 pub fn clipboard_only_last_text_lock() -> &'static Mutex<Option<String>> {
     CLIPBOARD_ONLY_LAST_TEXT.get_or_init(|| Mutex::new(None))
@@ -79,6 +89,32 @@ pub fn set_clipboard_text_platform(
     }
 
     clipboard.set_text(text).map_err(|e| e.to_string())
+}
+
+/// Set output text while retaining clipboard ownership where the platform requires it.
+pub fn set_output_clipboard_text(text: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let holder = PERSISTENT_OUTPUT_CLIPBOARD.get_or_init(|| Mutex::new(None));
+        let mut holder = holder
+            .lock()
+            .map_err(|_| "Output clipboard lock poisoned".to_string())?;
+
+        if holder.is_none() {
+            *holder = Some(Clipboard::new().map_err(|e| e.to_string())?);
+        }
+
+        let clipboard = holder
+            .as_mut()
+            .ok_or_else(|| "Output clipboard is unavailable".to_string())?;
+        return set_clipboard_text_with_barrier(clipboard, text, true);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+        set_clipboard_text_with_barrier(&mut clipboard, text, true)
+    }
 }
 
 #[cfg(target_os = "windows")]

@@ -4,7 +4,9 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use crate::text::clipboard::{set_clipboard_text_with_barrier, ClipboardRestoreGuard};
+use crate::text::clipboard::{
+    set_clipboard_text_with_barrier, set_output_clipboard_text, ClipboardRestoreGuard,
+};
 use crate::text::key_inject::{release_common_modifiers_best_effort, with_pressed_key};
 #[cfg(desktop)]
 use tauri::AppHandle;
@@ -201,9 +203,9 @@ pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), Strin
 
 /// Copy text to clipboard only (no paste)
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
-    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
-    // Avoid adding our output to Win+V history.
-    set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
+    // Linux clipboards are owner-served, so the shared helper retains the owner instead of
+    // dropping it as soon as this function returns. Other platforms complete the copy normally.
+    set_output_clipboard_text(text)?;
     log::info!("Copied {} chars to clipboard", text.len());
     Ok(())
 }
@@ -251,23 +253,50 @@ pub fn type_text_blocking_with_options(
     hit_enter: bool,
     preserve_clipboard: bool,
 ) -> Result<(), String> {
-    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+    // KDE may return from the synthetic key request before a first-use Wayland input-control
+    // approval has completed. Keep the new transcript available until the compositor eventually
+    // delivers that queued Ctrl+V; restoring the old clipboard on a timer would paste stale text.
+    #[cfg(target_os = "linux")]
+    let retain_clipboard_for_deferred_paste =
+        crate::platform_capabilities::current_linux_display_server()
+            == crate::platform_capabilities::LinuxDisplayServer::Wayland;
+    #[cfg(not(target_os = "linux"))]
+    let retain_clipboard_for_deferred_paste = false;
+
+    let mut clipboard = if retain_clipboard_for_deferred_paste {
+        None
+    } else {
+        Some(Clipboard::new().map_err(|e| e.to_string())?)
+    };
 
     // Save previous clipboard content (text only). If the previous clipboard isn't text,
     // don't try to "restore" it as an empty string.
-    let previous: Option<String> = if preserve_clipboard {
-        clipboard.get_text().ok()
+    let previous: Option<String> = if preserve_clipboard && !retain_clipboard_for_deferred_paste {
+        clipboard
+            .as_mut()
+            .and_then(|clipboard| clipboard.get_text().ok())
     } else {
         None
     };
 
     // RAII restore guard so errors/early-returns still attempt to restore when safe.
-    let mut restore_guard = ClipboardRestoreGuard::new(previous, text, preserve_clipboard);
+    let mut restore_guard = ClipboardRestoreGuard::new(
+        previous,
+        text,
+        preserve_clipboard && !retain_clipboard_for_deferred_paste,
+    );
 
     // Set new text and wait for it to become visible to readers (best-effort).
     // In the default "Paste" mode, we restore the clipboard afterwards, so on Windows we also
     // try to exclude the injected text from the OS clipboard history.
-    set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
+    if retain_clipboard_for_deferred_paste {
+        set_output_clipboard_text(text)?;
+    } else {
+        let clipboard = clipboard
+            .as_mut()
+            .ok_or_else(|| "Output clipboard is unavailable".to_string())?;
+        set_clipboard_text_with_barrier(clipboard, text, true)?;
+    }
 
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
