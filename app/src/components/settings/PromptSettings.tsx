@@ -14,6 +14,7 @@ import {
 	EMBEDDING_MODELS,
 	isRealtimeSttModel,
 	type ModelOption,
+	managedModelByokTarget,
 } from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
@@ -64,7 +65,6 @@ import {
 	type CleanupPromptSectionsOverride,
 	hasManagedInferenceAccess,
 	type IntentRouterSettings,
-	type ManagedModel,
 	type QuickAskDismissMode,
 	type RewritePreset,
 	type RewriteProgramPromptProfile,
@@ -134,22 +134,6 @@ function _createId(): string {
 		globalThis.crypto?.randomUUID?.() ??
 		`id_${Date.now()}_${Math.random().toString(16).slice(2)}`
 	);
-}
-
-function managedModelByokTarget(
-	model: ManagedModel,
-): { provider: string; model: string } | null {
-	if (model.provider === "cloudflare") return null;
-	if (model.provider === "google") {
-		return {
-			provider: "gemini",
-			model:
-				model.id === "gemini-3-flash"
-					? "models/gemini-3-flash-preview"
-					: model.id,
-		};
-	}
-	return { provider: model.provider, model: model.id };
 }
 
 export function PromptSettings({

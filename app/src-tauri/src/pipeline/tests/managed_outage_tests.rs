@@ -69,8 +69,20 @@ fn llm_provider_falls_back_when_managed_gateway_unavailable() {
         ..Default::default()
     };
 
-    let provider = super::resolve_llm_provider_for_runtime(&config, "openai");
+    let provider = super::resolve_llm_provider_for_runtime(&config, "managed");
     assert_eq!(provider, "anthropic");
+}
+
+#[test]
+fn byok_llm_provider_does_not_change_when_managed_gateway_is_unavailable() {
+    let config = PipelineConfig {
+        managed_inference_enabled: true,
+        managed_inference_fallback_llm_provider: Some("anthropic".to_string()),
+        ..Default::default()
+    };
+
+    let provider = super::resolve_llm_provider_for_runtime(&config, "openai");
+    assert_eq!(provider, "openai");
 }
 
 #[test]

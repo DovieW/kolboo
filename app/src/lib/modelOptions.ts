@@ -2,6 +2,24 @@ import type { ManagedModel } from "./tauri";
 
 export type ModelOption = { value: string; label: string };
 
+export type ManagedModelByokTarget = { provider: string; model: string };
+
+export function managedModelByokTarget(
+	model: ManagedModel,
+): ManagedModelByokTarget | null {
+	if (model.provider === "cloudflare") return null;
+	if (model.provider === "google") {
+		return {
+			provider: "gemini",
+			model:
+				model.id === "gemini-3-flash"
+					? "models/gemini-3-flash-preview"
+					: model.id,
+		};
+	}
+	return { provider: model.provider, model: model.id };
+}
+
 export function managedChatModelOptions(models: ManagedModel[]): ModelOption[] {
 	return models
 		.filter((model) => model.capabilities.includes("chat_completions"))

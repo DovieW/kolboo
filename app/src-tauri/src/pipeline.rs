@@ -163,20 +163,25 @@ fn resolve_llm_provider_for_runtime(
     config: &PipelineConfig,
     requested_provider_id: &str,
 ) -> String {
-    if !config.managed_inference_enabled {
-        return requested_provider_id.to_string();
-    }
-
-    if managed_gateway_ready(config) {
-        return requested_provider_id.to_string();
-    }
-
     let requested = requested_provider_id.trim();
+
+    // The provider ID is the inference-source contract. Entitlement makes the
+    // `managed` provider available; it must never silently turn a named BYOK
+    // provider into managed traffic.
+    if requested != "managed" {
+        return requested.to_string();
+    }
+
+    if config.managed_inference_enabled && managed_gateway_ready(config) {
+        return requested.to_string();
+    }
+
     let fallback = config
         .managed_inference_fallback_llm_provider
         .as_deref()
         .map(str::trim)
         .filter(|provider| !provider.is_empty())
+        .filter(|provider| *provider != "managed")
         .filter(|provider| *provider != requested)
         .unwrap_or(requested)
         .to_string();

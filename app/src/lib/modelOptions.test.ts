@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	isManagedModelSelection,
 	managedChatModelOptions,
+	managedModelByokTarget,
 	managedTranscriptionModelOptions,
 } from "./modelOptions";
 import type { ManagedModel } from "./tauri";
@@ -53,5 +54,36 @@ describe("managed model options", () => {
 				"whisper-large-v3-turbo",
 			),
 		).toBe(false);
+	});
+
+	it("maps managed models to the provider-native BYOK selection", () => {
+		const openAiModel = models.find((model) => model.provider === "openai");
+		if (!openAiModel) throw new Error("OpenAI fixture is missing");
+
+		expect(managedModelByokTarget(openAiModel)).toEqual({
+			provider: "openai",
+			model: "gpt-5-mini",
+		});
+		expect(
+			managedModelByokTarget({
+				id: "gemini-3-flash",
+				display_name: "Gemini 3 Flash",
+				provider: "google",
+				capabilities: ["chat_completions"],
+				default_for_provider: true,
+			}),
+		).toEqual({
+			provider: "gemini",
+			model: "models/gemini-3-flash-preview",
+		});
+		expect(
+			managedModelByokTarget({
+				id: "@cf/meta/llama-3.1-8b-instruct",
+				display_name: "Llama 3.1 8B",
+				provider: "cloudflare",
+				capabilities: ["chat_completions"],
+				default_for_provider: true,
+			}),
+		).toBeNull();
 	});
 });

@@ -96,8 +96,13 @@ pub(super) fn resolve_cached_llm_provider_config(
     let provider_id = resolve_llm_provider_for_runtime(pipeline_config, provider_id);
     let managed_ready =
         pipeline_config.managed_inference_enabled && managed_gateway_ready(pipeline_config);
-    // Ollama is local and never uses managed transport.
-    let managed_transport_active = managed_ready && provider_id != "ollama";
+    let managed_transport_active = managed_ready && provider_id == "managed";
+
+    if provider_id == "managed" && !managed_transport_active {
+        return Err(PipelineError::Config(
+            "Managed inference is not available for this session".to_string(),
+        ));
+    }
 
     let api_key = if provider_id == "ollama" {
         String::new()
@@ -663,13 +668,49 @@ mod tests {
     }
 
     #[test]
-    fn resolve_cached_runtime_config_uses_managed_token_and_gateway() {
+    fn resolve_cached_managed_config_uses_session_token_and_gateway() {
         let config = PipelineConfig {
             managed_inference_enabled: true,
             managed_inference_gateway_url: Some("https://managed.example.test".to_string()),
             managed_inference_access_token: Some("managed-token".to_string()),
             ..PipelineConfig::default()
         };
+
+        let resolved = resolve_cached_llm_provider_config(
+            &config,
+            "managed",
+            LlmProviderParams {
+                model: Some("gpt-5".to_string()),
+                timeout: Duration::from_secs(45),
+                ollama_url: None,
+                openai_reasoning_effort: Some("medium".to_string()),
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+        )
+        .expect("managed runtime config should resolve");
+
+        assert_eq!(resolved.provider_id, "managed");
+        assert!(resolved.managed_transport_active);
+        assert_eq!(resolved.config.api_key, "managed-token");
+        assert_eq!(
+            resolved.config.managed_gateway_url.as_deref(),
+            Some("https://managed.example.test")
+        );
+    }
+
+    #[test]
+    fn resolve_cached_byok_config_uses_provider_key_for_entitled_user() {
+        let mut config = PipelineConfig {
+            managed_inference_enabled: true,
+            managed_inference_gateway_url: Some("https://managed.example.test".to_string()),
+            managed_inference_access_token: Some("managed-token".to_string()),
+            ..PipelineConfig::default()
+        };
+        config
+            .llm_api_keys
+            .insert("openai".to_string(), "user-openai-key".to_string());
 
         let resolved = resolve_cached_llm_provider_config(
             &config,
@@ -684,15 +725,36 @@ mod tests {
                 anthropic_thinking_budget: None,
             },
         )
-        .expect("managed runtime config should resolve");
+        .expect("BYOK runtime config should resolve");
 
         assert_eq!(resolved.provider_id, "openai");
-        assert!(resolved.managed_transport_active);
-        assert_eq!(resolved.config.api_key, "managed-token");
-        assert_eq!(
-            resolved.config.managed_gateway_url.as_deref(),
-            Some("https://managed.example.test")
-        );
+        assert!(!resolved.managed_transport_active);
+        assert_eq!(resolved.config.api_key, "user-openai-key");
+        assert!(resolved.config.managed_gateway_url.is_none());
+    }
+
+    #[test]
+    fn resolve_cached_managed_config_fails_without_managed_session() {
+        let error = match resolve_cached_llm_provider_config(
+            &PipelineConfig::default(),
+            "managed",
+            LlmProviderParams {
+                model: Some("gpt-5".to_string()),
+                timeout: Duration::from_secs(45),
+                ollama_url: None,
+                openai_reasoning_effort: None,
+                gemini_thinking_budget: None,
+                gemini_thinking_level: None,
+                anthropic_thinking_budget: None,
+            },
+        ) {
+            Ok(_) => panic!("managed runtime config must fail without a managed session"),
+            Err(error) => error,
+        };
+
+        assert!(error
+            .to_string()
+            .contains("Managed inference is not available"));
     }
 
     #[test]

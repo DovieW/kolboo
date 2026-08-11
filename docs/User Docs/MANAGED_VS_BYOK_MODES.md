@@ -17,6 +17,9 @@ Kolboo supports two inference modes:
 - When a selected model supports both modes, **Use your own API key** switches
   that setting to BYOK without changing the model. Managed-only models do not
   offer that switch.
+- The selected provider is authoritative: **Kolboo Managed** uses the managed
+  gateway, while a named cloud provider uses that provider's configured API
+  key. Having Managed access never silently reroutes a BYOK selection.
 - If managed routing is not available, Kolboo falls back to BYOK providers when configured.
 
 The Managed model catalog returned by the API is authoritative. The desktop
