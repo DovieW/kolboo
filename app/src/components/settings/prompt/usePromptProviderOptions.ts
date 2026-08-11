@@ -1,12 +1,12 @@
 import { API_KEYS } from "../../../lib/apiKeys";
 import {
-	LLM_MODELS,
 	managedChatModelOptions,
 	managedTranscriptionModelOptions,
 	STT_MODELS,
 } from "../../../lib/modelOptions";
 import {
 	useFireworksModels,
+	useByokLlmModels,
 	useManagedModels,
 	useOllamaModels,
 } from "../../../lib/queries";
@@ -112,6 +112,10 @@ export function usePromptProviderOptions({
 	effectiveRouterLlmProvider,
 }: UsePromptProviderOptionsOptions): PromptProviderOptions {
 	const managedModelsQuery = useManagedModels(managedAccessEnabled);
+	const byokLlmModelsQuery = useByokLlmModels(
+		!managedAccessEnabled || showAllProvidersAndModels,
+	);
+	const byokLlmModels = byokLlmModelsQuery.data;
 	const managedModels = managedModelsQuery.data ?? [];
 	const managedCatalogReady = managedModels.length > 0;
 	const managedProviderReady =
@@ -126,7 +130,7 @@ export function usePromptProviderOptions({
 		(provider) => STT_MODELS[provider.id] !== undefined,
 	).map((provider) => ({ value: provider.id, label: provider.label }));
 	const allLlmCloudProviders = API_KEYS.filter(
-		(provider) => LLM_MODELS[provider.id] !== undefined,
+		(provider) => byokLlmModels[provider.id] !== undefined,
 	).map((provider) => ({ value: provider.id, label: provider.label }));
 	const managedSttProviders = Array.from(
 		new Set(
@@ -316,7 +320,7 @@ export function usePromptProviderOptions({
 			const dynamic = ollamaModelsQuery.data;
 			if (Array.isArray(dynamic) && dynamic.length > 0) return dynamic;
 		}
-		const configured = LLM_MODELS[provider] ?? [];
+		const configured = byokLlmModels[provider] ?? [];
 		const managedAliases = managedModels
 			.filter((model) => {
 				const byokProvider =

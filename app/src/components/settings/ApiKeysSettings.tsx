@@ -31,12 +31,10 @@ import {
 	resolveApiKeyMutationIntent,
 } from "../../lib/apiKeys";
 import { formatErrorMessage } from "../../lib/formatError";
+import { EMBEDDING_MODELS, STT_MODELS } from "../../lib/modelOptions";
+import type { ByokLlmModelCatalog } from "../../lib/modelsDev";
 import {
-	EMBEDDING_MODELS,
-	LLM_MODELS,
-	STT_MODELS,
-} from "../../lib/modelOptions";
-import {
+	useByokLlmModels,
 	useCancelWhisperModelDownload,
 	useDeleteWhisperModel,
 	useDownloadWhisperModel,
@@ -72,9 +70,12 @@ import { SettingsRow } from "./SettingsRow";
 const GLOBAL_ONLY_TOOLTIP =
 	"This setting can only be changed in the Default profile";
 
-function formatProviderModelCounts(providerId: string): string | null {
+function formatProviderModelCounts(
+	providerId: string,
+	llmModels: ByokLlmModelCatalog,
+): string | null {
 	const sttCount = STT_MODELS[providerId]?.length ?? 0;
-	const llmCount = LLM_MODELS[providerId]?.length ?? 0;
+	const llmCount = llmModels[providerId]?.length ?? 0;
 	const embedCount = EMBEDDING_MODELS[providerId]?.length ?? 0;
 
 	const parts: string[] = [];
@@ -85,10 +86,13 @@ function formatProviderModelCounts(providerId: string): string | null {
 	return parts.join(" / ");
 }
 
-function formatProviderModelsTooltip(providerId: string): ReactNode | null {
+function formatProviderModelsTooltip(
+	providerId: string,
+	llmModels: ByokLlmModelCatalog,
+): ReactNode | null {
 	const embed = EMBEDDING_MODELS[providerId] ?? [];
 	const stt = STT_MODELS[providerId] ?? [];
-	const llm = LLM_MODELS[providerId] ?? [];
+	const llm = llmModels[providerId] ?? [];
 
 	if (embed.length === 0 && stt.length === 0 && llm.length === 0) return null;
 
@@ -137,7 +141,13 @@ function formatProviderModelsTooltip(providerId: string): ReactNode | null {
 	);
 }
 
-function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
+function ApiKeyInput({
+	config,
+	llmModels,
+}: {
+	config: ApiKeyConfig;
+	llmModels: ByokLlmModelCatalog;
+}) {
 	const queryClient = useQueryClient();
 	const [value, setValue] = useState("");
 	const [isPrefilling, _setIsPrefilling] = useState(false);
@@ -218,8 +228,8 @@ function ApiKeyInput({ config }: { config: ApiKeyConfig }) {
 		saveKey.mutate(intent);
 	};
 
-	const modelCountsLabel = formatProviderModelCounts(config.id);
-	const modelsTooltip = formatProviderModelsTooltip(config.id);
+	const modelCountsLabel = formatProviderModelCounts(config.id, llmModels);
+	const modelsTooltip = formatProviderModelsTooltip(config.id, llmModels);
 
 	return (
 		<SettingsRow
@@ -1186,6 +1196,7 @@ export function ApiKeysSettings({
 	const isProfileScope = editingProfileId && editingProfileId !== "default";
 
 	const { data: settings } = useSettings();
+	const byokLlmModelsQuery = useByokLlmModels(true);
 	const updateOllamaUrl = useUpdateOllamaUrl();
 	const updateWhisperServerBaseUrl = useUpdateWhisperServerBaseUrl();
 
@@ -1204,7 +1215,11 @@ export function ApiKeysSettings({
 	const content = (
 		<>
 			{API_KEYS.map((config) => (
-				<ApiKeyInput key={config.id} config={config} />
+				<ApiKeyInput
+					key={config.id}
+					config={config}
+					llmModels={byokLlmModelsQuery.data}
+				/>
 			))}
 
 			<SettingsRow

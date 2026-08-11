@@ -35,6 +35,7 @@ export interface ManagedModel {
 export interface ManagedModelCatalogResponse {
 	models: ManagedModel[];
 	request_id: string;
+	catalog_version?: string | null;
 }
 
 export function hasManagedInferenceAccess(

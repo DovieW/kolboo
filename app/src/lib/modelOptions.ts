@@ -1,6 +1,15 @@
 import type { ManagedModel } from "./tauri";
 
-export type ModelOption = { value: string; label: string };
+export type ModelOption = {
+	value: string;
+	label: string;
+	pricing?: {
+		input_per_million?: number;
+		output_per_million?: number;
+		cache_read_per_million?: number;
+		source: "models.dev";
+	};
+};
 
 export type ManagedModelByokTarget = { provider: string; model: string };
 
@@ -48,20 +57,6 @@ export const BUNDLED_MANAGED_MODELS: ManagedModel[] = [
 		display_name: "GPT-5.5",
 		provider: "openai",
 		capabilities: ["chat_completions", "responses"],
-		default_for_provider: false,
-	},
-	{
-		id: "gemini-3-flash",
-		display_name: "Gemini 3 Flash",
-		provider: "google",
-		capabilities: ["chat_completions"],
-		default_for_provider: false,
-	},
-	{
-		id: "llama-3.3-70b-instruct-fp8-fast",
-		display_name: "Llama 3.3 70B Instruct",
-		provider: "cloudflare",
-		capabilities: ["chat_completions"],
 		default_for_provider: false,
 	},
 ];

@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { managedModelsWithBundledFallback } from "../modelOptions";
+import { useMemo } from "react";
+import { LLM_MODELS, managedModelsWithBundledFallback } from "../modelOptions";
+import {
+	byokModelsWithLiveCatalog,
+	fetchModelsDevByokLlmCatalog,
+} from "../modelsDev";
 import {
 	managedInferenceAPI,
 	type OcrAuthMode,
@@ -54,6 +59,27 @@ export function useManagedModels(enabled: boolean) {
 	return {
 		...query,
 		data: managedModelsWithBundledFallback(query.data),
+	};
+}
+
+export function useByokLlmModels(enabled = true) {
+	const query = useQuery({
+		queryKey: ["modelsDevByokLlmModels"],
+		queryFn: () => fetchModelsDevByokLlmCatalog(),
+		enabled,
+		staleTime: 24 * 60 * 60 * 1000,
+		gcTime: 7 * 24 * 60 * 60 * 1000,
+		retry: 1,
+		refetchOnWindowFocus: false,
+	});
+	const data = useMemo(
+		() => byokModelsWithLiveCatalog(LLM_MODELS, query.data),
+		[query.data],
+	);
+
+	return {
+		...query,
+		data,
 	};
 }
 

@@ -1,12 +1,9 @@
 import { Loader, Select, Slider, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
-import {
-	LLM_MODELS,
-	managedChatModelOptions,
-	STT_MODELS,
-} from "../../lib/modelOptions";
+import { managedChatModelOptions, STT_MODELS } from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
+	useByokLlmModels,
 	useLicenseAuthContext,
 	useManagedModels,
 	useSettings,
@@ -38,13 +35,15 @@ export function ProvidersSettings() {
 	const { data: licenseAuthContext } = useLicenseAuthContext();
 	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
 	const managedModelsQuery = useManagedModels(managedAccessEnabled);
+	const byokLlmModelsQuery = useByokLlmModels(true);
+	const byokLlmModels = byokLlmModelsQuery.data;
 	const managedModels = managedModelsQuery.data ?? [];
 	const managedProviderReady = managedAccessEnabled && managedModels.length > 0;
 	const getLlmModelsForProvider = (provider: string) => {
 		if (provider === "managed") {
 			return managedChatModelOptions(managedModels);
 		}
-		return LLM_MODELS[provider] ?? [];
+		return byokLlmModels[provider] ?? [];
 	};
 
 	// Wait for settings (source of truth) and provider list (for options)

@@ -13,7 +13,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
-import { useLicenseAuthContext, useManagedModels } from "../../lib/queries";
+import {
+	useByokLlmModels,
+	useLicenseAuthContext,
+	useManagedModels,
+} from "../../lib/queries";
 import { hasManagedInferenceAccess, llmAPI } from "../../lib/tauri";
 
 type OpenAiThinkingEffort = "none" | "low" | "medium" | "high";
@@ -104,6 +108,7 @@ export function RewritePromptLabModal(props: {
 	const { data: licenseAuthContext } = useLicenseAuthContext();
 	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
 	const managedModelsQuery = useManagedModels(managedAccessEnabled);
+	const byokLlmModelsQuery = useByokLlmModels(props.opened);
 	const llmProviders = useMemo(
 		() => [
 			...(managedAccessEnabled && (managedModelsQuery.data?.length ?? 0) > 0
@@ -127,11 +132,21 @@ export function RewritePromptLabModal(props: {
 						},
 					]
 				: []),
-			...(configuredLlmProviders ?? []).filter(
-				(provider) => provider.id !== "managed",
-			),
+			...(configuredLlmProviders ?? [])
+				.filter((provider) => provider.id !== "managed")
+				.map((provider) => ({
+					...provider,
+					models:
+						byokLlmModelsQuery.data[provider.id]?.map((model) => model.value) ??
+						provider.models,
+				})),
 		],
-		[configuredLlmProviders, managedAccessEnabled, managedModelsQuery.data],
+		[
+			byokLlmModelsQuery.data,
+			configuredLlmProviders,
+			managedAccessEnabled,
+			managedModelsQuery.data,
+		],
 	);
 
 	const [selectedProvider, setSelectedProvider] = useState<string | null>(null);

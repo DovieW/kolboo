@@ -22,6 +22,8 @@ pub struct ManagedModel {
 pub struct ManagedModelCatalogResponse {
     pub models: Vec<ManagedModel>,
     pub request_id: String,
+    #[serde(default)]
+    pub catalog_version: Option<String>,
 }
 
 #[cfg(desktop)]

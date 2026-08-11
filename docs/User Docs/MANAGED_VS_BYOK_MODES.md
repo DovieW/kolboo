@@ -22,9 +22,17 @@ Kolboo supports two inference modes:
   key. Having Managed access never silently reroutes a BYOK selection.
 - If managed routing is not available, Kolboo falls back to BYOK providers when configured.
 
-The Managed model catalog returned by the API is authoritative. The desktop
-does not infer Managed support merely because a provider or model is available
-for BYOK.
+The Managed model catalog returned by API Edge is authoritative and includes a
+server-controlled catalog version. Enabling or disabling a model at API Edge
+changes both discovery and request authorization without a desktop release. The
+desktop does not infer Managed support merely because a provider or model is
+available for BYOK.
+
+BYOK LLM choices are refreshed from `models.dev` only for provider adapters
+Kolboo already supports. The compact supported subset is cached for one day and
+falls back to the catalog shipped with the desktop when refresh is unavailable.
+This metadata request contains no prompts, transcripts, API keys, or account
+identifiers. `models.dev` availability never enables a Managed model.
 
 ## User-facing recovery behavior
 
