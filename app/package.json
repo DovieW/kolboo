@@ -8,10 +8,10 @@
 	"packageManager": "pnpm@10.26.2",
 	"scripts": {
 		"prepare": "cd .. && husky app/.husky",
-		"dev": "node --env-file-if-exists=.env ./node_modules/@tauri-apps/cli/tauri.js dev",
+		"dev": "node --env-file-if-exists=.env scripts/dev.mjs",
 		"dev:sccache": "node scripts/dev-sccache.mjs",
-		"dev:local-whisper": "tauri dev --features local-whisper",
-		"dev:local-whisper:cuda": "tauri dev --features local-whisper-cuda",
+		"dev:local-whisper": "node --env-file-if-exists=.env scripts/dev.mjs --features local-whisper",
+		"dev:local-whisper:cuda": "node --env-file-if-exists=.env scripts/dev.mjs --features local-whisper-cuda",
 		"dev:vite": "vite",
 		"build": "node scripts/run-with-timing.mjs tauri build --no-sign",
 		"build:release": "node scripts/run-with-timing.mjs tauri build",

@@ -78,7 +78,9 @@ You can also pass features directly through Tauri, e.g. `pnpm dev -- --features 
 
 ## Debug logging
 
-Kolboo's Tauri backend emits structured JSON logs.
+Kolboo's Tauri backend supports structured JSON and colored human-readable logs.
+Interactive `pnpm dev` commands always use the pretty console format; other
+launch paths retain structured JSON by default. Rolling file logs are unchanged.
 
 - Default log level is `info`.
 - To enable verbose logs, set `RUST_LOG` before launching.

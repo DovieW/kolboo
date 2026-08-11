@@ -33,6 +33,9 @@ if (!commandExists("sccache")) {
 
 const env = { ...process.env };
 
+// Keep interactive development readable even when compiler caching is enabled.
+env.KOLBOO_LOG_FORMAT = "pretty";
+
 // Enable Rust compiler caching for Cargo builds invoked by Tauri.
 // Docs: https://github.com/mozilla/sccache/blob/main/docs/Rust.md
 if (!env.RUSTC_WRAPPER) {
