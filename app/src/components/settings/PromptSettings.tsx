@@ -446,7 +446,6 @@ export function PromptSettings({
 		quickAskConversationHistoryEnabled,
 		quickAskConversationHistoryCount,
 		managedModels,
-		managedModelsLoading,
 		ollamaModelsQuery,
 		getLlmModelOptionsForProvider,
 	} = usePromptProviderOptions({
@@ -855,7 +854,6 @@ export function PromptSettings({
 		isLoadingSettings ||
 		isLoadingDefaultSections ||
 		isLoadingProviders ||
-		managedModelsLoading ||
 		settings === undefined ||
 		defaultSections === undefined ||
 		localSections === null;

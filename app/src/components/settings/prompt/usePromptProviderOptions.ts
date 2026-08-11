@@ -86,7 +86,6 @@ type PromptProviderOptions = {
 	quickAskConversationHistoryEnabled: boolean;
 	quickAskConversationHistoryCount: number;
 	managedModels: ReturnType<typeof useManagedModels>["data"];
-	managedModelsLoading: boolean;
 	fireworksModelsQuery: ReturnType<typeof useFireworksModels>;
 	ollamaModelsQuery: ReturnType<typeof useOllamaModels>;
 	getLlmModelOptionsForProvider: (
@@ -114,6 +113,7 @@ export function usePromptProviderOptions({
 }: UsePromptProviderOptionsOptions): PromptProviderOptions {
 	const managedModelsQuery = useManagedModels(managedAccessEnabled);
 	const managedModels = managedModelsQuery.data ?? [];
+	const managedCatalogReady = managedModels.length > 0;
 	const managedProviderReady =
 		managedAccessEnabled &&
 		managedModels.some((model) =>
@@ -148,13 +148,14 @@ export function usePromptProviderOptions({
 		availableProviders?.stt
 			.filter((p) => p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
-	const sttCloudProviders = managedAccessEnabled
-		? showAllProvidersAndModels
-			? allSttCloudProviders
-			: managedSttProviders
-		: configuredSttCloudProviders;
+	const sttCloudProviders =
+		managedAccessEnabled && managedCatalogReady
+			? showAllProvidersAndModels
+				? allSttCloudProviders
+				: managedSttProviders
+			: configuredSttCloudProviders;
 	const sttLocalProviders =
-		managedAccessEnabled && !showAllProvidersAndModels
+		managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
 			? []
 			: configuredSttLocalProviders;
 	const sttProviderOptions = [
@@ -169,22 +170,23 @@ export function usePromptProviderOptions({
 	const managedLlmProvider = managedProviderReady
 		? [{ value: "managed", label: "Kolboo Managed" }]
 		: [];
-	const llmCloudProviders = managedAccessEnabled
-		? showAllProvidersAndModels
-			? [
-					...managedLlmProvider,
-					...allLlmCloudProviders.filter(
-						(provider) => provider.value !== "managed",
-					),
-				]
-			: managedLlmProvider
-		: configuredLlmCloudProviders;
+	const llmCloudProviders =
+		managedAccessEnabled && managedCatalogReady
+			? showAllProvidersAndModels
+				? [
+						...managedLlmProvider,
+						...allLlmCloudProviders.filter(
+							(provider) => provider.value !== "managed",
+						),
+					]
+				: managedLlmProvider
+			: configuredLlmCloudProviders;
 	const configuredLlmLocalProviders =
 		availableProviders?.llm
 			.filter((p) => p.is_local)
 			.map((p) => ({ value: p.value, label: p.label })) ?? [];
 	const llmLocalProviders =
-		managedAccessEnabled && !showAllProvidersAndModels
+		managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
 			? []
 			: configuredLlmLocalProviders;
 	const llmProviderOptions = [
@@ -430,7 +432,6 @@ export function usePromptProviderOptions({
 		quickAskConversationHistoryEnabled,
 		quickAskConversationHistoryCount,
 		managedModels: managedModelsQuery.data,
-		managedModelsLoading: managedAccessEnabled && managedModelsQuery.isLoading,
 		fireworksModelsQuery,
 		ollamaModelsQuery,
 		getLlmModelOptionsForProvider,

@@ -281,9 +281,10 @@ export function createIdempotencyKey(prefix = "kolboo"): string {
 
 export const managedInferenceAPI = {
 	getModels: async (): Promise<ManagedModelCatalogResponse> => {
-		return getManagedJson<ManagedModelCatalogResponse>({
-			path: "/v1/managed/models",
-		});
+		// Catalog discovery runs in Rust so WebView CORS policy cannot block an
+		// authenticated desktop request. Managed provider credentials remain at
+		// the API boundary; only the user's session bearer is attached by Rust.
+		return invoke<ManagedModelCatalogResponse>("managed_inference_get_models");
 	},
 
 	transcribe: async (request: ManagedSttRequest, idempotencyKey: string) => {

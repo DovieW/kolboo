@@ -48,10 +48,7 @@ export function ProvidersSettings() {
 	};
 
 	// Wait for settings (source of truth) and provider list (for options)
-	const isLoadingProviderData =
-		isLoadingSettings ||
-		isLoadingProviders ||
-		(managedAccessEnabled && managedModelsQuery.isLoading);
+	const isLoadingProviderData = isLoadingSettings || isLoadingProviders;
 	const updateSTTProvider = useUpdateSTTProvider();
 	const updateSTTModel = useUpdateSTTModel();
 	const updateLLMProvider = useUpdateLLMProvider();

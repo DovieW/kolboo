@@ -1093,6 +1093,7 @@ pub fn run() {
             commands::licensing::license_logout,
             commands::licensing::license_refresh_entitlement,
             commands::licensing::license_get_management_url,
+            managed_inference::managed_inference_get_models,
             managed_inference::managed_inference_get_usage_state,
             commands::settings::hotkey_shortcut_cards_create,
             commands::settings::hotkey_shortcut_cards_update,

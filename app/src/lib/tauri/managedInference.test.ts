@@ -105,26 +105,6 @@ describe("managedInference", () => {
 	});
 
 	it("loads the authenticated managed model catalog", async () => {
-		loadRuntimeConfigMock.mockResolvedValueOnce({
-			app_version: null,
-			api_base_url: null,
-			managed_inference_gateway_url: "https://gateway.example/",
-			cloudflare_access_client_id: null,
-			cloudflare_access_client_secret: null,
-			sentry_dsn: null,
-			sentry_env: null,
-			sentry_release: null,
-			sentry_smoke: null,
-			posthog_api_key: null,
-			posthog_host: null,
-		});
-		invokeMock.mockImplementation(async (command) => {
-			if (command === "license_get_session_access_token") {
-				return "session-token";
-			}
-			throw new Error(`Unexpected invoke command: ${command}`);
-		});
-
 		const catalog = {
 			models: [
 				{
@@ -137,22 +117,13 @@ describe("managedInference", () => {
 			],
 			request_id: "request-1",
 		};
-		const fetchMock = vi.fn().mockResolvedValue({
-			ok: true,
-			json: async () => catalog,
+		invokeMock.mockImplementation(async (command) => {
+			if (command === "managed_inference_get_models") return catalog;
+			throw new Error(`Unexpected invoke command: ${command}`);
 		});
-		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(managedInferenceAPI.getModels()).resolves.toEqual(catalog);
-		expect(fetchMock).toHaveBeenCalledWith(
-			"https://gateway.example/v1/managed/models",
-			expect.objectContaining({
-				method: "GET",
-				headers: expect.objectContaining({
-					authorization: "Bearer session-token",
-				}),
-			}),
-		);
+		expect(invokeMock).toHaveBeenCalledWith("managed_inference_get_models");
 	});
 
 	it("attaches Cloudflare Access headers only for configured edge hosts", async () => {
