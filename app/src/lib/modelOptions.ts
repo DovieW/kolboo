@@ -4,6 +4,74 @@ export type ModelOption = { value: string; label: string };
 
 export type ManagedModelByokTarget = { provider: string; model: string };
 
+// A managed-capable account must remain configurable without a successful
+// catalog refresh. Keep this launch catalog synchronized with API Edge; the
+// live catalog replaces it whenever discovery succeeds.
+export const BUNDLED_MANAGED_MODELS: ManagedModel[] = [
+	{
+		id: "whisper-large-v3-turbo",
+		display_name: "Whisper Large V3 Turbo",
+		provider: "groq",
+		capabilities: ["transcription"],
+		default_for_provider: true,
+	},
+	{
+		id: "whisper-large-v3",
+		display_name: "Whisper Large V3",
+		provider: "groq",
+		capabilities: ["transcription"],
+		default_for_provider: false,
+	},
+	{
+		id: "gpt-4o-mini",
+		display_name: "GPT-4o mini",
+		provider: "openai",
+		capabilities: ["chat_completions", "responses"],
+		default_for_provider: true,
+	},
+	{
+		id: "gpt-5-mini",
+		display_name: "GPT-5 mini",
+		provider: "openai",
+		capabilities: ["chat_completions", "responses"],
+		default_for_provider: false,
+	},
+	{
+		id: "gpt-5",
+		display_name: "GPT-5",
+		provider: "openai",
+		capabilities: ["chat_completions", "responses"],
+		default_for_provider: false,
+	},
+	{
+		id: "gpt-5.5",
+		display_name: "GPT-5.5",
+		provider: "openai",
+		capabilities: ["chat_completions", "responses"],
+		default_for_provider: false,
+	},
+	{
+		id: "gemini-3-flash",
+		display_name: "Gemini 3 Flash",
+		provider: "google",
+		capabilities: ["chat_completions"],
+		default_for_provider: false,
+	},
+	{
+		id: "llama-3.3-70b-instruct-fp8-fast",
+		display_name: "Llama 3.3 70B Instruct",
+		provider: "cloudflare",
+		capabilities: ["chat_completions"],
+		default_for_provider: false,
+	},
+];
+
+export function managedModelsWithBundledFallback(
+	models: ManagedModel[] | null | undefined,
+): ManagedModel[] {
+	return models && models.length > 0 ? models : BUNDLED_MANAGED_MODELS;
+}
+
 export function managedModelByokTarget(
 	model: ManagedModel,
 ): ManagedModelByokTarget | null {

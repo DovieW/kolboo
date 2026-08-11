@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
+import { managedModelsWithBundledFallback } from "../modelOptions";
 import {
 	managedInferenceAPI,
 	type OcrAuthMode,
@@ -42,7 +42,7 @@ export function useAvailableProviders() {
 }
 
 export function useManagedModels(enabled: boolean) {
-	return useQuery({
+	const query = useQuery({
 		queryKey: ["managedModels"],
 		queryFn: () => managedInferenceAPI.getModels(),
 		select: (catalog) => catalog.models,
@@ -50,6 +50,11 @@ export function useManagedModels(enabled: boolean) {
 		staleTime: 5 * 60 * 1000,
 		retry: false,
 	});
+
+	return {
+		...query,
+		data: managedModelsWithBundledFallback(query.data),
+	};
 }
 
 export function useUpdateGroqFreeTier() {
