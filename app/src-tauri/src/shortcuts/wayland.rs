@@ -12,9 +12,10 @@ use std::sync::{Arc, OnceLock};
 
 use ashpd::desktop::global_shortcuts::{BindShortcutsOptions, GlobalShortcuts, NewShortcut};
 use ashpd::desktop::{CreateSessionOptions, Session};
+use ashpd::AppID;
 use futures_util::StreamExt;
 use tauri::AppHandle;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
 use crate::settings::{HotkeyAction, HotkeyConfig, HotkeyShortcutCard};
 
@@ -91,6 +92,8 @@ async fn create_session(
     app: &AppHandle,
     registrations: Vec<PortalRegistration>,
 ) -> Result<PortalShortcutSession, String> {
+    register_portal_app(app).await?;
+
     let portal = GlobalShortcuts::new()
         .await
         .map_err(|error| format!("The Wayland global-shortcut portal is unavailable: {error}"))?;
@@ -197,6 +200,33 @@ async fn create_session(
         session,
         activated_task,
         deactivated_task,
+    })
+}
+
+async fn register_portal_app(app: &AppHandle) -> Result<(), String> {
+    static REGISTERED: OnceCell<()> = OnceCell::const_new();
+
+    REGISTERED
+        .get_or_try_init(|| async {
+            let app_id = portal_app_id(&app.config().identifier)?;
+            match ashpd::register_host_app(app_id).await {
+                Ok(()) => Ok(()),
+                // Older portal frontends identify host applications without the
+                // Registry interface. Keep that compatibility path and let the
+                // actual shortcut request determine whether identification works.
+                Err(ashpd::Error::PortalNotFound(_)) => Ok(()),
+                Err(error) => Err(format!(
+                    "Failed to identify Kolboo to the desktop portal: {error}"
+                )),
+            }
+        })
+        .await
+        .map(|_| ())
+}
+
+fn portal_app_id(identifier: &str) -> Result<AppID, String> {
+    AppID::try_from(identifier).map_err(|error| {
+        format!("Kolboo's application identifier is invalid for the desktop portal: {error}")
     })
 }
 
@@ -437,6 +467,17 @@ mod tests {
     #[test]
     fn converts_default_f3_to_xdg_syntax() {
         assert_eq!(to_xdg_trigger(&hotkey(&[], "F3")).unwrap(), "F3");
+    }
+
+    #[test]
+    fn accepts_tauri_identifier_as_portal_app_id() {
+        let app_id = portal_app_id("com.kolboo.app").unwrap();
+        assert_eq!(app_id.as_ref(), "com.kolboo.app");
+    }
+
+    #[test]
+    fn rejects_invalid_portal_app_id() {
+        assert!(portal_app_id("kolboo").is_err());
     }
 
     #[test]

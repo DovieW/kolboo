@@ -11,6 +11,7 @@
 		"frontendDist": "../dist"
 	},
 	"app": {
+		"enableGTKAppId": true,
 		"macOSPrivateApi": true,
 		"withGlobalTauri": false,
 		"windows": [
