@@ -10,8 +10,8 @@ import { useQuery } from "@tanstack/react-query";
 import { CircleHelp, Cog, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
-import { useSettings } from "../../lib/queries";
-import { tauriAPI } from "../../lib/tauri";
+import { useLicenseAuthContext, useSettings } from "../../lib/queries";
+import { hasManagedInferenceAccess, tauriAPI } from "../../lib/tauri";
 import { ApiKeysSettings } from "./ApiKeysSettings";
 import { AudioSettings } from "./AudioSettings";
 import { DataSettings } from "./DataSettings";
@@ -35,6 +35,8 @@ type EditingOption = {
 
 export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 	const { data: settings } = useSettings();
+	const { data: licenseAuthContext, isFetched: licenseAuthContextResolved } =
+		useLicenseAuthContext();
 	const profiles = settings?.rewrite_program_prompt_profiles ?? [];
 	const [editingProfileId, setEditingProfileId] = useState<string>("default");
 	const [programsModalOpen, setProgramsModalOpen] = useState(false);
@@ -63,8 +65,18 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 	useEffect(() => {
 		if (hasUserSelectedTab) return;
 		if (hasAnyApiKey === undefined) return;
-		setActiveSettingsTab(hasAnyApiKey ? "ai" : "api-keys");
-	}, [hasAnyApiKey, hasUserSelectedTab]);
+		if (!licenseAuthContextResolved) return;
+
+		const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
+		setActiveSettingsTab(
+			hasAnyApiKey || managedAccessEnabled ? "ai" : "api-keys",
+		);
+	}, [
+		hasAnyApiKey,
+		hasUserSelectedTab,
+		licenseAuthContext,
+		licenseAuthContextResolved,
+	]);
 
 	useEffect(() => {
 		// Consume the one-shot flag as soon as the modal is opened.
