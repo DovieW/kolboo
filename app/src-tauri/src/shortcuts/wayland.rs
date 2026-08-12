@@ -133,11 +133,24 @@ async fn create_session(
         }
     };
 
-    let bound_ids: HashSet<&str> = response
+    let bound_ids = assigned_shortcut_ids(
+        response
+            .shortcuts()
+            .iter()
+            .map(|shortcut| (shortcut.id(), shortcut.trigger_description())),
+    );
+    let unassigned_ids = response
         .shortcuts()
         .iter()
+        .filter(|shortcut| shortcut.trigger_description().trim().is_empty())
         .map(|shortcut| shortcut.id())
-        .collect();
+        .collect::<Vec<_>>();
+    if !unassigned_ids.is_empty() {
+        log::warn!(
+            "Wayland portal returned shortcuts without assigned triggers: {}",
+            unassigned_ids.join(", ")
+        );
+    }
     let actions: HashMap<String, HotkeyAction> = registrations
         .into_iter()
         .filter(|registration| bound_ids.contains(registration.id.as_str()))
@@ -146,7 +159,12 @@ async fn create_session(
 
     if actions.is_empty() {
         let _ = session.close().await;
-        return Err("No Wayland global shortcuts were approved".to_string());
+        // Some portal implementations persist an explicit "unassigned" choice
+        // and return the shortcut ID as approved even though no key can activate it.
+        return Err(
+            "No Wayland global shortcuts have assigned keys. The requested key may conflict with another desktop shortcut; free the conflicting key or assign it to Kolboo in System Settings > Keyboard > Shortcuts."
+                .to_string(),
+        );
     }
 
     for shortcut in response.shortcuts() {
@@ -201,6 +219,15 @@ async fn create_session(
         activated_task,
         deactivated_task,
     })
+}
+
+fn assigned_shortcut_ids<'a>(
+    shortcuts: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> HashSet<&'a str> {
+    shortcuts
+        .into_iter()
+        .filter_map(|(id, trigger)| (!trigger.trim().is_empty()).then_some(id))
+        .collect()
 }
 
 async fn register_portal_app(app: &AppHandle) -> Result<(), String> {
@@ -508,5 +535,13 @@ mod tests {
             portal_shortcut_id(HotkeyAction::Toggle, 0, "F3"),
             portal_shortcut_id(HotkeyAction::Toggle, 0, "CTRL+F3")
         );
+    }
+
+    #[test]
+    fn ignores_portal_shortcuts_without_an_assigned_trigger() {
+        let assigned = assigned_shortcut_ids([("toggle-0-f3", ""), ("retry-1-ctrl_f3", "Ctrl+F3")]);
+
+        assert!(!assigned.contains("toggle-0-f3"));
+        assert!(assigned.contains("retry-1-ctrl_f3"));
     }
 }
