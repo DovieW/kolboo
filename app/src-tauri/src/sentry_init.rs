@@ -29,6 +29,17 @@ fn env_non_empty(key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn compiled_non_empty(value: Option<&'static str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn sentry_config_value(key: &str, compiled_value: Option<&'static str>) -> Option<String> {
+    env_non_empty(key).or_else(|| compiled_non_empty(compiled_value))
+}
+
 fn looks_sensitive(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     SENSITIVE_MARKERS
@@ -118,7 +129,7 @@ fn scrub_event(
 }
 
 fn sentry_environment() -> String {
-    env_non_empty("TAURI_SENTRY_ENV").unwrap_or_else(|| {
+    sentry_config_value("TAURI_SENTRY_ENV", option_env!("TAURI_SENTRY_ENV")).unwrap_or_else(|| {
         if cfg!(debug_assertions) {
             "development".to_string()
         } else {
@@ -132,7 +143,8 @@ pub fn init() {
         return;
     }
 
-    let Some(dsn_raw) = env_non_empty("TAURI_SENTRY_DSN") else {
+    let Some(dsn_raw) = sentry_config_value("TAURI_SENTRY_DSN", option_env!("TAURI_SENTRY_DSN"))
+    else {
         log::info!("Backend Sentry disabled (no TAURI_SENTRY_DSN)");
         return;
     };
@@ -145,7 +157,7 @@ pub fn init() {
         }
     };
 
-    let release = env_non_empty("TAURI_SENTRY_RELEASE")
+    let release = sentry_config_value("TAURI_SENTRY_RELEASE", option_env!("TAURI_SENTRY_RELEASE"))
         .or_else(|| env_non_empty("TAURI_APP_VERSION"))
         .map(Cow::Owned);
 
@@ -186,7 +198,7 @@ pub fn capture_backend_smoke(surface: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{looks_sensitive, scrub_event, scrub_text};
+    use super::{compiled_non_empty, looks_sensitive, scrub_event, scrub_text};
     use sentry::protocol::{
         value::Map as JsonMap, Breadcrumb, Event, Exception, Map, Request, User, Value,
     };
@@ -203,6 +215,16 @@ mod tests {
     fn scrub_text_keeps_safe_values() {
         assert_eq!(scrub_text("startup health check"), "startup health check");
         assert!(!looks_sensitive("normal-error-category"));
+    }
+
+    #[test]
+    fn compiled_config_ignores_missing_or_blank_values() {
+        assert_eq!(compiled_non_empty(None), None);
+        assert_eq!(compiled_non_empty(Some("  ")), None);
+        assert_eq!(
+            compiled_non_empty(Some(" beta-release ")),
+            Some("beta-release".to_string())
+        );
     }
 
     #[test]

@@ -19,6 +19,7 @@ const { mutation, query } = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/queries", () => ({
+	useByokLlmModels: () => query([]),
 	useSettings: () =>
 		query({
 			groq_free_tier: true,

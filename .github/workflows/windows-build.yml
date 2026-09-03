@@ -118,8 +118,6 @@ jobs:
           set -euo pipefail
           # Debug tests are substantially faster than --release on Windows, and jobs
           # don't share build outputs anyway. Keep the workflow fast.
-          export SCCACHE_NO_DAEMON="1"
-
           if sccache --version >/dev/null 2>&1; then
             export RUSTC_WRAPPER=sccache
             echo "Using sccache: $(sccache --version)"
@@ -310,8 +308,6 @@ jobs:
           VITE_SIGNED_UPDATER_ENABLED: ${{ inputs.release_signing && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          export SCCACHE_NO_DAEMON="1"
-
           if sccache --version >/dev/null 2>&1; then
             export RUSTC_WRAPPER=sccache
             echo "Using sccache: $(sccache --version)"
@@ -353,8 +349,6 @@ jobs:
           VITE_SIGNED_UPDATER_ENABLED: ${{ inputs.release_signing && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          export SCCACHE_NO_DAEMON="1"
-
           if sccache --version >/dev/null 2>&1; then
             export RUSTC_WRAPPER=sccache
             echo "Using sccache: $(sccache --version)"

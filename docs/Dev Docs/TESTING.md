@@ -49,6 +49,8 @@ pnpm cargo:test
 pnpm cargo:deaddeps
 ```
 
+The strict dead-code denial currently runs on Windows, where the Windows UIA and modifier-only shortcut production paths are reachable. On Linux and macOS this command reports an explicit skip; those targets still run ordinary Clippy and tests. Do not interpret a non-Windows skip as proof that target-specific dead code is absent.
+
 Generated-contract checks:
 
 ```sh

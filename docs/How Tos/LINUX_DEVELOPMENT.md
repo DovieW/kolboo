@@ -1,10 +1,10 @@
 # Linux development
 
-**Status:** Active engineering; not yet a supported release platform
+**Status:** x86_64 Community/BYOK beta candidate; packaged acceptance pending
 
-**Last reviewed:** 2026-08-10
+**Last reviewed:** 2026-09-03
 
-Kolboo is being built and validated natively on Linux. The current goal is a dependable private development build, followed by explicit X11 and Wayland acceptance—not a public Linux release.
+Kolboo is being prepared for a public, clearly labeled Linux Community beta. The first channel is limited to x86_64 Ubuntu/Kubuntu and account-free Community/BYOK use. It is not a managed-service launch, a stable-platform declaration, or a promise of native Wayland feature parity.
 
 ## Ubuntu and Kubuntu prerequisites
 
@@ -27,18 +27,55 @@ sudo apt-get install -y \
   pkg-config
 ```
 
-Install JavaScript dependencies and build the native binary:
+Install JavaScript dependencies and build the installable packages:
 
 ```sh
 pnpm -C app install --frozen-lockfile
-pnpm -C app tauri build --no-bundle
+TAURI_API_BASE_URL=https://kolboo.dovie.dev \
+TAURI_MANAGED_INFERENCE_GATEWAY_URL=https://kolboo.dovie.dev \
+VITE_SIGNED_UPDATER_ENABLED=false \
+pnpm -C app tauri build --no-sign --bundles deb,appimage
 ```
 
 For an interactive development launch, run `pnpm -C app dev`. The repository uses
 Cargo's sparse registry so a clean Linux checkout does not download the full Git
 index before compiling.
 
-The `Linux Build` GitHub workflow performs the same native build on Ubuntu and retains the development binary plus its shared-library report for seven days.
+The `Linux Build` GitHub workflow builds on Ubuntu 22.04 for a conservative glibc baseline. It retains the `.deb`, AppImage, SHA-256 checksums, dependency report, package contents, and commit/run evidence for 14 days. The updater is intentionally disabled for this beta channel.
+
+## Install, update, and remove
+
+Use one package format at a time.
+
+Debian package:
+
+```sh
+sudo apt install ./Kolboo_*_amd64.deb
+sudo apt remove kolboo
+```
+
+Portable AppImage:
+
+```sh
+chmod +x ./Kolboo_*.AppImage
+./Kolboo_*.AppImage
+```
+
+Remove the AppImage by deleting that file. User settings and secure-store entries are not silently deleted by either uninstall path.
+
+Updates are manual during the beta: download a newer prerelease, verify it against `SHA256SUMS`, and install or launch it. To roll back, download the previous prerelease and reinstall its `.deb` or run its AppImage. Never overwrite an existing release tag or asset; withdraw a defective release and fix forward with a higher version.
+
+## Release procedure
+
+1. Push the release commit and run `Linux Build` manually.
+2. Download its exact artifact and verify `sha256sum -c SHA256SUMS`.
+3. Complete the packaged acceptance matrix below on the `.deb` and do a launch check with the AppImage.
+4. Record the commit SHA, workflow run, package hashes, desktop session, and outcomes.
+5. Confirm the repository secret `TAURI_SENTRY_DSN` contains the beta project's public client DSN. Tagged builds fail closed without it so released crashes are observable.
+6. Only after acceptance, create and push the matching `vX.Y.Z-beta.N` tag. `Linux Community Beta Release` verifies the tag/version, rebuilds the packages, attests their provenance, and creates a GitHub prerelease.
+7. Download the public assets without authentication and recheck their hashes and launch behavior.
+
+Stable Windows releases ignore `-beta.N` tags, so a Linux beta cannot accidentally enter the signed Windows release workflow.
 
 ## X11 and Wayland behavior
 
@@ -61,10 +98,13 @@ For a Linux platform change, prefer:
 ```sh
 pnpm -C app cargo:fmt:check
 pnpm -C app cargo:test
-pnpm -C app tauri build --no-bundle
+TAURI_API_BASE_URL=https://kolboo.dovie.dev \
+TAURI_MANAGED_INFERENCE_GATEWAY_URL=https://kolboo.dovie.dev \
+VITE_SIGNED_UPDATER_ENABLED=false \
+pnpm -C app tauri build --no-sign --bundles deb,appimage
 ```
 
-Manual acceptance should separately record the desktop session and verify:
+The release artifact, not a dev-server build, must pass and record:
 
 - launch and tray lifecycle;
 - microphone enumeration and recording;
@@ -73,6 +113,9 @@ Manual acceptance should separately record the desktop session and verify:
 - recording-overlay mapping without moving focus away from the previously focused input;
 - secure-storage availability and failure messaging;
 - overlay visibility and monitor placement, including work-area bottom-center placement without drift across repeated recordings;
-- Sentry release/environment/platform tags.
+- opt-in Sentry release/environment/platform tags without sensitive content;
+- `.deb` install, clean launch, removal, reinstall, and rollback;
+- AppImage launch and second-launch persistence;
+- Community/BYOK remains useful while signed out and when Kolboo cloud is unavailable.
 
-Linux remains unsupported until this matrix passes on representative native systems and a private installable bundle has a documented rollback path.
+The initial beta may be published after this matrix passes on the current native Kubuntu x86_64 system for the exact GitHub-built package. Broader Linux support remains provisional until representative X11/Wayland and display-scaling combinations accumulate acceptance evidence.

@@ -1,0 +1,83 @@
+name: Linux Community Beta Release
+
+on:
+  push:
+    tags:
+      - "v*-beta.*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  verify:
+    name: Verify beta version and release notes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      - name: Verify versions match the beta tag
+        run: node .github/scripts/verify-versions.mjs
+
+      - name: Generate release notes from changelog.d
+        run: node .github/scripts/generate-release-notes.mjs RELEASE_NOTES.md
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: linux-beta-release-notes
+          if-no-files-found: error
+          path: RELEASE_NOTES.md
+
+  build-linux:
+    name: Build Linux Community beta
+    needs: verify
+    uses: ./.github/workflows/linux-build.yml
+    secrets: inherit
+
+  publish:
+    name: Publish Linux Community beta
+    needs:
+      - verify
+      - build-linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release notes
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: linux-beta-release-notes
+          path: .release
+
+      - name: Download Linux packages
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.build-linux.outputs.artifact-name }}
+          path: .release/linux
+
+      - name: Attest Linux package provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: |
+            .release/linux/*.deb
+            .release/linux/*.AppImage
+
+      - name: Create prerelease
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          name: Kolboo ${{ github.ref_name }} - Linux Community Beta
+          body_path: .release/RELEASE_NOTES.md
+          files: .release/linux/**
+          fail_on_unmatched_files: true
+          prerelease: true
+          make_latest: false

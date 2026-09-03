@@ -1,12 +1,14 @@
-# Windows v1 release operations
+# Release operations
 
-> **Private-development scope:** Public distribution is deferred. These procedures remain applicable to private Windows tester builds and to maintaining release/update code safely; public signing and promotion are not current milestones.
+> **Channel scope:** Stable Windows distribution remains gated. Linux may publish a clearly labeled Community/BYOK prerelease after exact-package native acceptance; this does not open managed signup or constitute a broad product launch.
 
-Kolboo v1 supports Windows only. macOS and Linux source may compile for development, but neither platform is release-tested, distributed, or covered by the v1 support commitment. The cross-platform roadmap is exploratory and is not a release promise.
+Windows remains the stable release target. Linux has a separate x86_64 Community/BYOK beta channel with manual updates and explicit native acceptance. macOS remains development-only.
+
+Linux beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Beta Release`; stable Windows release jobs exclude those tags. See [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md) for package verification, acceptance, installation, and rollback.
 
 ## Release gates
 
-A public release tag is allowed only after all of these are true:
+A stable Windows release tag is allowed only after all of these are true:
 
 - the repository is public and the unauthenticated GitHub release endpoint works;
 - `WINDOWS_CERTIFICATE` contains the base64-encoded publisher `.pfx` and `WINDOWS_CERTIFICATE_PASSWORD` contains its password;

@@ -1,6 +1,6 @@
 [package]
 name = "kolboo"
-version = "0.2.4"
+version = "0.2.5-beta.1"
 description = "Customizable AI-powered voice dictation tool"
 license = "AGPL-3.0"
 authors = ["kstonekuan"]
@@ -189,11 +189,5 @@ opt-level = 2
 name = "kolboo"
 path = "src/main.rs"
 # Avoid building the full Tauri app binary as a test harness during `cargo test`.
-test = false
-bench = false
-
-[[bin]]
-name = "export_request_log_schema"
-path = "src/bin/export_request_log_schema.rs"
 test = false
 bench = false

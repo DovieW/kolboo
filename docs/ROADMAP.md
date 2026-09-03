@@ -22,7 +22,9 @@ Detailed integration and rehearsal guidance lives in [Sentry integration](Dev%20
 
 ### Linux and macOS
 
-- Build the default application in Linux and macOS CI.
+- Complete packaged acceptance and publish the first x86_64 Linux Community/BYOK beta.
+- Keep Linux beta updates manual until the channel has enough upgrade and rollback evidence for signed automatic updates.
+- Continue building the default application in macOS CI while native acceptance is deferred until a Mac is available.
 - Isolate platform behavior for audio, shortcuts, text insertion, overlays, permissions, startup, tray/window behavior, secure storage, notifications, and updates.
 - Add explicit capability detection and deterministic fallbacks, especially for Linux Wayland and macOS Accessibility/Screen Recording permissions.
 - Define per-platform packaging and manual acceptance matrices before marking a platform supported.
@@ -69,8 +71,9 @@ Source code compiling conditionally is not sufficient.
 
 Deferred without a date:
 
-- public release promotion and unauthenticated updater distribution;
-- public OSS/community launch;
+- stable Linux promotion, signed automatic Linux updates, and non-x86_64 Linux packages;
+- public stable multi-platform release promotion;
+- broad OSS/community launch promotion beyond the limited Linux beta;
 - public legal/marketing link promotion;
 - enterprise-specific desktop UX, SSO, or SLA claims.
 

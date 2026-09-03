@@ -12,6 +12,8 @@ We added repo-level Rust dead-code checks:
 - `pnpm -C app cargo:deadcode:ci`
 - `pnpm -C app cargo:deaddeps`
 
+As of 2026-09-03, strict dead-code denial is Windows-owned. Running the same reachability lint on Ubuntu produced false failures for live Windows UIA and modifier-only shortcut paths. Linux and macOS continue to run ordinary Clippy and tests until platform modules are isolated finely enough for strict target-local reachability checks.
+
 Those checks were green for the default feature set, which was surprising enough to warrant a closer look at the current suppression footprint.
 
 The key distinction is:

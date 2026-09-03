@@ -3,7 +3,7 @@
 	"productName": "Kolboo",
 	"identifier": "com.kolboo.app",
 	"mainBinaryName": "kolboo",
-	"version": "0.2.4",
+	"version": "0.2.5-beta.1",
 	"build": {
 		"beforeDevCommand": "pnpm dev:vite",
 		"devUrl": "http://localhost:5173",

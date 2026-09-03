@@ -54,6 +54,13 @@ pub(crate) fn read_first_non_empty_env(keys: &[&str]) -> Option<String> {
     None
 }
 
+fn compiled_non_empty(value: Option<&'static str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 fn normalize_optional_base_url(value: Option<String>) -> Option<String> {
     value.map(|v| v.trim_end_matches('/').to_string())
 }
@@ -106,9 +113,14 @@ pub fn get_runtime_config() -> RuntimeConfigResponse {
         cloudflare_access_client_secret: renderer_dev_only_env(&[
             "TAURI_CLOUDFLARE_ACCESS_CLIENT_SECRET",
         ]),
-        sentry_dsn: read_first_non_empty_env(&["TAURI_SENTRY_DSN"]),
-        sentry_env: read_first_non_empty_env(&["TAURI_SENTRY_ENV"]),
-        sentry_release: read_first_non_empty_env(&["TAURI_SENTRY_RELEASE"]),
+        // Release builds embed only Sentry's public client configuration. Runtime
+        // values remain first so local rehearsals can override the build metadata.
+        sentry_dsn: read_first_non_empty_env(&["TAURI_SENTRY_DSN"])
+            .or_else(|| compiled_non_empty(option_env!("TAURI_SENTRY_DSN"))),
+        sentry_env: read_first_non_empty_env(&["TAURI_SENTRY_ENV"])
+            .or_else(|| compiled_non_empty(option_env!("TAURI_SENTRY_ENV"))),
+        sentry_release: read_first_non_empty_env(&["TAURI_SENTRY_RELEASE"])
+            .or_else(|| compiled_non_empty(option_env!("TAURI_SENTRY_RELEASE"))),
         // Keep the packaged/browser smoke gate explicit so operators can enable
         // it only for rehearsal launches without normalizing fake crashes in
         // regular desktop sessions.

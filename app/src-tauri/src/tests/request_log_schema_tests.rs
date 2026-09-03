@@ -21,9 +21,9 @@ fn request_log_schema_matches_checked_in_file() {
         serde_json::from_str(raw).expect("Invalid JSON in request-log.schema.json");
 
     assert_eq!(
-		generated, checked_in,
-		"RequestLog schema changed. Regenerate request-log.schema.json using the export_request_log_schema bin.",
-	);
+        generated, checked_in,
+        "RequestLog schema changed. Regenerate schemas with `pnpm -C app schemas:generate`.",
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 {
 	"name": "kolboo",
-	"version": "0.2.4",
+	"version": "0.2.5-beta.1",
 	"description": "Customizable AI-powered voice dictation",
 	"engines": {
 		"node": ">=24"
@@ -39,10 +39,10 @@
 		"types:generate": "node scripts/run-with-timing.mjs node scripts/generate-types-from-schemas.mjs",
 		"types:check": "node scripts/run-with-timing.mjs --shell \"pnpm run types:generate && git diff --exit-code -- src/lib/tauri/types.generated.ts\"",
 		"test:all": "node scripts/run-with-timing.mjs --shell \"pnpm run typecheck && pnpm test && pnpm run cargo:test\"",
-		"cargo:deadcode": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D dead-code",
-		"cargo:deadcode:ci": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci -- -D dead-code",
-		"cargo:deadcode:local-whisper": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --features local-whisper -- -D dead-code",
-		"cargo:deadcode:local-whisper:ci": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --features local-whisper --target-dir src-tauri/target-ci -- -D dead-code",
+		"cargo:deadcode": "node scripts/run-with-timing.mjs node scripts/run-rust-deadcode.mjs",
+		"cargo:deadcode:ci": "node scripts/run-with-timing.mjs node scripts/run-rust-deadcode.mjs --ci",
+		"cargo:deadcode:local-whisper": "node scripts/run-with-timing.mjs node scripts/run-rust-deadcode.mjs --local-whisper",
+		"cargo:deadcode:local-whisper:ci": "node scripts/run-with-timing.mjs node scripts/run-rust-deadcode.mjs --ci --local-whisper",
 		"cargo:deaddeps": "node scripts/run-with-timing.mjs node scripts/run-cargo-machete.mjs src-tauri",
 		"cargo:clippy": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml",
 		"cargo:clippy:ci": "node scripts/run-with-timing.mjs cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml --target-dir src-tauri/target-ci",
@@ -109,7 +109,7 @@
 	},
 	"pnpm": {
 		"overrides": {
-			"nanoid@<3.3.17": "3.3.17",
+			"nanoid@<3.3.18": "3.3.18",
 			"rollup@>=4.0.0 <4.59.0": "4.59.0"
 		}
 	}

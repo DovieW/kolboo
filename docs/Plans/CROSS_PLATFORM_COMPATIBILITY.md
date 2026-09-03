@@ -1,6 +1,6 @@
 # Cross-platform compatibility roadmap
 
-> **Active engineering plan:** Windows remains the currently supported tester platform while Linux and macOS are being built and validated. This work does not create a public release promise or delivery date.
+> **Active engineering plan:** Windows remains the stable tester platform. Linux is moving through an x86_64 Community/BYOK beta gate, while macOS remains development-only pending native testing.
 
 This is the living plan for **platform-specific behavior** in Kolboo.
 
@@ -42,9 +42,9 @@ This is not a promise of perfect parity. Platform limitations—especially Wayla
 
 - Add native default-feature lint, test, and build jobs for Linux and macOS.
 - Document required system packages, architectures, bundle formats, install/uninstall, and cache behavior.
-- Keep platform release channels private while public distribution is deferred.
+- Keep macOS artifacts private. Linux may use a clearly labeled public prerelease channel after its exact package passes native acceptance.
 
-Linux development prerequisites, build commands, and current X11/Wayland behavior are documented in [Linux development](../How%20Tos/LINUX_DEVELOPMENT.md). The `Linux Build` workflow now compiles the native default-feature binary on Ubuntu; installable packaging and the acceptance matrix remain open.
+Linux development prerequisites, build commands, release scope, and current X11/Wayland behavior are documented in [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md). The `Linux Build` workflow produces a Debian package and AppImage on Ubuntu 22.04 with checksums and build evidence. Publishing remains gated on acceptance of those exact packages.
 
 Private macOS artifact builds and the first native acceptance pass are documented in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md). The workflow is manual-only and produces ad-hoc-signed test bundles. An Apple Silicon bundle passed CI construction, signing, and architecture checks, but native acceptance is paused until a Mac is available. Signing, notarization, native behavior, and platform support remain open.
 

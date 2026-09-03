@@ -31,15 +31,15 @@ This is a fork of [Tambourine](https://github.com/kstonekuan/tambourine-voice) m
 
 ## Platform status
 
-Windows is the currently supported tester platform. Linux and macOS support are active engineering work, but neither is supported until its native build, packaging, permissions, and manual acceptance gates pass.
+Windows remains the stable tester platform. Linux now has an x86_64 Community/BYOK beta channel; its first public beta remains gated on packaged acceptance on a native Kubuntu system. macOS remains development-only.
 
 | Platform | v1 status |
 | --- | --- |
 | Windows | Supported |
 | macOS | In development; not yet supported |
-| Linux | In development; not yet supported |
+| Linux | Community/BYOK beta candidate (x86_64 Ubuntu/Kubuntu) |
 
-The source repository is public, but public binaries, updater delivery, and product-launch promotion remain deferred. Current priorities are documented in the [desktop roadmap](docs/ROADMAP.md), with platform detail in the [cross-platform roadmap](docs/Plans/CROSS_PLATFORM_COMPATIBILITY.md).
+The source repository is public. The Linux beta is a free Community/BYOK distribution, not a managed-service or broad product launch. Automatic updates and stable multi-platform promotion remain deferred. Current priorities are documented in the [desktop roadmap](docs/ROADMAP.md), with Linux install and support detail in [Linux development and beta releases](docs/How%20Tos/LINUX_DEVELOPMENT.md).
 
 Private Windows artifacts continue to use the [release operations guide](docs/Dev%20Docs/RELEASE_OPERATIONS.md) for build evidence, updater, rollback, and cache-cleaning procedures.
 

@@ -124,7 +124,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export SCCACHE_NO_DAEMON="1"
           export RUSTC_WRAPPER=sccache
           pnpm tauri build \
             --target "$KOLBOO_BUILD_TARGET" \
