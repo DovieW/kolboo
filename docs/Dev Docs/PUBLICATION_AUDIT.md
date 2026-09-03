@@ -61,4 +61,4 @@ The locked production JavaScript inventory contained 200 package entries and no 
 - Activate and rehearse the real Merchant-of-Record flow.
 - Complete the exact-SHA Windows desktop-to-operator support rehearsal.
 
-These blockers do not prevent public source access. They continue to block public binaries, updater delivery, managed-service promotion, and a broad product launch.
+These blockers do not prevent public source access or the explicitly limited, manual-update Linux Community/BYOK prerelease. They continue to block stable Windows binaries, signed updater delivery, managed-service promotion, and a broad product launch.

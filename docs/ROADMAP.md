@@ -2,7 +2,7 @@
 
 **Status:** Active
 
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-09-03
 
 This document translates the cross-repository Kolboo roadmap into desktop-owned work. Company priorities and deferrals are controlled by `kol-software/ROADMAP.md`; this file owns implementation detail for the Tauri application.
 
@@ -22,7 +22,7 @@ Detailed integration and rehearsal guidance lives in [Sentry integration](Dev%20
 
 ### Linux and macOS
 
-- Complete packaged acceptance and publish the first x86_64 Linux Community/BYOK beta.
+- Maintain and learn from the public x86_64 Linux Community/BYOK beta beginning with [`v0.2.5-beta.1`](https://github.com/DovieW/kolboo/releases/tag/v0.2.5-beta.1); keep its support status provisional.
 - Keep Linux beta updates manual until the channel has enough upgrade and rollback evidence for signed automatic updates.
 - Continue building the default application in macOS CI while native acceptance is deferred until a Mac is available.
 - Isolate platform behavior for audio, shortcuts, text insertion, overlays, permissions, startup, tray/window behavior, secure storage, notifications, and updates.
@@ -77,7 +77,7 @@ Deferred without a date:
 - public legal/marketing link promotion;
 - enterprise-specific desktop UX, SSO, or SLA claims.
 
-The source repository is public. That visibility decision does not make any platform supported, publish binaries, open managed signup, or complete a product launch. Updater, signing, license, and publication code may be maintained for correctness, but public-launch completion is not a current priority.
+The source repository and a limited Linux Community/BYOK prerelease are public. Neither fact makes a platform stable/supported, opens managed signup, or completes a product launch. Updater, signing, license, and publication code may be maintained for correctness, but public-launch completion is not a current priority.
 
 ## Backlog rule
 

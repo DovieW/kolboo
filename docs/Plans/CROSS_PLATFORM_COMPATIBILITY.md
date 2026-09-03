@@ -1,6 +1,6 @@
 # Cross-platform compatibility roadmap
 
-> **Active engineering plan:** Windows remains the stable tester platform. Linux is moving through an x86_64 Community/BYOK beta gate, while macOS remains development-only pending native testing.
+> **Active engineering plan:** Windows remains the stable tester platform. Linux has a public x86_64 Community/BYOK prerelease with provisional support, while macOS remains development-only pending native testing.
 
 This is the living plan for **platform-specific behavior** in Kolboo.
 
@@ -44,7 +44,7 @@ This is not a promise of perfect parity. Platform limitations—especially Wayla
 - Document required system packages, architectures, bundle formats, install/uninstall, and cache behavior.
 - Keep macOS artifacts private. Linux may use a clearly labeled public prerelease channel after its exact package passes native acceptance.
 
-Linux development prerequisites, build commands, release scope, and current X11/Wayland behavior are documented in [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md). The `Linux Build` workflow produces a Debian package and AppImage on Ubuntu 22.04 with checksums and build evidence. Publishing remains gated on acceptance of those exact packages.
+Linux development prerequisites, build commands, release scope, and current X11/Wayland behavior are documented in [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md). The `Linux Build` workflow produces a Debian package and AppImage on Ubuntu 22.04 with checksums and build evidence. The first accepted artifacts were published as [`v0.2.5-beta.1`](https://github.com/DovieW/kolboo/releases/tag/v0.2.5-beta.1); later prereleases remain gated on acceptance of their exact packages.
 
 Private macOS artifact builds and the first native acceptance pass are documented in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md). The workflow is manual-only and produces ad-hoc-signed test bundles. An Apple Silicon bundle passed CI construction, signing, and architecture checks, but native acceptance is paused until a Mac is available. Signing, notarization, native behavior, and platform support remain open.
 
@@ -69,7 +69,7 @@ Private macOS artifact builds and the first native acceptance pass are documente
 ### Windows, tray, startup, and updates
 
 - Validate overlay focus/always-on-top behavior, tray lifecycle, startup registration, notifications, and updater behavior per platform.
-- Keep updater/public distribution separate from the platform-support acceptance decision while publication is deferred.
+- Keep signed updater and stable-distribution decisions separate from the provisional Linux beta and from platform-support acceptance.
 
 ### Acceptance matrix
 

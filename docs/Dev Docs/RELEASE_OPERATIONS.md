@@ -22,7 +22,7 @@ The Release workflow fails closed if either publisher-signing credential is abse
 
 Release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Tauri creates updater signatures with the private updater key, while the application contains only `app/src-tauri/updater.pubkey`. The release workflow refuses to create `latest.json` without a signed Windows artifact and publishes the manifest with the installer.
 
-Updater checks stay disabled in ordinary builds until the repository is public. Never rotate or lose the updater private key without a migration plan: installed clients trust its committed public counterpart.
+Updater checks stay disabled in ordinary builds and in the manual-update Linux beta channel. Enable them only for a release channel that has completed signed update and rollback acceptance. Never rotate or lose the updater private key without a migration plan: installed clients trust its committed public counterpart.
 
 ## Cut and verify a release
 

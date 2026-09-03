@@ -1,10 +1,10 @@
 # Linux development
 
-**Status:** x86_64 Community/BYOK beta candidate; packaged acceptance pending
+**Status:** public x86_64 Community/BYOK beta; provisional support
 
 **Last reviewed:** 2026-09-03
 
-Kolboo is being prepared for a public, clearly labeled Linux Community beta. The first channel is limited to x86_64 Ubuntu/Kubuntu and account-free Community/BYOK use. It is not a managed-service launch, a stable-platform declaration, or a promise of native Wayland feature parity.
+Kolboo's public Linux Community beta began with [`v0.2.5-beta.1`](https://github.com/DovieW/kolboo/releases/tag/v0.2.5-beta.1). The channel is limited to x86_64 Ubuntu/Kubuntu and account-free Community/BYOK use. It is not a managed-service launch, a stable-platform declaration, or a promise of native Wayland feature parity.
 
 ## Ubuntu and Kubuntu prerequisites
 
