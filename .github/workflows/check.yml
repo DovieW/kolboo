@@ -259,6 +259,14 @@ jobs:
           cargo clippy --all-targets --manifest-path app/src-tauri/Cargo.toml --target-dir app/src-tauri/target-ci
           sccache --show-stats || true
 
+      - name: Generate contract schemas for Rust tests
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RUSTC_WRAPPER=sccache
+          cargo run --locked -p xtask --manifest-path app/src-tauri/Cargo.toml --target-dir app/src-tauri/target-ci -- schemas
+
       - name: Run Rust tests
         if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
         shell: bash
