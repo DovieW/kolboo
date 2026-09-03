@@ -245,14 +245,9 @@ jobs:
         shell: bash
         run: cargo fmt --manifest-path app/src-tauri/Cargo.toml -- --check
 
-      - name: Run Rust dead-code check
+      - name: Record strict dead-code ownership
         if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          sccache --show-stats || true
-          pnpm -C app cargo:deadcode:ci
-          sccache --show-stats || true
+        run: echo "Strict dead-code denial runs in Windows check:ci; Ubuntu cannot assess Windows-only UIA and modifier-shortcut reachability."
 
       - name: Run Rust clippy (CI flags)
         if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
