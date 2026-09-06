@@ -79,3 +79,10 @@ machine. Physical microphone/speaker combinations, multi-hour recordings, sudden
 power loss, and Windows/macOS acceptance remain manual checks—not completed
 release evidence. The published beta does not include these changes until a new
 release is built and authorized.
+
+On this Ubuntu desktop, the final native-window check showed missing painted
+content until the process was launched with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+That workaround is set only on the running local test service, not globally or
+in packaged platform defaults. The final window then rendered correctly. The
+optional cold Clippy run was stopped to keep the handoff bounded; it is not
+reported as a passing check.
