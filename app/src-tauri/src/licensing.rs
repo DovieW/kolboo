@@ -409,6 +409,11 @@ pub fn evaluate_status(state: &LicenseState, now: DateTime<Utc>, grace_days: i64
         return LicenseStatus::Active;
     }
 
+    // Do not revive an explicitly expired entitlement from cached timestamps.
+    if matches!(state.status, LicenseStatus::Expired) {
+        return LicenseStatus::Expired;
+    }
+
     let not_expired = state
         .expires_at
         .map(|expires_at| expires_at >= now)
@@ -423,7 +428,11 @@ pub fn evaluate_status(state: &LicenseState, now: DateTime<Utc>, grace_days: i64
         .unwrap_or(false);
 
     if in_grace {
-        LicenseStatus::Grace
+        if state.expires_at.is_none() && matches!(state.status, LicenseStatus::Active) {
+            LicenseStatus::Active
+        } else {
+            LicenseStatus::Grace
+        }
     } else {
         LicenseStatus::Expired
     }
@@ -533,6 +542,9 @@ pub fn apply_refresh_success(mut state: LicenseState, now: DateTime<Utc>) -> Lic
 
 pub fn apply_refresh_failure(mut state: LicenseState, now: DateTime<Utc>) -> LicenseState {
     state.cached_at = now;
+    if matches!(state.status, LicenseStatus::Active) && state.expires_at.is_none() {
+        state.status = LicenseStatus::Grace;
+    }
     state.status = evaluate_status(&state, now, DEFAULT_GRACE_DAYS);
     state
 }
@@ -542,6 +554,28 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use serde_json::json;
+
+    #[test]
+    fn open_ended_entitlement_is_active_until_validation_fails_or_ages_out() {
+        let now = Utc.with_ymd_and_hms(2026, 9, 6, 12, 0, 0).unwrap();
+        let mut state = build_login_state(Some("personal"), now);
+        state.tier = LicenseTier::Personal;
+        state.user_id = Some("test-user".into());
+        state.status = LicenseStatus::Active;
+        state.expires_at = None;
+        state.last_validated_at = Some(now);
+        assert_eq!(evaluate_status(&state, now, 7), LicenseStatus::Active);
+        assert_eq!(
+            apply_refresh_failure(state.clone(), now).status,
+            LicenseStatus::Grace
+        );
+        assert_eq!(
+            evaluate_status(&state, now + Duration::days(8), 7),
+            LicenseStatus::Expired
+        );
+        state.status = LicenseStatus::Expired;
+        assert_eq!(evaluate_status(&state, now, 7), LicenseStatus::Expired);
+    }
 
     #[test]
     fn normalizes_signed_out_when_missing() {

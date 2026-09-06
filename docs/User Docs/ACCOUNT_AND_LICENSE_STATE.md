@@ -6,6 +6,7 @@ Kolboo works without signing in. Account login is optional and only enables mana
 
 - **Signed out**: baseline functionality is available; no account identity is attached.
 - **Active**: account entitlement is current.
+  A freshly validated entitlement with no expiration date is Active, not Grace.
 - **Grace**: entitlement refresh failed recently; account remains available during the grace window.
 - **Expired**: grace window ended without a successful refresh.
 
