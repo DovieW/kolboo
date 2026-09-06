@@ -45,6 +45,7 @@ mod managed_outage_tests;
 #[cfg(test)]
 #[path = "pipeline/tests/managed_personal_tests.rs"]
 mod managed_personal_tests;
+mod meeting_transcription;
 mod ocr_session;
 mod ocr_session_state;
 mod profile_matcher;
@@ -62,6 +63,11 @@ mod tests;
 mod transcription_flow;
 mod types;
 mod utils;
+
+enum SavedAudioMode<'a> {
+    Dictation,
+    Meeting(Option<&'a std::path::Path>),
+}
 
 use config::canonicalize_stt_provider_id;
 pub(crate) use config::{resolve_provider_mode, ProviderMode};
@@ -1940,6 +1946,53 @@ impl SharedPipeline {
         forced_llm_provider: Option<&str>,
         forced_llm_model: Option<&str>,
     ) -> Result<TranscriptionResult, PipelineError> {
+        self.transcribe_saved_audio(
+            wav_bytes,
+            profile_id_override,
+            forced_stt_provider,
+            forced_stt_model,
+            forced_llm_provider,
+            forced_llm_model,
+            SavedAudioMode::Dictation,
+        )
+        .await
+    }
+
+    pub async fn transcribe_meeting_wav(
+        &self,
+        wav: Vec<u8>,
+        profile: Option<&str>,
+        checkpoint: Option<&std::path::Path>,
+    ) -> Result<TranscriptionResult, PipelineError> {
+        if !self.is_recovering() {
+            return Err(PipelineError::Config(
+                "Meeting recovery ownership is required".into(),
+            ));
+        }
+        self.transcribe_saved_audio(
+            wav,
+            profile,
+            None,
+            None,
+            None,
+            None,
+            SavedAudioMode::Meeting(checkpoint),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn transcribe_saved_audio(
+        &self,
+        wav_bytes: Vec<u8>,
+        profile_id_override: Option<&str>,
+        forced_stt_provider: Option<&str>,
+        forced_stt_model: Option<&str>,
+        forced_llm_provider: Option<&str>,
+        forced_llm_model: Option<&str>,
+        mode: SavedAudioMode<'_>,
+    ) -> Result<TranscriptionResult, PipelineError> {
+        let is_meeting = matches!(mode, SavedAudioMode::Meeting(_));
         // Phase 1: Resolve providers/config under lock.
         let (
             stt_provider,
@@ -1972,11 +2025,17 @@ impl SharedPipeline {
                 ));
             }
 
-            // Keep a copy for STT testing/debugging UI.
-            inner.last_wav_bytes = Some(wav_bytes.clone());
+            // Avoid a permanent full-meeting debug copy.
+            if !is_meeting {
+                inner.last_wav_bytes = Some(wav_bytes.clone());
+            }
 
             // Check size limit
-            let max_bytes = inner.config.max_recording_bytes;
+            let max_bytes = if is_meeting {
+                meeting_transcription::MAX_MEETING_WAV_BYTES
+            } else {
+                inner.config.max_recording_bytes
+            };
             if max_bytes > 0 && wav_bytes.len() > max_bytes {
                 inner.set_error(&format!("Recording too large: {} bytes", wav_bytes.len()));
                 return Err(PipelineError::RecordingTooLarge(wav_bytes.len(), max_bytes));
@@ -1988,7 +2047,13 @@ impl SharedPipeline {
             );
 
             // Ensure we have a cancellation token for this attempt.
-            let cancel_token = CancellationToken::new();
+            let cancel_token = if is_meeting {
+                inner.recovery_job.clone().ok_or_else(|| {
+                    PipelineError::Config("Meeting recovery ownership is required".into())
+                })?
+            } else {
+                CancellationToken::new()
+            };
             inner.cancel_token = Some(cancel_token.clone());
 
             let llm_config = inner.config.llm_config.clone();
@@ -2063,8 +2128,64 @@ impl SharedPipeline {
         );
 
         // Phase 2: STT transcription
-        let result = self
-            .run_batch_stt_request(
+        let result = if let SavedAudioMode::Meeting(checkpoint) = mode {
+            let settings_key = {
+                let inner = self
+                    .inner
+                    .lock()
+                    .map_err(|e| PipelineError::Lock(e.to_string()))?;
+                format!(
+                    "{:?}",
+                    (
+                        &stt_provider_id,
+                        &stt_model,
+                        &stt_language,
+                        &inner.config.stt_transcription_prompt
+                    )
+                )
+            };
+            let result = meeting_transcription::transcribe(
+                &wav_bytes,
+                checkpoint,
+                &settings_key,
+                &cancel_token,
+                |chunk| {
+                    let provider = stt_provider.clone();
+                    let model = stt_model.clone();
+                    let language = stt_language.clone();
+                    let token = &cancel_token;
+                    let retry = &retry_config;
+                    let provider_id = &stt_provider_id;
+                    async move {
+                        self.run_batch_stt_request(
+                            provider,
+                            provider_id,
+                            model,
+                            language,
+                            &chunk,
+                            retry,
+                            timeout,
+                            token,
+                            "Meeting",
+                            "meeting_upload",
+                        )
+                        .await
+                    }
+                },
+            )
+            .await;
+            match result {
+                Ok(result) => {
+                    self.mark_stt_complete("meeting_complete");
+                    result
+                }
+                Err(error) => {
+                    self.finish_failed_stt_attempt(&error)?;
+                    return Err(error);
+                }
+            }
+        } else {
+            self.run_batch_stt_request(
                 stt_provider,
                 &stt_provider_id,
                 stt_model.clone(),
@@ -2076,7 +2197,8 @@ impl SharedPipeline {
                 "Pipeline (retry)",
                 "retry_transcription",
             )
-            .await?;
+            .await?
+        };
         let (stt_text, stt_duration_ms, stt_retry) =
             (result.text, result.duration_ms, Some(result.retry));
 
@@ -2151,6 +2273,11 @@ impl SharedPipeline {
             &llm_config,
         )
         .await;
+
+        if is_meeting && cancel_token.is_cancelled() {
+            self.finish_failed_stt_attempt(&PipelineError::Cancelled)?;
+            return Err(PipelineError::Cancelled);
+        }
 
         // Phase 5: Update state to idle
         {

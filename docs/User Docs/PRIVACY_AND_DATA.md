@@ -29,8 +29,11 @@ Common categories of local data include:
   encrypted by Kolboo and stays until transcription succeeds or you discard it.
   Stop/Recover sends audio to your selected provider; local providers stay local.
   A final transcription also has saved audio for History playback; capture does
-  not send periodic transcription requests. If a provider rejects a long recording,
-  the original audio remains saved for recovery.
+  not send periodic transcription requests. After Stop, long recordings are
+  uploaded in smaller parts and combined into one transcript. Completed parts'
+  transcript text is saved locally (not encrypted by Kolboo) so interrupted work
+  can resume. Recovery audio and partial text are removed after the final result
+  is saved, or when you discard the recovery recording. Provider failures keep them.
   Cancel during capture discards that capture; cancel during transcription keeps
   the full audio for recovery. Delete all recordings includes recovery files.
 - **Usage/cost stats** (a local ledger of cost events)

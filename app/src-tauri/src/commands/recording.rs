@@ -93,8 +93,7 @@ pub fn recordings_delete_all(
     let mut deleted = store.delete_all_wavs().map_err(CommandError::from)?;
     for id in recovery_ids {
         let path = recovery_file(&app, &id)?;
-        std::fs::remove_file(&path).map_err(|e| CommandError::from(e.to_string()))?;
-        let _ = std::fs::remove_file(path.with_extension("progress"));
+        remove_recovery_files(&path)?;
         deleted += 1;
     }
     Ok(deleted)
@@ -143,7 +142,7 @@ pub fn recordings_get_stats(app: AppHandle) -> Result<RecordingsStats, CommandEr
         }
         let path = entry.path();
         let extension = path.extension().and_then(|x| x.to_str());
-        if !matches!(extension, Some("pcm" | "progress")) {
+        if !matches!(extension, Some("pcm" | "progress" | "transcripts")) {
             continue;
         }
         if !path
@@ -252,6 +251,23 @@ fn recovery_file(app: &AppHandle, id: &str) -> Result<std::path::PathBuf, Comman
     Ok(path)
 }
 
+fn remove_recovery_files(path: &std::path::Path) -> Result<(), CommandError> {
+    // Keep the journal visible if sensitive checkpoint cleanup fails.
+    for extension in ["transcripts", "progress"] {
+        match std::fs::remove_file(path.with_extension(extension)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(CommandError::from(
+                    "Could not remove saved recording progress".to_string(),
+                ))
+            }
+        }
+    }
+    std::fs::remove_file(path)
+        .map_err(|_| CommandError::from("Could not remove saved audio".to_string()))
+}
+
 #[tauri::command]
 pub fn recording_list_recovery(
     app: AppHandle,
@@ -330,11 +346,10 @@ async fn recover_recording_inner(
         let export_cancel = cancel.clone();
         let export_app = app.clone();
         let export_id = recording_id.clone();
-        let max_bytes = pipeline.config().max_recording_bytes;
-        // Read/encode bounded blocks off the async runtime, but submit ONE WAV
-        // only after capture has ended. Never replace or truncate the journal.
+        // Prepare one playback WAV off the async runtime, only after capture
+        // ends. STT uploads split later; never replace or truncate the journal.
         tokio::task::spawn_blocking(move || -> Result<(), String> {
-            let wav = crate::audio_capture::journal::final_wav(&export_path, max_bytes, || {
+            let wav = crate::audio_capture::journal::final_wav(&export_path, 0, || {
                 export_cancel.is_cancelled()
             })
             .map_err(|e| e.to_string())?;
@@ -360,8 +375,7 @@ async fn recover_recording_inner(
             ));
         }
     }
-    std::fs::remove_file(&path).map_err(|e| CommandError::from(e.to_string()))?;
-    let _ = std::fs::remove_file(path.with_extension("progress"));
+    remove_recovery_files(&path)?;
     Ok(())
 }
 
@@ -375,8 +389,7 @@ pub fn recording_discard_recovery(
         return Err(CommandError::from("Recording pipeline is busy".to_string()));
     }
     let path = recovery_file(&app, &id)?;
-    std::fs::remove_file(&path).map_err(|e| CommandError::from(e.to_string()))?;
-    let _ = std::fs::remove_file(path.with_extension("progress"));
+    remove_recovery_files(&path)?;
     Ok(())
 }
 
@@ -878,6 +891,24 @@ async fn retry_transcription_inner(
         .and_then(|entry| entry.recording_request_id.clone())
         .unwrap_or_else(|| request_id.clone());
 
+    let meeting_id = recording_source_id
+        .strip_suffix("-final")
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok());
+    struct MeetingReplayGuard(SharedPipeline);
+    impl Drop for MeetingReplayGuard {
+        fn drop(&mut self) {
+            self.0.end_recovery();
+        }
+    }
+    // History reruns of a completed meeting also use small uploads, but are
+    // deliberately fresh attempts rather than silently reusing old text.
+    let _meeting_replay = if meeting_id.is_some() && !recovery {
+        pipeline.begin_recovery().map_err(CommandError::from)?;
+        Some(MeetingReplayGuard(pipeline.clone()))
+    } else {
+        None
+    };
+
     // Preserve the preset used by the original request (if we can find it).
     // This was added after presets existed, but retry transcription historically did not
     // carry preset selection forward.
@@ -960,10 +991,24 @@ async fn retry_transcription_inner(
     );
 
     // Run the retry transcription (STT + optional LLM)
-    let result = match pipeline
-        .transcribe_wav_bytes_detailed_for_profile(wav.clone(), profile_id.as_deref())
-        .await
-    {
+    let transcription = if recovery {
+        let id = recording_source_id
+            .strip_suffix("-final")
+            .ok_or_else(|| CommandError::from("Invalid meeting recording id".to_string()))?;
+        let checkpoint = recovery_file(&app, id)?.with_extension("transcripts");
+        pipeline
+            .transcribe_meeting_wav(wav.clone(), profile_id.as_deref(), Some(&checkpoint))
+            .await
+    } else if meeting_id.is_some() {
+        pipeline
+            .transcribe_meeting_wav(wav.clone(), profile_id.as_deref(), None)
+            .await
+    } else {
+        pipeline
+            .transcribe_wav_bytes_detailed_for_profile(wav.clone(), profile_id.as_deref())
+            .await
+    };
+    let result = match transcription {
         Ok(r) => r,
         Err(PipelineError::Cancelled) => {
             #[cfg(desktop)]

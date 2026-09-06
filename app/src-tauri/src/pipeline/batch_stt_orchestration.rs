@@ -54,7 +54,9 @@ impl SharedPipeline {
 
         match stt_result {
             Ok(result) => {
-                self.mark_stt_complete(stt_complete_reason);
+                if stt_complete_reason != "meeting_upload" {
+                    self.mark_stt_complete(stt_complete_reason);
+                }
                 Ok(result)
             }
             Err(error) => {
@@ -82,7 +84,9 @@ impl SharedPipeline {
                         .await
                     {
                         Ok(recovered) => {
-                            self.mark_stt_complete(stt_complete_reason);
+                            if stt_complete_reason != "meeting_upload" {
+                                self.mark_stt_complete(stt_complete_reason);
+                            }
                             Ok(recovered)
                         }
                         Err(retry_error) => {

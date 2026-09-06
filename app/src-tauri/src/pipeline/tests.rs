@@ -832,6 +832,37 @@ async fn pipeline_can_transcribe_without_network_or_hardware() {
 }
 
 #[tokio::test]
+async fn meeting_transcription_bypasses_only_dictation_size_limit_and_requires_ownership() {
+    let mut config = test_config_for_transcription();
+    config.max_recording_bytes = 1024;
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(MockSttProvider::new("one final transcript")),
+    );
+    let mut audio = crate::audio_capture::AudioBuffer::new(16000, 1, 1.0);
+    audio.append(&vec![0.25; 16000]);
+    let wav = audio.to_wav_bytes().unwrap();
+    assert!(matches!(
+        p.transcribe_wav_bytes_detailed(wav.clone()).await,
+        Err(PipelineError::RecordingTooLarge(..))
+    ));
+    assert!(p
+        .transcribe_meeting_wav(wav.clone(), None, None)
+        .await
+        .is_err());
+    p.begin_recovery().unwrap();
+    let result = p.transcribe_meeting_wav(wav, None, None).await.unwrap();
+    assert_eq!(result.stt_text, "one final transcript");
+    assert_eq!(result.final_text, "one final transcript");
+    assert_eq!(p.state(), PipelineState::Idle);
+    assert!(p.is_recovering());
+    p.end_recovery();
+}
+
+#[tokio::test]
 async fn pipeline_can_transcribe_and_rewrite_without_network_or_hardware() {
     // Given: a pipeline with fake audio capture, fake STT, AND fake LLM providers.
     let mut config = test_config_for_transcription();
