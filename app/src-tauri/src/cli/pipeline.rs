@@ -40,7 +40,7 @@ pub(crate) fn handle_pipeline(
                     .map_err(|err| CliError::Runtime(err.to_string()))?;
             }
 
-            crate::commands::recording::pipeline_start_recording(app.clone(), pipeline)
+            crate::commands::recording::pipeline_start_recording(app.clone(), pipeline, None, None)
                 .map_err(|err| CliError::Runtime(err.to_string()))?;
 
             let state =

@@ -644,6 +644,28 @@ export const ocrAPI = {
 		invoke<OverlayPipelineState>("pipeline_get_overlay_state"),
 };
 
+export const recordingControlsAPI = {
+	getSeconds: () => invoke<number>("pipeline_get_recording_seconds"),
+	canPause: () => invoke<boolean>("pipeline_can_pause_recording"),
+	computerAudioAvailable: () =>
+		invoke<boolean>("recording_computer_audio_available"),
+	listRecovery: () => invoke<string[]>("recording_list_recovery"),
+	recover: (id: string) => invoke<void>("recording_recover", { id }),
+	discardRecovery: (id: string) =>
+		invoke<void>("recording_discard_recovery", { id }),
+	getPaused: () => invoke<boolean>("pipeline_get_recording_paused"),
+	setPaused: (paused: boolean) =>
+		invoke<void>("pipeline_set_recording_paused", { paused }),
+	getState: () => invoke<string>("pipeline_get_state"),
+	start: (computerAudio = false) =>
+		invoke<void>("pipeline_start_recording", {
+			historyOnly: true,
+			computerAudio,
+		}),
+	stop: () => invoke<string>("pipeline_stop_and_transcribe"),
+	cancel: () => invoke<void>("pipeline_cancel"),
+};
+
 export const policyAPI = {
 	syncPolicy: (request?: { policyPack?: unknown }) =>
 		tauriPolicyAPI.syncPolicy(request),

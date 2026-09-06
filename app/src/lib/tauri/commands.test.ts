@@ -33,6 +33,31 @@ vi.mock("./events", () => ({
 }));
 
 describe("tauri command wrappers", () => {
+	itWithImportTimeout(
+		"home controls use the existing recording pipeline without text injection",
+		async () => {
+			const { recordingControlsAPI } = await import("./commands");
+			await recordingControlsAPI.getState();
+			await recordingControlsAPI.start();
+			await recordingControlsAPI.stop();
+			await recordingControlsAPI.cancel();
+			await recordingControlsAPI.setPaused(true);
+			await recordingControlsAPI.setPaused(false);
+			await recordingControlsAPI.getPaused();
+			expect(invokeMock.mock.calls).toEqual([
+				["pipeline_get_state"],
+				[
+					"pipeline_start_recording",
+					{ historyOnly: true, computerAudio: false },
+				],
+				["pipeline_stop_and_transcribe"],
+				["pipeline_cancel"],
+				["pipeline_set_recording_paused", { paused: true }],
+				["pipeline_set_recording_paused", { paused: false }],
+				["pipeline_get_recording_paused"],
+			]);
+		},
+	);
 	beforeEach(() => {
 		invokeMock.mockReset();
 		invokeMock.mockResolvedValue(undefined);

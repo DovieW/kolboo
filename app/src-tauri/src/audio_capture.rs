@@ -18,7 +18,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
 
+pub mod computer_audio;
 mod device_selection;
+pub mod journal;
 mod meters;
 mod preprocessing;
 
@@ -155,6 +157,10 @@ pub enum AudioCaptureError {
 /// Audio buffer that accumulates samples during recording
 #[derive(Debug, Clone)]
 pub struct AudioBuffer {
+    recovery_path: Option<std::path::PathBuf>,
+    journal: Option<Arc<StdMutex<journal::Journal>>>,
+    journal_failed: bool,
+    captured_samples: u64,
     data: Vec<f32>,
     write_pos: usize,
     filled: usize,
@@ -200,6 +206,10 @@ impl AudioBuffer {
         let capacity = Self::max_samples_for(sample_rate, channels, max_duration_secs);
         Self {
             data: vec![0.0; capacity],
+            recovery_path: None,
+            journal: None,
+            journal_failed: false,
+            captured_samples: 0,
             write_pos: 0,
             filled: 0,
             sample_rate,
@@ -255,6 +265,7 @@ impl AudioBuffer {
     ///
     /// Clears samples and sets the max duration (used for trimming during capture).
     pub fn reset_for_recording(&mut self, max_duration_secs: f32) {
+        self.captured_samples = 0;
         self.max_duration_secs = max_duration_secs.max(0.0);
 
         let cap = Self::max_samples_for(self.sample_rate, self.channels, self.max_duration_secs);
@@ -269,6 +280,40 @@ impl AudioBuffer {
 
     /// Append samples to the buffer
     pub fn append(&mut self, new_samples: &[f32]) {
+        if self.journal_failed {
+            return;
+        }
+        if self.journal.is_none() {
+            if let Some(path) = self.recovery_path.as_ref() {
+                match journal::Journal::create(path, self.sample_rate, self.channels) {
+                    Ok(writer) => self.journal = Some(Arc::new(StdMutex::new(writer))),
+                    Err(_) => {
+                        self.journal_failed = true;
+                        return;
+                    }
+                }
+            }
+        }
+        if let Some(journal) = &self.journal {
+            match journal.lock() {
+                Ok(mut writer) => {
+                    if writer
+                        .append(new_samples, self.sample_rate, self.channels)
+                        .is_err()
+                    {
+                        self.journal_failed = true;
+                        return;
+                    }
+                }
+                Err(_) => {
+                    self.journal_failed = true;
+                    return;
+                }
+            }
+        }
+        self.captured_samples = self
+            .captured_samples
+            .saturating_add(new_samples.len() as u64);
         let cap = self.capacity();
         if cap == 0 || new_samples.is_empty() {
             return;
@@ -399,6 +444,20 @@ impl AudioBuffer {
         &self,
         cfg: AudioEncodeConfig,
     ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
+        if self.journal_failed {
+            return Err(AudioCaptureError::Encoding(
+                "Recovery storage failed; recording may be incomplete".into(),
+            ));
+        }
+        if let Some(writer) = &self.journal {
+            writer
+                .lock()
+                .map_err(|_| AudioCaptureError::Encoding("Recovery storage unavailable".into()))?
+                .finish()
+                .map_err(|_| {
+                    AudioCaptureError::Encoding("Recovery audio could not be synchronized".into())
+                })?;
+        }
         // Allocate once at stop-time to obtain a contiguous, chronological snapshot.
         let raw_samples = self.snapshot();
 
@@ -624,6 +683,31 @@ impl RollingBuffer {
 ///
 /// Real implementation: `AudioCapture`.
 pub trait AudioCaptureBackend: Send {
+    fn recording_progress(&self) -> (f64, bool) {
+        (0.0, false)
+    }
+    fn set_computer_audio(&mut self, enabled: bool) -> Result<(), AudioCaptureError> {
+        if enabled {
+            Err(AudioCaptureError::NoInputDevice)
+        } else {
+            Ok(())
+        }
+    }
+    fn recovery_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn discard_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        Ok(())
+    }
+    fn set_recovery_path(
+        &mut self,
+        _path: Option<std::path::PathBuf>,
+    ) -> Result<(), AudioCaptureError> {
+        Ok(())
+    }
+    fn set_paused(&mut self, _paused: bool) -> Result<(), AudioCaptureError> {
+        Err(AudioCaptureError::NotActive)
+    }
     fn shared_level_meter(&self) -> SharedAudioLevelMeter;
     fn shared_waveform_meter(&self) -> SharedAudioWaveformMeter;
     fn level_snapshot(&self) -> AudioLevelSnapshot;
@@ -705,6 +789,8 @@ struct CaptureHandle {
 /// This runs audio capture in a separate thread to avoid Send/Sync issues
 /// with cpal::Stream. The captured audio is stored in a shared buffer.
 pub struct AudioCapture {
+    computer_audio_enabled: bool,
+    computer_capture: Option<computer_audio::Capture>,
     buffer: Arc<StdMutex<AudioBuffer>>,
     pre_roll: Arc<StdMutex<RollingBuffer>>,
     capture_handle: Option<CaptureHandle>,
@@ -742,6 +828,8 @@ impl AudioCapture {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
             pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
+            computer_audio_enabled: false,
+            computer_capture: None,
             sample_rate: 44100,
             channels: 1,
             vad_config: VadAutoStopConfig::default(),
@@ -763,6 +851,8 @@ impl AudioCapture {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
             pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
+            computer_audio_enabled: false,
+            computer_capture: None,
             sample_rate: 44100,
             channels: 1,
             vad_config,
@@ -826,6 +916,9 @@ impl AudioCapture {
             *lock = desired_name;
         }
 
+        if self.computer_capture.is_some() {
+            return Ok(());
+        }
         if hot_mic_enabled {
             // Keep the stream open while idle.
             self.ensure_stream_running(input_device_name)?;
@@ -848,6 +941,25 @@ impl AudioCapture {
         max_duration_secs: f32,
         input_device_name: Option<&str>,
     ) -> Result<(), AudioCaptureError> {
+        if self.computer_audio_enabled {
+            self.stop();
+            self.sample_rate = 16000;
+            self.channels = 1;
+            if let Ok(mut buffer) = self.buffer.lock() {
+                buffer.set_format(16000, 1);
+                buffer.reset_for_recording(max_duration_secs);
+            }
+            self.recording_active.store(true, Ordering::Relaxed);
+            match computer_audio::Capture::start(self.buffer.clone(), self.recording_active.clone())
+            {
+                Ok(capture) => self.computer_capture = Some(capture),
+                Err(error) => {
+                    self.recording_active.store(false, Ordering::Relaxed);
+                    return Err(error);
+                }
+            }
+            return Ok(());
+        }
         if self.hot_mic_enabled {
             self.ensure_stream_running(input_device_name)?;
             self.begin_recording_with_pre_roll(max_duration_secs);
@@ -878,6 +990,7 @@ impl AudioCapture {
 
     /// Stop recording. In Hot Mic mode, keeps the stream open.
     pub fn stop_recording(&mut self) {
+        self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
         // NOTE: We intentionally do NOT clear live_audio_tx here.
         // The worker thread must be allowed to flush any remaining queued chunks
@@ -1164,6 +1277,7 @@ impl AudioCapture {
 
     /// Stop recording without returning audio data
     pub fn stop(&mut self) {
+        self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
         if let Some(handle) = self.capture_handle.take() {
             log::info!("Stopping audio capture");
@@ -1245,6 +1359,74 @@ impl AudioCapture {
 }
 
 impl AudioCaptureBackend for AudioCapture {
+    fn recording_progress(&self) -> (f64, bool) {
+        self.buffer
+            .lock()
+            .map(|buffer| {
+                (
+                    buffer.captured_samples as f64
+                        / buffer.sample_rate.max(1) as f64
+                        / buffer.channels.max(1) as f64,
+                    buffer.journal_failed,
+                )
+            })
+            .unwrap_or((0.0, true))
+    }
+    fn set_computer_audio(&mut self, enabled: bool) -> Result<(), AudioCaptureError> {
+        if enabled && !computer_audio::available() {
+            return Err(AudioCaptureError::StreamStart(
+                "Computer audio is not supported on this installation".into(),
+            ));
+        }
+        self.computer_audio_enabled = enabled;
+        Ok(())
+    }
+    fn recovery_path(&self) -> Option<std::path::PathBuf> {
+        self.buffer
+            .lock()
+            .ok()
+            .and_then(|buffer| buffer.recovery_path.clone())
+    }
+    fn discard_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        let mut buffer = self
+            .buffer
+            .lock()
+            .map_err(|_| AudioCaptureError::ThreadError("Recovery buffer unavailable".into()))?;
+        buffer.journal = None;
+        if let Some(path) = buffer.recovery_path.take() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => (),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(_) => {
+                    buffer.recovery_path = Some(path);
+                    return Err(AudioCaptureError::ThreadError(
+                        "Could not discard recovery audio".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+    fn set_recovery_path(
+        &mut self,
+        path: Option<std::path::PathBuf>,
+    ) -> Result<(), AudioCaptureError> {
+        let mut buffer = self
+            .buffer
+            .lock()
+            .map_err(|_| AudioCaptureError::ThreadError("Recovery buffer unavailable".into()))?;
+        buffer.journal = None;
+        buffer.journal_failed = false;
+        buffer.recovery_path = path;
+        Ok(())
+    }
+    fn set_paused(&mut self, paused: bool) -> Result<(), AudioCaptureError> {
+        if self.capture_handle.is_none() && self.computer_capture.is_none() {
+            return Err(AudioCaptureError::NotActive);
+        }
+        self.recording_active.store(!paused, Ordering::Relaxed);
+        Ok(())
+    }
     fn shared_level_meter(&self) -> SharedAudioLevelMeter {
         self.shared_level_meter()
     }
@@ -1938,6 +2120,28 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recovery_keeps_audio_beyond_the_memory_ring_and_explicit_discard_removes_it() {
+        use super::*;
+        let path =
+            std::env::temp_dir().join(format!("kolboo-ring-recovery-{}.pcm", uuid::Uuid::new_v4()));
+        let mut capture = AudioCapture::new();
+        AudioCaptureBackend::set_recovery_path(&mut capture, Some(path.clone())).unwrap();
+        {
+            let mut buffer = capture.buffer.lock().unwrap();
+            buffer.set_format(16000, 1);
+            buffer.reset_for_recording(0.01);
+            buffer.append(&vec![0.25; 16000]);
+            assert_eq!(buffer.snapshot().len(), 160);
+            assert_eq!(buffer.captured_samples, 16000);
+            buffer.to_wav_bytes().unwrap();
+        }
+        assert_eq!(journal::read_chunk(&path, 0, 16000).unwrap().2.len(), 16000);
+        AudioCaptureBackend::discard_recovery(&mut capture).unwrap();
+        assert!(!path.exists());
+        assert!(capture.buffer.lock().unwrap().recovery_path.is_none());
+    }
+
     use super::*;
     use std::sync::atomic::AtomicBool;
 

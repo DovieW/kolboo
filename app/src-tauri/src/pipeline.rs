@@ -201,6 +201,9 @@ fn resolve_llm_provider_for_runtime(
 
 /// Internal state for the recording pipeline
 struct PipelineInner {
+    recovery_job: Option<CancellationToken>,
+    history_only: bool,
+    recording_paused: bool,
     audio_capture: Box<dyn AudioCaptureBackend>,
     stt_registry: SttRegistry,
     stt_provider_cache: HashMap<String, Arc<dyn SttProvider>>,
@@ -389,6 +392,9 @@ impl PipelineInner {
         audio_capture: Box<dyn AudioCaptureBackend>,
     ) -> Self {
         let mut inner = Self {
+            history_only: false,
+            recovery_job: None,
+            recording_paused: false,
             audio_capture,
             stt_registry: SttRegistry::new(),
             stt_provider_cache: HashMap::new(),
@@ -599,6 +605,31 @@ pub struct SharedPipeline {
 }
 
 impl SharedPipeline {
+    pub fn begin_recovery(&self) -> Result<CancellationToken, PipelineError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+        if inner.recovery_job.is_some() || !inner.state.can_start_recording() {
+            return Err(PipelineError::AlreadyRecording);
+        }
+        let token = CancellationToken::new();
+        inner.recovery_job = Some(token.clone());
+        Ok(token)
+    }
+
+    pub fn end_recovery(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.recovery_job = None;
+        }
+    }
+
+    pub fn is_recovering(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.recovery_job.is_some())
+            .unwrap_or(true)
+    }
     fn mark_stt_complete(&self, reason: &str) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.stt_complete = true;
@@ -892,6 +923,72 @@ impl SharedPipeline {
     ///
     /// Creates a new cancellation token for this recording session.
     pub fn start_recording(&self) -> Result<(), PipelineError> {
+        self.start_recording_with_output(false, None, false)
+    }
+
+    pub fn is_history_only_recording(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.history_only)
+            .unwrap_or(true)
+    }
+
+    pub fn recording_progress(&self) -> Result<f64, PipelineError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+        let (seconds, failed) = inner.audio_capture.recording_progress();
+        if failed && matches!(inner.state, PipelineState::Recording | PipelineState::Error) {
+            if inner.state == PipelineState::Recording {
+                inner.audio_capture.stop();
+                inner.set_error("Audio capture or recovery storage failed. Saved audio may be incomplete; recover it before recording again.");
+            }
+            return Err(PipelineError::AudioCapture(
+                crate::audio_capture::AudioCaptureError::Encoding(
+                    "Audio capture stopped. Recover the saved audio before recording again.".into(),
+                ),
+            ));
+        }
+        Ok(seconds)
+    }
+
+    pub fn recovery_path(&self) -> Option<std::path::PathBuf> {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.audio_capture.recovery_path())
+    }
+
+    pub fn set_recording_paused(&self, paused: bool) -> Result<(), PipelineError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+        if inner.state != PipelineState::Recording || !inner.history_only {
+            return Err(PipelineError::NotRecording);
+        }
+        inner
+            .audio_capture
+            .set_paused(paused)
+            .map_err(PipelineError::AudioCapture)?;
+        inner.recording_paused = paused;
+        Ok(())
+    }
+
+    pub fn is_recording_paused(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.state == PipelineState::Recording && inner.recording_paused)
+            .unwrap_or(false)
+    }
+
+    pub fn start_recording_with_output(
+        &self,
+        history_only: bool,
+        recovery_path: Option<std::path::PathBuf>,
+        computer_audio: bool,
+    ) -> Result<(), PipelineError> {
         // Defensive: clear any previous session preset lock so we don't accidentally
         // apply an override from a prior (cancelled) session.
         //
@@ -904,11 +1001,19 @@ impl SharedPipeline {
             .map_err(|e| PipelineError::Lock(e.to_string()))?;
 
         // State guard: only allow starting from Idle or Error states
-        if !recording::can_start_recording(inner.state) {
+        if inner.recovery_job.is_some() || !recording::can_start_recording(inner.state) {
             return Err(PipelineError::AlreadyRecording);
         }
 
         // Create a new cancellation token for this session
+        inner
+            .audio_capture
+            .set_computer_audio(history_only && computer_audio)
+            .map_err(PipelineError::AudioCapture)?;
+        inner
+            .audio_capture
+            .set_recovery_path(recovery_path)
+            .map_err(PipelineError::AudioCapture)?;
         let cancel_token = CancellationToken::new();
         inner.cancel_token = Some(cancel_token);
 
@@ -923,6 +1028,8 @@ impl SharedPipeline {
         ) {
             Ok(()) => {
                 inner.stt_complete = false;
+                inner.history_only = history_only;
+                inner.recording_paused = false;
                 log::debug!("stt_complete reset to false (start_recording)");
                 inner.transition_to(PipelineState::Recording, "start_recording");
                 log::info!("Pipeline: Recording started");
@@ -945,6 +1052,10 @@ impl SharedPipeline {
     /// This is fire-and-forget: if streaming setup fails, the pipeline will fall
     /// back to the normal batch path in `stop_and_transcribe_detailed`.
     pub async fn try_start_concurrent_streaming(&self, app_handle: &AppHandle) {
+        // Home recordings must not feed the live dictation/insertion path.
+        if self.is_history_only_recording() {
+            return;
+        }
         // Helper: log to the request log store (if available) so the user can
         // see streaming diagnostics in the UI.
         let log_to_request = |app: &AppHandle, msg: String| {
@@ -2260,6 +2371,9 @@ impl SharedPipeline {
     /// - Reset the pipeline to Idle state
     pub fn cancel(&self) {
         if let Ok(mut inner) = self.inner.lock() {
+            if let Some(job) = &inner.recovery_job {
+                job.cancel();
+            }
             if !inner.state.can_cancel() {
                 log::debug!(
                     "Pipeline: Cancel requested but nothing to cancel (state: {:?})",
@@ -2276,6 +2390,10 @@ impl SharedPipeline {
             // Stop audio capture if recording
             if inner.state == PipelineState::Recording {
                 inner.audio_capture.stop_recording();
+                if let Err(error) = inner.audio_capture.discard_recovery() {
+                    inner.set_error(&error.to_string());
+                    return;
+                }
             }
 
             inner.reset_to_idle();
@@ -2288,6 +2406,9 @@ impl SharedPipeline {
     /// Use this to recover from stuck states. Cancels any in-progress operations.
     pub fn force_reset(&self) {
         if let Ok(mut inner) = self.inner.lock() {
+            if let Some(job) = &inner.recovery_job {
+                job.cancel();
+            }
             // Cancel any async tasks
             if let Some(token) = inner.cancel_token.take() {
                 token.cancel();

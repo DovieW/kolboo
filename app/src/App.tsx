@@ -43,6 +43,7 @@ import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
 import { MicStatusCard } from "./components/MicStatusCard";
+import { RecordingBar } from "./components/RecordingBar";
 import { SettingsShell } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
 import { TelemetryDisclosureModal } from "./components/settings/TelemetryDisclosureModal";
@@ -340,6 +341,8 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 				{/* <InstructionsCard /> */}
 				<MicStatusCard />
 				<HistoryFeed onJumpToLog={onJumpToLog} />
+				<RecordingBar />
+				<div aria-hidden="true" style={{ height: 320 }} />
 			</div>
 		</div>
 	);

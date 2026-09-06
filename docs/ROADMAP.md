@@ -10,6 +10,15 @@ Development uses focused subsystem checks by default. Full desktop and platform 
 
 ## Current priorities
 
+### Home and meeting recording
+
+Home recording controls, pause/resume, local recovery, and opt-in Linux computer
+audio are implemented in source. Meeting output stays in History instead of
+being pasted. See [behavior, privacy, and acceptance limits](Dev%20Docs/MEETING_RECORDING.md).
+Physical-device and multi-hour acceptance, Windows/macOS computer capture, and a
+single combined meeting document remain follow-ups; they are not beta-release
+claims.
+
 ### Reliability and Sentry
 
 - Capture actionable React, Tauri, and Rust failures across every desktop surface.

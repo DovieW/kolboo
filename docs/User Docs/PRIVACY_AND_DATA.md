@@ -23,6 +23,14 @@ Common categories of local data include:
     values until they are migrated forward
 - **History** (your transcription history)
 - **Recordings** (if you enable saving audio recordings)
+- **Home recorder recovery audio**: Home recordings save audio locally during
+  capture, independently of the ordinary saved-recording setting. On Linux,
+  enabling Computer audio also includes system output. Recovery audio is not
+  encrypted by Kolboo and stays until transcription succeeds or you discard it.
+  Stop/Recover sends audio to your selected provider; local providers stay local.
+  Completed transcription sections also have saved audio for History playback.
+  Cancel during capture discards that capture; cancel during transcription keeps
+  remaining audio for recovery. Delete all recordings includes recovery files.
 - **Usage/cost stats** (a local ledger of cost events)
 - **Logs**
   - the app includes request/response logging features intended for troubleshooting

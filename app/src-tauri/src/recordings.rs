@@ -176,33 +176,6 @@ impl RecordingStore {
         Ok(true)
     }
 
-    /// Returns total size (in bytes) of all files in the recordings directory.
-    ///
-    /// Best-effort: skips individual files it cannot stat.
-    pub fn total_size_bytes(&self) -> Result<u64, String> {
-        let mut total: u64 = 0;
-        let entries = self.fs.read_dir(&self.dir).map_err(|e| {
-            format!(
-                "Failed to read recordings dir {}: {}",
-                self.dir.display(),
-                e
-            )
-        })?;
-
-        for path in entries {
-            let meta = match self.fs.metadata(&path) {
-                Ok(meta) => meta,
-                Err(_) => continue,
-            };
-            if !meta.is_file() {
-                continue;
-            }
-            total = total.saturating_add(meta.len());
-        }
-
-        Ok(total)
-    }
-
     /// Returns basic stats about saved recordings.
     ///
     /// - `count`: number of `.wav` files in the recordings directory

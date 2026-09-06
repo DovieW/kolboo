@@ -141,6 +141,9 @@ impl AudioCaptureBackend for FailingStartAudioCapture {
 }
 
 impl AudioCaptureBackend for FakeAudioCapture {
+    fn set_paused(&mut self, _paused: bool) -> Result<(), AudioCaptureError> {
+        Ok(())
+    }
     fn shared_level_meter(&self) -> SharedAudioLevelMeter {
         self.level_meter.clone()
     }
@@ -504,6 +507,45 @@ fn ocr_session_survives_reset_to_idle() {
 
     assert_eq!(p.get_ocr_status(), "done");
     assert_eq!(p.ocr_session_id().as_deref(), Some("req-1"));
+}
+
+#[test]
+fn recording_output_mode_is_owned_by_the_session() {
+    let config = test_config_with_max_recording_bytes();
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    pipeline
+        .start_recording_with_output(true, None, false)
+        .unwrap();
+    pipeline.set_recording_paused(true).unwrap();
+    assert!(pipeline.is_recording_paused());
+    pipeline.set_recording_paused(false).unwrap();
+    assert!(!pipeline.is_recording_paused());
+    assert!(pipeline.is_history_only_recording());
+    assert!(pipeline.start_recording().is_err());
+    assert!(pipeline.is_history_only_recording());
+    pipeline.cancel();
+    pipeline.start_recording().unwrap();
+    assert!(!pipeline.is_history_only_recording());
+    assert!(pipeline.set_recording_paused(true).is_err());
+}
+
+#[test]
+fn recovery_owns_pipeline_between_chunks_and_cancels_without_new_recording() {
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_with_max_recording_bytes(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    let token = pipeline.begin_recovery().unwrap();
+    assert!(pipeline.is_recovering());
+    assert!(pipeline.begin_recovery().is_err());
+    assert!(pipeline.start_recording().is_err());
+    pipeline.cancel();
+    assert!(token.is_cancelled());
+    assert!(pipeline.start_recording().is_err());
+    pipeline.end_recovery();
+    pipeline.start_recording().unwrap();
+    assert!(pipeline.begin_recovery().is_err());
+    pipeline.cancel();
 }
 
 #[test]
