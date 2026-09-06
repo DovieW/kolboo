@@ -342,7 +342,7 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 				<MicStatusCard />
 				<HistoryFeed onJumpToLog={onJumpToLog} />
 				<RecordingBar />
-				<div aria-hidden="true" style={{ height: 320 }} />
+				<div aria-hidden="true" style={{ height: 80 }} />
 			</div>
 		</div>
 	);

@@ -1,14 +1,28 @@
 import {
+	ActionIcon,
 	Alert,
 	Button,
+	Divider,
 	Group,
+	Loader,
 	Paper,
+	Popover,
 	Stack,
 	Switch,
 	Text,
+	Tooltip,
 } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import {
+	CircleAlert,
+	Ellipsis,
+	Mic,
+	Pause,
+	Play,
+	Square,
+	X,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import { recordingControlsAPI } from "../lib/tauri/commands";
 
@@ -16,6 +30,7 @@ import { recordingControlsAPI } from "../lib/tauri/commands";
 export function RecordingBar() {
 	const client = useQueryClient();
 	const [computerAudio, setComputerAudio] = useState(false);
+	const [optionsOpen, setOptionsOpen] = useState(false);
 	const capability = useQuery({
 		queryKey: ["computer-audio-capability"],
 		queryFn: recordingControlsAPI.computerAudioAvailable,
@@ -89,109 +104,206 @@ export function RecordingBar() {
 		action.error ??
 		state.error;
 
+	const errorMessage = error ? formatErrorMessage(error) : null;
+	useEffect(() => {
+		if (errorMessage) setOptionsOpen(true);
+	}, [errorMessage]);
+	const savedCount = recovery.data?.length ?? 0;
+	const pending = action.isPending || recover.isPending;
+	const busy = !idle && !recording;
+	const optionsLabel = errorMessage
+		? "Recording options: error"
+		: savedCount
+			? `Recording options: ${savedCount} saved recordings`
+			: "Recording options";
+
 	return (
 		<Paper
 			withBorder
 			shadow="md"
-			radius="lg"
-			p="md"
+			radius="xl"
+			p={8}
+			role="region"
+			aria-label="Recorder"
 			style={{
 				position: "fixed",
 				bottom: 24,
 				right: 24,
 				zIndex: 100,
-				width: 380,
 				maxWidth: "calc(100vw - 112px)",
-				maxHeight: "60vh",
-				overflowY: "auto",
 			}}
 		>
-			<Stack gap="sm">
-				<Text fw={600}>
-					{recording
-						? "Recording audio"
-						: idle
-							? "Record a transcription"
-							: "Recording pipeline busy"}
-				</Text>
+			<Group gap={6} wrap="nowrap">
 				{recording ? (
-					<Text size="sm" aria-live="off">
-						{paused.data ? "Paused · " : ""}
-						{Math.floor((progress.data ?? 0) / 60)}:
-						{String(Math.floor((progress.data ?? 0) % 60)).padStart(2, "0")}
-					</Text>
-				) : null}
-				<Switch
-					label="Computer audio"
-					checked={computerAudio}
-					onChange={(event) => setComputerAudio(event.currentTarget.checked)}
-					disabled={!idle || !capability.data || action.isPending}
-					description={
-						capability.data
-							? "Include system output and the default microphone"
-							: "Computer audio is unavailable on this installation"
-					}
-				/>
-				<Text size="xs" c="dimmed">
-					Audio is saved locally for recovery. Stop sends it to your selected
-					transcription provider in 30-second sections.
-				</Text>
-				{error ? (
-					<Alert color="red" role="alert">
-						{formatErrorMessage(error)}
-					</Alert>
-				) : null}
-				<Group justify="flex-end">
-					{recording && canPause.data ? (
-						<Button
-							variant="default"
-							disabled={pause.isPending || action.isPending}
-							onClick={() => pause.mutate(!paused.data)}
+					<>
+						<Text
+							size="sm"
+							aria-label={
+								paused.data ? "Recording paused" : "Recording duration"
+							}
+							style={{
+								minWidth: 52,
+								textAlign: "center",
+								fontVariantNumeric: "tabular-nums",
+							}}
 						>
-							{paused.data ? "Resume" : "Pause"}
-						</Button>
-					) : null}
-					{!idle && state.data ? (
+							{Math.floor((progress.data ?? 0) / 60)}:
+							{String(Math.floor((progress.data ?? 0) % 60)).padStart(2, "0")}
+						</Text>
+						{canPause.data ? (
+							<Tooltip label={paused.data ? "Resume" : "Pause"}>
+								<ActionIcon
+									size={34}
+									variant="subtle"
+									aria-label={paused.data ? "Resume" : "Pause"}
+									disabled={pause.isPending || pending}
+									onClick={() => pause.mutate(!paused.data)}
+								>
+									{paused.data ? <Play size={17} /> : <Pause size={17} />}
+								</ActionIcon>
+							</Tooltip>
+						) : null}
+						<Tooltip label="Stop & transcribe">
+							<ActionIcon
+								size={34}
+								radius="xl"
+								variant="filled"
+								aria-label="Stop & transcribe"
+								disabled={pending}
+								onClick={() => action.mutate("stop")}
+							>
+								<Square size={15} fill="currentColor" />
+							</ActionIcon>
+						</Tooltip>
+					</>
+				) : busy || pending ? (
+					<Group gap={8} wrap="nowrap" px={6}>
+						<Loader size={16} />
+						<Text size="sm" role="status">
+							{state.data ? "Processing" : "Connecting"}
+						</Text>
+					</Group>
+				) : (
+					<Tooltip label="Audio is saved locally for recovery. Stop transcribes with your selected provider.">
 						<Button
+							size="compact-md"
+							h={34}
+							radius="xl"
+							leftSection={<Mic size={16} />}
+							disabled={state.isError || !idle || discard.isPending}
+							onClick={() => action.mutate("start")}
+						>
+							Record
+						</Button>
+					</Tooltip>
+				)}
+				{(!idle && state.data) || pending ? (
+					<Tooltip label="Cancel">
+						<ActionIcon
+							size={34}
 							variant="subtle"
+							color="gray"
+							aria-label="Cancel"
 							disabled={cancel.isPending}
 							onClick={() => cancel.mutate()}
 						>
-							Cancel
-						</Button>
-					) : null}
-					<Button
-						disabled={
-							state.isError || (!idle && !recording) || action.isPending
-						}
-						loading={action.isPending}
-						onClick={() => action.mutate(recording ? "stop" : "start")}
-					>
-						{recording ? "Stop & transcribe" : "Record"}
-					</Button>
-				</Group>
-				{recovery.data?.map((id, index) => (
-					<Group key={id}>
-						<Text size="xs">Saved audio {index + 1}</Text>
-						<Button
-							size="xs"
-							disabled={!idle || recover.isPending || discard.isPending}
-							onClick={() => recover.mutate(id)}
-						>
-							Recover & transcribe
-						</Button>
-						<Button
-							size="xs"
-							color="red"
+							<X size={17} />
+						</ActionIcon>
+					</Tooltip>
+				) : null}
+				<Popover
+					opened={optionsOpen}
+					onChange={setOptionsOpen}
+					position="top-end"
+					withArrow
+					shadow="md"
+					width={300}
+					withinPortal
+				>
+					<Popover.Target>
+						<ActionIcon
+							size={34}
 							variant="subtle"
-							disabled={!idle || recover.isPending || discard.isPending}
-							onClick={() => discard.mutate(id)}
+							radius="xl"
+							color={errorMessage ? "red" : savedCount ? "orange" : "gray"}
+							aria-label={optionsLabel}
+							onClick={() => setOptionsOpen((open) => !open)}
 						>
-							Discard audio
-						</Button>
-					</Group>
-				))}
-			</Stack>
+							{errorMessage ? (
+								<CircleAlert size={19} />
+							) : (
+								<Ellipsis size={19} />
+							)}
+						</ActionIcon>
+					</Popover.Target>
+					<Popover.Dropdown
+						style={{
+							maxWidth: "calc(100vw - 32px)",
+							maxHeight: "60vh",
+							overflowY: "auto",
+						}}
+					>
+						<Stack gap="sm">
+							<Text fw={600} size="sm">
+								Recording options
+							</Text>
+							{errorMessage ? (
+								<Alert color="red" role="alert">
+									{errorMessage}
+								</Alert>
+							) : null}
+							<Switch
+								label="Computer audio"
+								checked={computerAudio}
+								onChange={(event) =>
+									setComputerAudio(event.currentTarget.checked)
+								}
+								disabled={!idle || !capability.data || pending}
+								description={
+									capability.data
+										? "Include system output and the default microphone"
+										: "Computer audio is unavailable on this installation"
+								}
+							/>
+							<Text size="xs" c="dimmed">
+								Audio is saved locally for recovery. Stop transcribes it in
+								30-second sections with your selected provider.
+							</Text>
+							{savedCount ? (
+								<>
+									<Divider />
+									<Text size="sm" fw={600}>
+										Saved recordings ({savedCount})
+									</Text>
+								</>
+							) : null}
+							{recovery.data?.map((id, index) => (
+								<Stack key={id} gap={4}>
+									<Text size="xs">Saved audio {index + 1}</Text>
+									<Group gap={6}>
+										<Button
+											size="compact-xs"
+											disabled={!idle || pending || discard.isPending}
+											onClick={() => recover.mutate(id)}
+										>
+											Recover & transcribe
+										</Button>
+										<Button
+											size="compact-xs"
+											color="red"
+											variant="subtle"
+											disabled={!idle || pending || discard.isPending}
+											onClick={() => discard.mutate(id)}
+										>
+											Discard audio
+										</Button>
+									</Group>
+								</Stack>
+							))}
+						</Stack>
+					</Popover.Dropdown>
+				</Popover>
+			</Group>
 		</Paper>
 	);
 }

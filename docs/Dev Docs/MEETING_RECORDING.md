@@ -2,8 +2,10 @@
 
 ## Behavior
 
-- Home has a floating recorder with Record, Pause/Resume, Stop & transcribe,
-  Cancel, elapsed captured time, and an opt-in Computer audio switch.
+- Home has a compact single-row floating recorder with Record, Pause/Resume,
+  Stop & transcribe, Cancel, and elapsed captured time. Its options popover holds
+  Computer audio, recovery actions, and explanations. Errors open that popover
+  without expanding the bar; saved recordings highlight the options button.
 - Home recordings save transcripts to History, never type or paste into another
   application. That output mode belongs to the Rust session and also applies
   when F3 stops a Home recording. Ordinary F3 dictation is unchanged.

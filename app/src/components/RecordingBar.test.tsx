@@ -21,13 +21,14 @@ vi.mock("../lib/tauri/commands", () => ({
 	},
 }));
 
-function render(state?: string, paused = false) {
+function render(state?: string, paused = false, saved: string[] = []) {
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	if (state) client.setQueryData(["home-recording-state"], state);
 	client.setQueryData(["home-recording-paused"], paused);
 	client.setQueryData(["recording-can-pause"], state === "recording");
+	client.setQueryData(["recording-recovery"], saved);
 	return renderToStaticMarkup(
 		<QueryClientProvider client={client}>
 			<MantineProvider>
@@ -45,28 +46,29 @@ describe("Home recording controls", () => {
 	});
 	it("offers recording from the idle backend state", () => {
 		const html = render("idle");
-		expect(html).toContain("Record a transcription");
+		expect(html).toContain(">Record<");
+		expect(html).toContain('aria-label="Recording options"');
 		expect(html).not.toContain("Stop &amp; transcribe");
 	});
 	it("shows Stop for a recording started by another window or shortcut", () => {
 		const html = render("recording");
-		expect(html).toContain("Recording audio");
+		expect(html).toContain("Recording duration");
 		expect(html).toContain("Stop &amp; transcribe");
 		expect(html).toContain("Cancel");
 	});
 	it("keeps cancellation available during transcription", () => {
 		const html = render("transcribing");
 		expect(html).toContain("Cancel");
-		expect(html).toContain("Recording pipeline busy");
+		expect(html).toContain("Processing");
 	});
-	it("does not advertise computer capture or recovery as available", () => {
-		const html = render("idle");
+	it("keeps options and recovery lists out of the compact closed bar", () => {
+		const html = render("idle", false, ["one", "two", "three"]);
 		expect(html).toContain(
-			"Computer audio is unavailable on this installation",
+			'aria-label="Recording options: 3 saved recordings"',
 		);
-		expect(html).toContain("saved locally for recovery");
-		expect(html).toMatch(
-			/type="checkbox"[^>]*disabled|disabled[^>]*type="checkbox"/,
-		);
+		expect(html).not.toContain("Saved audio 1");
+		expect(html).not.toContain("Computer audio");
+		expect(html).not.toContain("30-second sections");
+		expect(html.match(/<button\b/g)).toHaveLength(2);
 	});
 });
