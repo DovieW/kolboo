@@ -94,8 +94,9 @@ export function AccountSummaryCard(props: {
 				{reauthRequired ? (
 					<div className="account-callout account-callout-warning">
 						<Text size="sm">
-							Your managed session expired or became invalid. Re-authenticate to
-							restore managed access.
+							Managed access could not be verified. Try Refresh access first.
+							Sign in again only if your session is no longer valid. Local and
+							BYOK features remain available.
 						</Text>
 					</div>
 				) : null}

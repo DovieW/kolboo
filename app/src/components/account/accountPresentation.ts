@@ -70,7 +70,7 @@ export function getAccountModeDescription(params: {
 		return "Sign in to save a Community/BYOK session now. Upgrade later to Personal/Pro or Managed Business for settings sync and managed inference.";
 	}
 	if (params.reauthRequired) {
-		return "Your managed session needs attention. Re-authenticate to restore managed access.";
+		return "Your managed access needs attention. Try Refresh access to check your current entitlement.";
 	}
 	if (params.modeLabel === "Managed Business") {
 		return "Managed access is active with organization policy and usage controls applied.";

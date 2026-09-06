@@ -125,7 +125,7 @@ describe("accountPresentation", () => {
 				signedIn: true,
 				reauthRequired: true,
 			}),
-		).toContain("Re-authenticate");
+		).toContain("Try Refresh access");
 	});
 
 	it("uses caution color when reauthentication is required", () => {
