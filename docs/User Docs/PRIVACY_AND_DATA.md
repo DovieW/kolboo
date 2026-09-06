@@ -28,9 +28,11 @@ Common categories of local data include:
   enabling Computer audio also includes system output. Recovery audio is not
   encrypted by Kolboo and stays until transcription succeeds or you discard it.
   Stop/Recover sends audio to your selected provider; local providers stay local.
-  Completed transcription sections also have saved audio for History playback.
+  A final transcription also has saved audio for History playback; capture does
+  not send periodic transcription requests. If a provider rejects a long recording,
+  the original audio remains saved for recovery.
   Cancel during capture discards that capture; cancel during transcription keeps
-  remaining audio for recovery. Delete all recordings includes recovery files.
+  the full audio for recovery. Delete all recordings includes recovery files.
 - **Usage/cost stats** (a local ledger of cost events)
 - **Logs**
   - the app includes request/response logging features intended for troubleshooting

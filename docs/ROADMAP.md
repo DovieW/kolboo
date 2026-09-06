@@ -15,8 +15,9 @@ Development uses focused subsystem checks by default. Full desktop and platform 
 Home recording controls, pause/resume, local recovery, and opt-in Linux computer
 audio are implemented in source. Meeting output stays in History instead of
 being pasted. See [behavior, privacy, and acceptance limits](Dev%20Docs/MEETING_RECORDING.md).
-Physical-device and multi-hour acceptance, Windows/macOS computer capture, and a
-single combined meeting document remain follow-ups; they are not beta-release
+Stop produces one final transcript rather than separate timed sections.
+Physical-device and multi-hour provider acceptance, Windows/macOS computer capture,
+and richer meeting documents remain follow-ups; they are not beta-release
 claims.
 
 ### Reliability and Sentry

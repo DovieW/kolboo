@@ -177,24 +177,26 @@ export function RecordingBar() {
 						</Tooltip>
 					</>
 				) : busy || pending ? (
-					<Group gap={8} wrap="nowrap" px={6}>
-						<Loader size={16} />
-						<Text size="sm" role="status">
-							{state.data ? "Processing" : "Connecting"}
-						</Text>
-					</Group>
+					<Tooltip label={state.data ? "Processing" : "Connecting"}>
+						<span
+							role="status"
+							aria-label={state.data ? "Processing" : "Connecting"}
+						>
+							<Loader size={16} mx={9} />
+						</span>
+					</Tooltip>
 				) : (
-					<Tooltip label="Audio is saved locally for recovery. Stop transcribes with your selected provider.">
-						<Button
-							size="compact-md"
-							h={34}
+					<Tooltip label="Record · saved locally until you stop and transcribe">
+						<ActionIcon
+							size={34}
+							variant="filled"
 							radius="xl"
-							leftSection={<Mic size={16} />}
+							aria-label="Record"
 							disabled={state.isError || !idle || discard.isPending}
 							onClick={() => action.mutate("start")}
 						>
-							Record
-						</Button>
+							<Mic size={17} />
+						</ActionIcon>
 					</Tooltip>
 				)}
 				{(!idle && state.data) || pending ? (
@@ -217,7 +219,7 @@ export function RecordingBar() {
 					position="top-end"
 					withArrow
 					shadow="md"
-					width={300}
+					width={260}
 					withinPortal
 				>
 					<Popover.Target>
@@ -244,9 +246,6 @@ export function RecordingBar() {
 						}}
 					>
 						<Stack gap="sm">
-							<Text fw={600} size="sm">
-								Recording options
-							</Text>
 							{errorMessage ? (
 								<Alert color="red" role="alert">
 									{errorMessage}
@@ -260,15 +259,9 @@ export function RecordingBar() {
 								}
 								disabled={!idle || !capability.data || pending}
 								description={
-									capability.data
-										? "Include system output and the default microphone"
-										: "Computer audio is unavailable on this installation"
+									capability.data ? undefined : "Unavailable on this device"
 								}
 							/>
-							<Text size="xs" c="dimmed">
-								Audio is saved locally for recovery. Stop transcribes it in
-								30-second sections with your selected provider.
-							</Text>
 							{savedCount ? (
 								<>
 									<Divider />
@@ -286,7 +279,7 @@ export function RecordingBar() {
 											disabled={!idle || pending || discard.isPending}
 											onClick={() => recover.mutate(id)}
 										>
-											Recover & transcribe
+											Transcribe
 										</Button>
 										<Button
 											size="compact-xs"
@@ -295,7 +288,7 @@ export function RecordingBar() {
 											disabled={!idle || pending || discard.isPending}
 											onClick={() => discard.mutate(id)}
 										>
-											Discard audio
+											Discard
 										</Button>
 									</Group>
 								</Stack>

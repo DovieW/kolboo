@@ -311,68 +311,54 @@ async fn recover_recording_inner(
     }
     let _guard = RecoveryGuard(pipeline.clone());
     let path = recovery_file(&app, &id)?;
-    let (rate, channels, _) = crate::audio_capture::journal::read_chunk(&path, 0, 1)
-        .map_err(|e| CommandError::from(e.to_string()))?;
-    let mut start = crate::audio_capture::journal::progress(&path)
-        .map_err(|e| CommandError::from(e.to_string()))?;
-    let total_frames = std::fs::metadata(&path)
-        .map_err(|e| CommandError::from(e.to_string()))?
-        .len()
-        .saturating_sub(14)
-        / (channels as u64 * 4);
-    if start > total_frames {
-        return Err(CommandError::from(
-            "Invalid recovery progress; audio has been retained".to_string(),
-        ));
-    }
-    loop {
-        if cancel.is_cancelled() {
-            return Err(CommandError::from(
-                "Transcription cancelled. Your audio is saved for recovery.".to_string(),
-            ));
-        }
-        let (rate, channels, samples) =
-            crate::audio_capture::journal::read_chunk(&path, start, rate * 30)
-                .map_err(|e| CommandError::from(e.to_string()))?;
-        if samples.is_empty() {
-            break;
-        }
-        let frames = samples.len() as u64 / channels as u64;
-        let mut buffer = crate::audio_capture::AudioBuffer::new(rate, channels, 30.0);
-        buffer.append(&samples);
-        let wav = buffer
-            .to_wav_bytes()
-            .map_err(|e| CommandError::from(e.to_string()))?;
-        let chunk_id = format!("{id}-{start}");
-        // History commits precede progress. If a crash falls between them, reuse
-        // the successful history row rather than billing/transcribing twice.
-        let completed = app
+    let recording_id = format!("{id}-final");
+    // A successful History commit is the completion marker. If the process
+    // crashes before journal deletion, recovering must not submit it again.
+    let completed = || -> Result<bool, CommandError> {
+        Ok(app
             .state::<HistoryStorage>()
             .get_all(None)
             .map_err(CommandError::from)?
             .iter()
             .any(|entry| {
-                entry.recording_request_id.as_deref() == Some(chunk_id.as_str())
+                entry.recording_request_id.as_deref() == Some(recording_id.as_str())
                     && entry.status == crate::history::HistoryStatus::Success
-            });
-        if completed {
-            start += frames;
-            crate::audio_capture::journal::checkpoint(&path, start)
-                .map_err(|e| CommandError::from(e.to_string()))?;
-            continue;
-        }
-        app.state::<RecordingStore>()
-            .save_wav(&chunk_id, &wav)
-            .map_err(CommandError::from)?;
-        retry_transcription_inner(app.clone(), pipeline.clone(), chunk_id, true).await?;
+            }))
+    };
+    if !completed()? {
+        let export_path = path.clone();
+        let export_cancel = cancel.clone();
+        let export_app = app.clone();
+        let export_id = recording_id.clone();
+        let max_bytes = pipeline.config().max_recording_bytes;
+        // Read/encode bounded blocks off the async runtime, but submit ONE WAV
+        // only after capture has ended. Never replace or truncate the journal.
+        tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let wav = crate::audio_capture::journal::final_wav(&export_path, max_bytes, || {
+                export_cancel.is_cancelled()
+            })
+            .map_err(|e| e.to_string())?;
+            export_app
+                .state::<RecordingStore>()
+                .save_wav(&export_id, &wav)
+        })
+        .await
+        .map_err(|_| {
+            CommandError::from("Audio preparation failed; your audio is saved".to_string())
+        })?
+        .map_err(CommandError::from)?;
         if cancel.is_cancelled() {
             return Err(CommandError::from(
                 "Transcription cancelled. Your audio is saved for recovery.".to_string(),
             ));
         }
-        start += frames;
-        crate::audio_capture::journal::checkpoint(&path, start)
-            .map_err(|e| CommandError::from(e.to_string()))?;
+        retry_transcription_inner(app.clone(), pipeline.clone(), recording_id.clone(), true)
+            .await?;
+        if !completed()? {
+            return Err(CommandError::from(
+                "The final transcript could not be saved. Your audio is retained.".to_string(),
+            ));
+        }
     }
     std::fs::remove_file(&path).map_err(|e| CommandError::from(e.to_string()))?;
     let _ = std::fs::remove_file(path.with_extension("progress"));

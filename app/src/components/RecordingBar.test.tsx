@@ -46,7 +46,8 @@ describe("Home recording controls", () => {
 	});
 	it("offers recording from the idle backend state", () => {
 		const html = render("idle");
-		expect(html).toContain(">Record<");
+		expect(html).toContain('aria-label="Record"');
+		expect(html).not.toContain(">Record<");
 		expect(html).toContain('aria-label="Recording options"');
 		expect(html).not.toContain("Stop &amp; transcribe");
 	});

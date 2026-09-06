@@ -2,9 +2,9 @@
 
 ## Behavior
 
-- Home has a compact single-row floating recorder with Record, Pause/Resume,
+- Home has a compact single-row floating recorder with icon-only Record, Pause/Resume,
   Stop & transcribe, Cancel, and elapsed captured time. Its options popover holds
-  Computer audio, recovery actions, and explanations. Errors open that popover
+  Computer audio and recovery actions. Tooltips explain icons; errors open that popover
   without expanding the bar; saved recordings highlight the options button.
 - Home recordings save transcripts to History, never type or paste into another
   application. That output mode belongs to the Rust session and also applies
@@ -12,11 +12,21 @@
 - Pausing keeps capture devices open but excludes paused samples. The elapsed
   counter measures retained audio, not wall-clock time. Ordinary F3 sessions do
   not offer meeting pause controls.
-- Stop transcribes sequential 30-second sections through the selected provider
-  and current rewrite settings. Each section has its own History/playback entry.
-  This is not yet a single meeting document, speaker diarization, or live captions.
+- Stop submits one final recording through the selected provider and current
+  rewrite settings, producing one History/playback entry. Nothing is transcribed
+  while Home capture is running. Internal encoding blocks are not transcription
+  requests. Speaker diarization and live captions are not implemented.
+- Final audio is normalized to mono 16 kHz. Providers still impose their own
+  file-size, duration, and timeout limits: a rejected long recording remains
+  saved for another attempt. Automatic provider-limit splitting is not performed.
+  The current app's 50 MiB transcription ceiling permits about 27 minutes of
+  mono 16-kHz WAV; longer recordings are safely retained, not split or discarded.
+  Final preparation checks that ceiling before encoding and uses bounded raw
+  blocks, but the current provider API still holds the final WAV and pipeline
+  copies in memory. If the ceiling is raised, four hours needs about 440 MiB per
+  copy. Multi-hour provider acceptance is not yet verified.
 - Cancel during capture discards that capture. Cancel during transcription keeps
-  remaining recovery audio; completed sections remain in History.
+  the full recovery audio.
 
 ## Computer audio capabilities
 
@@ -40,7 +50,8 @@ and tested. No cross-platform computer-audio release claim is made.
 Home recordings deliberately write raw audio into `meeting-recovery` under the
 application data directory. This is additional local persistence even if normal
 completed-recording retention is disabled; the recorder explains it before use.
-No provider request is made until Stop & transcribe or Recover & transcribe.
+No provider request is made until Stop & transcribe or the saved recording's
+Transcribe action.
 
 - Append-only audio is synced approximately once per second and at normal stop.
   An abrupt process crash can lose the unsynced tail; incomplete final frames are
@@ -50,15 +61,17 @@ No provider request is made until Stop & transcribe or Recover & transcribe.
 - A recording is limited to four hours or 2 GiB of raw audio, whichever comes
   first. Storage/capture failure stops the session and exposes retained audio for
   recovery. Recovery files are not automatically purged on an age timer.
-- Home lists interrupted recordings. Recover resumes after durable progress;
-  already successful History sections cover the history/progress crash window.
+- Home lists interrupted recordings. Transcribe processes the complete recording;
+  a successful History row prevents resubmission after a crash before cleanup.
   Cancellation, provider errors, and history persistence errors retain the source.
-- Successful completion removes the raw journal and cursor. Discard removes the
-  selected journal. Delete all recordings includes recovery journals and rejects
-  deletion while capture/transcription is active. Completed section WAVs use the
+- Legacy section progress is ignored when preparing a full final transcription;
+  existing section History rows are preserved, not silently deleted.
+- Successful completion removes the raw journal and any legacy cursor. Discard
+  removes the selected journal. Delete all recordings includes recovery journals and rejects
+  deletion while capture/transcription is active. Completed recording WAVs use the
   existing recording store and its controls.
 - Recovery is exclusive with new recording and other retry commands. The
-  recovery cancellation token persists across gaps between sections.
+  recovery cancellation token also covers final audio preparation.
 
 ## Entitlement status correction
 
@@ -71,7 +84,7 @@ operation remains available without managed access.
 
 Deterministic tests cover session output ownership, pause state, recovery job
 exclusivity/cancellation, journal data beyond the memory ring, explicit discard,
-partial crash frames/cursors, progress resumption, duration limits, and entitlement
+partial crash frames, complete final WAV preparation, cancellation, duration limits, and entitlement
 status. Frontend tests cover the controls and invoke contracts.
 
 The Linux FFmpeg adapter was exercised against an isolated PulseAudio null sink,

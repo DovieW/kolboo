@@ -89,38 +89,76 @@ impl Journal {
     }
 }
 
-/// Append-only progress is synced after each persisted transcription. A partial
-/// trailing cursor left by a crash is ignored, just like a partial audio frame.
-pub fn checkpoint(path: &Path, frame: u64) -> io::Result<()> {
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+/// Prepare one final, mono 16-kHz WAV without loading the multi-gigabyte raw
+/// journal into memory. Blocks here are encoding only, never provider requests.
+/// The normalized result is bounded by the four-hour capture limit (~440 MiB).
+/// Failure or cancellation leaves the source untouched.
+pub fn final_wav(
+    path: &Path,
+    max_bytes: usize,
+    cancelled: impl Fn() -> bool,
+) -> io::Result<Vec<u8>> {
+    let (rate, channels, _) = read_chunk(path, 0, 1)?;
+    let bytes = std::fs::metadata(path)?.len().saturating_sub(14);
+    let total_frames = bytes / (channels as u64 * 4);
+    if bytes > MAX_BYTES || total_frames > MAX_SECONDS * rate as u64 {
+        return Err(io::Error::other(
+            "Recording exceeds the supported size; audio is retained",
+        ));
     }
-    let mut file = options.open(path.with_extension("progress"))?;
-    let length = file.metadata()?.len();
-    file.set_len(length / 8 * 8)?;
-    file.write_all(&frame.to_le_bytes())?;
-    file.sync_all()
-}
-
-pub fn progress(path: &Path) -> io::Result<u64> {
-    use std::io::{Seek, SeekFrom};
-    let mut file = match File::open(path.with_extension("progress")) {
-        Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
-        Err(e) => return Err(e),
-    };
-    let length = file.metadata()?.len() / 8 * 8;
-    if length == 0 {
-        return Ok(0);
+    if total_frames == 0 {
+        return Err(io::Error::other("No recorded audio"));
     }
-    file.seek(SeekFrom::Start(length - 8))?;
-    let mut bytes = [0; 8];
-    file.read_exact(&mut bytes)?;
-    Ok(u64::from_le_bytes(bytes))
+    let estimated_bytes = (total_frames * 16000).div_ceil(rate as u64) * 2 + 44;
+    if max_bytes > 0 && estimated_bytes > max_bytes as u64 {
+        return Err(io::Error::other(
+            "This recording exceeds the current transcription size limit. Your full audio is saved.",
+        ));
+    }
+    let mut output = std::io::Cursor::new(Vec::new());
+    let mut writer = hound::WavWriter::new(
+        &mut output,
+        hound::WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        },
+    )
+    .map_err(io::Error::other)?;
+    let mut start = 0;
+    while start < total_frames {
+        if cancelled() {
+            return Err(io::Error::other(
+                "Transcription cancelled. Your audio is saved.",
+            ));
+        }
+        let (_, _, samples) = read_chunk(path, start, rate * 60)?;
+        if samples.is_empty() {
+            return Err(io::Error::other(
+                "Audio preparation incomplete; source is retained",
+            ));
+        }
+        start += samples.len() as u64 / channels as u64;
+        let mut buffer = super::AudioBuffer::new(rate, channels, 60.0);
+        buffer.append(&samples);
+        let (wav, _) = buffer
+            .to_wav_bytes_with_config(super::AudioEncodeConfig {
+                resample_to_16khz: true,
+                highpass_enabled: false,
+                ..Default::default()
+            })
+            .map_err(io::Error::other)?;
+        let mut reader =
+            hound::WavReader::new(std::io::Cursor::new(wav)).map_err(io::Error::other)?;
+        for sample in reader.samples::<i16>() {
+            writer
+                .write_sample(sample.map_err(io::Error::other)?)
+                .map_err(io::Error::other)?;
+        }
+    }
+    writer.finalize().map_err(io::Error::other)?;
+    Ok(output.into_inner())
 }
 
 pub fn read_chunk(path: &Path, start_frame: u64, frames: u32) -> io::Result<(u32, u16, Vec<f32>)> {
@@ -160,21 +198,27 @@ pub fn read_chunk(path: &Path, start_frame: u64, frames: u32) -> io::Result<(u32
 mod tests {
     use super::*;
     #[test]
-    fn progress_survives_partial_checkpoint_and_resumes() {
-        let path =
-            std::env::temp_dir().join(format!("kolboo-progress-{}.pcm", uuid::Uuid::new_v4()));
-        assert_eq!(progress(&path).unwrap(), 0);
-        checkpoint(&path, 480_000).unwrap();
+    fn final_transcription_contains_the_entire_recording_and_retains_source() {
+        let path = std::env::temp_dir().join(format!("kolboo-final-{}.pcm", uuid::Uuid::new_v4()));
+        let mut journal = Journal::create(&path, 16000, 1).unwrap();
+        journal.append(&vec![0.25; 16000 * 61], 16000, 1).unwrap();
+        journal.finish().unwrap();
+        drop(journal);
         OpenOptions::new()
             .append(true)
-            .open(path.with_extension("progress"))
+            .open(&path)
             .unwrap()
             .write_all(&[1, 2])
             .unwrap();
-        assert_eq!(progress(&path).unwrap(), 480_000);
-        checkpoint(&path, 960_000).unwrap();
-        assert_eq!(progress(&path).unwrap(), 960_000);
-        std::fs::remove_file(path.with_extension("progress")).unwrap();
+        let source_length = std::fs::metadata(&path).unwrap().len();
+        let wav = final_wav(&path, 0, || false).unwrap();
+        let mut reader = hound::WavReader::new(std::io::Cursor::new(wav)).unwrap();
+        assert_eq!(reader.duration(), 16000 * 61);
+        assert!(reader.samples::<i16>().all(|sample| sample.unwrap() > 8000));
+        assert!(final_wav(&path, 0, || true).is_err());
+        assert!(final_wav(&path, 1024, || false).is_err());
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), source_length);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
