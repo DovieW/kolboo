@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { RecordingPreferences } from "../lib/tauri/types";
 import { RecordingBar } from "./RecordingBar";
 
 const mock = vi.hoisted(() => ({
@@ -30,7 +31,41 @@ const mock = vi.hoisted(() => ({
 		cancel: vi.fn(),
 	},
 }));
-vi.mock("./MeetingModelDialog", () => ({ MeetingModelDialog: () => null }));
+vi.mock("./MeetingModelDialog", () => ({
+	MeetingModelDialog: ({
+		preferences,
+		onSave,
+		onClose,
+		error,
+	}: {
+		preferences: RecordingPreferences;
+		onSave: (value: RecordingPreferences) => void;
+		onClose: () => void;
+		error?: string | null;
+	}) => (
+		<div role="dialog" aria-label="Meeting model">
+			{error && <p>{error}</p>}
+			<button
+				type="button"
+				onClick={() =>
+					onSave({
+						...preferences,
+						meeting_model: {
+							provider: "openai",
+							model: "speaker-model",
+							use_managed: false,
+						},
+					})
+				}
+			>
+				Save meeting model
+			</button>
+			<button type="button" onClick={onClose}>
+				Close meeting model
+			</button>
+		</div>
+	),
+}));
 vi.mock("../lib/tauri/commands", () => ({ recordingControlsAPI: mock.api }));
 vi.mock("../lib/tauri/events", () => ({ listenTyped: mock.listen }));
 let client: QueryClient;
@@ -136,6 +171,70 @@ it("refreshes saved recordings immediately after Escape without claiming success
 	expect(document.querySelector('[role="dialog"]')).toBeNull();
 	expect(document.body.textContent).not.toContain("Saved successfully");
 });
+
+it("does not overwrite saved mode/model while recording preferences are still loading", async () => {
+	mock.api.getPreferences.mockImplementationOnce(() => new Promise(() => {}));
+	await render();
+	const record = host.querySelector(
+		'button[aria-label="Record"]',
+	) as HTMLButtonElement;
+	expect(record.disabled).toBe(true);
+	await act(async () =>
+		(
+			host.querySelector(
+				'button[aria-label^="Recording options"]',
+			) as HTMLButtonElement
+		).click(),
+	);
+	const modes = [
+		...document.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+	];
+	expect(modes).toHaveLength(2);
+	expect(modes.every((mode) => mode.disabled)).toBe(true);
+	await act(async () => {
+		record.click();
+		modes[1]?.click();
+	});
+	expect(mock.api.start).not.toHaveBeenCalled();
+	expect(mock.api.setPreferences).not.toHaveBeenCalled();
+});
+
+it("blocks recording after a preference failure and offers a retry that restores the saved mode", async () => {
+	mock.api.getPreferences.mockRejectedValueOnce(
+		new Error("Recording preferences unavailable"),
+	);
+	await render();
+	expect(
+		(host.querySelector('button[aria-label="Record"]') as HTMLButtonElement)
+			.disabled,
+	).toBe(true);
+	expect(document.body.textContent).toContain(
+		"Recording preferences unavailable",
+	);
+	mock.api.getPreferences.mockResolvedValue({
+		mode: "meeting",
+		meeting_model: {
+			provider: "openai",
+			model: "speaker-model",
+			use_managed: false,
+		},
+	});
+	await act(async () => button("Retry recording preferences").click());
+	await flush();
+	expect(
+		(host.querySelector('button[aria-label="Record"]') as HTMLButtonElement)
+			.disabled,
+	).toBe(false);
+	expect(client.getQueryData(["recording-preferences"])).toEqual({
+		mode: "meeting",
+		meeting_model: {
+			provider: "openai",
+			model: "speaker-model",
+			use_managed: false,
+		},
+	});
+	expect(mock.api.setPreferences).not.toHaveBeenCalled();
+});
 it("keeps a save-for-later failure visible without claiming that audio was retained", async () => {
 	mock.state = "recording";
 	mock.historyOnly = true;
@@ -156,6 +255,79 @@ it("keeps a save-for-later failure visible without claiming that audio was retai
 	expect(document.body.textContent).not.toContain(
 		"Audio is saved locally until",
 	);
+});
+
+it("keeps a model-save failure in its dialog without opening Saved recordings on top", async () => {
+	mock.api.getPreferences.mockResolvedValue({
+		mode: "meeting",
+		meeting_model: null,
+	});
+	mock.api.setPreferences.mockRejectedValueOnce(
+		new Error("Local settings could not be saved"),
+	);
+	await render();
+	await act(async () =>
+		(
+			host.querySelector(
+				'button[aria-label^="Recording options"]',
+			) as HTMLButtonElement
+		).click(),
+	);
+	await act(async () => button("Meeting model").click());
+	await act(async () => button("Save meeting model").click());
+	await flush();
+	expect(document.body.textContent).toContain(
+		"Local settings could not be saved",
+	);
+	expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+	expect(
+		document.querySelector('[role="dialog"]')?.getAttribute("aria-label"),
+	).toBe("Meeting model");
+	await act(async () => button("Close meeting model").click());
+	await flush();
+	expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("does not reset a model save in flight or allow recording before it finishes", async () => {
+	mock.api.getPreferences.mockResolvedValue({
+		mode: "meeting",
+		meeting_model: null,
+	});
+	let finish: () => void = () => {};
+	mock.api.setPreferences.mockImplementationOnce(
+		() =>
+			new Promise<void>((resolve) => {
+				finish = resolve;
+			}),
+	);
+	await render();
+	await act(async () =>
+		(
+			host.querySelector(
+				'button[aria-label^="Recording options"]',
+			) as HTMLButtonElement
+		).click(),
+	);
+	await act(async () => button("Meeting model").click());
+	await act(async () => button("Save meeting model").click());
+	await flush();
+	await act(async () => button("Close meeting model").click());
+	expect(
+		document.querySelector('[role="dialog"][aria-label="Meeting model"]'),
+	).not.toBeNull();
+	expect(
+		(host.querySelector('button[aria-label="Record"]') as HTMLButtonElement)
+			.disabled,
+	).toBe(true);
+	await act(async () => button("Save meeting model").click());
+	expect(mock.api.setPreferences).toHaveBeenCalledOnce();
+	await act(async () => finish());
+	await flush();
+	expect(document.querySelector('[role="dialog"]')).toBeNull();
+	expect(
+		(host.querySelector('button[aria-label="Record"]') as HTMLButtonElement)
+			.disabled,
+	).toBe(false);
 });
 
 it("disables Stop while a save-for-later request is pending", async () => {

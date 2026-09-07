@@ -218,6 +218,32 @@ describe("sentry telemetry", () => {
 		);
 	});
 
+	it("accepts a cloud-free desktop config without retrying or enabling telemetry", async () => {
+		runtimeConfigState.value = {
+			app_version: "0.2.5-beta.1",
+			api_base_url: null,
+			managed_inference_gateway_url: null,
+			cloudflare_access_client_id: null,
+			cloudflare_access_client_secret: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			sentry_smoke: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		};
+		const { initSentry, isSentryConfigured } = await loadSentryModule();
+		await initSentry("overlay");
+		expect(loadRuntimeConfigMock).toHaveBeenCalledOnce();
+		expect(sentryMock.init).not.toHaveBeenCalled();
+		expect(isSentryConfigured()).toBe(false);
+		expect(
+			frontendLogMock.warn.mock.calls.some(([, message]) =>
+				String(message).includes("runtime config unavailable"),
+			),
+		).toBe(false);
+	});
+
 	it("sets tier + hashed identity tags", async () => {
 		const { initSentry, setSentryLicenseIdentityTags } =
 			await loadSentryModule();

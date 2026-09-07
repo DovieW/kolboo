@@ -100,7 +100,12 @@ pub fn get_default_sections() -> DefaultSectionsResponse {
 #[tauri::command]
 pub fn get_runtime_config() -> RuntimeConfigResponse {
     RuntimeConfigResponse {
-        app_version: read_first_non_empty_env(&["TAURI_APP_VERSION"]),
+        // A cloud-free development launch is still a valid runtime response.
+        // Keep it distinguishable from the renderer's all-null IPC fallback.
+        app_version: Some(
+            read_first_non_empty_env(&["TAURI_APP_VERSION"])
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+        ),
         api_base_url: normalize_optional_base_url(read_first_non_empty_env(&[
             "TAURI_API_BASE_URL",
         ])),
@@ -1274,6 +1279,21 @@ pub fn set_vad_settings(_app: AppHandle, _settings: VadSettings) -> CommandResul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn runtime_config_always_identifies_the_app_without_optional_cloud_settings() {
+        let config = super::get_runtime_config();
+        assert!(config
+            .app_version
+            .as_deref()
+            .is_some_and(|version| !version.trim().is_empty()));
+        if super::read_first_non_empty_env(&["TAURI_APP_VERSION"]).is_none() {
+            assert_eq!(
+                config.app_version.as_deref(),
+                Some(env!("CARGO_PKG_VERSION"))
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

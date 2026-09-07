@@ -76,3 +76,34 @@ and `cargo-machete` are not installed here; a complete security/dependency gate 
 not run. The strict Rust dead-code gate is Windows-only and does not run on this
 Linux host. See [the file-backed long-audio follow-up](../Refactors/4_FILE_BACKED_LONG_AUDIO.md)
 for remaining whole-recording memory and forced-task-drop limitations.
+
+## Recorder validation follow-up — 2026-09-07
+
+- Recording controls wait for persisted preferences before enabling Record or
+  mode/model changes. Loading defaults cannot overwrite a saved meeting model;
+  failed preference reads offer a retry without changing the saved selection.
+- The meeting model picker distinguishes loading, failed sources and genuinely
+  empty catalogs. Failed sources can be retried independently, and available
+  BYOK/local choices remain usable when the managed catalog fails. There is no
+  bundled managed-model fallback or automatic replacement of a saved model.
+- Model-save failures stay inside the model dialog instead of opening another
+  dialog on top. Pending saves prevent dismissal and duplicate submissions.
+- Native runtime configuration always includes the package version when no
+  explicit version override is supplied. An intentionally cloud-free launch is
+  no longer mistaken for an unavailable IPC response; telemetry remains disabled
+  without a DSN.
+- Follow-up checks: **52 focused frontend tests** and **2 native configuration
+  tests** passed, alongside TypeScript, focused Biome lint, Rust formatting and
+  diff whitespace checks. The full suites above were not repeated for this patch.
+- Captured the actual wide-screen Settings/Appearance window, then restarted the
+  native development app and verified Home at 1280 × 720 with its compact idle
+  recording bar. The frontend returned HTTP 200, and the rebuilt startup no
+  longer reported runtime-config fallback retries. Screenshots remain temporary
+  local artifacts. The file-import page, recorder popup, audio devices and other
+  narrow-screen layouts still need visual or hardware acceptance; this check
+  does not claim those paths were exercised.
+
+The dev session remains running. After onboarding, native restarts intentionally
+start in the tray; launching the same executable again reveals the existing
+window through the single-instance handler. No credentials were provisioned and
+no paid API call, release or production deployment was performed.

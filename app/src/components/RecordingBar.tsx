@@ -53,6 +53,7 @@ export function RecordingBar() {
 		mode: "dictation" as const,
 		meeting_model: null,
 	};
+	const preferencesReady = preferences.isSuccess && !!preferences.data;
 	const savePreferences = useMutation({
 		mutationFn: recordingControlsAPI.setPreferences,
 		onSuccess: (_, value) => {
@@ -60,8 +61,10 @@ export function RecordingBar() {
 			setModelOpen(false);
 		},
 	});
-	const updatePreferences = (patch: Partial<RecordingPreferences>) =>
+	const updatePreferences = (patch: Partial<RecordingPreferences>) => {
+		if (!preferencesReady || savePreferences.isPending) return;
 		savePreferences.mutate({ ...recordingPreferences, ...patch });
+	};
 	const capability = useQuery({
 		queryKey: ["computer-audio-capability"],
 		queryFn: recordingControlsAPI.computerAudioAvailable,
@@ -74,11 +77,13 @@ export function RecordingBar() {
 	});
 	const action = useMutation({
 		mutationFn: async (operation: "start" | "stop" | "cancel") => {
-			if (operation === "start")
+			if (operation === "start") {
+				if (!preferencesReady)
+					throw new Error("Load recording preferences before starting");
 				await recordingControlsAPI.start(
 					recordingPreferences.mode === "meeting" && computerAudio,
 				);
-			else await recordingControlsAPI[operation]();
+			} else await recordingControlsAPI[operation]();
 		},
 		onSettled: async () => {
 			await client.invalidateQueries({ queryKey: ["home-recording-state"] });
@@ -179,7 +184,7 @@ export function RecordingBar() {
 	const idle = state.data === "idle" || state.data === "error";
 	const error =
 		preferences.error ??
-		savePreferences.error ??
+		(modelOpen ? null : savePreferences.error) ??
 		progress.error ??
 		recover.error ??
 		discard.error ??
@@ -297,7 +302,7 @@ export function RecordingBar() {
 							state.isError ||
 							!idle ||
 							discard.isPending ||
-							preferences.isPending ||
+							!preferencesReady ||
 							savePreferences.isPending
 						}
 						onClick={() => action.mutate("start")}
@@ -365,7 +370,12 @@ export function RecordingBar() {
 									{ value: "meeting", label: "Meeting" },
 								]}
 								value={recordingPreferences.mode}
-								disabled={!idle || pending || savePreferences.isPending}
+								disabled={
+									!idle ||
+									pending ||
+									!preferencesReady ||
+									savePreferences.isPending
+								}
 								onChange={(mode) =>
 									updatePreferences({
 										mode: mode === "meeting" ? "meeting" : "dictation",
@@ -378,10 +388,16 @@ export function RecordingBar() {
 										size="compact-xs"
 										variant="subtle"
 										onClick={() => {
+											savePreferences.reset();
 											setOptionsOpen(false);
 											setModelOpen(true);
 										}}
-										disabled={!idle || pending}
+										disabled={
+											!idle ||
+											pending ||
+											!preferencesReady ||
+											savePreferences.isPending
+										}
 									>
 										Meeting model
 									</Button>
@@ -391,7 +407,9 @@ export function RecordingBar() {
 										onChange={(event) =>
 											setComputerAudio(event.currentTarget.checked)
 										}
-										disabled={!idle || !capability.data || pending}
+										disabled={
+											!idle || !capability.data || pending || !preferencesReady
+										}
 										description={
 											capability.data ? undefined : "Unavailable on this device"
 										}
@@ -417,9 +435,21 @@ export function RecordingBar() {
 			{modelOpen && (
 				<MeetingModelDialog
 					preferences={recordingPreferences}
-					onClose={() => setModelOpen(false)}
-					onSave={(value) => savePreferences.mutate(value)}
+					onClose={() => {
+						if (savePreferences.isPending) return;
+						savePreferences.reset();
+						setModelOpen(false);
+					}}
+					onSave={(value) => {
+						if (!preferencesReady || savePreferences.isPending) return;
+						savePreferences.mutate(value);
+					}}
 					saving={savePreferences.isPending}
+					error={
+						savePreferences.error
+							? formatErrorMessage(savePreferences.error)
+							: null
+					}
 				/>
 			)}
 			<Modal
@@ -433,6 +463,15 @@ export function RecordingBar() {
 			>
 				<Stack gap="md">
 					{errorMessage && <Alert color="red">{errorMessage}</Alert>}
+					{preferences.isError && (
+						<Button
+							variant="default"
+							loading={preferences.isFetching}
+							onClick={() => void preferences.refetch()}
+						>
+							Retry recording preferences
+						</Button>
+					)}
 					{recoveryMessage && (
 						<Alert
 							color={recoveryResult?.transcription_complete ? "orange" : "red"}
