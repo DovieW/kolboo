@@ -18,6 +18,7 @@ mod active_window_capture;
 mod app_paths;
 mod audio;
 mod audio_capture;
+mod audio_import;
 mod audio_mute;
 mod audio_normalization;
 mod bootstrap;
@@ -101,6 +102,7 @@ pub use commands::pricing::LlmModelPricing;
 pub use commands::pricing::ModelPricingResponse;
 pub use commands::pricing::SttModelPricing;
 pub use commands::recording::AudioSettingsTestWavs;
+pub use commands::recording::FileImportResult;
 pub use commands::router::CacheRouterEmbeddingsResponse;
 pub use commands::stats::CostByProviderResponse;
 pub use commands::stats::CostSummaryResponse;
@@ -1130,6 +1132,7 @@ pub fn run() {
             commands::recording::pipeline_can_pause_recording,
             commands::recording::recording_list_recovery,
             commands::recording::recording_recover,
+            commands::recording::recording_import_file,
             commands::recording::recording_discard_recovery,
             commands::recording::pipeline_set_recording_paused,
             commands::recording::pipeline_get_recording_paused,

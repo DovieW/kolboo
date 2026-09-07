@@ -90,7 +90,7 @@ export function MeetingModelDialog({
 		<Modal opened onClose={onClose} title="Meeting transcription" centered>
 			<Stack>
 				<Text size="sm" c="dimmed">
-					Separate from dictation. Meetings are transcribed after Stop, without
+					Separate from dictation. Transcribes the full recording without
 					rewriting.
 				</Text>
 				<Select

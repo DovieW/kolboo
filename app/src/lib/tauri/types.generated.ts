@@ -121,6 +121,16 @@ export interface DefaultSectionsResponse {
   system: string;
 }
 
+// From: file-import-result.schema.json
+/**
+ * Import preparation and uploads share one owner, so F3 or another command cannot replace the job or its cancellation token between stages.
+ */
+export interface FileImportResult {
+  message?: string | null;
+  recovery_id?: string | null;
+  transcription_complete: boolean;
+}
+
 // From: history-changed.schema.json
 export type Null = null;
 

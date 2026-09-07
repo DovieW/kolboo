@@ -33,3 +33,19 @@ The current support bundle includes:
 - support-safe hashed `user` / `org` targets so operators can correlate the
 	bundle with the restricted operator console without needing raw identifiers in
 	the exported file
+
+## Request logs
+
+Open **Logs** from the sidebar to search recent requests and inspect a request's
+transcription, rewrite result, timing and errors. The controls stay at the top
+while the request list scrolls. Closing or switching a request pauses its audio.
+
+**Export → Export privacy-safe JSON** leaves out text and provider payloads. Full
+debug export requires a separate confirmation because it may include transcripts,
+prompts and provider responses. Review the file before sharing it.
+
+**Clear logs** asks for confirmation and clears all request logs, including those
+hidden by filters. It does not delete History entries or recordings.
+
+Expand **System events** beneath the request list for live local diagnostics and
+the **Hotkey debug** toggle. Hotkey debug turns off when you leave Logs.

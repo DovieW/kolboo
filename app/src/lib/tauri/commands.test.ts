@@ -34,6 +34,29 @@ vi.mock("./events", () => ({
 
 describe("tauri command wrappers", () => {
 	itWithImportTimeout(
+		"file import and recovery preserve completion and cleanup outcomes",
+		async () => {
+			const { recordingControlsAPI } = await import("./commands");
+			const result = {
+				transcription_complete: true,
+				recovery_id: "fixture-recovery",
+				message: "Cleanup needs attention",
+			};
+			const preferences = { mode: "dictation" as const, meeting_model: null };
+			invokeMock.mockResolvedValue(result);
+			await expect(
+				recordingControlsAPI.importFile("fixture.wav", preferences),
+			).resolves.toEqual(result);
+			await expect(
+				recordingControlsAPI.recover("fixture-recovery"),
+			).resolves.toEqual(result);
+			expect(invokeMock.mock.calls).toEqual([
+				["recording_import_file", { path: "fixture.wav", preferences }],
+				["recording_recover", { id: "fixture-recovery" }],
+			]);
+		},
+	);
+	itWithImportTimeout(
 		"home controls use the existing recording pipeline without text injection",
 		async () => {
 			const { recordingControlsAPI } = await import("./commands");

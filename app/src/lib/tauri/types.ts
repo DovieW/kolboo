@@ -42,7 +42,17 @@ export interface SpeakerSegment {
 }
 export interface RecordingPreferences {
 	mode: "dictation" | "meeting";
-	meeting_model: { provider: string; model: string; use_managed?: boolean } | null;
+	meeting_model: {
+		provider: string;
+		model: string;
+		use_managed?: boolean;
+	} | null;
+}
+
+export interface FileImportResult {
+	transcription_complete: boolean;
+	recovery_id: string | null;
+	message: string | null;
 }
 
 export interface HistoryEdit {

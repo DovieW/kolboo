@@ -92,14 +92,25 @@ pub fn recordings_delete_all(
             "Stop recording or transcription before deleting audio".to_string(),
         ));
     }
-    let recovery_ids = recording_list_recovery(app.clone(), pipeline)?;
+    // Hold ownership across staging cleanup and deletion; another command must
+    // not start an import/capture after the initial busy check.
+    let (_cleanup, _) = RecoveryGuard::acquire(pipeline.inner().clone(), None)?;
+    let recovery_ids = list_recovery_ids(&app)?;
     let store = app
         .try_state::<RecordingStore>()
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
 
+    let recovery_directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| CommandError::from("Local audio storage unavailable"))?
+        .join("meeting-recovery");
+    crate::audio_import::clean_interrupted_imports(&recovery_directory)
+        .map_err(CommandError::from)?;
+
     let mut deleted = store.delete_all_wavs().map_err(CommandError::from)?;
     for id in recovery_ids {
-        let path = recovery_file(&app, &id)?;
+        let path = recovery_path(&app, &id)?;
         remove_recovery_files(&path)?;
         deleted += 1;
     }
@@ -271,17 +282,21 @@ pub fn recording_set_preferences(
         .map_err(|_| CommandError::from("Could not save recording preferences"))
 }
 
-fn recovery_file(app: &AppHandle, id: &str) -> Result<std::path::PathBuf, CommandError> {
+fn recovery_path(app: &AppHandle, id: &str) -> Result<std::path::PathBuf, CommandError> {
     let id = uuid::Uuid::parse_str(id)
         .map_err(|_| CommandError::from("Invalid recovery id".to_string()))?;
-    let path = app
+    Ok(app
         .path()
         .app_data_dir()
-        .map_err(|e| CommandError::from(e.to_string()))?
+        .map_err(|_| CommandError::from("Local audio storage unavailable"))?
         .join("meeting-recovery")
-        .join(format!("{id}.pcm"));
+        .join(format!("{id}.pcm")))
+}
+
+fn recovery_file(app: &AppHandle, id: &str) -> Result<std::path::PathBuf, CommandError> {
+    let path = recovery_path(app, id)?;
     if !std::fs::symlink_metadata(&path)
-        .map_err(|e| CommandError::from(e.to_string()))?
+        .map_err(|_| CommandError::from("Saved recording is no longer available"))?
         .file_type()
         .is_file()
     {
@@ -303,30 +318,76 @@ pub fn recording_list_recovery(
     if pipeline.state() == PipelineState::Recording || pipeline.is_recovering() {
         return Ok(vec![]);
     }
+    list_recovery_ids(&app)
+}
+
+fn list_recovery_ids(app: &AppHandle) -> Result<Vec<String>, CommandError> {
     let directory = app
         .path()
         .app_data_dir()
-        .map_err(|e| CommandError::from(e.to_string()))?
+        .map_err(|_| CommandError::from("Local audio storage unavailable"))?
         .join("meeting-recovery");
+    collect_recovery_ids(&directory, || {
+        Ok(app
+            .state::<HistoryStorage>()
+            .get_all(None)
+            .map_err(CommandError::from)?
+            .into_iter()
+            .filter(|entry| entry.status == crate::history::HistoryStatus::Success)
+            .filter_map(|entry| entry.recording_request_id)
+            .filter_map(|id| id.strip_suffix("-final").map(str::to_owned))
+            .collect())
+    })
+}
+
+fn collect_recovery_ids(
+    directory: &std::path::Path,
+    completed: impl FnOnce() -> Result<std::collections::HashSet<String>, CommandError>,
+) -> Result<Vec<String>, CommandError> {
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(e) => return Err(CommandError::from(e.to_string())),
+        Err(_) => return Err(CommandError::from("Could not read local audio storage")),
     };
-    let mut ids: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            if !entry.file_type().ok()?.is_file() {
-                return None;
+    let mut ids = std::collections::HashSet::new();
+    let mut sidecars = std::collections::HashSet::new();
+    for entry in entries {
+        let entry = entry.map_err(|_| CommandError::from("Could not read local audio storage"))?;
+        if !entry
+            .file_type()
+            .map_err(|_| CommandError::from("Could not inspect local audio storage"))?
+            .is_file()
+        {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let (stem, audio) = if let Some(stem) = name.strip_suffix(".pcm") {
+            (stem, true)
+        } else if let Some(stem) = name
+            .strip_suffix(".options.json")
+            .or_else(|| name.strip_suffix(".transcripts"))
+            .or_else(|| name.strip_suffix(".progress"))
+        {
+            (stem, false)
+        } else {
+            continue;
+        };
+        if let Ok(id) = uuid::Uuid::parse_str(stem) {
+            if audio {
+                ids.insert(id.to_string());
+            } else {
+                sidecars.insert(id.to_string());
             }
-            let path = entry.path();
-            if path.extension()?.to_str()? != "pcm" {
-                return None;
-            }
-            let id = path.file_stem()?.to_str()?;
-            uuid::Uuid::parse_str(id).ok().map(|id| id.to_string())
-        })
-        .collect();
+        }
+    }
+    // Missing PCM is a cleanup-only recovery only with a durable successful
+    // History result. Never offer interrupted/partial import sidecars as audio.
+    if !sidecars.is_empty() {
+        let completed = completed()?;
+        ids.extend(sidecars.into_iter().filter(|id| completed.contains(id)));
+    }
+    let mut ids: Vec<_> = ids.into_iter().collect();
     ids.sort();
     Ok(ids)
 }
@@ -336,8 +397,15 @@ pub async fn recording_recover(
     app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
     id: String,
-) -> Result<(), CommandError> {
-    recover_recording_inner(app, pipeline.inner().clone(), id).await
+) -> Result<FileImportResult, CommandError> {
+    let id = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::from("Invalid recovery id"))?
+        .to_string();
+    let outcome = recover_recording_inner(app.clone(), pipeline.inner().clone(), id.clone()).await;
+    let recording_id = format!("{id}-final");
+    Ok(recovery_result(id, outcome, || {
+        recording_has_completed_history(&app, &recording_id).unwrap_or(false)
+    }))
 }
 
 async fn recover_recording_inner(
@@ -345,31 +413,161 @@ async fn recover_recording_inner(
     pipeline: SharedPipeline,
     id: String,
 ) -> Result<(), CommandError> {
-    let cancel = pipeline.begin_recovery().map_err(CommandError::from)?;
-    struct RecoveryGuard(SharedPipeline);
-    impl Drop for RecoveryGuard {
-        fn drop(&mut self) {
-            self.0.end_recovery();
+    let (_guard, cancel) = RecoveryGuard::acquire(pipeline.clone(), Some(&app))?;
+    recover_recording_owned(app, pipeline, id, cancel).await
+}
+
+struct RecoveryGuard {
+    pipeline: SharedPipeline,
+    app: Option<AppHandle>,
+    cancel: tokio_util::sync::CancellationToken,
+}
+impl RecoveryGuard {
+    fn acquire(
+        pipeline: SharedPipeline,
+        app: Option<&AppHandle>,
+    ) -> Result<(Self, tokio_util::sync::CancellationToken), CommandError> {
+        let cancel = pipeline.begin_recovery().map_err(CommandError::from)?;
+        #[cfg(desktop)]
+        if let Some(app) = app {
+            // The helper derives activity from pipeline ownership. Do not queue
+            // a forced enable that could arrive after a very short job finishes.
+            crate::set_escape_cancel_shortcut_enabled(app, false);
+        }
+        Ok((
+            Self {
+                pipeline,
+                app: app.cloned(),
+                cancel: cancel.clone(),
+            },
+            cancel,
+        ))
+    }
+}
+impl Drop for RecoveryGuard {
+    fn drop(&mut self) {
+        // Also stop native preparation if its owning async command was dropped.
+        self.cancel.cancel();
+        self.pipeline.end_recovery();
+        #[cfg(desktop)]
+        if let Some(app) = &self.app {
+            crate::set_escape_cancel_shortcut_enabled(app, false);
         }
     }
-    let _guard = RecoveryGuard(pipeline.clone());
-    let path = recovery_file(&app, &id)?;
-    let options = RecordingPreferences::load_journal(&path).map_err(CommandError::from)?;
+}
+
+/// Import preparation and uploads share one owner, so F3 or another command
+/// cannot replace the job or its cancellation token between stages.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FileImportResult {
+    pub recovery_id: Option<String>,
+    pub message: Option<String>,
+    pub transcription_complete: bool,
+}
+
+#[tauri::command]
+pub async fn recording_import_file(
+    app: AppHandle,
+    pipeline: State<'_, SharedPipeline>,
+    path: String,
+    preferences: RecordingPreferences,
+) -> Result<FileImportResult, CommandError> {
+    preferences.validate().map_err(CommandError::from)?;
+    if preferences.mode == RecordingMode::Meeting && preferences.meeting_model.is_none() {
+        return Err(CommandError::from(
+            "Choose a meeting model before transcribing",
+        ));
+    }
+    let pipeline = pipeline.inner().clone();
+    let (_guard, cancel) = RecoveryGuard::acquire(pipeline.clone(), Some(&app))?;
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| CommandError::from("Local audio storage unavailable"))?
+        .join("meeting-recovery");
+    let import_cancel = cancel.clone();
+    let id = tokio::task::spawn_blocking(move || {
+        crate::audio_import::clean_interrupted_imports(&directory)?;
+        crate::audio_import::import_file(
+            std::path::Path::new(&path),
+            &directory,
+            &preferences,
+            || import_cancel.is_cancelled(),
+        )
+    })
+    .await
+    .map_err(|_| CommandError::from("File import interrupted. Your original file is unchanged."))?
+    .map_err(CommandError::from)?;
+    let outcome = recover_recording_owned(app.clone(), pipeline, id.clone(), cancel).await;
+    let recording_id = format!("{id}-final");
+    Ok(recovery_result(id, outcome, || {
+        recording_has_completed_history(&app, &recording_id).unwrap_or(false)
+    }))
+}
+
+/// The same completion contract applies to the first attempt and every retry.
+/// A committed History result never asks the UI to submit its audio again.
+fn recovery_result(
+    id: String,
+    outcome: Result<(), CommandError>,
+    completed: impl FnOnce() -> bool,
+) -> FileImportResult {
+    match outcome {
+        Ok(()) => FileImportResult {
+            recovery_id: None,
+            message: None,
+            transcription_complete: true,
+        },
+        Err(error) => {
+            let transcription_complete = completed();
+            let message = if transcription_complete {
+                "Your transcription is saved in History. Some temporary recording files could not be removed; choose Finish cleanup to try again.".to_string()
+            } else {
+                error.to_string()
+            };
+            FileImportResult {
+                recovery_id: Some(id),
+                message: Some(message),
+                transcription_complete,
+            }
+        }
+    }
+}
+
+fn recording_has_completed_history(
+    app: &AppHandle,
+    recording_id: &str,
+) -> Result<bool, CommandError> {
+    Ok(app
+        .state::<HistoryStorage>()
+        .get_all(None)
+        .map_err(CommandError::from)?
+        .iter()
+        .any(|entry| {
+            entry.recording_request_id.as_deref() == Some(recording_id)
+                && entry.status == crate::history::HistoryStatus::Success
+        }))
+}
+
+async fn recover_recording_owned(
+    app: AppHandle,
+    pipeline: SharedPipeline,
+    id: String,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<(), CommandError> {
+    let id = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::from("Invalid recovery id"))?
+        .to_string();
+    let path = recovery_path(&app, &id)?;
     let recording_id = format!("{id}-final");
     // A successful History commit is the completion marker. If the process
     // crashes before journal deletion, recovering must not submit it again.
-    let completed = || -> Result<bool, CommandError> {
-        Ok(app
-            .state::<HistoryStorage>()
-            .get_all(None)
-            .map_err(CommandError::from)?
-            .iter()
-            .any(|entry| {
-                entry.recording_request_id.as_deref() == Some(recording_id.as_str())
-                    && entry.status == crate::history::HistoryStatus::Success
-            }))
-    };
+    let completed = || recording_has_completed_history(&app, &recording_id);
     if !completed()? {
+        // A completed transcript may only need sidecar cleanup, after the PCM
+        // has already been removed. Never require/re-upload audio for that retry.
+        recovery_file(&app, &id)?;
+        let options = RecordingPreferences::load_journal(&path).map_err(CommandError::from)?;
         let export_path = path.clone();
         let export_cancel = cancel.clone();
         let export_app = app.clone();
@@ -416,7 +614,8 @@ pub fn recording_discard_recovery(
     if pipeline.is_recovering() || !pipeline.state().can_start_recording() {
         return Err(CommandError::from("Recording pipeline is busy".to_string()));
     }
-    let path = recovery_file(&app, &id)?;
+    let (_cleanup, _) = RecoveryGuard::acquire(pipeline.inner().clone(), None)?;
+    let path = recovery_path(&app, &id)?;
     remove_recovery_files(&path)?;
     Ok(())
 }
@@ -946,17 +1145,10 @@ async fn retry_transcription_inner(
     let recording_options = recording_store
         .options(&recording_source_id)
         .map_err(CommandError::from)?;
-    struct MeetingReplayGuard(SharedPipeline);
-    impl Drop for MeetingReplayGuard {
-        fn drop(&mut self) {
-            self.0.end_recovery();
-        }
-    }
     // History reruns of a completed meeting also use small uploads, but are
     // deliberately fresh attempts rather than silently reusing old text.
     let _meeting_replay = if meeting_id.is_some() && !recovery {
-        pipeline.begin_recovery().map_err(CommandError::from)?;
-        Some(MeetingReplayGuard(pipeline.clone()))
+        Some(RecoveryGuard::acquire(pipeline.clone(), Some(&app))?.0)
     } else {
         None
     };
@@ -1247,7 +1439,7 @@ pub fn pipeline_cancel(
         // Reuse the centralized cancel logic so audio mute/pause state is restored too.
         crate::cancel_pipeline_session(&app, "Command");
         if pipeline.is_error() {
-            return Err(CommandError::from("Capture stopped, but recovery audio could not be discarded. Use the saved-audio controls to try again.".to_string()));
+            return Err(CommandError::from("Capture stopped, but some audio could not be saved. Check Saved recordings before starting again.".to_string()));
         }
         Ok(())
     }
@@ -1884,4 +2076,131 @@ pub fn pipeline_force_reset(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod recovery_ownership_tests {
+    use super::*;
+
+    #[test]
+    fn preparation_guard_owns_pipeline_until_drop_and_cancels_leftover_work() {
+        let pipeline = SharedPipeline::new(PipelineConfig::default());
+        let (guard, token) = RecoveryGuard::acquire(pipeline.clone(), None).unwrap();
+        assert!(pipeline.is_recovering());
+        assert!(!token.is_cancelled());
+        assert!(RecoveryGuard::acquire(pipeline.clone(), None).is_err());
+        assert!(pipeline.is_recovering());
+        assert!(!token.is_cancelled());
+
+        drop(guard);
+
+        assert!(token.is_cancelled());
+        assert!(!pipeline.is_recovering());
+        let (_next, next_token) = RecoveryGuard::acquire(pipeline, None).unwrap();
+        assert!(!next_token.is_cancelled());
+    }
+
+    #[test]
+    fn completed_cleanup_can_be_retried_after_audio_was_already_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("finished.pcm");
+        let options = path.with_extension("options.json");
+        std::fs::write(&path, b"complete audio").unwrap();
+        // Fail precisely after PCM deletion, at mode-sidecar cleanup.
+        std::fs::create_dir(&options).unwrap();
+        assert!(remove_recovery_files(&path).is_err());
+        assert!(!path.exists());
+        std::fs::remove_dir(&options).unwrap();
+        std::fs::write(&options, b"mode").unwrap();
+
+        remove_recovery_files(&path).unwrap();
+
+        assert!(!options.exists());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn recovery_outcomes_distinguish_transcription_retry_from_cleanup_only() {
+        let pending = recovery_result(
+            "recovery-id".into(),
+            Err(CommandError::from("Transcription unavailable")),
+            || false,
+        );
+        assert!(!pending.transcription_complete);
+        assert_eq!(pending.recovery_id.as_deref(), Some("recovery-id"));
+        assert_eq!(
+            pending.message.as_deref(),
+            Some("Transcription unavailable")
+        );
+
+        let cleanup = recovery_result(
+            "recovery-id".into(),
+            Err(CommandError::from("Temporary file cleanup failed")),
+            || true,
+        );
+        assert!(cleanup.transcription_complete);
+        assert_eq!(cleanup.recovery_id.as_deref(), Some("recovery-id"));
+        assert!(cleanup.message.unwrap().contains("Finish cleanup"));
+
+        let success = recovery_result("recovery-id".into(), Ok(()), || {
+            panic!("Successful recovery does not need to reread History")
+        });
+        assert!(success.transcription_complete);
+        assert!(success.recovery_id.is_none());
+        assert!(success.message.is_none());
+    }
+
+    #[test]
+    fn discovery_includes_completed_cleanup_only_bundles_but_not_partial_imports() {
+        let directory = tempfile::tempdir().unwrap();
+        let audio = uuid::Uuid::new_v4().to_string();
+        let completed = uuid::Uuid::new_v4().to_string();
+        let partial = uuid::Uuid::new_v4().to_string();
+        let directory_only = uuid::Uuid::new_v4().to_string();
+        for suffix in ["pcm", "options.json"] {
+            std::fs::write(directory.path().join(format!("{audio}.{suffix}")), b"audio").unwrap();
+        }
+        for suffix in ["options.json", "progress", "transcripts"] {
+            std::fs::write(
+                directory.path().join(format!("{completed}.{suffix}")),
+                b"sidecar",
+            )
+            .unwrap();
+        }
+        for suffix in ["importing", "options.json"] {
+            std::fs::write(
+                directory.path().join(format!("{partial}.{suffix}")),
+                b"partial",
+            )
+            .unwrap();
+        }
+        std::fs::write(directory.path().join("not-a-recording.pcm"), b"other").unwrap();
+        std::fs::create_dir(directory.path().join(format!("{directory_only}.pcm"))).unwrap();
+        let ids = collect_recovery_ids(directory.path(), || {
+            Ok(std::collections::HashSet::from([
+                audio.clone(),
+                completed.clone(),
+            ]))
+        })
+        .unwrap();
+        let mut expected = vec![audio, completed];
+        expected.sort();
+        assert_eq!(ids, expected);
+        assert!(directory
+            .path()
+            .join(format!("{partial}.importing"))
+            .exists());
+    }
+
+    #[test]
+    fn discovery_of_audio_only_does_not_require_history_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        std::fs::write(directory.path().join(format!("{id}.pcm")), b"audio").unwrap();
+        let ids = collect_recovery_ids(directory.path(), || {
+            panic!("No cleanup-only sidecars to check")
+        })
+        .unwrap();
+        assert_eq!(ids, vec![id]);
+    }
 }

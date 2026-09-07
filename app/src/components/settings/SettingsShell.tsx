@@ -3,6 +3,7 @@ import {
 	Select,
 	type SelectProps,
 	Tabs,
+	Text,
 	Title,
 	Tooltip,
 } from "@mantine/core";
@@ -124,141 +125,116 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 	};
 
 	return (
-		<div className="main-content">
-			<header
-				className="tv-page-header animate-in"
-				style={{
-					display: "flex",
-					alignItems: "flex-end",
-					justifyContent: "space-between",
-					gap: 16,
-					flexWrap: "wrap",
+		<div className="main-content settings-page">
+			<Tabs
+				value={activeSettingsTab}
+				onChange={(value) => {
+					if (!value) return;
+					setHasUserSelectedTab(true);
+					setActiveSettingsTab(value);
 				}}
+				classNames={{ root: "settings-tabs" }}
+				keepMounted={false}
 			>
-				<div>
-					<Title order={1}>Settings</Title>
-				</div>
+				<header className="tv-page-header settings-page-header">
+					<div className="settings-header-row">
+						<div>
+							<Title order={1}>Settings</Title>
+						</div>
 
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						gap: 10,
-					}}
-				>
-					<div
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: 6,
-						}}
-					>
-						{onRunSetupGuide ? (
-							<Tooltip label="Run setup guide" withArrow>
+						<div className="settings-header-actions">
+							{onRunSetupGuide ? (
+								<Tooltip label="Run setup guide" withArrow>
+									<ActionIcon
+										variant="subtle"
+										color="orange"
+										size={32}
+										aria-label="Run setup guide"
+										onClick={onRunSetupGuide}
+									>
+										<CircleHelp size={14} />
+									</ActionIcon>
+								</Tooltip>
+							) : null}
+
+							<Text
+								component="label"
+								htmlFor="settings-profile"
+								size="xs"
+								c="dimmed"
+							>
+								Profile
+							</Text>
+							<Tooltip label="New profile" withArrow>
 								<ActionIcon
 									variant="subtle"
 									color="orange"
-									size="sm"
-									aria-label="Run setup guide"
-									onClick={onRunSetupGuide}
+									size={32}
+									aria-label="New profile"
+									onClick={() => {
+										setAutoCreateProfileOnOpen(true);
+										setProgramsModalOpen(true);
+									}}
 								>
-									<CircleHelp size={14} />
+									<Plus size={14} />
 								</ActionIcon>
 							</Tooltip>
-						) : null}
 
-						<Tooltip label="New profile" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="orange"
+							<Select
+								id="settings-profile"
+								aria-label="Editing profile"
+								className="settings-profile-select"
+								data={editingOptions}
+								value={editingProfileId}
+								onChange={(v) => setEditingProfileId(v ?? "default")}
+								renderOption={renderEditingOption}
+								withCheckIcon={false}
 								size="sm"
-								aria-label="New profile"
-								onClick={() => {
-									setAutoCreateProfileOnOpen(true);
-									setProgramsModalOpen(true);
+								styles={{
+									input: {
+										backgroundColor: "transparent",
+										border: "1px solid var(--border-default)",
+										borderRadius: 6,
+										color: selectedProfileDisabled
+											? "var(--text-secondary)"
+											: "var(--text-primary)",
+										textDecoration: selectedProfileDisabled
+											? "line-through"
+											: "none",
+										paddingLeft: 8,
+										paddingRight: 4,
+									},
+									dropdown: {
+										backgroundColor: "var(--bg-elevated)",
+										borderColor: "var(--border-default)",
+									},
 								}}
-							>
-								<Plus size={14} />
-							</ActionIcon>
-						</Tooltip>
+							/>
 
-						<Select
-							data={editingOptions}
-							value={editingProfileId}
-							onChange={(v) => setEditingProfileId(v ?? "default")}
-							renderOption={renderEditingOption}
-							withCheckIcon={false}
-							size="xs"
-							styles={{
-								input: {
-									backgroundColor: "transparent",
-									border: "1px solid var(--border-default)",
-									borderRadius: 6,
-									color: selectedProfileDisabled
-										? "var(--text-secondary)"
-										: "var(--text-primary)",
-									textDecoration: selectedProfileDisabled
-										? "line-through"
-										: "none",
-									minWidth: 140,
-									paddingLeft: 8,
-									paddingRight: 4,
-								},
-								dropdown: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-								},
-							}}
-						/>
-
-						<Tooltip
-							label={
-								editingProfileId === "default"
-									? "Select a none-default profile to configure programs"
-									: "Profile config"
-							}
-							withArrow
-						>
-							<ActionIcon
-								variant="subtle"
-								color="orange"
-								size="sm"
-								aria-label="Profile config"
-								onClick={() => setProgramsModalOpen(true)}
-								disabled={editingProfileId === "default"}
+							<Tooltip
+								label={
+									editingProfileId === "default"
+										? "Choose a profile to configure its app rules"
+										: "Profile config"
+								}
+								withArrow
 							>
-								<Cog size={14} />
-							</ActionIcon>
-						</Tooltip>
+								<ActionIcon
+									variant="subtle"
+									color="orange"
+									size={32}
+									aria-label="Profile config"
+									onClick={() => setProgramsModalOpen(true)}
+									disabled={editingProfileId === "default"}
+								>
+									<Cog size={14} />
+								</ActionIcon>
+							</Tooltip>
+						</div>
 					</div>
-				</div>
-			</header>
-
-			<div className="main-content-inner">
-				<ProfileConfigModal
-					opened={programsModalOpen}
-					onClose={() => {
-						setProgramsModalOpen(false);
-						setAutoCreateProfileOnOpen(false);
-					}}
-					editingProfileId={editingProfileId}
-					onEditingProfileChange={setEditingProfileId}
-					autoCreateProfile={autoCreateProfileOnOpen}
-				/>
-
-				<Tabs
-					value={activeSettingsTab}
-					onChange={(value) => {
-						if (!value) return;
-						setHasUserSelectedTab(true);
-						setActiveSettingsTab(value);
-					}}
-					classNames={{ root: "settings-tabs" }}
-					keepMounted={false}
-				>
-					<Tabs.List>
+					<Tabs.List aria-label="Settings categories">
 						<Tabs.Tab value="ai">AI</Tabs.Tab>
-						<Tabs.Tab value="ui">UI</Tabs.Tab>
+						<Tabs.Tab value="ui">Appearance</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
 						<Tabs.Tab value="api-keys">Providers</Tabs.Tab>
@@ -267,6 +243,19 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
+				</header>
+
+				<div className="main-content-inner">
+					<ProfileConfigModal
+						opened={programsModalOpen}
+						onClose={() => {
+							setProgramsModalOpen(false);
+							setAutoCreateProfileOnOpen(false);
+						}}
+						editingProfileId={editingProfileId}
+						onEditingProfileChange={setEditingProfileId}
+						autoCreateProfile={autoCreateProfileOnOpen}
+					/>
 
 					<Tabs.Panel value="ai" pt="md">
 						<div className="settings-card">
@@ -326,8 +315,8 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 							<PolicySettings />
 						</div>
 					</Tabs.Panel>
-				</Tabs>
-			</div>
+				</div>
+			</Tabs>
 		</div>
 	);
 }

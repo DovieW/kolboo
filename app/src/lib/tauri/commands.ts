@@ -661,7 +661,16 @@ export const recordingControlsAPI = {
 	computerAudioAvailable: () =>
 		invoke<boolean>("recording_computer_audio_available"),
 	listRecovery: () => invoke<string[]>("recording_list_recovery"),
-	recover: (id: string) => invoke<void>("recording_recover", { id }),
+	recover: (id: string) =>
+		invoke<import("./types").FileImportResult>("recording_recover", { id }),
+	importFile: (
+		path: string,
+		preferences: import("./types").RecordingPreferences,
+	) =>
+		invoke<import("./types").FileImportResult>("recording_import_file", {
+			path,
+			preferences,
+		}),
 	discardRecovery: (id: string) =>
 		invoke<void>("recording_discard_recovery", { id }),
 	getPaused: () => invoke<boolean>("pipeline_get_recording_paused"),

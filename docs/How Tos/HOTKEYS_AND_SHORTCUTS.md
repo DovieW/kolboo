@@ -318,9 +318,10 @@ easy for end users to collect.
 Instead, enable the in-app hotkey diagnostics:
 
 - Set `hotkey_debug_enabled = true` in `settings.json`, or
-- Use the UI toggle in **Request Logs → System Events (Live) → Hotkey debug**.
+- Open **Logs**, expand **System events** below the request list, and enable **Hotkey debug**.
 
-Then reproduce the issue and copy the events from **System Events (Live)**.
+Then reproduce the issue and copy the events from **System events**. Hotkey debug
+turns off when you leave Logs.
 You should see entries like:
 
 - `Hotkey debug: RightAlt down/up`

@@ -220,6 +220,10 @@ fn gen_export_recording_preferences_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::RecordingPreferences)
 }
 
+fn gen_export_file_import_result_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::FileImportResult)
+}
+
 fn gen_export_request_log_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::RequestLog)
 }
@@ -517,6 +521,11 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "recording-preferences.schema.json",
         "RecordingPreferences",
         gen_export_recording_preferences_schema
+    ),
+    schema_spec!(
+        "file-import-result.schema.json",
+        "FileImportResult",
+        gen_export_file_import_result_schema
     ),
     schema_spec!(
         "request-log.schema.json",

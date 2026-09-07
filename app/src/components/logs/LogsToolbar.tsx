@@ -11,6 +11,7 @@ import {
 	Text,
 	TextInput,
 	Tooltip,
+	Title,
 } from "@mantine/core";
 import {
 	ChevronLeft,
@@ -101,19 +102,16 @@ export function LogsToolbar({
 			<Group justify="space-between" align="flex-start" gap="sm" wrap="wrap">
 				<Stack gap={2}>
 					<Group gap="xs" wrap="wrap">
-						<Text fw={700} size="lg">
-							Request Logs
-						</Text>
+						<Title order={1}>Logs</Title>
 						<Badge variant="light" color="gray">
-							{filteredLogsCount} shown
-						</Badge>
-						<Badge variant="outline" color="gray">
-							{totalLogsCount} total
+							{hasActiveFilters || filteredLogsCount !== totalLogsCount
+								? `${filteredLogsCount} of ${totalLogsCount}`
+								: totalLogsCount}{" "}
+							requests
 						</Badge>
 					</Group>
 					<Text size="sm" c="dimmed">
-						Backend request logs stay the source of truth; this view only
-						derives display state, filters, and pagination.
+						Inspect recent transcriptions, rewriting and errors.
 					</Text>
 				</Stack>
 
@@ -165,10 +163,11 @@ export function LogsToolbar({
 			</Group>
 
 			<Group justify="space-between" align="center" gap="sm" wrap="wrap">
-				<Group gap="xs" wrap="wrap" style={{ flex: 1 }}>
+				<Group gap="xs" wrap="wrap" style={{ flex: "1 1 320px", minWidth: 0 }}>
 					<TextInput
-						style={{ flex: 1, minWidth: 260 }}
-						placeholder="Search ids, transcripts, quick actions, or errors"
+						style={{ flex: "1 1 220px", minWidth: 0 }}
+						aria-label="Search request logs"
+						placeholder="Search requests, text or errors"
 						value={filterText}
 						onChange={(event) => onFilterTextChange(event.currentTarget.value)}
 						leftSection={<Search size={14} />}

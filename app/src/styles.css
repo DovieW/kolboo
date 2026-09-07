@@ -138,6 +138,33 @@ a:focus-visible {
 	height: 100%;
 }
 
+.app-page,
+.retained-page {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.retained-page[hidden] {
+	display: none;
+}
+
+.skip-navigation {
+	position: fixed;
+	top: 8px;
+	left: 84px;
+	z-index: 500;
+	padding: 10px 16px;
+	border-radius: 8px;
+	background: var(--bg-elevated);
+	transform: translateY(-160%);
+}
+
+.skip-navigation:focus {
+	transform: translateY(0);
+}
+
 /* Sidebar */
 .sidebar {
 	width: 72px;
@@ -147,6 +174,8 @@ a:focus-visible {
 	display: flex;
 	flex-direction: column;
 	padding: 20px 0;
+	flex-shrink: 0;
+	min-height: 0;
 }
 
 .sidebar-header {
@@ -161,6 +190,15 @@ a:focus-visible {
 	align-items: center;
 	justify-content: center;
 	color: var(--accent-primary);
+	gap: 12px;
+}
+
+.sidebar-brand {
+	display: none;
+	color: var(--text-primary);
+	font-family: var(--tv-font-heading), sans-serif;
+	font-size: 22px;
+	font-weight: 600;
 }
 
 .sidebar-nav {
@@ -169,6 +207,8 @@ a:focus-visible {
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
+	min-height: 0;
+	overflow-y: auto;
 }
 
 .sidebar-nav-link {
@@ -177,6 +217,9 @@ a:focus-visible {
 	padding: 12px;
 	display: flex;
 	justify-content: center;
+	min-height: 44px;
+	flex-shrink: 0;
+	font-size: 13px;
 }
 
 .sidebar-nav-link:hover {
@@ -201,7 +244,7 @@ a:focus-visible {
 .sidebar-nav-link[data-active] {
 	background-color: rgba(var(--accent-rgb) / 0.1);
 	color: var(--accent-primary);
-	box-shadow: 0 0 0 2px var(--accent-glow);
+	box-shadow: inset 2px 0 0 var(--accent-primary);
 }
 
 .sidebar-nav-link[data-active]:hover {
@@ -249,14 +292,27 @@ a:focus-visible {
 .main-content {
 	/* Shared padding vars so sticky headers can offset them cleanly */
 	--main-pad-y: 32px;
-	--main-pad-x: 40px;
+	--main-pad-x: clamp(16px, 3vw, 40px);
+	--content-max-width: 1280px;
+	--header-pad-x: max(
+		var(--main-pad-x),
+		calc((100% - var(--content-max-width)) / 2 + var(--main-pad-x))
+	);
 
 	flex: 1;
+	min-width: 0;
+	min-height: 0;
 	overflow-y: auto;
 	/* Prevent subtle width changes when scrollbar appears/disappears (tab switches) */
 	scrollbar-gutter: stable;
 	padding: 0;
 	background: var(--bg-primary);
+	scroll-padding-top: 140px;
+}
+
+.home-page,
+.settings-page {
+	--content-max-width: 1160px;
 }
 
 /* Default padded content area inside a scrollable `.main-content` pane.
@@ -266,6 +322,9 @@ a:focus-visible {
 	platforms/webviews).
 */
 .main-content-inner {
+	width: 100%;
+	max-width: var(--content-max-width);
+	margin-inline: auto;
 	padding: 0 var(--main-pad-x) var(--main-pad-y);
 }
 
@@ -273,19 +332,109 @@ a:focus-visible {
 
 	Usage:
 	- Add `tv-page-header` to the top heading container in each view.
-	- Works even though `.main-content` uses padding, by offsetting via negative margins.
+	- Shares the same centered content bounds as `.main-content-inner`.
 */
 .main-content .tv-page-header {
 	position: sticky;
 	top: 0;
 	z-index: 20;
 	margin: 0 0 20px;
-	padding: 14px var(--main-pad-x) 14px;
+	padding: 22px var(--header-pad-x) 18px;
 
 	/* Ensure scrolled content doesn't show through the sticky area */
 	background: rgba(0, 0, 0, 0.94);
 	border-bottom: 1px solid var(--border-subtle);
 	backdrop-filter: blur(10px);
+}
+
+.main-content .tv-page-header .mantine-Title-root {
+	font-size: clamp(26px, 2.4vw, 32px);
+	line-height: 1.2;
+}
+
+.settings-header-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 16px;
+	margin-bottom: 18px;
+}
+
+.settings-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 100%;
+}
+
+.settings-profile-select {
+	width: 190px;
+	min-width: 0;
+	flex: 1 1 140px;
+}
+
+.main-content .settings-page-header {
+	padding-bottom: 0;
+	margin-bottom: 12px;
+}
+
+.logs-diagnostics {
+	margin-top: 8px;
+}
+
+@media (min-width: 1200px) {
+	.sidebar {
+		width: 196px;
+	}
+
+	.sidebar-header {
+		padding-inline: 20px;
+	}
+
+	.sidebar-logo {
+		justify-content: flex-start;
+	}
+
+	.sidebar-brand,
+	.sidebar-nav-link .mantine-NavLink-body {
+		display: block;
+	}
+
+	.sidebar-nav-link {
+		justify-content: flex-start;
+		gap: 12px;
+	}
+
+	.sidebar-footer {
+		align-items: flex-start;
+		padding-inline: 24px;
+	}
+}
+
+@media (max-width: 640px) {
+	.sidebar {
+		width: 60px;
+		min-width: 60px;
+	}
+
+	.sidebar-nav,
+	.sidebar-header,
+	.sidebar-footer {
+		padding-inline: 8px;
+	}
+
+	.sidebar-nav-link {
+		padding-inline: 10px;
+	}
+
+	.main-content .tv-page-header {
+		padding-top: 18px;
+	}
+
+	.settings-header-actions {
+		width: 100%;
+	}
 }
 
 @supports not (
@@ -318,93 +467,7 @@ a:focus-visible {
 	background: var(--accent-primary);
 }
 
-/* Instructions Card */
-.instructions-card {
-	background: var(--bg-card);
-	border: 1px solid var(--border-default);
-	border-radius: 16px;
-	padding: 24px 28px;
-	margin-bottom: 32px;
-	position: relative;
-	overflow: hidden;
-}
-
-.instructions-card::before {
-	content: "";
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 60px;
-	height: 2px;
-	background: var(--accent-primary);
-}
-
-.instructions-card-title {
-	/* DM Serif Display looks great for big headlines, but gets finicky at ~18px.
-	   Use the UI font here for a cleaner, more "designed" look. */
-	font-family:
-		var(--tv-font-heading), "Sora", -apple-system, BlinkMacSystemFont,
-		"Segoe UI", sans-serif;
-	font-size: 17px;
-	font-weight: 600;
-	letter-spacing: -0.01em;
-	line-height: 1.2;
-	color: var(--text-primary);
-	margin-bottom: 12px;
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.instructions-card-title .highlight {
-	color: var(--accent-primary);
-}
-
-.instructions-card-text {
-	font-size: 14px;
-	color: var(--text-secondary);
-	line-height: 1.6;
-	margin-bottom: 0;
-}
-
-.instructions-methods {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	margin-bottom: 0;
-}
-
-/* Only add extra spacing when the descriptive paragraph is present. */
-.instructions-methods + .instructions-card-text {
-	margin-top: 16px;
-}
-
-.instruction-method {
-	display: flex;
-	align-items: center;
-	gap: 12px;
-}
-
-.instruction-label {
-	font-size: 13px;
-	font-weight: 600;
-	color: var(--text-secondary);
-	min-width: 50px;
-}
-
-.instruction-desc {
-	font-size: 12px;
-	color: var(--text-muted);
-	margin-left: 4px;
-}
-
 /* Keyboard Shortcuts */
-.kbd-combo {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-}
-
 .kbd-plus {
 	color: var(--text-muted);
 	font-size: 11px;
@@ -648,7 +711,7 @@ a:focus-visible {
 	font-size: 13px;
 	font-weight: 500;
 	color: var(--text-secondary);
-	padding: 12px 20px;
+	padding: 12px 14px;
 	border: none;
 	background: transparent;
 	transition: all 0.2s ease;
@@ -684,10 +747,15 @@ a:focus-visible {
 
 /* Prevent tab list height changes */
 .settings-tabs .mantine-Tabs-list {
-	border-bottom: 1px solid var(--border-subtle);
+	border-bottom: none;
 	gap: 0;
-	margin-bottom: 16px;
+	margin-bottom: 0;
 	min-height: 45px;
+	flex-wrap: wrap;
+}
+
+.settings-tabs .mantine-Tabs-list::before {
+	border: none;
 }
 
 /* Remove checkmarks in dropdown options (Mantine Select/Combobox) */
@@ -961,6 +1029,11 @@ a:focus-visible {
 	padding: 16px 0;
 	min-height: 72px;
 	border-bottom: 1px solid var(--border-subtle);
+	gap: 24px;
+}
+
+.settings-row > div:first-child {
+	min-width: 0;
 }
 
 /* Utility: visually grey out a row when its controls are disabled */
@@ -974,6 +1047,23 @@ a:focus-visible {
 	align-items: center;
 	gap: 8px;
 	flex-shrink: 0;
+	max-width: 100%;
+}
+
+@media (max-width: 760px) {
+	.settings-row {
+		flex-wrap: wrap;
+		gap: 12px;
+	}
+
+	.settings-row-actions {
+		flex-wrap: wrap;
+		min-width: 0;
+	}
+
+	.settings-row-actions > * {
+		max-width: 100%;
+	}
 }
 
 .provider-visibility-row {

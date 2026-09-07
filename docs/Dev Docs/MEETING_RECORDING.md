@@ -3,7 +3,8 @@
 ## Behavior
 
 - Home has a compact single-row floating recorder with icon-only Record, Pause/Resume,
-  Stop & transcribe, Cancel, and elapsed captured time. Its options popover holds
+  Stop & transcribe, Stop & save for later, and elapsed captured time. Active ordinary
+  dictation and transcription still offer Cancel. Its options popover holds
   a remembered Dictation/Meeting selector. Meeting options include a separate model
   picker and Computer audio. Record has an accessible label but no tooltip. Detailed
   errors and saved recordings open a separate dialog; the popover has no scrollbar.
@@ -39,8 +40,58 @@
 - Providers may impose shorter duration/timeouts or quotas. A failed upload keeps
   the complete source and completed progress for retry. Automatic splitting does
   not bypass quotas, authentication, or managed model policy.
-- Cancel during capture discards that capture. Cancel during transcription keeps
-  the full recovery audio.
+- Escape or **Stop & save for later** during a Home capture stops it without transcription and keeps
+  its recovery audio and original mode/model. This also applies while paused.
+  Saved recordings offers Transcribe or an explicit, confirmed Discard action.
+  Ordinary F3 cancellation stays unchanged: it does not start writing a recovery
+  journal. Cancel during transcription keeps the full recovery audio.
+
+## Local file imports
+
+`recording_import_file` is an explicit user action from the Transcribe file page.
+It takes an absolute local path plus a `RecordingPreferences` snapshot. Native
+dialog/drag selection alone never calls it. No source path is put in settings,
+History, request logs or browser local storage; the UI shows only the basename.
+
+Local decoding uses the same Symphonia 0.5 family already used by rodio, enabling
+WAV/PCM, MP3, FLAC and ADTS AAC. No external FFmpeg process,
+system install, new provider adapter or credential is required. See the
+[decoder's supported formats](https://docs.rs/symphonia/0.5.5/symphonia/).
+Decode runs off the async runtime and webview in bounded packets/minute blocks,
+downmixing/resampling to the existing mono 16 kHz journal format. Inputs are
+regular local mono/stereo files up to 192 kHz, 2 GiB and four hours. Format changes,
+known decode errors and declared lossless frame-count mismatches reject the import;
+the decoder cannot detect an already-truncated but otherwise valid lossy source.
+AIFF is not enabled: a valid synthetic fixture fails in the current decoder's
+AIFF packet handling. MP4/M4A (including ALAC) and Ogg/Vorbis are also disabled
+pending bounded container/decoder setup allocation support in the decoder family.
+Their optional parsers are not enabled, rather than relying only on file extensions.
+Supported codecs have offline synthetic fixture coverage, including malformed
+input regressions. Filename extensions do not determine completeness checks.
+
+A UUID-named private `.importing` file and options snapshot are staged first.
+Only a completely decoded/synced file is renamed to `.pcm` and made recoverable;
+an interrupted import is never presented as a complete recording. The original
+source remains untouched. Interrupted staging is cleaned separately from complete
+recovery audio. Subsequent upload failures return a recovery ID so the same page
+offers resumable recovery, not a duplicate paid import. Native job ownership spans
+decode, final WAV preparation and transcription, including cancellation. Existing
+provider limits, managed policy and recorded route choices remain in force.
+
+`FileImportResult.transcription_complete` distinguishes a saved History result from
+a failed transcription even when temporary-file cleanup fails. Finish cleanup checks
+the durable History completion marker before requiring PCM or submitting any audio.
+Staging cleanup is fallible and preserves mode metadata if its audio cannot be
+removed; Delete all recordings includes interrupted imports under exclusive ownership.
+Only decoding and raw preparation are block-bounded: the existing final-WAV pipeline
+still has the memory-copy ceiling described above.
+
+The page remains mounted but hidden during navigation, preserving the selected
+file and job state in memory. Native drag listeners detach off-page. No automatic
+upload, microphone start, clipboard insertion or provider switching is introduced.
+Complete imports share the recovery/History persistence and retention behavior
+documented below. File-manager context menus, a separate drop overlay, video and
+multiple-file queues remain separate features.
 
 ## Computer audio capabilities
 
@@ -63,13 +114,19 @@ and tested. No cross-platform computer-audio release claim is made.
 
 Home recordings deliberately write raw audio into `meeting-recovery` under the
 application data directory. This is additional local persistence even if normal
-completed-recording retention is disabled; the recorder explains it before use.
+completed-recording retention is disabled.
 No provider request is made until Stop & transcribe or the saved recording's
 Transcribe action.
 
 - Append-only audio is synced approximately once per second and at normal stop.
   An abrupt process crash can lose the unsynced tail; incomplete final frames are
   ignored. The audio journal retains samples beyond the ordinary memory ring.
+- Stopping/cancelling a journal-backed Home recording drains the capture worker
+  and syncs the retained tail, including when Hot Mic is enabled. Ordinary Hot Mic
+  shortcut dictation keeps its armed stream. If a Home worker cannot shut down
+  cleanly, the journal is frozen and a new capture is refused until app restart;
+  the stopped audio remains available. Cancelling before the first audio callback
+  removes empty recording metadata rather than creating an unusable recovery item.
 - Journals use owner-only file/directory permissions on Unix. Audio is not
   encrypted on disk; OS account and disk encryption protect it.
 - A recording is limited to four hours or 2 GiB of raw audio, whichever comes
@@ -157,13 +214,18 @@ operation remains available without managed access.
 
 ## Validation and remaining acceptance
 
-The History/recording-mode redesign passes the desktop's full Rust test command
+The prior History/recording-mode checkpoint (`daaedb5`, before the desktop QoL
+batch) passed the desktop's full Rust test command
 (829 passed, 12 ignored), frontend tests (664 passed, 57 skipped), typechecking,
 lint, formatting, Knip, renderer production build and the local-Whisper compile
 check. API Edge's full suite passes (153 tests), including mocked enabled/disabled
 diarization routes. No real credentials or paid API calls are needed by these tests.
 Native playback, visual acceptance, and physical recording of this redesign still
 require an app restart and manual checks. No release or deployment was performed.
+
+For the newer desktop/file-import batch's checks and remaining acceptance, see
+`DESKTOP_QOL_BATCH.md`; the counts above are checkpoint evidence, not a claim
+about subsequent changes.
 
 ### Earlier recorder baseline checks (before the History redesign)
 

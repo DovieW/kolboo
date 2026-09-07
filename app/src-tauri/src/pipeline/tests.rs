@@ -27,6 +27,9 @@ pub(super) struct FakeAudioCapture {
     before_wav: Vec<u8>,
     after_wav: Vec<u8>,
     _queued_events: std::collections::VecDeque<AudioCaptureEvent>,
+    recovery_path: Option<std::path::PathBuf>,
+    cancellation_calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    fail_recovery_finish: bool,
 }
 
 impl FakeAudioCapture {
@@ -40,6 +43,9 @@ impl FakeAudioCapture {
             before_wav: vec![9],
             after_wav: vec![8],
             _queued_events: std::collections::VecDeque::new(),
+            recovery_path: None,
+            cancellation_calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+            fail_recovery_finish: false,
         }
     }
 
@@ -141,6 +147,34 @@ impl AudioCaptureBackend for FailingStartAudioCapture {
 }
 
 impl AudioCaptureBackend for FakeAudioCapture {
+    fn recovery_path(&self) -> Option<std::path::PathBuf> {
+        self.recovery_path.clone()
+    }
+
+    fn set_recovery_path(
+        &mut self,
+        path: Option<std::path::PathBuf>,
+    ) -> Result<(), AudioCaptureError> {
+        self.recovery_path = path;
+        Ok(())
+    }
+
+    fn finish_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        self.cancellation_calls.lock().unwrap().push("finish");
+        if self.fail_recovery_finish {
+            return Err(AudioCaptureError::Encoding("Synthetic sync failure".into()));
+        }
+        Ok(())
+    }
+
+    fn discard_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        self.cancellation_calls.lock().unwrap().push("discard");
+        if let Some(path) = self.recovery_path.take() {
+            crate::audio_capture::journal::discard(&path).unwrap();
+        }
+        Ok(())
+    }
+
     fn set_paused(&mut self, _paused: bool) -> Result<(), AudioCaptureError> {
         Ok(())
     }
@@ -197,7 +231,9 @@ impl AudioCaptureBackend for FakeAudioCapture {
         ))
     }
 
-    fn stop_recording(&mut self) {}
+    fn stop_recording(&mut self) {
+        self.cancellation_calls.lock().unwrap().push("stop");
+    }
     fn stop(&mut self) {}
 
     fn poll_vad_event(&self) -> Option<AudioCaptureEvent> {
@@ -466,6 +502,98 @@ fn test_cancel_from_transcribing_transitions_to_idle() {
 }
 
 #[test]
+fn cancelling_home_capture_preserves_audio_and_mode_without_submitting() {
+    use crate::audio_capture::journal::{read_chunk, Journal};
+    use crate::recordings::options::{MeetingModel, RecordingMode, RecordingPreferences};
+
+    for mode in [RecordingMode::Dictation, RecordingMode::Meeting] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("recording.pcm");
+        let mut journal = Journal::create(&path, 16000, 1).unwrap();
+        journal.append(&[0.25, -0.25], 16000, 1).unwrap();
+        journal.finish().unwrap();
+        drop(journal);
+        let preferences = RecordingPreferences {
+            mode,
+            meeting_model: Some(MeetingModel {
+                provider: "openai".into(),
+                model: "gpt-4o-transcribe-diarize".into(),
+                use_managed: false,
+            }),
+        };
+        preferences.save_journal(&path).unwrap();
+        let capture = FakeAudioCapture::new();
+        let calls = capture.cancellation_calls.clone();
+        let pipeline = SharedPipeline::new_for_tests(
+            test_config_with_max_recording_bytes(),
+            Box::new(capture),
+        );
+        pipeline
+            .start_recording_with_output(true, Some(path.clone()), false)
+            .unwrap();
+        let token = pipeline.get_cancel_token().unwrap();
+        pipeline.set_recording_paused(true).unwrap();
+
+        pipeline.cancel();
+
+        assert_eq!(*calls.lock().unwrap(), vec!["stop", "finish"]);
+        assert!(token.is_cancelled());
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        assert_eq!(read_chunk(&path, 0, 10).unwrap().2, vec![0.25, -0.25]);
+        let recovered = RecordingPreferences::load_journal(&path).unwrap();
+        assert_eq!(recovered.mode, preferences.mode);
+        assert_eq!(recovered.meeting_model, preferences.meeting_model);
+        assert!(pipeline.clone_last_wav_bytes().is_none());
+        assert!(!pipeline.is_recovering());
+
+        // A subsequent ordinary shortcut session must not inherit this journal.
+        pipeline.start_recording().unwrap();
+        assert!(!pipeline.is_history_only_recording());
+        assert!(pipeline.recovery_path().is_none());
+        pipeline.cancel();
+        assert!(path.exists());
+        assert!(path.with_extension("options.json").exists());
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec!["stop", "finish", "stop", "discard"]
+        );
+    }
+}
+
+#[test]
+fn cancelling_home_capture_reports_sync_failure_without_discarding() {
+    let mut capture = FakeAudioCapture::new();
+    capture.fail_recovery_finish = true;
+    let calls = capture.cancellation_calls.clone();
+    let pipeline =
+        SharedPipeline::new_for_tests(test_config_with_max_recording_bytes(), Box::new(capture));
+    pipeline
+        .start_recording_with_output(true, None, false)
+        .unwrap();
+    let token = pipeline.get_cancel_token().unwrap();
+
+    pipeline.cancel();
+
+    assert!(token.is_cancelled());
+    assert_eq!(pipeline.state(), PipelineState::Error);
+    assert_eq!(*calls.lock().unwrap(), vec!["stop", "finish"]);
+}
+
+#[test]
+fn cancelling_shortcut_capture_does_not_create_recovery_persistence() {
+    let capture = FakeAudioCapture::new();
+    let calls = capture.cancellation_calls.clone();
+    let pipeline =
+        SharedPipeline::new_for_tests(test_config_with_max_recording_bytes(), Box::new(capture));
+    pipeline.start_recording().unwrap();
+    pipeline.cancel();
+
+    assert_eq!(pipeline.state(), PipelineState::Idle);
+    assert!(pipeline.recovery_path().is_none());
+    assert_eq!(*calls.lock().unwrap(), vec!["stop", "discard"]);
+}
+
+#[test]
 fn test_stop_recording_transitions_to_idle() {
     let pipeline = SharedPipeline::new(PipelineConfig::default());
     let token = CancellationToken::new();
@@ -546,6 +674,24 @@ fn recovery_owns_pipeline_between_chunks_and_cancels_without_new_recording() {
     pipeline.start_recording().unwrap();
     assert!(pipeline.begin_recovery().is_err());
     pipeline.cancel();
+}
+
+#[test]
+fn recovery_retry_clears_prior_error_before_cancellable_preparation() {
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_with_max_recording_bytes(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    set_state_for_test(&pipeline, PipelineState::Error, None);
+
+    let token = pipeline.begin_recovery().unwrap();
+    assert_eq!(pipeline.state(), PipelineState::Idle);
+    assert!(pipeline.is_recovering());
+    pipeline.cancel();
+    assert!(token.is_cancelled());
+    assert!(pipeline.is_recovering());
+    pipeline.end_recovery();
+    assert!(!pipeline.is_recovering());
 }
 
 #[test]

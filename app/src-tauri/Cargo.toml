@@ -92,6 +92,8 @@ rodio = { version = "0.22.2", default-features = false, features = [
 # Audio capture
 cpal = "0.17.3"
 hound = "3.5"  # WAV encoding
+# Reuse rodio's decoder family for local file imports, without an FFmpeg process.
+symphonia = { version = "0.5.5", default-features = false, features = ["wav", "pcm", "mp3", "flac", "aac"] }
 
 # Voice Activity Detection
 webrtc-vad = "0.4"
@@ -136,6 +138,10 @@ thiserror = "2.0"
 tauri-plugin-global-shortcut = "2.3.1"
 open = "5.4.1"
 
+[target.'cfg(unix)'.dependencies]
+# No-follow/nonblocking file opens protect deliberate local audio imports.
+libc = "0.2"
+
 # Windows audio control (WASAPI)
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61.3", features = [
@@ -162,6 +168,7 @@ windows = { version = "0.61.3", features = [
     "Win32_System_Threading",
     "Win32_System_Variant",
     "Win32_Storage_Xps",
+    "Win32_Storage_FileSystem",
 ] }
 keyring = { version = "3", features = ["windows-native"] }
 

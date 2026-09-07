@@ -7,14 +7,12 @@ import {
 	Divider,
 	Group,
 	Indicator,
-	Kbd,
 	NavLink,
 	Popover,
 	ScrollArea,
 	SegmentedControl,
 	Select,
 	Stack,
-	Tabs,
 	Text,
 	Title,
 	Tooltip,
@@ -23,6 +21,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BarChart2,
+	FileAudio,
 	FileText,
 	Filter,
 	Home,
@@ -39,6 +38,7 @@ import {
 } from "react";
 import appPackageJson from "../package.json";
 import { AccountView } from "./components/account";
+import { FileTranscription } from "./components/FileTranscription";
 import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
@@ -56,11 +56,6 @@ import {
 	setBootGuideState,
 } from "./lib/bootStorage";
 import { frontendLog } from "./lib/frontendLog";
-import {
-	DEFAULT_HOLD_HOTKEY,
-	DEFAULT_PASTE_LAST_HOTKEY,
-	DEFAULT_TOGGLE_HOTKEY,
-} from "./lib/hotkeyDefaults";
 import { listAllLlmModelKeys, listAllSttModelKeys } from "./lib/modelOptions";
 import {
 	useSetSettingsGuideState,
@@ -71,7 +66,6 @@ import { isTelemetryDisclosureResolved } from "./lib/settings/telemetryDisclosur
 import {
 	type CostTimeframe,
 	getPolicyPathEnforcement,
-	type HotkeyConfig,
 	tauriAPI,
 } from "./lib/tauri";
 import { listenTyped } from "./lib/tauri/events";
@@ -83,7 +77,13 @@ import {
 } from "./lib/updates";
 import "./styles.css";
 
-type View = "home" | "settings" | "logs" | "usage-stats" | "account";
+type View =
+	| "home"
+	| "transcribe-file"
+	| "settings"
+	| "logs"
+	| "usage-stats"
+	| "account";
 
 function Sidebar({
 	activeView,
@@ -121,59 +121,44 @@ function Sidebar({
 	};
 
 	return (
-		<aside className="sidebar">
+		<aside className="sidebar" aria-label="Kolboo">
 			<header className="sidebar-header">
 				<div className="sidebar-logo">
 					<Logo size={32} />
+					<span className="sidebar-brand">Kolboo</span>
 				</div>
 			</header>
 
-			<nav className="sidebar-nav">
-				<Tooltip label="Home" position="right" withArrow>
-					<NavLink
-						leftSection={<Home size={20} />}
-						active={activeView === "home"}
-						onClick={() => onViewChange("home")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Settings" position="right" withArrow>
-					<NavLink
-						leftSection={<Settings size={20} />}
-						active={activeView === "settings"}
-						onClick={() => onViewChange("settings")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Stats" position="right" withArrow>
-					<NavLink
-						leftSection={<BarChart2 size={20} />}
-						active={activeView === "usage-stats"}
-						onClick={() => onViewChange("usage-stats")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Account" position="right" withArrow>
-					<NavLink
-						leftSection={<UserRound size={20} />}
-						active={activeView === "account"}
-						onClick={() => onViewChange("account")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Logs" position="right" withArrow>
-					<NavLink
-						leftSection={<FileText size={20} />}
-						active={activeView === "logs"}
-						onClick={() => onViewChange("logs")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
+			<nav className="sidebar-nav" aria-label="Main navigation">
+				{(
+					[
+						{ view: "home", label: "Home", icon: Home },
+						{
+							view: "transcribe-file",
+							label: "Transcribe file",
+							icon: FileAudio,
+						},
+						{ view: "settings", label: "Settings", icon: Settings },
+						{ view: "usage-stats", label: "Usage", icon: BarChart2 },
+						{ view: "account", label: "Account", icon: UserRound },
+						{ view: "logs", label: "Logs", icon: FileText },
+					] as const
+				).map(({ view, label, icon: Icon }) => (
+					<Tooltip key={view} label={label} position="right" withArrow>
+						<NavLink
+							component="button"
+							type="button"
+							label={label}
+							aria-label={label}
+							aria-current={activeView === view ? "page" : undefined}
+							leftSection={<Icon size={20} aria-hidden="true" />}
+							active={activeView === view}
+							onClick={() => onViewChange(view)}
+							variant="filled"
+							className="sidebar-nav-link"
+						/>
+					</Tooltip>
+				))}
 			</nav>
 
 			<footer className="sidebar-footer">
@@ -219,65 +204,13 @@ function Sidebar({
 	);
 }
 
-function HotkeyDisplay({ config }: { config: HotkeyConfig | null }) {
-	if (!config) {
-		return <Kbd className="hotkey-placeholder">Unassigned</Kbd>;
-	}
-
-	const parts = [
-		...config.modifiers.map((m) => m.charAt(0).toUpperCase() + m.slice(1)),
-		config.key,
-	];
-
-	return (
-		<span className="kbd-combo">
-			{parts.map((part, index) => (
-				<span key={part}>
-					<Kbd>{part}</Kbd>
-					{index < parts.length - 1 && <span className="kbd-plus">+</span>}
-				</span>
-			))}
-		</span>
-	);
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: retained as a disabled design reference
-function InstructionsCard() {
-	const { data: settings } = useSettings();
-
-	const toggleHotkey = settings
-		? settings.toggle_hotkey
-		: DEFAULT_TOGGLE_HOTKEY;
-	const holdHotkey = settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY;
-	const pasteLastHotkey = settings
-		? settings.paste_last_hotkey
-		: DEFAULT_PASTE_LAST_HOTKEY;
-
-	return (
-		<div className="instructions-card animate-in">
-			<h2 className="instructions-card-title">Dictate with your voice</h2>
-			<div className="instructions-methods">
-				<div className="instruction-method">
-					<span className="instruction-label">Toggle:</span>
-					<HotkeyDisplay config={toggleHotkey} />
-					<span className="instruction-desc">Press to start/stop</span>
-				</div>
-				<div className="instruction-method">
-					<span className="instruction-label">Hold:</span>
-					<HotkeyDisplay config={holdHotkey} />
-					<span className="instruction-desc">Hold to record</span>
-				</div>
-				<div className="instruction-method">
-					<span className="instruction-label">Paste:</span>
-					<HotkeyDisplay config={pasteLastHotkey} />
-					<span className="instruction-desc">Paste last result</span>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
+function HomeView({
+	onJumpToLog,
+	onTranscribeFile,
+}: {
+	onJumpToLog?: (logId: string) => void;
+	onTranscribeFile: () => void;
+}) {
 	const homeHeaderRef = useRef<HTMLElement | null>(null);
 	const [homeHeaderHeight, setHomeHeaderHeight] = useState(0);
 
@@ -327,18 +260,22 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 	);
 
 	return (
-		<div className="main-content" style={homeStickyStyle}>
+		<div className="main-content home-page" style={homeStickyStyle}>
 			<header ref={homeHeaderRef} className="tv-page-header animate-in">
-				<Title order={1} mb={4}>
-					Welcome to Kolboo
-				</Title>
-				<Text c="dimmed" size="sm">
-					~-~-~-~-~-~
-				</Text>
+				<Group justify="space-between" gap="sm">
+					<Title order={1}>Home</Title>
+					<Button
+						variant="default"
+						size="sm"
+						leftSection={<FileAudio size={16} />}
+						onClick={onTranscribeFile}
+					>
+						Transcribe file
+					</Button>
+				</Group>
 			</header>
 
 			<div className="main-content-inner">
-				{/* <InstructionsCard /> */}
 				<MicStatusCard />
 				<HistoryFeed onJumpToLog={onJumpToLog} />
 				<RecordingBar />
@@ -349,7 +286,6 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 }
 
 function UsageStatsView() {
-	const [activeStatsTab, setActiveStatsTab] = useState<string>("cost");
 	const [timeframe, setTimeframe] = useState<CostTimeframe>("30d");
 	const [filtersOpened, setFiltersOpened] = useState(false);
 
@@ -386,7 +322,7 @@ function UsageStatsView() {
 			<header className="tv-page-header animate-in">
 				<Group justify="space-between" align="center" wrap="wrap">
 					<Title order={1} mb={0}>
-						Stats
+						Usage
 					</Title>
 
 					<Group gap={8} align="center" wrap="nowrap">
@@ -475,8 +411,8 @@ function UsageStatsView() {
 										onChange={(value) => setStatsKind(value as StatsKindFilter)}
 										data={[
 											{ value: "all", label: "All" },
-											{ value: "stt", label: "STT" },
-											{ value: "llm", label: "LLM" },
+											{ value: "stt", label: "Transcription" },
+											{ value: "llm", label: "AI text" },
 										]}
 										size="xs"
 										fullWidth
@@ -532,7 +468,7 @@ function UsageStatsView() {
 											<Accordion.Control>
 												<Group justify="space-between" wrap="nowrap" w="100%">
 													<Text size="xs" fw={600}>
-														STT models
+														Transcription models
 													</Text>
 													{selectedSttModelKeys.length > 0 ? (
 														<Button
@@ -601,7 +537,7 @@ function UsageStatsView() {
 											<Accordion.Control>
 												<Group justify="space-between" wrap="nowrap" w="100%">
 													<Text size="xs" fw={600}>
-														LLM models
+														Text models
 													</Text>
 													{selectedLlmModelKeys.length > 0 ? (
 														<Button
@@ -701,28 +637,13 @@ function UsageStatsView() {
 			</header>
 
 			<div className="main-content-inner">
-				<Tabs
-					value={activeStatsTab}
-					onChange={(value) => {
-						if (!value) return;
-						setActiveStatsTab(value);
-					}}
-					keepMounted={false}
-				>
-					<Tabs.List>
-						<Tabs.Tab value="cost">Cost</Tabs.Tab>
-					</Tabs.List>
-
-					<Tabs.Panel value="cost" pt="md">
-						<CostTab
-							timeframe={timeframe}
-							kind={statsKind}
-							sttModelKeys={selectedSttModelKeys}
-							llmModelKeys={selectedLlmModelKeys}
-							excludeFreeTier={excludeFreeTier}
-						/>
-					</Tabs.Panel>
-				</Tabs>
+				<CostTab
+					timeframe={timeframe}
+					kind={statsKind}
+					sttModelKeys={selectedSttModelKeys}
+					llmModelKeys={selectedLlmModelKeys}
+					excludeFreeTier={excludeFreeTier}
+				/>
 			</div>
 		</div>
 	);
@@ -958,12 +879,15 @@ export default function App() {
 			case "home":
 				return (
 					<HomeView
+						onTranscribeFile={() => setActiveView("transcribe-file")}
 						onJumpToLog={(logId) => {
 							setLogsJumpToId(logId);
 							setActiveView("logs");
 						}}
 					/>
 				);
+			case "transcribe-file":
+				return null;
 			case "settings":
 				return (
 					<SettingsViewWithGuideLauncher
@@ -974,12 +898,10 @@ export default function App() {
 				);
 			case "logs":
 				return (
-					<div className="main-content">
-						<LogsView
-							jumpToLogId={logsJumpToId}
-							onJumpHandled={() => setLogsJumpToId(null)}
-						/>
-					</div>
+					<LogsView
+						jumpToLogId={logsJumpToId}
+						onJumpHandled={() => setLogsJumpToId(null)}
+					/>
 				);
 			case "usage-stats":
 				return <UsageStatsView />;
@@ -988,6 +910,7 @@ export default function App() {
 			default:
 				return (
 					<HomeView
+						onTranscribeFile={() => setActiveView("transcribe-file")}
 						onJumpToLog={(logId) => {
 							setLogsJumpToId(logId);
 							setActiveView("logs");
@@ -1011,6 +934,9 @@ export default function App() {
 
 	return (
 		<div className="app-layout">
+			<a className="skip-navigation" href="#main-content">
+				Skip to content
+			</a>
 			<AccentColorSync />
 			<Sidebar
 				activeView={activeView}
@@ -1022,7 +948,18 @@ export default function App() {
 					}
 				}}
 			/>
-			{renderView()}
+			<main id="main-content" className="app-page" tabIndex={-1}>
+				{renderView()}
+				<div
+					className="retained-page"
+					hidden={activeView !== "transcribe-file"}
+				>
+					<FileTranscription
+						active={activeView === "transcribe-file"}
+						onOpenHistory={() => setActiveView("home")}
+					/>
+				</div>
+			</main>
 
 			<SettingsGuideOverlay
 				opened={settingsGuideOpen}

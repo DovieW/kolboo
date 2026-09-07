@@ -15,6 +15,7 @@ import {
 } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+	Archive,
 	CircleAlert,
 	Ellipsis,
 	Mic,
@@ -26,7 +27,11 @@ import {
 import { useEffect, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import { recordingControlsAPI } from "../lib/tauri/commands";
-import type { RecordingPreferences } from "../lib/tauri/types";
+import { listenTyped } from "../lib/tauri/events";
+import type {
+	FileImportResult,
+	RecordingPreferences,
+} from "../lib/tauri/types";
 import { MeetingModelDialog } from "./MeetingModelDialog";
 
 /** Uses the backend pipeline as owner, including recordings started with F3. */
@@ -35,6 +40,10 @@ export function RecordingBar() {
 	const [computerAudio, setComputerAudio] = useState(false);
 	const [optionsOpen, setOptionsOpen] = useState(false);
 	const [recoveryOpen, setRecoveryOpen] = useState(false);
+	const [discardId, setDiscardId] = useState<string | null>(null);
+	const [recoveryResult, setRecoveryResult] = useState<FileImportResult | null>(
+		null,
+	);
 	const [modelOpen, setModelOpen] = useState(false);
 	const preferences = useQuery({
 		queryKey: ["recording-preferences"],
@@ -92,13 +101,58 @@ export function RecordingBar() {
 		queryFn: recordingControlsAPI.listRecovery,
 		refetchInterval: 3000,
 	});
+	useEffect(() => {
+		let disposed = false;
+		let unlisten: (() => void) | undefined;
+		void listenTyped("pipeline-cancelled", () => {
+			if (disposed) return;
+			// Escape may stop a History-only recording in another window. Ask
+			// the backend what was retained; cancellation alone is not proof.
+			for (const queryKey of [
+				"recording-recovery",
+				"home-recording-state",
+				"recording-can-pause",
+			])
+				void client.invalidateQueries({ queryKey: [queryKey] });
+		})
+			.then((stop) => {
+				if (disposed) stop();
+				else unlisten = stop;
+			})
+			.catch(() => {
+				// Existing polling remains the fallback if event setup is unavailable.
+			});
+		return () => {
+			disposed = true;
+			unlisten?.();
+		};
+	}, [client]);
 	const recover = useMutation({
 		mutationFn: recordingControlsAPI.recover,
-		onSettled: () =>
-			client.invalidateQueries({ queryKey: ["recording-recovery"] }),
+		onSuccess: (result) => {
+			setRecoveryResult(result);
+			if (result.message) {
+				setOptionsOpen(false);
+				setRecoveryOpen(true);
+			}
+		},
+		onSettled: async () => {
+			await Promise.all(
+				[
+					"recording-recovery",
+					"home-recording-state",
+					"historyPage",
+					"historyAll",
+				].map((queryKey) => client.invalidateQueries({ queryKey: [queryKey] })),
+			);
+		},
 	});
 	const discard = useMutation({
 		mutationFn: recordingControlsAPI.discardRecovery,
+		onSuccess: (_, id) => {
+			setDiscardId(null);
+			if (recoveryResult?.recovery_id === id) setRecoveryResult(null);
+		},
 		onSettled: () =>
 			client.invalidateQueries({ queryKey: ["recording-recovery"] }),
 	});
@@ -114,8 +168,13 @@ export function RecordingBar() {
 	});
 	const cancel = useMutation({
 		mutationFn: recordingControlsAPI.cancel,
-		onSettled: () =>
-			client.invalidateQueries({ queryKey: ["home-recording-state"] }),
+		onSettled: async () => {
+			await Promise.all([
+				client.invalidateQueries({ queryKey: ["home-recording-state"] }),
+				client.invalidateQueries({ queryKey: ["recording-recovery"] }),
+				client.invalidateQueries({ queryKey: ["recording-can-pause"] }),
+			]);
+		},
 	});
 	const idle = state.data === "idle" || state.data === "error";
 	const error =
@@ -137,14 +196,28 @@ export function RecordingBar() {
 			setRecoveryOpen(true);
 		}
 	}, [errorMessage]);
-	const savedCount = recovery.data?.length ?? 0;
-	const pending = action.isPending || recover.isPending;
+	const recoveryMessage = recoveryResult?.message;
+	const recoveryIds = [...(recovery.data ?? [])];
+	// Cleanup can fail after the PCM was already removed. Retain the returned
+	// recovery handle even if the disk listing only contains remaining audio.
+	if (
+		recoveryResult?.recovery_id &&
+		!recoveryIds.includes(recoveryResult.recovery_id)
+	)
+		recoveryIds.push(recoveryResult.recovery_id);
+	const savedCount = recoveryIds.length;
+	const pending = action.isPending || recover.isPending || cancel.isPending;
 	const busy = !idle && !recording;
+	const canSaveForLater =
+		recording && canPause.data === true && !canPause.isError;
+	const cancelLabel = canSaveForLater ? "Stop & save for later" : "Cancel";
 	const optionsLabel = errorMessage
 		? "Recording options: error"
-		: savedCount
-			? `Recording options: ${savedCount} saved recordings`
-			: "Recording options";
+		: recoveryMessage
+			? "Recording options: recovery needs attention"
+			: savedCount
+				? `Recording options: ${savedCount} saved ${savedCount === 1 ? "recording" : "recordings"}`
+				: "Recording options";
 
 	return (
 		<Paper
@@ -233,16 +306,16 @@ export function RecordingBar() {
 					</ActionIcon>
 				)}
 				{(!idle && state.data) || pending ? (
-					<Tooltip label="Cancel">
+					<Tooltip label={cancelLabel}>
 						<ActionIcon
 							size={34}
 							variant="subtle"
 							color="gray"
-							aria-label="Cancel"
+							aria-label={cancelLabel}
 							disabled={cancel.isPending}
 							onClick={() => cancel.mutate()}
 						>
-							<X size={17} />
+							{canSaveForLater ? <Archive size={17} /> : <X size={17} />}
 						</ActionIcon>
 					</Tooltip>
 				) : null}
@@ -260,7 +333,13 @@ export function RecordingBar() {
 							size={34}
 							variant="subtle"
 							radius="xl"
-							color={errorMessage ? "red" : savedCount ? "orange" : "gray"}
+							color={
+								errorMessage
+									? "red"
+									: savedCount || recoveryMessage
+										? "orange"
+										: "gray"
+							}
 							aria-label={optionsLabel}
 							onClick={() => setOptionsOpen((open) => !open)}
 						>
@@ -345,37 +424,84 @@ export function RecordingBar() {
 			)}
 			<Modal
 				opened={recoveryOpen}
-				onClose={() => setRecoveryOpen(false)}
+				onClose={() => {
+					setRecoveryOpen(false);
+					setDiscardId(null);
+				}}
 				title="Saved recordings"
 				centered
 			>
 				<Stack gap="md">
 					{errorMessage && <Alert color="red">{errorMessage}</Alert>}
+					{recoveryMessage && (
+						<Alert
+							color={recoveryResult?.transcription_complete ? "orange" : "red"}
+							title={
+								recoveryResult?.transcription_complete
+									? "Transcript saved; cleanup needs attention"
+									: "Recovery needs attention"
+							}
+						>
+							{recoveryMessage}
+						</Alert>
+					)}
 					<Text size="sm" c="dimmed">
-						Audio is saved locally until transcription finishes. Recover or
-						discard interrupted recordings here.
+						Transcribe saved audio, finish a cleanup, or discard a recording.
 					</Text>
-					{recovery.data?.map((id, index) => (
+					{recovery.isSuccess && !savedCount && (
+						<Text size="sm">No saved recordings found.</Text>
+					)}
+					{recoveryIds.map((id, index) => (
 						<Stack key={id} gap={4}>
-							<Text size="xs">Saved audio {index + 1}</Text>
-							<Group gap={6}>
-								<Button
-									size="compact-xs"
-									disabled={!idle || pending || discard.isPending}
-									onClick={() => recover.mutate(id)}
-								>
-									Transcribe
-								</Button>
-								<Button
-									size="compact-xs"
-									color="red"
-									variant="subtle"
-									disabled={!idle || pending || discard.isPending}
-									onClick={() => discard.mutate(id)}
-								>
-									Discard
-								</Button>
-							</Group>
+							<Text size="xs">Saved recording {index + 1}</Text>
+							{discardId === id ? (
+								<Stack gap="xs">
+									<Text size="sm">
+										Remove this recording from recovery? This cannot be undone.
+									</Text>
+									<Group gap={6}>
+										<Button
+											size="compact-xs"
+											variant="default"
+											disabled={discard.isPending}
+											onClick={() => setDiscardId(null)}
+										>
+											Keep recording
+										</Button>
+										<Button
+											size="compact-xs"
+											color="red"
+											disabled={!idle || pending}
+											loading={discard.isPending}
+											onClick={() => discard.mutate(id)}
+										>
+											Discard recording
+										</Button>
+									</Group>
+								</Stack>
+							) : (
+								<Group gap={6}>
+									<Button
+										size="compact-xs"
+										disabled={!idle || pending || discard.isPending}
+										onClick={() => recover.mutate(id)}
+									>
+										{recoveryResult?.recovery_id === id &&
+										recoveryResult.transcription_complete
+											? "Finish cleanup"
+											: "Transcribe"}
+									</Button>
+									<Button
+										size="compact-xs"
+										color="red"
+										variant="subtle"
+										disabled={!idle || pending || discard.isPending}
+										onClick={() => setDiscardId(id)}
+									>
+										Discard
+									</Button>
+								</Group>
+							)}
 						</Stack>
 					))}
 				</Stack>

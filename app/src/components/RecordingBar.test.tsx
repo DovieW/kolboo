@@ -25,13 +25,21 @@ vi.mock("../lib/tauri/commands", () => ({
 	},
 }));
 
-function render(state?: string, paused = false, saved: string[] = []) {
+function render(
+	state?: string,
+	paused = false,
+	saved: string[] = [],
+	historyOnly = false,
+) {
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	if (state) client.setQueryData(["home-recording-state"], state);
 	client.setQueryData(["home-recording-paused"], paused);
-	client.setQueryData(["recording-can-pause"], state === "recording");
+	client.setQueryData(
+		["recording-can-pause"],
+		historyOnly && state === "recording",
+	);
 	client.setQueryData(["recording-recovery"], saved);
 	client.setQueryData(["recording-preferences"], {
 		mode: "dictation",
@@ -48,9 +56,10 @@ function render(state?: string, paused = false, saved: string[] = []) {
 
 describe("Home recording controls", () => {
 	it("offers resume without hiding stop when capture is paused", () => {
-		const html = render("recording", true);
+		const html = render("recording", true, [], true);
 		expect(html).toContain("Resume");
 		expect(html).toContain("Stop &amp; transcribe");
+		expect(html).toContain('aria-label="Stop &amp; save for later"');
 	});
 	it("offers recording from the idle backend state", () => {
 		const html = render("idle");
@@ -64,6 +73,8 @@ describe("Home recording controls", () => {
 		expect(html).toContain("Recording duration");
 		expect(html).toContain("Stop &amp; transcribe");
 		expect(html).toContain("Cancel");
+		expect(html).not.toContain("save for later");
+		expect(html).not.toContain("Discard");
 	});
 	it("keeps cancellation available during transcription", () => {
 		const html = render("transcribing");
@@ -75,7 +86,7 @@ describe("Home recording controls", () => {
 		expect(html).toContain(
 			'aria-label="Recording options: 3 saved recordings"',
 		);
-		expect(html).not.toContain("Saved audio 1");
+		expect(html).not.toContain("Saved recording 1");
 		expect(html).not.toContain("Computer audio");
 		expect(html).not.toContain("30-second sections");
 		expect(html.match(/<button\b/g)).toHaveLength(2);

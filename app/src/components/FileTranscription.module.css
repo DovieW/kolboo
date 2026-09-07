@@ -1,0 +1,48 @@
+.page {
+	--content-max-width: 860px;
+}
+.workspace {
+	width: 100%;
+	margin: 0 auto;
+	display: grid;
+	gap: 20px;
+	padding-bottom: 96px;
+}
+.drop,
+.dropActive {
+	border-style: dashed;
+	transition:
+		border-color 120ms ease,
+		background-color 120ms ease;
+}
+.dropActive {
+	border-color: var(--mantine-primary-color-filled);
+	background: var(--mantine-primary-color-light);
+}
+.fileIcon {
+	display: grid;
+	place-items: center;
+	width: 64px;
+	height: 64px;
+	border-radius: 20px;
+	color: var(--mantine-primary-color-filled);
+	background: var(--mantine-primary-color-light);
+}
+.fileName {
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+.model {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.noteIcon {
+	flex-shrink: 0;
+	color: var(--mantine-color-dimmed);
+}
+@media (prefers-reduced-motion: reduce) {
+	.drop,
+	.dropActive {
+		transition: none;
+	}
+}

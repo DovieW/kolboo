@@ -622,6 +622,9 @@ impl SharedPipeline {
         if inner.recovery_job.is_some() || !inner.state.can_start_recording() {
             return Err(PipelineError::AlreadyRecording);
         }
+        // A retry owns a fresh operation, not the previous attempt's Error state.
+        // This also makes cancellation during local preparation report accurately.
+        inner.reset_to_idle();
         let token = CancellationToken::new();
         inner.recovery_job = Some(token.clone());
         Ok(token)
@@ -2582,6 +2585,8 @@ impl SharedPipeline {
     ///
     /// This will:
     /// - Stop any ongoing recording
+    /// - Retain an already-persisted Home capture for explicit recovery; ordinary
+    ///   shortcut dictation remains non-journaled and is discarded as before
     /// - Signal cancellation to any in-flight transcription
     /// - Reset the pipeline to Idle state
     pub fn cancel(&self) {
@@ -2605,7 +2610,12 @@ impl SharedPipeline {
             // Stop audio capture if recording
             if inner.state == PipelineState::Recording {
                 inner.audio_capture.stop_recording();
-                if let Err(error) = inner.audio_capture.discard_recovery() {
+                let result = if inner.history_only {
+                    inner.audio_capture.finish_recovery()
+                } else {
+                    inner.audio_capture.discard_recovery()
+                };
+                if let Err(error) = result {
                     inner.set_error(&error.to_string());
                     return;
                 }
