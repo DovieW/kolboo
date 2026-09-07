@@ -29,11 +29,12 @@ describe("AccountActionsCard", () => {
 
 		expect(html).toContain("Sign in to Kolboo");
 		expect(html).toContain("Create free account");
-		expect(html).toContain("Community/BYOK session now");
-		expect(html).toContain("settings sync and managed inference");
-		expect(html).toContain("confirm the email first");
+		expect(html).toContain("An account is optional");
 		expect(html).toContain(
-			"rechecks any ready organization or paid-access claims",
+			"Local models and your own API keys work without one",
 		);
+		expect(html).toContain("Confirm your email if prompted");
+		expect(html).toContain("password reset or a magic link");
+		expect(html).toContain("Use browser instead");
 	});
 });

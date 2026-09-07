@@ -1,20 +1,14 @@
 import {
 	Accordion,
-	Button,
-	Group,
 	NumberInput,
-	PasswordInput,
 	Select,
 	Switch,
 	Textarea,
 	TextInput,
 	Tooltip,
 } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-	useClearOcrApiKey,
-	useSetOcrApiKey,
 	useSettings,
 	useUpdateOcrAuthMode,
 	useUpdateOcrAutoCaptureTiming,
@@ -31,7 +25,7 @@ import {
 	useUpdateOcrTemperature,
 	useUpdateOcrTopP,
 } from "../../lib/queries";
-import { tauriAPI } from "../../lib/tauri";
+import { ApiKeyField } from "./ApiKeyField";
 import { SettingsRow } from "./SettingsRow";
 
 const GLOBAL_ONLY_TOOLTIP =
@@ -60,8 +54,6 @@ export function OcrProviderSettings({
 	const updateOcrHallucinationThreshold = useUpdateOcrHallucinationThreshold();
 	const updateOcrResizeMaxDimension = useUpdateOcrResizeMaxDimension();
 	const updateOcrResizeFilter = useUpdateOcrResizeFilter();
-	const setOcrApiKey = useSetOcrApiKey();
-	const clearOcrApiKey = useClearOcrApiKey();
 
 	const commitInt = (
 		raw: string,
@@ -93,12 +85,6 @@ export function OcrProviderSettings({
 		commit(parsed);
 	};
 
-	const handleOcrApiKeySave = () => {
-		const trimmed = ocrApiKeyDraft.trim();
-		if (!trimmed) return;
-		setOcrApiKey.mutate(trimmed);
-	};
-
 	const [ocrBaseUrlDraft, setOcrBaseUrlDraft] = useState(
 		settings?.ocr_base_url ?? "",
 	);
@@ -121,14 +107,6 @@ export function OcrProviderSettings({
 	const [ocrMaxCharsDraft, setOcrMaxCharsDraft] = useState(
 		String(settings?.ocr_context_max_chars ?? 8000),
 	);
-	const [ocrApiKeyDraft, setOcrApiKeyDraft] = useState("");
-	const ocrApiKeyHydratedRef = useRef(false);
-
-	const { data: storedOcrApiKey } = useQuery({
-		queryKey: ["apiKeyValue", "ocr_api_key"],
-		queryFn: () => tauriAPI.getApiKey("ocr_api_key"),
-		staleTime: 0,
-	});
 
 	useEffect(() => {
 		setOcrBaseUrlDraft(settings?.ocr_base_url ?? "");
@@ -149,13 +127,6 @@ export function OcrProviderSettings({
 		settings?.ocr_request_timeout_ms,
 		settings?.ocr_context_max_chars,
 	]);
-
-	useEffect(() => {
-		if (ocrApiKeyHydratedRef.current) return;
-		if (!storedOcrApiKey) return;
-		setOcrApiKeyDraft(storedOcrApiKey);
-		ocrApiKeyHydratedRef.current = true;
-	}, [storedOcrApiKey]);
 
 	const content = (
 		<div className="settings-accordion-block" style={{ marginTop: 0 }}>
@@ -361,43 +332,11 @@ export function OcrProviderSettings({
 								label="OCR API Key"
 								description="Stored securely in your OS credential vault."
 								right={
-									<Group gap={8} wrap="nowrap">
-										<PasswordInput
-											value={ocrApiKeyDraft}
-											onChange={(e) => setOcrApiKeyDraft(e.currentTarget.value)}
-											placeholder="sk-..."
-											styles={{
-												input: {
-													backgroundColor: "var(--bg-elevated)",
-													borderColor: "var(--border-default)",
-													color: "var(--text-primary)",
-													minWidth: 220,
-													height: 36,
-												},
-											}}
-											onKeyDown={(e) => {
-												if (e.key === "Enter") handleOcrApiKeySave();
-											}}
-										/>
-										<Button
-											size="sm"
-											color="orange"
-											onClick={handleOcrApiKeySave}
-											disabled={!ocrApiKeyDraft.trim()}
-										>
-											Set
-										</Button>
-										<Button
-											size="sm"
-											variant="default"
-											onClick={() => {
-												clearOcrApiKey.mutate();
-												setOcrApiKeyDraft("");
-											}}
-										>
-											Clear
-										</Button>
-									</Group>
+									<ApiKeyField
+										storeKey="ocr_api_key"
+										label="OCR"
+										disabled={Boolean(isProfileScope)}
+									/>
 								}
 							/>
 						)}
@@ -604,7 +543,9 @@ export function OcrProviderSettings({
 		return (
 			<Tooltip label={GLOBAL_ONLY_TOOLTIP} withArrow position="top-start">
 				<div style={{ opacity: 0.5, cursor: "not-allowed" }}>
-					<div style={{ pointerEvents: "none" }}>{content}</div>
+					<div inert style={{ pointerEvents: "none" }}>
+						{content}
+					</div>
 				</div>
 			</Tooltip>
 		);

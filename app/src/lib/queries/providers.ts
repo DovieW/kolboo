@@ -252,26 +252,6 @@ export function useUpdateOcrResizeFilter() {
 	);
 }
 
-export function useSetOcrApiKey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (apiKey: string) => tauriAPI.setApiKey("ocr_api_key", apiKey),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
-		},
-	});
-}
-
-export function useClearOcrApiKey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: () => tauriAPI.clearApiKey("ocr_api_key"),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
-		},
-	});
-}
-
 export function useUpdateLocalWhisperModelId() {
 	return useSettingsInvalidatingMutation((modelId: string | null) =>
 		tauriAPI.updateLocalWhisperModelId(modelId),

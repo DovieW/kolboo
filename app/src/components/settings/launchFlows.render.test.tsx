@@ -29,14 +29,12 @@ vi.mock("../../lib/queries", () => ({
 			speechmatics_free_tier: true,
 		}),
 	useCancelWhisperModelDownload: mutation,
-	useClearOcrApiKey: mutation,
 	useDeleteWhisperModel: mutation,
 	useDownloadWhisperModel: mutation,
 	useIsLocalWhisperAvailable: () => query(false),
 	useIsLocalWhisperModelLoaded: () => query(false),
 	useLoadLocalWhisperModel: mutation,
 	useLocalWhisperBackendStatus: () => query(null),
-	useSetOcrApiKey: mutation,
 	useUnloadLocalWhisperModel: mutation,
 	useUpdateAssemblyAiFreeTier: mutation,
 	useUpdateCerebrasFreeTier: mutation,
@@ -67,8 +65,8 @@ vi.mock("../../lib/queries", () => ({
 }));
 
 import { ApiKeysSettings } from "./ApiKeysSettings";
-import { TelemetryDisclosureContent } from "./TelemetryDisclosureModal";
 import { DataCloudSyncSection } from "./data/DataCloudSyncSection";
+import { TelemetryDisclosureContent } from "./TelemetryDisclosureModal";
 
 function render(ui: ReactNode): string {
 	return renderToStaticMarkup(
@@ -84,8 +82,8 @@ describe("launch-critical rendered settings flows", () => {
 
 		expect(html).toContain("OpenAI");
 		expect(html).toContain("Groq");
-		expect(html).toContain("Stored securely. Leave blank to clear.");
-		expect(html).toContain("Enter API key");
+		expect(html).toContain("Your key, stored securely on this device.");
+		expect(html).toContain("Paste your API key");
 	});
 
 	it("keeps analytics paused behind an explicit disclosure", () => {
@@ -103,6 +101,12 @@ describe("launch-critical rendered settings flows", () => {
 		expect(html).toContain("Nothing is sent until you make a choice");
 		expect(html).toContain("no transcripts, prompts, audio, or OCR content");
 		expect(html).toContain("Keep analytics disabled");
+	});
+
+	it("makes global provider controls inert for non-default profiles, including keyboard input", () => {
+		expect(render(<ApiKeysSettings editingProfileId="work" />)).toContain(
+			'inert=""',
+		);
 	});
 
 	it("renders managed cloud sync as blocked for Community/BYOK", () => {

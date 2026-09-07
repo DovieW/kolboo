@@ -67,18 +67,18 @@ export function getAccountModeDescription(params: {
 	reauthRequired: boolean;
 }): string {
 	if (!params.signedIn) {
-		return "Sign in to save a Community/BYOK session now. Upgrade later to Personal/Pro or Managed Business for settings sync and managed inference.";
+		return "Community/BYOK works without an account. Sign in for eligible managed access and settings sync.";
 	}
 	if (params.reauthRequired) {
 		return "Your managed access needs attention. Try Refresh access to check your current entitlement.";
 	}
 	if (params.modeLabel === "Managed Business") {
-		return "Managed access is active with organization policy and usage controls applied.";
+		return "Your organization provides managed access, subject to its policies.";
 	}
 	if (params.modeLabel === "Personal") {
-		return "Managed personal access is active for this account.";
+		return "Your account has managed access. You can still choose your own API keys in AI settings; Meeting uses its own model selection.";
 	}
-	return "You're signed in and currently running in Community/BYOK mode using your own providers and keys. Upgrade to Personal/Pro or Managed Business later for settings sync and managed inference.";
+	return "You're signed in with Community/BYOK access. Local models and your own keys remain available. Personal adds settings sync and managed access.";
 }
 
 export function getAccountStatusColor(params: {

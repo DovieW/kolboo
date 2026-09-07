@@ -17,6 +17,12 @@ Kolboo works without signing in. Account login is optional and only enables mana
 - Organization name and ID (if your account has org context)
 - Actions: Sign in, Refresh, Manage, Sign out
 
+**Access level** describes your account entitlement, not the provider used for
+each request. Personal managed access does not prevent using your own API keys:
+choose those routes in AI settings. Meeting recordings have their own model
+and managed/BYOK selection. These per-task choices do not sign you out or change
+your plan; there is not yet a device-wide managed-inference off switch.
+
 ## Privacy and storage
 
 - Session tokens are stored in secure OS-backed secret storage.

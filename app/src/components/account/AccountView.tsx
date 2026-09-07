@@ -1,6 +1,6 @@
 import { Alert, Stack, Text, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
 import {
 	useLicenseAuthContext,
@@ -63,15 +63,6 @@ export function AccountView() {
 	const authContextMessage =
 		authReasonCodeToMessage(context?.reason_code ?? null) ??
 		"No auth issue detected.";
-	const headerSubtitle = useMemo(() => {
-		if (modeLabel === "Managed Business") {
-			return "A cleaner view of managed access, identity, usage, and recovery.";
-		}
-		if (modeLabel === "Personal") {
-			return "Everything about your managed personal account in one place.";
-		}
-		return "See your current setup, usage, and sign-in actions without digging through settings.";
-	}, [modeLabel]);
 
 	const queryError = licenseState.error ?? authContext.error;
 	const loginTierHint =
@@ -245,7 +236,7 @@ export function AccountView() {
 					Account
 				</Title>
 				<Text c="dimmed" size="sm">
-					{headerSubtitle}
+					Your account, access and usage.
 				</Text>
 			</header>
 

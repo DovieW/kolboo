@@ -51,11 +51,11 @@ export function AccountActionsCard(props: {
 	const showSignIn = !signedIn || reauthRequired;
 	const actionTitle = signedIn ? "Manage your session" : "Sign in to Kolboo";
 	const introCopy = signedIn
-		? "Refresh your managed access, open account management, or sign out. If organization access or billing changed recently, use Refresh access to pull the latest state."
-		: "Create a free Kolboo account or sign in to save a Community/BYOK session now, then upgrade to Personal/Pro or Managed Business later for settings sync and managed inference.";
+		? "Refresh access after a plan or organization change."
+		: "An account is optional. Local models and your own API keys work without one.";
 	const browserCopy = reauthRequired
-		? "Kolboo will reopen your browser so you can restore managed access without re-entering everything in-app."
-		: "Browser auth opens the hosted Kolboo account page, where you can sign in, create an account, or use a magic link. That page rechecks any ready organization or paid-access claims before returning to the desktop app.";
+		? "Continue in your browser to sign in again."
+		: "Use your browser for sign-in, password reset or a magic link.";
 	const signInLabel =
 		reauthRequired && signedIn ? "Re-authenticate" : "Sign in";
 	const effectiveFormMode = signedIn ? "sign_in" : formMode;
@@ -99,8 +99,8 @@ export function AccountActionsCard(props: {
 							) : null}
 							<Text c="dimmed" size="sm">
 								{effectiveFormMode === "sign_up"
-									? "Create a free self-serve account. If email confirmation is required, confirm the email first, then come back here or use browser auth to finish sign-in."
-									: "Sign in with the email and password for your account. This works for self-serve accounts you created yourself or accounts an operator created for you."}
+									? "Confirm your email if prompted, then return to sign in."
+									: "Use your Kolboo email and password."}
 							</Text>
 							<TextInput
 								label="Email"
@@ -154,7 +154,7 @@ export function AccountActionsCard(props: {
 									loading={loginPending}
 									disabled={signupPending}
 								>
-									Use browser auth instead
+									Use browser instead
 								</Button>
 							</Group>
 						</Stack>
