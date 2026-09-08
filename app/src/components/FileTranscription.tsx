@@ -48,17 +48,20 @@ export function FileTranscription({
 	const [complete, setComplete] = useState(false);
 	const [recoveryId, setRecoveryId] = useState<string | null>(null);
 	const [modelOpen, setModelOpen] = useState(false);
-	const [preferences, setPreferences] = useState<RecordingPreferences | null>(
-		null,
-	);
+	const [draftPreferences, setPreferences] =
+		useState<RecordingPreferences | null>(null);
 	const initial = useQuery({
 		queryKey: ["recording-preferences"],
 		queryFn: recordingControlsAPI.getPreferences,
 		enabled: active,
 	});
+	// Follow recorder defaults while pristine, then keep this file's explicit
+	// options independent of changes made elsewhere (including while hidden).
+	const preferences = draftPreferences ?? initial.data ?? null;
 	useEffect(() => {
-		if (initial.data) setPreferences((existing) => existing ?? initial.data);
-	}, [initial.data]);
+		if (path && initial.data)
+			setPreferences((existing) => existing ?? initial.data);
+	}, [path, initial.data]);
 	const state = useQuery({
 		queryKey: ["home-recording-state"],
 		queryFn: recordingControlsAPI.getState,
@@ -105,6 +108,7 @@ export function FileTranscription({
 			return;
 		}
 		setPath(selected);
+		setPreferences(preferences);
 		setComplete(false);
 		setMessage(null);
 		setRecoveryId(null);
@@ -241,19 +245,16 @@ export function FileTranscription({
 									{ value: "dictation", label: "Dictation" },
 									{ value: "meeting", label: "Meeting" },
 								]}
-								onChange={(mode) =>
-									setPreferences((value) =>
-										value
-											? {
-													...value,
-													mode: mode === "meeting" ? "meeting" : "dictation",
-												}
-											: value,
-									)
-								}
+								onChange={(mode) => {
+									if (preferences)
+										setPreferences({
+											...preferences,
+											mode: mode === "meeting" ? "meeting" : "dictation",
+										});
+								}}
 							/>
 						</Group>
-						{preferences?.mode === "meeting" ? (
+						{!preferences ? null : preferences.mode === "meeting" ? (
 							<Stack gap="xs">
 								<Group justify="space-between" wrap="nowrap">
 									<div className={styles.model}>
@@ -319,6 +320,16 @@ export function FileTranscription({
 									Reconnect
 								</Button>
 							</Alert>
+						)}
+						{(state.isPending || (!preferences && initial.isPending)) && (
+							<Group gap="xs" role="status">
+								<Loader size="xs" />
+								<Text size="sm" c="dimmed">
+									{state.isPending
+										? "Checking recorder…"
+										: "Loading transcription options…"}
+								</Text>
+							</Group>
 						)}
 						<Group align="flex-start" gap="xs" wrap="nowrap">
 							<ShieldCheck

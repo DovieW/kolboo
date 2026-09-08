@@ -133,6 +133,113 @@ afterEach(async () => {
 	vi.useRealTimers();
 });
 describe("File transcription", () => {
+	it("explains initial loading and pins late-loaded options for an already selected file", async () => {
+		await act(async () => root.unmount());
+		client.clear();
+		let loadPreferences!: (value: RecordingPreferences) => void;
+		let loadState!: (value: "idle") => void;
+		vi.mocked(recordingControlsAPI.getPreferences).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					loadPreferences = resolve;
+				}),
+		);
+		vi.mocked(recordingControlsAPI.getState).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					loadState = resolve;
+				}),
+		);
+		root = createRoot(host);
+		await render();
+		expect(host.textContent).toContain("Checking recorder");
+		expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
+		expect(host.textContent).not.toContain("Uses your dictation model");
+		expect(button("Transcribe")?.disabled).toBe(true);
+		await act(async () => loadState("idle"));
+		await settle();
+		expect(host.textContent).not.toContain("Checking recorder");
+		expect(host.textContent).toContain("Loading transcription options");
+		await drop(["/meeting.wav"]);
+		expect(button("Transcribe")?.disabled).toBe(true);
+		await act(async () => loadPreferences(prefs));
+		await settle();
+		expect(host.textContent).not.toContain("Loading transcription options");
+		await act(async () =>
+			client.setQueryData(["recording-preferences"], {
+				mode: "meeting",
+				meeting_model: null,
+			}),
+		);
+		await settle();
+		await click("Transcribe");
+		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
+			"/meeting.wav",
+			prefs,
+		);
+	});
+	it("uses current recorder defaults until a file or its options are selected", async () => {
+		await render(false);
+		const meeting: RecordingPreferences = {
+			mode: "meeting",
+			meeting_model: {
+				provider: "local-whisper",
+				model: "base",
+				use_managed: false,
+			},
+		};
+		await act(async () =>
+			client.setQueryData(["recording-preferences"], meeting),
+		);
+		await render(true);
+		expect(
+			(host.querySelector('input[value="meeting"]') as HTMLInputElement)
+				.checked,
+		).toBe(true);
+		await drop(["/meeting.wav"]);
+		await click("Transcribe");
+		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
+			"/meeting.wav",
+			meeting,
+		);
+	});
+	it("pins a selected file's options when recorder defaults change elsewhere", async () => {
+		await drop(["/dictation.wav"]);
+		await render(false);
+		await act(async () =>
+			client.setQueryData(["recording-preferences"], {
+				mode: "meeting",
+				meeting_model: null,
+			}),
+		);
+		await render(true);
+		expect(
+			(host.querySelector('input[value="dictation"]') as HTMLInputElement)
+				.checked,
+		).toBe(true);
+		await click("Transcribe");
+		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
+			"/dictation.wav",
+			prefs,
+		);
+	});
+	it("preserves an explicit mode choice before a file is selected", async () => {
+		await act(async () =>
+			(
+				host.querySelector('input[value="meeting"]') as HTMLInputElement
+			).click(),
+		);
+		await settle();
+		await render(false);
+		await act(async () =>
+			client.setQueryData(["recording-preferences"], { ...prefs }),
+		);
+		await render(true);
+		expect(
+			(host.querySelector('input[value="meeting"]') as HTMLInputElement)
+				.checked,
+		).toBe(true);
+	});
 	it("selects without uploading and starts only on explicit Transcribe", async () => {
 		expect(button("Transcribe")?.disabled).toBe(true);
 		await drop(["/private/meeting.wav"]);

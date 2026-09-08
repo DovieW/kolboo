@@ -18,6 +18,9 @@ Choose Dictation to use your normal transcription and optional rewriting setting
 or Meeting for an independent model and no rewriting. Speaker labels require a
 diarization-capable model. These file-specific choices do not overwrite the recorder's
 saved preferences. Managed choices must already be enabled for your account.
+Before you select a file or change its options, this page follows the recorder's
+current mode and meeting model. Once selected, your file's options stay unchanged
+when you navigate away or change the recorder defaults elsewhere.
 
 The full audio is prepared locally and submitted in bounded uploads; the complete
 transcript and playable recording appear in History. You can navigate to another

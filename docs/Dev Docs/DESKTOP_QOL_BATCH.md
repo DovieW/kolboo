@@ -107,3 +107,16 @@ The dev session remains running. After onboarding, native restarts intentionally
 start in the tray; launching the same executable again reveals the existing
 window through the single-instance handler. No credentials were provisioned and
 no paid API call, release or production deployment was performed.
+
+## File-transcription defaults follow-up — 2026-09-07
+
+The retained import page previously copied recorder preferences while hidden,
+before any file was chosen. It now follows current defaults until file selection
+or an explicit options edit, then pins that draft across navigation. If preferences
+arrive after file selection, the first loaded options are pinned as well. This
+does not write recorder defaults or alter recovery's persisted options.
+
+A single loading status explains unavailable controls while preferences or recorder
+state load. A regression test reproduced the stale-mode behavior before the fix;
+the four focused frontend files now pass **38 tests**, including late preference
+loading, explicit-choice preservation and unchanged import/recovery behavior.
