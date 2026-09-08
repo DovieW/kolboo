@@ -17,6 +17,32 @@ Notes:
 
 ---
 
+## Custom OpenAI-compatible providers
+
+In **Settings → Providers → Custom providers**, add a name, API base URL
+(including `/v1` where your server requires it), and model IDs. Then enter the
+provider's API key in its key field. Add transcription models, language models,
+or both; model discovery is manual.
+
+Custom providers always use your key directly, never Kolboo Managed. They appear
+in normal/profile model choices and the Meeting model picker after a key is saved.
+For a Managed account, enable **Show all providers and models** to select them.
+
+- Language models use `POST {base}/chat/completions` and JSON chat responses.
+- Transcription models use `POST {base}/audio/transcriptions` with WAV multipart
+  uploads and a JSON `text` response. Realtime, custom diarization formats, and
+  vendor-specific options are not negotiated.
+- Remote endpoints require HTTPS. HTTP is allowed for localhost and private or
+  link-local IP addresses. Redirects are rejected; enter the final API base URL.
+- Keys remain in OS secure storage. Provider metadata contains no keys.
+- Normal transcription and rewriting honor configured proxy/TLS settings. Ad-hoc
+  LLM tools currently use the default network settings instead.
+- Removing a provider removes its saved key but does not replace saved model
+  selections. Select another model before using a recording/profile that referred
+  to the removed provider; it will fail safely instead of contacting another vendor.
+
+---
+
 ## Speech-to-Text (STT)
 
 ### `openai` (OpenAI)

@@ -144,7 +144,7 @@ pub(super) fn resolve_stt_provider_for_transcription(
         Err(err) => {
             // Explicit per-recording/model selections must not silently use the
             // dictation provider if their credentials/model are unavailable.
-            if request.forced_provider.is_some() {
+            if request.forced_provider.is_some() || provider_id_used.starts_with("custom_") {
                 inner.set_error("The selected transcription provider is unavailable");
                 return Err(err);
             }
@@ -379,6 +379,45 @@ fn get_or_create_resolved_stt_provider(
         .with_request_log_store(inner.config.request_log_store.clone());
 
         let provider = Arc::new(provider);
+        inner.stt_provider_cache.insert(cache_key, provider.clone());
+        return Ok(provider);
+    }
+
+    if provider_id.starts_with("custom_") {
+        let definition = inner
+            .config
+            .llm_config
+            .custom_providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .ok_or_else(|| {
+                PipelineError::Config("Custom provider is no longer configured".into())
+            })?;
+        let model = model
+            .filter(|m| definition.stt_models.contains(m))
+            .ok_or_else(|| {
+                PipelineError::Config("Select a configured custom transcription model".into())
+            })?;
+        let key = inner
+            .config
+            .stt_api_keys
+            .get(&provider_id)
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| {
+                PipelineError::Config("Add this custom provider's API key in Settings".into())
+            })?;
+        let provider = crate::stt::WhisperServerSttProvider::with_client(
+            crate::network::build_custom_provider_client(&inner.config.proxy_settings)
+                .map_err(PipelineError::Config)?,
+            definition.base_url.clone(),
+            Some(model),
+            language,
+            inner.config.stt_transcription_prompt.clone(),
+        )
+        .map_err(PipelineError::Stt)?
+        .with_api_key(key.clone())
+        .with_request_log_store(inner.config.request_log_store.clone());
+        let provider: Arc<dyn SttProvider> = Arc::new(provider);
         inner.stt_provider_cache.insert(cache_key, provider.clone());
         return Ok(provider);
     }

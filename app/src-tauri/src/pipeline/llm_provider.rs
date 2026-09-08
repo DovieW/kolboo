@@ -145,6 +145,7 @@ pub(super) fn resolve_cached_llm_provider_config(
     config.gemini_thinking_level = params.gemini_thinking_level.clone();
     config.anthropic_thinking_budget = params.anthropic_thinking_budget;
 
+    validate_custom_llm(&config)?;
     Ok(ResolvedCachedLlmProviderConfig {
         cache_key: llm_provider_cache_key(&provider_id, &params),
         provider_id,
@@ -198,7 +199,42 @@ pub(crate) fn resolve_one_off_llm_config(
     config.prompts = PromptSections::default();
     config.program_prompt_profiles.clear();
 
+    validate_custom_llm(&config)?;
     Ok(config)
+}
+
+fn validate_custom_llm(config: &LlmConfig) -> Result<(), PipelineError> {
+    if !config.provider.starts_with("custom_") {
+        return Ok(());
+    }
+    let provider = config
+        .custom_providers
+        .iter()
+        .find(|p| p.id == config.provider)
+        .ok_or_else(|| PipelineError::Config("Custom provider is no longer configured".into()))?;
+    if !config
+        .model
+        .as_ref()
+        .is_some_and(|m| provider.llm_models.contains(m))
+    {
+        return Err(PipelineError::Config(
+            "Select a configured custom language model".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn custom_llm(config: &LlmConfig, client: reqwest::Client) -> GroqLlmProvider {
+    // All callers validate before construction. An absent endpoint is never
+    // replaced with a vendor endpoint, even for malformed in-memory config.
+    let endpoint = config
+        .custom_providers
+        .iter()
+        .find(|p| p.id == config.provider)
+        .map(|p| format!("{}/chat/completions", p.base_url))
+        .unwrap_or_default();
+    GroqLlmProvider::with_client(client, config.api_key.clone(), config.model.clone())
+        .for_custom_endpoint(endpoint)
 }
 
 pub(crate) fn create_one_off_llm_provider_unstructured(
@@ -208,6 +244,13 @@ pub(crate) fn create_one_off_llm_provider_unstructured(
     params: LlmProviderParams,
 ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
     let config = resolve_one_off_llm_config(base_config, llm_api_keys, provider_id, params)?;
+    if config.provider.starts_with("custom_") {
+        let client = crate::network::build_custom_provider_client(&ProxySettings::default())
+            .map_err(PipelineError::Config)?;
+        return Ok(Arc::new(
+            custom_llm(&config, client).with_timeout(config.timeout),
+        ));
+    }
     Ok(create_llm_provider_unstructured(&config))
 }
 
@@ -219,6 +262,15 @@ pub(crate) fn create_one_off_llm_provider_without_timeout(
     request_log_store: Option<RequestLogStore>,
 ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
     let config = resolve_one_off_llm_config(base_config, llm_api_keys, provider_id, params)?;
+    if config.provider.starts_with("custom_") {
+        let client = crate::network::build_custom_provider_client(&ProxySettings::default())
+            .map_err(PipelineError::Config)?;
+        return Ok(Arc::new(
+            custom_llm(&config, client)
+                .without_timeout()
+                .with_request_log_store(request_log_store),
+        ));
+    }
     Ok(create_llm_provider_without_timeout(
         &config,
         request_log_store,
@@ -231,7 +283,7 @@ pub(crate) fn create_one_off_llm_provider_without_timeout(
 /// Keeping this constructor in the LLM Provider Resolution Module prevents
 /// command handlers and Quick Actions from growing provider-specific match
 /// statements whenever a provider knob is added.
-pub(crate) fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
+fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
     match config.provider.as_str() {
         "managed" => {
             let api_url = config
@@ -336,7 +388,7 @@ pub(crate) fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn Ll
 
 /// Create an LLM provider for Settings test commands that intentionally avoid
 /// request timeouts while still attaching request-log capture.
-pub(crate) fn create_llm_provider_without_timeout(
+fn create_llm_provider_without_timeout(
     config: &LlmConfig,
     request_log_store: Option<RequestLogStore>,
 ) -> Arc<dyn LlmProvider> {
@@ -470,6 +522,17 @@ pub(super) fn create_llm_provider(
     let client = crate::network::build_http_client(proxy_settings).map_err(|e| {
         crate::pipeline::PipelineError::Config(format!("Failed to create HTTP client: {}", e))
     })?;
+
+    if config.provider.starts_with("custom_") {
+        validate_custom_llm(config)?;
+        let client = crate::network::build_custom_provider_client(proxy_settings)
+            .map_err(PipelineError::Config)?;
+        return Ok(Arc::new(
+            custom_llm(config, client)
+                .with_timeout(config.timeout)
+                .with_request_log_store(request_log_store),
+        ));
+    }
 
     let provider: Arc<dyn LlmProvider> = match config.provider.as_str() {
         "managed" => {
@@ -644,6 +707,72 @@ pub(super) fn create_llm_provider(
 mod tests {
     use super::*;
     use crate::llm::PromptSections;
+
+    fn custom_config(base_url: String) -> LlmConfig {
+        LlmConfig {
+            provider: "custom_test".into(),
+            api_key: "fake-key".into(),
+            model: Some("my-model".into()),
+            custom_providers: vec![crate::custom_providers::CustomProvider {
+                id: "custom_test".into(),
+                name: "Example".into(),
+                base_url,
+                stt_models: vec![],
+                llm_models: vec!["my-model".into()],
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn custom_llm_rejects_removed_provider_and_model() {
+        let mut config = custom_config("http://localhost:1234/v1".into());
+        assert!(validate_custom_llm(&config).is_ok());
+        config.model = Some("not-configured".into());
+        assert!(validate_custom_llm(&config).is_err());
+        config.custom_providers.clear();
+        assert!(create_llm_provider(&config, None, &ProxySettings::default()).is_err());
+    }
+
+    #[tokio::test]
+    async fn custom_llm_posts_own_key_to_configured_chat_endpoint() {
+        use wiremock::matchers::{body_partial_json, header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(header("authorization", "Bearer fake-key"))
+            .and(body_partial_json(serde_json::json!({"model": "my-model"})))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"choices":[{"message":{"content":"ok"}}]})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut config = custom_config(format!("{}/v1", server.uri()));
+        config.managed_gateway_url = Some("https://unused.invalid".into());
+        let provider = create_llm_provider(&config, None, &ProxySettings::default()).unwrap();
+        assert_eq!(provider.name(), "custom");
+        assert_eq!(provider.complete("system", "hello").await.unwrap(), "ok");
+    }
+
+    #[tokio::test]
+    async fn custom_llm_does_not_follow_redirects() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let target = MockServer::start().await;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(307).insert_header("Location", target.uri()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let config = custom_config(server.uri());
+        let provider = create_llm_provider(&config, None, &ProxySettings::default()).unwrap();
+        assert!(provider.complete("system", "hello").await.is_err());
+        assert!(target.received_requests().await.unwrap().is_empty());
+    }
 
     #[test]
     fn llm_provider_cache_key_tracks_provider_identity_knobs() {

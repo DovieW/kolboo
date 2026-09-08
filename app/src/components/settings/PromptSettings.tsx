@@ -1031,6 +1031,14 @@ export function PromptSettings({
 		handleDisableSttLanguageOverride,
 		handleDisableSttTimeoutOverride,
 	} = useSttSettingsHandlers({
+		customModels: Object.fromEntries(
+			(availableProviders?.stt ?? [])
+				.filter((p) => p.models)
+				.map((p) => [
+					p.value,
+					(p.models ?? []).map((value) => ({ value, label: value })),
+				]),
+		),
 		isDefaultScope,
 		settings,
 		activeProfile,

@@ -9,6 +9,7 @@ import { MeetingModelDialog } from "./MeetingModelDialog";
 const state = vi.hoisted(() => ({
 	managed: false,
 	openai: false,
+	custom: false,
 	loadingProviders: false,
 	providerError: false,
 	catalogError: false,
@@ -24,11 +25,19 @@ vi.mock("../lib/queries/providers", () => ({
 			state.loadingProviders || state.providerError
 				? undefined
 				: {
-						stt: state.openai
-							? [{ value: "openai", label: "OpenAI" }]
-							: state.managed
-								? []
-								: [{ value: "whisper", label: "Local Whisper" }],
+						stt: state.custom
+							? [
+									{
+										value: "custom_test",
+										label: "My server",
+										models: ["my-transcriber"],
+									},
+								]
+							: state.openai
+								? [{ value: "openai", label: "OpenAI" }]
+								: state.managed
+									? []
+									: [{ value: "whisper", label: "Local Whisper" }],
 					},
 	}),
 	useWhisperModels: () => ({
@@ -66,6 +75,7 @@ const save = vi.fn();
 beforeEach(() => {
 	state.managed = false;
 	state.openai = false;
+	state.custom = false;
 	state.loadingProviders = false;
 	state.providerError = false;
 	state.catalogError = false;
@@ -138,6 +148,33 @@ it("shows loading instead of claiming that an unfinished provider list is empty"
 		)?.disabled,
 	).toBe(true);
 	expect(save).not.toHaveBeenCalled();
+});
+
+it("saves a custom meeting model as BYOK even with managed access", async () => {
+	state.custom = true;
+	state.managed = true;
+	await render();
+	await act(async () =>
+		(
+			document.querySelector('[placeholder="Choose a model"]') as HTMLElement
+		).click(),
+	);
+	const option = document.querySelector('[role="option"]') as HTMLElement;
+	expect(option.textContent).toContain("my-transcriber · My server");
+	await act(async () => option.click());
+	await act(async () =>
+		[...document.querySelectorAll("button")]
+			.find((b) => b.textContent === "Save")
+			?.click(),
+	);
+	expect(save).toHaveBeenCalledWith({
+		mode: "meeting",
+		meeting_model: {
+			provider: "custom_test",
+			model: "my-transcriber",
+			use_managed: false,
+		},
+	});
 });
 
 it("offers a targeted retry after a provider-list failure", async () => {

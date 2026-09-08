@@ -94,7 +94,12 @@ export function MeetingModelDialog({
 				});
 			}
 		}
-		for (const model of STT_MODELS[provider.value] ?? []) {
+		for (const model of provider.models?.map((value) => ({
+			value,
+			label: value,
+		})) ??
+			STT_MODELS[provider.value] ??
+			[]) {
 			if (isRealtimeSttModel(provider.value, model.value)) continue;
 			const value = `${provider.value}::${model.value}::byok`;
 			if (!options.has(value))

@@ -8,6 +8,7 @@ import type {
 const DEFAULT_STT_TIMEOUT = 10;
 
 type UseSttSettingsHandlersOptions = {
+	customModels?: Record<string, Array<{ value: string; label: string }>>;
 	isDefaultScope: boolean;
 	settings: AppSettings | undefined;
 	activeProfile: RewriteProgramPromptProfile | null;
@@ -62,6 +63,7 @@ export type SttSettingsHandlers = {
  * Encapsulates logic for both default scope and profile-specific overrides.
  */
 export function useSttSettingsHandlers({
+	customModels,
 	isDefaultScope,
 	settings,
 	activeProfile,
@@ -92,7 +94,7 @@ export function useSttSettingsHandlers({
 			if (!value) return;
 			updateSTTProvider.mutate(value, {
 				onSuccess: () => {
-					const models = STT_MODELS[value];
+					const models = customModels?.[value] ?? STT_MODELS[value];
 					const firstModel = models?.[0];
 					if (firstModel) {
 						updateSTTModel.mutate(firstModel.value);
@@ -100,7 +102,7 @@ export function useSttSettingsHandlers({
 				},
 			});
 		},
-		[updateSTTModel, updateSTTProvider],
+		[updateSTTModel, updateSTTProvider, customModels],
 	);
 
 	const handleDefaultSTTModelChange = useCallback(
@@ -165,7 +167,7 @@ export function useSttSettingsHandlers({
 			setSttProviderInheriting(false);
 			setSttModelInheriting(false);
 			setLocalProfileSttProvider(value);
-			const models = STT_MODELS[value] ?? [];
+			const models = customModels?.[value] ?? STT_MODELS[value] ?? [];
 			const firstModel = models[0]?.value ?? null;
 			setLocalProfileSttModel(firstModel);
 			saveProfileMetadata({
@@ -175,6 +177,7 @@ export function useSttSettingsHandlers({
 		},
 		[
 			handleDefaultSTTProviderChange,
+			customModels,
 			isDefaultScope,
 			saveProfileMetadata,
 			setLocalProfileSttModel,

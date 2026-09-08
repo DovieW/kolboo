@@ -26,6 +26,7 @@ mod cli;
 mod clipboard_context;
 mod commands;
 mod cost;
+mod custom_providers;
 mod embeddings;
 pub mod events;
 mod fs;
@@ -114,6 +115,7 @@ pub use commands::whisper::LocalWhisperModelLoadStatus;
 pub use commands::whisper::WhisperModelDownloadProgress;
 pub use commands::whisper::WhisperModelDownloadStatus;
 pub use commands::whisper::WhisperModelInfo;
+pub use custom_providers::CustomProvider;
 pub use history::HistoryPageQuery;
 pub use history::HistoryPageResult;
 pub use history::{HistoryDetail, HistoryEdit, HistoryEditInput};
@@ -1193,6 +1195,9 @@ pub fn run() {
             commands::config::get_default_sections,
             commands::config::get_runtime_config,
             commands::config::get_available_providers,
+            commands::config::get_custom_providers,
+            commands::config::save_custom_provider,
+            commands::config::delete_custom_provider,
             commands::config::sync_pipeline_config,
             // Network commands
             commands::network::get_system_proxy_info,

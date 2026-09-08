@@ -111,6 +111,17 @@ pub fn build_http_client(proxy: &ProxySettings) -> Result<Client, String> {
     builder.build().map_err(|e| e.to_string())
 }
 
+/// User-selected endpoints must not forward audio or prompts to a redirect target.
+pub fn build_custom_provider_client(proxy: &ProxySettings) -> Result<Client, String> {
+    let builder = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .danger_accept_invalid_certs(proxy.danger_accept_invalid_certs);
+    let builder = apply_trusted_ca_certificates(builder, proxy);
+    apply_proxy_settings(builder, proxy)?
+        .build()
+        .map_err(|_| "Could not create custom provider client".to_string())
+}
+
 /// Build a reqwest `Client` configured with proxy settings and a default timeout.
 ///
 /// This is primarily used by STT providers that configure a client-wide timeout.

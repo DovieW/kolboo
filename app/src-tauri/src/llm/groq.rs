@@ -17,6 +17,7 @@ const DEFAULT_MODEL: &str = "llama-3.3-70b-versatile";
 
 /// Groq LLM provider using the OpenAI-compatible Chat Completions API.
 pub struct GroqLlmProvider {
+    provider_name: &'static str,
     client: Client,
     api_key: String,
     model: String,
@@ -29,6 +30,7 @@ impl GroqLlmProvider {
     /// Create a new Groq provider with the given API key.
     pub fn new(api_key: String) -> Self {
         Self {
+            provider_name: "groq",
             client: Client::new(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
@@ -41,6 +43,7 @@ impl GroqLlmProvider {
     /// Create with a specific model.
     pub fn with_model(api_key: String, model: String) -> Self {
         Self {
+            provider_name: "groq",
             client: Client::new(),
             api_key,
             model,
@@ -54,6 +57,7 @@ impl GroqLlmProvider {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_client(client: Client, api_key: String, model: Option<String>) -> Self {
         Self {
+            provider_name: "groq",
             client,
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
@@ -69,6 +73,12 @@ impl GroqLlmProvider {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_api_base_url(mut self, base_url: String) -> Self {
         self.api_base_url = base_url;
+        self
+    }
+
+    pub fn for_custom_endpoint(mut self, endpoint: String) -> Self {
+        self.provider_name = "custom";
+        self.api_base_url = endpoint;
         self
     }
 
@@ -96,7 +106,7 @@ impl GroqLlmProvider {
 impl LlmProvider for GroqLlmProvider {
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.is_empty() {
-            return Err(LlmError::NoApiKey("groq".to_string()));
+            return Err(LlmError::NoApiKey(self.provider_name.to_string()));
         }
 
         let request = openai_compat::ChatRequest::new(
@@ -106,6 +116,15 @@ impl LlmProvider for GroqLlmProvider {
             4096,
             0.3,
         );
+        let request = if self.provider_name == "custom" {
+            serde_json::json!({"model": self.model, "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ]})
+        } else {
+            serde_json::to_value(&request)
+                .map_err(|_| LlmError::InvalidResponse("Could not encode request".into()))?
+        };
 
         let req = self
             .client
@@ -114,8 +133,8 @@ impl LlmProvider for GroqLlmProvider {
             .json(&request);
 
         let response_json = http_json::send_json_request_logged(
-            "Groq",
-            "groq",
+            self.provider_name,
+            self.provider_name,
             req,
             self.timeout,
             self.request_log_store.as_ref(),
@@ -128,7 +147,7 @@ impl LlmProvider for GroqLlmProvider {
     }
 
     fn name(&self) -> &'static str {
-        "groq"
+        self.provider_name
     }
 
     fn model(&self) -> &str {

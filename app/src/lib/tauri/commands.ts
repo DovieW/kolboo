@@ -7,6 +7,10 @@ import { tauriLicenseAPI } from "./license";
 import { managedInferenceAPI } from "./managedInference";
 import { tauriPolicyAPI } from "./policy";
 import { applySettingsRuntimeSyncPolicy } from "./settingsSync";
+import type { CustomProvider } from "./types.generated";
+
+export type { CustomProvider } from "./types.generated";
+
 import type {
 	AudioCaptureDiagnostics,
 	AudioInputDeviceInfo,
@@ -603,6 +607,7 @@ interface ProviderInfo {
 	value: string;
 	label: string;
 	is_local: boolean;
+	models?: string[] | null;
 }
 
 interface OcrProviderStatus {
@@ -627,6 +632,15 @@ interface AvailableProvidersResponse {
 }
 
 export const configAPI = {
+	getCustomProviders: () => invoke<CustomProvider[]>("get_custom_providers"),
+	async saveCustomProvider(provider: CustomProvider): Promise<void> {
+		await invoke<void>("save_custom_provider", { provider });
+		await emitTyped("settings-changed", {});
+	},
+	async deleteCustomProvider(id: string): Promise<void> {
+		await invoke<void>("delete_custom_provider", { id });
+		await emitTyped("settings-changed", {});
+	},
 	// Default prompt sections (from Tauri)
 	getDefaultSections: () =>
 		invoke<DefaultSectionsResponse>("get_default_sections"),

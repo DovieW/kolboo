@@ -42,6 +42,10 @@ fn gen_export_available_providers_response_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::AvailableProvidersResponse)
 }
 
+fn gen_export_custom_provider_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::CustomProvider)
+}
+
 fn gen_export_cache_router_embeddings_response_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::CacheRouterEmbeddingsResponse)
 }
@@ -297,6 +301,7 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "AvailableProvidersResponse",
         gen_export_available_providers_response_schema
     ),
+    schema_spec!("custom-provider.schema.json", "CustomProvider", gen_export_custom_provider_schema),
     schema_spec!(
         "cache-router-embeddings-response.schema.json",
         "CacheRouterEmbeddingsResponse",

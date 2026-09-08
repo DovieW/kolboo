@@ -57,6 +57,7 @@ import type {
 	WhisperModelInfo,
 } from "../../lib/tauri";
 import { ApiKeyField } from "./ApiKeyField";
+import { CustomProvidersSettings } from "./CustomProvidersSettings";
 import { OcrProviderSettings } from "./OcrProviderSettings";
 import { SettingsRow } from "./SettingsRow";
 
@@ -1188,6 +1189,7 @@ export function ApiKeysSettings({
 				}
 			/>
 
+			<CustomProvidersSettings />
 			<OcrProviderSettings editingProfileId={editingProfileId} />
 
 			<LocalWhisperModelsCard />

@@ -50,6 +50,7 @@ export interface AvailableProvidersResponse {
 export interface ProviderInfo {
   is_local: boolean;
   label: string;
+  models?: string[] | null;
   value: string;
 }
 /**
@@ -98,6 +99,15 @@ export interface CostSummaryResponse {
   latest_included_at?: string | null;
   timeframe: string;
   total_usd_micros: number;
+}
+
+// From: custom-provider.schema.json
+export interface CustomProvider {
+  base_url: string;
+  id: string;
+  llm_models: string[];
+  name: string;
+  stt_models: string[];
 }
 
 // From: data-storage-summary.schema.json

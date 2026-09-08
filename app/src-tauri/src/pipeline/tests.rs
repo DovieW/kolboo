@@ -423,6 +423,7 @@ fn mock_llm_config(
 ) -> crate::llm::LlmConfig {
     crate::llm::LlmConfig {
         enabled,
+        custom_providers: Vec::new(),
         provider: MOCK_PROVIDER.to_string(),
         api_key: String::new(),
         model: None,

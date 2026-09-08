@@ -63,6 +63,7 @@ export function useManagedModels(enabled: boolean) {
 }
 
 export function useByokLlmModels(enabled = true) {
+	const providers = useAvailableProviders();
 	const query = useQuery({
 		queryKey: ["modelsDevByokLlmModels"],
 		queryFn: () => fetchModelsDevByokLlmCatalog(),
@@ -73,8 +74,18 @@ export function useByokLlmModels(enabled = true) {
 		refetchOnWindowFocus: false,
 	});
 	const data = useMemo(
-		() => byokModelsWithLiveCatalog(LLM_MODELS, query.data),
-		[query.data],
+		() => ({
+			...byokModelsWithLiveCatalog(LLM_MODELS, query.data),
+			...Object.fromEntries(
+				(providers.data?.llm ?? [])
+					.filter((p) => p.models)
+					.map((p) => [
+						p.value,
+						(p.models ?? []).map((value) => ({ value, label: value })),
+					]),
+			),
+		}),
+		[query.data, providers.data],
 	);
 
 	return {
