@@ -36,6 +36,19 @@ import { HistoryAudioPlayer } from "./HistoryAudioPlayer";
 
 // Only unsaved sessions survive navigation; no transcripts go to browser storage.
 const pendingDocuments = new Map<string, HistoryDocument>();
+const activeDocuments = new Map<string, HistoryDocument>();
+
+export async function historyTextForCopy(id: string) {
+	const local = () => activeDocuments.get(id) ?? pendingDocuments.get(id);
+	const current = local();
+	if (current) return current.snapshot().text;
+	const detail = await tauriAPI.getHistoryDetail(id);
+	return (
+		local()?.snapshot().text ??
+		detail?.entry.text ??
+		detail?.entry.error_message
+	);
+}
 
 /** History deletion/retention also releases unsaved, in-memory editor sessions. */
 export async function prunePendingHistoryDocuments() {
@@ -81,9 +94,19 @@ export function HistoryReader({
 	if (query.isPending) return <Loader size="sm" m="md" />;
 	if (query.error || !query.data)
 		return (
-			<Text size="sm" c="red" p="md">
-				Could not load this recording. Close and reopen it to retry.
-			</Text>
+			<Group p="md" justify="space-between">
+				<Text size="sm" c="dimmed">
+					Could not load this recording.
+				</Text>
+				<Button
+					size="xs"
+					variant="subtle"
+					loading={query.isFetching}
+					onClick={() => void query.refetch()}
+				>
+					Retry
+				</Button>
+			</Group>
 		);
 	return (
 		<HistoryDocumentView
@@ -141,19 +164,22 @@ function HistoryDocumentView({
 			?.querySelector('[data-current="true"]')
 			?.scrollIntoView({ block: "nearest" });
 	}, [currentMatch, matches]);
-	useEffect(
-		() => () => {
+	useEffect(() => {
+		activeDocuments.set(detail.entry.id, document);
+		return () => {
+			activeDocuments.delete(detail.entry.id);
 			if (document.dirty) {
 				pendingDocuments.set(detail.entry.id, document);
 				void document.flush().then((saved) => {
 					if (saved) pendingDocuments.delete(detail.entry.id);
 				});
 			}
-		},
-		[document, detail.entry.id],
-	);
+		};
+	}, [document, detail.entry.id]);
 	const close = async () => {
 		player.stop();
+		// Closing cancels playback intent, not the inline reader's audio source.
+		void player.prepare(recordingId);
 		if (await document.flush()) {
 			setFull(false);
 			setEditing(false);
@@ -219,7 +245,21 @@ function HistoryDocumentView({
 			<Modal
 				opened={full}
 				onClose={() => void close()}
-				title={title}
+				title={
+					editing ? (
+						<TextInput
+							aria-label="Recording title"
+							placeholder="Untitled recording"
+							value={draft.title}
+							maxLength={200}
+							onChange={(event) =>
+								document.change({ title: event.currentTarget.value })
+							}
+						/>
+					) : (
+						title
+					)
+				}
 				size="calc(100vw - 48px)"
 				yOffset={24}
 				padding="lg"
@@ -240,32 +280,20 @@ function HistoryDocumentView({
 				}}
 			>
 				<Stack gap="sm" className="history-reader-header">
-					<Group justify="space-between" align="center">
-						<TextInput
-							aria-label="Recording title"
-							placeholder="Untitled recording"
-							value={draft.title}
-							maxLength={200}
-							onChange={(event) =>
-								document.change({ title: event.currentTarget.value })
-							}
-							style={{ flex: 1 }}
-							disabled={
-								detail.entry.status === "in_progress" ||
-								Boolean(detail.edit_error)
-							}
-						/>
-						<Text
-							size="xs"
-							c={draft.status === "error" ? "red" : "dimmed"}
-							aria-live="polite"
-						>
-							{draft.status === "saving" || draft.status === "pending"
-								? "Saving…"
-								: draft.status === "error"
-									? "Not saved"
-									: "Saved"}
-						</Text>
+					<Group justify="flex-end" align="center">
+						{(editing || draft.status !== "saved") && (
+							<Text
+								size="xs"
+								c={draft.status === "error" ? "red" : "dimmed"}
+								aria-live="polite"
+							>
+								{draft.status === "saving" || draft.status === "pending"
+									? "Saving…"
+									: draft.status === "error"
+										? "Not saved"
+										: "Saved"}
+							</Text>
+						)}
 						<Button
 							size="xs"
 							variant="subtle"

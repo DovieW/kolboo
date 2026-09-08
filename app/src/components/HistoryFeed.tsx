@@ -123,15 +123,7 @@ export function HistoryFeed({
 		return bytes / 1024 ** 3;
 	})();
 
-	const player = useRecordingPlayer({
-		onError: (message) => {
-			notifications.show({
-				title: "Playback",
-				message,
-				color: "red",
-			});
-		},
-	});
+	const player = useRecordingPlayer();
 
 	const isDeleteDialogBusy = deleteAllHistoryAndRecordings.isPending;
 	const [confirmOpened, { open: openConfirm, close: closeConfirm }] =
@@ -266,23 +258,10 @@ export function HistoryFeed({
 				const outcome = await historyOrchestration.requestDeleteEntry(id);
 
 				switch (outcome.kind) {
+					case "ignored":
 					case "opened_shared_dialog":
-						return;
 					case "deleted_entry":
-						notifications.show({
-							title: "History",
-							message: "Deleted transcript.",
-							color: "green",
-						});
-						return;
 					case "deleted_entry_and_recording":
-						notifications.show({
-							title: "History",
-							message: outcome.result.deleted_recording
-								? "Deleted transcript and recording."
-								: "Deleted transcript.",
-							color: "green",
-						});
 						return;
 				}
 			} catch (e) {
@@ -435,17 +414,11 @@ export function HistoryFeed({
 	};
 
 	const handleRetryEntry = (entryId: string) => {
-		notifications.show({
-			title: "Rerunning",
-			message: "Re-running transcription…",
-			color: "orange",
-		});
-
 		retryMutation.mutate(entryId, {
 			onSuccess: () => {
 				notifications.show({
 					title: "Rerun complete",
-					message: "Check History / Request Logs for the new entry.",
+					message: "New transcript saved.",
 					color: "teal",
 				});
 			},
@@ -468,14 +441,7 @@ export function HistoryFeed({
 	const handleDeleteOnlyThisTranscript = () => {
 		void (async () => {
 			try {
-				const outcome = await historyOrchestration.deleteOnlyThisTranscript();
-				if (outcome.kind !== "deleted_entry") return;
-
-				notifications.show({
-					title: "History",
-					message: "Deleted transcript.",
-					color: "green",
-				});
+				await historyOrchestration.deleteOnlyThisTranscript();
 			} catch (error) {
 				notifications.show({
 					title: "History",

@@ -60,6 +60,7 @@ export type RetryLastFailedOutcome =
 	  };
 
 export type RequestDeleteEntryOutcome =
+	| { kind: "ignored" }
 	| { kind: "opened_shared_dialog"; context: HistoryDeleteOneContext }
 	| { kind: "deleted_entry"; result: HistoryDeleteResult }
 	| { kind: "deleted_entry_and_recording"; result: HistoryDeleteResult };
@@ -357,6 +358,8 @@ export function useHistoryFeedOrchestration({
 	const [deleteOneContext, setDeleteOneContext] =
 		useState<HistoryDeleteOneContext | null>(null);
 	const [deleteOneBusy, setDeleteOneBusy] = useState(false);
+	const deleteBusyRef = useRef(false);
+	const deleteContextRef = useRef<HistoryDeleteOneContext | null>(null);
 
 	const pageHistory = useMemo(
 		() => filterVisibleHistoryEntries(pageEntries, hiddenEntryIds),
@@ -486,47 +489,62 @@ export function useHistoryFeedOrchestration({
 	const requestDeleteEntry = async (
 		entryId: string,
 	): Promise<RequestDeleteEntryOutcome> => {
-		const options = await getDeleteOptions(entryId);
-		const plan = classifyHistoryDeleteOptions(entryId, options);
-
-		if (plan.kind === "confirm_shared_recording") {
-			setDeleteOneContext(plan.context);
-			setDeleteOneOpened(true);
-
-			return {
-				kind: "opened_shared_dialog",
-				context: plan.context,
-			};
-		}
-
-		hideEntries([entryId]);
-
+		if (deleteBusyRef.current || deleteContextRef.current)
+			return { kind: "ignored" };
+		deleteBusyRef.current = true;
+		setDeleteOneBusy(true);
 		try {
-			const result = await deleteHistoryEntry({ id: entryId, mode: plan.mode });
+			const options = await getDeleteOptions(entryId);
+			const plan = classifyHistoryDeleteOptions(entryId, options);
 
-			return plan.kind === "delete_entry_and_recording"
-				? { kind: "deleted_entry_and_recording", result }
-				: { kind: "deleted_entry", result };
-		} catch (error) {
-			unhideEntries([entryId]);
-			throw error;
+			if (plan.kind === "confirm_shared_recording") {
+				deleteContextRef.current = plan.context;
+				setDeleteOneContext(plan.context);
+				setDeleteOneOpened(true);
+
+				return {
+					kind: "opened_shared_dialog",
+					context: plan.context,
+				};
+			}
+
+			hideEntries([entryId]);
+
+			try {
+				const result = await deleteHistoryEntry({
+					id: entryId,
+					mode: plan.mode,
+				});
+
+				return plan.kind === "delete_entry_and_recording"
+					? { kind: "deleted_entry_and_recording", result }
+					: { kind: "deleted_entry", result };
+			} catch (error) {
+				unhideEntries([entryId]);
+				throw error;
+			}
+		} finally {
+			deleteBusyRef.current = false;
+			setDeleteOneBusy(false);
 		}
 	};
 
 	const closeDeleteOneDialog = () => {
-		if (deleteOneBusy) return;
+		if (deleteBusyRef.current) return;
 
+		deleteContextRef.current = null;
 		setDeleteOneOpened(false);
 		setDeleteOneContext(null);
 	};
 
 	const deleteOnlyThisTranscript =
 		async (): Promise<DeleteOneTranscriptOutcome> => {
-			const context = deleteOneContext;
-			if (!context) {
+			const context = deleteContextRef.current;
+			if (!context || deleteBusyRef.current) {
 				return { kind: "no_context" };
 			}
 
+			deleteBusyRef.current = true;
 			setDeleteOneBusy(true);
 			hideEntries([context.entryId]);
 
@@ -536,6 +554,7 @@ export function useHistoryFeedOrchestration({
 					mode: "entry_only",
 				});
 
+				deleteContextRef.current = null;
 				setDeleteOneOpened(false);
 				setDeleteOneContext(null);
 
@@ -544,17 +563,19 @@ export function useHistoryFeedOrchestration({
 				unhideEntries([context.entryId]);
 				throw error;
 			} finally {
+				deleteBusyRef.current = false;
 				setDeleteOneBusy(false);
 			}
 		};
 
 	const deleteAllUsingRecording =
 		async (): Promise<DeleteAllUsingRecordingOutcome> => {
-			const context = deleteOneContext;
-			if (!context) {
+			const context = deleteContextRef.current;
+			if (!context || deleteBusyRef.current) {
 				return { kind: "no_context" };
 			}
 
+			deleteBusyRef.current = true;
 			setDeleteOneBusy(true);
 
 			const idsToHide = collectHistoryEntryIdsUsingRecording(
@@ -570,6 +591,7 @@ export function useHistoryFeedOrchestration({
 					mode: "recording_and_all_entries",
 				});
 
+				deleteContextRef.current = null;
 				setDeleteOneOpened(false);
 				setDeleteOneContext(null);
 
@@ -583,6 +605,7 @@ export function useHistoryFeedOrchestration({
 				unhideEntries(idsToHide);
 				throw error;
 			} finally {
+				deleteBusyRef.current = false;
 				setDeleteOneBusy(false);
 			}
 		};

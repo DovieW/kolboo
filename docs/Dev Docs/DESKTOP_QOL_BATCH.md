@@ -120,3 +120,20 @@ A single loading status explains unavailable controls while preferences or recor
 state load. A regression test reproduced the stale-mode behavior before the fix;
 the four focused frontend files now pass **38 tests**, including late preference
 loading, explicit-choice preservation and unchanged import/recovery behavior.
+
+## History cleanup follow-up — 2026-09-07
+
+- Removed the sidebar's active inset stripe, routine Saved badges, repeated expanded
+  previews and duplicate reader title. Title editing lives in Edit mode.
+- Playback failures stay inline rather than also opening an error toast. Closing
+  full view cancels playback while preserving preparation for the inline player.
+- Copy reads the active or retained document draft before persisted text, so a
+  failed save does not silently copy an older correction.
+- Deletion owns its lookup and mutation synchronously: repeated clicks cannot
+  replace a shared-recording confirmation's target or start duplicate deletions.
+  Existing shared-recording deletion scopes and failure rollback remain intact.
+- The five focused history/recording-control test files pass 32 tests. These use
+  disposable fixtures; no user recordings are deleted by the checks.
+- Restarted `pnpm dev` and captured the native Home window at 1280×720. Native
+  pointer injection did not activate controls on this Wayland desktop, so this
+  is a Home visual check, not a manual accordion/modal/deletion acceptance run.

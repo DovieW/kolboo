@@ -484,9 +484,6 @@ export function RecordingBar() {
 							{recoveryMessage}
 						</Alert>
 					)}
-					<Text size="sm" c="dimmed">
-						Transcribe saved audio, finish a cleanup, or discard a recording.
-					</Text>
 					{recovery.isSuccess && !savedCount && (
 						<Text size="sm">No saved recordings found.</Text>
 					)}

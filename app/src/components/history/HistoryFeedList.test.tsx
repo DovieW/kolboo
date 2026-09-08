@@ -8,6 +8,7 @@ import { groupHistoryForDisplay } from "../../lib/history/readModel";
 import { tauriAPI } from "../../lib/tauri";
 import type { RecordingPlayerControls } from "../../lib/useRecordingPlayer";
 import { HistoryFeedList } from "./HistoryFeedList";
+import { historyTextForCopy } from "./HistoryReader";
 
 vi.mock("wavesurfer.js", () => ({
 	default: { create: vi.fn(() => ({ destroy: vi.fn(), on: vi.fn() })) },
@@ -146,6 +147,10 @@ describe("History cards and reader", () => {
 		await click(document.querySelector(".history-card-toggle"));
 		await click(button("Open full view"));
 		expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+		expect(document.querySelector('[aria-label="Recording title"]')).toBeNull();
+		expect(
+			document.querySelector('[role="dialog"]')?.textContent,
+		).not.toContain("Saved");
 		expect(
 			document.querySelector('[aria-label="Full transcript"]')?.textContent,
 		).toBe(original);
@@ -160,11 +165,15 @@ describe("History cards and reader", () => {
 		expect(document.querySelector("#history-detail-one")).not.toBeNull();
 		await click(document.querySelector(".mantine-Modal-close"));
 		expect(player.stop).toHaveBeenCalled();
+		expect(player.prepare).toHaveBeenLastCalledWith("one");
 	});
 	it("flushes corrections when closing and keeps the reader open if saving fails", async () => {
 		await click(document.querySelector(".history-card-toggle"));
 		await click(button("Open full view"));
 		await click(button("Edit"));
+		expect(
+			document.querySelector('[aria-label="Recording title"]'),
+		).not.toBeNull();
 		const input = document.querySelector(
 			'[aria-label="Edit transcript"]',
 		) as HTMLTextAreaElement;
@@ -188,6 +197,7 @@ describe("History cards and reader", () => {
 		expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 		expect(input.value).toBe("Corrected meeting");
 		expect(document.body.textContent).toContain("Your draft is still here");
+		expect(await historyTextForCopy("one")).toBe("Corrected meeting");
 		await click(document.querySelector(".mantine-Modal-close"));
 		expect(tauriAPI.saveHistoryEdit).toHaveBeenCalledTimes(2);
 		expect(document.querySelector('[role="dialog"]')).toBeNull();

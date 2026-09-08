@@ -87,7 +87,7 @@ export function HistoryAudioPlayer({
 			<div ref={container} aria-hidden="true" />
 			{waveformError && (
 				<Text size="xs" c="dimmed">
-					Waveform unavailable. You can still use the playback controls below.
+					Waveform unavailable.
 				</Text>
 			)}
 			<Slider

@@ -244,7 +244,6 @@ a:focus-visible {
 .sidebar-nav-link[data-active] {
 	background-color: rgba(var(--accent-rgb) / 0.1);
 	color: var(--accent-primary);
-	box-shadow: inset 2px 0 0 var(--accent-primary);
 }
 
 .sidebar-nav-link[data-active]:hover {

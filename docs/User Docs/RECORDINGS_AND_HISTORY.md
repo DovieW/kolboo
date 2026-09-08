@@ -63,8 +63,9 @@ does not start playback. Copy is a separate button. The overflow menu contains r
 request logs and deletion. Rerun produces a new result without changing your notes.
 
 **Open full view** is available for every recording. It has a larger transcript,
-search, an editable title and an explicit Edit button. Corrections save automatically;
-watch Saving/Saved or the error message. Restore original brings back the original
+search and an Edit button for changing the title and transcript. Corrections save automatically;
+save status appears while editing or when attention is needed. Copy includes your current
+corrections, even if saving failed. Restore original brings back the original
 transcript. If a save fails, keep the app open and retry or copy your draft. Unsaved
 changes cannot survive a process crash.
 

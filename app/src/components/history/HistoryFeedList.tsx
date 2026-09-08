@@ -25,10 +25,9 @@ import type {
 	GroupedHistoryViewModel,
 	HistoryFeedEmptyState,
 } from "../../lib/history/readModel";
-import { tauriAPI } from "../../lib/tauri";
 import type { RecordingPlayerControls } from "../../lib/useRecordingPlayer";
 import { audioTime } from "./HistoryAudioPlayer";
-import { HistoryReader } from "./HistoryReader";
+import { HistoryReader, historyTextForCopy } from "./HistoryReader";
 
 export function HistoryFeedList({
 	isInitialLoading,
@@ -77,9 +76,8 @@ export function HistoryFeedList({
 	const copy = async (id: string) => {
 		setCopying(id);
 		try {
-			const detail = await tauriAPI.getHistoryDetail(id);
-			if (detail)
-				onCopyEntry(id, detail.entry.text || detail.entry.error_message);
+			const text = await historyTextForCopy(id);
+			if (text != null) onCopyEntry(id, text);
 		} catch {
 			notifications.show({
 				color: "red",
@@ -87,7 +85,7 @@ export function HistoryFeedList({
 				message: "Could not load the complete transcript. Please try again.",
 			});
 		} finally {
-			setCopying(null);
+			setCopying((current) => (current === id ? null : current));
 		}
 	};
 	if (isInitialLoading)
@@ -171,42 +169,45 @@ export function HistoryFeedList({
 													</Text>
 												)}
 											</button>
-											<Group gap={6}>
-												{busy ? (
-													<Badge
-														size="xs"
-														variant="light"
-														leftSection={<Loader size={10} />}
-													>
-														Transcribing
-													</Badge>
-												) : entry.contentKind === "error" ? (
-													<Badge size="xs" variant="light" color="red">
-														Failed
-													</Badge>
-												) : (
-													<Badge size="xs" variant="light" color="gray">
-														Saved
-													</Badge>
-												)}
-												{entry.profilePresetLabel && (
-													<Text size="xs" c="dimmed">
-														{entry.profilePresetLabel}
-													</Text>
-												)}
-											</Group>
-											<Text
-												size="sm"
-												c="dimmed"
-												lineClamp={2}
-												className="history-preview"
-											>
-												{entry.displayText}
-											</Text>
+											{(busy ||
+												entry.contentKind === "error" ||
+												entry.profilePresetLabel) && (
+												<Group gap={6}>
+													{busy ? (
+														<Badge
+															size="xs"
+															variant="light"
+															leftSection={<Loader size={10} />}
+														>
+															Transcribing
+														</Badge>
+													) : entry.contentKind === "error" ? (
+														<Badge size="xs" variant="light" color="red">
+															Failed
+														</Badge>
+													) : null}
+													{entry.profilePresetLabel && (
+														<Text size="xs" c="dimmed">
+															{entry.profilePresetLabel}
+														</Text>
+													)}
+												</Group>
+											)}
+											{!open && (
+												<Text
+													size="sm"
+													c="dimmed"
+													lineClamp={2}
+													className="history-preview"
+												>
+													{entry.displayText}
+												</Text>
+											)}
 										</Stack>
 										<Group gap={4} wrap="nowrap">
 											<ActionIcon
 												aria-label="Copy transcript"
+												color="gray"
 												variant="subtle"
 												disabled={!entry.hasCopyValue}
 												loading={copying === entry.id}
@@ -222,6 +223,7 @@ export function HistoryFeedList({
 												<Menu.Target>
 													<ActionIcon
 														aria-label="Recording actions"
+														color="gray"
 														variant="subtle"
 													>
 														<MoreHorizontal size={18} />
