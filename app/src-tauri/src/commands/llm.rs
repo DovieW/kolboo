@@ -363,6 +363,7 @@ pub async fn test_llm_rewrite(
         .create_without_timeout(
             &config.llm_config,
             &config.llm_api_keys,
+            &config.proxy_settings,
             request_log_store.clone(),
         )
         .map_err(|e| llm_error(e.to_string()))?;
@@ -515,6 +516,7 @@ pub async fn iterate_rewrite_prompt(
         .create_without_timeout(
             &config.llm_config,
             &config.llm_api_keys,
+            &config.proxy_settings,
             request_log_store.clone(),
         )
         .map_err(|e| llm_error(e.to_string()))?;
@@ -709,6 +711,7 @@ pub async fn test_rewrite_with_prompt(
         .create_without_timeout(
             &config.llm_config,
             &config.llm_api_keys,
+            &config.proxy_settings,
             request_log_store.clone(),
         )
         .map_err(|e| llm_error(e.to_string()))?;
@@ -827,7 +830,11 @@ pub async fn llm_complete(
     );
 
     let provider = provider_request
-        .create_unstructured(&config.llm_config, &config.llm_api_keys)
+        .create_unstructured(
+            &config.llm_config,
+            &config.llm_api_keys,
+            &config.proxy_settings,
+        )
         .map_err(|e| llm_error(e.to_string()))?;
     let output = provider
         .complete(system_prompt.as_str(), user_prompt.as_str())

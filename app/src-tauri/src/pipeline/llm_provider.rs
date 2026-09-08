@@ -242,16 +242,19 @@ pub(crate) fn create_one_off_llm_provider_unstructured(
     llm_api_keys: &HashMap<String, String>,
     provider_id: &str,
     params: LlmProviderParams,
+    proxy_settings: &ProxySettings,
 ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
     let config = resolve_one_off_llm_config(base_config, llm_api_keys, provider_id, params)?;
     if config.provider.starts_with("custom_") {
-        let client = crate::network::build_custom_provider_client(&ProxySettings::default())
+        let client = crate::network::build_custom_provider_client(proxy_settings)
             .map_err(PipelineError::Config)?;
         return Ok(Arc::new(
             custom_llm(&config, client).with_timeout(config.timeout),
         ));
     }
-    Ok(create_llm_provider_unstructured(&config))
+    let client =
+        crate::network::build_http_client(proxy_settings).map_err(PipelineError::Config)?;
+    Ok(create_llm_provider_unstructured(&config, client))
 }
 
 pub(crate) fn create_one_off_llm_provider_without_timeout(
@@ -259,11 +262,12 @@ pub(crate) fn create_one_off_llm_provider_without_timeout(
     llm_api_keys: &HashMap<String, String>,
     provider_id: &str,
     params: LlmProviderParams,
+    proxy_settings: &ProxySettings,
     request_log_store: Option<RequestLogStore>,
 ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
     let config = resolve_one_off_llm_config(base_config, llm_api_keys, provider_id, params)?;
     if config.provider.starts_with("custom_") {
-        let client = crate::network::build_custom_provider_client(&ProxySettings::default())
+        let client = crate::network::build_custom_provider_client(proxy_settings)
             .map_err(PipelineError::Config)?;
         return Ok(Arc::new(
             custom_llm(&config, client)
@@ -271,8 +275,11 @@ pub(crate) fn create_one_off_llm_provider_without_timeout(
                 .with_request_log_store(request_log_store),
         ));
     }
+    let client =
+        crate::network::build_http_client(proxy_settings).map_err(PipelineError::Config)?;
     Ok(create_llm_provider_without_timeout(
         &config,
+        client,
         request_log_store,
     ))
 }
@@ -283,7 +290,10 @@ pub(crate) fn create_one_off_llm_provider_without_timeout(
 /// Keeping this constructor in the LLM Provider Resolution Module prevents
 /// command handlers and Quick Actions from growing provider-specific match
 /// statements whenever a provider knob is added.
-fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> {
+fn create_llm_provider_unstructured(
+    config: &LlmConfig,
+    client: reqwest::Client,
+) -> Arc<dyn LlmProvider> {
     match config.provider.as_str() {
         "managed" => {
             let api_url = config
@@ -292,16 +302,21 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
                 .and_then(|gateway| managed_llm_api_base_url("managed", gateway))
                 .unwrap_or_default();
             Arc::new(
-                ManagedLlmProvider::new(config.api_key.clone(), config.model.clone(), api_url)
-                    .with_timeout(config.timeout),
+                ManagedLlmProvider::with_client(
+                    client,
+                    config.api_key.clone(),
+                    config.model.clone(),
+                    api_url,
+                )
+                .with_timeout(config.timeout),
             )
         }
         "cerebras" => {
-            let provider = if let Some(model) = &config.model {
-                CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                CerebrasLlmProvider::new(config.api_key.clone())
-            };
+            let provider = CerebrasLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .with_timeout(config.timeout)
@@ -309,11 +324,11 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
             )
         }
         "anthropic" => {
-            let provider = if let Some(model) = &config.model {
-                AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                AnthropicLlmProvider::new(config.api_key.clone())
-            };
+            let provider = AnthropicLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .with_timeout(config.timeout)
@@ -321,19 +336,16 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
             )
         }
         "groq" => {
-            let provider = if let Some(model) = &config.model {
-                GroqLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GroqLlmProvider::new(config.api_key.clone())
-            };
+            let provider =
+                GroqLlmProvider::with_client(client, config.api_key.clone(), config.model.clone());
             Arc::new(provider.with_timeout(config.timeout))
         }
         "gemini" => {
-            let provider = if let Some(model) = &config.model {
-                GeminiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GeminiLlmProvider::new(config.api_key.clone())
-            };
+            let provider = GeminiLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
 
             Arc::new(
                 provider
@@ -344,38 +356,36 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
             )
         }
         "cohere" => {
-            let provider = if let Some(model) = &config.model {
-                CohereLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                CohereLlmProvider::new(config.api_key.clone())
-            };
+            let provider = CohereLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(provider.with_timeout(config.timeout))
         }
         "fireworks" => {
-            let provider = if let Some(model) = &config.model {
-                FireworksLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                FireworksLlmProvider::new(config.api_key.clone())
-            };
+            let provider = FireworksLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(provider.with_timeout(config.timeout))
         }
         "ollama" => {
-            let provider = OllamaLlmProvider::with_url(
-                config
-                    .ollama_url
-                    .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
+            let provider = OllamaLlmProvider::with_client(
+                client,
+                config.ollama_url.clone(),
                 config.model.clone(),
             );
             Arc::new(provider.with_timeout(config.timeout))
         }
         _ => {
             // Default to OpenAI
-            let provider = if let Some(model) = &config.model {
-                OpenAiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                OpenAiLlmProvider::new(config.api_key.clone())
-            };
+            let provider = OpenAiLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .with_timeout(config.timeout)
@@ -390,6 +400,7 @@ fn create_llm_provider_unstructured(config: &LlmConfig) -> Arc<dyn LlmProvider> 
 /// request timeouts while still attaching request-log capture.
 fn create_llm_provider_without_timeout(
     config: &LlmConfig,
+    client: reqwest::Client,
     request_log_store: Option<RequestLogStore>,
 ) -> Arc<dyn LlmProvider> {
     match config.provider.as_str() {
@@ -400,17 +411,22 @@ fn create_llm_provider_without_timeout(
                 .and_then(|gateway| managed_llm_api_base_url("managed", gateway))
                 .unwrap_or_default();
             Arc::new(
-                ManagedLlmProvider::new(config.api_key.clone(), config.model.clone(), api_url)
-                    .without_timeout()
-                    .with_request_log_store(request_log_store.clone()),
+                ManagedLlmProvider::with_client(
+                    client,
+                    config.api_key.clone(),
+                    config.model.clone(),
+                    api_url,
+                )
+                .without_timeout()
+                .with_request_log_store(request_log_store.clone()),
             )
         }
         "cerebras" => {
-            let provider = if let Some(model) = &config.model {
-                CerebrasLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                CerebrasLlmProvider::new(config.api_key.clone())
-            };
+            let provider = CerebrasLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .without_timeout()
@@ -419,11 +435,11 @@ fn create_llm_provider_without_timeout(
             )
         }
         "anthropic" => {
-            let provider = if let Some(model) = &config.model {
-                AnthropicLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                AnthropicLlmProvider::new(config.api_key.clone())
-            };
+            let provider = AnthropicLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .without_timeout()
@@ -432,11 +448,8 @@ fn create_llm_provider_without_timeout(
             )
         }
         "groq" => {
-            let provider = if let Some(model) = &config.model {
-                GroqLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GroqLlmProvider::new(config.api_key.clone())
-            };
+            let provider =
+                GroqLlmProvider::with_client(client, config.api_key.clone(), config.model.clone());
             Arc::new(
                 provider
                     .without_timeout()
@@ -444,11 +457,11 @@ fn create_llm_provider_without_timeout(
             )
         }
         "gemini" => {
-            let provider = if let Some(model) = &config.model {
-                GeminiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                GeminiLlmProvider::new(config.api_key.clone())
-            };
+            let provider = GeminiLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
 
             Arc::new(
                 provider
@@ -459,11 +472,11 @@ fn create_llm_provider_without_timeout(
             )
         }
         "cohere" => {
-            let provider = if let Some(model) = &config.model {
-                CohereLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                CohereLlmProvider::new(config.api_key.clone())
-            };
+            let provider = CohereLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .without_timeout()
@@ -471,11 +484,11 @@ fn create_llm_provider_without_timeout(
             )
         }
         "fireworks" => {
-            let provider = if let Some(model) = &config.model {
-                FireworksLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                FireworksLlmProvider::new(config.api_key.clone())
-            };
+            let provider = FireworksLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .without_timeout()
@@ -483,11 +496,9 @@ fn create_llm_provider_without_timeout(
             )
         }
         "ollama" => {
-            let provider = OllamaLlmProvider::with_url(
-                config
-                    .ollama_url
-                    .clone()
-                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
+            let provider = OllamaLlmProvider::with_client(
+                client,
+                config.ollama_url.clone(),
                 config.model.clone(),
             );
             Arc::new(
@@ -498,11 +509,11 @@ fn create_llm_provider_without_timeout(
         }
         _ => {
             // Default to OpenAI
-            let provider = if let Some(model) = &config.model {
-                OpenAiLlmProvider::with_model(config.api_key.clone(), model.clone())
-            } else {
-                OpenAiLlmProvider::new(config.api_key.clone())
-            };
+            let provider = OpenAiLlmProvider::with_client(
+                client,
+                config.api_key.clone(),
+                config.model.clone(),
+            );
             Arc::new(
                 provider
                     .without_timeout()
@@ -721,6 +732,95 @@ mod tests {
                 llm_models: vec!["my-model".into()],
             }],
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn one_off_clients_reject_invalid_proxy_for_every_provider() {
+        use crate::pipeline::llm_provider_request::resolve_one_off_llm_request_for_profile;
+        let proxy = ProxySettings {
+            mode: crate::settings::ProxyMode::Manual,
+            ..Default::default()
+        };
+        for id in [
+            "custom_test",
+            "managed",
+            "cerebras",
+            "anthropic",
+            "groq",
+            "gemini",
+            "cohere",
+            "fireworks",
+            "ollama",
+            "openai",
+        ] {
+            let mut config = custom_config("http://localhost:1234/v1".into());
+            config.provider = id.into();
+            config.managed_gateway_url = Some("https://unused.invalid".into());
+            let keys = HashMap::from([(id.to_string(), "fixture-key".to_string())]);
+            let request = resolve_one_off_llm_request_for_profile(&config, None, &[]);
+            assert!(
+                request.create_unstructured(&config, &keys, &proxy).is_err(),
+                "{id}"
+            );
+            assert!(
+                request
+                    .create_without_timeout(&config, &keys, &proxy, None)
+                    .is_err(),
+                "{id}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn one_off_custom_clients_honor_manual_proxy_and_bypass() {
+        use crate::pipeline::llm_provider_request::resolve_one_off_llm_request_for_profile;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let destination = MockServer::start().await;
+        let proxy_server = MockServer::start().await;
+        for (server, text, expected) in [(&destination, "direct", 4), (&proxy_server, "proxied", 2)]
+        {
+            Mock::given(method("POST"))
+                .and(path("/v1/chat/completions"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(
+                        serde_json::json!({"choices":[{"message":{"content":text}}]}),
+                    ),
+                )
+                .expect(expected)
+                .mount(server)
+                .await;
+        }
+        let config = custom_config(format!("{}/v1", destination.uri()));
+        let keys = HashMap::from([("custom_test".to_string(), "fixture-key".to_string())]);
+        let request = resolve_one_off_llm_request_for_profile(&config, None, &[]);
+        for mode in 0..3 {
+            let mut proxy = ProxySettings {
+                mode: crate::settings::ProxyMode::Manual,
+                ..Default::default()
+            };
+            proxy.manual.proxy_url = proxy_server.uri();
+            proxy.manual.no_proxy.clear();
+            if mode == 1 {
+                proxy.manual.no_proxy = "127.0.0.1".into();
+            }
+            if mode == 2 {
+                proxy.mode = crate::settings::ProxyMode::NoProxy;
+            }
+            let expected = if mode == 0 { "proxied" } else { "direct" };
+            let provider = request.create_unstructured(&config, &keys, &proxy).unwrap();
+            assert_eq!(
+                provider.complete("fixture", "fixture").await.unwrap(),
+                expected
+            );
+            let provider = request
+                .create_without_timeout(&config, &keys, &proxy, None)
+                .unwrap();
+            assert_eq!(
+                provider.complete("fixture", "fixture").await.unwrap(),
+                expected
+            );
         }
     }
 

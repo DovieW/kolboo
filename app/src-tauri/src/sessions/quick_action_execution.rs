@@ -154,9 +154,11 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
             ..Default::default()
         }],
     );
-    let provider_impl = match provider_request
-        .create_unstructured(&pipeline_config.llm_config, &pipeline_config.llm_api_keys)
-    {
+    let provider_impl = match provider_request.create_unstructured(
+        &pipeline_config.llm_config,
+        &pipeline_config.llm_api_keys,
+        &pipeline_config.proxy_settings,
+    ) {
         Ok(provider) => provider,
         Err(e) => {
             let err = e.to_string();
@@ -443,9 +445,11 @@ pub(crate) async fn try_quick_replace(
                 }],
             );
 
-            let provider_impl = match provider_request
-                .create_unstructured(&pipeline_config.llm_config, &pipeline_config.llm_api_keys)
-            {
+            let provider_impl = match provider_request.create_unstructured(
+                &pipeline_config.llm_config,
+                &pipeline_config.llm_api_keys,
+                &pipeline_config.proxy_settings,
+            ) {
                 Ok(provider_impl) => provider_impl,
                 Err(e) => {
                     let err = format!("Quick Replace failed: {}", e);

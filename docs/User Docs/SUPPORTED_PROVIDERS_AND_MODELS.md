@@ -35,8 +35,8 @@ For a Managed account, enable **Show all providers and models** to select them.
 - Remote endpoints require HTTPS. HTTP is allowed for localhost and private or
   link-local IP addresses. Redirects are rejected; enter the final API base URL.
 - Keys remain in OS secure storage. Provider metadata contains no keys.
-- Normal transcription and rewriting honor configured proxy/TLS settings. Ad-hoc
-  LLM tools currently use the default network settings instead.
+- Transcription, rewriting and ad-hoc LLM tools honor configured proxy/TLS settings,
+  including manual proxy bypass rules and explicit No proxy mode.
 - Removing a provider removes its saved key but does not replace saved model
   selections. Select another model before using a recording/profile that referred
   to the removed provider; it will fail safely instead of contacting another vendor.

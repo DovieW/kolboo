@@ -137,3 +137,15 @@ loading, explicit-choice preservation and unchanged import/recovery behavior.
 - Restarted `pnpm dev` and captured the native Home window at 1280×720. Native
   pointer injection did not activate controls on this Wayland desktop, so this
   is a Home visual check, not a manual accordion/modal/deletion acceptance run.
+
+## Ad-hoc network settings follow-up — 2026-09-08
+
+Quick Ask, Quick Replace, History analysis and Settings/Prompt Lab LLM requests
+now pass the current pipeline proxy/TLS settings into their HTTP clients, for
+built-in and custom providers alike. Custom endpoints retain their no-redirect
+policy. Timeout and structured-output choices are unchanged. No IPC contract or
+stored setting changed.
+
+Regression checks cover invalid manual proxies for every provider and actual
+local mocked proxy/bypass/No proxy requests through both ad-hoc constructors.
+The full native library suite passes: 864 passed, 12 ignored; no paid calls.
