@@ -143,13 +143,47 @@ pub fn set_secret(app: &AppHandle, store_key: &str, value: &str) -> Result<(), S
 }
 
 #[cfg(desktop)]
+fn resolve_delete_failure(
+    delete_error: String,
+    credential_readback: Result<Option<()>, String>,
+) -> Result<(), String> {
+    match credential_readback {
+        // Some Secret Service implementations can report an error after the
+        // item was already removed. Treat the verified end state as success so
+        // logout and key removal remain idempotent.
+        Ok(None) => Ok(()),
+        Ok(Some(())) => Err(delete_error),
+        Err(read_error) => Err(format!(
+            "{delete_error}; secure storage cleanup could not be verified: {read_error}"
+        )),
+    }
+}
+
+#[cfg(desktop)]
 pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
     let _ = app;
     let entry = entry_for_key(store_key)?;
     match entry.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
+        Err(delete_error) => {
+            let delete_error = delete_error.to_string();
+            let credential_readback = match entry.get_password() {
+                Ok(_) => Ok(Some(())),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(read_error) => Err(read_error.to_string()),
+            };
+
+            let result = resolve_delete_failure(delete_error.clone(), credential_readback);
+            if result.is_ok() {
+                log::warn!(
+                    "Secure storage reported a delete error for {}, but readback confirmed the credential is absent: {}",
+                    store_key,
+                    delete_error
+                );
+            }
+            result
+        }
     }
 }
 
@@ -380,6 +414,41 @@ pub fn migrate_api_keys_from_store(app: &AppHandle) -> Result<(), Box<dyn Error>
     }
 
     Ok(())
+}
+
+#[cfg(all(test, desktop))]
+mod tests {
+    use super::resolve_delete_failure;
+
+    #[test]
+    fn delete_error_is_ignored_when_readback_confirms_absence() {
+        assert_eq!(
+            resolve_delete_failure("backend error".to_string(), Ok(None)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn delete_error_is_preserved_when_credential_remains() {
+        assert_eq!(
+            resolve_delete_failure("backend error".to_string(), Ok(Some(()))),
+            Err("backend error".to_string())
+        );
+    }
+
+    #[test]
+    fn delete_error_includes_readback_failure_when_state_is_unknown() {
+        assert_eq!(
+            resolve_delete_failure(
+                "backend error".to_string(),
+                Err("readback error".to_string())
+            ),
+            Err(
+                "backend error; secure storage cleanup could not be verified: readback error"
+                    .to_string()
+            )
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
