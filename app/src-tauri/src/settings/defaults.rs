@@ -145,6 +145,12 @@ pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std
         }
     }
 
+    // Linux builds before persistent Secret Service support stored credentials
+    // only in the kernel session keyring. Move any still-available values before
+    // normal startup reads them.
+    #[cfg(target_os = "linux")]
+    secrets::migrate_linux_session_keyring_secrets(app);
+
     // Best-effort: migrate legacy plaintext API keys out of `settings.json`.
     // This runs on startup (after the store exists), and deletes the store copy
     // only after the key was written to secure storage.

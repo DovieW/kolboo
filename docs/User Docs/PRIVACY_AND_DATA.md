@@ -18,9 +18,12 @@ Common categories of local data include:
 
 - **Settings** (via the Tauri store)
   - includes your chosen providers/models and feature toggles
-  - API keys and session secrets are intended to live in your OS secure
-    storage / credential manager; legacy installs may still have old fallback
-    values until they are migrated forward
+  - API keys and session secrets live in your OS secure storage / credential
+    manager (Windows Credential Manager, macOS Keychain, or Linux Secret
+    Service such as KWallet/GNOME Keyring). Legacy installs may still have old
+    fallback values until they are migrated forward. On Linux, a working Secret
+    Service is required so credentials persist across desktop sessions and
+    reboots.
 - **History** (your transcription history)
 - **Recordings** (if you enable saving audio recordings)
 - **Home recorder recovery audio**: Home recordings save audio locally during

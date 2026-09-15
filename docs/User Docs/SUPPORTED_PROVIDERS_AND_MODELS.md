@@ -34,7 +34,9 @@ For a Managed account, enable **Show all providers and models** to select them.
   vendor-specific options are not negotiated.
 - Remote endpoints require HTTPS. HTTP is allowed for localhost and private or
   link-local IP addresses. Redirects are rejected; enter the final API base URL.
-- Keys remain in OS secure storage. Provider metadata contains no keys.
+- Keys remain in OS secure storage. On Linux this uses Secret Service (for
+  example KWallet or GNOME Keyring) so keys survive restarts. Provider metadata
+  contains no keys.
 - Transcription, rewriting and ad-hoc LLM tools honor configured proxy/TLS settings,
   including manual proxy bypass rules and explicit No proxy mode.
 - Removing a provider removes its saved key but does not replace saved model

@@ -19,6 +19,9 @@ use crate::settings::store::get_fresh_settings_store;
 #[cfg(desktop)]
 use keyring::Entry;
 
+#[cfg(all(desktop, target_os = "linux"))]
+use std::collections::BTreeSet;
+
 /// Known API key setting keys that historically lived in `settings.json`.
 ///
 /// Keep this in sync with provider lists in:
@@ -91,6 +94,180 @@ fn validate_secret_store_key(store_key: &str) -> Result<(), String> {
 fn entry_for_key(store_key: &str) -> Result<Entry, String> {
     validate_secret_store_key(store_key)?;
     Entry::new(SERVICE_NAME, store_key).map_err(|e| e.to_string())
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn legacy_linux_entry_for_key(store_key: &str) -> Result<Option<Entry>, String> {
+    validate_secret_store_key(store_key)?;
+    let credential =
+        match keyring::keyutils::KeyutilsCredential::new_with_target(None, SERVICE_NAME, store_key)
+        {
+            Ok(credential) => credential,
+            Err(keyring::Error::NoEntry) => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+    Ok(Some(Entry::new_with_credential(Box::new(credential))))
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn non_empty_password(entry: &Entry) -> Result<Option<String>, keyring::Error> {
+    match entry.get_password() {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn migration_api_key_names(app: &AppHandle) -> BTreeSet<String> {
+    let mut keys = API_KEY_SETTING_KEYS
+        .iter()
+        .map(|key| (*key).to_string())
+        .collect::<BTreeSet<_>>();
+    keys.extend(
+        crate::custom_providers::load(app)
+            .into_iter()
+            .map(|provider| provider.key_name()),
+    );
+    keys
+}
+
+/// Move credentials written by older Linux builds from the session-only kernel
+/// keyring into Secret Service. The old value is deleted only after a matching
+/// persistent readback succeeds.
+#[cfg(all(desktop, target_os = "linux"))]
+pub fn migrate_linux_session_keyring_secrets(app: &AppHandle) {
+    for key in migration_api_key_names(app)
+        .into_iter()
+        .chain(["github_gist_token".to_string()])
+    {
+        if let Err(error) = migrate_linux_session_secret(&key) {
+            log::warn!(
+                "Could not migrate {} from the legacy Linux session keyring: {}",
+                key,
+                error
+            );
+        }
+    }
+
+    if let Err(error) = migrate_linux_auth_session() {
+        log::warn!(
+            "Could not migrate the auth session from the legacy Linux session keyring: {}",
+            error
+        );
+    }
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn migrate_linux_session_secret(store_key: &str) -> Result<(), String> {
+    let persistent = entry_for_key(store_key)?;
+
+    if non_empty_password(&persistent)
+        .map_err(|e| e.to_string())?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    let Some(legacy) = legacy_linux_entry_for_key(store_key)? else {
+        return Ok(());
+    };
+    let Some(value) = non_empty_password(&legacy).map_err(|e| e.to_string())? else {
+        return Ok(());
+    };
+
+    persistent.set_password(&value).map_err(|e| e.to_string())?;
+    let verified = non_empty_password(&persistent).map_err(|e| e.to_string())?;
+    if verified.as_deref() != Some(value.as_str()) {
+        return Err("persistent secure-storage readback did not match".to_string());
+    }
+
+    match legacy.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => {
+            log::warn!(
+                "Migrated {}, but could not remove its obsolete Linux session-keyring copy: {}",
+                store_key,
+                error
+            );
+            Ok(())
+        }
+    }
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn migrate_linux_auth_session() -> Result<(), String> {
+    let persistent_access = entry_for_key(AUTH_SESSION_ACCESS_TOKEN_KEY)?;
+    let persistent_refresh = entry_for_key(AUTH_SESSION_REFRESH_TOKEN_KEY)?;
+
+    let current_access = non_empty_password(&persistent_access).map_err(|e| e.to_string())?;
+    let current_refresh = non_empty_password(&persistent_refresh).map_err(|e| e.to_string())?;
+    if current_access.is_some() && current_refresh.is_some() {
+        return Ok(());
+    }
+
+    let Some(legacy_access) = legacy_linux_entry_for_key(AUTH_SESSION_ACCESS_TOKEN_KEY)? else {
+        return Ok(());
+    };
+    let Some(legacy_refresh) = legacy_linux_entry_for_key(AUTH_SESSION_REFRESH_TOKEN_KEY)? else {
+        return Ok(());
+    };
+    let old_access = non_empty_password(&legacy_access).map_err(|e| e.to_string())?;
+    let old_refresh = non_empty_password(&legacy_refresh).map_err(|e| e.to_string())?;
+
+    let desired_access = current_access.clone().or(old_access);
+    let desired_refresh = current_refresh.clone().or(old_refresh);
+    let (Some(desired_access), Some(desired_refresh)) = (desired_access, desired_refresh) else {
+        // Never turn an incomplete legacy session into a persistent partial session.
+        return Ok(());
+    };
+
+    let wrote_access = current_access.is_none();
+    let wrote_refresh = current_refresh.is_none();
+    let migration = (|| -> Result<(), String> {
+        if wrote_access {
+            persistent_access
+                .set_password(&desired_access)
+                .map_err(|e| e.to_string())?;
+        }
+        if wrote_refresh {
+            persistent_refresh
+                .set_password(&desired_refresh)
+                .map_err(|e| e.to_string())?;
+        }
+
+        let verified_access = non_empty_password(&persistent_access).map_err(|e| e.to_string())?;
+        let verified_refresh =
+            non_empty_password(&persistent_refresh).map_err(|e| e.to_string())?;
+        if verified_access.as_deref() != Some(desired_access.as_str())
+            || verified_refresh.as_deref() != Some(desired_refresh.as_str())
+        {
+            return Err("persistent auth-session readback did not match".to_string());
+        }
+        Ok(())
+    })();
+
+    if let Err(error) = migration {
+        if wrote_access {
+            let _ = persistent_access.delete_credential();
+        }
+        if wrote_refresh {
+            let _ = persistent_refresh.delete_credential();
+        }
+        return Err(error);
+    }
+
+    for legacy in [&legacy_access, &legacy_refresh] {
+        match legacy.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(error) => log::warn!(
+                "Migrated the auth session, but could not remove an obsolete Linux session-keyring copy: {}",
+                error
+            ),
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -331,14 +508,7 @@ pub fn set_api_key(app: &AppHandle, store_key: &str, api_key: &str) -> Result<()
 
 #[cfg(desktop)]
 pub fn clear_api_key(app: &AppHandle, store_key: &str) -> Result<(), String> {
-    let entry = entry_for_key(store_key)?;
-    match entry.delete_credential() {
-        Ok(()) => {}
-        Err(keyring::Error::NoEntry) => {}
-        Err(e) => {
-            return Err(e.to_string());
-        }
-    }
+    clear_secret(app, store_key)?;
 
     // Also clear any legacy value that may remain.
     if let Some(store) = get_fresh_settings_store(app) {
