@@ -96,9 +96,11 @@ beforeEach(async () => {
 						groupedHistory={groupHistoryForDisplay(
 							["one", "two"].map((id) => ({
 								id,
-								title: id,
+								title: id === "two" ? "Team sync" : null,
 								timestamp: "2026-01-01T00:00:00Z",
 								text: "Short preview",
+								recording_mode:
+									id === "two" ? ("meeting" as const) : ("dictation" as const),
 							})),
 						)}
 						copiedEntryId={null}
@@ -140,6 +142,18 @@ describe("History cards and reader", () => {
 		expect(player.stop).toHaveBeenCalled();
 		await click(document.querySelectorAll(".history-card-toggle")[1] ?? null);
 		expect(document.querySelector("[data-history-detail]")).toBeNull();
+	});
+	it("uses quiet mode icons instead of generic recording labels", () => {
+		expect(document.body.textContent).not.toContain("Voice recording");
+		expect(
+			document.querySelectorAll(".history-kind-icon--dictation"),
+		).toHaveLength(1);
+		expect(
+			document.querySelectorAll(".history-kind-icon--meeting"),
+		).toHaveLength(1);
+		expect(
+			document.querySelector('[aria-label^="Expand dictation from"]'),
+		).not.toBeNull();
 	});
 	it("copies full text explicitly and offers the full reader without starting playback", async () => {
 		await click(document.querySelector('[aria-label="Copy transcript"]'));

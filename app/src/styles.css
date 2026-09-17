@@ -1951,8 +1951,25 @@ a:focus-visible {
 	outline-offset: 4px;
 	border-radius: 4px;
 }
-.history-card-toggle > span:first-of-type {
+.history-card-title {
 	overflow-wrap: anywhere;
+}
+.history-kind-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 8px;
+	flex: 0 0 auto;
+}
+.history-kind-icon--dictation {
+	color: rgba(var(--accent-rgb) / 0.9);
+	background: rgba(var(--accent-rgb) / 0.1);
+}
+.history-kind-icon--meeting {
+	color: var(--mantine-color-indigo-4);
+	background: rgba(92, 124, 250, 0.12);
 }
 .history-preview {
 	white-space: pre-wrap;

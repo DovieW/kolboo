@@ -16,9 +16,11 @@ import {
 	Copy,
 	FileText,
 	MessageSquare,
+	Mic,
 	MoreHorizontal,
 	RotateCcw,
 	Trash2,
+	UsersRound,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type {
@@ -119,6 +121,7 @@ export function HistoryFeedList({
 					<Stack gap="xs">
 						{group.items.map((entry) => {
 							const open = expanded === entry.id;
+							const isMeeting = entry.recordingMode === "meeting";
 							const recordingId = entry.recordingRequestId ?? entry.id;
 							const missing =
 								recordingExistsById.get(recordingId)?.exists === false;
@@ -149,6 +152,7 @@ export function HistoryFeedList({
 												className="history-card-toggle"
 												aria-expanded={open}
 												aria-controls={`history-detail-${entry.id}`}
+												aria-label={`${open ? "Collapse" : "Expand"} ${isMeeting ? "meeting" : "dictation"} from ${entry.timestampLabel}`}
 												onClick={() => {
 													player.stop();
 													setExpanded(open ? null : entry.id);
@@ -159,7 +163,21 @@ export function HistoryFeedList({
 												) : (
 													<ChevronRight size={16} />
 												)}
-												<span>{entry.title || "Voice recording"}</span>
+												<span
+													className={`history-kind-icon history-kind-icon--${isMeeting ? "meeting" : "dictation"}`}
+													aria-hidden="true"
+												>
+													{isMeeting ? (
+														<UsersRound size={15} />
+													) : (
+														<Mic size={15} />
+													)}
+												</span>
+												{entry.title && (
+													<span className="history-card-title">
+														{entry.title}
+													</span>
+												)}
 												<Text component="span" size="xs" c="dimmed">
 													{entry.timestampLabel}
 												</Text>

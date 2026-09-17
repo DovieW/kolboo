@@ -112,6 +112,7 @@ export type HistoryEntryContentKind =
 export interface HistoryEntryViewModel {
 	id: string;
 	timestampLabel: string;
+	recordingMode: "dictation" | "meeting";
 	contentKind: HistoryEntryContentKind;
 	displayText: string;
 	displayTitle?: string;
@@ -119,7 +120,7 @@ export interface HistoryEntryViewModel {
 	hasCopyValue: boolean;
 	profilePresetLabel: string | null;
 	recordingRequestId: string | null;
-	title?: string;
+	title: string | null;
 	durationSeconds?: number | null;
 }
 
@@ -136,6 +137,20 @@ export interface HistoryFeedEmptyState {
 function trimOrNull(value: string | null | undefined): string | null {
 	const trimmed = (value ?? "").trim();
 	return trimmed.length > 0 ? trimmed : null;
+}
+
+function historyDisplayTitle(value: string | null | undefined): string | null {
+	const title = trimOrNull(value);
+	if (!title) return null;
+	const normalized = title.toLowerCase();
+	if (
+		normalized === "voice recording" ||
+		normalized === "dictation" ||
+		normalized === "meeting" ||
+		normalized === "meeting recording"
+	)
+		return null;
+	return title;
 }
 
 export function groupHistoryByDate(history: HistoryEntry[]): GroupedHistory[] {
@@ -185,9 +200,11 @@ export function toHistoryEntryViewModel(
 	const transcript = trimOrNull(entry.text);
 	const recordingRequestId = trimOrNull(entry.recording_request_id) ?? entry.id;
 	const metadata = {
-		title:
-			entry.title ||
-			(entry.recording_mode === "meeting" ? "Meeting" : "Voice recording"),
+		title: historyDisplayTitle(entry.title),
+		recordingMode:
+			entry.recording_mode === "meeting"
+				? ("meeting" as const)
+				: ("dictation" as const),
 		durationSeconds: entry.duration_seconds,
 	};
 
