@@ -145,83 +145,82 @@ export function HistoryFeedList({
 										setExpanded(open ? null : entry.id);
 									}}
 								>
-									<Group gap="xs" wrap="nowrap" align="flex-start" p="md">
-										<Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
-											<button
-												type="button"
-												className="history-card-toggle"
-												aria-expanded={open}
-												aria-controls={`history-detail-${entry.id}`}
-												aria-label={`${open ? "Collapse" : "Expand"} ${isMeeting ? "meeting" : "dictation"} from ${entry.timestampLabel}`}
-												onClick={() => {
-													player.stop();
-													setExpanded(open ? null : entry.id);
-												}}
+									<Group
+										gap="xs"
+										wrap="nowrap"
+										align="center"
+										className="history-card-summary"
+									>
+										<button
+											type="button"
+											className="history-card-toggle"
+											aria-expanded={open}
+											aria-controls={`history-detail-${entry.id}`}
+											aria-label={`${open ? "Collapse" : "Expand"} ${isMeeting ? "meeting" : "dictation"} from ${entry.timestampLabel}`}
+											onClick={() => {
+												player.stop();
+												setExpanded(open ? null : entry.id);
+											}}
+										>
+											{open ? (
+												<ChevronDown size={15} />
+											) : (
+												<ChevronRight size={15} />
+											)}
+											<span
+												className={`history-kind-icon history-kind-icon--${isMeeting ? "meeting" : "dictation"}`}
+												aria-hidden="true"
 											>
-												{open ? (
-													<ChevronDown size={16} />
+												{isMeeting ? (
+													<UsersRound size={14} />
 												) : (
-													<ChevronRight size={16} />
+													<Mic size={14} />
 												)}
-												<span
-													className={`history-kind-icon history-kind-icon--${isMeeting ? "meeting" : "dictation"}`}
-													aria-hidden="true"
-												>
-													{isMeeting ? (
-														<UsersRound size={15} />
-													) : (
-														<Mic size={15} />
-													)}
-												</span>
+											</span>
+											<span className="history-card-content">
 												{entry.title && (
 													<span className="history-card-title">
 														{entry.title}
 													</span>
 												)}
-												<Text component="span" size="xs" c="dimmed">
-													{entry.timestampLabel}
-												</Text>
-												{entry.durationSeconds != null && (
-													<Text component="span" size="xs" c="dimmed">
-														{audioTime(entry.durationSeconds)}
-													</Text>
+												{!open && (
+													<span className="history-preview">
+														{entry.displayText}
+													</span>
 												)}
-											</button>
-											{(busy ||
-												entry.contentKind === "error" ||
-												entry.profilePresetLabel) && (
-												<Group gap={6}>
-													{busy ? (
-														<Badge
-															size="xs"
-															variant="light"
-															leftSection={<Loader size={10} />}
-														>
-															Transcribing
-														</Badge>
-													) : entry.contentKind === "error" ? (
-														<Badge size="xs" variant="light" color="red">
-															Failed
-														</Badge>
-													) : null}
-													{entry.profilePresetLabel && (
-														<Text size="xs" c="dimmed">
-															{entry.profilePresetLabel}
-														</Text>
-													)}
-												</Group>
-											)}
-											{!open && (
-												<Text
-													size="sm"
-													c="dimmed"
-													lineClamp={2}
-													className="history-preview"
+											</span>
+											{busy ? (
+												<Badge
+													size="xs"
+													variant="light"
+													leftSection={<Loader size={10} />}
 												>
-													{entry.displayText}
+													Transcribing
+												</Badge>
+											) : entry.contentKind === "error" ? (
+												<Badge size="xs" variant="light" color="red">
+													Failed
+												</Badge>
+											) : null}
+											{entry.profilePresetLabel && (
+												<Text component="span" size="xs" c="dimmed">
+													{entry.profilePresetLabel}
 												</Text>
 											)}
-										</Stack>
+											<Text
+												component="span"
+												size="xs"
+												c="dimmed"
+												className="history-card-time"
+											>
+												{entry.timestampLabel}
+											</Text>
+											{entry.durationSeconds != null && (
+												<Text component="span" size="xs" c="dimmed">
+													{audioTime(entry.durationSeconds)}
+												</Text>
+											)}
+										</button>
 										<Group gap={4} wrap="nowrap">
 											<ActionIcon
 												aria-label="Copy transcript"

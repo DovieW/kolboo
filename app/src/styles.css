@@ -1932,11 +1932,16 @@ a:focus-visible {
 	overflow: hidden;
 	border-color: var(--mantine-color-default-border);
 }
+.history-card-summary {
+	min-height: 54px;
+	padding: 8px 10px 8px 12px;
+}
 .history-card-toggle {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	flex-wrap: wrap;
+	gap: 7px;
+	flex: 1;
+	min-width: 0;
 	border: 0;
 	padding: 0;
 	background: none;
@@ -1952,15 +1957,25 @@ a:focus-visible {
 	border-radius: 4px;
 }
 .history-card-title {
-	overflow-wrap: anywhere;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.history-card-content {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	min-width: 0;
+	flex: 1;
 }
 .history-kind-icon {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 26px;
-	height: 26px;
-	border-radius: 8px;
+	width: 24px;
+	height: 24px;
+	border-radius: 7px;
 	flex: 0 0 auto;
 }
 .history-kind-icon--dictation {
@@ -1972,8 +1987,17 @@ a:focus-visible {
 	background: rgba(92, 124, 250, 0.12);
 }
 .history-preview {
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--mantine-color-dimmed);
+	font-size: var(--mantine-font-size-sm);
+	font-weight: 400;
+}
+.history-card-time {
+	margin-left: auto;
+	white-space: nowrap;
 }
 .history-transcript {
 	white-space: pre-wrap;
