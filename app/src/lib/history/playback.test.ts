@@ -83,6 +83,29 @@ describe("shared History playback", () => {
 		audio.dispatchEvent(new Event("playing"));
 		expect(player.snapshot().playing).toBe(false);
 	});
+	it("ignores a late media error from the previous recording", async () => {
+		const audios: FakeAudio[] = [];
+		const onError = vi.fn();
+		const player = new RecordingPlayback({
+			createAudio: () => {
+				const audio = new FakeAudio();
+				audios.push(audio);
+				return audio as unknown as HTMLAudioElement;
+			},
+			getUrl: async (id) => `media:${id}`,
+			getWaveform: async () => ({
+				duration_seconds: 10,
+				peaks: [-1, 1],
+			}),
+			onError,
+		});
+		await player.prepare("one");
+		await player.prepare("two");
+		audios[0]?.dispatchEvent(new Event("error"));
+		expect(player.snapshot().id).toBe("two");
+		expect(player.snapshot().error).toBeNull();
+		expect(onError).not.toHaveBeenCalled();
+	});
 	it("keeps useful missing audio errors without a timeout or autoplay", async () => {
 		const { player, audio } = setup(async () => {
 			throw new Error("gone");
@@ -90,5 +113,19 @@ describe("shared History playback", () => {
 		await player.prepare("one");
 		expect(player.snapshot().error).toContain("Could not load");
 		expect(audio.play).not.toHaveBeenCalled();
+	});
+	it("reports a repeated media failure only once", async () => {
+		const audio = new FakeAudio();
+		const onError = vi.fn();
+		const player = new RecordingPlayback({
+			createAudio: () => audio as unknown as HTMLAudioElement,
+			getUrl: async () => "media:one",
+			getWaveform: async () => ({ duration_seconds: 1, peaks: [-1, 1] }),
+			onError,
+		});
+		await player.prepare("one");
+		audio.dispatchEvent(new Event("error"));
+		audio.dispatchEvent(new Event("error"));
+		expect(onError).toHaveBeenCalledTimes(1);
 	});
 });

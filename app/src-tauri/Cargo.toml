@@ -44,7 +44,6 @@ tauri = { version = "~2.11.5", default-features = false, features = [
     "macos-private-api",
     "image-png",
     "devtools",
-    "protocol-asset",
 ] }
 tauri-utils = "~2.9.3"
 tauri-plugin-opener = "2.5.4"

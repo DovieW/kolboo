@@ -810,10 +810,10 @@ export const backupAPI = {
 export const recordingsAPI = {
 	// Returns a URL usable as an <audio src>, or null if no recording exists.
 	getRecordingAssetUrl: async (params: { requestId: string }) => {
-		const path = await invoke<string | null>("recording_get_wav_path", {
+		const exists = await invoke<boolean>("recording_exists", {
 			requestId: params.requestId,
 		});
-		return path ? convertFileSrc(path) : null;
+		return exists ? convertFileSrc(params.requestId, "kolboo-media") : null;
 	},
 
 	getRecordingWaveform: (params: { requestId: string }) =>

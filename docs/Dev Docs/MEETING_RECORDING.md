@@ -175,16 +175,19 @@ realigned to timestamps. There is no speaker management or synchronized highligh
 - Cards expand rather than copy. Inline transcripts scroll after 300 px. Every card
   offers Open full view: title, fixed player, literal search with previous/next
   matches, Copy and explicit Edit mode, above one scrolling reading surface.
-- One HTML media element belongs to the History view. It pauses on collapse,
-  modal close, switching entries and navigation, preserves session positions, and
-  never autoplays on expansion. Controls include waveform seeking, keyboard seek,
-  ±10 seconds, elapsed/total time and speed.
+- One playback controller belongs to the History view. It creates a fresh HTML
+  media element per source so late webview errors cannot affect a newer recording.
+  Audio and waveform preparation are lazy until Play; playback pauses on collapse,
+  modal close, switching entries and navigation, and preserves session positions.
+  Controls include waveform seeking, keyboard seek, ±10 seconds,
+  elapsed/total time and speed.
 - Rust streams PCM to generate at most 4096 min/max waveform pairs, caches them
   beside the WAV and validates the source fingerprint. WaveSurfer renders these
   precomputed peaks; the webview does not decode the complete meeting to draw it.
-  Tauri asset playback permits individual canonical files within RecordingStore,
-  supports range requests, and grants no recursive directory access. The old
-  whole-file base64 fallback and playback timeout are removed.
+  Kolboo's private media protocol accepts only validated RecordingStore ids,
+  supports bounded byte ranges and exposes no filesystem paths or recursive
+  directory access. The generic Tauri asset protocol, whole-file base64 fallback
+  and playback timeout are not used.
 - Corrections are stored in `history-edits/<hashed-entry-id>.json`, owned by
   HistoryStorage. Original History output remains unchanged. Writes are serialized,
   use synced private temporary files and same-directory replacement, and reject

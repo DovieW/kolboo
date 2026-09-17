@@ -44,6 +44,7 @@ mod platform_capabilities;
 mod policy;
 mod prompt_builders;
 mod recording_completion;
+mod recording_media_protocol;
 mod recording_orchestration;
 mod recording_request_initialization;
 mod recordings;
@@ -1037,7 +1038,15 @@ pub fn run() {
     //   or interfere with a running instance.
     let is_cli_invocation = crate::cli::is_cli_invocation();
 
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default().register_asynchronous_uri_scheme_protocol(
+        "kolboo-media",
+        |context, request, responder| {
+            let app = context.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(recording_media_protocol::respond(&app, request));
+            });
+        },
+    );
 
     #[cfg(desktop)]
     {
@@ -1159,7 +1168,7 @@ pub fn run() {
             commands::recording::pipeline_test_audio_settings_stop_recording,
             commands::recording::pipeline_retry_transcription,
             // Recording file access (for playback)
-            commands::recording::recording_get_wav_path,
+            commands::recording::recording_exists,
             commands::recording::recording_get_waveform,
             commands::recording::recording_get_preferences,
             commands::recording::recording_set_preferences,

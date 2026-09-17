@@ -173,13 +173,14 @@ describe("History cards and reader", () => {
 		).not.toBeNull();
 		expect(button("Edit")).not.toBeNull();
 		expect(player.toggle).not.toHaveBeenCalled();
+		expect(player.prepare).not.toHaveBeenCalled();
 		// Portal events bubble through React's tree, but must not toggle the card.
 		await click(document.querySelector('[aria-label="Full transcript"]'));
 		expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 		expect(document.querySelector("#history-detail-one")).not.toBeNull();
 		await click(document.querySelector(".mantine-Modal-close"));
 		expect(player.stop).toHaveBeenCalled();
-		expect(player.prepare).toHaveBeenLastCalledWith("one");
+		expect(player.prepare).not.toHaveBeenCalled();
 	});
 	it("flushes corrections when closing and keeps the reader open if saving fails", async () => {
 		await click(document.querySelector(".history-card-toggle"));

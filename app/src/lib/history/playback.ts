@@ -48,8 +48,7 @@ export class RecordingPlayback {
 		this.state = { ...this.state, ...patch };
 		for (const listener of this.listeners) listener();
 	}
-	private ensureAudio() {
-		if (this.media) return this.media;
+	private createAudio() {
 		const audio = this.dependencies.createAudio();
 		audio.preload = "metadata";
 		audio.addEventListener("timeupdate", () => {
@@ -79,7 +78,18 @@ export class RecordingPlayback {
 		this.media = audio;
 		return audio;
 	}
+	private replaceAudio() {
+		const previous = this.media;
+		this.media = null;
+		if (previous) {
+			previous.pause();
+			previous.removeAttribute("src");
+			previous.load();
+		}
+		return this.createAudio();
+	}
 	private fail(message: string) {
+		if (this.state.error === message) return;
 		this.update({ loading: false, playing: false, error: message });
 		this.dependencies.onError?.(message);
 	}
@@ -92,9 +102,9 @@ export class RecordingPlayback {
 			return;
 		this.stop();
 		const generation = ++this.generation;
-		const audio = this.ensureAudio();
-		audio.removeAttribute("src");
-		audio.load();
+		// A new element isolates this source from late `error` events emitted while
+		// WebKit tears down the previous custom-protocol request.
+		const audio = this.replaceAudio();
 		this.update({
 			id,
 			loading: true,
@@ -182,8 +192,9 @@ export class RecordingPlayback {
 	};
 	dispose = () => {
 		this.stop();
-		this.media?.removeAttribute("src");
-		this.media?.load();
+		const media = this.media;
 		this.media = null;
+		media?.removeAttribute("src");
+		media?.load();
 	};
 }

@@ -68,7 +68,7 @@ impl RecordingStore {
 
     /// Returns the absolute WAV path for a given request id if it exists on disk.
     ///
-    /// This is intended for frontend playback via `convertFileSrc`.
+    /// The private recording media protocol uses this after validating the id.
     pub fn wav_path_if_exists(&self, id: &str) -> Result<Option<PathBuf>, String> {
         if !Self::is_safe_request_id(id) {
             return Err("Invalid request id".to_string());

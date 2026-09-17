@@ -58,7 +58,21 @@ export function HistoryAudioPlayer({
 		}
 		return () => wave?.destroy();
 	}, [media, waveform]);
-	if (!active || player.loading)
+	if (!active)
+		return (
+			<Group justify="center" py="xs">
+				<ActionIcon
+					variant="light"
+					radius="xl"
+					size="lg"
+					aria-label="Play audio"
+					onClick={() => void player.toggle(recordingId)}
+				>
+					<Play size={18} />
+				</ActionIcon>
+			</Group>
+		);
+	if (player.loading || !waveform)
 		return (
 			<Group p="md" gap="xs">
 				<Loader size="xs" />

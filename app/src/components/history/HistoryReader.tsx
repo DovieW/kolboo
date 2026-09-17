@@ -85,12 +85,6 @@ export function HistoryReader({
 			query.state.data?.entry.status === "in_progress" ? 1000 : false,
 	});
 	const status = query.data?.entry.status;
-	const { prepare, stop } = player;
-	useEffect(() => {
-		if (!status) return;
-		void prepare(recordingId);
-		return stop;
-	}, [prepare, stop, recordingId, status]);
 	if (query.isPending) return <Loader size="sm" m="md" />;
 	if (query.error || !query.data)
 		return (
@@ -178,8 +172,6 @@ function HistoryDocumentView({
 	}, [document, detail.entry.id]);
 	const close = async () => {
 		player.stop();
-		// Closing cancels playback intent, not the inline reader's audio source.
-		void player.prepare(recordingId);
 		if (await document.flush()) {
 			setFull(false);
 			setEditing(false);

@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, vi } from "vitest";
 import { itWithImportTimeout } from "../testTimeouts";
 
 const invokeMock = vi.fn();
-const convertFileSrcMock = vi.fn((path: string) => `converted:${path}`);
+const convertFileSrcMock = vi.fn(
+	(path: string, protocol?: string) =>
+		`converted:${protocol ?? "asset"}:${path}`,
+);
 const startDraggingMock = vi.fn();
 const getCurrentWindowMock = vi.fn(() => ({
 	startDragging: startDraggingMock,
@@ -335,27 +338,27 @@ describe("tauri command wrappers", () => {
 	);
 
 	itWithImportTimeout(
-		"getRecordingAssetUrl converts the file path",
+		"getRecordingAssetUrl creates a scoped media URL for an existing recording",
 		async () => {
-			invokeMock.mockResolvedValueOnce("C:\\temp\\audio.wav");
+			invokeMock.mockResolvedValueOnce(true);
 			const { recordingsAPI } = await import("./commands");
 
 			const url = await recordingsAPI.getRecordingAssetUrl({
 				requestId: "req-1",
 			});
 
-			expect(invokeMock).toHaveBeenCalledWith("recording_get_wav_path", {
+			expect(invokeMock).toHaveBeenCalledWith("recording_exists", {
 				requestId: "req-1",
 			});
-			expect(convertFileSrcMock).toHaveBeenCalledWith("C:\\temp\\audio.wav");
-			expect(url).toBe("converted:C:\\temp\\audio.wav");
+			expect(convertFileSrcMock).toHaveBeenCalledWith("req-1", "kolboo-media");
+			expect(url).toBe("converted:kolboo-media:req-1");
 		},
 	);
 
 	itWithImportTimeout(
-		"getRecordingAssetUrl returns null when no path",
+		"getRecordingAssetUrl returns null when no recording exists",
 		async () => {
-			invokeMock.mockResolvedValueOnce(null);
+			invokeMock.mockResolvedValueOnce(false);
 			const { recordingsAPI } = await import("./commands");
 
 			const url = await recordingsAPI.getRecordingAssetUrl({

@@ -30,39 +30,16 @@ use schemars::JsonSchema;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::Instrument;
-///
-/// Returns `null` when the recording doesn't exist.
 #[tauri::command]
-pub fn recording_get_wav_path(
-    app: AppHandle,
-    request_id: String,
-) -> Result<Option<String>, CommandError> {
+pub fn recording_exists(app: AppHandle, request_id: String) -> Result<bool, CommandError> {
     let store = app
         .try_state::<RecordingStore>()
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
 
-    let path = store
+    Ok(store
         .wav_path_if_exists(&request_id)
-        .map_err(CommandError::from)?;
-    path.map(|p| {
-        let canonical = p
-            .canonicalize()
-            .map_err(|_| CommandError::from("Recording unavailable"))?;
-        let directory = store
-            .directory()
-            .canonicalize()
-            .map_err(|_| CommandError::from("Recording unavailable"))?;
-        if canonical.parent() != Some(directory.as_path()) {
-            return Err(CommandError::from(
-                "Recording path is outside the audio store",
-            ));
-        }
-        app.asset_protocol_scope()
-            .allow_file(&canonical)
-            .map_err(|_| CommandError::from("Could not allow recording playback"))?;
-        Ok(canonical.to_string_lossy().into_owned())
-    })
-    .transpose()
+        .map_err(CommandError::from)?
+        .is_some())
 }
 
 /// Generate/cache a bounded local waveform off the webview and async runtime.
