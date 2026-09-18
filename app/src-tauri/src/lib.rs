@@ -1038,15 +1038,7 @@ pub fn run() {
     //   or interfere with a running instance.
     let is_cli_invocation = crate::cli::is_cli_invocation();
 
-    let mut builder = tauri::Builder::default().register_asynchronous_uri_scheme_protocol(
-        "kolboo-media",
-        |context, request, responder| {
-            let app = context.app_handle().clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                responder.respond(recording_media_protocol::respond(&app, request));
-            });
-        },
-    );
+    let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
     {
@@ -1168,7 +1160,7 @@ pub fn run() {
             commands::recording::pipeline_test_audio_settings_stop_recording,
             commands::recording::pipeline_retry_transcription,
             // Recording file access (for playback)
-            commands::recording::recording_exists,
+            commands::recording::recording_get_playback_url,
             commands::recording::recording_get_waveform,
             commands::recording::recording_get_preferences,
             commands::recording::recording_set_preferences,
@@ -1452,7 +1444,12 @@ pub fn run() {
 
             // Initialize recording store (saved WAVs for retry)
             let recording_store = RecordingStore::new(app_data_dir.clone());
+            let recording_media_server = recording_media_protocol::RecordingMediaServer::start(
+                recording_store.directory().to_owned(),
+            )
+            .map_err(std::io::Error::other)?;
             app.manage(recording_store);
+            app.manage(recording_media_server);
 
             let history_storage = HistoryStorage::new(app_data_dir.clone());
             app.manage(history_storage);

@@ -1,107 +1,274 @@
 //! Private, range-capable playback for recordings owned by `RecordingStore`.
 //!
-//! The URL contains only a recording id. Filesystem paths never enter the
-//! webview, and the handler cannot serve files outside the recording store.
+//! WebKitGTK does not reliably hand custom-scheme responses to its media
+//! pipeline. This process-local HTTP server gives the media element an ordinary
+//! byte-range stream without exposing filesystem paths or accepting arbitrary
+//! files. The random token changes on every app start.
 
 use crate::recordings::RecordingStore;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use tauri::http::{
-    header::{
-        ACCEPT_RANGES, ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE,
-        CONTENT_TYPE,
-    },
-    Method, Request, Response, StatusCode,
-};
-use tauri::{AppHandle, Manager, Runtime};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 const MAX_RANGE_BYTES: u64 = 1024 * 1024;
+const MAX_HEADER_BYTES: usize = 16 * 1024;
 
-pub fn respond<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let Some(store) = app.try_state::<RecordingStore>() else {
-        return empty_response(StatusCode::SERVICE_UNAVAILABLE);
-    };
-    response_from_store(&store, &request)
+pub struct RecordingMediaServer {
+    address: SocketAddr,
+    token: String,
+    shutdown: Arc<AtomicBool>,
+    worker: Mutex<Option<JoinHandle<()>>>,
 }
 
-fn response_from_store(store: &RecordingStore, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    if request.method() != Method::GET && request.method() != Method::HEAD {
-        return empty_response(StatusCode::METHOD_NOT_ALLOWED);
+impl RecordingMediaServer {
+    pub fn start(recordings_dir: PathBuf) -> Result<Self, String> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .map_err(|error| format!("Could not start recording playback: {error}"))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|error| format!("Could not configure recording playback: {error}"))?;
+        let address = listener
+            .local_addr()
+            .map_err(|error| format!("Could not read recording playback address: {error}"))?;
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let worker_token = token.clone();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = shutdown.clone();
+        let worker = thread::Builder::new()
+            .name("recording-media".to_string())
+            .spawn(move || {
+                serve(listener, recordings_dir, worker_token, worker_shutdown);
+            })
+            .map_err(|error| format!("Could not start recording playback worker: {error}"))?;
+
+        Ok(Self {
+            address,
+            token,
+            shutdown,
+            worker: Mutex::new(Some(worker)),
+        })
     }
 
-    let request_id = request.uri().path().trim_start_matches('/');
-    let path = match store.wav_path_if_exists(request_id) {
-        Ok(Some(path)) => path,
-        Ok(None) => return empty_response(StatusCode::NOT_FOUND),
-        Err(_) => return empty_response(StatusCode::BAD_REQUEST),
+    pub fn url_for(&self, request_id: &str) -> Result<String, String> {
+        if !RecordingStore::is_safe_request_id(request_id) {
+            return Err("Invalid recording id".to_string());
+        }
+        Ok(format!(
+            "http://{}/{}/{}",
+            self.address, self.token, request_id
+        ))
+    }
+}
+
+impl Drop for RecordingMediaServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        // Wake the nonblocking accept loop so shutdown does not wait for its poll.
+        let _ = TcpStream::connect_timeout(&self.address, Duration::from_millis(50));
+        if let Ok(mut worker) = self.worker.lock() {
+            if let Some(worker) = worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+}
+
+fn serve(listener: TcpListener, recordings_dir: PathBuf, token: String, shutdown: Arc<AtomicBool>) {
+    while !shutdown.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((stream, peer)) => {
+                if !peer.ip().is_loopback() {
+                    continue;
+                }
+                let directory = recordings_dir.clone();
+                let expected_token = token.clone();
+                let _ = thread::Builder::new()
+                    .name("recording-media-request".to_string())
+                    .spawn(move || {
+                        if let Err(error) = handle_connection(stream, &directory, &expected_token) {
+                            log::debug!("Recording playback request ended: {error}");
+                        }
+                    });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                log::warn!("Recording playback listener stopped: {error}");
+                return;
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct MediaRequest {
+    method: String,
+    path: String,
+    range: Option<String>,
+}
+
+fn handle_connection(
+    mut stream: TcpStream,
+    recordings_dir: &Path,
+    expected_token: &str,
+) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+    let request = match read_request(&stream) {
+        Ok(request) => request,
+        Err(_) => return write_empty(&mut stream, 400, "Bad Request", None),
     };
-    let length = match std::fs::metadata(&path) {
-        Ok(metadata) => metadata.len(),
-        Err(_) => return empty_response(StatusCode::NOT_FOUND),
+    if request.method != "GET" && request.method != "HEAD" {
+        return write_empty(&mut stream, 405, "Method Not Allowed", None);
+    }
+
+    let path = request.path.split('?').next().unwrap_or(&request.path);
+    let mut components = path.trim_start_matches('/').split('/');
+    let token = components.next().unwrap_or_default();
+    let request_id = components.next().unwrap_or_default();
+    if token != expected_token
+        || components.next().is_some()
+        || !RecordingStore::is_safe_request_id(request_id)
+    {
+        return write_empty(&mut stream, 404, "Not Found", None);
+    }
+
+    let path = recordings_dir.join(format!("{request_id}.wav"));
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return write_empty(&mut stream, 404, "Not Found", None);
+        }
+        Err(_) => return write_empty(&mut stream, 500, "Internal Server Error", None),
     };
+    let length = file.metadata()?.len();
     if length == 0 {
-        return empty_response(StatusCode::NOT_FOUND);
+        return write_empty(&mut stream, 404, "Not Found", None);
     }
 
-    let range = match request.headers().get("range") {
-        Some(value) => match value
-            .to_str()
-            .ok()
-            .and_then(|value| parse_range(value, length))
-        {
+    let range = match request.range.as_deref() {
+        Some(value) => match parse_range(value, length) {
             Some(range) => Some(range),
-            None => return unsatisfiable_response(length),
+            None => {
+                return write_empty(
+                    &mut stream,
+                    416,
+                    "Range Not Satisfiable",
+                    Some(format!("Content-Range: bytes */{length}\r\n")),
+                );
+            }
         },
         None => None,
     };
 
-    let mut builder = Response::builder()
-        .header(CONTENT_TYPE, "audio/wav")
-        .header(ACCEPT_RANGES, "bytes")
-        .header(CACHE_CONTROL, "private, no-store")
-        .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-
-    if let Some((start, requested_end)) = range {
-        let end = requested_end.min(start.saturating_add(MAX_RANGE_BYTES - 1).min(length - 1));
-        let response_length = end - start + 1;
-        builder = builder
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header(CONTENT_RANGE, format!("bytes {start}-{end}/{length}"))
-            .header(CONTENT_LENGTH, response_length);
-        if request.method() == Method::HEAD {
-            return builder
-                .body(Vec::new())
-                .unwrap_or_else(|_| empty_response(StatusCode::INTERNAL_SERVER_ERROR));
+    let (status, reason, start, response_length, content_range) = match range {
+        Some((start, requested_end)) => {
+            let end = requested_end.min(start.saturating_add(MAX_RANGE_BYTES - 1).min(length - 1));
+            (
+                206,
+                "Partial Content",
+                start,
+                end - start + 1,
+                Some(format!("Content-Range: bytes {start}-{end}/{length}\r\n")),
+            )
         }
-        let body = match read_range(&path, start, response_length) {
-            Ok(body) => body,
-            Err(_) => return empty_response(StatusCode::INTERNAL_SERVER_ERROR),
-        };
-        return builder
-            .body(body)
-            .unwrap_or_else(|_| empty_response(StatusCode::INTERNAL_SERVER_ERROR));
+        None => (200, "OK", 0, length, None),
+    };
+
+    write!(
+        stream,
+        "HTTP/1.1 {status} {reason}\r\n\
+         Content-Type: audio/wav\r\n\
+         Content-Length: {response_length}\r\n\
+         Accept-Ranges: bytes\r\n\
+         Cache-Control: private, no-store\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Cross-Origin-Resource-Policy: cross-origin\r\n\
+         Connection: close\r\n"
+    )?;
+    if let Some(content_range) = content_range {
+        stream.write_all(content_range.as_bytes())?;
+    }
+    stream.write_all(b"\r\n")?;
+    if request.method == "HEAD" {
+        return stream.flush();
     }
 
-    builder = builder.header(CONTENT_LENGTH, length);
-    let body = if request.method() == Method::HEAD {
-        Vec::new()
-    } else {
-        match std::fs::read(path) {
-            Ok(body) => body,
-            Err(_) => return empty_response(StatusCode::INTERNAL_SERVER_ERROR),
-        }
-    };
-    builder
-        .body(body)
-        .unwrap_or_else(|_| empty_response(StatusCode::INTERNAL_SERVER_ERROR))
+    file.seek(SeekFrom::Start(start))?;
+    std::io::copy(&mut file.take(response_length), &mut stream)?;
+    stream.flush()
 }
 
-fn read_range(path: &std::path::Path, start: u64, length: u64) -> std::io::Result<Vec<u8>> {
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(start))?;
-    let mut body = Vec::with_capacity(length as usize);
-    file.take(length).read_to_end(&mut body)?;
-    Ok(body)
+fn read_request(stream: &TcpStream) -> Result<MediaRequest, String> {
+    let mut reader = BufReader::new(stream);
+    let mut first_line = String::new();
+    read_bounded_line(&mut reader, &mut first_line)?;
+    let mut parts = first_line.split_whitespace();
+    let method = parts.next().ok_or("Missing method")?.to_string();
+    let path = parts.next().ok_or("Missing path")?.to_string();
+    if parts.next().is_none() || parts.next().is_some() {
+        return Err("Invalid request line".to_string());
+    }
+
+    let mut total = first_line.len();
+    let mut range = None;
+    loop {
+        let mut line = String::new();
+        read_bounded_line(&mut reader, &mut line)?;
+        total = total.saturating_add(line.len());
+        if total > MAX_HEADER_BYTES {
+            return Err("Headers too large".to_string());
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("range") {
+                range = Some(value.trim().to_string());
+            }
+        }
+    }
+    Ok(MediaRequest {
+        method,
+        path,
+        range,
+    })
+}
+
+fn read_bounded_line(reader: &mut BufReader<&TcpStream>, line: &mut String) -> Result<(), String> {
+    let bytes = reader.read_line(line).map_err(|error| error.to_string())?;
+    if bytes == 0 || line.len() > MAX_HEADER_BYTES {
+        return Err("Invalid request".to_string());
+    }
+    Ok(())
+}
+
+fn write_empty(
+    stream: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    extra_headers: Option<String>,
+) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 {status} {reason}\r\n\
+         Content-Length: 0\r\n\
+         Cache-Control: private, no-store\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Cross-Origin-Resource-Policy: cross-origin\r\n\
+         Connection: close\r\n"
+    )?;
+    if let Some(headers) = extra_headers {
+        stream.write_all(headers.as_bytes())?;
+    }
+    stream.write_all(b"\r\n")?;
+    stream.flush()
 }
 
 fn parse_range(value: &str, length: u64) -> Option<(u64, u64)> {
@@ -129,71 +296,84 @@ fn parse_range(value: &str, length: u64) -> Option<(u64, u64)> {
     (end >= start).then_some((start, end))
 }
 
-fn empty_response(status: StatusCode) -> Response<Vec<u8>> {
-    Response::builder()
-        .status(status)
-        .header(CACHE_CONTROL, "private, no-store")
-        .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .header(CONTENT_LENGTH, 0)
-        .body(Vec::new())
-        .expect("static media response is valid")
-}
-
-fn unsatisfiable_response(length: u64) -> Response<Vec<u8>> {
-    Response::builder()
-        .status(StatusCode::RANGE_NOT_SATISFIABLE)
-        .header(CONTENT_RANGE, format!("bytes */{length}"))
-        .header(ACCEPT_RANGES, "bytes")
-        .header(CACHE_CONTROL, "private, no-store")
-        .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .header(CONTENT_LENGTH, 0)
-        .body(Vec::new())
-        .expect("static media response is valid")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn request(method: Method, range: Option<&str>) -> Request<Vec<u8>> {
-        let mut builder = Request::builder()
-            .method(method)
-            .uri("kolboo-media://localhost/recording-1");
+    fn request(
+        server: &RecordingMediaServer,
+        method: &str,
+        path: &str,
+        range: Option<&str>,
+    ) -> Vec<u8> {
+        let mut stream = TcpStream::connect(server.address).unwrap();
+        write!(
+            stream,
+            "{method} {path} HTTP/1.1\r\nHost: {}\r\n",
+            server.address
+        )
+        .unwrap();
         if let Some(range) = range {
-            builder = builder.header("range", range);
+            write!(stream, "Range: {range}\r\n").unwrap();
         }
-        builder.body(Vec::new()).unwrap()
+        stream.write_all(b"Connection: close\r\n\r\n").unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).unwrap();
+        response
+    }
+
+    fn headers(response: &[u8]) -> String {
+        let boundary = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("response has a header terminator");
+        String::from_utf8(response[..boundary].to_vec()).unwrap()
     }
 
     #[test]
-    fn serves_bounded_ranges_and_head_without_exposing_other_files() {
+    fn serves_ranges_without_exposing_other_files() {
         let temp = tempfile::tempdir().unwrap();
-        let store = RecordingStore::new(temp.path().to_owned());
         let bytes = (0_u8..=31).collect::<Vec<_>>();
-        store.save_wav("recording-1", &bytes).unwrap();
+        std::fs::write(temp.path().join("recording-1.wav"), &bytes).unwrap();
+        std::fs::write(temp.path().join("settings.json"), b"secret").unwrap();
+        let server = RecordingMediaServer::start(temp.path().to_owned()).unwrap();
 
-        let response = response_from_store(&store, &request(Method::GET, Some("bytes=4-9")));
-        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
-        assert_eq!(response.headers()[CONTENT_RANGE], "bytes 4-9/32");
-        assert_eq!(response.body(), &bytes[4..=9]);
-
-        let response = response_from_store(&store, &request(Method::HEAD, None));
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers()[CONTENT_LENGTH], "32");
-        assert!(response.body().is_empty());
-
-        let missing = Request::builder()
-            .uri("kolboo-media://localhost/../settings.json")
-            .body(Vec::new())
-            .unwrap();
+        let path = format!("/{}/recording-1", server.token);
+        let response = request(&server, "GET", &path, Some("bytes=4-9"));
+        assert!(response.starts_with(b"HTTP/1.1 206 Partial Content\r\n"));
+        assert!(headers(&response).contains("Content-Range: bytes 4-9/32"));
         assert_eq!(
-            response_from_store(&store, &missing).status(),
-            StatusCode::BAD_REQUEST
+            response.split(|byte| *byte == b'\n').next_back().unwrap(),
+            &bytes[4..=9]
         );
+
+        let invalid = request(
+            &server,
+            "GET",
+            &format!("/{}/../settings.json", server.token),
+            None,
+        );
+        assert!(invalid.starts_with(b"HTTP/1.1 404 Not Found\r\n"));
+
+        let wrong_token = request(&server, "GET", "/wrong/recording-1", None);
+        assert!(wrong_token.starts_with(b"HTTP/1.1 404 Not Found\r\n"));
     }
 
     #[test]
-    fn rejects_invalid_and_multiple_ranges() {
+    fn supports_head_and_rejects_invalid_ranges() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("recording-1.wav"), vec![7_u8; 20]).unwrap();
+        let server = RecordingMediaServer::start(temp.path().to_owned()).unwrap();
+        let path = format!("/{}/recording-1", server.token);
+
+        let head = request(&server, "HEAD", &path, None);
+        assert!(head.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert!(head.ends_with(b"\r\n\r\n"));
+
+        let invalid = request(&server, "GET", &path, Some("bytes=30-40"));
+        assert!(invalid.starts_with(b"HTTP/1.1 416 Range Not Satisfiable\r\n"));
+        assert!(headers(&invalid).contains("Content-Range: bytes */20"));
+
         assert_eq!(parse_range("bytes=10-4", 20), None);
         assert_eq!(parse_range("bytes=0-1,4-5", 20), None);
         assert_eq!(parse_range("bytes=-4", 20), Some((16, 19)));

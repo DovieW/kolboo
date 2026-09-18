@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { buildCostInvokeParams } from "../costParams";
@@ -809,12 +809,10 @@ export const backupAPI = {
 
 export const recordingsAPI = {
 	// Returns a URL usable as an <audio src>, or null if no recording exists.
-	getRecordingAssetUrl: async (params: { requestId: string }) => {
-		const exists = await invoke<boolean>("recording_exists", {
+	getRecordingAssetUrl: (params: { requestId: string }) =>
+		invoke<string | null>("recording_get_playback_url", {
 			requestId: params.requestId,
-		});
-		return exists ? convertFileSrc(params.requestId, "kolboo-media") : null;
-	},
+		}),
 
 	getRecordingWaveform: (params: { requestId: string }) =>
 		invoke<import("./types").RecordingWaveform | null>(

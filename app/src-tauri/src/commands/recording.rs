@@ -16,6 +16,7 @@ use crate::pipeline::{
     PipelineConfig, PipelineError, PipelineState, SharedPipeline,
 };
 use crate::recording_completion;
+use crate::recording_media_protocol::RecordingMediaServer;
 use crate::recording_request_initialization::{
     record_request_id_on_current_span, start_request_log_with_seed, HistorySelectionMode,
     LogLlmSeedMode, RecordingRequestSeed,
@@ -31,15 +32,27 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::Instrument;
 #[tauri::command]
-pub fn recording_exists(app: AppHandle, request_id: String) -> Result<bool, CommandError> {
+pub fn recording_get_playback_url(
+    app: AppHandle,
+    request_id: String,
+) -> Result<Option<String>, CommandError> {
     let store = app
         .try_state::<RecordingStore>()
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
-
-    Ok(store
+    if store
         .wav_path_if_exists(&request_id)
         .map_err(CommandError::from)?
-        .is_some())
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let server = app
+        .try_state::<RecordingMediaServer>()
+        .ok_or_else(|| CommandError::from("Recording playback is not available".to_string()))?;
+    server
+        .url_for(&request_id)
+        .map(Some)
+        .map_err(CommandError::from)
 }
 
 /// Generate/cache a bounded local waveform off the webview and async runtime.

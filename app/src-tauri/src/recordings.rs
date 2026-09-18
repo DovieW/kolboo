@@ -45,7 +45,7 @@ impl RecordingStore {
         }
     }
 
-    fn is_safe_request_id(id: &str) -> bool {
+    pub(crate) fn is_safe_request_id(id: &str) -> bool {
         // Request ids are expected to be UUID-like strings.
         // We keep this conservative to prevent path traversal / weird filenames.
         !id.trim().is_empty()
@@ -68,7 +68,7 @@ impl RecordingStore {
 
     /// Returns the absolute WAV path for a given request id if it exists on disk.
     ///
-    /// The private recording media protocol uses this after validating the id.
+    /// The process-local recording playback stream uses this after validating the id.
     pub fn wav_path_if_exists(&self, id: &str) -> Result<Option<PathBuf>, String> {
         if !Self::is_safe_request_id(id) {
             return Err("Invalid request id".to_string());

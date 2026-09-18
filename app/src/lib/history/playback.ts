@@ -1,4 +1,5 @@
 import type { RecordingWaveform } from "../tauri/types";
+import { frontendLog } from "../frontendLog";
 
 type PlaybackState = {
 	id: string | null;
@@ -70,10 +71,15 @@ export class RecordingPlayback {
 			if (this.state.id) this.seek(this.positions.get(this.state.id) ?? 0);
 		});
 		audio.addEventListener("error", () => {
-			if (this.media === audio && audio.getAttribute("src"))
+			if (this.media === audio && audio.getAttribute("src")) {
+				frontendLog.warn(
+					"history-playback",
+					`media error code=${audio.error?.code ?? 0} network=${audio.networkState} ready=${audio.readyState}`,
+				);
 				this.fail(
 					"This audio could not be played. The saved recording has not been changed.",
 				);
+			}
 		});
 		this.media = audio;
 		return audio;

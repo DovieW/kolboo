@@ -143,17 +143,17 @@ describe("tauri invoke wrappers", () => {
 		});
 	});
 
-	it("recordingsAPI.getRecordingAssetUrl uses the scoped media protocol", async () => {
+	it("recordingsAPI.getRecordingAssetUrl returns the scoped playback stream", async () => {
 		const { recordingsAPI } = await import("./tauri");
-		invokeMock.mockResolvedValueOnce(true);
+		invokeMock.mockResolvedValueOnce("http://127.0.0.1:1234/token/req-1");
 
 		const url = await recordingsAPI.getRecordingAssetUrl({
 			requestId: "req-1",
 		});
 
-		expect(invokeMock).toHaveBeenCalledWith("recording_exists", {
+		expect(invokeMock).toHaveBeenCalledWith("recording_get_playback_url", {
 			requestId: "req-1",
 		});
-		expect(url).toBe("req-1");
+		expect(url).toBe("http://127.0.0.1:1234/token/req-1");
 	});
 });

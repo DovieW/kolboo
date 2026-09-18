@@ -184,10 +184,10 @@ realigned to timestamps. There is no speaker management or synchronized highligh
 - Rust streams PCM to generate at most 4096 min/max waveform pairs, caches them
   beside the WAV and validates the source fingerprint. WaveSurfer renders these
   precomputed peaks; the webview does not decode the complete meeting to draw it.
-  Kolboo's private media protocol accepts only validated RecordingStore ids,
-  supports bounded byte ranges and exposes no filesystem paths or recursive
-  directory access. The generic Tauri asset protocol, whole-file base64 fallback
-  and playback timeout are not used.
+  Kolboo's tokenized, process-local playback stream accepts only validated
+  RecordingStore ids, supports bounded byte ranges and exposes no filesystem
+  paths or recursive directory access. The generic Tauri asset protocol,
+  whole-file base64 fallback and playback timeout are not used.
 - Corrections are stored in `history-edits/<hashed-entry-id>.json`, owned by
   HistoryStorage. Original History output remains unchanged. Writes are serialized,
   use synced private temporary files and same-directory replacement, and reject
