@@ -177,10 +177,10 @@ realigned to timestamps. There is no speaker management or synchronized highligh
   matches, Copy and explicit Edit mode, above one scrolling reading surface.
 - One playback controller belongs to the History view. It creates a fresh HTML
   media element per source so late webview errors cannot affect a newer recording.
-  Audio and waveform preparation are lazy until Play; playback pauses on collapse,
-  modal close, switching entries and navigation, and preserves session positions.
-  Controls include waveform seeking, keyboard seek, ±10 seconds,
-  elapsed/total time and speed.
+  Audio and waveform preparation begin when a card expands, without autoplay;
+  playback pauses on collapse, modal close, switching entries and navigation, and
+  preserves session positions. Controls include waveform seeking, keyboard seek,
+  ±10 seconds, elapsed/total time and speed.
 - Rust streams PCM to generate at most 4096 min/max waveform pairs, caches them
   beside the WAV and validates the source fingerprint. WaveSurfer renders these
   precomputed peaks; the webview does not decode the complete meeting to draw it.

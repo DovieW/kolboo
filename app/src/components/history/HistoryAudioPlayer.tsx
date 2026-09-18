@@ -4,7 +4,6 @@ import {
 	Group,
 	Loader,
 	Select,
-	Slider,
 	Stack,
 	Text,
 } from "@mantine/core";
@@ -32,6 +31,9 @@ export function HistoryAudioPlayer({
 	const waveform = active ? player.waveform : null;
 	const media = player.media;
 	useEffect(() => {
+		void player.prepare(recordingId);
+	}, [player.prepare, recordingId]);
+	useEffect(() => {
 		if (!container.current || !media || !waveform) return;
 		setWaveformError(false);
 		let wave: WaveSurfer | undefined;
@@ -58,27 +60,10 @@ export function HistoryAudioPlayer({
 		}
 		return () => wave?.destroy();
 	}, [media, waveform]);
-	if (!active)
+	if (!active || player.loading || (!waveform && !player.error))
 		return (
-			<Group justify="center" py="xs">
-				<ActionIcon
-					variant="light"
-					radius="xl"
-					size="lg"
-					aria-label="Play audio"
-					onClick={() => void player.toggle(recordingId)}
-				>
-					<Play size={18} />
-				</ActionIcon>
-			</Group>
-		);
-	if (player.loading || !waveform)
-		return (
-			<Group p="md" gap="xs">
+			<Group justify="center" p="md" gap="xs">
 				<Loader size="xs" />
-				<Text size="sm" c="dimmed">
-					Preparing audio…
-				</Text>
 			</Group>
 		);
 	if (player.error)
@@ -98,24 +83,41 @@ export function HistoryAudioPlayer({
 		);
 	return (
 		<Stack gap="xs" className="history-audio-player">
-			<div ref={container} aria-hidden="true" />
+			<div
+				ref={container}
+				className="history-waveform"
+				role="slider"
+				tabIndex={0}
+				aria-label="Playback position"
+				aria-valuemin={0}
+				aria-valuemax={Math.max(1, Math.round(player.duration))}
+				aria-valuenow={Math.round(player.position)}
+				aria-valuetext={`${audioTime(player.position)} of ${audioTime(player.duration)}`}
+				onKeyDown={(event) => {
+					if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+						event.preventDefault();
+						player.seek(player.position + (event.key === "ArrowLeft" ? -5 : 5));
+					} else if (event.key === "Home" || event.key === "End") {
+						event.preventDefault();
+						player.seek(event.key === "Home" ? 0 : player.duration);
+					}
+				}}
+			/>
 			{waveformError && (
 				<Text size="xs" c="dimmed">
 					Waveform unavailable.
 				</Text>
 			)}
-			<Slider
-				aria-label="Playback position"
-				min={0}
-				max={Math.max(1, player.duration)}
-				step={0.1}
-				value={player.position}
-				onChange={player.seek}
-				label={audioTime}
-				size={2}
-			/>
-			<Group justify="space-between" gap="xs" wrap="wrap">
-				<Group gap="xs">
+			<div className="history-audio-controls">
+				<Text
+					size="xs"
+					c="dimmed"
+					className="history-audio-time"
+					style={{ fontVariantNumeric: "tabular-nums" }}
+				>
+					{audioTime(player.position)} / {audioTime(player.duration)}
+				</Text>
+				<Group gap="xs" className="history-audio-buttons">
 					<ActionIcon
 						variant="subtle"
 						aria-label="Back 10 seconds"
@@ -139,15 +141,9 @@ export function HistoryAudioPlayer({
 					>
 						<RotateCw size={17} />
 					</ActionIcon>
-					<Text
-						size="xs"
-						c="dimmed"
-						style={{ fontVariantNumeric: "tabular-nums" }}
-					>
-						{audioTime(player.position)} / {audioTime(player.duration)}
-					</Text>
 				</Group>
 				<Select
+					className="history-audio-speed"
 					aria-label="Playback speed"
 					size="xs"
 					w={85}
@@ -159,7 +155,7 @@ export function HistoryAudioPlayer({
 					}))}
 					allowDeselect={false}
 				/>
-			</Group>
+			</div>
 		</Stack>
 	);
 }

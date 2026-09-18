@@ -1999,6 +1999,29 @@ a:focus-visible {
 	margin-left: auto;
 	white-space: nowrap;
 }
+.history-waveform {
+	cursor: pointer;
+	border-radius: var(--mantine-radius-sm);
+}
+.history-waveform:focus-visible {
+	outline: 2px solid var(--mantine-primary-color-filled);
+	outline-offset: 4px;
+}
+.history-audio-controls {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+	align-items: center;
+	column-gap: var(--mantine-spacing-xs);
+}
+.history-audio-time {
+	justify-self: start;
+}
+.history-audio-buttons {
+	grid-column: 2;
+}
+.history-audio-speed {
+	justify-self: end;
+}
 .history-transcript {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;

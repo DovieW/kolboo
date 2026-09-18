@@ -58,9 +58,10 @@ Meeting models marked **Managed** use your Kolboo access; **Your key** uses the
 provider key you configured. This choice is independent of Dictation. Recovery
 retains the original recording's mode and model choice.
 
-Click a History card to expand it. Audio stays unloaded until you press Play; Kolboo
-then prepares the waveform and recording. Copy is a separate button. The overflow
-menu contains rerun, request logs and deletion. Rerun produces a new result without
+Click a History card to expand it. Kolboo prepares its waveform and audio without
+starting playback. Click or keyboard-seek on the waveform, then use the centered
+playback controls when you are ready. Copy is a separate button. The overflow menu
+contains rerun, request logs and deletion. Rerun produces a new result without
 changing your notes.
 
 **Open full view** is available for every recording. It has a larger transcript,

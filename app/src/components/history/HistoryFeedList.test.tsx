@@ -133,6 +133,7 @@ describe("History cards and reader", () => {
 		expect(document.querySelectorAll("[data-history-detail]")).toHaveLength(1);
 		expect(copy).not.toHaveBeenCalled();
 		expect(player.toggle).not.toHaveBeenCalled();
+		expect(player.prepare).toHaveBeenCalledWith("one");
 		expect(
 			document.querySelector(".history-transcript-inline")?.textContent,
 		).toBe(original);
@@ -155,7 +156,7 @@ describe("History cards and reader", () => {
 			document.querySelector('[aria-label^="Expand dictation from"]'),
 		).not.toBeNull();
 	});
-	it("copies full text explicitly and offers the full reader without starting playback", async () => {
+	it("copies full text explicitly and prepares the player without autoplay", async () => {
 		await click(document.querySelector('[aria-label="Copy transcript"]'));
 		expect(copy).toHaveBeenCalledWith("one", original);
 		await click(document.querySelector(".history-card-toggle"));
@@ -173,14 +174,17 @@ describe("History cards and reader", () => {
 		).not.toBeNull();
 		expect(button("Edit")).not.toBeNull();
 		expect(player.toggle).not.toHaveBeenCalled();
-		expect(player.prepare).not.toHaveBeenCalled();
+		expect(player.prepare).toHaveBeenCalledWith("one");
+		expect(document.querySelector(".history-audio-buttons")).not.toBeNull();
+		expect(
+			document.querySelectorAll('[aria-label="Playback position"]'),
+		).toHaveLength(1);
 		// Portal events bubble through React's tree, but must not toggle the card.
 		await click(document.querySelector('[aria-label="Full transcript"]'));
 		expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 		expect(document.querySelector("#history-detail-one")).not.toBeNull();
 		await click(document.querySelector(".mantine-Modal-close"));
 		expect(player.stop).toHaveBeenCalled();
-		expect(player.prepare).not.toHaveBeenCalled();
 	});
 	it("flushes corrections when closing and keeps the reader open if saving fails", async () => {
 		await click(document.querySelector(".history-card-toggle"));
