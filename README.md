@@ -43,6 +43,21 @@ The source repository is public. The Linux beta is a free Community/BYOK distrib
 
 Private Windows artifacts continue to use the [release operations guide](docs/Dev%20Docs/RELEASE_OPERATIONS.md) for build evidence, updater, rollback, and cache-cleaning procedures.
 
+## Development setup
+
+Kolboo requires the repository's Rust build accelerators before running desktop
+development commands. After installing dependencies, verify the machine once:
+
+```sh
+pnpm -C app setup:check
+```
+
+On Linux, install `sccache` and `mold`; macOS and Windows require `sccache`.
+Normal `pnpm -C app dev`, Cargo checks, and supported packaging commands then use
+the configured cache and linker automatically. See
+[Faster Rust/Tauri builds](docs/Dev%20Docs/FASTER_BUILDS.md) for installation,
+benchmarking, and cache-cleanup guidance.
+
 ## Development build variants
 
 Kolboo ships with optional Local Whisper support behind Cargo features.

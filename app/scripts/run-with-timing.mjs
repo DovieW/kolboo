@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { configureRustBuildEnv } from "./rust-build-env.mjs";
 
 const args = process.argv.slice(2);
 let useShell = false;
@@ -98,10 +99,22 @@ const logTime = (label, message, tint) => {
 const start = Date.now();
 let commandLabel = "";
 
-const env = {
+let env = {
 	...process.env,
 	PATH: [binPath, process.env.PATH ?? ""].join(path.delimiter),
 };
+
+const rustCommand = args.some((argument) =>
+	/(^|\s)(cargo|tauri)(\s|$)/.test(argument),
+);
+if (rustCommand) {
+	try {
+		env = configureRustBuildEnv(env, { requireTools: true }).env;
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	}
+}
 
 let child;
 if (useShell) {

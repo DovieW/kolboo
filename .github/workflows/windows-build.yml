@@ -43,6 +43,7 @@ jobs:
     runs-on: windows-latest
 
     env:
+      CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
       # Use a local sccache directory and cache it via actions/cache.
       # This avoids relying on GitHub's artifact cache service, which can be flaky.
@@ -142,6 +143,7 @@ jobs:
       artifact-name-local-whisper: ${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}
 
     env:
+      CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
       # Use a local sccache directory and cache it via actions/cache.
       # This avoids relying on GitHub's artifact cache service, which can be flaky.

@@ -35,7 +35,9 @@ jobs:
 
     env:
       CARGO_BUILD_JOBS: 4
+      CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       TAURI_API_BASE_URL: https://kolboo.dovie.dev
       TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
@@ -60,6 +62,7 @@ jobs:
             libssl-dev \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
+            mold \
             patchelf \
             pkg-config
 

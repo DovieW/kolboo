@@ -27,6 +27,7 @@ jobs:
 
     env:
       CARGO_BUILD_JOBS: 3
+      CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       TAURI_API_BASE_URL: https://kolboo.dovie.dev

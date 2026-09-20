@@ -187,10 +187,23 @@ keyring = { version = "3", features = ["linux-native-sync-persistent", "crypto-r
 tempfile = "3"
 wiremock = "0.6.5"
 
-# Compile dependencies with optimizations even in dev/test builds.
-# This dramatically speeds up `cargo test` for heavy deps (windows, tauri,
-# reqwest, rubato, etc.) and makes the benchmark tests ~10-20x faster.
-[profile.dev.package."*"]
+# Retain useful line information while avoiding the link-time and disk cost of
+# full debug information for the complete desktop dependency graph.
+[profile.dev]
+debug = 1
+
+# Keep latency-sensitive audio processing representative without forcing Cargo
+# to optimize the entire Tauri dependency graph during every clean dev build.
+[profile.dev.package.rubato]
+opt-level = 2
+
+[profile.dev.package.realfft]
+opt-level = 2
+
+[profile.dev.package.rustfft]
+opt-level = 2
+
+[profile.dev.package.webrtc-vad]
 opt-level = 2
 
 [[bin]]

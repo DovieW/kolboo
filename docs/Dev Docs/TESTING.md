@@ -19,13 +19,22 @@ Tests should protect important behavior, risky boundaries, or known regressions.
 - Node.js 24 or newer
 - pnpm 10.26.2 through the `packageManager` field
 - stable Rust with `rustfmt` and `clippy`
+- `sccache` on every development platform
+- `mold` on Linux
 - platform-specific Tauri build prerequisites
 
 Install JavaScript dependencies from `app/`:
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm setup:check
 ```
+
+Rust/Tauri commands launched through the package scripts use `sccache` with
+`CARGO_INCREMENTAL=0` automatically. Linux builds also use `mold`; the setup
+check fails with the platform-specific installation command when either required
+accelerator is missing. Keep direct Cargo invocations for troubleshooting only so
+normal development does not silently bypass the shared build environment.
 
 ## Fast focused checks
 

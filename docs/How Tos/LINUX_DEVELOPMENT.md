@@ -23,8 +23,16 @@ sudo apt-get install -y \
   libssl-dev \
   libwebkit2gtk-4.1-dev \
   libxdo-dev \
+  mold \
   patchelf \
-  pkg-config
+  pkg-config \
+  sccache
+```
+
+Verify the required compiler cache and linker before development:
+
+```sh
+pnpm -C app setup:check
 ```
 
 Install JavaScript dependencies and build the installable packages:
@@ -39,7 +47,15 @@ pnpm -C app tauri build --no-sign --bundles deb,appimage
 
 For an interactive development launch, run `pnpm -C app dev`. The repository uses
 Cargo's sparse registry so a clean Linux checkout does not download the full Git
-index before compiling.
+index before compiling. Package scripts enable `sccache` and `mold`
+automatically; do not maintain a separate unaccelerated local launch command.
+
+For a fast installable package intended only for native testing, use
+`pnpm -C app build:linux:fast`. `pnpm -C app deploy:ideapad` also copies that
+package to `dovie-ideapad-linux`, and `pnpm -C app deploy:ideapad:install`
+performs the interactive sudo installation. These debug-profile packages embed
+the frontend but are not release candidates; public artifacts must continue
+through the release workflow below.
 
 The `Linux Build` GitHub workflow builds on Ubuntu 22.04 for a conservative glibc baseline. It retains the `.deb`, AppImage, SHA-256 checksums, dependency report, package contents, and commit/run evidence for 14 days. The updater is intentionally disabled for this beta channel.
 

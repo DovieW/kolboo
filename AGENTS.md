@@ -93,7 +93,13 @@ pnpm -C app cargo:fmt:check
 pnpm -C app cargo:test
 ```
 
-Use `pnpm -C app check:ci` as a checkpoint rather than after every small edit. When invoking Cargo locally, use `sccache` when available and set a conservative `CARGO_BUILD_JOBS` value so the machine remains responsive.
+Use `pnpm -C app check:ci` as a checkpoint rather than after every small edit. A
+new development machine must pass `pnpm -C app setup:check` before Rust-backed
+work. Use the repository package scripts for routine Cargo and Tauri commands;
+they require `sccache`, disable Cargo incremental output so Rust cache entries are
+reusable, cap parallelism, and enable `mold` on Linux. Direct Cargo invocations
+are for troubleshooting only and must reproduce the environment from
+`app/scripts/rust-build-env.mjs` when their result will be used as validation.
 
 ## Completion discipline
 

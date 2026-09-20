@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { configureRustBuildEnv } from "./rust-build-env.mjs";
 
 export function conservativeCargoJobs(cpuCount = os.cpus().length) {
 	return Math.min(8, Math.max(1, Math.floor(cpuCount / 2)));
@@ -98,7 +99,9 @@ function parseArgs(argv) {
 export function runRustCoverageCli(argv = process.argv.slice(2)) {
 	const options = parseArgs(argv);
 	const cargoArgs = buildRustCoverageArgs(options);
-	const env = createRustCoverageEnvironment();
+	const env = configureRustBuildEnv(createRustCoverageEnvironment(), {
+		requireTools: true,
+	}).env;
 
 	console.log(`[rust-coverage] cargo ${cargoArgs.join(" ")}`);
 	console.log(`[rust-coverage] CARGO_BUILD_JOBS=${env.CARGO_BUILD_JOBS}`);
