@@ -1991,9 +1991,12 @@ a:focus-visible {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: var(--mantine-color-dimmed);
+	color: var(--mantine-color-white);
 	font-size: var(--mantine-font-size-sm);
 	font-weight: 400;
+}
+.history-preview--error {
+	color: var(--mantine-color-dimmed);
 }
 .history-card-time {
 	margin-left: auto;

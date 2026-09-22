@@ -184,7 +184,13 @@ export function HistoryFeedList({
 													</span>
 												)}
 												{!open && (
-													<span className="history-preview">
+													<span
+														className={`history-preview${
+															entry.contentKind === "error"
+																? " history-preview--error"
+																: ""
+														}`}
+													>
 														{entry.displayText}
 													</span>
 												)}

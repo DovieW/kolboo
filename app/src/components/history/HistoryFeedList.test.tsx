@@ -146,6 +146,8 @@ describe("History cards and reader", () => {
 	});
 	it("uses quiet mode icons instead of generic recording labels", () => {
 		expect(document.body.textContent).not.toContain("Voice recording");
+		expect(document.querySelectorAll(".history-preview")).toHaveLength(2);
+		expect(document.querySelector(".history-preview--error")).toBeNull();
 		expect(
 			document.querySelectorAll(".history-kind-icon--dictation"),
 		).toHaveLength(1);
