@@ -53,6 +53,8 @@ pnpm -C app setup:check
 ```
 
 On Linux, install `sccache` and `mold`; macOS and Windows require `sccache`.
+Every development machine also requires `cargo-llvm-cov` 0.9.1 and Rust's
+`llvm-tools-preview` component so coverage is reproducible locally and in CI.
 Normal `pnpm -C app dev`, Cargo checks, and supported packaging commands then use
 the configured cache and linker automatically. See
 [Faster Rust/Tauri builds](docs/Dev%20Docs/FASTER_BUILDS.md) for installation,

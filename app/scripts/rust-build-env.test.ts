@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	configureRustBuildEnv,
 	inspectRustBuildTools,
+	rustComponentListIncludes,
 	withUserLocalBin,
 } from "./rust-build-env.mjs";
 
@@ -16,13 +17,16 @@ describe("Rust build acceleration environment", () => {
 				return true;
 			},
 			moldLinkerWorksFn: () => true,
+			rustComponentInstalledFn: () => true,
 		});
 
-		expect(seen.sort()).toEqual(["mold", "sccache"]);
+		expect(seen.sort()).toEqual(["cargo-llvm-cov", "mold", "sccache"]);
 		expect(status).toMatchObject({
 			sccache: true,
 			mold: true,
 			moldRequired: true,
+			cargoLlvmCov: true,
+			llvmTools: true,
 		});
 	});
 
@@ -32,9 +36,19 @@ describe("Rust build acceleration environment", () => {
 			env: { PATH: "/usr/bin" },
 			commandExistsFn: () => true,
 			moldLinkerWorksFn: () => false,
+			rustComponentInstalledFn: () => true,
 		});
 
 		expect(status).toMatchObject({ mold: false, moldBinary: true });
+	});
+
+	it("recognizes rustup's target-qualified llvm-tools component name", () => {
+		expect(
+			rustComponentListIncludes(
+				"llvm-tools-x86_64-unknown-linux-gnu\nrustfmt-x86_64-unknown-linux-gnu",
+				"llvm-tools-preview",
+			),
+		).toBe(true);
 	});
 
 	it("prepends the user-local bin directory only once", () => {

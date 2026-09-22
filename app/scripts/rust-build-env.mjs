@@ -24,6 +24,27 @@ export function commandExists(command, env = process.env) {
 	);
 }
 
+export function rustComponentListIncludes(output, component) {
+	const installedName = component.replace(/-preview$/u, "");
+	return output.split(/\r?\n/u).some(
+		(line) =>
+			line === component ||
+			line.startsWith(`${component}-`) ||
+			line === installedName ||
+			line.startsWith(`${installedName}-`),
+	);
+}
+
+export function rustComponentInstalled(component, env = process.env) {
+	const result = spawnSync("rustup", ["component", "list", "--installed"], {
+		encoding: "utf8",
+		env,
+	});
+	return (
+		result.status === 0 && rustComponentListIncludes(result.stdout, component)
+	);
+}
+
 export function moldLinkerWorks(env = process.env) {
 	return (
 		spawnSync("cc", ["-fuse-ld=mold", "-Wl,--version"], {
@@ -38,6 +59,7 @@ export function inspectRustBuildTools({
 	env = process.env,
 	commandExistsFn = commandExists,
 	moldLinkerWorksFn = moldLinkerWorks,
+	rustComponentInstalledFn = rustComponentInstalled,
 } = {}) {
 	const normalizedEnv = {
 		...env,
@@ -48,6 +70,11 @@ export function inspectRustBuildTools({
 	return {
 		env: normalizedEnv,
 		sccache: commandExistsFn("sccache", normalizedEnv),
+		cargoLlvmCov: commandExistsFn("cargo-llvm-cov", normalizedEnv),
+		llvmTools: rustComponentInstalledFn(
+			"llvm-tools-preview",
+			normalizedEnv,
+		),
 		mold:
 			moldBinary && (platform !== "linux" || moldLinkerWorksFn(normalizedEnv)),
 		moldBinary,
@@ -56,10 +83,16 @@ export function inspectRustBuildTools({
 }
 
 export function rustBuildSetupInstructions(platform = process.platform) {
+	const coverageTools = [
+		"Install the required Rust coverage tools:",
+		"  cargo +stable install cargo-llvm-cov --locked --version 0.9.1",
+		"  rustup component add llvm-tools-preview",
+	];
 	if (platform === "linux") {
 		return [
 			"Install the required Rust build accelerators:",
 			"  sudo apt-get install -y sccache mold",
+			...coverageTools,
 			"Then verify the environment:",
 			"  pnpm -C app setup:check",
 		].join("\n");
@@ -68,6 +101,7 @@ export function rustBuildSetupInstructions(platform = process.platform) {
 		return [
 			"Install the required Rust compiler cache:",
 			"  brew install sccache",
+			...coverageTools,
 			"Then verify the environment:",
 			"  pnpm -C app setup:check",
 		].join("\n");
@@ -75,6 +109,7 @@ export function rustBuildSetupInstructions(platform = process.platform) {
 	return [
 		"Install the required Rust compiler cache:",
 		"  scoop install sccache",
+		...coverageTools,
 		"Then verify the environment:",
 		"  pnpm -C app setup:check",
 	].join("\n");
@@ -88,6 +123,8 @@ export function configureRustBuildEnv(
 	const missing = [
 		...(status.sccache ? [] : ["sccache"]),
 		...(status.mold ? [] : ["mold"]),
+		...(status.cargoLlvmCov ? [] : ["cargo-llvm-cov"]),
+		...(status.llvmTools ? [] : ["llvm-tools-preview"]),
 	];
 	if (requireTools && missing.length > 0) {
 		throw new Error(
@@ -129,6 +166,8 @@ export function describeRustBuildEnv(status, env) {
 	const parts = [
 		`sccache=${status.sccache ? "on" : "missing"}`,
 		...(status.moldRequired ? [`mold=${status.mold ? "on" : "missing"}`] : []),
+		`cargo-llvm-cov=${status.cargoLlvmCov ? "on" : "missing"}`,
+		`llvm-tools=${status.llvmTools ? "on" : "missing"}`,
 		`incremental=${env.CARGO_INCREMENTAL === "0" ? "off" : "on"}`,
 		`jobs=${env.CARGO_BUILD_JOBS}`,
 	];

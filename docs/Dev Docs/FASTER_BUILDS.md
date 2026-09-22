@@ -15,6 +15,17 @@ pnpm -C app setup:check
 Normal `pnpm -C app dev`, Cargo validation scripts, and the fast Linux package
 path automatically enable the available accelerators.
 
+Coverage is also a required part of the development toolchain:
+
+```sh
+cargo +stable install cargo-llvm-cov --locked --version 0.9.1
+rustup component add llvm-tools-preview
+pnpm -C app setup:check
+```
+
+CI uses the corresponding verified prebuilt release. Keeping the version pinned
+makes local and CI coverage semantics consistent.
+
 ## 1) Antivirus / Defender exclusions
 
 If you’re on Windows, excluding these paths from real-time scanning often removes “random long rebuilds”:

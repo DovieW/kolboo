@@ -40,6 +40,22 @@ describe("rust coverage helper", () => {
 		]);
 	});
 
+	it("builds an LCOV report for patch coverage", () => {
+		expect(
+			buildRustCoverageArgs({
+				lcov: true,
+				outputPath: "coverage/rust-lcov.info",
+			}),
+		).toEqual([
+			"llvm-cov",
+			"--manifest-path",
+			"src-tauri/Cargo.toml",
+			"--lcov",
+			"--output-path",
+			"coverage/rust-lcov.info",
+		]);
+	});
+
 	it("preserves an existing cargo job limit", () => {
 		const env = createRustCoverageEnvironment({ CARGO_BUILD_JOBS: "3" });
 
@@ -49,6 +65,9 @@ describe("rust coverage helper", () => {
 	it("documents missing-tool validation guidance", () => {
 		expect(validateRustCoverageOptions()).toContain(
 			"cargo llvm-cov must be installed before Rust in-scope coverage can be claimed.",
+		);
+		expect(validateRustCoverageOptions()).toContain(
+			"Install with: cargo +stable install cargo-llvm-cov --locked --version 0.9.1",
 		);
 		expect(validateRustCoverageOptions({ requireTool: false })).toEqual([]);
 	});

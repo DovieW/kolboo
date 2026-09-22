@@ -19,6 +19,7 @@ Tests should protect important behavior, risky boundaries, or known regressions.
 - Node.js 24 or newer
 - pnpm 10.26.2 through the `packageManager` field
 - stable Rust with `rustfmt` and `clippy`
+- `cargo-llvm-cov` 0.9.1 and the `llvm-tools-preview` Rust component
 - `sccache` on every development platform
 - `mold` on Linux
 - platform-specific Tauri build prerequisites
@@ -45,6 +46,7 @@ pnpm lint:ci
 pnpm typecheck
 pnpm test
 pnpm coverage
+pnpm coverage:patch
 pnpm knip
 ```
 
@@ -126,7 +128,15 @@ Cover permutations beneath those journeys with API integration and rendered comp
 
 ## Coverage policy
 
-Coverage thresholds are enforced for declared frontend files and must not be lowered to make a change pass. Add focused tests for uncovered branches or explicitly exclude generated/entrypoint code when it has no meaningful executable behavior.
+Coverage thresholds are enforced for declared frontend files and must not be lowered to make a change pass. In addition, pull requests require 100% coverage of changed executable lines and functions. Frontend branch records on changed lines must also be fully covered. Rust branch coverage remains excluded because LLVM's support is unstable.
+
+The patch gate intentionally applies to new behavior rather than pretending the
+legacy repository already has 100% global coverage. It fails closed when a
+changed production source file is missing from coverage reports. Tests,
+declarations, generated contracts, and trivial renderer entrypoints are excluded
+explicitly; do not expand that list merely to make a patch pass. Coverage proves
+execution, not correctness, so changed behavior still needs meaningful assertions
+and the appropriate unit, component, integration, or native-platform test.
 
 Rust coverage evidence is available through:
 
