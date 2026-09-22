@@ -7,7 +7,7 @@ class FakeAudio extends EventTarget {
 	playbackRate = 1;
 	preload = "";
 	paused = true;
-	load = vi.fn();
+	load = vi.fn(() => this.dispatchEvent(new Event("loadedmetadata")));
 	play = vi.fn(async () => {
 		this.paused = false;
 		this.dispatchEvent(new Event("playing"));
@@ -40,6 +40,14 @@ function setup(getUrl = async (id: string) => `asset:${id}`) {
 	return { audio, player };
 }
 describe("shared History playback", () => {
+	it("stays unavailable until the media metadata has loaded", async () => {
+		const { player, audio } = setup();
+		audio.load.mockImplementationOnce(() => true);
+		await player.prepare("one");
+		expect(player.snapshot()).toMatchObject({ loading: true, ready: false });
+		audio.dispatchEvent(new Event("loadedmetadata"));
+		expect(player.snapshot()).toMatchObject({ loading: false, ready: true });
+	});
 	it("never autoplays, supports seeking/speed, and retains each position", async () => {
 		const { player, audio } = setup();
 		await player.prepare("one");

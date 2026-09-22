@@ -107,12 +107,35 @@ describe("Settings shell", () => {
 			"Appearance controls",
 		);
 	});
+	it("activates heavy tabs before mounting their content", async () => {
+		await render();
+		const providers = [
+			...host.querySelectorAll<HTMLButtonElement>("[role='tab']"),
+		].find((tab) => tab.textContent === "Providers");
+		await act(async () => providers?.click());
+		expect(
+			host.querySelector("[role='tab'][aria-selected='true']")?.textContent,
+		).toBe("Providers");
+		expect(
+			host.querySelector(
+				'[role="status"][aria-label="Loading Providers settings"]',
+			),
+		).not.toBeNull();
+		expect(host.textContent).not.toContain("Provider controls");
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1);
+		});
+		expect(host.textContent).toContain("Provider controls");
+	});
 	it("retains the provider setup landing for a community user without keys", async () => {
 		mocks.managed = false;
 		await render();
 		expect(
 			host.querySelector("[role='tab'][aria-selected='true']")?.textContent,
 		).toBe("Providers");
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1);
+		});
 		expect(host.querySelector(".main-content-inner")?.textContent).toContain(
 			"Provider controls",
 		);

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { groupHistoryForDisplay } from "../../lib/history/readModel";
 import { tauriAPI } from "../../lib/tauri";
 import type { RecordingPlayerControls } from "../../lib/useRecordingPlayer";
+import { HistoryAudioPlayer } from "./HistoryAudioPlayer";
 import { HistoryFeedList } from "./HistoryFeedList";
 import { historyTextForCopy } from "./HistoryReader";
 
@@ -27,6 +28,7 @@ let client: QueryClient;
 const player = {
 	id: "one",
 	loading: false,
+	ready: true,
 	playing: false,
 	position: 0,
 	duration: 100,
@@ -157,6 +159,41 @@ describe("History cards and reader", () => {
 		expect(
 			document.querySelector('[aria-label^="Expand dictation from"]'),
 		).not.toBeNull();
+	});
+	it("renders the complete player shell while audio is loading", async () => {
+		const loadingPlayer = {
+			...player,
+			id: "one",
+			loading: true,
+			ready: false,
+			waveform: null,
+			media: null,
+		} satisfies RecordingPlayerControls;
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<HistoryAudioPlayer player={loadingPlayer} recordingId="one" />
+				</MantineProvider>,
+			),
+		);
+		expect(
+			document.querySelector(".history-audio-player--loading"),
+		).not.toBeNull();
+		expect(document.querySelector(".mantine-Loader-root")).toBeNull();
+		expect(
+			document.querySelector('[aria-label="Playback position"]'),
+		).not.toBeNull();
+		expect(
+			(document.querySelector('[aria-label="Play audio"]') as HTMLButtonElement)
+				.disabled,
+		).toBe(true);
+		expect(
+			(
+				document.querySelector(
+					'[aria-label="Playback speed"]',
+				) as HTMLInputElement
+			).disabled,
+		).toBe(true);
 	});
 	it("copies full text explicitly and prepares the player without autoplay", async () => {
 		await click(document.querySelector('[aria-label="Copy transcript"]'));

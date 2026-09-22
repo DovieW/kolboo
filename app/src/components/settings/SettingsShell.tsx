@@ -1,5 +1,7 @@
 import {
 	ActionIcon,
+	Center,
+	Loader,
 	Select,
 	type SelectProps,
 	Tabs,
@@ -9,13 +11,11 @@ import {
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { CircleHelp, Cog, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, startTransition, Suspense, useEffect, useState } from "react";
 import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
 import { useLicenseAuthContext, useSettings } from "../../lib/queries";
 import { hasManagedInferenceAccess, tauriAPI } from "../../lib/tauri";
-import { ApiKeysSettings } from "./ApiKeysSettings";
 import { AudioSettings } from "./AudioSettings";
-import { DataSettings } from "./DataSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { NetworkSettings } from "./NetworkSettings";
 import { PolicySettings } from "./PolicySettings";
@@ -23,6 +23,23 @@ import { PrivacySettings } from "./PrivacySettings";
 import { ProfileConfigModal } from "./ProgramsModal";
 import { PromptSettings } from "./PromptSettings";
 import { UiSettings } from "./UiSettings";
+
+const loadApiKeysSettings = () => import("./ApiKeysSettings");
+const loadDataSettings = () => import("./DataSettings");
+const LazyApiKeysSettings = lazy(async () => ({
+	default: (await loadApiKeysSettings()).ApiKeysSettings,
+}));
+const LazyDataSettings = lazy(async () => ({
+	default: (await loadDataSettings()).DataSettings,
+}));
+
+function SettingsPanelLoading({ label }: { label: string }) {
+	return (
+		<Center mih={180} role="status" aria-label={`Loading ${label} settings`}>
+			<Loader size="sm" />
+		</Center>
+	);
+}
 
 export type SettingsShellProps = {
 	onRunSetupGuide?: () => void;
@@ -62,6 +79,26 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 
 	const [activeSettingsTab, setActiveSettingsTab] = useState<string>("ai");
 	const [hasUserSelectedTab, setHasUserSelectedTab] = useState(false);
+	const [mountedHeavyTabs, setMountedHeavyTabs] = useState<Set<string>>(
+		() => new Set(),
+	);
+
+	useEffect(() => {
+		if (
+			(activeSettingsTab !== "api-keys" && activeSettingsTab !== "data") ||
+			mountedHeavyTabs.has(activeSettingsTab)
+		)
+			return;
+		const timeout = window.setTimeout(() => {
+			startTransition(() => {
+				setMountedHeavyTabs((current) => {
+					if (current.has(activeSettingsTab)) return current;
+					return new Set(current).add(activeSettingsTab);
+				});
+			});
+		}, 0);
+		return () => window.clearTimeout(timeout);
+	}, [activeSettingsTab, mountedHeavyTabs]);
 
 	useEffect(() => {
 		if (hasUserSelectedTab) return;
@@ -237,8 +274,20 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 						<Tabs.Tab value="ui">Appearance</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
-						<Tabs.Tab value="api-keys">Providers</Tabs.Tab>
-						<Tabs.Tab value="data">Data</Tabs.Tab>
+						<Tabs.Tab
+							value="api-keys"
+							onMouseEnter={() => void loadApiKeysSettings()}
+							onFocus={() => void loadApiKeysSettings()}
+						>
+							Providers
+						</Tabs.Tab>
+						<Tabs.Tab
+							value="data"
+							onMouseEnter={() => void loadDataSettings()}
+							onFocus={() => void loadDataSettings()}
+						>
+							Data
+						</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="policy">Policy</Tabs.Tab>
@@ -281,15 +330,35 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 						</div>
 					</Tabs.Panel>
 
-					<Tabs.Panel value="api-keys" pt="md">
+					<Tabs.Panel
+						value="api-keys"
+						pt="md"
+						keepMounted={mountedHeavyTabs.has("api-keys")}
+					>
 						<div className="settings-card">
-							<ApiKeysSettings editingProfileId={editingProfileId} />
+							{mountedHeavyTabs.has("api-keys") ? (
+								<Suspense fallback={<SettingsPanelLoading label="Providers" />}>
+									<LazyApiKeysSettings editingProfileId={editingProfileId} />
+								</Suspense>
+							) : (
+								<SettingsPanelLoading label="Providers" />
+							)}
 						</div>
 					</Tabs.Panel>
 
-					<Tabs.Panel value="data" pt="md">
+					<Tabs.Panel
+						value="data"
+						pt="md"
+						keepMounted={mountedHeavyTabs.has("data")}
+					>
 						<div className="settings-card">
-							<DataSettings editingProfileId={editingProfileId} />
+							{mountedHeavyTabs.has("data") ? (
+								<Suspense fallback={<SettingsPanelLoading label="Data" />}>
+									<LazyDataSettings editingProfileId={editingProfileId} />
+								</Suspense>
+							) : (
+								<SettingsPanelLoading label="Data" />
+							)}
 						</div>
 					</Tabs.Panel>
 

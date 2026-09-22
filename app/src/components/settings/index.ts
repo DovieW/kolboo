@@ -1,6 +1,4 @@
-export { ApiKeysSettings } from "./ApiKeysSettings";
 export { AudioSettings } from "./AudioSettings";
-export { DataSettings } from "./DataSettings";
 export { HotkeySettings } from "./HotkeySettings";
 export { HotkeyShortcutCard } from "./HotkeyShortcutCard";
 export { NetworkSettings } from "./NetworkSettings";

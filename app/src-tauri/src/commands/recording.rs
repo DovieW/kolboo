@@ -118,12 +118,11 @@ pub fn recordings_open_folder(app: AppHandle) -> Result<(), CommandError> {
 }
 
 #[tauri::command]
-pub fn recordings_get_storage_bytes(app: AppHandle) -> Result<u64, CommandError> {
-    recordings_get_stats(app).map(|stats| stats.bytes)
+pub async fn recordings_get_storage_bytes(app: AppHandle) -> Result<u64, CommandError> {
+    recordings_get_stats(app).await.map(|stats| stats.bytes)
 }
 
-#[tauri::command]
-pub fn recordings_get_stats(app: AppHandle) -> Result<RecordingsStats, CommandError> {
+fn collect_recordings_stats(app: &AppHandle) -> Result<RecordingsStats, CommandError> {
     let store = app
         .try_state::<RecordingStore>()
         .ok_or_else(|| CommandError::from("Recording store not available".to_string()))?;
@@ -171,6 +170,13 @@ pub fn recordings_get_stats(app: AppHandle) -> Result<RecordingsStats, CommandEr
         }
     }
     Ok(stats)
+}
+
+#[tauri::command]
+pub async fn recordings_get_stats(app: AppHandle) -> Result<RecordingsStats, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || collect_recordings_stats(&app))
+        .await
+        .map_err(|error| CommandError::from(format!("Recording stats task failed: {error}")))?
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

@@ -4,6 +4,7 @@ import { frontendLog } from "../frontendLog";
 type PlaybackState = {
 	id: string | null;
 	loading: boolean;
+	ready: boolean;
 	playing: boolean;
 	position: number;
 	duration: number;
@@ -23,6 +24,7 @@ export class RecordingPlayback {
 	private state: PlaybackState = {
 		id: null,
 		loading: false,
+		ready: false,
 		playing: false,
 		position: 0,
 		duration: 0,
@@ -69,6 +71,7 @@ export class RecordingPlayback {
 		audio.addEventListener("loadedmetadata", () => {
 			if (this.media !== audio) return;
 			if (this.state.id) this.seek(this.positions.get(this.state.id) ?? 0);
+			this.update({ loading: false, ready: true });
 		});
 		audio.addEventListener("error", () => {
 			if (this.media === audio && audio.getAttribute("src")) {
@@ -96,7 +99,12 @@ export class RecordingPlayback {
 	}
 	private fail(message: string) {
 		if (this.state.error === message) return;
-		this.update({ loading: false, playing: false, error: message });
+		this.update({
+			loading: false,
+			ready: false,
+			playing: false,
+			error: message,
+		});
 		this.dependencies.onError?.(message);
 	}
 	prepare = async (id: string) => {
@@ -114,6 +122,7 @@ export class RecordingPlayback {
 		this.update({
 			id,
 			loading: true,
+			ready: false,
 			error: null,
 			waveform: null,
 			duration: 0,
@@ -134,7 +143,6 @@ export class RecordingPlayback {
 			this.update({
 				waveform,
 				duration: waveform.duration_seconds,
-				loading: false,
 			});
 			audio.load();
 		} catch {
@@ -156,6 +164,7 @@ export class RecordingPlayback {
 			intent !== this.playIntent ||
 			this.state.id !== id ||
 			this.state.loading ||
+			!this.state.ready ||
 			this.state.error ||
 			!this.media?.getAttribute("src")
 		)

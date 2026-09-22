@@ -1,12 +1,4 @@
-import {
-	ActionIcon,
-	Button,
-	Group,
-	Loader,
-	Select,
-	Stack,
-	Text,
-} from "@mantine/core";
+import { ActionIcon, Button, Group, Select, Stack, Text } from "@mantine/core";
 import { Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
@@ -30,7 +22,11 @@ export function HistoryAudioPlayer({
 	const active = player.id === recordingId;
 	const waveform = active ? player.waveform : null;
 	const media = player.media;
+	const ready = Boolean(
+		active && player.ready && !player.error && waveform && media,
+	);
 	useEffect(() => {
+		setWaveformError(false);
 		void player.prepare(recordingId);
 	}, [player.prepare, recordingId]);
 	useEffect(() => {
@@ -60,53 +56,57 @@ export function HistoryAudioPlayer({
 		}
 		return () => wave?.destroy();
 	}, [media, waveform]);
-	if (!active || player.loading || (!waveform && !player.error))
-		return (
-			<Group justify="center" p="md" gap="xs">
-				<Loader size="xs" />
-			</Group>
-		);
-	if (player.error)
-		return (
-			<Group justify="space-between" py="sm">
-				<Text size="sm" c="dimmed">
-					{player.error}
-				</Text>
-				<Button
-					variant="subtle"
-					size="xs"
-					onClick={() => void player.prepare(recordingId)}
-				>
-					Retry audio
-				</Button>
-			</Group>
-		);
 	return (
-		<Stack gap="xs" className="history-audio-player">
-			<div
-				ref={container}
-				className="history-waveform"
-				role="slider"
-				tabIndex={0}
-				aria-label="Playback position"
-				aria-valuemin={0}
-				aria-valuemax={Math.max(1, Math.round(player.duration))}
-				aria-valuenow={Math.round(player.position)}
-				aria-valuetext={`${audioTime(player.position)} of ${audioTime(player.duration)}`}
-				onKeyDown={(event) => {
-					if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-						event.preventDefault();
-						player.seek(player.position + (event.key === "ArrowLeft" ? -5 : 5));
-					} else if (event.key === "Home" || event.key === "End") {
-						event.preventDefault();
-						player.seek(event.key === "Home" ? 0 : player.duration);
-					}
-				}}
-			/>
+		<Stack
+			gap="xs"
+			className={`history-audio-player${ready ? " history-audio-player--ready" : " history-audio-player--loading"}`}
+			aria-busy={!ready && !player.error}
+		>
+			<div className="history-waveform-stage">
+				<div className="history-waveform-placeholder" aria-hidden="true" />
+				<div
+					ref={container}
+					className="history-waveform"
+					role="slider"
+					tabIndex={ready ? 0 : -1}
+					aria-disabled={!ready}
+					aria-label="Playback position"
+					aria-valuemin={0}
+					aria-valuemax={Math.max(1, Math.round(player.duration))}
+					aria-valuenow={Math.round(player.position)}
+					aria-valuetext={`${audioTime(player.position)} of ${audioTime(player.duration)}`}
+					onKeyDown={(event) => {
+						if (!ready) return;
+						if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+							event.preventDefault();
+							player.seek(
+								player.position + (event.key === "ArrowLeft" ? -5 : 5),
+							);
+						} else if (event.key === "Home" || event.key === "End") {
+							event.preventDefault();
+							player.seek(event.key === "Home" ? 0 : player.duration);
+						}
+					}}
+				/>
+			</div>
 			{waveformError && (
 				<Text size="xs" c="dimmed">
 					Waveform unavailable.
 				</Text>
+			)}
+			{player.error && (
+				<Group justify="space-between" gap="xs" wrap="nowrap">
+					<Text size="sm" c="dimmed">
+						{player.error}
+					</Text>
+					<Button
+						variant="subtle"
+						size="xs"
+						onClick={() => void player.prepare(recordingId)}
+					>
+						Retry audio
+					</Button>
+				</Group>
 			)}
 			<div className="history-audio-controls">
 				<Text
@@ -121,6 +121,7 @@ export function HistoryAudioPlayer({
 					<ActionIcon
 						variant="subtle"
 						aria-label="Back 10 seconds"
+						disabled={!ready}
 						onClick={() => player.seek(player.position - 10)}
 					>
 						<RotateCcw size={17} />
@@ -130,6 +131,7 @@ export function HistoryAudioPlayer({
 						radius="xl"
 						size="lg"
 						aria-label={player.playing ? "Pause audio" : "Play audio"}
+						disabled={!ready}
 						onClick={() => void player.toggle(recordingId)}
 					>
 						{player.playing ? <Pause size={18} /> : <Play size={18} />}
@@ -137,6 +139,7 @@ export function HistoryAudioPlayer({
 					<ActionIcon
 						variant="subtle"
 						aria-label="Forward 10 seconds"
+						disabled={!ready}
 						onClick={() => player.seek(player.position + 10)}
 					>
 						<RotateCw size={17} />
@@ -148,6 +151,7 @@ export function HistoryAudioPlayer({
 					size="xs"
 					w={85}
 					value={String(player.rate)}
+					disabled={!ready}
 					onChange={(v) => player.setRate(Number(v))}
 					data={[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => ({
 						value: String(r),

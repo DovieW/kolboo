@@ -6,6 +6,8 @@
 
 #[cfg(desktop)]
 use std::error::Error;
+#[cfg(desktop)]
+use std::sync::{Mutex, MutexGuard};
 
 #[cfg(desktop)]
 use tauri::AppHandle;
@@ -50,6 +52,20 @@ pub const API_KEY_SETTING_KEYS: &[&str] = &[
 
 #[cfg(desktop)]
 const SERVICE_NAME: &str = "kolboo";
+
+// Secret Service and some platform keyring backends do not reliably tolerate
+// concurrent operations from one process. Commands run these blocking calls on
+// worker threads, while this lock keeps the backend access itself serialized.
+#[cfg(desktop)]
+static SECRET_STORE_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(desktop)]
+fn lock_secret_store() -> MutexGuard<'static, ()> {
+    SECRET_STORE_LOCK.lock().unwrap_or_else(|poisoned| {
+        log::warn!("Recovering a poisoned secure-storage lock");
+        poisoned.into_inner()
+    })
+}
 
 #[cfg(desktop)]
 pub const AUTH_SESSION_ACCESS_TOKEN_KEY: &str = "license_access_token";
@@ -280,6 +296,7 @@ fn migrate_linux_auth_session() -> Result<(), String> {
 #[cfg(desktop)]
 pub fn get_secret(app: &AppHandle, store_key: &str) -> Option<String> {
     let _ = app;
+    let _guard = lock_secret_store();
     let entry = entry_for_key(store_key).ok()?;
     match entry.get_password() {
         Ok(s) => {
@@ -314,6 +331,7 @@ pub fn set_secret(app: &AppHandle, store_key: &str, value: &str) -> Result<(), S
     if trimmed.is_empty() {
         return Err("Secret cannot be empty".to_string());
     }
+    let _guard = lock_secret_store();
     let entry = entry_for_key(store_key)?;
     entry.set_password(trimmed).map_err(|e| e.to_string())?;
     Ok(())
@@ -339,6 +357,7 @@ fn resolve_delete_failure(
 #[cfg(desktop)]
 pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
     let _ = app;
+    let _guard = lock_secret_store();
     let entry = entry_for_key(store_key)?;
     match entry.delete_credential() {
         Ok(()) => Ok(()),
@@ -465,6 +484,7 @@ pub fn has_api_key(app: &AppHandle, store_key: &str) -> bool {
 /// 2) Legacy `settings.json` (during migration)
 #[cfg(desktop)]
 pub fn get_api_key(app: &AppHandle, store_key: &str) -> Option<String> {
+    let _guard = lock_secret_store();
     let entry = entry_for_key(store_key).ok()?;
     match entry.get_password() {
         Ok(s) => {
@@ -494,6 +514,7 @@ pub fn set_api_key(app: &AppHandle, store_key: &str, api_key: &str) -> Result<()
         return Err("API key cannot be empty".to_string());
     }
 
+    let _guard = lock_secret_store();
     let entry = entry_for_key(store_key)?;
     entry.set_password(trimmed).map_err(|e| e.to_string())?;
 
