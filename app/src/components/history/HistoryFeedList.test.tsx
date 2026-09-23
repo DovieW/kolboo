@@ -11,8 +11,16 @@ import { HistoryAudioPlayer } from "./HistoryAudioPlayer";
 import { HistoryFeedList } from "./HistoryFeedList";
 import { historyTextForCopy } from "./HistoryReader";
 
+const waveformEvents = vi.hoisted(() => new Map<string, () => void>());
 vi.mock("wavesurfer.js", () => ({
-	default: { create: vi.fn(() => ({ destroy: vi.fn(), on: vi.fn() })) },
+	default: {
+		create: vi.fn(() => ({
+			destroy: vi.fn(),
+			on: vi.fn((event: string, listener: () => void) => {
+				waveformEvents.set(event, listener);
+			}),
+		})),
+	},
 }));
 vi.mock("../../lib/tauri", () => ({
 	tauriAPI: {
@@ -65,6 +73,7 @@ function button(text: string) {
 beforeEach(async () => {
 	vi.useFakeTimers();
 	vi.clearAllMocks();
+	waveformEvents.clear();
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 	client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	vi.mocked(tauriAPI.getHistoryDetail).mockImplementation(async (id) => ({
@@ -194,6 +203,44 @@ describe("History cards and reader", () => {
 				) as HTMLInputElement
 			).disabled,
 		).toBe(true);
+	});
+	it("reveals the waveform after rendering and ignores stale redraws", async () => {
+		const firstMedia = document.createElement("audio");
+		const readyPlayer = { ...player, media: firstMedia };
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<HistoryAudioPlayer player={readyPlayer} recordingId="one" />
+				</MantineProvider>,
+			),
+		);
+		expect(document.querySelector(".history-waveform-stage--revealed")).toBeNull();
+		await act(async () => waveformEvents.get("redrawcomplete")?.());
+		expect(
+			document.querySelector(".history-waveform-stage--revealed"),
+		).not.toBeNull();
+		const oldRedraw = waveformEvents.get("redrawcomplete");
+
+		const secondMedia = document.createElement("audio");
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<HistoryAudioPlayer
+						player={{ ...readyPlayer, media: secondMedia }}
+						recordingId="one"
+					/>
+				</MantineProvider>,
+			),
+		);
+		expect(document.querySelector(".history-waveform-stage--revealed")).toBeNull();
+		await act(async () => waveformEvents.get("redrawcomplete")?.());
+		expect(
+			document.querySelector(".history-waveform-stage--revealed"),
+		).not.toBeNull();
+		await act(async () => oldRedraw?.());
+		expect(
+			document.querySelector(".history-waveform-stage--revealed"),
+		).not.toBeNull();
 	});
 	it("copies full text explicitly and prepares the player without autoplay", async () => {
 		await click(document.querySelector('[aria-label="Copy transcript"]'));

@@ -19,12 +19,14 @@ export function HistoryAudioPlayer({
 }) {
 	const container = useRef<HTMLDivElement>(null);
 	const [waveformError, setWaveformError] = useState(false);
+	const [renderedMedia, setRenderedMedia] = useState<HTMLAudioElement | null>(null);
 	const active = player.id === recordingId;
 	const waveform = active ? player.waveform : null;
 	const media = player.media;
 	const ready = Boolean(
 		active && player.ready && !player.error && waveform && media,
 	);
+	const waveformRevealed = ready && renderedMedia === media && !waveformError;
 	useEffect(() => {
 		setWaveformError(false);
 		void player.prepare(recordingId);
@@ -33,6 +35,7 @@ export function HistoryAudioPlayer({
 		if (!container.current || !media || !waveform) return;
 		setWaveformError(false);
 		let wave: WaveSurfer | undefined;
+		let disposed = false;
 		try {
 			wave = WaveSurfer.create({
 				container: container.current,
@@ -51,10 +54,16 @@ export function HistoryAudioPlayer({
 				dragToSeek: true,
 			});
 			wave.on("error", () => setWaveformError(true));
+			wave.on("redrawcomplete", () => {
+				if (!disposed) setRenderedMedia(media);
+			});
 		} catch {
 			setWaveformError(true);
 		}
-		return () => wave?.destroy();
+		return () => {
+			disposed = true;
+			wave?.destroy();
+		};
 	}, [media, waveform]);
 	return (
 		<Stack
@@ -62,7 +71,9 @@ export function HistoryAudioPlayer({
 			className={`history-audio-player${ready ? " history-audio-player--ready" : " history-audio-player--loading"}`}
 			aria-busy={!ready && !player.error}
 		>
-			<div className="history-waveform-stage">
+			<div
+				className={`history-waveform-stage${waveformRevealed ? " history-waveform-stage--revealed" : ""}`}
+			>
 				<div className="history-waveform-placeholder" aria-hidden="true" />
 				<div
 					ref={container}
