@@ -1,4 +1,4 @@
-// Windows foreground process + window enumeration helpers.
+// Foreground process + window enumeration helpers.
 //
 // These are used for per-program prompt profiles.
 
@@ -277,7 +277,7 @@ mod imp {
         }
     }
 
-    pub fn list_open_windows(include_titles: bool) -> Vec<OpenWindowInfo> {
+    pub fn list_open_windows(include_titles: bool) -> Result<Vec<OpenWindowInfo>, String> {
         unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
             // Safety: caller passes a valid mutable EnumWindowsState pointer via LPARAM.
             let state = unsafe { &mut *(lparam.0 as *mut EnumWindowsState) };
@@ -341,7 +341,7 @@ mod imp {
             let _ = EnumWindows(Some(enum_proc), LPARAM((&mut state as *mut _) as isize));
         }
 
-        windows
+        Ok(windows)
     }
 }
 
@@ -351,7 +351,14 @@ pub use imp::{
     OpenWindowInfo,
 };
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+#[path = "windows_apps_linux.rs"]
+mod imp_linux;
+
+#[cfg(target_os = "linux")]
+pub use imp_linux::{get_foreground_process_path, list_open_windows, OpenWindowInfo};
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 mod imp_stub {
     use schemars::JsonSchema;
 
@@ -365,10 +372,10 @@ mod imp_stub {
         None
     }
 
-    pub fn list_open_windows(_include_titles: bool) -> Vec<OpenWindowInfo> {
-        Vec::new()
+    pub fn list_open_windows(_include_titles: bool) -> Result<Vec<OpenWindowInfo>, String> {
+        Err("Open-program detection is not available on this platform yet.".into())
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub use imp_stub::{get_foreground_process_path, list_open_windows, OpenWindowInfo};

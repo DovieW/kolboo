@@ -3067,6 +3067,7 @@ dependencies = [
  "chrono",
  "cpal",
  "crossbeam-queue",
+ "dbus",
  "dirs",
  "dotenvy",
  "enigo",
