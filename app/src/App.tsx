@@ -14,7 +14,6 @@ import {
 	Select,
 	Stack,
 	Text,
-	Title,
 	Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -28,14 +27,7 @@ import {
 	Settings,
 	UserRound,
 } from "lucide-react";
-import {
-	type CSSProperties,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import appPackageJson from "../package.json";
 import { AccountView } from "./components/account";
 import { FileTranscription } from "./components/FileTranscription";
@@ -204,78 +196,10 @@ function Sidebar({
 	);
 }
 
-function HomeView({
-	onJumpToLog,
-	onTranscribeFile,
-}: {
-	onJumpToLog?: (logId: string) => void;
-	onTranscribeFile: () => void;
-}) {
-	const homeHeaderRef = useRef<HTMLElement | null>(null);
-	const [homeHeaderHeight, setHomeHeaderHeight] = useState(0);
-
-	useLayoutEffect(() => {
-		const header = homeHeaderRef.current;
-		if (!header) return;
-
-		// Keep the History sticky bar aligned to the *actual* header height.
-		// The Home header is taller than other pages, so a guessed magic number
-		// will clip the History toolbar under it as soon as fonts/layout shift.
-		const updateHistoryStickyTop = () => {
-			// Preserve sub-pixel height instead of rounding up. Rounding can create
-			// a tiny visible seam between the page header and the sticky History bar.
-			const nextHeight = Number.parseFloat(
-				header.getBoundingClientRect().height.toFixed(2),
-			);
-			setHomeHeaderHeight((current) =>
-				current === nextHeight ? current : nextHeight,
-			);
-		};
-
-		updateHistoryStickyTop();
-
-		if (typeof ResizeObserver === "undefined") {
-			window.addEventListener("resize", updateHistoryStickyTop);
-			return () => {
-				window.removeEventListener("resize", updateHistoryStickyTop);
-			};
-		}
-
-		const observer = new ResizeObserver(() => {
-			updateHistoryStickyTop();
-		});
-		observer.observe(header);
-
-		return () => {
-			observer.disconnect();
-		};
-	}, []);
-
-	const homeStickyStyle = useMemo(
-		() =>
-			({
-				"--history-feed-sticky-top": `${homeHeaderHeight}px`,
-			}) as CSSProperties,
-		[homeHeaderHeight],
-	);
-
+function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 	return (
-		<div className="main-content home-page" style={homeStickyStyle}>
-			<header ref={homeHeaderRef} className="tv-page-header animate-in">
-				<Group justify="space-between" gap="sm">
-					<Title order={1}>Home</Title>
-					<Button
-						variant="default"
-						size="sm"
-						leftSection={<FileAudio size={16} />}
-						onClick={onTranscribeFile}
-					>
-						Transcribe file
-					</Button>
-				</Group>
-			</header>
-
-			<div className="main-content-inner">
+		<div className="main-content home-page">
+			<div className="main-content-inner page-content-start">
 				<MicStatusCard />
 				<HistoryFeed onJumpToLog={onJumpToLog} />
 				<RecordingBar />
@@ -318,13 +242,9 @@ function UsageStatsView() {
 		statsKind !== "all" || hasAnyModelFilter || excludeFreeTier !== true;
 
 	return (
-		<div className="main-content">
-			<header className="tv-page-header animate-in">
-				<Group justify="space-between" align="center" wrap="wrap">
-					<Title order={1} mb={0}>
-						Usage
-					</Title>
-
+		<div className="main-content usage-page">
+			<div className="usage-controls">
+				<Group justify="flex-end" align="center" wrap="wrap">
 					<Group gap={8} align="center" wrap="nowrap">
 						<Popover
 							opened={filtersOpened}
@@ -634,9 +554,9 @@ function UsageStatsView() {
 						/>
 					</Group>
 				</Group>
-			</header>
+			</div>
 
-			<div className="main-content-inner">
+			<div className="main-content-inner page-content-start">
 				<CostTab
 					timeframe={timeframe}
 					kind={statsKind}
@@ -879,7 +799,6 @@ export default function App() {
 			case "home":
 				return (
 					<HomeView
-						onTranscribeFile={() => setActiveView("transcribe-file")}
 						onJumpToLog={(logId) => {
 							setLogsJumpToId(logId);
 							setActiveView("logs");
@@ -910,7 +829,6 @@ export default function App() {
 			default:
 				return (
 					<HomeView
-						onTranscribeFile={() => setActiveView("transcribe-file")}
 						onJumpToLog={(logId) => {
 							setLogsJumpToId(logId);
 							setActiveView("logs");

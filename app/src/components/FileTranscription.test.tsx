@@ -133,6 +133,10 @@ afterEach(async () => {
 	vi.useRealTimers();
 });
 describe("File transcription", () => {
+	it("starts with the drop zone rather than a redundant page header", () => {
+		expect(host.querySelector("h1")).toBeNull();
+		expect(host.textContent).toContain("Drop an audio file here");
+	});
 	it("explains initial loading and pins late-loaded options for an already selected file", async () => {
 		await act(async () => root.unmount());
 		client.clear();

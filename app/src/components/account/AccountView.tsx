@@ -1,4 +1,4 @@
-import { Alert, Stack, Text, Title } from "@mantine/core";
+import { Alert, Stack } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
@@ -231,16 +231,7 @@ export function AccountView() {
 
 	return (
 		<div className="main-content">
-			<header className="tv-page-header animate-in">
-				<Title order={1} mb={4}>
-					Account
-				</Title>
-				<Text c="dimmed" size="sm">
-					Your account, access and usage.
-				</Text>
-			</header>
-
-			<div className="main-content-inner">
+			<div className="main-content-inner page-content-start">
 				<Stack gap="lg" className="account-page-stack">
 					{queryError ? (
 						<Alert

@@ -314,6 +314,17 @@ a:focus-visible {
 	--content-max-width: 1160px;
 }
 
+.usage-page {
+	position: relative;
+}
+
+.usage-controls {
+	position: absolute;
+	top: 20px;
+	right: var(--header-pad-x);
+	z-index: 2;
+}
+
 /* Default padded content area inside a scrollable `.main-content` pane.
 
 	We keep padding off the scroll container itself so sticky headers can sit
@@ -327,59 +338,54 @@ a:focus-visible {
 	padding: 0 var(--main-pad-x) var(--main-pad-y);
 }
 
-/* Sticky page header within a scrollable .main-content pane.
-
-	Usage:
-	- Add `tv-page-header` to the top heading container in each view.
-	- Shares the same centered content bounds as `.main-content-inner`.
-*/
-.main-content .tv-page-header {
-	position: sticky;
-	top: 0;
-	z-index: 20;
-	margin: 0 0 20px;
-	padding: 22px var(--header-pad-x) 18px;
-
-	/* Ensure scrolled content doesn't show through the sticky area */
-	background: rgba(0, 0, 0, 0.94);
-	border-bottom: 1px solid var(--border-subtle);
-	backdrop-filter: blur(10px);
+.main-content-inner.page-content-start {
+	padding-top: 20px;
 }
 
-.main-content .tv-page-header .mantine-Title-root {
-	font-size: clamp(26px, 2.4vw, 32px);
-	line-height: 1.2;
+@media (max-width: 780px) {
+	.usage-controls {
+		position: static;
+		padding: 16px var(--main-pad-x) 0;
+	}
+
+	.usage-page .main-content-inner.page-content-start {
+		padding-top: 12px;
+	}
 }
 
 .settings-header-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	flex-wrap: wrap;
-	gap: 16px;
-	margin-bottom: 18px;
+	display: contents;
 }
 
 .settings-header-actions {
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	flex: 0 0 auto;
+	order: 1;
 	max-width: 100%;
 }
 
 .settings-profile-select {
-	width: 190px;
+	width: 160px;
 	min-width: 0;
-	flex: 1 1 140px;
 }
 
-.main-content .settings-page-header {
-	padding-bottom: 0;
+.settings-tabs-toolbar {
+	position: sticky;
+	top: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px var(--header-pad-x) 0;
 	margin-bottom: 12px;
+	background: var(--bg-primary);
+	border-bottom: 1px solid var(--border-subtle);
 }
 
-.logs-diagnostics {
-	margin-top: 8px;
+.settings-tabs-toolbar .mantine-Tabs-list::-webkit-scrollbar {
+	display: none;
 }
 
 @media (min-width: 1200px) {
@@ -426,22 +432,15 @@ a:focus-visible {
 	.sidebar-nav-link {
 		padding-inline: 10px;
 	}
-
-	.main-content .tv-page-header {
-		padding-top: 18px;
-	}
-
-	.settings-header-actions {
-		width: 100%;
-	}
 }
 
-@supports not (
-		(backdrop-filter: blur(1px)) or
-		(-webkit-backdrop-filter: blur(1px))
-	) {
-	.main-content .tv-page-header {
-		background: var(--bg-primary);
+@media (max-width: 900px) {
+	.settings-header-actions label {
+		display: none;
+	}
+
+	.settings-profile-select {
+		width: 120px;
 	}
 }
 
@@ -551,9 +550,7 @@ a:focus-visible {
 
 .history-feed-toolbar {
 	position: sticky;
-	/* Home injects the real page-header height here so this bar never clips. */
-	/* Overlap by 1px to avoid any hairline seam from sub-pixel layout rounding. */
-	top: calc(var(--history-feed-sticky-top, 1px) - 1px);
+	top: 0;
 	z-index: 15;
 	margin: 0 calc(var(--main-pad-x) * -1) 16px;
 	padding: 12px var(--main-pad-x) 16px;
@@ -746,11 +743,16 @@ a:focus-visible {
 
 /* Prevent tab list height changes */
 .settings-tabs .mantine-Tabs-list {
+	order: 0;
+	flex: 1 1 auto;
+	min-width: 0;
 	border-bottom: none;
 	gap: 0;
 	margin-bottom: 0;
 	min-height: 45px;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
+	overflow-x: auto;
+	scrollbar-width: none;
 }
 
 .settings-tabs .mantine-Tabs-list::before {

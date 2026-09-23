@@ -165,13 +165,9 @@ export function FileTranscription({
 			!!recoveryId);
 	return (
 		<div className={`main-content ${styles.page}`}>
-			<header className="tv-page-header">
-				<Title order={1}>Transcribe file</Title>
-				<Text c="dimmed">
-					Turn saved audio into a searchable, editable transcript.
-				</Text>
-			</header>
-			<div className={`main-content-inner ${styles.workspace}`}>
+			<div
+				className={`main-content-inner page-content-start ${styles.workspace}`}
+			>
 				<Paper
 					withBorder
 					radius="lg"

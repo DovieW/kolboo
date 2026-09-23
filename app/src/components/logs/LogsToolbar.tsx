@@ -11,7 +11,6 @@ import {
 	Text,
 	TextInput,
 	Tooltip,
-	Title,
 } from "@mantine/core";
 import {
 	ChevronLeft,
@@ -99,69 +98,6 @@ export function LogsToolbar({
 
 	return (
 		<Stack gap="sm">
-			<Group justify="space-between" align="flex-start" gap="sm" wrap="wrap">
-				<Stack gap={2}>
-					<Group gap="xs" wrap="wrap">
-						<Title order={1}>Logs</Title>
-						<Badge variant="light" color="gray">
-							{hasActiveFilters || filteredLogsCount !== totalLogsCount
-								? `${filteredLogsCount} of ${totalLogsCount}`
-								: totalLogsCount}{" "}
-							requests
-						</Badge>
-					</Group>
-					<Text size="sm" c="dimmed">
-						Inspect recent transcriptions, rewriting and errors.
-					</Text>
-				</Stack>
-
-				<Group gap="xs" wrap="wrap">
-					<Popover
-						opened={exportOpened}
-						onChange={onExportOpenedChange}
-						position="bottom-end"
-						withArrow
-					>
-						<Popover.Target>
-							<Button
-								size="xs"
-								variant="light"
-								leftSection={<Download size={14} />}
-								disabled={!hasLogs}
-								onClick={() => onExportOpenedChange(!exportOpened)}
-							>
-								Export
-							</Button>
-						</Popover.Target>
-						<Popover.Dropdown>
-							<Stack gap="xs">
-								<Button
-									size="xs"
-									variant="subtle"
-									onClick={onExportPrivacySafe}
-								>
-									Export privacy-safe JSON
-								</Button>
-								<Button size="xs" variant="subtle" onClick={onExportFull}>
-									Export full debug JSON
-								</Button>
-							</Stack>
-						</Popover.Dropdown>
-					</Popover>
-
-					<Button
-						size="xs"
-						variant="default"
-						leftSection={<Trash2 size={14} />}
-						disabled={!hasLogs || clearAllPending}
-						loading={clearAllPending}
-						onClick={onClearAll}
-					>
-						Clear logs
-					</Button>
-				</Group>
-			</Group>
-
 			<Group justify="space-between" align="center" gap="sm" wrap="wrap">
 				<Group gap="xs" wrap="wrap" style={{ flex: "1 1 320px", minWidth: 0 }}>
 					<TextInput
@@ -192,20 +128,20 @@ export function LogsToolbar({
 						withArrow
 					>
 						<Popover.Target>
-							<Button
-								size="sm"
-								variant={hasActiveFilters ? "filled" : "light"}
-								leftSection={
-									hasActiveFilters ? (
-										<SlidersHorizontal size={14} />
+							<Tooltip label="Filters">
+								<ActionIcon
+									size="lg"
+									variant={hasActiveFilters ? "filled" : "default"}
+									aria-label="Filters"
+									onClick={() => onFiltersOpenedChange(!filtersOpened)}
+								>
+									{hasActiveFilters ? (
+										<SlidersHorizontal size={16} />
 									) : (
-										<Filter size={14} />
-									)
-								}
-								onClick={() => onFiltersOpenedChange(!filtersOpened)}
-							>
-								Filters
-							</Button>
+										<Filter size={16} />
+									)}
+								</ActionIcon>
+							</Tooltip>
 						</Popover.Target>
 						<Popover.Dropdown>
 							<Stack gap="sm" maw={280}>
@@ -258,6 +194,58 @@ export function LogsToolbar({
 							</Stack>
 						</Popover.Dropdown>
 					</Popover>
+					<Popover
+						opened={exportOpened}
+						onChange={onExportOpenedChange}
+						position="bottom-end"
+						withArrow
+					>
+						<Popover.Target>
+							<Tooltip label="Export">
+								<ActionIcon
+									size="lg"
+									variant="default"
+									aria-label="Export"
+									disabled={!hasLogs}
+									onClick={() => onExportOpenedChange(!exportOpened)}
+								>
+									<Download size={16} />
+								</ActionIcon>
+							</Tooltip>
+						</Popover.Target>
+						<Popover.Dropdown>
+							<Stack gap="xs">
+								<Button
+									size="xs"
+									variant="subtle"
+									onClick={onExportPrivacySafe}
+								>
+									Export privacy-safe JSON
+								</Button>
+								<Button size="xs" variant="subtle" onClick={onExportFull}>
+									Export full debug JSON
+								</Button>
+							</Stack>
+						</Popover.Dropdown>
+					</Popover>
+					<Tooltip label="Clear logs">
+						<ActionIcon
+							size="lg"
+							variant="default"
+							aria-label="Clear logs"
+							disabled={!hasLogs || clearAllPending}
+							loading={clearAllPending}
+							onClick={onClearAll}
+						>
+							<Trash2 size={16} />
+						</ActionIcon>
+					</Tooltip>
+					<Badge variant="light" color="gray">
+						{hasActiveFilters || filteredLogsCount !== totalLogsCount
+							? `${filteredLogsCount} of ${totalLogsCount}`
+							: totalLogsCount}{" "}
+						requests
+					</Badge>
 				</Group>
 
 				<Group gap={4} wrap="nowrap">

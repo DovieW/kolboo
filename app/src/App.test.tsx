@@ -33,7 +33,9 @@ vi.mock("./components/settings/SettingsGuideOverlay", () => ({
 vi.mock("./components/settings/TelemetryDisclosureModal", () => ({
 	TelemetryDisclosureModal: () => null,
 }));
-vi.mock("./components/usageStats/CostTab", () => ({ CostTab: () => null }));
+vi.mock("./components/usageStats/CostTab", () => ({
+	CostTab: () => <h3>Total spend</h3>,
+}));
 vi.mock("./hooks/useModifierKeyForwarder", () => ({
 	useModifierKeyForwarder: () => {},
 }));
@@ -123,7 +125,13 @@ describe("Desktop navigation", () => {
 				.querySelector("nav [aria-current='page']")
 				?.getAttribute("aria-label"),
 		).toBe("Home");
-		expect(host.querySelector("h1")?.textContent).toBe("Home");
+		expect(host.querySelector("h1")).toBeNull();
+		expect(host.textContent).toContain("History list");
+		expect(
+			[...host.querySelectorAll("main button")].some(
+				(button) => button.textContent === "Transcribe file",
+			),
+		).toBe(false);
 		expect(host.textContent).not.toContain("Welcome to Kolboo");
 		await navigate("Settings");
 		expect(host.querySelector("main")?.textContent).toContain("Settings page");
@@ -151,5 +159,16 @@ describe("Desktop navigation", () => {
 		await navigate("Transcribe file");
 		expect(host.querySelector("[aria-label='File import draft']")).toBe(draft);
 		expect(draft.value).toBe("Selected recording");
+	});
+	it("keeps Usage filters beside Total spend without a page heading", async () => {
+		await navigate("Usage");
+		expect(host.querySelector("h1")).toBeNull();
+		expect(host.querySelector("h3")?.textContent).toBe("Total spend");
+		expect(
+			host.querySelector(".usage-controls [aria-label='Filters']"),
+		).not.toBeNull();
+		expect(
+			host.querySelector(".usage-controls input")?.getAttribute("value"),
+		).toBe("Last 30 days");
 	});
 });

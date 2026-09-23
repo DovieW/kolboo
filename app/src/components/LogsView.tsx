@@ -184,7 +184,7 @@ export function LogsView(
 
 	return (
 		<div className="main-content logs-page">
-			<header className="tv-page-header logs-page-header">
+			<Stack gap="lg" className="main-content-inner page-content-start">
 				<LogsToolbar
 					totalLogsCount={logs?.length ?? 0}
 					filteredLogsCount={filteredLogs.length}
@@ -230,8 +230,35 @@ export function LogsView(
 					onClearAll={() => setClearConfirmationOpened(true)}
 					clearAllPending={logsOrchestration.clearLogs.isPending}
 				/>
-			</header>
-			<Stack gap="lg" className="main-content-inner">
+				<Accordion variant="separated" className="logs-diagnostics">
+					<Accordion.Item value="system-events">
+						<Accordion.Control>
+							<Group gap="xs">
+								<Text size="sm" fw={500}>
+									System events
+								</Text>
+								<Text size="xs" c="dimmed">
+									{systemEvents.length} this session
+									{hotkeyDebugEnabled ? " · Hotkey debug on" : ""}
+								</Text>
+							</Group>
+						</Accordion.Control>
+						<Accordion.Panel>
+							<LogsSystemEventsPanel
+								systemEvents={systemEvents}
+								hotkeyDebugEnabled={hotkeyDebugEnabled}
+								hotkeyDebugPending={
+									logsOrchestration.updateHotkeyDebugEnabled.isPending
+								}
+								settingsLoaded={Boolean(settings)}
+								onHotkeyDebugChange={(enabled) =>
+									logsOrchestration.updateHotkeyDebugEnabled.mutate(enabled)
+								}
+								onClear={() => setSystemEvents([])}
+							/>
+						</Accordion.Panel>
+					</Accordion.Item>
+				</Accordion>
 				{logsQuery.isError ? (
 					<Alert color="red" title="Couldn't load request logs">
 						<Group justify="space-between" gap="sm">
@@ -269,35 +296,6 @@ export function LogsView(
 						player={player}
 					/>
 				) : null}
-				<Accordion variant="separated" className="logs-diagnostics">
-					<Accordion.Item value="system-events">
-						<Accordion.Control>
-							<Group gap="xs">
-								<Text size="sm" fw={500}>
-									System events
-								</Text>
-								<Text size="xs" c="dimmed">
-									{systemEvents.length} this session
-									{hotkeyDebugEnabled ? " · Hotkey debug on" : ""}
-								</Text>
-							</Group>
-						</Accordion.Control>
-						<Accordion.Panel>
-							<LogsSystemEventsPanel
-								systemEvents={systemEvents}
-								hotkeyDebugEnabled={hotkeyDebugEnabled}
-								hotkeyDebugPending={
-									logsOrchestration.updateHotkeyDebugEnabled.isPending
-								}
-								settingsLoaded={Boolean(settings)}
-								onHotkeyDebugChange={(enabled) =>
-									logsOrchestration.updateHotkeyDebugEnabled.mutate(enabled)
-								}
-								onClear={() => setSystemEvents([])}
-							/>
-						</Accordion.Panel>
-					</Accordion.Item>
-				</Accordion>
 			</Stack>
 			<Modal
 				opened={clearConfirmationOpened}

@@ -6,12 +6,11 @@ import {
 	type SelectProps,
 	Tabs,
 	Text,
-	Title,
 	Tooltip,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { CircleHelp, Cog, Plus } from "lucide-react";
-import { lazy, startTransition, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, startTransition, useEffect, useState } from "react";
 import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
 import { useLicenseAuthContext, useSettings } from "../../lib/queries";
 import { hasManagedInferenceAccess, tauriAPI } from "../../lib/tauri";
@@ -173,12 +172,8 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 				classNames={{ root: "settings-tabs" }}
 				keepMounted={false}
 			>
-				<header className="tv-page-header settings-page-header">
+				<header className="settings-tabs-toolbar">
 					<div className="settings-header-row">
-						<div>
-							<Title order={1}>Settings</Title>
-						</div>
-
 						<div className="settings-header-actions">
 							{onRunSetupGuide ? (
 								<Tooltip label="Run setup guide" withArrow>

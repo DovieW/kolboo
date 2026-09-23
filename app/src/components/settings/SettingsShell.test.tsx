@@ -80,16 +80,17 @@ afterEach(async () => {
 });
 
 describe("Settings shell", () => {
-	it("keeps category navigation in the shared header and gives the profile selector a name", async () => {
+	it("places profile controls alongside named category tabs without a page heading", async () => {
 		await render();
 		const tabs = host.querySelector("[role='tablist']");
 		expect(tabs?.getAttribute("aria-label")).toBe("Settings categories");
-		expect(tabs?.closest("header")).not.toBeNull();
-		expect(host.querySelector("[aria-label='Editing profile']")).not.toBeNull();
-		expect(host.querySelector(".main-content-inner")?.textContent).toContain(
-			"AI controls",
+		const profile = host.querySelector("[aria-label='Editing profile']");
+		expect(profile).not.toBeNull();
+		expect(profile?.closest(".settings-tabs-toolbar")).toBe(
+			tabs?.closest(".settings-tabs-toolbar"),
 		);
-		expect(host.querySelector(".tv-page-header")?.textContent).not.toContain(
+		expect(host.querySelector("h1")).toBeNull();
+		expect(host.querySelector(".main-content-inner")?.textContent).toContain(
 			"AI controls",
 		);
 	});
