@@ -113,15 +113,15 @@ a:focus-visible {
 
 /* Global focus-visible: keep it consistent and keyboard-friendly */
 [data-mantine-color-scheme="dark"]
-	:where(
-		.mantine-Button-root,
-		.mantine-ActionIcon-root,
-		.mantine-TextInput-input,
-		.mantine-Textarea-input,
-		.mantine-Select-input,
-		.mantine-NumberInput-input,
-		.mantine-PasswordInput-input
-	):focus-visible {
+:where(
+	.mantine-Button-root,
+	.mantine-ActionIcon-root,
+	.mantine-TextInput-input,
+	.mantine-Textarea-input,
+	.mantine-Select-input,
+	.mantine-NumberInput-input,
+	.mantine-PasswordInput-input
+):focus-visible {
 	outline: 2px solid var(--accent-glow);
 	outline-offset: 2px;
 }
@@ -795,7 +795,7 @@ a:focus-visible {
 
 /* Logs: subtle in-progress stripe */
 [data-mantine-color-scheme="dark"]
-	.mantine-Accordion-item[data-status="in_progress"] {
+.mantine-Accordion-item[data-status="in_progress"] {
 	box-shadow: inset 3px 0 0 rgba(var(--accent-rgb) / 0.75);
 }
 
@@ -834,7 +834,17 @@ a:focus-visible {
 
 /* Account view */
 .account-page-stack {
+	width: 100%;
 	padding-bottom: 12px;
+}
+
+.account-signin-layout .main-content-inner {
+	max-width: 480px;
+	padding-top: clamp(32px, 10vh, 100px);
+}
+
+.account-signin-layout .account-actions {
+	padding: 32px;
 }
 
 .account-page-grid {
@@ -1382,6 +1392,10 @@ a:focus-visible {
 	flex-wrap: wrap;
 }
 
+.microphone-test-feedback {
+	margin: 0 0 12px;
+}
+
 .microphone-control-select {
 	width: 420px;
 	max-width: 100%;
@@ -1590,7 +1604,7 @@ a:focus-visible {
 
 /* Respect explicit notification colors when present */
 [data-mantine-color-scheme="dark"]
-	.mantine-Notification-root[data-color="red"]::before {
+.mantine-Notification-root[data-color="red"]::before {
 	background: rgba(239, 68, 68, 1);
 }
 
@@ -2064,7 +2078,7 @@ a:focus-visible {
 .history-audio-buttons {
 	grid-column: 2;
 }
-.history-audio-speed {
+.history-audio-trailing {
 	justify-self: end;
 }
 @media (prefers-reduced-motion: reduce) {

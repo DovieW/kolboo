@@ -11,6 +11,7 @@ import {
 	shouldDisableTranscriptionDeleteRecordings,
 	summarizeRecordingsStorage,
 } from "./dataLifecycle";
+import { TELEMETRY_DISCLOSURE_VERSION } from "./telemetryDisclosure";
 
 function fakeStore(values: Record<string, unknown>) {
 	return async () => ({
@@ -100,7 +101,7 @@ describe("Data Lifecycle read model", () => {
 				remoteRevision: "rev-42",
 				posthogAnalyticsEnabled: false,
 				telemetryDisclosureAcknowledgedAt: "2026-05-13T00:00:00Z",
-				telemetryDisclosureVersion: "2026-05-phase6b-v1",
+				telemetryDisclosureVersion: TELEMETRY_DISCLOSURE_VERSION,
 			}),
 		).toMatchObject({
 			lastPushedLabel: "2026-05-07T01:00:00Z",

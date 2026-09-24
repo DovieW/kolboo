@@ -1,13 +1,12 @@
-import { Button, Group, Modal, Stack, Text } from "@mantine/core";
+import { Accordion, Button, Group, Modal, Stack, Text } from "@mantine/core";
 
 type TelemetryDisclosureModalProps = {
 	opened: boolean;
-	analyticsEnabled: boolean;
 	analyticsPolicyEnforced: boolean;
 	analyticsPolicyReason: string | null;
 	loading: boolean;
 	onDisableAnalytics: () => void;
-	onContinue: () => void;
+	onAllowAnalytics: () => void;
 };
 
 type TelemetryDisclosureContentProps = Omit<
@@ -16,73 +15,73 @@ type TelemetryDisclosureContentProps = Omit<
 >;
 
 export function TelemetryDisclosureContent({
-	analyticsEnabled,
 	analyticsPolicyEnforced,
 	analyticsPolicyReason,
 	loading,
 	onDisableAnalytics,
-	onContinue,
+	onAllowAnalytics,
 }: TelemetryDisclosureContentProps) {
-	const disableLabel = analyticsEnabled
-		? "Disable analytics"
-		: "Keep analytics disabled";
-
 	return (
-		<Stack gap="md">
-			<Text size="sm">
-				{analyticsPolicyEnforced
-					? "Your organization has disabled product analytics for this installation. Reviewing this notice acknowledges the privacy posture, but analytics will remain off until that policy changes."
-					: "Kolboo can send privacy-safe product analytics to help improve feature quality and reliability. Nothing is sent until you make a choice here."}
-			</Text>
-
-			<div>
-				<Text size="sm" fw={600} mb={6}>
-					This analytics flow is intentionally limited:
-				</Text>
-				<ul style={{ margin: 0, paddingLeft: 18 }}>
-					<li>
-						<Text size="sm">
-							Event-only analytics only; no transcripts, prompts, audio, or
-							OCR content are included.
-						</Text>
-					</li>
-					<li>
-						<Text size="sm">
-							Session replay and desktop autocapture are off.
-						</Text>
-					</li>
-					<li>
-						<Text size="sm">
-							A local distinct ID is used for counting installs and product
-							behavior, not for capturing raw content.
-						</Text>
-					</li>
-				</ul>
-			</div>
-
+		<Stack gap="lg">
 			<Text size="sm" c="dimmed">
 				{analyticsPolicyEnforced
-					? "Settings → Data will show that this control is currently managed by organization policy."
-					: "You can change this later in Settings → Data."}
+					? "Your organization has turned off product analytics. No events will be sent."
+					: "Kolboo counts basic usage without a persistent ID. You can also allow linked analytics to help us understand repeat use. No audio or transcript content is sent."}
 			</Text>
 
-			{analyticsPolicyReason ? (
-				<Text size="sm" c="dimmed">
-					Policy reason: {analyticsPolicyReason}
-				</Text>
-			) : null}
+			<Accordion variant="default">
+				<Accordion.Item value="details">
+					<Accordion.Control>What’s shared?</Accordion.Control>
+					<Accordion.Panel>
+						<Stack gap="xs">
+							<Text size="sm" c="dimmed">
+								App opens, page visits and recording outcomes. Recording events
+								include rounded duration, mode and recognized provider/model.
+							</Text>
+							<Text size="sm" c="dimmed">
+								No transcripts, prompts, audio, OCR content, secrets or email
+								addresses. Session replay and autocapture are off.
+							</Text>
+							<Text size="sm" c="dimmed">
+								Basic usage uses a fresh ID for each event. Linked analytics
+								uses your account ID when signed in or a random installation ID
+								when signed out. The analytics service can see the network
+								request’s IP address.
+							</Text>
+							<Text size="sm" c="dimmed">
+								{analyticsPolicyEnforced
+									? "Your organization controls this setting."
+									: "Change linked analytics later in Settings → Data."}
+							</Text>
+							{analyticsPolicyReason ? (
+								<Text size="sm" c="dimmed">
+									Policy reason: {analyticsPolicyReason}
+								</Text>
+							) : null}
+						</Stack>
+					</Accordion.Panel>
+				</Accordion.Item>
+			</Accordion>
 
-			<Group justify="space-between" gap="sm" wrap="wrap-reverse">
-				<Button
-					variant="default"
-					disabled={loading}
-					onClick={onDisableAnalytics}
-				>
-					{disableLabel}
-				</Button>
-				<Button disabled={loading} onClick={onContinue}>
-					Continue
-				</Button>
+			<Group justify="flex-end" gap="sm">
+				{analyticsPolicyEnforced ? (
+					<Button disabled={loading} onClick={onDisableAnalytics}>
+						Continue
+					</Button>
+				) : (
+					<>
+						<Button
+							variant="default"
+							disabled={loading}
+							onClick={onDisableAnalytics}
+						>
+							Basic usage only
+						</Button>
+						<Button disabled={loading} onClick={onAllowAnalytics}>
+							Allow linked analytics
+						</Button>
+					</>
+				)}
 			</Group>
 		</Stack>
 	);
@@ -103,8 +102,8 @@ export function TelemetryDisclosureModal({
 			closeOnClickOutside={false}
 			closeOnEscape={false}
 			centered
-			title="Review product analytics"
-			size="lg"
+			title="Product analytics"
+			size="md"
 		>
 			<TelemetryDisclosureContent {...contentProps} />
 		</Modal>

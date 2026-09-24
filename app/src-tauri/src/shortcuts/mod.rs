@@ -494,7 +494,10 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
                     current_epoch,
                     pipeline_state
                 );
-                if current_mode == "recording_only" && current_epoch == expected_epoch {
+                if current_mode == "recording_only"
+                    && current_epoch == expected_epoch
+                    && crate::overlay::may_hide(&current_mode, pipeline_state)
+                {
                     let visible_before = window_clone.is_visible().ok();
                     log::debug!(
                         "[overlay] shortcut-cancel fallback hide firing (visible_before={:?})",

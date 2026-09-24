@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use tauri::{App, AppHandle, Emitter, Manager};
+use tauri::{App, AppHandle, Emitter, Listener, Manager};
 use tauri_utils::config::BackgroundThrottlingPolicy;
 
 use crate::commands;
@@ -9,6 +9,19 @@ use crate::pipeline;
 use crate::{get_setting_from_store, OverlayAudioLevelPayload};
 
 pub(crate) mod layout;
+
+/// Unknown/busy/error state must not lose its recording or error indicator.
+/// An explicit Never preference remains authoritative even during capture.
+pub(crate) fn may_hide(mode: &str, state: Option<pipeline::PipelineState>) -> bool {
+    mode == "never" || (mode == "recording_only" && state == Some(pipeline::PipelineState::Idle))
+}
+
+fn waveform_interval(state: Option<pipeline::PipelineState>) -> Duration {
+    match state {
+        Some(pipeline::PipelineState::Recording) | None => Duration::from_millis(33),
+        _ => Duration::from_secs(5),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OverlayWindowPreset {
@@ -44,7 +57,7 @@ impl OverlayWindowPreset {
 
     fn size(self) -> (f64, f64) {
         match self {
-            Self::Overlay => (56.0, 56.0),
+            Self::Overlay => (48.0, 48.0),
             Self::Hover => (320.0, 220.0),
             Self::QuickAsk => (520.0, 340.0),
         }
@@ -194,14 +207,28 @@ fn configure_linux_overlay_stacking(
 #[cfg(desktop)]
 pub(crate) fn spawn_overlay_waveform_publisher(app: &AppHandle) {
     let app_handle = app.clone();
+    let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+    for event in [
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        events::EVENT_RECORDING_START,
+    ] {
+        let wake = wake.clone();
+        app.listen(event, move |_| wake.notify_one());
+    }
     tauri::async_runtime::spawn(async move {
         let mut last_seq: u64 = 0;
         let mut last_emit = Instant::now();
         let mut last_priming_emit: Option<Instant> = None;
 
         loop {
-            // 60Hz-ish. If this is too chatty we can reduce to 30Hz later.
-            tokio::time::sleep(Duration::from_millis(16)).await;
+            let state = app_handle
+                .try_state::<pipeline::SharedPipeline>()
+                .and_then(|pipeline| pipeline.try_state());
+            // State events wake capture immediately; polling is only a safety net.
+            tokio::select! {
+                _ = tokio::time::sleep(waveform_interval(state)) => {},
+                _ = wake.notified() => {},
+            }
 
             let Some(pipeline) = app_handle.try_state::<pipeline::SharedPipeline>() else {
                 continue;
@@ -386,12 +413,49 @@ mod tests {
     use super::OverlayWindowPreset;
 
     #[test]
+    fn waveform_uses_fast_capture_and_slow_idle_cadence() {
+        use crate::pipeline::PipelineState::*;
+        use std::time::Duration;
+        assert_eq!(super::waveform_interval(None), Duration::from_millis(33));
+        assert_eq!(
+            super::waveform_interval(Some(Recording)),
+            Duration::from_millis(33)
+        );
+        for state in [Idle, Transcribing, Routing, Rewriting, Error] {
+            assert_eq!(
+                super::waveform_interval(Some(state)),
+                Duration::from_secs(5)
+            );
+        }
+    }
+
+    #[test]
+    fn stale_hide_cannot_conceal_an_active_or_unknown_pipeline() {
+        use crate::pipeline::PipelineState::*;
+        for state in [
+            None,
+            Some(Recording),
+            Some(Transcribing),
+            Some(Routing),
+            Some(Rewriting),
+            Some(Error),
+        ] {
+            assert!(!super::may_hide("recording_only", state));
+            assert!(!super::may_hide("always", state));
+            assert!(super::may_hide("never", state));
+        }
+        assert!(super::may_hide("recording_only", Some(Idle)));
+        assert!(!super::may_hide("always", Some(Idle)));
+        assert!(!super::may_hide("invalid", Some(Idle)));
+    }
+
+    #[test]
     fn overlay_window_presets_are_stable() {
         let overlay = OverlayWindowPreset::Overlay;
         assert_eq!(overlay.label(), "overlay");
         assert_eq!(overlay.html_path(), "overlay.html");
         assert_eq!(overlay.title(), "Kolboo Overlay");
-        assert_eq!(overlay.size(), (56.0, 56.0));
+        assert_eq!(overlay.size(), (48.0, 48.0));
         assert!(!overlay.visible());
         assert!(!overlay.focusable());
 

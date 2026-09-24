@@ -57,11 +57,21 @@ pub fn recording_get_playback_url(
 
 /// Generate/cache a bounded local waveform off the webview and async runtime.
 #[tauri::command]
-pub async fn recording_get_waveform(
-    app: AppHandle,
+pub async fn recording_get_waveform<R: tauri::Runtime>(
+    app: AppHandle<R>,
     request_id: String,
 ) -> Result<Option<crate::recordings::RecordingWaveform>, CommandError> {
+    let jobs = app
+        .try_state::<RecordingStore>()
+        .ok_or_else(|| CommandError::from("Recording store not available"))?
+        .waveform_jobs
+        .clone();
+    let permit = jobs
+        .acquire_owned()
+        .await
+        .map_err(|_| CommandError::from("Waveform analysis interrupted"))?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
         let store = app
             .try_state::<RecordingStore>()
             .ok_or_else(|| CommandError::from("Recording store not available"))?;
@@ -571,13 +581,8 @@ async fn recover_recording_owned(
         // Prepare one playback WAV off the async runtime, only after capture
         // ends. STT uploads split later; never replace or truncate the journal.
         tokio::task::spawn_blocking(move || -> Result<(), String> {
-            let wav = crate::audio_capture::journal::final_wav(&export_path, 0, || {
-                export_cancel.is_cancelled()
-            })
-            .map_err(|e| e.to_string())?;
             let store = export_app.state::<RecordingStore>();
-            store.save_options(&export_id, &options)?;
-            store.save_wav(&export_id, &wav)
+            store.prepare_journal(&export_id, &export_path, &options, &export_cancel)
         })
         .await
         .map_err(|_| {
@@ -885,7 +890,12 @@ async fn pipeline_stop_and_transcribe_inner(
         });
     }
 
-    let result = match pipeline.stop_and_transcribe_detailed().await {
+    let epoch = pipeline.session_epoch();
+    let outcome = pipeline.stop_and_transcribe_detailed().await;
+    if epoch.is_none() || epoch != pipeline.session_epoch() {
+        return Ok(String::new());
+    }
+    let result = match outcome {
         Ok(r) => r,
         Err(PipelineError::Cancelled) => {
             // User cancelled (Escape / cancel button). Treat as a normal outcome.
@@ -946,7 +956,7 @@ async fn pipeline_stop_and_transcribe_inner(
                 pipeline.inner(),
                 active_request_id.as_deref(),
                 EventStatus::Error,
-                wav_bytes.as_deref(),
+                wav_bytes.as_deref().map(Vec::as_slice),
             );
 
             // Update history entry with error (keep it visible for retry)
@@ -967,7 +977,7 @@ async fn pipeline_stop_and_transcribe_inner(
             if let Err(err) = recording_completion::persist_request_recording(
                 &app,
                 active_request_id.as_deref(),
-                wav_bytes.as_deref(),
+                wav_bytes.as_deref().map(Vec::as_slice),
                 max_saved_recordings,
             ) {
                 log::warn!("{}", err);
@@ -992,7 +1002,10 @@ async fn pipeline_stop_and_transcribe_inner(
 
     // Capture WAV bytes once (used for duration + retry persistence + cost).
     let wav_bytes = pipeline.clone_last_wav_bytes();
-    let audio_secs_from_wav = wav_bytes.as_deref().and_then(stats::wav_duration_secs);
+    let audio_secs_from_wav = wav_bytes
+        .as_deref()
+        .map(Vec::as_slice)
+        .and_then(stats::wav_duration_secs);
     let audio_size_bytes = wav_bytes.as_ref().map(|v| v.len());
 
     // Log success
@@ -1034,14 +1047,14 @@ async fn pipeline_stop_and_transcribe_inner(
         pipeline.inner(),
         active_request_id.as_deref(),
         EventStatus::Success,
-        wav_bytes.as_deref(),
+        wav_bytes.as_deref().map(Vec::as_slice),
     );
 
     // Persist audio for retry (best-effort)
     if let Err(err) = recording_completion::persist_request_recording(
         &app,
         active_request_id.as_deref(),
-        wav_bytes.as_deref(),
+        wav_bytes.as_deref().map(Vec::as_slice),
         max_saved_recordings,
     ) {
         log::warn!("{}", err);
@@ -1143,7 +1156,7 @@ async fn retry_transcription_inner(
         .map_err(CommandError::from)?;
     // History reruns of a completed meeting also use small uploads, but are
     // deliberately fresh attempts rather than silently reusing old text.
-    let _meeting_replay = if meeting_id.is_some() && !recovery {
+    let _replay = if !recovery {
         Some(RecoveryGuard::acquire(pipeline.clone(), Some(&app))?.0)
     } else {
         None
@@ -1157,9 +1170,16 @@ async fn retry_transcription_inner(
     let original_preset_name: Option<String> =
         original_entry.as_ref().and_then(|e| e.preset_name.clone());
 
-    let wav = recording_store
-        .load_wav(&recording_source_id)
-        .map_err(CommandError::from)?;
+    let wav: crate::recordings::audio::TranscriptionAudio = if meeting_id.is_some() {
+        recording_store
+            .transcription_audio(&recording_source_id)
+            .map_err(CommandError::from)?
+    } else {
+        recording_store
+            .load_wav(&recording_source_id)
+            .map_err(CommandError::from)?
+            .into()
+    };
 
     // Start a *new* request log for the retry attempt.
     let config = pipeline.config();
@@ -1196,7 +1216,7 @@ async fn retry_transcription_inner(
         app.state::<HistoryStorage>().set_recording_details(
             id,
             recording_options.mode,
-            stats::wav_duration_secs(&wav),
+            wav.duration(),
             Vec::new(),
             None,
         )
@@ -1263,7 +1283,13 @@ async fn retry_transcription_inner(
             .await
     } else {
         pipeline
-            .transcribe_wav_bytes_detailed_for_profile(wav.clone(), profile_id.as_deref())
+            .transcribe_wav_bytes_detailed_for_profile(
+                wav.memory()
+                    .ok_or_else(|| CommandError::from("Saved files require chunked transcription"))?
+                    .as_ref()
+                    .clone(),
+                profile_id.as_deref(),
+            )
             .await
     };
     // Persist all original output before reporting success or clearing recovery.
@@ -1274,16 +1300,17 @@ async fn retry_transcription_inner(
                 .set_recording_details(
                     req_id,
                     recording_options.mode,
-                    stats::wav_duration_secs(&wav),
+                    wav.duration(),
                     result.speaker_segments.clone(),
                     (!result.speaker_segments.is_empty()).then(|| result.stt_text.clone()),
                 )
                 .map_err(PipelineError::Config)?;
             history_request_lifecycle::apply_request_history_update(
                 &app,
-                RequestHistoryUpdate::CompleteSuccess {
+                RequestHistoryUpdate::CompleteRetry {
                     request_id: req_id.to_string(),
-                    text: result.final_text.clone(),
+                    prior_failed_id: request_id.clone(),
+                    result: Ok(result.final_text.clone()),
                 },
             )
             .map_err(PipelineError::Config)?;
@@ -1308,6 +1335,15 @@ async fn retry_transcription_inner(
                 &pipeline,
                 new_request_id.as_deref(),
             );
+
+            if let Some(req_id) = new_request_id.as_deref() {
+                let _ = history_request_lifecycle::apply_request_history_update(
+                    &app,
+                    RequestHistoryUpdate::Delete {
+                        request_id: req_id.to_string(),
+                    },
+                );
+            }
 
             recording_completion::emit_cancelled(&app);
             if recovery {
@@ -1336,20 +1372,21 @@ async fn retry_transcription_inner(
                 new_request_id.as_deref(),
             );
 
-            recording_finalization::complete_current_request_with_cost(
+            recording_finalization::complete_current_request_with_duration(
                 &app,
                 &pipeline,
                 new_request_id.as_deref(),
                 EventStatus::Error,
-                Some(wav.as_slice()),
+                wav.duration(),
             );
 
             if let Some(req_id) = new_request_id.as_deref() {
                 let _ = history_request_lifecycle::apply_request_history_update(
                     &app,
-                    RequestHistoryUpdate::CompleteError {
+                    RequestHistoryUpdate::CompleteRetry {
                         request_id: req_id.to_string(),
-                        error_message: e.to_string(),
+                        prior_failed_id: request_id.clone(),
+                        result: Err(e.to_string()),
                     },
                 );
             }
@@ -1382,7 +1419,7 @@ async fn retry_transcription_inner(
                 recording_finalization::TranscriptionSuccessLogUpdate {
                     result: &result,
                     formatted_transcript: Some(result.final_text.as_str()),
-                    audio_duration_secs: stats::wav_duration_secs(wav.as_slice()),
+                    audio_duration_secs: wav.duration(),
                     audio_size_bytes: Some(wav.len()),
                     stt_summary_label: "Retry STT",
                     completion_log_message: None,
@@ -1403,12 +1440,12 @@ async fn retry_transcription_inner(
         new_request_id.as_deref(),
     );
     recording_finalization::persist_history_llm_metadata(&app, new_request_id.as_deref(), &result);
-    recording_finalization::complete_current_request_with_cost(
+    recording_finalization::complete_current_request_with_duration(
         &app,
         &pipeline,
         new_request_id.as_deref(),
         EventStatus::Success,
-        Some(wav.as_slice()),
+        wav.duration(),
     );
 
     // Emit transcript ready event
@@ -1637,7 +1674,12 @@ async fn pipeline_dictate_inner(
         crate::recording_orchestration::RecordingPhaseWatcherBundle::Dictate,
     );
 
-    let result = match pipeline.stop_and_transcribe_detailed().await {
+    let epoch = pipeline.session_epoch();
+    let outcome = pipeline.stop_and_transcribe_detailed().await;
+    if epoch.is_none() || epoch != pipeline.session_epoch() {
+        return Ok(String::new());
+    }
+    let result = match outcome {
         Ok(r) => r,
         Err(PipelineError::Cancelled) => {
             #[cfg(desktop)]
@@ -1698,14 +1740,14 @@ async fn pipeline_dictate_inner(
                 pipeline.inner(),
                 active_request_id.as_deref(),
                 EventStatus::Error,
-                wav_bytes.as_deref(),
+                wav_bytes.as_deref().map(Vec::as_slice),
             );
 
             // Persist audio for retry (best-effort)
             if let Err(err) = recording_completion::persist_request_recording(
                 &app,
                 active_request_id.as_deref(),
-                wav_bytes.as_deref(),
+                wav_bytes.as_deref().map(Vec::as_slice),
                 max_saved_recordings,
             ) {
                 if let Some(log_store) = app.try_state::<RequestLogStore>() {
@@ -1791,7 +1833,10 @@ async fn pipeline_dictate_inner(
                 recording_finalization::TranscriptionSuccessLogUpdate {
                     result: &result,
                     formatted_transcript: Some(result.final_text.as_str()),
-                    audio_duration_secs: wav_bytes.as_deref().and_then(stats::wav_duration_secs),
+                    audio_duration_secs: wav_bytes
+                        .as_deref()
+                        .map(Vec::as_slice)
+                        .and_then(stats::wav_duration_secs),
                     audio_size_bytes: wav_bytes.as_ref().map(|b| b.len()),
                     stt_summary_label: "STT",
                     completion_log_message: None,
@@ -1823,14 +1868,14 @@ async fn pipeline_dictate_inner(
         pipeline.inner(),
         active_request_id.as_deref(),
         EventStatus::Success,
-        wav_bytes.as_deref(),
+        wav_bytes.as_deref().map(Vec::as_slice),
     );
 
     // Persist audio for retry/playback (best-effort)
     if let Err(err) = recording_completion::persist_request_recording(
         &app,
         active_request_id.as_deref(),
-        wav_bytes.as_deref(),
+        wav_bytes.as_deref().map(Vec::as_slice),
         max_saved_recordings,
     ) {
         log::warn!("{}", err);
@@ -1963,7 +2008,7 @@ async fn pipeline_test_transcribe_last_audio_inner(
                 pipeline.inner(),
                 request_id.as_deref(),
                 EventStatus::Success,
-                wav.as_deref(),
+                wav.as_deref().map(Vec::as_slice),
             );
 
             Ok(s)
@@ -1989,7 +2034,7 @@ async fn pipeline_test_transcribe_last_audio_inner(
                 pipeline.inner(),
                 request_id.as_deref(),
                 EventStatus::Error,
-                wav.as_deref(),
+                wav.as_deref().map(Vec::as_slice),
             );
 
             Err(e.into())
@@ -2077,6 +2122,84 @@ pub fn pipeline_force_reset(
 #[cfg(test)]
 mod recovery_ownership_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn waveform_commands_queue_before_spawning_and_reuse_the_saved_cache() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let directory = tempfile::tempdir().unwrap();
+        let store = RecordingStore::new(directory.path().to_owned());
+        let mut wav = std::io::Cursor::new(Vec::new());
+        let mut writer = hound::WavWriter::new(
+            &mut wav,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 16000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        for sample in [-16000_i16, 8000, 0, 1000] {
+            writer.write_sample(sample).unwrap();
+        }
+        writer.finalize().unwrap();
+        store.save_wav("example", wav.get_ref()).unwrap();
+        let jobs = store.waveform_jobs.clone();
+        let app = tauri::test::mock_builder()
+            .manage(store)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let held = jobs.clone().acquire_owned().await.unwrap();
+        let mut queued = Box::pin(recording_get_waveform(
+            app.handle().clone(),
+            "example".into(),
+        ));
+        assert!(matches!(
+            queued
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+        assert!(!directory
+            .path()
+            .join("recordings/example.waveform.json")
+            .exists());
+        drop(held);
+        let first = queued.await.unwrap().unwrap();
+        assert_eq!(first.duration_seconds, 4.0 / 16000.0);
+        assert!(first.peaks.contains(&(-16000.0 / 32768.0)));
+        let cached = recording_get_waveform(app.handle().clone(), "example".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cached.peaks, first.peaks);
+        assert!(
+            recording_get_waveform(app.handle().clone(), "missing".into())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            recording_get_waveform(app.handle().clone(), "../escape".into())
+                .await
+                .is_err()
+        );
+        jobs.close();
+        assert!(
+            recording_get_waveform(app.handle().clone(), "example".into())
+                .await
+                .is_err()
+        );
+        let empty_app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        assert!(
+            recording_get_waveform(empty_app.handle().clone(), "example".into())
+                .await
+                .is_err()
+        );
+    }
 
     #[test]
     fn preparation_guard_owns_pipeline_until_drop_and_cancels_leftover_work() {

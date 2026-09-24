@@ -22,6 +22,7 @@ use tauri::AppHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct OutputSettingsView {
+    pub(crate) paste_shortcut: crate::text::key_inject::PasteShortcut,
     pub(crate) mode: OutputMode,
     pub(crate) hit_enter: bool,
     pub(crate) clipboard_privacy_mode: bool,
@@ -36,6 +37,7 @@ fn sanitize_output_settings(mode: OutputMode, hit_enter: bool) -> OutputSettings
     };
 
     OutputSettingsView {
+        paste_shortcut: crate::text::key_inject::PasteShortcut::System,
         mode,
         hit_enter,
         clipboard_privacy_mode: default_values::DEFAULT_OUTPUT_CLIPBOARD_PRIVACY_MODE,
@@ -143,6 +145,13 @@ pub(crate) fn read_output_settings_view(
         "output_clipboard_privacy_mode",
         default_values::DEFAULT_OUTPUT_CLIPBOARD_PRIVACY_MODE,
     );
+    view.paste_shortcut = crate::text::key_inject::PasteShortcut::parse(&read_setting(
+        app,
+        mode,
+        "output_paste_shortcut",
+        default_values::DEFAULT_OUTPUT_PASTE_SHORTCUT.to_string(),
+    ))
+    .unwrap_or_default();
     view.smart_paste_protection = read_setting(
         app,
         mode,

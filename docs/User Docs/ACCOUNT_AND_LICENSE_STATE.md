@@ -2,6 +2,11 @@
 
 Kolboo works without signing in. Account login is optional and only enables managed account context.
 
+The signed-out Account page opens directly to a compact sign-in form. Choose
+**Create an account** to register, or **Continue in browser** for browser sign-in.
+**Forgot password?** opens the same browser flow, which includes password reset.
+Account/access summaries are shown only after signing in.
+
 ## States you may see
 
 - **Signed out**: baseline functionality is available; no account identity is attached.

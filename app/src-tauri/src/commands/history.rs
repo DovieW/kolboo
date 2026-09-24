@@ -13,6 +13,14 @@ fn history_error(message: impl Into<String>) -> CommandError {
     CommandError::new(message, "history")
 }
 
+#[tauri::command]
+pub async fn get_history_activity(
+    timeframe: String,
+    history: State<'_, HistoryStorage>,
+) -> CommandResult<crate::history::HistoryActivity> {
+    history.activity(&timeframe).map_err(CommandError::from)
+}
+
 pub(crate) fn get_max_saved_recordings(app: &AppHandle) -> usize {
     #[cfg(desktop)]
     {

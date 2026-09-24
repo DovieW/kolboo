@@ -29,9 +29,6 @@ impl RecordingMediaServer {
     pub fn start(recordings_dir: PathBuf) -> Result<Self, String> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|error| format!("Could not start recording playback: {error}"))?;
-        listener
-            .set_nonblocking(true)
-            .map_err(|error| format!("Could not configure recording playback: {error}"))?;
         let address = listener
             .local_addr()
             .map_err(|error| format!("Could not read recording playback address: {error}"))?;
@@ -68,8 +65,12 @@ impl RecordingMediaServer {
 impl Drop for RecordingMediaServer {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
-        // Wake the nonblocking accept loop so shutdown does not wait for its poll.
-        let _ = TcpStream::connect_timeout(&self.address, Duration::from_millis(50));
+        // Wake the blocking accept: no timer or periodic wakeups while idle.
+        if TcpStream::connect_timeout(&self.address, Duration::from_millis(50)).is_err() {
+            // Resource exhaustion must not deadlock app shutdown on accept().
+            // The worker owns its resources and exits on the next connection.
+            return;
+        }
         if let Ok(mut worker) = self.worker.lock() {
             if let Some(worker) = worker.take() {
                 let _ = worker.join();
@@ -82,6 +83,9 @@ fn serve(listener: TcpListener, recordings_dir: PathBuf, token: String, shutdown
     while !shutdown.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((stream, peer)) => {
+                if shutdown.load(Ordering::Acquire) {
+                    return;
+                }
                 if !peer.ip().is_loopback() {
                     continue;
                 }
@@ -94,9 +98,6 @@ fn serve(listener: TcpListener, recordings_dir: PathBuf, token: String, shutdown
                             log::debug!("Recording playback request ended: {error}");
                         }
                     });
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(10));
             }
             Err(error) => {
                 log::warn!("Recording playback listener stopped: {error}");
@@ -242,7 +243,11 @@ fn read_request(stream: &TcpStream) -> Result<MediaRequest, String> {
 }
 
 fn read_bounded_line(reader: &mut BufReader<&TcpStream>, line: &mut String) -> Result<(), String> {
-    let bytes = reader.read_line(line).map_err(|error| error.to_string())?;
+    // Bound allocation before reading, not after an arbitrary-length line.
+    let bytes = reader
+        .take(MAX_HEADER_BYTES as u64 + 1)
+        .read_line(line)
+        .map_err(|error| error.to_string())?;
     if bytes == 0 || line.len() > MAX_HEADER_BYTES {
         return Err("Invalid request".to_string());
     }
@@ -297,86 +302,5 @@ fn parse_range(value: &str, length: u64) -> Option<(u64, u64)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn request(
-        server: &RecordingMediaServer,
-        method: &str,
-        path: &str,
-        range: Option<&str>,
-    ) -> Vec<u8> {
-        let mut stream = TcpStream::connect(server.address).unwrap();
-        write!(
-            stream,
-            "{method} {path} HTTP/1.1\r\nHost: {}\r\n",
-            server.address
-        )
-        .unwrap();
-        if let Some(range) = range {
-            write!(stream, "Range: {range}\r\n").unwrap();
-        }
-        stream.write_all(b"Connection: close\r\n\r\n").unwrap();
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).unwrap();
-        response
-    }
-
-    fn headers(response: &[u8]) -> String {
-        let boundary = response
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .expect("response has a header terminator");
-        String::from_utf8(response[..boundary].to_vec()).unwrap()
-    }
-
-    #[test]
-    fn serves_ranges_without_exposing_other_files() {
-        let temp = tempfile::tempdir().unwrap();
-        let bytes = (0_u8..=31).collect::<Vec<_>>();
-        std::fs::write(temp.path().join("recording-1.wav"), &bytes).unwrap();
-        std::fs::write(temp.path().join("settings.json"), b"secret").unwrap();
-        let server = RecordingMediaServer::start(temp.path().to_owned()).unwrap();
-
-        let path = format!("/{}/recording-1", server.token);
-        let response = request(&server, "GET", &path, Some("bytes=4-9"));
-        assert!(response.starts_with(b"HTTP/1.1 206 Partial Content\r\n"));
-        assert!(headers(&response).contains("Content-Range: bytes 4-9/32"));
-        assert_eq!(
-            response.split(|byte| *byte == b'\n').next_back().unwrap(),
-            &bytes[4..=9]
-        );
-
-        let invalid = request(
-            &server,
-            "GET",
-            &format!("/{}/../settings.json", server.token),
-            None,
-        );
-        assert!(invalid.starts_with(b"HTTP/1.1 404 Not Found\r\n"));
-
-        let wrong_token = request(&server, "GET", "/wrong/recording-1", None);
-        assert!(wrong_token.starts_with(b"HTTP/1.1 404 Not Found\r\n"));
-    }
-
-    #[test]
-    fn supports_head_and_rejects_invalid_ranges() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::write(temp.path().join("recording-1.wav"), vec![7_u8; 20]).unwrap();
-        let server = RecordingMediaServer::start(temp.path().to_owned()).unwrap();
-        let path = format!("/{}/recording-1", server.token);
-
-        let head = request(&server, "HEAD", &path, None);
-        assert!(head.starts_with(b"HTTP/1.1 200 OK\r\n"));
-        assert!(head.ends_with(b"\r\n\r\n"));
-
-        let invalid = request(&server, "GET", &path, Some("bytes=30-40"));
-        assert!(invalid.starts_with(b"HTTP/1.1 416 Range Not Satisfiable\r\n"));
-        assert!(headers(&invalid).contains("Content-Range: bytes */20"));
-
-        assert_eq!(parse_range("bytes=10-4", 20), None);
-        assert_eq!(parse_range("bytes=0-1,4-5", 20), None);
-        assert_eq!(parse_range("bytes=-4", 20), Some((16, 19)));
-        assert_eq!(parse_range("bytes=18-", 20), Some((18, 19)));
-    }
-}
+#[path = "recording_media_protocol/tests.rs"]
+mod tests;

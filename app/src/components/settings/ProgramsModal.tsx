@@ -73,6 +73,7 @@ export function ProfileConfigModal({
 			overlay_mode: null,
 			widget_position: null,
 			output_mode: null,
+			output_paste_shortcut: null,
 		};
 
 		const next = [...profiles, newProfile];
@@ -218,6 +219,7 @@ export function ProfileConfigModal({
 					overlay_mode: null,
 					widget_position: null,
 					output_mode: null,
+					output_paste_shortcut: null,
 				});
 			},
 		});

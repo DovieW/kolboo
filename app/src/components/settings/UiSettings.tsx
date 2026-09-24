@@ -45,6 +45,7 @@ import {
 	inheritedSettingView,
 	isInheritedSettingValue,
 } from "../../lib/tauri/settingsViews";
+import { PasteShortcutSetting } from "./PasteShortcutSetting";
 import {
 	SettingsIconButton,
 	SettingsRow,
@@ -833,6 +834,13 @@ export function UiSettings({
 						</div>
 					</>
 				}
+			/>
+
+			<PasteShortcutSetting
+				globalValue={settings?.output_paste_shortcut}
+				profile={profile}
+				disabled={isLoading || outputMode === "clipboard"}
+				updateProfile={updateProfile}
 			/>
 
 			<SettingsRow

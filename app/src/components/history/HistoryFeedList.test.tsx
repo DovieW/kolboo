@@ -118,7 +118,6 @@ beforeEach(async () => {
 						onCopyEntry={copy}
 						onRetryEntry={vi.fn()}
 						isRetryPending={false}
-						recordingExistsById={new Map()}
 						player={player}
 						requestLogIds={new Set()}
 						onDeleteEntry={vi.fn()}
@@ -169,6 +168,121 @@ describe("History cards and reader", () => {
 			document.querySelector('[aria-label^="Expand dictation from"]'),
 		).not.toBeNull();
 	});
+	it("offers a retry on failed recordings and sends the entry id to the backend", async () => {
+		const retry = vi.fn();
+		const renderFailed = async (
+			isRetryPending = false,
+			retryPendingEntryId?: string,
+		) =>
+			act(async () =>
+				root.render(
+					<QueryClientProvider client={client}>
+						<MantineProvider env="test">
+							<HistoryFeedList
+								isInitialLoading={false}
+								hasError={false}
+								emptyState={null}
+								groupedHistory={groupHistoryForDisplay([
+									{
+										id: "failed-attempt",
+										recording_request_id: "source-recording",
+										timestamp: "2026-01-01T00:00:00Z",
+										text: "",
+										status: "error",
+										error_message: "Transcription timeout after 20s",
+									},
+								])}
+								copiedEntryId={null}
+								onCopyEntry={copy}
+								onRetryEntry={retry}
+								isRetryPending={isRetryPending}
+								retryPendingEntryId={retryPendingEntryId}
+								player={player}
+								requestLogIds={new Set()}
+								onDeleteEntry={vi.fn()}
+								isDeleteDisabled={false}
+							/>
+						</MantineProvider>
+					</QueryClientProvider>,
+				),
+			);
+		await renderFailed();
+		const retryButton = button("Retry") as HTMLButtonElement;
+		expect(document.querySelector("[data-history-detail]")).toBeNull();
+		expect(retryButton.closest(".history-card-retry")).not.toBeNull();
+		expect(retryButton.disabled).toBe(false);
+		await click(retryButton);
+		expect(retry).toHaveBeenCalledExactlyOnceWith("failed-attempt");
+		expect(document.querySelector("[data-history-detail]")).toBeNull();
+		await click(document.querySelector(".history-card-toggle"));
+		expect(document.querySelector("[data-history-detail]")).not.toBeNull();
+		expect(
+			[...document.querySelectorAll("button")].filter(
+				(b) => b.textContent === "Retry",
+			),
+		).toHaveLength(1);
+		await click(document.querySelector('[aria-label="Recording actions"]'));
+		expect(
+			[...document.querySelectorAll('[role="menuitem"]')].some((item) =>
+				item.textContent?.includes("Retry"),
+			),
+		).toBe(false);
+		expect(copy).not.toHaveBeenCalled();
+		await renderFailed(true, "failed-attempt");
+		expect(button("Retry")?.getAttribute("data-loading")).toBe("true");
+		await renderFailed(true, "another-attempt");
+		expect(button("Retry")?.getAttribute("data-loading")).toBe(null);
+		expect((button("Retry") as HTMLButtonElement).disabled).toBe(true);
+	});
+	it("keeps rerun in the menu for successful recordings and marks its pending request", async () => {
+		const rerun = vi.fn();
+		const renderSuccess = async (
+			isRetryPending = false,
+			retryPendingEntryId?: string,
+		) =>
+			act(async () =>
+				root.render(
+					<QueryClientProvider client={client}>
+						<MantineProvider env="test">
+							<HistoryFeedList
+								isInitialLoading={false}
+								hasError={false}
+								emptyState={null}
+								groupedHistory={groupHistoryForDisplay([
+									{
+										id: "successful-attempt",
+										timestamp: "2026-01-01T00:00:00Z",
+										text: "A successful transcript",
+										status: "success",
+									},
+								])}
+								copiedEntryId={null}
+								onCopyEntry={copy}
+								onRetryEntry={rerun}
+								isRetryPending={isRetryPending}
+								retryPendingEntryId={retryPendingEntryId}
+								player={player}
+								requestLogIds={new Set()}
+								onDeleteEntry={vi.fn()}
+								isDeleteDisabled={false}
+							/>
+						</MantineProvider>
+					</QueryClientProvider>,
+				),
+			);
+		await renderSuccess();
+		expect(button("Retry")).toBeNull();
+		await click(document.querySelector('[aria-label="Recording actions"]'));
+		await click(button("Rerun as new result"));
+		expect(rerun).toHaveBeenCalledExactlyOnceWith("successful-attempt");
+		await renderSuccess(true, "successful-attempt");
+		await click(document.querySelector('[aria-label="Recording actions"]'));
+		expect((button("Rerunning…") as HTMLButtonElement).disabled).toBe(true);
+		await renderSuccess(true, "another-attempt");
+		expect((button("Rerun as new result") as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+	});
 	it("renders the complete player shell while audio is loading", async () => {
 		const loadingPlayer = {
 			...player,
@@ -214,7 +328,9 @@ describe("History cards and reader", () => {
 				</MantineProvider>,
 			),
 		);
-		expect(document.querySelector(".history-waveform-stage--revealed")).toBeNull();
+		expect(
+			document.querySelector(".history-waveform-stage--revealed"),
+		).toBeNull();
 		await act(async () => waveformEvents.get("redrawcomplete")?.());
 		expect(
 			document.querySelector(".history-waveform-stage--revealed"),
@@ -232,7 +348,9 @@ describe("History cards and reader", () => {
 				</MantineProvider>,
 			),
 		);
-		expect(document.querySelector(".history-waveform-stage--revealed")).toBeNull();
+		expect(
+			document.querySelector(".history-waveform-stage--revealed"),
+		).toBeNull();
 		await act(async () => waveformEvents.get("redrawcomplete")?.());
 		expect(
 			document.querySelector(".history-waveform-stage--revealed"),
@@ -242,11 +360,60 @@ describe("History cards and reader", () => {
 			document.querySelector(".history-waveform-stage--revealed"),
 		).not.toBeNull();
 	});
+	it("allows listening and seeking while optional waveform analysis is pending", async () => {
+		const readyPlayer = {
+			...player,
+			media: document.createElement("audio"),
+			waveform: null,
+		};
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<HistoryAudioPlayer player={readyPlayer} recordingId="one" />
+				</MantineProvider>,
+			),
+		);
+		expect(
+			document.querySelector(".history-waveform-placeholder"),
+		).not.toBeNull();
+		expect(
+			document.querySelector(".history-waveform-stage--revealed"),
+		).toBeNull();
+		expect(
+			(document.querySelector('[aria-label="Play audio"]') as HTMLButtonElement)
+				.disabled,
+		).toBe(false);
+		await click(document.querySelector('[aria-label="Play audio"]'));
+		expect(player.toggle).toHaveBeenCalledWith("one");
+		await click(document.querySelector('[aria-label="Forward 10 seconds"]'));
+		expect(player.seek).toHaveBeenCalledWith(10);
+	});
 	it("copies full text explicitly and prepares the player without autoplay", async () => {
 		await click(document.querySelector('[aria-label="Copy transcript"]'));
 		expect(copy).toHaveBeenCalledWith("one", original);
 		await click(document.querySelector(".history-card-toggle"));
-		await click(button("Open full view"));
+		const transcript = document.querySelector(
+			'[data-history-detail] [aria-label="Transcript"]',
+		);
+		const audioPlayer = document.querySelector(
+			"[data-history-detail] .history-audio-player",
+		);
+		expect(transcript).not.toBeNull();
+		expect(audioPlayer).not.toBeNull();
+		if (!transcript || !audioPlayer)
+			throw new Error("History detail is missing");
+		expect(
+			Boolean(
+				transcript.compareDocumentPosition(audioPlayer) &
+					Node.DOCUMENT_POSITION_FOLLOWING,
+			),
+		).toBe(true);
+		expect(
+			document.querySelector(
+				'.history-audio-trailing [aria-label="Open full view"]',
+			),
+		).not.toBeNull();
+		await click(document.querySelector('[aria-label="Open full view"]'));
 		expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 		expect(document.querySelector('[aria-label="Recording title"]')).toBeNull();
 		expect(
@@ -272,9 +439,30 @@ describe("History cards and reader", () => {
 		await click(document.querySelector(".mantine-Modal-close"));
 		expect(player.stop).toHaveBeenCalled();
 	});
+	it("changes playback speed when the ready player's speed menu is selected", async () => {
+		const readyPlayer = {
+			...player,
+			media: document.createElement("audio"),
+			setRate: vi.fn(),
+		};
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<HistoryAudioPlayer player={readyPlayer} recordingId="one" />
+				</MantineProvider>,
+			),
+		);
+		await click(document.querySelector('[aria-label="Playback speed"]'));
+		await click(
+			[...document.querySelectorAll('[role="option"]')].find(
+				(option) => option.textContent === "1.5×",
+			) ?? null,
+		);
+		expect(readyPlayer.setRate).toHaveBeenCalledWith(1.5);
+	});
 	it("flushes corrections when closing and keeps the reader open if saving fails", async () => {
 		await click(document.querySelector(".history-card-toggle"));
-		await click(button("Open full view"));
+		await click(document.querySelector('[aria-label="Open full view"]'));
 		await click(button("Edit"));
 		expect(
 			document.querySelector('[aria-label="Recording title"]'),

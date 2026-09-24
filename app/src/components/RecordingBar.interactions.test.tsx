@@ -12,6 +12,7 @@ const mock = vi.hoisted(() => ({
 	historyOnly: false,
 	saved: [] as string[],
 	onCancelled: null as (() => void) | null,
+	onStateChanged: null as (() => void) | null,
 	stopListening: vi.fn(),
 	listen: vi.fn(),
 	api: {
@@ -80,8 +81,10 @@ beforeEach(() => {
 	mock.historyOnly = false;
 	mock.saved = [];
 	mock.onCancelled = null;
-	mock.listen.mockImplementation((_name: string, callback: () => void) => {
-		mock.onCancelled = callback;
+	mock.onStateChanged = null;
+	mock.listen.mockImplementation((name: string, callback: () => void) => {
+		if (name === "pipeline-cancelled") mock.onCancelled = callback;
+		if (name === "pipeline-state-changed") mock.onStateChanged = callback;
 		return Promise.resolve(mock.stopListening);
 	});
 	mock.api.getPreferences.mockResolvedValue({
@@ -120,7 +123,7 @@ afterEach(async () => {
 });
 async function flush() {
 	await act(async () => {
-		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(1);
 	});
 }
 async function render() {
@@ -133,6 +136,8 @@ async function render() {
 			</MantineProvider>,
 		),
 	);
+	await flush();
+	// Dependent queries become enabled after the state query publishes.
 	await flush();
 }
 function button(text: string) {
@@ -170,6 +175,34 @@ it("refreshes saved recordings immediately after Escape without claiming success
 	).not.toBeNull();
 	expect(document.querySelector('[role="dialog"]')).toBeNull();
 	expect(document.body.textContent).not.toContain("Saved successfully");
+});
+
+it("avoids idle capture polling and reacts immediately to a recording event", async () => {
+	await render();
+	expect(mock.api.getSeconds).not.toHaveBeenCalled();
+	expect(mock.api.canPause).not.toHaveBeenCalled();
+	expect(mock.api.getPaused).not.toHaveBeenCalled();
+	const recoveryReads = mock.api.listRecovery.mock.calls.length;
+	const stateReads = mock.api.getState.mock.calls.length;
+	await act(async () => vi.advanceTimersByTimeAsync(4000));
+	expect(mock.api.getState).toHaveBeenCalledTimes(stateReads);
+	expect(mock.api.listRecovery).toHaveBeenCalledTimes(recoveryReads);
+	mock.state = "recording";
+	mock.historyOnly = true;
+	await act(async () => mock.onStateChanged?.());
+	await flush();
+	await flush();
+	expect(
+		host.querySelector('button[aria-label="Stop & transcribe"]'),
+	).not.toBeNull();
+	expect(mock.api.getSeconds).toHaveBeenCalled();
+	expect(mock.api.canPause).toHaveBeenCalled();
+	mock.state = "idle";
+	await act(async () => mock.onStateChanged?.());
+	await flush();
+	const progressReads = mock.api.getSeconds.mock.calls.length;
+	await act(async () => vi.advanceTimersByTimeAsync(4000));
+	expect(mock.api.getSeconds).toHaveBeenCalledTimes(progressReads);
 });
 
 it("does not overwrite saved mode/model while recording preferences are still loading", async () => {

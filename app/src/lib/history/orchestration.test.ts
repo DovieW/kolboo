@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { HistoryDeleteOptions, HistoryEntry } from "../tauri";
 import {
 	addHiddenHistoryEntryIds,
-	buildRecordingProbePlan,
 	classifyHistoryDeleteOptions,
 	collectHistoryEntryIdsUsingRecording,
 	getRetryLastFailedActionState,
@@ -107,37 +106,6 @@ function entry(
 }
 
 describe("History Feed orchestration helpers", () => {
-	it("prioritizes recent or in-progress recording probes and de-dupes shared ids", () => {
-		const now = new Date("2026-05-07T10:00:20.000Z").getTime();
-		const recordingExistsById = new Map([
-			["already-there", { exists: true, checkedAt: now - 1000 }],
-			["retry-me", { exists: false, checkedAt: now - 1000 }],
-		]);
-
-		const plan = buildRecordingProbePlan(
-			[
-				entry({
-					id: "a",
-					recording_request_id: "shared",
-					status: "in_progress",
-				}),
-				entry({
-					id: "b",
-					recording_request_id: "shared",
-					status: "in_progress",
-				}),
-				entry({ id: "c", recording_request_id: "retry-me" }),
-				entry({ id: "d", recording_request_id: "already-there" }),
-				entry({ id: "e", recording_request_id: "first-seen" }),
-			],
-			recordingExistsById,
-			now,
-		);
-
-		expect(plan.shouldPollAgain).toBe(true);
-		expect(plan.batch).toEqual(["shared", "retry-me", "first-seen"]);
-	});
-
 	it("supports optimistic hidden-entry rollback without mutating previous sets", () => {
 		const hidden = addHiddenHistoryEntryIds(new Set(["keep-me"]), [
 			"a",

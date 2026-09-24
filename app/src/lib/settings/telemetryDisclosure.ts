@@ -5,7 +5,9 @@ export const TELEMETRY_DISCLOSURE_VERSION_KEY = "telemetry_disclosure_version";
 
 // Keep this explicit and stable. If we revise the wording later, bump this
 // version intentionally so the app can re-show the disclosure on purpose.
-export const TELEMETRY_DISCLOSURE_VERSION = "2026-05-phase6b-v1";
+// This revision adds page and recording metadata and allows account-linked
+// analytics after the optional choice. Existing consent must be renewed.
+export const TELEMETRY_DISCLOSURE_VERSION = "2026-09-usage-v2";
 
 export type TelemetryDisclosureState = {
 	posthogAnalyticsEnabled: boolean;
@@ -35,6 +37,16 @@ export function shouldSendProductAnalytics(
 	state: TelemetryDisclosureState,
 ): boolean {
 	return state.posthogAnalyticsEnabled && isTelemetryDisclosureResolved(state);
+}
+
+export function shouldSendAggregateAnalytics(
+	state: Pick<
+		TelemetryDisclosureState,
+		"telemetryDisclosureAcknowledgedAt" | "telemetryDisclosureVersion"
+	>,
+	organizationDisablesAnalytics: boolean,
+): boolean {
+	return !organizationDisablesAnalytics && isTelemetryDisclosureResolved(state);
 }
 
 export function buildTelemetryDisclosureResolutionPatch(args: {

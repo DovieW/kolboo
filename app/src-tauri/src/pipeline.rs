@@ -20,6 +20,7 @@ use crate::audio_capture::{
     AudioLevelSnapshot,
 };
 use crate::llm::{LlmConfig, LlmProvider, ProgramPreset, ProgramPromptProfile};
+use crate::recordings::audio::TranscriptionAudio;
 use crate::settings::store::SettingsReadMode;
 use crate::settings_view;
 use crate::stt::{StreamingSttSession, SttError, SttProvider, SttRegistry};
@@ -210,6 +211,7 @@ fn resolve_llm_provider_for_runtime(
 
 /// Internal state for the recording pipeline
 struct PipelineInner {
+    session_epoch: u64,
     recovery_job: Option<CancellationToken>,
     history_only: bool,
     recording_paused: bool,
@@ -237,7 +239,7 @@ struct PipelineInner {
     stt_complete: bool,
 
     /// Last captured audio (WAV bytes). Used for debugging/testing.
-    last_wav_bytes: Option<Vec<u8>>,
+    last_wav_bytes: Option<Arc<Vec<u8>>>,
 
     /// Last recording diagnostics (raw stats + optional speech detection).
     last_recording_diagnostics: Option<AudioCaptureDiagnostics>,
@@ -401,6 +403,7 @@ impl PipelineInner {
         audio_capture: Box<dyn AudioCaptureBackend>,
     ) -> Self {
         let mut inner = Self {
+            session_epoch: 0,
             history_only: false,
             recovery_job: None,
             recording_paused: false,
@@ -516,7 +519,9 @@ impl PipelineInner {
     /// Reset to idle state, clearing any error condition
     fn reset_to_idle(&mut self) {
         self.transition_to(PipelineState::Idle, "reset_to_idle");
-        self.cancel_token = None;
+        if let Some(token) = self.cancel_token.take() {
+            token.cancel();
+        }
         // Clean up any active streaming session (e.g. quiet audio gate, cancellation).
         self.active_streaming_session.take();
         self.audio_capture.set_live_audio_tx(None);
@@ -536,7 +541,9 @@ impl PipelineInner {
     fn set_error(&mut self, msg: &str) {
         log::error!("Pipeline error: {}", msg);
         self.state = PipelineState::Error;
-        self.cancel_token = None;
+        if let Some(token) = self.cancel_token.take() {
+            token.cancel();
+        }
         self.stt_complete = false;
         // Clean up any active streaming session.
         self.active_streaming_session.take();
@@ -554,12 +561,13 @@ use transcription_flow::{complete_transcription_flow, SessionPresetLock, Transcr
 /// inner state as needed for state transitions and provider creation.
 struct PipelineCallbacks {
     inner: Arc<Mutex<PipelineInner>>,
+    cancel: CancellationToken,
 }
 
 impl transcription_flow::TranscriptionCallbacks for PipelineCallbacks {
     fn transition_to_routing(&self) {
         if let Ok(mut inner) = self.inner.lock() {
-            if inner.state == PipelineState::Transcribing {
+            if !self.cancel.is_cancelled() && inner.state == PipelineState::Transcribing {
                 inner.transition_to(PipelineState::Routing, "transcription_flow (routing)");
             }
         }
@@ -567,7 +575,7 @@ impl transcription_flow::TranscriptionCallbacks for PipelineCallbacks {
 
     fn transition_from_routing(&self) {
         if let Ok(mut inner) = self.inner.lock() {
-            if inner.state == PipelineState::Routing {
+            if !self.cancel.is_cancelled() && inner.state == PipelineState::Routing {
                 inner.transition_to(
                     PipelineState::Transcribing,
                     "transcription_flow (routing done)",
@@ -578,7 +586,7 @@ impl transcription_flow::TranscriptionCallbacks for PipelineCallbacks {
 
     fn transition_to_rewriting(&self) {
         if let Ok(mut inner) = self.inner.lock() {
-            if inner.state == PipelineState::Transcribing {
+            if !self.cancel.is_cancelled() && inner.state == PipelineState::Transcribing {
                 inner.transition_to(PipelineState::Rewriting, "transcription_flow (rewrite)");
             }
         }
@@ -593,6 +601,9 @@ impl transcription_flow::TranscriptionCallbacks for PipelineCallbacks {
             .inner
             .lock()
             .map_err(|e| PipelineError::Lock(e.to_string()))?;
+        if self.cancel.is_cancelled() {
+            return Err(PipelineError::Cancelled);
+        }
         inner.get_or_create_llm_provider(provider_id, params)
     }
 }
@@ -614,6 +625,11 @@ pub struct SharedPipeline {
 }
 
 impl SharedPipeline {
+    /// Native completion handlers must not emit events or finalize a newer request.
+    pub fn session_epoch(&self) -> Option<u64> {
+        self.inner.lock().ok().map(|inner| inner.session_epoch)
+    }
+
     pub fn begin_recovery(&self) -> Result<CancellationToken, PipelineError> {
         let mut inner = self
             .inner
@@ -622,6 +638,7 @@ impl SharedPipeline {
         if inner.recovery_job.is_some() || !inner.state.can_start_recording() {
             return Err(PipelineError::AlreadyRecording);
         }
+        inner.session_epoch = inner.session_epoch.wrapping_add(1);
         // A retry owns a fresh operation, not the previous attempt's Error state.
         // This also makes cancellation during local preparation report accurately.
         inner.reset_to_idle();
@@ -642,18 +659,37 @@ impl SharedPipeline {
             .map(|inner| inner.recovery_job.is_some())
             .unwrap_or(true)
     }
-    fn mark_stt_complete(&self, reason: &str) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.stt_complete = true;
-            log::debug!("stt_complete set to true ({})", reason);
+    fn mark_stt_complete(
+        &self,
+        cancel: &CancellationToken,
+        reason: &str,
+    ) -> Result<(), PipelineError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+        if cancel.is_cancelled() {
+            return Err(PipelineError::Cancelled);
         }
+        inner.stt_complete = true;
+        log::debug!("stt_complete set to true ({})", reason);
+        Ok(())
     }
 
-    fn finish_failed_stt_attempt(&self, error: &PipelineError) -> Result<(), PipelineError> {
+    fn finish_failed_stt_attempt(
+        &self,
+        cancel: &CancellationToken,
+        error: &PipelineError,
+    ) -> Result<(), PipelineError> {
         let mut inner = self
             .inner
             .lock()
             .map_err(|err| PipelineError::Lock(err.to_string()))?;
+        // Cancellation already released the old session. Its continuation must
+        // never clear the token, audio channel, or state of a newer recording.
+        if cancel.is_cancelled() {
+            return Ok(());
+        }
         if matches!(error, PipelineError::Cancelled) {
             inner.reset_to_idle();
         } else {
@@ -894,11 +930,22 @@ impl SharedPipeline {
     }
 
     /// Take (read and clear) the current session preset lock.
-    fn take_session_preset_lock(&self) -> Option<SessionPresetLock> {
-        self.session_preset_lock
+    fn take_session_preset_lock(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Result<Option<SessionPresetLock>, PipelineError> {
+        let _session = self
+            .inner
+            .lock()
+            .map_err(|e| PipelineError::Lock(e.to_string()))?;
+        if cancel.is_cancelled() {
+            return Err(PipelineError::Cancelled);
+        }
+        Ok(self
+            .session_preset_lock
             .lock()
             .ok()
-            .and_then(|mut g| g.take())
+            .and_then(|mut g| g.take()))
     }
 
     /// Read (without clearing) the current session preset lock.
@@ -1027,7 +1074,13 @@ impl SharedPipeline {
             .set_recovery_path(recovery_path)
             .map_err(PipelineError::AudioCapture)?;
         let cancel_token = CancellationToken::new();
-        inner.cancel_token = Some(cancel_token);
+        inner.session_epoch = inner.session_epoch.wrapping_add(1);
+        // Old streaming consumers may still hold their flag after cancellation.
+        // Give each capture its own flag so it cannot suppress the next paste.
+        inner.live_output_active = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if let Some(previous) = inner.cancel_token.replace(cancel_token) {
+            previous.cancel();
+        }
 
         let max_duration = inner.config.max_duration_secs;
         // Clone out of the config to avoid borrowing `inner` immutably while calling into
@@ -1070,16 +1123,18 @@ impl SharedPipeline {
         }
         // Helper: log to the request log store (if available) so the user can
         // see streaming diagnostics in the UI.
-        let log_to_request = |app: &AppHandle, msg: String| {
+        let log_to_request = |app: &AppHandle, cancel: &CancellationToken, msg: String| {
             if let Some(store) = app.try_state::<crate::request_log::RequestLogStore>() {
                 store.with_current(|log| {
-                    log.info(msg);
+                    if !cancel.is_cancelled() {
+                        log.info(msg);
+                    }
                 });
             }
         };
 
         // 1. Resolve STT provider under the lock (brief).
-        let (stt_provider, sample_rate, use_simulated, proxy_settings) = {
+        let (stt_provider, sample_rate, use_simulated, proxy_settings, cancel) = {
             let mut inner = match self.inner.lock() {
                 Ok(inner) => inner,
                 Err(e) => {
@@ -1125,11 +1180,15 @@ impl SharedPipeline {
             }
 
             let sr = inner.audio_capture.capture_sample_rate();
+            let Some(cancel) = inner.cancel_token.clone() else {
+                return;
+            };
             (
                 provider,
                 sr,
                 use_simulated,
                 inner.config.proxy_settings.clone(),
+                cancel,
             )
         };
 
@@ -1141,6 +1200,7 @@ impl SharedPipeline {
             );
             log_to_request(
                 app_handle,
+                &cancel,
                 format!(
                     "Simulated streaming: starting (sample_rate={})",
                     sample_rate
@@ -1156,21 +1216,28 @@ impl SharedPipeline {
                 crate::stt::streaming::describe_websocket_transport_policy_gap(&proxy_settings)
             {
                 log::warn!("{}", message);
-                log_to_request(app_handle, message);
+                log_to_request(app_handle, &cancel, message);
             }
             log_to_request(
                 app_handle,
+                &cancel,
                 format!(
                     "Realtime streaming: connecting (sample_rate={})",
                     sample_rate
                 ),
             );
-            match stt_provider.start_streaming(sample_rate).await {
+            let connected = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return,
+                result = stt_provider.start_streaming(sample_rate) => result,
+            };
+            match connected {
                 Ok(s) => s,
                 Err(e) => {
                     log::warn!("Concurrent streaming: failed to start: {}", e);
                     log_to_request(
                         app_handle,
+                        &cancel,
                         format!("Realtime streaming: connection failed ({})", e),
                     );
                     return;
@@ -1190,7 +1257,7 @@ impl SharedPipeline {
                 }
             };
 
-            if inner.state != PipelineState::Recording {
+            if cancel.is_cancelled() || inner.state != PipelineState::Recording {
                 log::info!(
                     "Concurrent streaming: recording stopped before session ready, aborting"
                 );
@@ -1216,6 +1283,9 @@ impl SharedPipeline {
                         return;
                     }
                 };
+                if cancel.is_cancelled() {
+                    return;
+                }
                 (
                     inner.config.stt_live_output,
                     inner.live_output_active.clone(),
@@ -1247,10 +1317,22 @@ impl SharedPipeline {
             } else {
                 (crate::text::inject::OutputMode::Paste, false)
             };
+            let output_paste_shortcut = crate::core::output_settings::paste_shortcut_for_profile(
+                &app,
+                self.peek_session_profile_override().as_deref(),
+            );
 
             tokio::spawn(async move {
                 let mut is_first_chunk = true;
-                while let Some(partial) = partial_rx.recv().await {
+                loop {
+                    let partial = tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => break,
+                        partial = partial_rx.recv() => match partial {
+                            Some(partial) => partial,
+                            None => break,
+                        },
+                    };
                     // Always emit the partial transcript event for overlay display.
                     let payload = serde_json::json!({ "text": partial.text });
                     if let Err(e) = app.emit(crate::events::EVENT_STT_PARTIAL_TRANSCRIPT, payload) {
@@ -1277,9 +1359,17 @@ impl SharedPipeline {
                             let text = output_text.clone();
                             let mode = output_mode;
                             let enter = output_hit_enter;
+                            let output_cancel = cancel.clone();
                             tokio::task::spawn_blocking(move || {
+                                if output_cancel.is_cancelled() {
+                                    return;
+                                }
                                 if let Err(e) = crate::text::inject::output_text_with_mode_options(
-                                    &text, mode, enter, false,
+                                    &text,
+                                    mode,
+                                    enter,
+                                    false,
+                                    output_paste_shortcut,
                                 ) {
                                     log::error!("Live output: failed to paste chunk: {}", e);
                                 }
@@ -1324,7 +1414,7 @@ impl SharedPipeline {
                 }
 
                 // Keep a copy for STT testing/debugging UI.
-                inner.last_wav_bytes = Some(outcome.wav_bytes.clone());
+                inner.last_wav_bytes = Some(Arc::new(outcome.wav_bytes.clone()));
 
                 inner.reset_to_idle();
                 log::info!(
@@ -1384,7 +1474,7 @@ impl SharedPipeline {
                 }
 
                 // Keep a copy of the processed output for STT test + debugging.
-                inner.last_wav_bytes = Some(outcome.after_wav.clone());
+                inner.last_wav_bytes = Some(Arc::new(outcome.after_wav.clone()));
 
                 inner.reset_to_idle();
                 Ok((outcome.before_wav, outcome.after_wav))
@@ -1535,8 +1625,9 @@ impl SharedPipeline {
                 return Err(e);
             }
 
-            // Keep a copy for STT testing/debugging UI.
-            inner.last_wav_bytes = Some(outcome.wav_bytes.clone());
+            // Share immutable audio with retry/history; never copy it under this lock.
+            let wav_bytes = Arc::new(outcome.wav_bytes);
+            inner.last_wav_bytes = Some(wav_bytes.clone());
 
             // Evaluate quiet audio gate (VAD-based speech detection + amplitude thresholds).
             let gate_config = recording::QuietAudioGateConfig {
@@ -1650,7 +1741,7 @@ impl SharedPipeline {
             );
 
             (
-                outcome.wav_bytes,
+                wav_bytes,
                 resolved_stt.provider,
                 resolved_stt.provider_id,
                 resolved_stt.model,
@@ -1677,10 +1768,18 @@ impl SharedPipeline {
             );
             const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
             const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
-            let wait_start = std::time::Instant::now();
+            // Use the runtime clock consistently with the polling timer.
+            let wait_start = tokio::time::Instant::now();
             while wait_start.elapsed() < MAX_WAIT {
-                tokio::time::sleep(POLL_INTERVAL).await;
+                tokio::select! {
+                    biased;
+                    _ = cancel_token.cancelled() => return Err(PipelineError::Cancelled),
+                    _ = tokio::time::sleep(POLL_INTERVAL) => {},
+                }
                 if let Ok(mut inner) = self.inner.lock() {
+                    if cancel_token.is_cancelled() {
+                        return Err(PipelineError::Cancelled);
+                    }
                     if inner.active_streaming_session.is_some() {
                         streaming_session = inner.active_streaming_session.take();
                         log::info!(
@@ -1706,7 +1805,12 @@ impl SharedPipeline {
                 "Pipeline: Finalizing concurrent streaming session ({} bytes recorded)",
                 wav_bytes.len()
             );
-            match session.finalize().await {
+            let finalized = tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => return Err(PipelineError::Cancelled),
+                result = session.finalize() => result,
+            };
+            match finalized {
                 Ok(text) => {
                     let duration_ms = stt_start.elapsed().as_millis() as u64;
                     let normalized = utils::normalize_stt_text(text);
@@ -1715,10 +1819,7 @@ impl SharedPipeline {
                         normalized.len(),
                         duration_ms
                     );
-                    if let Ok(mut inner) = self.inner.lock() {
-                        inner.stt_complete = true;
-                        log::debug!("stt_complete set to true (streaming finalize)");
-                    }
+                    self.mark_stt_complete(&cancel_token, "streaming finalize")?;
                     (normalized, duration_ms, None)
                 }
                 Err(e) => {
@@ -1733,6 +1834,9 @@ impl SharedPipeline {
                             .inner
                             .lock()
                             .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                        if cancel_token.is_cancelled() {
+                            return Err(PipelineError::Cancelled);
+                        }
                         inner.set_error(&e.to_string());
                         return Err(PipelineError::Stt(e));
                     }
@@ -1770,6 +1874,9 @@ impl SharedPipeline {
                     .inner
                     .lock()
                     .map_err(|err| PipelineError::Lock(err.to_string()))?;
+                if cancel_token.is_cancelled() {
+                    return Err(PipelineError::Cancelled);
+                }
                 inner.set_error("Realtime streaming session was not started. Please try again.");
                 return Err(PipelineError::Stt(SttError::Config(
                     "Realtime streaming session was not started — no batch fallback available"
@@ -1821,8 +1928,11 @@ impl SharedPipeline {
         // - manual: user may have triggered OCR via overlay; if so, wait for it here
         // - off: never wait
         let ocr_result = if ocr_modes.should_wait_for_normal_dictation_ocr() {
-            self.get_ocr_result_with_timeout(Duration::from_millis(ocr_config.request_timeout_ms))
-                .await
+            self.get_ocr_result_with_timeout(
+                Duration::from_millis(ocr_config.request_timeout_ms),
+                Some(&cancel_token),
+            )
+            .await
         } else {
             None
         };
@@ -1830,7 +1940,7 @@ impl SharedPipeline {
 
         // Session lock is a one-shot override: take + clear it now so it only
         // applies to this transcription attempt.
-        let session_lock = self.take_session_preset_lock();
+        let session_lock = self.take_session_preset_lock(&cancel_token)?;
         let persist_app = self.app_handle.lock().ok().and_then(|g| g.clone());
 
         // Retrieve injected embeddings provider for testing (None in production)
@@ -1865,6 +1975,7 @@ impl SharedPipeline {
 
         let callbacks = PipelineCallbacks {
             inner: self.inner.clone(),
+            cancel: cancel_token.clone(),
         };
 
         let result = complete_transcription_flow(
@@ -1875,7 +1986,7 @@ impl SharedPipeline {
             stt_retry,
             &llm_config,
         )
-        .await;
+        .await?;
 
         // Phase 5: Update state to idle and check live output flag
         let live_output_completed = {
@@ -1884,6 +1995,9 @@ impl SharedPipeline {
                 .lock()
                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
 
+            if cancel_token.is_cancelled() {
+                return Err(PipelineError::Cancelled);
+            }
             let was_live = inner
                 .live_output_active
                 .load(std::sync::atomic::Ordering::SeqCst);
@@ -1955,7 +2069,7 @@ impl SharedPipeline {
         forced_llm_model: Option<&str>,
     ) -> Result<TranscriptionResult, PipelineError> {
         self.transcribe_saved_audio(
-            wav_bytes,
+            wav_bytes.into(),
             profile_id_override,
             forced_stt_provider,
             forced_stt_model,
@@ -1966,9 +2080,9 @@ impl SharedPipeline {
         .await
     }
 
-    pub async fn transcribe_journal_wav(
+    pub(crate) async fn transcribe_journal_wav(
         &self,
-        wav: Vec<u8>,
+        wav: impl Into<TranscriptionAudio>,
         profile: Option<&str>,
         checkpoint: Option<&std::path::Path>,
         options: &crate::recordings::options::RecordingPreferences,
@@ -1988,7 +2102,7 @@ impl SharedPipeline {
             None
         };
         self.transcribe_saved_audio(
-            wav,
+            wav.into(),
             profile,
             selection.map(|s| s.provider.as_str()),
             selection.map(|s| s.model.as_str()),
@@ -2002,7 +2116,7 @@ impl SharedPipeline {
     #[allow(clippy::too_many_arguments)]
     async fn transcribe_saved_audio(
         &self,
-        wav_bytes: Vec<u8>,
+        wav_bytes: TranscriptionAudio,
         profile_id_override: Option<&str>,
         forced_stt_provider: Option<&str>,
         forced_stt_model: Option<&str>,
@@ -2053,7 +2167,7 @@ impl SharedPipeline {
 
             // Avoid a permanent full-meeting debug copy.
             if !is_journal {
-                inner.last_wav_bytes = Some(wav_bytes.clone());
+                inner.last_wav_bytes = wav_bytes.memory().cloned();
             }
 
             // Check size limit
@@ -2080,7 +2194,9 @@ impl SharedPipeline {
             } else {
                 CancellationToken::new()
             };
-            inner.cancel_token = Some(cancel_token.clone());
+            if let Some(previous) = inner.cancel_token.replace(cancel_token.clone()) {
+                previous.cancel();
+            }
 
             let llm_config = inner.config.llm_config.clone();
             let request_profile_context = resolve_request_profile_context(
@@ -2209,7 +2325,7 @@ impl SharedPipeline {
                 }
             };
             let result = meeting_transcription::transcribe(
-                &wav_bytes,
+                wav_bytes.clone(),
                 checkpoint,
                 &settings_key,
                 &cancel_token,
@@ -2240,21 +2356,27 @@ impl SharedPipeline {
             .await;
             match result {
                 Ok(result) => {
-                    self.mark_stt_complete("meeting_complete");
+                    self.mark_stt_complete(&cancel_token, "meeting_complete")?;
                     result
                 }
                 Err(error) => {
-                    self.finish_failed_stt_attempt(&error)?;
+                    self.finish_failed_stt_attempt(&cancel_token, &error)?;
                     return Err(error);
                 }
             }
         } else {
+            let Some(memory) = wav_bytes.memory() else {
+                let error =
+                    PipelineError::Config("Saved files require chunked transcription".into());
+                self.finish_failed_stt_attempt(&cancel_token, &error)?;
+                return Err(error);
+            };
             self.run_batch_stt_request(
                 stt_provider,
                 &stt_provider_id,
                 stt_model.clone(),
                 stt_language.clone(),
-                &wav_bytes,
+                memory.as_slice(),
                 &retry_config,
                 timeout,
                 &cancel_token,
@@ -2271,14 +2393,17 @@ impl SharedPipeline {
         // Bypass routing, OCR, clipboard context, and every rewrite override.
         if is_meeting {
             if cancel_token.is_cancelled() {
-                self.finish_failed_stt_attempt(&PipelineError::Cancelled)?;
                 return Err(PipelineError::Cancelled);
             }
             let final_text = crate::stt::speaker_document(&stt_text, &speaker_segments);
-            self.inner
+            let mut inner = self
+                .inner
                 .lock()
-                .map_err(|e| PipelineError::Lock(e.to_string()))?
-                .reset_to_idle();
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            if cancel_token.is_cancelled() {
+                return Err(PipelineError::Cancelled);
+            }
+            inner.reset_to_idle();
             return Ok(TranscriptionResult {
                 speaker_segments,
                 stt_text,
@@ -2309,14 +2434,17 @@ impl SharedPipeline {
         };
 
         let ocr_result = if ocr_modes.should_wait_for_normal_dictation_ocr() {
-            self.get_ocr_result_with_timeout(Duration::from_millis(ocr_config.request_timeout_ms))
-                .await
+            self.get_ocr_result_with_timeout(
+                Duration::from_millis(ocr_config.request_timeout_ms),
+                Some(&cancel_token),
+            )
+            .await
         } else {
             None
         };
         let ocr_text = ocr_result.as_ref().map(|r| r.text.clone());
 
-        let session_lock = self.take_session_preset_lock();
+        let session_lock = self.take_session_preset_lock(&cancel_token)?;
         let persist_app = self.app_handle.lock().ok().and_then(|g| g.clone());
 
         // Retrieve injected embeddings provider for testing (None in production)
@@ -2353,6 +2481,7 @@ impl SharedPipeline {
 
         let callbacks = PipelineCallbacks {
             inner: self.inner.clone(),
+            cancel: cancel_token.clone(),
         };
 
         let result = complete_transcription_flow(
@@ -2363,12 +2492,7 @@ impl SharedPipeline {
             stt_retry,
             &llm_config,
         )
-        .await;
-
-        if is_journal && cancel_token.is_cancelled() {
-            self.finish_failed_stt_attempt(&PipelineError::Cancelled)?;
-            return Err(PipelineError::Cancelled);
-        }
+        .await?;
 
         // Phase 5: Update state to idle
         {
@@ -2376,6 +2500,9 @@ impl SharedPipeline {
                 .inner
                 .lock()
                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            if cancel_token.is_cancelled() {
+                return Err(PipelineError::Cancelled);
+            }
             inner.reset_to_idle();
             log::info!(
                 "Pipeline: Retry complete, {} chars output",
@@ -2546,7 +2673,7 @@ impl SharedPipeline {
     }
 
     /// Get a clone of the last captured WAV bytes, if present.
-    pub fn clone_last_wav_bytes(&self) -> Option<Vec<u8>> {
+    pub fn clone_last_wav_bytes(&self) -> Option<Arc<Vec<u8>>> {
         self.inner
             .lock()
             .ok()

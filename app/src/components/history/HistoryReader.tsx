@@ -11,15 +11,7 @@ import {
 	TextInput,
 } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-	ArrowDown,
-	ArrowUp,
-	Copy,
-	Expand,
-	Pencil,
-	Search,
-	Undo2,
-} from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Pencil, Search, Undo2 } from "lucide-react";
 import {
 	Fragment,
 	useEffect,
@@ -201,9 +193,6 @@ function HistoryDocumentView({
 	) : (
 		draft.text
 	);
-	const playerView = (
-		<HistoryAudioPlayer player={player} recordingId={recordingId} />
-	);
 	const title =
 		draft.title ||
 		(detail.entry.recording_mode === "meeting" ? "Meeting" : "Voice recording");
@@ -211,7 +200,6 @@ function HistoryDocumentView({
 		<>
 			{!full && (
 				<Stack gap="md" p="md" pt={0}>
-					{playerView}
 					<section
 						className="history-transcript history-transcript-inline"
 						// biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard scrolling
@@ -222,16 +210,11 @@ function HistoryDocumentView({
 							detail.entry.error_message ||
 							"No transcript was produced."}
 					</section>
-					<Group justify="flex-end">
-						<Button
-							variant="subtle"
-							size="xs"
-							leftSection={<Expand size={15} />}
-							onClick={() => setFull(true)}
-						>
-							Open full view
-						</Button>
-					</Group>
+					<HistoryAudioPlayer
+						player={player}
+						recordingId={recordingId}
+						onOpenFullView={() => setFull(true)}
+					/>
 				</Stack>
 			)}
 			<Modal
@@ -309,7 +292,7 @@ function HistoryDocumentView({
 							{editing ? "Done" : "Edit"}
 						</Button>
 					</Group>
-					{playerView}
+					<HistoryAudioPlayer player={player} recordingId={recordingId} />
 					<Group gap="xs">
 						<TextInput
 							aria-label="Search transcript"

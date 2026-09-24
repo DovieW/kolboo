@@ -1,6 +1,6 @@
 import { Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -18,7 +18,6 @@ import { formatErrorMessage } from "../../lib/formatError";
 import {
 	useDataStorageSummary,
 	useLicenseState,
-	useRecordingsStats,
 	useSettings,
 } from "../../lib/queries";
 import {
@@ -57,8 +56,10 @@ const GLOBAL_ONLY_TOOLTIP =
 
 export function DataSettings({
 	editingProfileId,
+	active = true,
 }: {
 	editingProfileId?: string;
+	active?: boolean;
 }) {
 	const { data: settings } = useSettings();
 	const licenseState = useLicenseState();
@@ -80,34 +81,13 @@ export function DataSettings({
 		void queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
 		void queryClient.invalidateQueries({ queryKey: ["requestLogs"] });
 		void queryClient.invalidateQueries({ queryKey: ["history"] });
-		void queryClient.invalidateQueries({ queryKey: ["apiKeysSavedCount"] });
 	};
 	const reRegisterShortcuts = async () => {
 		await tauriAPI.unregisterShortcuts();
 		await tauriAPI.registerShortcuts();
 	};
 
-	const recordingsStats = useRecordingsStats();
-	const dataStorageSummary = useDataStorageSummary();
-
-	const apiKeysSavedCount = useQuery({
-		queryKey: ["apiKeysSavedCount"],
-		queryFn: async () => {
-			const results = await Promise.all(
-				API_KEY_STORE_KEYS.map(async (key) => {
-					try {
-						return await tauriAPI.hasApiKey(key);
-					} catch {
-						return false;
-					}
-				}),
-			);
-			return results.filter(Boolean).length;
-		},
-		staleTime: 0,
-		refetchOnWindowFocus: true,
-		refetchInterval: 10000,
-	});
+	const dataStorageSummary = useDataStorageSummary(active);
 
 	const dataBackupCloudSync = useDataBackupCloudSyncOrchestration({
 		gistIdFromSettings: settings?.github_backup_gist_id ?? "",
@@ -332,7 +312,12 @@ export function DataSettings({
 		});
 	};
 
-	const recordingsSummary = summarizeRecordingsStorage(recordingsStats.data);
+	const recordingsSummary = summarizeRecordingsStorage(
+		dataStorageSummary.data && {
+			count: dataStorageSummary.data.recordings_count,
+			bytes: dataStorageSummary.data.recordings_bytes,
+		},
+	);
 
 	// ---------------------------------------------------------------------------
 	// Danger zone (destructive actions)
@@ -376,7 +361,7 @@ export function DataSettings({
 	const dataStorageBreakdown = dataStorageSummary.data
 		? buildDataStorageBreakdown({
 				summary: dataStorageSummary.data,
-				apiKeysSavedCount: apiKeysSavedCount.data,
+				apiKeysSavedCount: dataStorageSummary.data.api_keys_set_count,
 				apiKeyStoreKeyCount: API_KEY_STORE_KEYS.length,
 			})
 		: [];
@@ -563,7 +548,7 @@ export function DataSettings({
 				recordingsRetention={dataRetention.recordingsRetention}
 				transcriptionRetention={dataRetention.transcriptionRetention}
 				statsRetention={dataRetention.statsRetention}
-				recordingsStatsLoading={recordingsStats.isLoading}
+				recordingsStatsLoading={dataStorageSummary.isLoading}
 				recordingsSummary={recordingsSummary}
 				onOpenAppLogsFolder={() => {
 					void handleOpenAppLogsFolder();

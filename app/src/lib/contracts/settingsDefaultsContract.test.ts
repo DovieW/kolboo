@@ -58,6 +58,10 @@ describe("settings defaults cross-layer contract", () => {
 			["DEFAULT_WIDGET_POSITION", DEFAULT_SETTINGS_VALUES.widget_position],
 			["DEFAULT_OUTPUT_MODE", DEFAULT_SETTINGS_VALUES.output_mode],
 			[
+				"DEFAULT_OUTPUT_PASTE_SHORTCUT",
+				DEFAULT_SETTINGS_VALUES.output_paste_shortcut,
+			],
+			[
 				"DEFAULT_MAIN_WINDOW_CLOSE_BEHAVIOR",
 				DEFAULT_SETTINGS_VALUES.main_window_close_behavior,
 			],

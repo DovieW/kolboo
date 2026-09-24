@@ -130,10 +130,15 @@ pub fn get_runtime_config() -> RuntimeConfigResponse {
         // it only for rehearsal launches without normalizing fake crashes in
         // regular desktop sessions.
         sentry_smoke: read_optional_bool_env(&["TAURI_SENTRY_SMOKE"]),
-        posthog_api_key: read_first_non_empty_env(&["TAURI_POSTHOG_API_KEY"]),
-        posthog_host: normalize_optional_base_url(read_first_non_empty_env(&[
-            "TAURI_POSTHOG_HOST",
-        ])),
+        // This is a public PostHog project ingestion token, never a personal
+        // API key. Release bundles need it embedded because their environment
+        // will not inherit GitHub Actions variables at runtime.
+        posthog_api_key: read_first_non_empty_env(&["TAURI_POSTHOG_API_KEY"])
+            .or_else(|| compiled_non_empty(option_env!("TAURI_POSTHOG_API_KEY"))),
+        posthog_host: normalize_optional_base_url(
+            read_first_non_empty_env(&["TAURI_POSTHOG_HOST"])
+                .or_else(|| compiled_non_empty(option_env!("TAURI_POSTHOG_HOST"))),
+        ),
     }
 }
 

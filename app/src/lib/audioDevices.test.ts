@@ -3,6 +3,7 @@ import {
 	buildMicSelectorModel,
 	decodeMicDeviceIdName,
 	describeMicSelection,
+	toMicListErrorMessage,
 	toMicTestErrorMessage,
 } from "./audioDevices";
 
@@ -17,7 +18,7 @@ describe("audioDevices read model", () => {
 			storedMicId: "mic-2",
 		});
 
-		expect(model.defaultOptionLabel).toBe("System Default: USB Mic");
+		expect(model.defaultOptionLabel).toBe("System default · USB Mic");
 		expect(model.selectData.slice(1)).toEqual([
 			{ value: "mic-1", label: "USB Mic · Device 1 of 2" },
 			{ value: "mic-2", label: "USB Mic · Device 2 of 2" },
@@ -33,11 +34,32 @@ describe("audioDevices read model", () => {
 		});
 
 		expect(model.hasAnyDetectedInput).toBe(false);
-		expect(model.defaultOptionLabel).toBe(
-			"System Default — no default detected",
-		);
+		expect(model.defaultOptionLabel).toBe("System default — unavailable");
 		expect(describeMicSelection(model)).toBe(
 			"Kolboo can’t currently see any input microphones.",
+		);
+	});
+
+	it("avoids repeating generic OS names in the default microphone label", () => {
+		for (const name of ["Default Audio Device", "default", "System Default"]) {
+			const model = buildMicSelectorModel({
+				devices: [{ id: "mic-1", name }],
+				defaultDeviceName: name,
+				storedMicId: null,
+			});
+			expect(model.defaultOptionLabel).toBe("System default");
+			expect(model.selectedSummaryLabel).toBe("System default");
+		}
+	});
+
+	it("does not claim a system default exists when only explicit inputs are known", () => {
+		const model = buildMicSelectorModel({
+			devices: [{ id: "mic-1", name: "USB Mic" }],
+			defaultDeviceName: null,
+			storedMicId: null,
+		});
+		expect(describeMicSelection(model)).toBe(
+			"No system default microphone was detected. Choose an input from the list.",
 		);
 	});
 
@@ -84,7 +106,13 @@ describe("audioDevices read model", () => {
 		expect(
 			toMicTestErrorMessage({ message: "No input device available" }),
 		).toBe(
-			"Kolboo couldn’t find a microphone to test. Plug one in, check Windows sound settings, then refresh the list.",
+			"Kolboo couldn’t find a microphone to test. Check your system’s input settings, then refresh the list.",
+		);
+	});
+
+	it("gives platform-neutral guidance when device enumeration fails without detail", () => {
+		expect(toMicListErrorMessage(undefined)).toBe(
+			"Kolboo couldn’t list microphones right now. Try refreshing, or reopen the app after an audio-device change.",
 		);
 	});
 });

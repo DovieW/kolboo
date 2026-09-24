@@ -6,7 +6,9 @@ use std::time::SystemTime;
 use crate::app_paths::ensure_dir;
 use crate::fs::{Fs, RealFs};
 
+pub(crate) mod audio;
 pub mod options;
+mod preparation;
 mod waveform;
 pub use waveform::RecordingWaveform;
 
@@ -27,6 +29,9 @@ pub struct RecordingStore {
     known_existing: RwLock<std::collections::HashSet<String>>,
     fs: Arc<dyn Fs>,
     media_write: Mutex<()>,
+    // Waveform scans are CPU/disk-heavy. Queue before spawning blocking workers;
+    // the next request rechecks the persisted cache after the current one finishes.
+    pub(crate) waveform_jobs: Arc<tokio::sync::Semaphore>,
 }
 
 impl RecordingStore {
@@ -37,11 +42,13 @@ impl RecordingStore {
     pub fn with_fs(app_data_dir: PathBuf, fs: Arc<dyn Fs>) -> Self {
         let dir = app_data_dir.join("recordings");
         let _ = ensure_dir(&dir);
+        preparation::remove_interrupted_preparations(&dir, fs.as_ref());
         Self {
             dir,
             known_existing: RwLock::new(std::collections::HashSet::new()),
             fs,
             media_write: Mutex::new(()),
+            waveform_jobs: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
 
@@ -62,6 +69,7 @@ impl RecordingStore {
         let name = path.file_name()?.to_str()?;
         let id = name
             .strip_suffix(".options.json")
+            .or_else(|| name.strip_suffix(".prepared.json"))
             .or_else(|| name.strip_suffix(".waveform.json"))?;
         Self::is_safe_request_id(id).then_some(id)
     }
@@ -183,6 +191,12 @@ impl RecordingStore {
         }
 
         self.remove_waveform(id)?;
+        let marker = self.dir.join(format!("{id}.prepared.json"));
+        if self.fs.exists(&marker) {
+            self.fs
+                .remove_file(&marker)
+                .map_err(|_| "Could not remove preparation metadata")?;
+        }
         let path = self.path_for_id(id);
         let options = self.dir.join(format!("{id}.options.json"));
         if !self.fs.exists(&path) {

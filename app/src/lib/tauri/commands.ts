@@ -273,6 +273,12 @@ export const tauriAPI = {
 		return invoke("get_history", { limit });
 	},
 
+	getHistoryActivity: (timeframe: string) =>
+		invoke<import("./types.generated").HistoryActivity>(
+			"get_history_activity",
+			{ timeframe },
+		),
+
 	async getHistoryPage(params: HistoryPageQuery): Promise<HistoryPageResult> {
 		return invoke("get_history_page", { params });
 	},
@@ -730,6 +736,8 @@ export const licenseAPI = {
 };
 
 export const logsAPI = {
+	getRequestLogIds: (limit: number) =>
+		invoke<string[]>("get_request_log_ids", { limit }),
 	getRequestLogs: (limit?: number) =>
 		invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 50 }),
 

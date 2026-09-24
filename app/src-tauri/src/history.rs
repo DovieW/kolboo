@@ -11,7 +11,9 @@ use uuid::Uuid;
 use crate::app_paths::ensure_dir;
 use crate::fs::{Fs, RealFs};
 
+mod activity;
 mod edits;
+pub use activity::HistoryActivity;
 pub use edits::{HistoryDetail, HistoryEdit, HistoryEditInput};
 
 /// Hard safety cap to prevent unbounded growth of `history.json`.
@@ -173,6 +175,11 @@ pub enum RequestHistoryUpdate {
     CompleteError {
         request_id: String,
         error_message: String,
+    },
+    CompleteRetry {
+        request_id: String,
+        prior_failed_id: String,
+        result: Result<String, String>,
     },
     Delete {
         request_id: String,
@@ -662,6 +669,77 @@ impl HistoryStorage {
         self.save()
     }
 
+    /// Commit a retry's terminal result and remove the failed attempt in one
+    /// history snapshot. The saved audio remains owned by its recording source,
+    /// and each retry keeps its own request log. Never discard corrected or
+    /// partial text from an older failed entry.
+    pub fn complete_retry_request(
+        &self,
+        request_id: &str,
+        prior_failed_id: &str,
+        result: Result<String, String>,
+    ) -> Result<(), String> {
+        let _mutation = self.mutation.lock().map_err(|_| "History unavailable")?;
+        let mut snapshot = self.data.read().map_err(|_| "History unavailable")?.clone();
+        let retry_index = snapshot
+            .entries
+            .iter()
+            .position(|entry| entry.id == request_id)
+            .ok_or("Retry history entry not found")?;
+        let retry = &mut snapshot.entries[retry_index];
+        if retry.status != HistoryStatus::InProgress {
+            return Err("Retry history entry is no longer in progress".into());
+        }
+        match result {
+            Ok(text) => {
+                retry.text = text;
+                retry.status = HistoryStatus::Success;
+                retry.error_message = None;
+            }
+            Err(message) => {
+                retry.status = HistoryStatus::Error;
+                retry.error_message = Some(message);
+            }
+        }
+        let retry_source = retry.recording_request_id.clone();
+        let old = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.id == prior_failed_id);
+        let replace_old = old.is_some_and(|entry| {
+            entry.id != request_id
+                && entry.status == HistoryStatus::Error
+                && entry.text.is_empty()
+                && entry.speaker_segments.is_empty()
+                && entry.original_stt_text.is_none()
+                && retry_source.as_deref()
+                    == Some(entry.recording_request_id.as_deref().unwrap_or(&entry.id))
+        }) && {
+            let edits = self.edits.read().map_err(|_| "History edits unavailable")?;
+            !edits.has_correction(prior_failed_id)
+                && !edits.has_unreadable_correction(prior_failed_id)
+        };
+        if replace_old {
+            // User-authored base titles (not correction sidecars) survive a retry.
+            if let Some(title) = old.and_then(|entry| entry.title.clone()) {
+                snapshot.entries[retry_index].title = Some(title);
+            }
+            snapshot.entries.retain(|entry| entry.id != prior_failed_id);
+        }
+        let content = serde_json::to_vec_pretty(&snapshot)
+            .map_err(|error| format!("Failed to serialize history: {error}"))?;
+        self.atomic_write_history_json(&content)?;
+        *self.data.write().map_err(|_| "History unavailable")? = snapshot;
+        // The removed row is known to have no correction. If cleanup fails,
+        // the committed history is still valid and the next save can retry it.
+        if let Err(error) =
+            self.cleanup_edits(&self.data.read().map_err(|_| "History unavailable")?.entries)
+        {
+            log::warn!("Could not clean up unused History corrections: {error}");
+        }
+        Ok(())
+    }
+
     /// Apply one request-row lifecycle update.
     ///
     /// Keep this as a thin orchestration layer over the storage primitives above. The goal is not
@@ -703,6 +781,11 @@ impl HistoryStorage {
                 request_id,
                 error_message,
             } => self.complete_request_error(&request_id, error_message),
+            RequestHistoryUpdate::CompleteRetry {
+                request_id,
+                prior_failed_id,
+                result,
+            } => self.complete_retry_request(&request_id, &prior_failed_id, result),
             RequestHistoryUpdate::Delete { request_id } => self.delete(&request_id).map(|_| ()),
         }
     }
@@ -1253,6 +1336,7 @@ mod tests {
     use std::collections::HashMap;
     use std::io;
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
     use crate::fs::Fs;
@@ -1260,6 +1344,8 @@ mod tests {
     #[derive(Debug, Default)]
     struct MemoryFs {
         files: Mutex<HashMap<PathBuf, Vec<u8>>>,
+        fail_history_rename: AtomicBool,
+        fail_read_dir: AtomicBool,
     }
 
     impl MemoryFs {
@@ -1296,6 +1382,11 @@ mod tests {
         }
 
         fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            if to.file_name().is_some_and(|name| name == "history.json")
+                && self.fail_history_rename.load(Ordering::SeqCst)
+            {
+                return Err(io::Error::other("injected history rename failure"));
+            }
             let mut guard = self
                 .files
                 .lock()
@@ -1313,6 +1404,9 @@ mod tests {
         }
 
         fn read_dir(&self, _path: &Path) -> io::Result<Vec<PathBuf>> {
+            if self.fail_read_dir.load(Ordering::SeqCst) {
+                return Err(io::Error::other("injected read_dir failure"));
+            }
             Ok(Vec::new())
         }
 
@@ -1456,5 +1550,107 @@ mod tests {
         assert_eq!(entry.text, "");
         assert_eq!(entry.recording_request_id.as_deref(), Some("rec-1"));
         assert_eq!(entry.status, HistoryStatus::Success);
+    }
+
+    #[test]
+    fn retry_write_failure_keeps_both_prior_and_pending_rows_in_memory_and_on_disk() {
+        let dir = make_temp_app_dir();
+        let fs = Arc::new(MemoryFs::default());
+        let history = HistoryStorage::with_fs(dir.clone(), fs.clone());
+        history
+            .add_request_entry("old".into(), RequestModelInfo::default(), None)
+            .unwrap();
+        history
+            .set_request_recording_id("old", Some("old".into()))
+            .unwrap();
+        history
+            .complete_request_error("old", "failure".into())
+            .unwrap();
+        history
+            .add_request_entry("new".into(), RequestModelInfo::default(), None)
+            .unwrap();
+        history
+            .set_request_recording_id("new", Some("old".into()))
+            .unwrap();
+        let saved = fs.read(&dir.join("history.json")).unwrap();
+        fs.fail_history_rename.store(true, Ordering::SeqCst);
+        assert!(history
+            .complete_retry_request("new", "old", Ok("transcript".into()))
+            .is_err());
+        assert_eq!(
+            history.get_by_id("old").unwrap().unwrap().status,
+            HistoryStatus::Error
+        );
+        assert_eq!(
+            history.get_by_id("new").unwrap().unwrap().status,
+            HistoryStatus::InProgress
+        );
+        assert_eq!(fs.read(&dir.join("history.json")).unwrap(), saved);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retry_preserves_base_title_and_commits_even_if_cleanup_fails() {
+        let dir = make_temp_app_dir();
+        let fs = Arc::new(MemoryFs::default());
+        let history = HistoryStorage::with_fs(dir.clone(), fs.clone());
+        history
+            .add_request_entry("old".into(), RequestModelInfo::default(), None)
+            .unwrap();
+        history
+            .set_request_recording_id("old", Some("old".into()))
+            .unwrap();
+        history
+            .complete_request_error("old", "failure".into())
+            .unwrap();
+        history
+            .add_request_entry("new".into(), RequestModelInfo::default(), None)
+            .unwrap();
+        history
+            .set_request_recording_id("new", Some("old".into()))
+            .unwrap();
+        history
+            .data
+            .write()
+            .unwrap()
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == "old")
+            .unwrap()
+            .title = Some("Call notes".into());
+        history.save().unwrap();
+        // A cleanup error after a durable commit must not turn a successful
+        // retry into a reported failure or resurrect the older row.
+        fs.write(&dir.join("history-edits"), b"").unwrap();
+        assert!(fs.read_dir(&dir.join("history-edits")).unwrap().is_empty());
+        fs.fail_read_dir.store(true, Ordering::SeqCst);
+        history
+            .complete_retry_request("new", "old", Ok("transcript".into()))
+            .unwrap();
+        assert!(history.get_by_id("old").unwrap().is_none());
+        assert_eq!(
+            history.get_by_id("new").unwrap().unwrap().title.as_deref(),
+            Some("Call notes")
+        );
+        let reloaded = HistoryStorage::with_fs(dir.clone(), fs);
+        assert_eq!(reloaded.get_all(None).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retry_refuses_to_overwrite_a_terminal_attempt() {
+        let dir = make_temp_app_dir();
+        let history = HistoryStorage::new(dir.clone());
+        history
+            .add_request_entry("retry".into(), RequestModelInfo::default(), None)
+            .unwrap();
+        history
+            .complete_request_success("retry", "first".into())
+            .unwrap();
+        assert!(history
+            .complete_retry_request("retry", "old", Ok("second".into()))
+            .is_err());
+        assert_eq!(history.get_by_id("retry").unwrap().unwrap().text, "first");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

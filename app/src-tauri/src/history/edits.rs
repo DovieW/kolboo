@@ -100,6 +100,10 @@ impl EditStore {
             .is_some_and(|e| e.title.is_some() || e.text.is_some())
     }
 
+    pub(super) fn has_unreadable_correction(&self, id: &str) -> bool {
+        self.unreadable.contains(id)
+    }
+
     pub fn text<'a>(&'a self, entry: &'a HistoryEntry) -> &'a str {
         self.values
             .get(&entry.id)

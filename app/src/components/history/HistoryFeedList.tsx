@@ -1,6 +1,7 @@
 import {
 	ActionIcon,
 	Badge,
+	Button,
 	Group,
 	Loader,
 	Menu,
@@ -41,7 +42,6 @@ export function HistoryFeedList({
 	onRetryEntry,
 	isRetryPending,
 	retryPendingEntryId,
-	recordingExistsById,
 	player,
 	requestLogIds,
 	onJumpToLog,
@@ -57,7 +57,6 @@ export function HistoryFeedList({
 	onRetryEntry: (entryId: string) => void;
 	isRetryPending: boolean;
 	retryPendingEntryId?: string;
-	recordingExistsById: Map<string, { exists: boolean; checkedAt: number }>;
 	player: RecordingPlayerControls;
 	requestLogIds: Set<string>;
 	onJumpToLog?: (logId: string) => void;
@@ -123,8 +122,6 @@ export function HistoryFeedList({
 							const open = expanded === entry.id;
 							const isMeeting = entry.recordingMode === "meeting";
 							const recordingId = entry.recordingRequestId ?? entry.id;
-							const missing =
-								recordingExistsById.get(recordingId)?.exists === false;
 							const busy = entry.contentKind === "in_progress";
 							return (
 								<Paper
@@ -253,15 +250,18 @@ export function HistoryFeedList({
 													</ActionIcon>
 												</Menu.Target>
 												<Menu.Dropdown>
-													<Menu.Item
-														leftSection={<RotateCcw size={15} />}
-														disabled={missing || busy || isRetryPending}
-														onClick={() => onRetryEntry(entry.id)}
-													>
-														{isRetryPending && retryPendingEntryId === entry.id
-															? "Rerunning…"
-															: "Rerun as new result"}
-													</Menu.Item>
+													{entry.contentKind !== "error" && (
+														<Menu.Item
+															leftSection={<RotateCcw size={15} />}
+															disabled={busy || isRetryPending}
+															onClick={() => onRetryEntry(entry.id)}
+														>
+															{isRetryPending &&
+															retryPendingEntryId === entry.id
+																? "Rerunning…"
+																: "Rerun as new result"}
+														</Menu.Item>
+													)}
 													{onJumpToLog && requestLogIds.has(entry.id) && (
 														<Menu.Item
 															leftSection={<FileText size={15} />}
@@ -273,7 +273,6 @@ export function HistoryFeedList({
 															View request log
 														</Menu.Item>
 													)}
-													<Menu.Divider />
 													<Menu.Item
 														color="red"
 														leftSection={<Trash2 size={15} />}
@@ -289,6 +288,25 @@ export function HistoryFeedList({
 											</Menu>
 										</Group>
 									</Group>
+									{entry.contentKind === "error" && (
+										<Group
+											justify="center"
+											pb="xs"
+											className="history-card-retry"
+										>
+											<Button
+												variant="subtle"
+												size="compact-sm"
+												loading={
+													isRetryPending && retryPendingEntryId === entry.id
+												}
+												disabled={isRetryPending}
+												onClick={() => onRetryEntry(entry.id)}
+											>
+												Retry
+											</Button>
+										</Group>
+									)}
 									{open && (
 										<div id={`history-detail-${entry.id}`} data-history-detail>
 											<HistoryReader

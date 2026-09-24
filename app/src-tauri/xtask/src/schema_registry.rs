@@ -94,6 +94,10 @@ fn gen_export_history_page_result_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::HistoryPageResult)
 }
 
+fn gen_export_history_activity_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::HistoryActivity)
+}
+
 fn gen_export_history_detail_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::HistoryDetail)
 }
@@ -361,6 +365,11 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "history-page-result.schema.json",
         "HistoryPageResult",
         gen_export_history_page_result_schema
+    ),
+    schema_spec!(
+        "history-activity.schema.json",
+        "HistoryActivity",
+        gen_export_history_activity_schema
     ),
     schema_spec!(
         "history-detail.schema.json",

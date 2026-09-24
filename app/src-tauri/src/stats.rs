@@ -1132,6 +1132,18 @@ pub fn emit_cost_events_for_current_request(
     status: EventStatus,
     wav_bytes: Option<&[u8]>,
 ) {
+    emit_cost_events_for_current_request_with_duration(
+        app,
+        status,
+        wav_bytes.and_then(wav_duration_secs),
+    );
+}
+
+pub fn emit_cost_events_for_current_request_with_duration(
+    app: &AppHandle,
+    status: EventStatus,
+    audio_secs: Option<f64>,
+) {
     log::info!(
         "emit_cost_events_for_current_request called with status {:?}",
         status
@@ -1159,8 +1171,6 @@ pub fn emit_cost_events_for_current_request(
 
     // Prefer WAV-derived duration (ground truth), but fall back to provider-reported duration
     // (e.g. OpenAI transcription `usage.seconds`) when WAV bytes are unavailable.
-    let audio_secs = wav_bytes.and_then(wav_duration_secs);
-
     // If we successfully append any cost event, notify the UI so it can invalidate cached stats.
     let mut any_stats_written = false;
 

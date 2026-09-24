@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/react";
 import { frontendLog } from "../frontendLog";
+import { scrubSentryEvent } from "./sentryPrivacy";
 import {
 	isTauriRuntimeAvailable,
 	loadRuntimeConfig,
@@ -147,7 +148,7 @@ function resolveFrontendSentryConfig(runtimeConfig: {
 	const release =
 		normalizeOptionalString(runtimeConfig.sentry_release) ||
 		normalizeOptionalString(import.meta.env.VITE_SENTRY_RELEASE) ||
-		normalizeOptionalString(runtimeConfig.app_version);
+		(runtimeConfig.app_version ? `kolboo@${runtimeConfig.app_version}` : null);
 
 	return {
 		dsn,
@@ -273,44 +274,28 @@ export async function initSentry(surface: SentrySurface): Promise<boolean> {
 	if (initialized) return false;
 	sentryEnvironment = config.environment;
 	sentryRelease = config.release ?? null;
+	const smokeDiagnostics =
+		config.smokeRequested && !isProductionLikeEnvironment(config.environment);
 
 	Sentry.init({
 		dsn,
 		enabled: true,
-		debug: config.smokeRequested,
+		debug: smokeDiagnostics,
 		environment: config.environment,
 		release: config.release ?? undefined,
 		sampleRate: 1,
-		transport: createLoggedSmokeTransport(config.smokeRequested),
+		transport: createLoggedSmokeTransport(smokeDiagnostics),
 		tracesSampleRate: 0,
-		beforeSend(event) {
-			const safe = { ...event };
-			delete safe.user;
-			delete safe.request;
-			if (safe.extra) {
-				safe.extra = redactTelemetryValue(safe.extra) as Record<
-					string,
-					unknown
-				>;
-			}
-			if (safe.contexts) {
-				safe.contexts = redactTelemetryValue(
-					safe.contexts,
-				) as typeof safe.contexts;
-			}
-			return safe;
-		},
-		beforeBreadcrumb(breadcrumb) {
-			if (
-				breadcrumb.category?.toLowerCase().includes("xhr") ||
-				breadcrumb.category?.toLowerCase().includes("fetch")
-			) {
-				return null;
-			}
-			return breadcrumb;
-		},
+		sendDefaultPii: false,
+		enableLogs: false,
+		maxBreadcrumbs: 0,
+		beforeSend: scrubSentryEvent,
+		beforeBreadcrumb: () => null,
 	});
 
+	Sentry.setTag("service", "desktop");
+	Sentry.setTag("runtime", "webview");
+	Sentry.setTag("os", import.meta.env.TAURI_PLATFORM || "unknown");
 	Sentry.setTag("surface", surface);
 	initialized = true;
 	frontendLog.info(
@@ -403,7 +388,18 @@ export async function maybeCaptureSentrySmokeTest(
 	// Browser-only smoke verification often runs in short-lived headless sessions,
 	// so explicitly flush the queue before returning to make the proof path
 	// reliable instead of timing-sensitive.
-	await Sentry.flush(2000);
+	try {
+		if (!(await Sentry.flush(2000))) {
+			frontendLog.warn(
+				"sentry",
+				"smoke flush timed out; delivery not verified",
+			);
+			return false;
+		}
+	} catch {
+		frontendLog.warn("sentry", "smoke flush failed; delivery not verified");
+		return false;
+	}
 	frontendLog.info(
 		"sentry",
 		`smoke flushed surface=${surface} trigger=${smokeTrigger} release=${release}`,

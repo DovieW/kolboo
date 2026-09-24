@@ -32,6 +32,17 @@ pub fn get_request_logs(app: AppHandle, limit: Option<usize>) -> Vec<RequestLog>
     }
 }
 
+/// List recent request IDs without copying or exposing their log payloads.
+#[tauri::command]
+pub fn get_request_log_ids(app: AppHandle, limit: Option<usize>) -> Vec<String> {
+    if let Some(store) = app.try_state::<RequestLogStore>() {
+        store.set_retention(read_request_logs_retention(&app));
+        store.get_ids(limit.unwrap_or(50))
+    } else {
+        Vec::new()
+    }
+}
+
 /// Clear all request logs
 #[tauri::command]
 pub fn clear_request_logs(app: AppHandle) {

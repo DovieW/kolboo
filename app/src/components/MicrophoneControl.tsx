@@ -98,6 +98,9 @@ export function MicrophoneControl({
 		isMicTesting,
 		meterLevel,
 		meterColor,
+		micTestError,
+		statusText,
+		statusTone,
 		clearMicTestError,
 		stopMicTest,
 		toggleMicTest,
@@ -187,7 +190,7 @@ export function MicrophoneControl({
 							>
 								<Text size="sm">
 									Kolboo can’t see any input microphones right now. Plug one in,
-									check Windows sound settings or drivers, then refresh.
+									check your system’s input settings, then refresh.
 								</Text>
 								{refreshIconButton()}
 							</Group>
@@ -298,6 +301,23 @@ export function MicrophoneControl({
 			/>
 		</div>
 	);
+	const micTestFeedback =
+		micTestError || isMicTesting ? (
+			<Text
+				className="microphone-test-feedback"
+				size="xs"
+				c={
+					statusTone === "red"
+						? "red"
+						: statusTone === "yellow"
+							? "yellow"
+							: "dimmed"
+				}
+				role="status"
+			>
+				{statusText}
+			</Text>
+		) : null;
 
 	if (variant === "home") {
 		return (
@@ -308,6 +328,7 @@ export function MicrophoneControl({
 					label="Microphone"
 					right={controls}
 				/>
+				{micTestFeedback}
 			</div>
 		);
 	}
@@ -326,6 +347,7 @@ export function MicrophoneControl({
 				label="Microphone"
 				right={controls}
 			/>
+			{micTestFeedback}
 		</>
 	);
 }

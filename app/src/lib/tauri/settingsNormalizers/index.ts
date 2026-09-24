@@ -3,6 +3,7 @@ export {
 	normalizeLocalWhisperModelId,
 	normalizeMainWindowCloseBehavior,
 	normalizeOutputMode,
+	normalizePasteShortcut,
 	normalizeOverlayModeValue,
 	normalizeOverlayMonitorTarget,
 	normalizeQuickAskConversationHistoryCount,

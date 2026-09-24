@@ -2,7 +2,7 @@
 //! Files contain a fixed header followed by little-endian float samples. A crash can
 //! leave a partial final frame; readers truncate that frame rather than guessing.
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 
 const MAGIC: &[u8; 8] = b"KOLPCM01";
@@ -110,13 +110,14 @@ impl Journal {
 
 /// Prepare one final, mono 16-kHz WAV without loading the multi-gigabyte raw
 /// journal into memory. Blocks here are encoding only, never provider requests.
-/// The normalized result is bounded by the four-hour capture limit (~440 MiB).
+/// Writes directly to a seekable destination; memory stays bounded to one block.
 /// Failure or cancellation leaves the source untouched.
-pub fn final_wav(
+pub fn final_wav_to(
     path: &Path,
+    output: impl Write + Seek,
     max_bytes: usize,
     cancelled: impl Fn() -> bool,
-) -> io::Result<Vec<u8>> {
+) -> io::Result<()> {
     let (rate, channels, _) = read_chunk(path, 0, 1)?;
     let bytes = std::fs::metadata(path)?.len().saturating_sub(14);
     let total_frames = bytes / (channels as u64 * 4);
@@ -134,9 +135,8 @@ pub fn final_wav(
             "This recording exceeds the current transcription size limit. Your full audio is saved.",
         ));
     }
-    let mut output = std::io::Cursor::new(Vec::new());
     let mut writer = hound::WavWriter::new(
-        &mut output,
+        output,
         hound::WavSpec {
             channels: 1,
             sample_rate: 16000,
@@ -177,7 +177,7 @@ pub fn final_wav(
         }
     }
     writer.finalize().map_err(io::Error::other)?;
-    Ok(output.into_inner())
+    Ok(())
 }
 
 pub fn read_chunk(path: &Path, start_frame: u64, frames: u32) -> io::Result<(u32, u16, Vec<f32>)> {
@@ -216,6 +216,16 @@ pub fn read_chunk(path: &Path, start_frame: u64, frames: u32) -> io::Result<(u32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn final_wav(
+        path: &Path,
+        max_bytes: usize,
+        cancelled: impl Fn() -> bool,
+    ) -> io::Result<Vec<u8>> {
+        let mut output = std::io::Cursor::new(Vec::new());
+        final_wav_to(path, &mut output, max_bytes, cancelled)?;
+        Ok(output.into_inner())
+    }
     #[test]
     fn discard_removes_only_owned_sidecars_and_preserves_audio_if_progress_cleanup_fails() {
         let dir = tempfile::tempdir().unwrap();
@@ -260,6 +270,27 @@ mod tests {
         assert!(final_wav(&path, 1024, || false).is_err());
         assert_eq!(std::fs::metadata(&path).unwrap().len(), source_length);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn streamed_normalization_can_cancel_between_blocks_without_touching_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.pcm");
+        let mut journal = Journal::create(&path, 16000, 1).unwrap();
+        journal.append(&vec![0.25; 16000 * 61], 16000, 1).unwrap();
+        journal.finish().unwrap();
+        let original = std::fs::metadata(&path).unwrap().len();
+        let checks = std::cell::Cell::new(0);
+        let mut destination = std::io::Cursor::new(Vec::new());
+        let result = final_wav_to(&path, &mut destination, 0, || {
+            checks.set(checks.get() + 1);
+            checks.get() > 1
+        });
+        assert!(result.is_err());
+        assert_eq!(checks.get(), 2);
+        assert_eq!(destination.get_ref().len(), 44 + 16000 * 60 * 2);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), original);
+        assert_eq!(read_chunk(&path, 16000 * 60, 16000).unwrap().2.len(), 16000);
     }
 
     #[test]

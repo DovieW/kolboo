@@ -1,48 +1,55 @@
 .page {
-	--content-max-width: 860px;
+	--content-max-width: 1160px;
+	display: flex;
+	flex-direction: column;
 }
 .workspace {
 	width: 100%;
-	margin: 0 auto;
-	display: grid;
-	gap: 20px;
-	padding-bottom: 96px;
+	flex: 1;
+	display: flex;
+	padding-bottom: 24px;
 }
 .drop,
 .dropActive {
-	border-style: dashed;
-	transition:
-		border-color 120ms ease,
-		background-color 120ms ease;
+	flex: 1;
+	min-width: 0;
+	min-height: 550px;
+	display: flex;
+	flex-direction: column;
 }
 .dropActive {
-	border-color: var(--mantine-primary-color-filled);
-	background: var(--mantine-primary-color-light);
+	--file-icon-opacity: 1;
+}
+.dropTarget {
+	flex: 1;
+	min-height: 260px;
+	padding: 40px 24px;
 }
 .fileIcon {
 	display: grid;
 	place-items: center;
-	width: 64px;
-	height: 64px;
-	border-radius: 20px;
+	width: 72px;
+	height: 72px;
 	color: var(--mantine-primary-color-filled);
-	background: var(--mantine-primary-color-light);
+	opacity: var(--file-icon-opacity, 0.75);
+	transition: opacity 150ms ease;
 }
 .fileName {
 	max-width: 100%;
 	overflow-wrap: anywhere;
 }
-.model {
-	min-width: 0;
-	overflow-wrap: anywhere;
+.options {
+	width: min(100%, 640px);
+	margin-inline: auto;
+	padding: 24px 32px 32px;
 }
-.noteIcon {
-	flex-shrink: 0;
-	color: var(--mantine-color-dimmed);
+@media (max-width: 600px) {
+	.options {
+		padding: 20px;
+	}
 }
 @media (prefers-reduced-motion: reduce) {
-	.drop,
-	.dropActive {
+	.fileIcon {
 		transition: none;
 	}
 }

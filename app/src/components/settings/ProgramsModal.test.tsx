@@ -6,10 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfileConfigModal } from "./ProgramsModal";
 
 const mocks = vi.hoisted(() => ({
-	listOpenWindows: vi.fn<() => Promise<Array<{ title: string; process_path: string }>>>(),
+	mutate: vi.fn(),
+	listOpenWindows:
+		vi.fn<() => Promise<Array<{ title: string; process_path: string }>>>(),
 	settings: {
 		rewrite_program_prompt_profiles: [
-			{ id: "browser", name: "Browser", program_paths: [], disabled: false },
+			{
+				id: "browser",
+				name: "Browser",
+				program_paths: [],
+				disabled: false,
+				output_paste_shortcut: "ctrl_shift_v",
+			},
 		],
 	},
 }));
@@ -21,7 +29,7 @@ vi.mock("../../lib/queries", () => ({
 	}),
 	useUpdateRewriteProgramPromptProfiles: () => ({
 		isPending: false,
-		mutate: vi.fn(),
+		mutate: mocks.mutate,
 	}),
 }));
 vi.mock("../../lib/tauri", () => ({
@@ -57,8 +65,42 @@ afterEach(async () => {
 });
 
 describe("open-program picker", () => {
+	it("clears the paste shortcut override when resetting a profile", async () => {
+		const buttons = () =>
+			[...document.querySelectorAll<HTMLButtonElement>("button")].filter(
+				(b) => b.textContent === "Reset profile",
+			);
+		await act(async () => buttons()[0]?.click());
+		await act(async () => buttons().at(-1)?.click());
+		expect(mocks.mutate.mock.calls[0]?.[0][0]).toMatchObject({
+			id: "browser",
+			program_paths: [],
+			output_paste_shortcut: null,
+		});
+	});
+	it("creates a new profile with an inherited paste shortcut", async () => {
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<ProfileConfigModal
+						opened
+						autoCreateProfile
+						editingProfileId="default"
+						onClose={vi.fn()}
+						onEditingProfileChange={vi.fn()}
+					/>
+				</MantineProvider>,
+			),
+		);
+		expect(mocks.mutate.mock.calls[0]?.[0].at(-1)).toMatchObject({
+			name: "New Profile",
+			output_paste_shortcut: null,
+		});
+	});
 	it("shows a desktop integration error instead of claiming no windows are open", async () => {
-		mocks.listOpenWindows.mockRejectedValueOnce("GNOME extension is not enabled.");
+		mocks.listOpenWindows.mockRejectedValueOnce(
+			"GNOME extension is not enabled.",
+		);
 		const button = document.querySelector<HTMLButtonElement>(
 			'[aria-label="Pick from open programs"]',
 		);
@@ -88,7 +130,9 @@ describe("open-program picker", () => {
 			'[aria-label="Pick from open programs"]',
 		);
 		await act(async () => button?.click());
-		expect(document.body.textContent).toContain("Could not list open programs.");
+		expect(document.body.textContent).toContain(
+			"Could not list open programs.",
+		);
 		expect(document.body.textContent).not.toContain("internal details");
 	});
 });

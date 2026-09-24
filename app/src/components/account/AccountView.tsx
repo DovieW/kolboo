@@ -230,7 +230,7 @@ export function AccountView() {
 	};
 
 	return (
-		<div className="main-content">
+		<div className={`main-content ${signedIn ? "" : "account-signin-layout"}`}>
 			<div className="main-content-inner page-content-start">
 				<Stack gap="lg" className="account-page-stack">
 					{queryError ? (
@@ -243,17 +243,19 @@ export function AccountView() {
 						</Alert>
 					) : null}
 
-					<AccountSummaryCard
-						loading={licenseState.isLoading || authContext.isLoading}
-						modeLabel={modeLabel}
-						modeDescription={modeDescription}
-						statusLabel={statusLabel}
-						statusColor={statusColor}
-						email={state?.email ?? null}
-						organizationLabel={state?.org?.org_name ?? null}
-						signedIn={signedIn}
-						reauthRequired={reauthRequired}
-					/>
+					{state && signedIn && (
+						<AccountSummaryCard
+							loading={licenseState.isLoading || authContext.isLoading}
+							modeLabel={modeLabel}
+							modeDescription={modeDescription}
+							statusLabel={statusLabel}
+							statusColor={statusColor}
+							email={state.email ?? null}
+							organizationLabel={state.org?.org_name ?? null}
+							signedIn={signedIn}
+							reauthRequired={reauthRequired}
+						/>
+					)}
 
 					{signedIn ? (
 						<div className="account-page-grid">

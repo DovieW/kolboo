@@ -59,6 +59,7 @@ pub fn insert_text_with_snapshot(
     allow_paste: bool,
     allow_typing: bool,
     smart_paste_protection: bool,
+    paste_shortcut: crate::text::key_inject::PasteShortcut,
 ) -> Result<WindowsInsertMethod, String> {
     let snapshot = if let Some(snapshot) = initial_snapshot {
         snapshot
@@ -141,7 +142,7 @@ pub fn insert_text_with_snapshot(
             WindowsInsertMethod::UiaValuePattern
         }
         WindowsInsertMethod::Paste => {
-            if let Err(err) = type_text_blocking_with_options(text, false, true) {
+            if let Err(err) = type_text_blocking_with_options(text, false, true, paste_shortcut) {
                 method_error = Some(err);
             } else {
                 clipboard_restored = Some(true);
@@ -207,7 +208,7 @@ pub fn insert_text_with_snapshot(
     // Fallback ladder: attempt paste then typing before safe fallback.
     if method_used != WindowsInsertMethod::Paste
         && allow_paste
-        && type_text_blocking_with_options(text, false, true).is_ok()
+        && type_text_blocking_with_options(text, false, true, paste_shortcut).is_ok()
     {
         log::info!("UIA insert: fallback paste succeeded");
         log_request_entry(
@@ -280,6 +281,7 @@ pub fn insert_text_with_snapshot(
     _allow_paste: bool,
     _allow_typing: bool,
     _smart_paste_protection: bool,
+    _paste_shortcut: crate::text::key_inject::PasteShortcut,
 ) -> Result<WindowsInsertMethod, String> {
     Ok(WindowsInsertMethod::None)
 }

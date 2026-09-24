@@ -1,0 +1,343 @@
+[
+	{
+		"filePath": "app/src-tauri/src/commands/logs.rs",
+		"reason": "Concrete Wry IPC/store boundary; payload-free ID selection and retention are tested in RequestLogStore, but a headless mock cannot supply this desktop AppHandle.",
+		"evidence": [
+			"app/src-tauri/src/request_log.rs",
+			"app/src/lib/tauri/logAvailability.test.ts"
+		],
+		"lines": [37, 38, 39, 40, 42, 44],
+		"functions": [37],
+		"instantiations": [],
+		"sha256": "4d4b74c967e76edddb2dd508fb892c3088f2a96c4b71dea58a347019563ddcd2"
+	},
+	{
+		"filePath": "app/src-tauri/src/commands/overlay.rs",
+		"reason": "Native window visibility calls require the real window manager; the may_hide decision and stale frontend callbacks are tested independently.",
+		"evidence": [
+			"app/src-tauri/src/overlay/mod.rs",
+			"app/src/overlay/useOverlayHideRequested.ts",
+			"app/src/overlay/eventsLifecycle.test.tsx"
+		],
+		"lines": [522, 523, 524, 872, 873, 874],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "7b55021bc64c3f2c8bcf55ee2b58af212ad9803f147d2c7ff7abc3728bcb1a07"
+	},
+	{
+		"filePath": "app/src-tauri/src/commands/recording.rs",
+		"reason": "Native recording command wiring requires Wry, capture and application stores. The delegated journal preparation, file-backed duration, recovery ownership, stale-session cancellation, retry replacement and waveform IPC are exercised without hardware.",
+		"evidence": [
+			"app/src-tauri/src/pipeline/tests.rs",
+			"app/src-tauri/src/recordings/tests/preparation.rs",
+			"app/src-tauri/src/recordings/tests/audio.rs",
+			"app/src-tauri/src/tests/history_storage_tests.rs",
+			"app/src-tauri/src/commands/recording.rs"
+		],
+		"lines": [
+			585, 893, 894, 895, 896, 897, 898, 959, 980, 1005, 1006, 1007, 1008, 1050,
+			1057, 1159, 1173, 1174, 1175, 1176, 1178, 1179, 1180, 1181, 1219, 1286,
+			1287, 1288, 1289, 1290, 1291, 1303, 1365, 1370, 1411, 1432, 1437, 1666,
+			1667, 1668, 1669, 1670, 1671, 1732, 1739, 1825, 1826, 1827, 1828, 1860,
+			1867, 2000, 2026,
+			1310, 1312, 1313, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346,
+			1375, 1380, 1386, 1388, 1389, 1422, 1443, 1448,
+			1677, 1678, 1679, 1680, 1681, 1682, 1743, 1750,
+			1836, 1837, 1838, 1839, 1871, 1878, 2011, 2037
+		],
+		"functions": [1288],
+		"instantiations": [],
+		"sha256": "dd87ae941a3610e947c564107178bed439fa0851983a3198035baaab873e4056"
+	},
+	{
+		"filePath": "app/src-tauri/src/history.rs",
+		"reason": "HistoryData contains only serializable plain fields; serde_json has no reachable failure for this owned snapshot. Successful and failed retry commits, title preservation, correction protection, disk-write rollback and post-commit cleanup failure are exercised in storage tests.",
+		"evidence": [
+			"app/src-tauri/src/tests/history_storage_tests.rs",
+			"app/src-tauri/src/history.rs"
+		],
+		"lines": [730],
+		"functions": [730],
+		"instantiations": [],
+		"sha256": "4630e6ef735f4fc202d849f9624e076366271067460b8472943bb5a53f74f6d8"
+	},
+	{
+		"filePath": "app/src-tauri/src/commands/text.rs",
+		"reason": "Paste shortcut argument forwarding into OS input injection; chord order and cleanup are tested with a recording keyboard backend.",
+		"evidence": ["app/src-tauri/src/text/tests/key_inject.rs"],
+		"lines": [71],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "ffa7a0c1a14fb872bd2b2e50c33b69892b5bbbe48b5a8e4602be0fd78c125e45"
+	},
+	{
+		"filePath": "app/src-tauri/src/commands/windows.rs",
+		"reason": "Concrete desktop IPC wrappers invoke the OS compositor on a blocking worker. Parser, privacy and program-picker behavior have deterministic tests; compositor availability is a native acceptance check.",
+		"evidence": [
+			"app/src-tauri/src/windows_apps_linux/tests.rs",
+			"app/src/components/settings/ProgramsModal.test.tsx"
+		],
+		"lines": [13, 14, 15, 16, 17, 18, 19, 20, 25, 26, 27, 28, 29],
+		"functions": [13, 15, 16, 20, 25],
+		"instantiations": [],
+		"sha256": "a32a6a004c1632f2d93aa105964df1b521502280edc54f68425020d5205ec423"
+	},
+	{
+		"filePath": "app/src-tauri/src/core/output_settings.rs",
+		"reason": "Wry settings-store and actual foreground-process lookup glue. Profile resolution, explicit system override, invalid-value inheritance and serialization are unit-tested in this module.",
+		"evidence": [
+			"app/src-tauri/src/core/output_settings.rs",
+			"app/src/components/settings/PasteShortcutSetting.test.tsx"
+		],
+		"lines": [
+			10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 35, 36, 37, 38, 39, 40, 41, 42,
+			137, 149
+		],
+		"functions": [10, 35, 38, 41],
+		"instantiations": [],
+		"sha256": "2c806df0ee4dcfc8c292be0c0394a159231e2d4ec555e1e6b6d5913a74eb95eb"
+	},
+	{
+		"filePath": "app/src-tauri/src/lib.rs",
+		"reason": "Native application orchestration wires the tested session epoch, paste profile and visibility decisions into real shortcut/window callbacks.",
+		"evidence": [
+			"app/src-tauri/src/pipeline/tests.rs",
+			"app/src-tauri/src/core/output_settings.rs",
+			"app/src-tauri/src/overlay/mod.rs"
+		],
+		"lines": [
+			250, 258, 267, 637, 638, 639, 640, 641, 642, 880, 938, 939, 940, 941, 943,
+			944, 945
+		],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "5e4b857091c1aff0d984116500e595bab4611a2bacf4777b3b4d72e574a2a880"
+	},
+	{
+		"filePath": "app/src-tauri/src/overlay/mod.rs",
+		"reason": "Window event emission and the long-lived native waveform loop require the desktop event loop; notification ownership, waveform smoothing and listener teardown are independently tested.",
+		"evidence": [
+			"app/src/overlay/BackendAudioWave.test.tsx",
+			"app/src/overlay/eventsLifecycle.test.tsx",
+			"app/src-tauri/src/audio_capture/meters.rs"
+		],
+		"lines": [210, 211, 212, 213, 214, 215, 216, 224, 225, 226, 228, 229, 230],
+		"functions": [216, 226],
+		"instantiations": [],
+		"sha256": "1b7fdec85daf00b4f82f70352d7dbe0a38c26b17bfbf1ad4b26171695af9996f"
+	},
+	{
+		"filePath": "app/src-tauri/src/pipeline.rs",
+		"reason": "Concrete Wry realtime event/clipboard bridge plus second ownership checks under mutex and poisoned-lock recovery. Exercising those check-between-check races would require nondeterministic scheduling or production test hooks. Streaming success/fallback, delayed connection/timeout and cancellation preserving the next session are tested.",
+		"evidence": [
+			"app/src-tauri/src/pipeline/tests.rs",
+			"app/src-tauri/src/stt/streaming.rs"
+		],
+		"lines": [
+			1126, 1129, 1130, 1131, 1137, 1183, 1184, 1191, 1203, 1219, 1223, 1229,
+			1231, 1232, 1234, 1240, 1260, 1286, 1287, 1288, 1320, 1321, 1322, 1328,
+			1330, 1331, 1332, 1333, 1362, 1364, 1365, 1366, 1368, 1369, 1370, 1371,
+			1372, 1781, 1838, 1878, 1999, 2404, 2504
+		],
+		"functions": [1126, 2402],
+		"instantiations": [2083],
+		"sha256": "12166feb8f5ee20e60587f2aff150cf268d4ea999929f3cf20fa665132b76287"
+	},
+	{
+		"filePath": "app/src-tauri/src/pipeline/batch_stt_orchestration.rs",
+		"reason": "Successful managed-auth refresh needs the native credential store and a Supabase session; the post-refresh cancellation-under-lock defense is race-only. Missing-session failure cleanup, token-error classification and STT retry behavior are tested.",
+		"evidence": [
+			"app/src-tauri/src/pipeline/tests.rs",
+			"app/src-tauri/src/pipeline/stt_flow.rs"
+		],
+		"lines": [91, 153, 154, 155],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "47ebf7253f5593adcda8dca58389a76dd29e576e2b06945329431bbb63564911"
+	},
+	{
+		"filePath": "app/src-tauri/src/pipeline/meeting_transcription.rs",
+		"reason": "Two cancellation guards inside hashing/between worker completion and upload are race-only. Boundary cancellation, cancellation during sample read, checkpoint resume and complete chunk assembly are tested. Listed function-only exceptions are duplicate LLVM generic instances, not source-body waivers.",
+		"evidence": ["app/src-tauri/src/pipeline/meeting_transcription/tests.rs"],
+		"lines": [67, 233],
+		"functions": [],
+		"instantiations": [164, 213, 229],
+		"sha256": "aa1f6d94e8d2f7fc1a5446dea2d57272c7ec629d3ce7e3969524ae8c2632646c"
+	},
+	{
+		"filePath": "app/src-tauri/src/pipeline/transcription_flow.rs",
+		"reason": "LLVM emits uncalled generic copies for early-return/cancelled/native callers. These source functions and every changed line execute in successful routing, rewrite, unavailable-provider and cancellation tests; only duplicate function records may be waived.",
+		"evidence": ["app/src-tauri/src/pipeline/transcription_flow/tests.rs"],
+		"lines": [],
+		"functions": [],
+		"instantiations": [72, 74, 691, 806, 813],
+		"sha256": "4c2cdbfe6214ac9aa8e48fc479cdc36962933d05585e9991d1db78bf61192118"
+	},
+	{
+		"filePath": "app/src-tauri/src/sessions/normal_dictation_output.rs",
+		"reason": "Native paste-shortcut argument forwarding into UIA/clipboard output, protected by pure output-intent and chord tests.",
+		"evidence": [
+			"app/src-tauri/src/core/output_settings.rs",
+			"app/src-tauri/src/text/tests/key_inject.rs"
+		],
+		"lines": [274],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "29a6e8e684737bed2c85f84ac19717dccea90bd581f7166f9f682890f08fba6f"
+	},
+	{
+		"filePath": "app/src-tauri/src/sessions/ocr_usage.rs",
+		"reason": "Native best-effort cost event adapter receives no audio for OCR-only usage; this concrete AppHandle call requires desktop acceptance.",
+		"evidence": ["app/src-tauri/src/stats.rs"],
+		"lines": [80],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "722cc1f63b1de90f25932730e1038154d9af0d9d515bb8ed4a7b4bbce8751c64"
+	},
+	{
+		"filePath": "app/src-tauri/src/sessions/recording_finalization.rs",
+		"reason": "Concrete Wry history/log/cost finalization adapters now forward duration rather than decoding a whole recording. Duration extraction, activity metadata and log finalization semantics are independently tested.",
+		"evidence": [
+			"app/src-tauri/src/recordings/tests/audio.rs",
+			"app/src-tauri/src/history/activity.rs",
+			"app/src-tauri/src/sessions/recording_finalization.rs"
+		],
+		"lines": [
+			144, 145, 146, 147, 148, 149, 151, 153, 154, 155, 156, 157, 158, 159, 160,
+			172, 173, 174, 175, 176, 177, 204, 210, 219, 225
+		],
+		"functions": [153],
+		"instantiations": [],
+		"sha256": "2c82882659a3e5064563855b9777cb0e21efa95c53bca13bb342e77c08f515d8"
+	},
+	{
+		"filePath": "app/src-tauri/src/settings_view.rs",
+		"reason": "Read a non-secret paste setting from the concrete Wry store. Parser/default/inheritance/persistence tests cover the delegated value semantics.",
+		"evidence": [
+			"app/src-tauri/src/text/tests/key_inject.rs",
+			"app/src-tauri/src/core/output_settings.rs",
+			"app/src/lib/tauri/settings.actions.test.ts"
+		],
+		"lines": [148, 149, 150, 151, 152, 153, 154],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "1447d466ced5a687a8b8dcb8d8737f00249041309da061042b1ea41a89aff47d"
+	},
+	{
+		"filePath": "app/src-tauri/src/shortcuts/mod.rs",
+		"reason": "Window-manager hide callback; tested may_hide predicate prevents active recording from disappearing.",
+		"evidence": ["app/src-tauri/src/overlay/mod.rs"],
+		"lines": [497, 498, 499],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "3a8df3d94cd1ab316b43dbd4fd1590a66dacfc0d489ee2ce305761834f916266"
+	},
+	{
+		"filePath": "app/src-tauri/src/shortcuts/paste_last.rs",
+		"reason": "Actual foreground-process and OS paste-chord forwarding require a desktop; resolver and key-order tests cover the decisions.",
+		"evidence": [
+			"app/src-tauri/src/core/output_settings.rs",
+			"app/src-tauri/src/text/tests/key_inject.rs"
+		],
+		"lines": [77, 88],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "3d80ccdbd686c076e6295239604cf136715ca1d2cc49347c0245082e6002d336"
+	},
+	{
+		"filePath": "app/src-tauri/src/shortcuts/retry_last.rs",
+		"reason": "Native retry output forwards the captured paste shortcut; pipeline replay and profile resolution are tested independently.",
+		"evidence": [
+			"app/src-tauri/src/pipeline/tests.rs",
+			"app/src-tauri/src/core/output_settings.rs"
+		],
+		"lines": [124, 132],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "10fbc0225c4fed8aa9a593afdd01392527ee56ce5ba5f89acbd1856a323d7ce1"
+	},
+	{
+		"filePath": "app/src-tauri/src/stats.rs",
+		"reason": "Concrete AppHandle cost-emission adapter converting optional WAV metadata to duration. Memory/file duration metadata is exercised by recording tests; actual native cost emission remains a desktop acceptance check.",
+		"evidence": ["app/src-tauri/src/stats.rs"],
+		"lines": [1134, 1135, 1136, 1137, 1138, 1140, 1142, 1143, 1144, 1145],
+		"functions": [1142],
+		"instantiations": [],
+		"sha256": "30a751a78af05c4848b62b6e8b97fb320ac5f707adfecc7dfb925b8082cbde6c"
+	},
+	{
+		"filePath": "app/src-tauri/src/text/clipboard.rs",
+		"reason": "Actual arboard clipboard read/OS wait cannot run safely in ordinary tests without touching the user's clipboard. Deterministic barrier tests cover immediate confirmation, busy/stale retries and fail-closed exhaustion; duplicate generic instance exception requires a covered source definition.",
+		"evidence": ["app/src-tauri/src/text/clipboard/tests.rs"],
+		"lines": [55, 56],
+		"functions": [55],
+		"instantiations": [58],
+		"sha256": "f12141cd96fc8bcbd02d30fccc61d774ccafd01f48e5905bb2dbd741fe94667f"
+	},
+	{
+		"filePath": "app/src-tauri/src/text/inject.rs",
+		"reason": "Real arboard/Enigo input and OS clipboard side effects are excluded from headless tests. Paste chord order/modifier cleanup, output policy and clipboard verification are tested at their owned boundaries.",
+		"evidence": [
+			"app/src-tauri/src/text/tests/key_inject.rs",
+			"app/src-tauri/src/text/clipboard/tests.rs",
+			"app/src-tauri/src/platform_capabilities.rs"
+		],
+		"lines": [
+			99, 107, 109, 127, 146, 151, 152, 153, 154, 155, 165, 166, 225, 275, 276
+		],
+		"functions": [151, 165, 275],
+		"instantiations": [],
+		"sha256": "b12e3b1f5984d8dc0d4f1bf3a7a88bb5a5fddf1b738876b8f0af77b7bd51b7d3"
+	},
+	{
+		"filePath": "app/src-tauri/src/windows_apps_linux.rs",
+		"reason": "Actual GNOME/KWin/X11/Sway/Hyprland IPC and uncommon OS temp-file/process errors require their desktop or fault injection. Backend selection, all response parsers, title opt-in/self filtering, helper failures, bounded output and malformed UTF-8 are covered. The ignored KWin smoke is intentionally not claimed as run.",
+		"evidence": [
+			"app/src-tauri/src/windows_apps_linux/tests.rs",
+			"docs/User Docs/LINUX_PROGRAM_PROFILES.md"
+		],
+		"lines": [
+			103, 104, 115, 116, 117, 118, 119, 122, 123, 124, 150, 151, 152, 153, 156,
+			158, 159, 160, 161, 162, 163, 164, 165, 167, 168, 169, 172, 174, 175, 176,
+			177, 178, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 274, 275,
+			276, 277, 278, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317,
+			318, 319, 320, 321, 322, 323, 324, 325, 328, 329, 330, 331, 332, 333, 334,
+			335, 336, 337, 338, 341, 342, 343, 344, 346, 347, 348, 349, 350, 352, 353,
+			355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 369, 371,
+			372, 374, 375, 376, 377, 378, 379, 381, 382, 384, 385, 386, 387, 388, 389,
+			390, 391, 392, 394, 395, 397, 398, 399, 400, 401, 402, 403, 405, 406, 407,
+			408, 409, 411, 413, 414, 415, 419, 420, 421, 422, 423, 424, 425, 427, 428,
+			429, 430, 431, 434, 435, 436, 437, 441
+		],
+		"functions": [
+			99, 102, 138, 150, 152, 160, 167, 262, 269, 306, 308, 314, 316, 318, 329,
+			332, 334, 346, 367, 381, 388, 401, 402, 413, 431
+		],
+		"instantiations": [],
+		"sha256": "8bfba1b44fee182b2dc3f117ad2efedfa2760faa49e2d34f85b97c8c37a32693"
+	},
+	{
+		"filePath": "app/src-tauri/src/windows_uia/insert.rs",
+		"reason": "Unused shortcut parameter in the Linux no-UIA fallback; actual Windows UIA requires Windows-native acceptance. Clipboard/key fallback logic has deterministic tests.",
+		"evidence": [
+			"app/src-tauri/src/text/tests/key_inject.rs",
+			"app/src-tauri/src/windows_uia/verify.rs"
+		],
+		"lines": [284],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "7b4e25929cfa2985680b17122d3e565bf0884e6694829b6044a98e52bea62226"
+	},
+	{
+		"filePath": "app/src-tauri/src/windows_apps.rs",
+		"reason": "No executable Linux body: this selector re-exports the tested Linux implementation. Changed Windows Result wrapper and unsupported-platform fallback require their native target. Only these exact changed declarations may lack Linux coverage records.",
+		"evidence": [
+			"app/src-tauri/src/windows_apps_linux/tests.rs",
+			"docs/User Docs/LINUX_PROGRAM_PROFILES.md"
+		],
+		"sha256": "de00e7c1dfb4c2091d7b519f9f85515f84cad29ff4a82a16f051cf910809cbe8",
+		"unmeasuredLines": [
+			1, 280, 344, 354, 355, 356, 357, 358, 359, 360, 361, 375, 376, 380
+		]
+	}
+]

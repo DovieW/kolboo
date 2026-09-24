@@ -27,7 +27,7 @@ import {
 import { useEffect, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import { recordingControlsAPI } from "../lib/tauri/commands";
-import { listenTyped } from "../lib/tauri/events";
+import { useBackendEvent } from "../lib/tauri/useBackendEvent";
 import type {
 	FileImportResult,
 	RecordingPreferences,
@@ -73,7 +73,8 @@ export function RecordingBar() {
 	const state = useQuery({
 		queryKey: ["home-recording-state"],
 		queryFn: recordingControlsAPI.getState,
-		refetchInterval: 500,
+		refetchInterval: (query) =>
+			query.state.data === "idle" || query.state.data === "error" ? 5000 : 500,
 	});
 	const action = useMutation({
 		mutationFn: async (operation: "start" | "stop" | "cancel") => {
@@ -93,45 +94,31 @@ export function RecordingBar() {
 	const progress = useQuery({
 		queryKey: ["recording-seconds"],
 		queryFn: recordingControlsAPI.getSeconds,
+		enabled: recording,
 		refetchInterval: 1000,
 		retry: false,
 	});
 	const canPause = useQuery({
 		queryKey: ["recording-can-pause"],
 		queryFn: recordingControlsAPI.canPause,
-		refetchInterval: 500,
+		enabled: recording,
+		staleTime: 0,
 	});
 	const recovery = useQuery({
 		queryKey: ["recording-recovery"],
 		queryFn: recordingControlsAPI.listRecovery,
-		refetchInterval: 3000,
+		refetchInterval: recoveryOpen ? 3000 : false,
 	});
-	useEffect(() => {
-		let disposed = false;
-		let unlisten: (() => void) | undefined;
-		void listenTyped("pipeline-cancelled", () => {
-			if (disposed) return;
-			// Escape may stop a History-only recording in another window. Ask
-			// the backend what was retained; cancellation alone is not proof.
-			for (const queryKey of [
-				"recording-recovery",
-				"home-recording-state",
-				"recording-can-pause",
-			])
-				void client.invalidateQueries({ queryKey: [queryKey] });
-		})
-			.then((stop) => {
-				if (disposed) stop();
-				else unlisten = stop;
-			})
-			.catch(() => {
-				// Existing polling remains the fallback if event setup is unavailable.
-			});
-		return () => {
-			disposed = true;
-			unlisten?.();
-		};
-	}, [client]);
+	const refreshRecording = () => {
+		for (const queryKey of [
+			"recording-recovery",
+			"home-recording-state",
+			"recording-can-pause",
+		])
+			void client.invalidateQueries({ queryKey: [queryKey] });
+	};
+	useBackendEvent("pipeline-cancelled", refreshRecording);
+	useBackendEvent("pipeline-state-changed", refreshRecording);
 	const recover = useMutation({
 		mutationFn: recordingControlsAPI.recover,
 		onSuccess: (result) => {
@@ -164,6 +151,7 @@ export function RecordingBar() {
 	const paused = useQuery({
 		queryKey: ["home-recording-paused"],
 		queryFn: recordingControlsAPI.getPaused,
+		enabled: recording,
 		refetchInterval: 500,
 	});
 	const pause = useMutation({

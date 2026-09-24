@@ -11,6 +11,7 @@ import {
 	type MainWindowCloseBehavior,
 	type OutputMode,
 	type OverlayMonitorTarget,
+	type PasteShortcut,
 	type PlayingAudioHandling,
 	type QuickAskDismissMode,
 	type RewriteProgramPromptProfile,
@@ -193,6 +194,12 @@ export function useUpdateOverlayMonitorTarget() {
 export function useUpdateOutputMode() {
 	return useSettingsInvalidatingMutation((mode: OutputMode) =>
 		tauriAPI.updateOutputMode(mode),
+	);
+}
+
+export function useUpdateOutputPasteShortcut() {
+	return useSettingsInvalidatingMutation((shortcut: PasteShortcut) =>
+		tauriAPI.updateOutputPasteShortcut(shortcut),
 	);
 }
 

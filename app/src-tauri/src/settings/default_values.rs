@@ -18,6 +18,7 @@ pub const DEFAULT_OVERLAY_MONITOR_TARGET: &str = "main";
 pub const DEFAULT_WIDGET_POSITION: &str = "bottom-center";
 pub const DEFAULT_OUTPUT_MODE: &str = "paste";
 pub const DEFAULT_OUTPUT_HIT_ENTER: bool = false;
+pub const DEFAULT_OUTPUT_PASTE_SHORTCUT: &str = "system";
 pub const DEFAULT_OUTPUT_CLIPBOARD_PRIVACY_MODE: bool = false;
 pub const DEFAULT_OUTPUT_SMART_PASTE_PROTECTION: bool = false;
 pub const DEFAULT_MAIN_WINDOW_CLOSE_BEHAVIOR: &str = "minimize_to_tray";

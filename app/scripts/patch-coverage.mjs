@@ -4,11 +4,21 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "../..");
 const APP_ROOT = path.join(REPO_ROOT, "app");
 const POLICY_MARKER = ".coverage-patch-v1";
+const EXCEPTIONS_PATH = path.join(SCRIPT_DIR, "patch-coverage-exceptions.json");
+
+// Approved 2026-09-23: rustc 1.98.1 / Tauri 2.11.5 emits counterless
+// async-wrapper records at this command's attribute. IPC success and error
+// paths are tested in history/activity.rs. This is not a command-body exemption.
+// Recheck/remove when the compiler or Tauri macro changes.
+const TAURI_METADATA_EXCEPTIONS = new Map([
+	["app/src-tauri/src/commands/history.rs", "get_history_activity"],
+]);
 
 const EXCLUDED_SOURCE_FILES = new Set([
 	"app/src/main.tsx",
@@ -63,9 +73,7 @@ export function parseLcov(text, { sourceRoot, repoRoot = REPO_ROOT }) {
 				addCount(current.lines, line, count);
 			}
 		} else if (current && rawLine.startsWith("BRDA:")) {
-			const [lineText, block, branch, takenText] = rawLine
-				.slice(5)
-				.split(",");
+			const [lineText, block, branch, takenText] = rawLine.slice(5).split(",");
 			const line = Number(lineText);
 			const taken = takenText === "-" ? 0 : Number(takenText);
 			if (Number.isFinite(line) && Number.isFinite(taken)) {
@@ -162,16 +170,57 @@ function failedLinesByPrefix(values, changedLines) {
 	return [...failures].sort((a, b) => a - b);
 }
 
-export function evaluatePatchCoverage(changed, coverage) {
+function approvedMetadataLines(filePath, source, coverage) {
+	const command = TAURI_METADATA_EXCEPTIONS.get(filePath);
+	if (!command || source === undefined) return new Set();
+	const lines = source.split(/\r?\n/u);
+	const result = new Set();
+	for (let index = 0; index < lines.length; index += 1) {
+		// Fail closed for changed macro syntax, inline bodies, or unknown records.
+		if (lines[index].trim() !== "#[tauri::command]") continue;
+		if (lines[index + 1]?.trim() !== `pub async fn ${command}(`) continue;
+		const line = index + 1;
+		const functions = [...coverage.functions].filter(([key]) =>
+			key.startsWith(`${line}:`),
+		);
+		if (
+			coverage.lines.get(line) !== 0 ||
+			functions.length === 0 ||
+			!functions.every(
+				([key, count]) => key.startsWith(`${line}:_RNC`) && count === 0,
+			) ||
+			[...coverage.branches.keys()].some((key) => key.startsWith(`${line}:`)) ||
+			![...coverage.functions].some(
+				([key, count]) => key.startsWith(`${line + 1}:_RNv`) && count > 0,
+			)
+		)
+			continue;
+		result.add(line);
+	}
+	return result;
+}
+
+export function evaluatePatchCoverage(changed, coverage, sources = new Map()) {
 	const failures = [];
+	const metadataExceptions = [];
 	let executableLines = 0;
 
-	for (const [filePath, changedLines] of changed) {
+	for (const [filePath, originalChangedLines] of changed) {
 		if (!isCoverageSource(filePath)) continue;
 		const fileCoverage = coverage.get(filePath);
 		if (!fileCoverage) {
 			failures.push({ filePath, missingReport: true });
 			continue;
+		}
+		const exemptLines = approvedMetadataLines(
+			filePath,
+			sources.get(filePath),
+			fileCoverage,
+		);
+		const changedLines = new Set(originalChangedLines);
+		for (const line of exemptLines) {
+			if (changedLines.delete(line))
+				metadataExceptions.push({ filePath, line });
 		}
 
 		const uncoveredLines = [];
@@ -204,7 +253,106 @@ export function evaluatePatchCoverage(changed, coverage) {
 		}
 	}
 
-	return { failures, executableLines };
+	return { failures, executableLines, metadataExceptions };
+}
+
+// Exceptions are reviewed source snapshots, never file/folder exclusions. A
+// subsequent edit invalidates the checksum and must be tested or re-reviewed.
+export function applyCoverageExceptions(
+	result,
+	changed,
+	coverage,
+	sources,
+	exceptions,
+) {
+	const applied = [];
+	const failures = [];
+	for (const failure of result.failures) {
+		const entry = exceptions.find((item) => item.filePath === failure.filePath);
+		if (!entry) {
+			failures.push(failure);
+			continue;
+		}
+		const source = sources.get(failure.filePath);
+		if (
+			typeof source !== "string" ||
+			!entry.reason?.trim() ||
+			!entry.evidence?.length ||
+			createHash("sha256")
+				.update(source.replaceAll("\r\n", "\n"))
+				.digest("hex") !== entry.sha256
+		) {
+			throw new Error(`Coverage exception needs review: ${failure.filePath}`);
+		}
+		if (failure.missingReport) {
+			// Only the exact changed target-gated declarations can be unmeasured.
+			if (
+				entry.unmeasuredLines &&
+				[...changed.get(failure.filePath)].every((line) =>
+					entry.unmeasuredLines.includes(line),
+				)
+			) {
+				applied.push({
+					filePath: failure.filePath,
+					reason: entry.reason,
+					lines: [],
+					functions: [],
+					unmeasured: true,
+				});
+			} else {
+				failures.push(failure);
+			}
+			continue;
+		}
+		const approvedLines = new Set(entry.lines ?? []);
+		const approvedFunctions = new Set(entry.functions ?? []);
+		// LLVM emits one record per generic instantiation. Only the listed
+		// already-covered source definitions may use this compiler exception.
+		const fileCoverage = coverage.get(failure.filePath);
+		for (const line of entry.instantiations ?? []) {
+			const records = [...fileCoverage.functions].filter(([key]) =>
+				key.startsWith(`${line}:`),
+			);
+			if (
+				fileCoverage.lines.get(line) > 0 &&
+				records.length > 1 &&
+				records.every(([key]) => key.startsWith(`${line}:_R`)) &&
+				records.some(([, count]) => count > 0)
+			) {
+				approvedFunctions.add(line);
+			}
+		}
+		const lines = failure.uncoveredLines.filter((line) =>
+			approvedLines.has(line),
+		);
+		const functions = failure.uncoveredFunctions.filter((line) =>
+			approvedFunctions.has(line),
+		);
+		if (lines.length || functions.length)
+			applied.push({
+				filePath: failure.filePath,
+				reason: entry.reason,
+				lines,
+				functions,
+			});
+		const remaining = {
+			...failure,
+			uncoveredLines: failure.uncoveredLines.filter(
+				(line) => !approvedLines.has(line),
+			),
+			uncoveredFunctions: failure.uncoveredFunctions.filter(
+				(line) => !approvedFunctions.has(line),
+			),
+		};
+		// No frontend/branch waivers. Untested changed branches still fail.
+		if (
+			remaining.uncoveredLines.length ||
+			remaining.uncoveredFunctions.length ||
+			remaining.uncoveredBranches.length
+		)
+			failures.push(remaining);
+	}
+	return { ...result, failures, applied };
 }
 
 function runGit(args) {
@@ -226,6 +374,31 @@ function hasPolicyMarker(base) {
 			stdio: "ignore",
 		}).status === 0
 	);
+}
+
+// Bootstrap only the code that predates the policy, not later commits on a
+// feature branch whose remote base still lacks the marker. Never use HEAD as
+// an automatic baseline: that would hide pending committed changes.
+export function resolveCoverageBase(
+	base,
+	git = runGit,
+	hasMarker = hasPolicyMarker,
+) {
+	const mergeBase = git(["merge-base", base, "HEAD"]);
+	if (hasMarker(mergeBase)) return { base: mergeBase, enforced: true };
+	const additions = git([
+		"log",
+		"--reverse",
+		"--format=%H",
+		"--diff-filter=A",
+		`${mergeBase}..HEAD`,
+		"--",
+		POLICY_MARKER,
+	])
+		.split(/\r?\n/u)
+		.filter(Boolean);
+	const introduced = additions.find((revision) => hasMarker(revision));
+	return { base: introduced ?? mergeBase, enforced: Boolean(introduced) };
 }
 
 function parseArgs(argv) {
@@ -252,12 +425,16 @@ function parseArgs(argv) {
 export function runPatchCoverageCli(argv = process.argv.slice(2)) {
 	try {
 		const options = parseArgs(argv);
-		if (!options.force && !hasPolicyMarker(options.base)) {
+		const baseline = resolveCoverageBase(options.base);
+		if (!options.force && !baseline.enforced) {
 			console.log(
 				`Patch coverage bootstrap: ${POLICY_MARKER} is not present on ${options.base}; enforcement begins after this policy lands.`,
 			);
 			return 0;
 		}
+		console.log(
+			`Patch coverage baseline: ${baseline.base} (requested ${options.base}).`,
+		);
 
 		for (const reportPath of [options.frontendLcov, options.rustLcov]) {
 			if (!existsSync(reportPath)) {
@@ -265,17 +442,32 @@ export function runPatchCoverageCli(argv = process.argv.slice(2)) {
 			}
 		}
 
-		const mergeBase = runGit(["merge-base", options.base, "HEAD"]);
 		const diff = runGit([
 			"diff",
 			"--unified=0",
 			"--diff-filter=AMCR",
-			mergeBase,
+			baseline.base,
 			"--",
 			"app/src",
 			"app/src-tauri/src",
 		]);
 		const changed = parseChangedLines(diff);
+		// git diff omits untracked files. They are new production code too.
+		for (const filePath of runGit([
+			"ls-files",
+			"--others",
+			"--exclude-standard",
+			"--",
+			"app/src",
+			"app/src-tauri/src",
+		]).split(/\r?\n/u)) {
+			if (!isCoverageSource(filePath)) continue;
+			const source = readFileSync(path.join(REPO_ROOT, filePath), "utf8");
+			changed.set(
+				filePath,
+				new Set(source.split(/\r?\n/u).map((_, index) => index + 1)),
+			);
+		}
 		const coverage = mergeCoverageReports([
 			parseLcov(readFileSync(options.frontendLcov, "utf8"), {
 				sourceRoot: APP_ROOT,
@@ -284,11 +476,58 @@ export function runPatchCoverageCli(argv = process.argv.slice(2)) {
 				sourceRoot: APP_ROOT,
 			}),
 		]);
-		const result = evaluatePatchCoverage(changed, coverage);
+		const sources = new Map();
+		for (const filePath of TAURI_METADATA_EXCEPTIONS.keys()) {
+			if (changed.has(filePath)) {
+				sources.set(
+					filePath,
+					readFileSync(path.join(REPO_ROOT, filePath), "utf8"),
+				);
+			}
+		}
+		const exceptions = JSON.parse(readFileSync(EXCEPTIONS_PATH, "utf8"));
+		for (const entry of exceptions) {
+			if (
+				!entry.filePath.startsWith("app/src-tauri/src/") ||
+				!entry.filePath.endsWith(".rs") ||
+				entry.filePath.includes("..")
+			)
+				throw new Error(
+					"Only reviewed Rust native/compiler exceptions are allowed",
+				);
+			if (changed.has(entry.filePath))
+				sources.set(
+					entry.filePath,
+					readFileSync(path.join(REPO_ROOT, entry.filePath), "utf8"),
+				);
+		}
+		const result = applyCoverageExceptions(
+			evaluatePatchCoverage(changed, coverage, sources),
+			changed,
+			coverage,
+			sources,
+			exceptions,
+		);
+		for (const entry of result.applied) {
+			console.log(
+				`Reviewed coverage exception: ${entry.filePath}: ${entry.unmeasured ? "target-gated declarations" : `${entry.lines.length} lines, ${entry.functions.length} function locations`}. ${entry.reason}`,
+			);
+		}
+		for (const { filePath, line } of result.metadataExceptions) {
+			console.log(
+				`Approved Tauri metadata exception: ${filePath}:${line} (command body remains enforced).`,
+			);
+		}
 
 		if (result.failures.length === 0) {
+			const waivedLines = result.applied.reduce(
+				(total, entry) => total + entry.lines.length,
+				0,
+			);
 			console.log(
-				`Patch coverage: 100% (${result.executableLines} changed executable lines).`,
+				result.applied.length
+					? `Patch coverage: 100% of non-exempt changed executable lines (${result.executableLines - waivedLines}); ${waivedLines} native/race lines exempt, ${result.applied.length} reviewed source snapshots. Not global coverage.`
+					: `Patch coverage: 100% (${result.executableLines} changed executable lines).`,
 			);
 			return 0;
 		}
@@ -322,6 +561,9 @@ export function runPatchCoverageCli(argv = process.argv.slice(2)) {
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+	process.argv[1] &&
+	path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
 	process.exit(runPatchCoverageCli());
 }

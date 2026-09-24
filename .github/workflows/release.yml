@@ -31,6 +31,25 @@ jobs:
       - name: Verify versions match (and match tag)
         run: node .github/scripts/verify-versions.mjs
 
+      - name: Require PostHog configuration for the release
+        shell: bash
+        env:
+          POSTHOG_PUBLIC_PROJECT_TOKEN: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
+          POSTHOG_PUBLIC_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$POSTHOG_PUBLIC_PROJECT_TOKEN" || "$POSTHOG_PUBLIC_PROJECT_TOKEN" == "phc_xxx" ]]; then
+            echo "Set the public PostHog project token as repository variable POSTHOG_PUBLIC_PROJECT_TOKEN before publishing." >&2
+            exit 1
+          fi
+          case "$POSTHOG_PUBLIC_HOST" in
+            https://us.i.posthog.com|https://us.i.posthog.com/|https://eu.i.posthog.com|https://eu.i.posthog.com/) ;;
+            *)
+              echo "Set POSTHOG_PUBLIC_HOST to the US or EU PostHog ingestion origin before publishing." >&2
+              exit 1
+              ;;
+          esac
+
       - name: Test updater manifest generation
         run: node --test .github/scripts/generate-updater-manifest.test.mjs
 

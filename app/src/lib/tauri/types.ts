@@ -276,15 +276,14 @@ export interface RewriteProgramPromptProfile {
 
 	// Per-profile overrides for UI (Option 1: override-or-inherit)
 	// NOTE: These are persisted in settings.json as part of the profile object.
-	// The backend may ignore them until it is updated to apply them at runtime.
 	sound_enabled?: boolean | null;
 	playing_audio_handling?: PlayingAudioHandling | null;
 	overlay_mode?: OverlayMode | null;
 	widget_position?: WidgetPosition | null;
 	output_mode?: OutputMode | null;
+	output_paste_shortcut?: PasteShortcut | null;
 
 	// After paste, optionally press Enter.
-	// (May be ignored by backend until runtime/profile routing supports it.)
 	output_hit_enter?: boolean | null;
 
 	// Per-profile OCR context mode overrides (tri-state, null = inherit from global).
@@ -667,6 +666,12 @@ export type WidgetPosition =
 	| "bottom-right";
 
 export type OutputMode = "paste" | "paste_and_clipboard" | "clipboard";
+export type PasteShortcut =
+	| "system"
+	| "ctrl_v"
+	| "ctrl_shift_v"
+	| "shift_insert"
+	| "cmd_v";
 
 export type QuickAskDismissMode = "manual" | "auto";
 
@@ -951,6 +956,7 @@ export interface AppSettings {
 	widget_position: WidgetPosition;
 	output_mode: OutputMode;
 	output_hit_enter: boolean;
+	output_paste_shortcut: PasteShortcut;
 	// When true, output injection will not read/restore the clipboard.
 	output_clipboard_privacy_mode: boolean;
 	// When true, avoid pasting into sensitive targets (e.g., password fields).

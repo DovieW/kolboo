@@ -6,6 +6,8 @@ on:
       - master
     paths:
       - "app/**"
+      - ".github/scripts/configure-desktop-sentry*"
+      - ".github/scripts/upload-desktop-symbols*"
       - ".github/workflows/linux-build.yml"
   workflow_dispatch:
   workflow_call:
@@ -36,11 +38,14 @@ jobs:
     env:
       CARGO_BUILD_JOBS: 4
       CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_RELEASE_DEBUG: 1
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       TAURI_API_BASE_URL: https://kolboo.dovie.dev
       TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
+      TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
+      TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
     steps:
       - name: Checkout
@@ -85,11 +90,16 @@ jobs:
       - name: Compute Linux build metadata
         id: build-meta
         shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_PUBLIC_DEV_DSN: ${{ vars.SENTRY_PUBLIC_DEV_DSN }}
+          SENTRY_PUBLIC_PROD_DSN: ${{ vars.SENTRY_PUBLIC_PROD_DSN }}
+          TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
         run: |
           set -euo pipefail
+          node --test .github/scripts/configure-desktop-sentry.test.mjs .github/scripts/upload-desktop-symbols.test.mjs
+          node .github/scripts/configure-desktop-sentry.mjs
           version=$(node -p "require('./app/package.json').version")
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "release=kolboo@${version}" >> "$GITHUB_OUTPUT"
           echo "artifact-name=kolboo-linux-x86_64-${version}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
@@ -99,18 +109,6 @@ jobs:
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Require runtime crash reporting for a beta tag
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "$TAURI_SENTRY_DSN" ]]; then
-            echo "TAURI_SENTRY_DSN must be configured before publishing a Linux beta." >&2
-            exit 1
-          fi
 
       - name: Cache sccache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -131,21 +129,13 @@ jobs:
         working-directory: app
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: dov-weinstock
-          SENTRY_PROJECT: kolboo-public-dev
-          SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
-          TAURI_APP_VERSION: ${{ steps.build-meta.outputs.version }}
-          TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
-          TAURI_SENTRY_ENV: beta
-          TAURI_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
-          VITE_SENTRY_ENV: beta
-          VITE_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
           VITE_SIGNED_UPDATER_ENABLED: "false"
         shell: bash
         run: |
           set -euo pipefail
           export RUSTC_WRAPPER=sccache
           pnpm tauri build --no-sign --bundles deb,appimage
+          node ../.github/scripts/upload-desktop-symbols.mjs src-tauri/target/release/kolboo
 
       - name: Verify and package Linux artifacts
         id: bundles
@@ -191,6 +181,11 @@ jobs:
 
           cat > artifacts/build-evidence.txt <<EOF
           release=${{ steps.build-meta.outputs.release }}
+          sentry_project=${{ steps.build-meta.outputs.project }}
+          sentry_environment=${{ steps.build-meta.outputs.environment }}
+          sentry_runtime_enabled=${{ steps.build-meta.outputs.reporting_enabled }}
+          sentry_sourcemaps_required=${{ steps.build-meta.outputs.sourcemaps_required }}
+          sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
           channel=linux-community-beta
           architecture=x86_64
           build_runner=ubuntu-22.04

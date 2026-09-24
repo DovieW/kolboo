@@ -6,6 +6,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
+const resolveTelemetryDisclosure = vi.hoisted(() =>
+	vi.fn(async () => undefined),
+);
+
 vi.mock("./components/account", () => ({
 	AccountView: () => <div>Account page</div>,
 }));
@@ -31,10 +35,26 @@ vi.mock("./components/settings/SettingsGuideOverlay", () => ({
 	SettingsGuideOverlay: () => null,
 }));
 vi.mock("./components/settings/TelemetryDisclosureModal", () => ({
-	TelemetryDisclosureModal: () => null,
+	TelemetryDisclosureModal: ({
+		onAllowAnalytics,
+	}: {
+		onAllowAnalytics: () => void;
+	}) => (
+		<button type="button" onClick={onAllowAnalytics}>
+			Choose linked analytics
+		</button>
+	),
 }));
 vi.mock("./components/usageStats/CostTab", () => ({
 	CostTab: () => <h3>Total spend</h3>,
+}));
+vi.mock("./components/usageStats/ActivityPanel", () => ({
+	ActivityPanel: () => <div>Local activity</div>,
+}));
+vi.mock("./lib/queries/license", () => ({
+	useLicenseState: () => ({
+		data: { status: "signed_out", tier: "community" },
+	}),
 }));
 vi.mock("./hooks/useModifierKeyForwarder", () => ({
 	useModifierKeyForwarder: () => {},
@@ -48,7 +68,8 @@ vi.mock("./lib/bootStorage", () => ({
 vi.mock("./lib/frontendLog", () => ({
 	frontendLog: { info: vi.fn(), warn: vi.fn() },
 }));
-vi.mock("./lib/modelOptions", () => ({
+vi.mock("./lib/modelOptions", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./lib/modelOptions")>()),
 	listAllLlmModelKeys: () => [],
 	listAllSttModelKeys: () => [],
 }));
@@ -62,6 +83,7 @@ vi.mock("./lib/tauri", () => ({
 	tauriAPI: {
 		onStatsChanged: vi.fn(async () => vi.fn()),
 		onTranscriptCopiedToClipboard: vi.fn(async () => vi.fn()),
+		resolveTelemetryDisclosure,
 	},
 }));
 vi.mock("./lib/tauri/events", () => ({
@@ -78,6 +100,7 @@ let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
 beforeEach(async () => {
+	resolveTelemetryDisclosure.mockClear();
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 	client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	host = document.createElement("div");
@@ -107,6 +130,16 @@ async function navigate(label: string) {
 }
 
 describe("Desktop navigation", () => {
+	it("routes the linked analytics choice to an enabled disclosure resolution", async () => {
+		await act(async () =>
+			[...host.querySelectorAll("button")]
+				.find((button) => button.textContent === "Choose linked analytics")
+				?.click(),
+		);
+		expect(resolveTelemetryDisclosure).toHaveBeenCalledWith({
+			analyticsEnabled: true,
+		});
+	});
 	it("names every destination for icon-rail users and marks the current page", async () => {
 		expect(
 			[...host.querySelectorAll("nav button")].map((button) =>
@@ -163,12 +196,20 @@ describe("Desktop navigation", () => {
 	it("keeps Usage filters beside Total spend without a page heading", async () => {
 		await navigate("Usage");
 		expect(host.querySelector("h1")).toBeNull();
+		expect(host.textContent).toContain("Local activity");
+		await act(async () =>
+			[...host.querySelectorAll<HTMLElement>('[role="tab"]')]
+				.find((tab) => tab.textContent === "Spend")
+				?.click(),
+		);
 		expect(host.querySelector("h3")?.textContent).toBe("Total spend");
 		expect(
 			host.querySelector(".usage-controls [aria-label='Filters']"),
 		).not.toBeNull();
 		expect(
-			host.querySelector(".usage-controls input")?.getAttribute("value"),
+			host
+				.querySelector("input[aria-label='Usage period']")
+				?.getAttribute("value"),
 		).toBe("Last 30 days");
 	});
 });

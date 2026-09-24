@@ -19,18 +19,6 @@ export type RetryLastFailedCandidate = {
 	recordingRequestId: string;
 };
 
-export interface RecordingExistenceProbeState {
-	exists: boolean;
-	checkedAt: number;
-}
-
-export type RecordingExistenceById = Map<string, RecordingExistenceProbeState>;
-
-export interface RecordingProbePlan {
-	batch: string[];
-	shouldPollAgain: boolean;
-}
-
 export type HistoryDeletePlan =
 	| {
 			kind: "delete_entry_only";
@@ -95,10 +83,6 @@ type UseHistoryFeedOrchestrationArgs = {
 	retryEntry: (entryId: string) => Promise<string>;
 };
 
-const RECENT_RECORDING_WINDOW_MS = 30_000;
-const RETRY_MISSING_RECORDING_AFTER_MS = 650;
-const RECORDING_PROBE_POLL_INTERVAL_MS = 650;
-const MAX_RECORDING_PROBES_PER_TICK = 12;
 export const COPIED_ENTRY_FEEDBACK_MS = 900;
 
 function trimOrNull(value: string | null | undefined): string | null {
@@ -154,91 +138,6 @@ export function getRetryLastFailedActionState(
 				canRetry: false,
 				tooltip: "No failed requests with saved audio found",
 			};
-}
-
-function isRecentOrInProgressHistoryEntry(
-	entry: Pick<HistoryEntry, "timestamp" | "status">,
-	now: number,
-): boolean {
-	const status = (entry.status ?? "success").toString();
-	if (status === "in_progress") return true;
-	if (status === "error") return false;
-
-	const timestampMs = entry.timestamp
-		? new Date(entry.timestamp).getTime()
-		: Number.NaN;
-	return Number.isFinite(timestampMs)
-		? now - timestampMs < RECENT_RECORDING_WINDOW_MS
-		: false;
-}
-
-export function buildRecordingProbePlan(
-	entries: Array<
-		Pick<HistoryEntry, "id" | "recording_request_id" | "timestamp" | "status">
-	>,
-	recordingExistsById: RecordingExistenceById,
-	now = Date.now(),
-): RecordingProbePlan {
-	const candidates: Array<{ id: string; priority: number; order: number }> = [];
-	let shouldPollAgain = false;
-
-	for (const [index, entry] of entries.entries()) {
-		const recordingId = getHistoryEntryRecordingRequestId(entry);
-		if (!recordingId) continue;
-
-		const shouldPoll = isRecentOrInProgressHistoryEntry(entry, now);
-		const cached = recordingExistsById.get(recordingId);
-
-		if (shouldPoll && (!cached || !cached.exists)) {
-			shouldPollAgain = true;
-		}
-
-		// Probe immediately the first time an entry becomes visible.
-		if (!cached) {
-			candidates.push({
-				id: recordingId,
-				priority: shouldPoll ? 2 : 1,
-				order: index,
-			});
-			continue;
-		}
-
-		// Keep polling a little for recent/in-progress entries when the WAV may not exist yet.
-		if (
-			shouldPoll &&
-			!cached.exists &&
-			now - cached.checkedAt > RETRY_MISSING_RECORDING_AFTER_MS
-		) {
-			candidates.push({ id: recordingId, priority: 2, order: index });
-		}
-	}
-
-	const selected: string[] = [];
-	const seen = new Set<string>();
-
-	candidates
-		.sort((a, b) => b.priority - a.priority || a.order - b.order)
-		.forEach((candidate) => {
-			if (seen.has(candidate.id)) return;
-			seen.add(candidate.id);
-			selected.push(candidate.id);
-		});
-
-	return {
-		batch: selected.slice(0, MAX_RECORDING_PROBES_PER_TICK),
-		shouldPollAgain,
-	};
-}
-
-export function setRecordingProbeResult(
-	prev: RecordingExistenceById,
-	id: string,
-	exists: boolean,
-	checkedAt = Date.now(),
-): RecordingExistenceById {
-	const next = new Map(prev);
-	next.set(id, { exists, checkedAt });
-	return next;
 }
 
 export function addHiddenHistoryEntryIds(
@@ -346,9 +245,6 @@ export function useHistoryFeedOrchestration({
 	deleteHistoryEntry,
 	retryEntry,
 }: UseHistoryFeedOrchestrationArgs) {
-	const [recordingExistsById, setRecordingExistsById] =
-		useState<RecordingExistenceById>(() => new Map());
-	const [recordingsProbeTick, setRecordingsProbeTick] = useState(0);
 	const [hiddenEntryIds, setHiddenEntryIds] = useState<Set<string>>(
 		() => new Set(),
 	);
@@ -411,59 +307,6 @@ export function useHistoryFeedOrchestration({
 			copiedTimerRef.current = null;
 		}, COPIED_ENTRY_FEEDBACK_MS);
 	};
-
-	useEffect(() => {
-		void recordingsProbeTick;
-
-		let cancelled = false;
-		let timeout: ReturnType<typeof setTimeout> | null = null;
-
-		const { batch, shouldPollAgain } = buildRecordingProbePlan(
-			pageHistory,
-			recordingExistsById,
-		);
-
-		if (shouldPollAgain) {
-			timeout = setTimeout(() => {
-				setRecordingsProbeTick((tick) => tick + 1);
-			}, RECORDING_PROBE_POLL_INTERVAL_MS);
-		}
-
-		if (batch.length === 0) {
-			return () => {
-				cancelled = true;
-				if (timeout !== null) clearTimeout(timeout);
-			};
-		}
-
-		void (async () => {
-			await Promise.all(
-				batch.map(async (recordingId) => {
-					try {
-						const url = await getRecordingAssetUrl(recordingId);
-						if (cancelled) return;
-
-						setRecordingExistsById((prev) =>
-							setRecordingProbeResult(prev, recordingId, Boolean(url)),
-						);
-					} catch {
-						// Treat errors as "unknown" so the UI does not permanently hide
-						// playback/rerun actions because of a transient lookup failure.
-					}
-				}),
-			);
-		})();
-
-		return () => {
-			cancelled = true;
-			if (timeout !== null) clearTimeout(timeout);
-		};
-	}, [
-		pageHistory,
-		recordingExistsById,
-		recordingsProbeTick,
-		getRecordingAssetUrl,
-	]);
 
 	const retryLastFailed = async (): Promise<RetryLastFailedOutcome> => {
 		const candidate = retryLastFailedCandidate;
@@ -613,7 +456,6 @@ export function useHistoryFeedOrchestration({
 	return {
 		copiedEntryId,
 		handleCopyEntry,
-		recordingExistsById,
 		pageHistory,
 		retryLastFailedCandidate,
 		canRetryLastFailed: retryLastFailedAction.canRetry,

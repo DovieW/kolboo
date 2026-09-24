@@ -117,6 +117,7 @@ pub use commands::whisper::WhisperModelDownloadProgress;
 pub use commands::whisper::WhisperModelDownloadStatus;
 pub use commands::whisper::WhisperModelInfo;
 pub use custom_providers::CustomProvider;
+pub use history::HistoryActivity;
 pub use history::HistoryPageQuery;
 pub use history::HistoryPageResult;
 pub use history::{HistoryDetail, HistoryEdit, HistoryEditInput};
@@ -246,6 +247,7 @@ pub(crate) fn stop_recording(
     // The explicit "default" marker is for UI/log semantics and should not change runtime behavior.
     let output_intent = {
         let (mut profile_output_mode, mut profile_output_hit_enter) = (None::<String>, None);
+        let mut profile_paste_shortcut = None;
         if let Some(pid) = session_profile_id.as_deref() {
             if pid != "default" {
                 let profiles: Vec<crate::settings::RewriteProgramPromptProfile> =
@@ -253,6 +255,7 @@ pub(crate) fn stop_recording(
                 if let Some(p) = profiles.iter().find(|p| p.id == pid) {
                     profile_output_mode = p.output_mode.clone();
                     profile_output_hit_enter = p.output_hit_enter;
+                    profile_paste_shortcut = p.output_paste_shortcut.clone();
                 }
             }
         }
@@ -261,6 +264,7 @@ pub(crate) fn stop_recording(
             app,
             profile_output_mode.as_deref(),
             profile_output_hit_enter,
+            profile_paste_shortcut.as_deref(),
         )
     };
 
@@ -630,7 +634,12 @@ pub(crate) fn stop_recording(
 
             let mut complete_request_log_after_output = false;
 
-            match pipeline_clone.stop_and_transcribe_detailed().await {
+            let epoch = pipeline_clone.session_epoch();
+            let outcome = pipeline_clone.stop_and_transcribe_detailed().await;
+            if epoch.is_none() || epoch != pipeline_clone.session_epoch() {
+                return;
+            }
+            match outcome {
                 Ok(result) => {
                     log::info!("Transcription complete: {} chars", result.final_text.len());
 
@@ -868,6 +877,7 @@ pub(crate) fn stop_recording(
                                 );
                                 if current_mode == "recording_only"
                                     && current_epoch == expected_epoch
+                                    && overlay::may_hide(&current_mode, pipeline_state)
                                 {
                                     let visible_before = window_clone.is_visible().ok();
                                     log::debug!(
@@ -925,7 +935,14 @@ pub(crate) fn stop_recording(
                                     visible_before,
                                     pipeline_state
                                 );
-                                let _ = window.hide();
+                                let current_mode: String = get_setting_from_store(
+                                    &app_clone,
+                                    "overlay_mode",
+                                    "recording_only".to_string(),
+                                );
+                                if overlay::may_hide(&current_mode, pipeline_state) {
+                                    let _ = window.hide();
+                                }
                             }
                         }
 
@@ -1110,6 +1127,7 @@ pub fn run() {
             commands::history::add_history_entry,
             commands::history::get_history,
             commands::history::get_history_page,
+            commands::history::get_history_activity,
             commands::history::get_history_detail,
             commands::history::save_history_edit,
             commands::history::delete_history_entry,
@@ -1234,6 +1252,7 @@ pub fn run() {
             commands::whisper::cancel_whisper_model_download,
             // Request logging commands
             commands::logs::get_request_logs,
+            commands::logs::get_request_log_ids,
             commands::logs::clear_request_logs,
             commands::logs::export_request_logs_to_file,
             commands::logs::frontend_log,

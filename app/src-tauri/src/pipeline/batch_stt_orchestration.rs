@@ -55,11 +55,14 @@ impl SharedPipeline {
         match stt_result {
             Ok(result) => {
                 if stt_complete_reason != "meeting_upload" {
-                    self.mark_stt_complete(stt_complete_reason);
+                    self.mark_stt_complete(cancel_token, stt_complete_reason)?;
                 }
                 Ok(result)
             }
             Err(error) => {
+                if cancel_token.is_cancelled() {
+                    return Err(PipelineError::Cancelled);
+                }
                 let managed_auth_recovered = {
                     let managed_enabled = self
                         .inner
@@ -85,17 +88,17 @@ impl SharedPipeline {
                     {
                         Ok(recovered) => {
                             if stt_complete_reason != "meeting_upload" {
-                                self.mark_stt_complete(stt_complete_reason);
+                                self.mark_stt_complete(cancel_token, stt_complete_reason)?;
                             }
                             Ok(recovered)
                         }
                         Err(retry_error) => {
-                            self.finish_failed_stt_attempt(&retry_error)?;
+                            self.finish_failed_stt_attempt(cancel_token, &retry_error)?;
                             Err(retry_error)
                         }
                     }
                 } else {
-                    self.finish_failed_stt_attempt(&error)?;
+                    self.finish_failed_stt_attempt(cancel_token, &error)?;
                     Err(error)
                 }
             }
@@ -147,6 +150,9 @@ impl SharedPipeline {
                 .inner
                 .lock()
                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            if cancel_token.is_cancelled() {
+                return Err(PipelineError::Cancelled);
+            }
             inner.get_or_create_stt_provider(stt_provider_id, stt_model, stt_language)?
         };
 

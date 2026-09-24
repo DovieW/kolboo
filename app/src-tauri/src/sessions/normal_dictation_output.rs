@@ -208,6 +208,7 @@ fn output_text_for_platform(
             true,
             true,
             output_intent.smart_paste_protection(),
+            output_intent.paste_shortcut(),
         ) {
             log::error!("Failed to output transcript (UIA ladder): {}", e);
             record_output_failure(app, &e);
@@ -249,6 +250,7 @@ fn output_text_for_platform(
         output_intent.mode(),
         output_intent.hit_enter(),
         !output_intent.clipboard_privacy_mode(),
+        output_intent.paste_shortcut(),
     ) {
         log::error!("Failed to output transcript: {}", e);
         record_output_failure(app, &e);
@@ -269,6 +271,7 @@ fn output_text_for_platform(
         output_intent.mode(),
         output_intent.hit_enter(),
         !output_intent.clipboard_privacy_mode(),
+        output_intent.paste_shortcut(),
     ) {
         log::error!("Failed to output transcript: {}", e);
         record_output_failure(app, &e);

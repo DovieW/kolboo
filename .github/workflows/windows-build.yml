@@ -153,6 +153,8 @@ jobs:
       # a developer-local .env file that GitHub Actions will never see.
       TAURI_API_BASE_URL: https://kolboo.dovie.dev
       TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
+      TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
+      TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
     permissions:
       contents: read
@@ -223,25 +225,15 @@ jobs:
       - name: Compute Sentry build metadata
         id: sentry-meta
         shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_PUBLIC_DEV_DSN: ${{ vars.SENTRY_PUBLIC_DEV_DSN }}
+          SENTRY_PUBLIC_PROD_DSN: ${{ vars.SENTRY_PUBLIC_PROD_DSN }}
+          TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
         run: |
           set -euo pipefail
-
-          version=$(node -p "require('./app/package.json').version")
-          short_sha="${GITHUB_SHA::7}"
-
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            project="kolboo-public-prod"
-            environment="production"
-            release="kolboo@${GITHUB_REF_NAME#v}"
-          else
-            project="kolboo-public-dev"
-            environment="development"
-            release="kolboo@${version}-dev.${short_sha}"
-          fi
-
-          echo "project=${project}" >> "$GITHUB_OUTPUT"
-          echo "environment=${environment}" >> "$GITHUB_OUTPUT"
-          echo "release=${release}" >> "$GITHUB_OUTPUT"
+          node --test .github/scripts/configure-desktop-sentry.test.mjs .github/scripts/upload-desktop-symbols.test.mjs
+          node .github/scripts/configure-desktop-sentry.mjs
 
       - name: Require updater signing credentials for releases
         if: ${{ inputs.release_signing }}
@@ -303,6 +295,7 @@ jobs:
           SENTRY_ORG: dov-weinstock
           SENTRY_PROJECT: ${{ steps.sentry-meta.outputs.project }}
           SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
+          CARGO_PROFILE_RELEASE_DEBUG: 1
           TAURI_SENTRY_ENV: ${{ steps.sentry-meta.outputs.environment }}
           TAURI_SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
@@ -324,6 +317,7 @@ jobs:
             pnpm build
           fi
 
+          node ../.github/scripts/upload-desktop-symbols.mjs src-tauri/target/release/kolboo.exe src-tauri/target/release/kolboo.pdb
           sccache --show-stats || true
 
       - name: Collect bundles (default)
@@ -340,6 +334,7 @@ jobs:
         working-directory: app
         shell: bash
         env:
+          CARGO_PROFILE_RELEASE_DEBUG: 1
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: dov-weinstock
           SENTRY_PROJECT: ${{ steps.sentry-meta.outputs.project }}
@@ -367,6 +362,7 @@ jobs:
             pnpm build:local-whisper
           fi
 
+          node ../.github/scripts/upload-desktop-symbols.mjs src-tauri/target/release/kolboo.exe src-tauri/target/release/kolboo.pdb
           sccache --show-stats || true
 
       - name: Collect bundles (local-whisper)
@@ -421,6 +417,9 @@ jobs:
           sentry_project=${{ steps.sentry-meta.outputs.project }}
           sentry_environment=${{ steps.sentry-meta.outputs.environment }}
           sentry_release=${{ steps.sentry-meta.outputs.release }}
+          sentry_runtime_enabled=${{ steps.sentry-meta.outputs.reporting_enabled }}
+          sentry_sourcemaps_required=${{ steps.sentry-meta.outputs.sourcemaps_required }}
+          sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
           sentry_upload_enabled=${sentry_upload_enabled}
           bundle_artifact_default=${{ steps.artifact-meta.outputs.artifact_name_default }}
           bundle_artifact_local_whisper=${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}

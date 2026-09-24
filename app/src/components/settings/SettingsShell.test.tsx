@@ -25,7 +25,9 @@ vi.mock("./AudioSettings", () => ({
 	AudioSettings: () => <div>Audio controls</div>,
 }));
 vi.mock("./DataSettings", () => ({
-	DataSettings: () => <div>Data controls</div>,
+	DataSettings: ({ active }: { active: boolean }) => (
+		<div data-data-active={String(active)}>Data controls</div>
+	),
 }));
 vi.mock("./HotkeySettings", () => ({
 	HotkeySettings: () => <div>Hotkey controls</div>,
@@ -44,7 +46,7 @@ vi.mock("./PromptSettings", () => ({
 	PromptSettings: () => <div>AI controls</div>,
 }));
 vi.mock("./UiSettings", () => ({
-	UiSettings: () => <div>Appearance controls</div>,
+	UiSettings: () => <div>UI controls</div>,
 }));
 
 let host: HTMLDivElement;
@@ -55,7 +57,7 @@ async function render() {
 		root.render(
 			<QueryClientProvider client={client}>
 				<MantineProvider env="test">
-					<SettingsShell />
+					<SettingsShell onRunSetupGuide={vi.fn()} />
 				</MantineProvider>
 			</QueryClientProvider>,
 		),
@@ -80,6 +82,35 @@ afterEach(async () => {
 });
 
 describe("Settings shell", () => {
+	it("keeps cached Data controls mounted but deactivates their background work", async () => {
+		await render();
+		const tab = (name: string) => {
+			const target = [
+				...host.querySelectorAll<HTMLButtonElement>("[role='tab']"),
+			].find((node) => node.textContent === name);
+			if (!target) throw new Error(`Missing ${name} tab`);
+			return target;
+		};
+		await act(async () => tab("Data").click());
+		await act(async () => vi.advanceTimersByTimeAsync(1));
+		expect(
+			host
+				.querySelector("[data-data-active]")
+				?.getAttribute("data-data-active"),
+		).toBe("true");
+		await act(async () => tab("AI").click());
+		expect(
+			host
+				.querySelector("[data-data-active]")
+				?.getAttribute("data-data-active"),
+		).toBe("false");
+		await act(async () => tab("Data").click());
+		expect(
+			host
+				.querySelector("[data-data-active]")
+				?.getAttribute("data-data-active"),
+		).toBe("true");
+	});
 	it("places profile controls alongside named category tabs without a page heading", async () => {
 		await render();
 		const tabs = host.querySelector("[role='tablist']");
@@ -90,6 +121,7 @@ describe("Settings shell", () => {
 			tabs?.closest(".settings-tabs-toolbar"),
 		);
 		expect(host.querySelector("h1")).toBeNull();
+		expect(host.querySelector('[aria-label="Run setup guide"]')).toBeNull();
 		expect(host.querySelector(".main-content-inner")?.textContent).toContain(
 			"AI controls",
 		);
@@ -100,12 +132,12 @@ describe("Settings shell", () => {
 			host.querySelector("[role='tab'][aria-selected='true']")?.textContent,
 		).toBe("AI");
 		expect(host.querySelectorAll("[role='tab']")).toHaveLength(9);
-		const appearance = [
+		const ui = [
 			...host.querySelectorAll<HTMLButtonElement>("[role='tab']"),
-		].find((tab) => tab.textContent === "Appearance");
-		await act(async () => appearance?.click());
+		].find((tab) => tab.textContent === "UI");
+		await act(async () => ui?.click());
 		expect(host.querySelector(".main-content-inner")?.textContent).toContain(
-			"Appearance controls",
+			"UI controls",
 		);
 	});
 	it("activates heavy tabs before mounting their content", async () => {

@@ -877,36 +877,38 @@ impl RequestLogStore {
     pub fn get_logs(&self, limit: Option<usize>) -> Vec<RequestLog> {
         self.prune();
 
-        let logs = lock_or_recover(&self.logs);
         let current = lock_or_recover(&self.current);
+        // Match start_request/complete_current: current must precede logs.
+        let logs = lock_or_recover(&self.logs);
 
-        let mut result: Vec<RequestLog> = logs
+        current
             .iter()
+            .chain(logs.iter().rev())
+            .take(limit.unwrap_or(usize::MAX))
             .cloned()
             .map(redact_request_log_json_fields)
-            .collect();
+            .collect()
+    }
 
-        // Add current request if exists
-        if let Some(ref c) = *current {
-            result.push(redact_request_log_json_fields(c.clone()));
-        }
-
-        // Reverse to get most recent first
-        result.reverse();
-
-        if let Some(limit) = limit {
-            result.truncate(limit);
-        }
-
-        result
+    /// History needs availability only, not sensitive transcript/provider payloads.
+    pub fn get_ids(&self, limit: usize) -> Vec<String> {
+        self.prune();
+        let current = lock_or_recover(&self.current);
+        let logs = lock_or_recover(&self.logs);
+        current
+            .iter()
+            .chain(logs.iter().rev())
+            .take(limit.min(HARD_MAX_LOGS))
+            .map(|log| log.id.clone())
+            .collect()
     }
 
     /// Return the number of stored logs (including an in-progress current log, if any).
     pub fn count(&self) -> usize {
         self.prune();
 
-        let logs = lock_or_recover(&self.logs);
         let current = lock_or_recover(&self.current);
+        let logs = lock_or_recover(&self.logs);
         logs.len() + if current.is_some() { 1 } else { 0 }
     }
 
@@ -920,6 +922,31 @@ impl RequestLogStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn availability_is_ordered_and_bounded_without_copying_payloads() {
+        let store = RequestLogStore::new();
+        assert_eq!(store.count(), 0);
+        let first = store.start_request("mock".into(), None);
+        assert_eq!(store.count(), 1);
+        store.with_current(|log| {
+            log.raw_transcript = Some("private content".repeat(1000));
+        });
+        store.complete_current();
+        let second = store.start_request("mock".into(), None);
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get_ids(2), vec![second.clone(), first.clone()]);
+        assert_eq!(store.get_ids(1), vec![second.clone()]);
+        assert!(store.get_ids(0).is_empty());
+        assert_eq!(store.get_logs(Some(1))[0].id, second);
+        assert!(store.get_logs(Some(0)).is_empty());
+        store.complete_current();
+        assert_eq!(store.count(), 2);
+        assert_eq!(store.get_ids(2), vec![second, first]);
+        store.clear();
+        assert!(store.get_ids(50).is_empty());
+        assert_eq!(store.count(), 0);
+    }
     use serde_json::json;
 
     #[test]

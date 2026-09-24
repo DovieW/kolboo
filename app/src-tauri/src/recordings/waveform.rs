@@ -38,10 +38,20 @@ impl RecordingStore {
         Ok(())
     }
 
-    /// Run on a blocking worker. Serialize against save/deletion so a completed
-    /// analysis cannot recreate private metadata after the recording was deleted.
+    /// Run on a blocking worker. Only opening/publishing hold the store lock;
+    /// scanning a meeting must not block saving or deleting another recording.
     pub fn waveform(&self, id: &str) -> Result<Option<RecordingWaveform>, String> {
-        let _guard = self
+        self.waveform_with(id, analyze)
+    }
+
+    fn waveform_with(
+        &self,
+        id: &str,
+        analyze: impl FnOnce(
+            hound::WavReader<std::io::BufReader<std::fs::File>>,
+        ) -> Result<RecordingWaveform, String>,
+    ) -> Result<Option<RecordingWaveform>, String> {
+        let guard = self
             .media_write
             .lock()
             .map_err(|_| "Recording store unavailable")?;
@@ -90,8 +100,23 @@ impl RecordingStore {
                 }
             }
         }
-        let reader = hound::WavReader::open(path).map_err(|_| "This recording cannot be played")?;
+        let reader =
+            hound::WavReader::open(&path).map_err(|_| "This recording cannot be played")?;
+        drop(guard);
         let waveform = analyze(reader)?;
+        let _guard = self
+            .media_write
+            .lock()
+            .map_err(|_| "Recording store unavailable")?;
+        // Deletion wins over an in-flight analysis: never resurrect its cache.
+        let Some(current_path) = self.wav_path_if_exists(id)? else {
+            return Ok(None);
+        };
+        let current =
+            std::fs::metadata(&current_path).map_err(|_| "Could not read audio metadata")?;
+        if current.len() != metadata.len() || current.modified().ok() != metadata.modified().ok() {
+            return Err("Recording changed during analysis. Open it again.".into());
+        }
         let cache = CachedWaveform {
             version: VERSION,
             bytes: metadata.len(),
@@ -156,6 +181,51 @@ fn analyze<R: Read + Seek>(mut reader: hound::WavReader<R>) -> Result<RecordingW
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn analysis_does_not_lock_writes_or_resurrect_deleted_or_replaced_audio() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = RecordingStore::new(temp.path().to_owned());
+        let mut wav = Cursor::new(Vec::new());
+        let mut writer = hound::WavWriter::new(
+            &mut wav,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 16000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .unwrap();
+        writer.write_sample(123_i16).unwrap();
+        writer.finalize().unwrap();
+        store.save_wav("deleted", wav.get_ref()).unwrap();
+        let result = store
+            .waveform_with("deleted", |reader| {
+                assert!(
+                    store.media_write.try_lock().is_ok(),
+                    "scan held the recording write lock"
+                );
+                store.delete_wav_if_exists("deleted").unwrap();
+                analyze(reader)
+            })
+            .unwrap();
+        assert!(result.is_none());
+        assert!(!store.waveform_path("deleted").exists());
+
+        store.save_wav("replaced", wav.get_ref()).unwrap();
+        let error = store
+            .waveform_with("replaced", |reader| {
+                let waveform = analyze(reader)?;
+                store.save_wav("other", wav.get_ref()).unwrap();
+                store.save_wav("replaced", b"replacement audio").unwrap();
+                Ok(waveform)
+            })
+            .unwrap_err();
+        assert!(error.contains("changed during analysis"));
+        assert!(!store.waveform_path("replaced").exists());
+        assert!(store.has("other"));
+    }
 
     #[test]
     fn empty_audio_has_a_useful_error_instead_of_invalid_peaks() {

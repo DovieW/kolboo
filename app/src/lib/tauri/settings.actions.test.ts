@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { TELEMETRY_DISCLOSURE_VERSION } from "../settings/telemetryDisclosure";
 
 type StoreLike = {
 	get<T = unknown>(key: string): Promise<T | undefined>;
@@ -151,6 +152,17 @@ describe("tauri settings side effects", () => {
 			patch: { output_smart_paste_protection: true },
 			deleteKeys: [],
 		});
+	});
+
+	it("persists the paste chord and synchronizes the runtime", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+		await tauriSettingsAPI.updateOutputPasteShortcut("ctrl_shift_v");
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: { output_paste_shortcut: "ctrl_shift_v" },
+			deleteKeys: [],
+		});
+		expect(invokeMock).toHaveBeenCalledWith("sync_pipeline_config");
 	});
 
 	it("updateRequestLogsPrivacyMode patches settings", async () => {
@@ -427,7 +439,7 @@ describe("tauri settings side effects", () => {
 		expect(invokeMock).toHaveBeenNthCalledWith(1, "settings_apply_patch", {
 			patch: {
 				telemetry_disclosure_acknowledged_at: "2026-05-13T18:30:00.000Z",
-				telemetry_disclosure_version: "2026-05-phase6b-v1",
+				telemetry_disclosure_version: TELEMETRY_DISCLOSURE_VERSION,
 			},
 			deleteKeys: [],
 		});
@@ -496,7 +508,9 @@ describe("tauri settings side effects", () => {
 		}
 
 		expect(
-			invokeMock.mock.calls.filter(([command]) => command === "settings_apply_patch"),
+			invokeMock.mock.calls.filter(
+				([command]) => command === "settings_apply_patch",
+			),
 		).toHaveLength(calls.length);
 		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
 			patch: { ocr_resize_max_dimension: 1_920 },

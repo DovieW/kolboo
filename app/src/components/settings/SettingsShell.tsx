@@ -9,7 +9,7 @@ import {
 	Tooltip,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { CircleHelp, Cog, Plus } from "lucide-react";
+import { Cog, Plus } from "lucide-react";
 import { lazy, Suspense, startTransition, useEffect, useState } from "react";
 import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
 import { useLicenseAuthContext, useSettings } from "../../lib/queries";
@@ -50,7 +50,7 @@ type EditingOption = {
 	isDisabledProfile?: boolean;
 };
 
-export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
+export function SettingsShell(_props: SettingsShellProps) {
 	const { data: settings } = useSettings();
 	const { data: licenseAuthContext, isFetched: licenseAuthContextResolved } =
 		useLicenseAuthContext();
@@ -175,6 +175,7 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 				<header className="settings-tabs-toolbar">
 					<div className="settings-header-row">
 						<div className="settings-header-actions">
+							{/* Setup guide button intentionally hidden for now.
 							{onRunSetupGuide ? (
 								<Tooltip label="Run setup guide" withArrow>
 									<ActionIcon
@@ -188,6 +189,7 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 									</ActionIcon>
 								</Tooltip>
 							) : null}
+							*/}
 
 							<Text
 								component="label"
@@ -266,7 +268,7 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 					</div>
 					<Tabs.List aria-label="Settings categories">
 						<Tabs.Tab value="ai">AI</Tabs.Tab>
-						<Tabs.Tab value="ui">Appearance</Tabs.Tab>
+						<Tabs.Tab value="ui">UI</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
 						<Tabs.Tab
@@ -349,7 +351,10 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 						<div className="settings-card">
 							{mountedHeavyTabs.has("data") ? (
 								<Suspense fallback={<SettingsPanelLoading label="Data" />}>
-									<LazyDataSettings editingProfileId={editingProfileId} />
+									<LazyDataSettings
+										editingProfileId={editingProfileId}
+										active={activeSettingsTab === "data"}
+									/>
 								</Suspense>
 							) : (
 								<SettingsPanelLoading label="Data" />

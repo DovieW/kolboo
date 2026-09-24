@@ -20,6 +20,7 @@ export class RecordingPlayback {
 	private generation = 0;
 	private playIntent = 0;
 	private positions = new Map<string, number>();
+	private waveformLoads = new Map<string, Promise<RecordingWaveform | null>>();
 	private listeners = new Set<() => void>();
 	private state: PlaybackState = {
 		id: null,
@@ -51,6 +52,16 @@ export class RecordingPlayback {
 		this.state = { ...this.state, ...patch };
 		for (const listener of this.listeners) listener();
 	}
+	private loadWaveform(id: string) {
+		let pending = this.waveformLoads.get(id);
+		if (!pending) {
+			pending = this.dependencies.getWaveform(id).finally(() => {
+				this.waveformLoads.delete(id);
+			});
+			this.waveformLoads.set(id, pending);
+		}
+		return pending;
+	}
 	private createAudio() {
 		const audio = this.dependencies.createAudio();
 		audio.preload = "metadata";
@@ -70,8 +81,15 @@ export class RecordingPlayback {
 		});
 		audio.addEventListener("loadedmetadata", () => {
 			if (this.media !== audio) return;
+			this.update({
+				duration:
+					Number.isFinite(audio.duration) && audio.duration > 0
+						? audio.duration
+						: this.state.duration,
+				loading: false,
+				ready: true,
+			});
 			if (this.state.id) this.seek(this.positions.get(this.state.id) ?? 0);
-			this.update({ loading: false, ready: true });
 		});
 		audio.addEventListener("error", () => {
 			if (this.media === audio && audio.getAttribute("src")) {
@@ -111,6 +129,7 @@ export class RecordingPlayback {
 		if (
 			this.state.id === id &&
 			this.media?.getAttribute("src") &&
+			this.state.waveform &&
 			!this.state.error
 		)
 			return;
@@ -128,22 +147,24 @@ export class RecordingPlayback {
 			duration: 0,
 			position: this.positions.get(id) ?? 0,
 		});
+		// Audio metadata/range playback need not wait for a first-time meeting scan.
+		void this.loadWaveform(id)
+			.then((waveform) => {
+				if (generation !== this.generation || !waveform) return;
+				this.update({ waveform, duration: waveform.duration_seconds });
+			})
+			.catch(() => {
+				// A failed optional visualization must not prevent listening to saved audio.
+			});
 		try {
-			const [url, waveform] = await Promise.all([
-				this.dependencies.getUrl(id),
-				this.dependencies.getWaveform(id),
-			]);
+			const url = await this.dependencies.getUrl(id);
 			if (generation !== this.generation) return;
-			if (!url || !waveform) {
+			if (!url) {
 				this.fail("No saved audio is available for this recording.");
 				return;
 			}
 			audio.src = url;
 			audio.playbackRate = this.state.rate;
-			this.update({
-				waveform,
-				duration: waveform.duration_seconds,
-			});
 			audio.load();
 		} catch {
 			if (generation === this.generation)

@@ -89,18 +89,43 @@ describe("launch-critical rendered settings flows", () => {
 	it("keeps analytics paused behind an explicit disclosure", () => {
 		const html = render(
 			<TelemetryDisclosureContent
-				analyticsEnabled={false}
 				analyticsPolicyEnforced={false}
 				analyticsPolicyReason={null}
 				loading={false}
 				onDisableAnalytics={vi.fn()}
-				onContinue={vi.fn()}
+				onAllowAnalytics={vi.fn()}
 			/>,
 		);
 
-		expect(html).toContain("Nothing is sent until you make a choice");
-		expect(html).toContain("no transcripts, prompts, audio, or OCR content");
-		expect(html).toContain("Keep analytics disabled");
+		expect(html).toContain("basic usage without a persistent ID");
+		expect(html).toContain("No audio or transcript content is sent");
+		expect(html).toContain("Basic usage only");
+		expect(html).toContain("What’s shared?");
+		expect(html).not.toContain("Recording events include rounded duration");
+		const optionalHtml = render(
+			<TelemetryDisclosureContent
+				analyticsPolicyEnforced={false}
+				analyticsPolicyReason={null}
+				loading={false}
+				onDisableAnalytics={vi.fn()}
+				onAllowAnalytics={vi.fn()}
+			/>,
+		);
+		expect(optionalHtml).toContain("Basic usage only");
+		expect(optionalHtml).toContain("Allow linked analytics");
+
+		const policyHtml = render(
+			<TelemetryDisclosureContent
+				analyticsPolicyEnforced
+				analyticsPolicyReason="Workspace policy"
+				loading={false}
+				onDisableAnalytics={vi.fn()}
+				onAllowAnalytics={vi.fn()}
+			/>,
+		);
+		expect(policyHtml).toContain("No events will be sent");
+		expect(policyHtml).toContain("Continue");
+		expect(policyHtml).not.toContain("Allow linked analytics");
 	});
 
 	it("makes global provider controls inert for non-default profiles, including keyboard input", () => {

@@ -141,6 +141,29 @@ export interface FileImportResult {
   transcription_complete: boolean;
 }
 
+// From: history-activity.schema.json
+export interface HistoryActivity {
+  days: ActivityDay[];
+  models: ActivityModel[];
+  totals: ActivityTotals;
+}
+export interface ActivityDay {
+  date: string;
+  totals: ActivityTotals;
+}
+export interface ActivityTotals {
+  audio_seconds: number;
+  meetings: number;
+  recordings: number;
+  timed_recordings: number;
+  words: number;
+}
+export interface ActivityModel {
+  model: string;
+  provider: string;
+  totals: ActivityTotals;
+}
+
 // From: history-changed.schema.json
 export type Null = null;
 
@@ -1058,6 +1081,7 @@ export interface RewriteProgramPromptProfile {
   openai_reasoning_effort?: string | null;
   output_hit_enter?: boolean | null;
   output_mode?: string | null;
+  output_paste_shortcut?: string | null;
   overlay_mode?: string | null;
   playing_audio_handling?: string | null;
   presets?: RewritePreset[];

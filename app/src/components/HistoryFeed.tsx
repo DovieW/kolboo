@@ -21,7 +21,7 @@ import {
 	useHistoryAll,
 	useHistoryPage,
 	useRecordingsStats,
-	useRequestLogs,
+	useRequestLogIds,
 	useRetryTranscription,
 	useSettings,
 } from "../lib/queries";
@@ -33,6 +33,7 @@ import {
 	tauriAPI,
 } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
+import { useBackendEvent } from "../lib/tauri/useBackendEvent";
 import { HistoryAnalysisPanel } from "./history/HistoryAnalysisPanel";
 import { HistoryDeleteDialogs } from "./history/HistoryDeleteDialogs";
 import { HistoryFeedFilterToolbar } from "./history/HistoryFeedFilterToolbar";
@@ -111,9 +112,9 @@ export function HistoryFeed({
 		}
 		return fallback;
 	})();
-	const { data: requestLogs } = useRequestLogs(requestLogsLimit);
+	const { data: requestLogs } = useRequestLogIds(requestLogsLimit);
 	const requestLogIds = useMemo(
-		() => new Set((requestLogs ?? []).map((l) => l.id)),
+		() => new Set(requestLogs ?? []),
 		[requestLogs],
 	);
 
@@ -232,25 +233,14 @@ export function HistoryFeed({
 	);
 
 	// Listen for history changes from other windows (e.g., overlay after transcription)
-	useEffect(() => {
-		let unlisten: (() => void) | undefined;
-
-		const setup = async () => {
-			unlisten = await tauriAPI.onHistoryChanged(() => {
-				void prunePendingHistoryDocuments();
-				queryClient.invalidateQueries({ queryKey: ["historyDetail"] });
-				queryClient.invalidateQueries({ queryKey: ["history"] });
-				queryClient.invalidateQueries({ queryKey: ["historyAll"] });
-				queryClient.invalidateQueries({ queryKey: ["historyPage"] });
-			});
-		};
-
-		void setup();
-
-		return () => {
-			unlisten?.();
-		};
-	}, [queryClient]);
+	useBackendEvent("history-changed", () => {
+		void prunePendingHistoryDocuments();
+		void queryClient.invalidateQueries({ queryKey: ["historyDetail"] });
+		void queryClient.invalidateQueries({ queryKey: ["history"] });
+		void queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+		void queryClient.invalidateQueries({ queryKey: ["historyPage"] });
+		void queryClient.invalidateQueries({ queryKey: ["requestLogs", "ids"] });
+	});
 
 	const handleDelete = (id: string) => {
 		void (async () => {
@@ -673,7 +663,6 @@ export function HistoryFeed({
 				onRetryEntry={handleRetryEntry}
 				isRetryPending={retryMutation.isPending}
 				retryPendingEntryId={retryPendingEntryId}
-				recordingExistsById={historyOrchestration.recordingExistsById}
 				player={player}
 				requestLogIds={requestLogIds}
 				onJumpToLog={onJumpToLog}

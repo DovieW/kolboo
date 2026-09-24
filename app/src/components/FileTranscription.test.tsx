@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { audioFilesAPI } from "../lib/tauri/audioFiles";
@@ -11,6 +11,7 @@ import type {
 	RecordingPreferences,
 } from "../lib/tauri/types";
 import { FileTranscription } from "./FileTranscription";
+import styles from "./FileTranscription.module.css";
 
 vi.mock("../lib/tauri/audioFiles", async (original) => {
 	const actual = await original<typeof import("../lib/tauri/audioFiles")>();
@@ -28,32 +29,35 @@ vi.mock("../lib/tauri/commands", () => ({
 		cancel: vi.fn(),
 	},
 }));
-vi.mock("./MeetingModelDialog", () => ({
-	MeetingModelDialog: ({
-		preferences,
-		onSave,
+vi.mock("./FileModelPicker", () => ({
+	FileModelPicker: ({
+		value,
+		onChange,
+		onReadyChange,
+		disabled,
 	}: {
-		preferences: RecordingPreferences;
-		onSave: (value: RecordingPreferences) => void;
-	}) => (
-		<div role="dialog">
+		value: RecordingPreferences["meeting_model"];
+		onChange: (value: RecordingPreferences["meeting_model"]) => void;
+		onReadyChange: (value: boolean) => void;
+		disabled: boolean;
+	}) => {
+		useEffect(() => onReadyChange(value !== null), [value, onReadyChange]);
+		return (
 			<button
 				type="button"
+				disabled={disabled}
 				onClick={() =>
-					onSave({
-						...preferences,
-						meeting_model: {
-							provider: "openai",
-							model: "speaker-model",
-							use_managed: false,
-						},
+					onChange({
+						provider: "openai",
+						model: "speaker-model",
+						use_managed: false,
 					})
 				}
 			>
 				Select speaker model
 			</button>
-		</div>
-	),
+		);
+	},
 }));
 let host: HTMLDivElement;
 let root: Root;
@@ -61,7 +65,14 @@ let client: QueryClient;
 let onDrop: ((paths: string[]) => void) | undefined;
 const unlisten = vi.fn();
 const history = vi.fn();
-const prefs = { mode: "dictation" as const, meeting_model: null };
+const prefs: RecordingPreferences = {
+	mode: "dictation",
+	meeting_model: {
+		provider: "openai",
+		model: "regular-model",
+		use_managed: false,
+	},
+};
 async function settle() {
 	await act(async () => {
 		await vi.advanceTimersByTimeAsync(2);
@@ -133,9 +144,39 @@ afterEach(async () => {
 	vi.useRealTimers();
 });
 describe("File transcription", () => {
+	it("shows drag feedback only while the recorder can accept a file", async () => {
+		const hover = vi.mocked(audioFilesAPI.listenForDrop).mock.calls.at(-1)?.[1];
+		expect(hover).toBeDefined();
+		await act(async () => hover?.(true));
+		expect(host.querySelector(`.${styles.dropActive}`)).not.toBeNull();
+		expect(host.querySelector(".mantine-Paper-root")).toBeNull();
+		await act(async () =>
+			client.setQueryData(["home-recording-state"], "recording"),
+		);
+		await settle();
+		expect(host.querySelector(`.${styles.dropActive}`)).toBeNull();
+		expect(button("Choose file")?.disabled).toBe(true);
+		await act(async () => hover?.(false));
+		expect(host.querySelector(`.${styles.drop}`)).not.toBeNull();
+	});
 	it("starts with the drop zone rather than a redundant page header", () => {
 		expect(host.querySelector("h1")).toBeNull();
+		expect(host.querySelector(".mantine-Paper-root")).toBeNull();
 		expect(host.textContent).toContain("Drop an audio file here");
+		expect(button("Choose file")).not.toBeNull();
+		expect(button("Transcribe")).not.toBeNull();
+	});
+	it("removes the selected file without uploading or changing recorder settings", async () => {
+		await drop(["/meeting.wav"]);
+		await act(async () =>
+			host
+				.querySelector<HTMLButtonElement>('[aria-label="Remove selected file"]')
+				?.click(),
+		);
+		expect(host.textContent).toContain("Drop an audio file here");
+		expect(button("Transcribe")?.disabled).toBe(true);
+		expect(recordingControlsAPI.importFile).not.toHaveBeenCalled();
+		expect(client.getQueryData(["recording-preferences"])).toEqual(prefs);
 	});
 	it("explains initial loading and pins late-loaded options for an already selected file", async () => {
 		await act(async () => root.unmount());
@@ -179,7 +220,7 @@ describe("File transcription", () => {
 		await click("Transcribe");
 		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
 			"/meeting.wav",
-			prefs,
+			{ ...prefs, mode: "meeting" },
 		);
 	});
 	it("uses current recorder defaults until a file or its options are selected", async () => {
@@ -196,10 +237,7 @@ describe("File transcription", () => {
 			client.setQueryData(["recording-preferences"], meeting),
 		);
 		await render(true);
-		expect(
-			(host.querySelector('input[value="meeting"]') as HTMLInputElement)
-				.checked,
-		).toBe(true);
+
 		await drop(["/meeting.wav"]);
 		await click("Transcribe");
 		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
@@ -217,32 +255,33 @@ describe("File transcription", () => {
 			}),
 		);
 		await render(true);
-		expect(
-			(host.querySelector('input[value="dictation"]') as HTMLInputElement)
-				.checked,
-		).toBe(true);
+
 		await click("Transcribe");
 		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
 			"/dictation.wav",
-			prefs,
+			{ ...prefs, mode: "meeting" },
 		);
 	});
-	it("preserves an explicit mode choice before a file is selected", async () => {
-		await act(async () =>
-			(
-				host.querySelector('input[value="meeting"]') as HTMLInputElement
-			).click(),
-		);
-		await settle();
+	it("preserves an explicit model choice before selecting a file", async () => {
+		await click("Select speaker model");
 		await render(false);
 		await act(async () =>
 			client.setQueryData(["recording-preferences"], { ...prefs }),
 		);
 		await render(true);
-		expect(
-			(host.querySelector('input[value="meeting"]') as HTMLInputElement)
-				.checked,
-		).toBe(true);
+		await drop(["/meeting.wav"]);
+		await click("Transcribe");
+		expect(recordingControlsAPI.importFile).toHaveBeenCalledWith(
+			"/meeting.wav",
+			{
+				mode: "meeting",
+				meeting_model: {
+					provider: "openai",
+					model: "speaker-model",
+					use_managed: false,
+				},
+			},
+		);
 	});
 	it("selects without uploading and starts only on explicit Transcribe", async () => {
 		expect(button("Transcribe")?.disabled).toBe(true);
@@ -253,7 +292,7 @@ describe("File transcription", () => {
 		await click("Transcribe");
 		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
 			"/private/meeting.wav",
-			prefs,
+			{ ...prefs, mode: "meeting" },
 		);
 		expect(host.textContent).toContain("Saved to History");
 		await click("Open History");
@@ -280,7 +319,7 @@ describe("File transcription", () => {
 		});
 		await drop(["/meeting.wav"]);
 		await click("Transcribe");
-		expect(host.textContent).toContain("Audio saved for retry");
+		expect(button("Retry saved audio")).toBeDefined();
 		await click("Retry saved audio");
 		expect(recordingControlsAPI.recover).toHaveBeenCalledExactlyOnceWith(
 			"saved-id",
@@ -325,7 +364,7 @@ describe("File transcription", () => {
 		await drop(["/meeting.wav"]);
 		await click("Transcribe");
 		await click("Retry saved audio");
-		expect(host.textContent).toContain("Audio saved for retry");
+		expect(button("Retry saved audio")).toBeDefined();
 		expect(host.textContent).not.toContain("Saved to History");
 		expect(button("Open History")).toBeUndefined();
 		expect(button("Retry saved audio")?.disabled).toBe(false);
@@ -346,7 +385,7 @@ describe("File transcription", () => {
 		await click("Transcribe");
 		await click("Retry saved audio");
 		expect(host.textContent).toContain(
-			"Transcript saved; cleanup needs attention",
+			"Could not remove saved recording files",
 		);
 		expect(host.textContent).toContain("Saved to History");
 		expect(button("Retry saved audio")).toBeUndefined();
@@ -376,7 +415,7 @@ describe("File transcription", () => {
 		await drop(["/meeting.wav"]);
 		await click("Transcribe");
 		expect(host.textContent).toContain(
-			"Transcript saved; cleanup needs attention",
+			"Could not remove saved recording files",
 		);
 		expect(button("Retry saved audio")).toBeUndefined();
 		expect(button("Open History")).toBeDefined();
@@ -420,20 +459,16 @@ describe("File transcription", () => {
 		await settle();
 		expect(button("Retry saved audio")?.disabled).toBe(false);
 	});
-	it("requires an explicit Meeting model and keeps its choice local to the file", async () => {
-		await drop(["/meeting.wav"]);
+	it("requires a model and keeps file choices separate from recorder settings", async () => {
 		await act(async () =>
-			(
-				host.querySelector('input[value="meeting"]') as HTMLInputElement
-			).click(),
+			client.setQueryData(["recording-preferences"], {
+				mode: "dictation",
+				meeting_model: null,
+			}),
 		);
 		await settle();
+		await drop(["/meeting.wav"]);
 		expect(button("Transcribe")?.disabled).toBe(true);
-		await click("Choose model");
-		expect(host.querySelector('[role="dialog"]')).not.toBeNull();
-		await render(false);
-		expect(host.querySelector('[role="dialog"]')).toBeNull();
-		await render(true);
 		await click("Select speaker model");
 		await click("Transcribe");
 		expect(recordingControlsAPI.importFile).toHaveBeenCalledWith(
@@ -447,7 +482,10 @@ describe("File transcription", () => {
 				},
 			},
 		);
-		expect(client.getQueryData(["recording-preferences"])).toEqual(prefs);
+		expect(client.getQueryData(["recording-preferences"])).toEqual({
+			mode: "dictation",
+			meeting_model: null,
+		});
 	});
 	it("shows a reconnect action instead of silently disabling the page after a state failure", async () => {
 		vi.mocked(recordingControlsAPI.getState).mockRejectedValue(
