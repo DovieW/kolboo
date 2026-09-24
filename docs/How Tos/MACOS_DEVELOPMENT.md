@@ -3,21 +3,24 @@
 **Status:** Active engineering; not yet a supported release platform
 
 Kolboo's private macOS test build is produced by the manually triggered
-`macOS Development Build` GitHub Actions workflow. It does not run for pushes or
-pull requests, so macOS runner usage remains an explicit decision.
+`Build (macOS)` GitHub Actions workflow. It does not run for pushes or
+pull requests. The stable-tag Release workflow also builds an explicitly
+experimental universal Mac download from the same workflow. Neither artifact
+is a supported Mac release until native acceptance is complete.
 
 ## Build an artifact
 
-1. Open **Actions → macOS Development Build → Run workflow**.
+1. Open **Actions → Build (macOS) → Run workflow**.
 2. Choose `apple-silicon`, `intel`, or `universal`.
 3. Download the `kolboo-macos-*` artifact after the job succeeds.
 4. Prefer the DMG for normal installation testing. The application ZIP is also
    retained for bundle inspection and troubleshooting.
 
-The development artifact uses ad-hoc signing. It is not notarized, does not
-enable signed updater delivery, and is not a public release. macOS may require
-the tester to approve the application from **System Settings → Privacy &
-Security** after the first download.
+Both development and release-channel Mac artifacts use ad-hoc signing. They are
+not Apple Developer ID signed or notarized, and do not enable signed updater
+delivery. The release-channel download is labeled experimental. macOS may
+require the tester to approve the application from **System Settings → Privacy
+& Security** after the first download.
 
 ## Deferred native-validation checkpoint
 

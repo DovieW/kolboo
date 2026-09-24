@@ -72,11 +72,21 @@ jobs:
       release_signing: true
     secrets: inherit
 
+  build-macos:
+    name: Build experimental macOS bundle
+    needs: verify
+    uses: ./.github/workflows/macos-build.yml
+    with:
+      architecture: universal
+      release_build: true
+    secrets: inherit
+
   publish:
     name: Publish GitHub Release
     needs:
       - verify
       - build-windows
+      - build-macos
     runs-on: ubuntu-latest
 
     steps:
@@ -104,10 +114,21 @@ jobs:
           name: ${{ needs.build-windows.outputs.artifact-name-local-whisper }}
           path: .release/windows/local-whisper
 
+      - name: Download macOS bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.build-macos.outputs.artifact-name }}
+          path: .release/macos
+
       - name: Attest build provenance (Windows bundles)
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: .release/windows/**
+
+      - name: Attest build provenance (macOS bundles)
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: .release/macos/**
 
       - name: Disclose unsigned Windows publisher identity
         if: ${{ needs.build-windows.outputs.publisher-signed != 'true' }}
@@ -116,6 +137,14 @@ jobs:
           cat >> .release/RELEASE_NOTES.md <<'EOF'
 
           > **Windows installer signing:** These installers do not have an Authenticode publisher signature, so Windows may show an Unknown publisher warning. Automatic-update packages remain signed with Kolboo's updater key.
+          EOF
+
+      - name: Disclose experimental macOS distribution
+        shell: bash
+        run: |
+          cat >> .release/RELEASE_NOTES.md <<'EOF'
+
+          > **macOS (experimental):** The universal Mac download is ad-hoc signed, not Apple Developer ID signed or notarized, and has no automatic updater. macOS may block its first launch; only proceed if you trust this download. Native Mac acceptance is still pending.
           EOF
 
       - name: Generate signed updater manifest
@@ -128,4 +157,6 @@ jobs:
           body_path: .release/RELEASE_NOTES.md
           files: |
             .release/windows/**
+            .release/macos/*.dmg
+            .release/macos/*.app.zip
           fail_on_unmatched_files: true

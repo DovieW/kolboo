@@ -1,6 +1,21 @@
-name: macOS Development Build
+name: Build (macOS)
 
 on:
+  workflow_call:
+    inputs:
+      architecture:
+        description: "Mac architecture to package"
+        required: true
+        type: string
+      release_build:
+        description: "Use release Sentry configuration and require release telemetry assets"
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      artifact-name:
+        description: "Name of the uploaded macOS bundle artifact"
+        value: ${{ jobs.build-macos.outputs.artifact-name }}
   workflow_dispatch:
     inputs:
       architecture:
@@ -17,13 +32,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: macos-development-build-${{ github.ref }}
+  group: macos-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-macos:
     name: Build macOS (${{ inputs.architecture }})
     runs-on: ${{ inputs.architecture == 'intel' && 'macos-15-intel' || 'macos-15' }}
+
+    outputs:
+      artifact-name: ${{ steps.package.outputs.artifact_name }}
 
     env:
       CARGO_BUILD_JOBS: 3
@@ -88,13 +106,14 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      - name: Compute development build metadata
+      - name: Compute build metadata
         id: build-meta
         shell: bash
         env:
-          SENTRY_BUILD_KIND: development
+          SENTRY_BUILD_KIND: ${{ inputs.release_build && 'release' || 'development' }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_PUBLIC_DEV_DSN: ${{ vars.SENTRY_PUBLIC_DEV_DSN }}
+          SENTRY_PUBLIC_PROD_DSN: ${{ vars.SENTRY_PUBLIC_PROD_DSN }}
           TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
         run: |
           set -euo pipefail
@@ -123,11 +142,11 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: dov-weinstock
-          SENTRY_PROJECT: kolboo-public-dev
+          SENTRY_PROJECT: ${{ steps.build-meta.outputs.project }}
           SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
-          TAURI_SENTRY_ENV: development
+          TAURI_SENTRY_ENV: ${{ steps.build-meta.outputs.environment }}
           TAURI_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
-          VITE_SENTRY_ENV: development
+          VITE_SENTRY_ENV: ${{ steps.build-meta.outputs.environment }}
           VITE_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
           VITE_SIGNED_UPDATER_ENABLED: "false"
         shell: bash
@@ -161,11 +180,15 @@ jobs:
           test -x "$executable"
           file "$executable"
           lipo -info "$executable"
+          if [[ "$KOLBOO_BUILD_TARGET" == "universal-apple-darwin" ]]; then
+            lipo -verify_arch arm64 x86_64 "$executable"
+          fi
 
           echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
           echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
 
       - name: Package downloadable artifacts
+        id: package
         shell: bash
         run: |
           set -euo pipefail
@@ -191,11 +214,12 @@ jobs:
           run_id=${GITHUB_RUN_ID}
           run_url=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           EOF
+          echo "artifact_name=kolboo-macos-${KOLBOO_ARTIFACT_SUFFIX}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload macOS development bundles
+      - name: Upload macOS bundles
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: kolboo-macos-${{ inputs.architecture }}
+          name: ${{ steps.package.outputs.artifact_name }}
           if-no-files-found: error
           retention-days: 7
           path: artifacts/**
