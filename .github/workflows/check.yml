@@ -98,6 +98,10 @@ jobs:
       - name: Setup sccache for Rust coverage
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
+      - name: Generate schema fixtures for Rust coverage tests
+        working-directory: app
+        run: pnpm schemas:generate
+
       - name: Generate Rust coverage
         working-directory: app
         run: pnpm cargo:coverage -- --lcov --output-path coverage/rust-lcov.info

@@ -3,13 +3,27 @@ use super::*;
 #[test]
 fn window_queries_exclude_self_and_keep_titles_opt_in() {
     // An owned child keeps /proc identity deterministic without probing the
-    // user's applications. Closing stdin terminates it, including on failure.
-    let mut child = Command::new("cat")
+    // user's applications. Wait for its shell to be ready before inspecting
+    // /proc; the spawned process may not have replaced its image yet.
+    let mut child = Command::new("sh")
+        .args(["-c", "printf x; while IFS= read -r line; do :; done"])
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .spawn()
         .unwrap();
     let pid = child.id();
+    let mut ready = [0_u8; 1];
+    child
+        .stdout
+        .as_mut()
+        .unwrap()
+        .read_exact(&mut ready)
+        .unwrap();
+    assert_eq!(ready, [b'x']);
+    let expected_path = std::fs::read_link(format!("/proc/{pid}/exe"))
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let windows = || {
         vec![
             RawWindow {
@@ -40,7 +54,7 @@ fn window_queries_exclude_self_and_keep_titles_opt_in() {
     assert!(child.wait().unwrap().success());
     assert_eq!(private.len(), 1);
     assert!(private[0].title.is_empty());
-    assert!(private[0].process_path.ends_with("/cat"));
+    assert_eq!(private[0].process_path, expected_path);
     assert_eq!(titled.len(), 1);
     assert_eq!(titled[0].title, "synthetic title");
     assert_eq!(private[0].process_path, titled[0].process_path);
