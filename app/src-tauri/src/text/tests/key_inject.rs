@@ -26,16 +26,21 @@ impl Keyboard for KeyboardSpy {
 
 #[test]
 fn paste_chords_press_in_order_and_release_in_reverse() {
-    for (raw, modifiers, key) in [
+    let mut chords = vec![
         ("ctrl_v", vec![Key::Control], Key::Unicode('v')),
         (
             "ctrl_shift_v",
             vec![Key::Control, Key::Shift],
             Key::Unicode('v'),
         ),
-        ("shift_insert", vec![Key::Shift], Key::Insert),
         ("cmd_v", vec![Key::Meta], Key::Unicode('v')),
-    ] {
+    ];
+    #[cfg(target_os = "macos")]
+    chords.push(("shift_insert", vec![Key::Meta], Key::Unicode('v')));
+    #[cfg(not(target_os = "macos"))]
+    chords.push(("shift_insert", vec![Key::Shift], Key::Insert));
+
+    for (raw, modifiers, key) in chords {
         let mut keyboard = KeyboardSpy::default();
         let mut delays = vec![];
         send_paste_shortcut(

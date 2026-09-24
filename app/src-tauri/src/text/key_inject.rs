@@ -32,7 +32,18 @@ impl PasteShortcut {
             }
             Self::CtrlV => (&[Key::Control], Key::Unicode('v')),
             Self::CtrlShiftV => (&[Key::Control, Key::Shift], Key::Unicode('v')),
-            Self::ShiftInsert => (&[Key::Shift], Key::Insert),
+            Self::ShiftInsert => {
+                // macOS has no Insert key in Enigo. Preserve the intent to paste
+                // if this shortcut was carried over from another platform.
+                #[cfg(target_os = "macos")]
+                {
+                    Self::CmdV.keys()
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    (&[Key::Shift], Key::Insert)
+                }
+            }
             Self::CmdV => (&[Key::Meta], Key::Unicode('v')),
         }
     }
