@@ -108,12 +108,22 @@ jobs:
         with:
           subject-path: .release/windows/**
 
+      - name: Disclose unsigned Windows publisher identity
+        if: ${{ needs.build-windows.outputs.publisher-signed != 'true' }}
+        shell: bash
+        run: |
+          cat >> .release/RELEASE_NOTES.md <<'EOF'
+
+          > **Windows installer signing:** These installers do not have an Authenticode publisher signature, so Windows may show an Unknown publisher warning. Automatic-update packages remain signed with Kolboo's updater key.
+          EOF
+
       - name: Generate signed updater manifest
         run: node .github/scripts/generate-updater-manifest.mjs .release/windows/default .release/RELEASE_NOTES.md .release/windows/default/latest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          name: ${{ needs.build-windows.outputs.publisher-signed == 'true' && format('Kolboo {0}', github.ref_name) || format('Kolboo {0} (unsigned Windows installer)', github.ref_name) }}
           body_path: .release/RELEASE_NOTES.md
           files: |
             .release/windows/**

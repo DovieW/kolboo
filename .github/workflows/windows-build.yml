@@ -9,7 +9,7 @@ on:
         type: boolean
         default: true
       release_signing:
-        description: "Generate signed updater artifacts for a public release"
+        description: "Generate signed updater artifacts for a public release (publisher signing is optional)"
         required: false
         type: boolean
         default: false
@@ -20,6 +20,9 @@ on:
       artifact-name-local-whisper:
         description: "Name of the uploaded Windows bundle artifact (with local-whisper feature). Empty when build_local_whisper=false."
         value: ${{ jobs.build-windows.outputs.artifact-name-local-whisper }}
+      publisher-signed:
+        description: "Whether Windows bundles received a verified Authenticode publisher signature"
+        value: ${{ jobs.build-windows.outputs.publisher-signed }}
   workflow_dispatch:
     inputs:
       build_local_whisper:
@@ -28,7 +31,7 @@ on:
         type: boolean
         default: true
       release_signing:
-        description: "Generate signed updater artifacts for a public release"
+        description: "Generate signed updater artifacts for a public release (publisher signing is optional)"
         required: false
         type: boolean
         default: false
@@ -145,6 +148,7 @@ jobs:
     outputs:
       artifact-name-default: ${{ steps.artifact-meta.outputs.artifact_name_default }}
       artifact-name-local-whisper: ${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}
+      publisher-signed: ${{ steps.publisher-signing.outputs.enabled }}
 
     env:
       CARGO_INCREMENTAL: 0
@@ -257,21 +261,27 @@ jobs:
             exit 1
           fi
 
-      - name: Require Windows publisher credentials for releases
+      - name: Resolve optional Windows publisher signing
         if: ${{ inputs.release_signing }}
+        id: publisher-signing
         shell: bash
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ -z "${WINDOWS_CERTIFICATE}" || -z "${WINDOWS_CERTIFICATE_PASSWORD}" ]]; then
-            echo "Release blocked: provision WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD before publishing Windows installers." >&2
+          if [[ -z "${WINDOWS_CERTIFICATE}" && -z "${WINDOWS_CERTIFICATE_PASSWORD}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Windows publisher certificate absent: release installers will not have an Authenticode signature." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -z "${WINDOWS_CERTIFICATE}" || -z "${WINDOWS_CERTIFICATE_PASSWORD}" ]]; then
+            echo "Release blocked: set both WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD, or neither." >&2
             exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Import Windows publisher certificate
-        if: ${{ inputs.release_signing }}
+        if: ${{ inputs.release_signing && steps.publisher-signing.outputs.enabled == 'true' }}
         id: windows-certificate
         shell: pwsh
         env:
@@ -288,7 +298,7 @@ jobs:
           Remove-Item -LiteralPath $certificatePath -Force
 
       - name: Write Windows signing configuration
-        if: ${{ inputs.release_signing }}
+        if: ${{ inputs.release_signing && steps.publisher-signing.outputs.enabled == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -320,8 +330,10 @@ jobs:
             echo "sccache not available; building without compiler cache"
           fi
 
-          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+          if [[ "${{ steps.publisher-signing.outputs.enabled }}" == "true" ]]; then
             pnpm tauri build --config "${WINDOWS_SIGNING_CONFIG}"
+          elif [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            pnpm build:release
           else
             pnpm build
           fi
@@ -365,8 +377,10 @@ jobs:
 
           # Reuse the repo's own local-whisper build script so CI follows the
           # exact same invocation path developers use locally.
-          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+          if [[ "${{ steps.publisher-signing.outputs.enabled }}" == "true" ]]; then
             pnpm tauri build --config "${WINDOWS_SIGNING_CONFIG}" --features local-whisper
+          elif [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            pnpm build:release:local-whisper
           else
             pnpm build:local-whisper
           fi
@@ -385,7 +399,7 @@ jobs:
           cp app/src-tauri/target/release/*.exe artifacts/windows-local-whisper/ || true
 
       - name: Verify Authenticode signatures
-        if: ${{ inputs.release_signing }}
+        if: ${{ inputs.release_signing && steps.publisher-signing.outputs.enabled == 'true' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -430,6 +444,8 @@ jobs:
           sentry_sourcemaps_required=${{ steps.sentry-meta.outputs.sourcemaps_required }}
           sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
           sentry_upload_enabled=${sentry_upload_enabled}
+          updater_signing_enabled=${{ inputs.release_signing }}
+          publisher_authenticode_signed=${{ steps.publisher-signing.outputs.enabled == 'true' }}
           bundle_artifact_default=${{ steps.artifact-meta.outputs.artifact_name_default }}
           bundle_artifact_local_whisper=${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}
           build_local_whisper=${{ inputs.build_local_whisper }}

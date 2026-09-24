@@ -32,7 +32,7 @@ describe("patch gate CLI metadata exception", () => {
 				}) as ReturnType<typeof spawnSync>,
 		);
 		vi.mocked(readFileSync).mockImplementation((name) => {
-			const path = String(name);
+			const path = String(name).replaceAll("\\", "/");
 			if (path.endsWith("patch-coverage-exceptions.json")) return "[]";
 			if (path.endsWith("/coverage/lcov.info")) return "";
 			if (path.endsWith("/coverage/rust-lcov.info"))
@@ -92,7 +92,7 @@ end_of_record`;
 		const read = vi.mocked(readFileSync).getMockImplementation();
 		if (!read) throw new Error("Missing filesystem fixture");
 		vi.mocked(readFileSync).mockImplementation((name, options) =>
-			String(name).endsWith("app/src/new-feature.ts")
+			String(name).replaceAll("\\", "/").endsWith("app/src/new-feature.ts")
 				? "export const feature = () => 42;\n"
 				: read(name, options),
 		);

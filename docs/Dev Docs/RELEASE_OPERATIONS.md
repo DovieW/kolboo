@@ -11,12 +11,11 @@ Linux beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Bet
 A stable Windows release tag is allowed only after all of these are true:
 
 - the repository is public and the unauthenticated GitHub release endpoint works;
-- `WINDOWS_CERTIFICATE` contains the base64-encoded publisher `.pfx` and `WINDOWS_CERTIFICATE_PASSWORD` contains its password;
 - `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are configured;
 - the legal pages are publicly hosted and their links have been checked;
 - the desktop-to-operator and support rehearsal is complete for the exact release commit.
 
-The Release workflow fails closed if either publisher-signing credential is absent. It imports the certificate into the ephemeral Windows runner, configures SHA-256 Authenticode with a timestamp, and rejects any collected `.exe` or `.msi` whose signature is not valid. Ordinary branch and local development builds use `--no-sign` and remain available.
+Windows publisher signing is optional. If both `WINDOWS_CERTIFICATE` (base64-encoded publisher `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` are configured, the workflow imports the certificate into the ephemeral Windows runner, configures SHA-256 Authenticode with a timestamp, and rejects any collected `.exe` or `.msi` whose signature is not valid. If neither is configured, it builds unsigned Windows installers and labels the GitHub release accordingly; Windows may show an Unknown publisher warning. If only one credential is configured, the release fails rather than silently producing an unsigned installer. Ordinary branch and local development builds use `--no-sign` and remain available.
 
 ## Signed updates
 
@@ -28,15 +27,15 @@ Updater checks stay disabled in ordinary builds and in the manual-update Linux b
 
 1. Run `pnpm -C app check:ci`, `pnpm -C app coverage`, and `pnpm -C app audit`.
 2. Confirm package, Tauri, and Cargo versions match the intended `vX.Y.Z` tag.
-3. Push the tag and inspect the Release workflow. A missing signing credential is a launch blocker, not a skippable warning.
+3. Push the tag and inspect the Release workflow. Missing updater-key credentials are a launch blocker. Check whether the Windows publisher certificate is present; the workflow signs and verifies installers when it is, and clearly discloses unsigned installers when it is not.
 4. Download the release without authentication on a clean Windows machine.
-5. Verify Authenticode in PowerShell with `Get-AuthenticodeSignature <installer>`.
-6. Install, launch, check for updates, and confirm that altered or unsigned artifacts are rejected.
+5. If publisher credentials were configured, verify Authenticode in PowerShell with `Get-AuthenticodeSignature <installer>`. Otherwise confirm the release title and notes disclose that the Windows installers are unsigned.
+6. Install, launch, check for updates, and confirm that altered or updater-unsigned artifacts are rejected.
 7. Record the workflow run, commit SHA, installer hash, updater result, request IDs, and support-safe correlation hashes in the launch evidence.
 
 ## Rollback
 
-Do not overwrite a published tag. Mark the affected release as withdrawn, preserve its hashes and incident record, fix forward with a higher version, and publish a newly signed release. Existing clients only accept metadata and artifacts signed by the updater key.
+Do not overwrite a published tag. Mark the affected release as withdrawn, preserve its hashes and incident record, fix forward with a higher version, and publish a new updater-signed release. Existing clients only accept metadata and artifacts signed by the updater key; publisher Authenticode signing remains optional.
 
 ## Cargo cache disk usage
 
