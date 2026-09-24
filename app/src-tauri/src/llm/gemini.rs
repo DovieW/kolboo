@@ -26,25 +26,12 @@ pub struct GeminiLlmProvider {
 }
 
 impl GeminiLlmProvider {
+    #[cfg(test)]
     pub fn new(api_key: String) -> Self {
         Self {
             client: Client::new(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
-            api_base_url: GEMINI_API_ROOT.to_string(),
-            timeout: Some(DEFAULT_LLM_TIMEOUT),
-            thinking_budget: None,
-            thinking_level: None,
-            structured_outputs: true,
-            request_log_store: None,
-        }
-    }
-
-    pub fn with_model(api_key: String, model: String) -> Self {
-        Self {
-            client: Client::new(),
-            api_key,
-            model,
             api_base_url: GEMINI_API_ROOT.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             thinking_budget: None,

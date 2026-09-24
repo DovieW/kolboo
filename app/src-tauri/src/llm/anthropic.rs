@@ -26,6 +26,7 @@ pub struct AnthropicLlmProvider {
 
 impl AnthropicLlmProvider {
     /// Create a new Anthropic provider with the given API key
+    #[cfg(test)]
     pub fn new(api_key: String) -> Self {
         Self {
             client: Client::new(),
@@ -39,6 +40,7 @@ impl AnthropicLlmProvider {
     }
 
     /// Create with a specific model
+    #[cfg(test)]
     pub fn with_model(api_key: String, model: String) -> Self {
         Self {
             client: Client::new(),

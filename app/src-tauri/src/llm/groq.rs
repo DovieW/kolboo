@@ -28,6 +28,7 @@ pub struct GroqLlmProvider {
 
 impl GroqLlmProvider {
     /// Create a new Groq provider with the given API key.
+    #[cfg(test)]
     pub fn new(api_key: String) -> Self {
         Self {
             provider_name: "groq",
@@ -41,6 +42,7 @@ impl GroqLlmProvider {
     }
 
     /// Create with a specific model.
+    #[cfg(test)]
     pub fn with_model(api_key: String, model: String) -> Self {
         Self {
             provider_name: "groq",
