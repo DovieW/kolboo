@@ -68,6 +68,7 @@ jobs:
     needs: verify
     uses: ./.github/workflows/windows-build.yml
     with:
+      build_local_whisper: false
       release_signing: true
     secrets: inherit
 

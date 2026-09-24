@@ -17,6 +17,8 @@ A stable Windows release tag is allowed only after all of these are true:
 
 Windows publisher signing is optional. If both `WINDOWS_CERTIFICATE` (base64-encoded publisher `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` are configured, the workflow imports the certificate into the ephemeral Windows runner, configures SHA-256 Authenticode with a timestamp, and rejects any collected `.exe` or `.msi` whose signature is not valid. If neither is configured, it builds unsigned Windows installers and labels the GitHub release accordingly; Windows may show an Unknown publisher warning. If only one credential is configured, the release fails rather than silently producing an unsigned installer. Ordinary branch and local development builds use `--no-sign` and remain available.
 
+The release builds only the standard Windows bundle. The extra `local-whisper` Windows variant is disabled by default, including for manual Windows builds; it remains available as an explicit manual opt-in while the app feature is retained.
+
 ## Signed updates
 
 Release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Tauri creates updater signatures with the private updater key, while the application contains only `app/src-tauri/updater.pubkey`. The release workflow refuses to create `latest.json` without a signed Windows artifact and publishes the manifest with the installer.

@@ -4,10 +4,10 @@ on:
   workflow_call:
     inputs:
       build_local_whisper:
-        description: "Whether to build and upload the local-whisper Windows bundle artifact"
+        description: "Manually opt in to the extra local-whisper Windows bundle artifact"
         required: false
         type: boolean
-        default: true
+        default: false
       release_signing:
         description: "Generate signed updater artifacts for a public release (publisher signing is optional)"
         required: false
@@ -26,10 +26,10 @@ on:
   workflow_dispatch:
     inputs:
       build_local_whisper:
-        description: "Whether to build and upload the local-whisper Windows bundle artifact"
+        description: "Manually opt in to the extra local-whisper Windows bundle artifact"
         required: false
         type: boolean
-        default: true
+        default: false
       release_signing:
         description: "Generate signed updater artifacts for a public release (publisher signing is optional)"
         required: false
