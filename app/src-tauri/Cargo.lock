@@ -3057,7 +3057,7 @@ dependencies = [
 
 [[package]]
 name = "kolboo"
-version = "0.2.5-beta.1"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "ashpd",
