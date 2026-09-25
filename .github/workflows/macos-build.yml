@@ -209,8 +209,9 @@ jobs:
           diff -u \
             <(xcrun dwarfdump --uuid "$binary" | awk '{ print $2, $3 }' | sort) \
             <(xcrun dwarfdump --uuid "${dwarfs[@]}" | awk '{ print $2, $3 }' | sort)
-          node ../.github/scripts/upload-desktop-symbols.mjs \
-            "$binary" "${dwarfs[@]}"
+          # Sentry CLI accepts each architecture-specific dSYM, but rejects
+          # the two-architecture universal executable as a single DIF.
+          node ../.github/scripts/upload-desktop-symbols.mjs "${dwarfs[@]}"
 
       - name: Locate and verify bundles
         id: bundles
