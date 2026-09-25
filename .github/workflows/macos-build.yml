@@ -234,7 +234,7 @@ jobs:
           file "$executable"
           lipo -info "$executable"
           if [[ "$KOLBOO_BUILD_TARGET" == "universal-apple-darwin" ]]; then
-            lipo -verify_arch arm64 x86_64 "$executable"
+            lipo "$executable" -verify_arch arm64 x86_64
           fi
 
           echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
