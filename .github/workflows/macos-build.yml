@@ -175,10 +175,9 @@ jobs:
           set -euo pipefail
           binary="src-tauri/target/$KOLBOO_BUILD_TARGET/release/kolboo"
           test -f "$binary"
-          # Cargo's packed debuginfo produces one dSYM per compiled target.
-          # Tauri merges the executable for universal builds, not the dSYMs.
-          # Upload the original architecture-specific DWARF files directly;
-          # rerunning dsymutil on the merged binary loses rustc's removed .o files.
+          # Cargo puts the dSYMs beside hashed binaries under release/deps,
+          # not beside the top-level binaries that Tauri merges. Match each
+          # architecture's actual UUID instead of assuming a filename.
           if [[ "$KOLBOO_BUILD_TARGET" == "universal-apple-darwin" ]]; then
             targets=(aarch64-apple-darwin x86_64-apple-darwin)
           else
@@ -186,9 +185,26 @@ jobs:
           fi
           dwarfs=()
           for target in "${targets[@]}"; do
-            dwarf="src-tauri/target/$target/release/kolboo.dSYM/Contents/Resources/DWARF/kolboo"
-            test -f "$dwarf" || { echo "Missing dSYM for $target: $dwarf" >&2; exit 1; }
-            dwarfs+=("$dwarf")
+            release_dir="src-tauri/target/$target/release"
+            arch_binary="$release_dir/kolboo"
+            test -f "$arch_binary"
+            expected_uuid=$(xcrun dwarfdump --uuid "$arch_binary" | awk '{ print $2 }')
+            test -n "$expected_uuid"
+            matching_dwarf=""
+            while IFS= read -r -d '' candidate; do
+              candidate_uuid=$(xcrun dwarfdump --uuid "$candidate" | awk '{ print $2 }')
+              if [[ "$candidate_uuid" == "$expected_uuid" ]]; then
+                matching_dwarf="$candidate"
+                break
+              fi
+            done < <(find "$release_dir" -type f -path '*/kolboo*.dSYM/Contents/Resources/DWARF/*' -print0)
+            if [[ -z "$matching_dwarf" ]]; then
+              echo "No dSYM matches $target UUID $expected_uuid; available Kolboo dSYMs:" >&2
+              find "$release_dir" -type d -name 'kolboo*.dSYM' -print >&2
+              exit 1
+            fi
+            echo "Matched $target symbols: $matching_dwarf"
+            dwarfs+=("$matching_dwarf")
           done
           diff -u \
             <(xcrun dwarfdump --uuid "$binary" | awk '{ print $2, $3 }' | sort) \
