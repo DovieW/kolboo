@@ -131,7 +131,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          xcrun --find dsymutil
           xcrun --find dwarfdump
 
       - name: Setup sccache
@@ -164,7 +163,7 @@ jobs:
             --target "$KOLBOO_BUILD_TARGET" \
             --config src-tauri/tauri.macos-development.conf.json
 
-      - name: Generate and upload native symbols
+      - name: Verify and upload native symbols
         working-directory: app
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -175,19 +174,27 @@ jobs:
         run: |
           set -euo pipefail
           binary="src-tauri/target/$KOLBOO_BUILD_TARGET/release/kolboo"
-          symbols="${binary}.dSYM"
-          dwarf="${symbols}/Contents/Resources/DWARF/kolboo"
           test -f "$binary"
-          # Tauri merges the universal executable, but does not create a dSYM
-          # at the merged target path. Link symbols from its debug map while
-          # per-architecture object files are still available on this runner.
-          xcrun dsymutil --verify "$binary" -o "$symbols"
-          test -f "$dwarf"
+          # Cargo's packed debuginfo produces one dSYM per compiled target.
+          # Tauri merges the executable for universal builds, not the dSYMs.
+          # Upload the original architecture-specific DWARF files directly;
+          # rerunning dsymutil on the merged binary loses rustc's removed .o files.
+          if [[ "$KOLBOO_BUILD_TARGET" == "universal-apple-darwin" ]]; then
+            targets=(aarch64-apple-darwin x86_64-apple-darwin)
+          else
+            targets=("$KOLBOO_BUILD_TARGET")
+          fi
+          dwarfs=()
+          for target in "${targets[@]}"; do
+            dwarf="src-tauri/target/$target/release/kolboo.dSYM/Contents/Resources/DWARF/kolboo"
+            test -f "$dwarf" || { echo "Missing dSYM for $target: $dwarf" >&2; exit 1; }
+            dwarfs+=("$dwarf")
+          done
           diff -u \
             <(xcrun dwarfdump --uuid "$binary" | awk '{ print $2, $3 }' | sort) \
-            <(xcrun dwarfdump --uuid "$dwarf" | awk '{ print $2, $3 }' | sort)
+            <(xcrun dwarfdump --uuid "${dwarfs[@]}" | awk '{ print $2, $3 }' | sort)
           node ../.github/scripts/upload-desktop-symbols.mjs \
-            "$binary" "$dwarf"
+            "$binary" "${dwarfs[@]}"
 
       - name: Locate and verify bundles
         id: bundles

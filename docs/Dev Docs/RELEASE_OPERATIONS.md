@@ -19,7 +19,7 @@ Windows publisher signing is optional. If both `WINDOWS_CERTIFICATE` (base64-enc
 
 The release builds only the standard Windows bundle. The extra `local-whisper` Windows variant is disabled by default, including for manual Windows builds; it remains available as an explicit manual opt-in while the app feature is retained.
 
-Windows checks must pass before installer packaging starts. A failing check therefore prevents an expensive installer build rather than leaving two independent jobs running. The macOS workflow creates a dSYM from the finished executable and verifies that its architecture UUIDs match before uploading symbols; missing or unusable release symbols still fail the build.
+Windows checks must pass before installer packaging starts. A failing check therefore prevents an expensive installer build rather than leaving two independent jobs running. The macOS workflow uploads Cargo's architecture-specific dSYMs and verifies that their UUIDs match the finished executable; missing or unusable release symbols still fail the build.
 
 The release also builds a universal macOS DMG and app ZIP with ad-hoc signing. The workflow verifies the app bundle's code signature and both CPU architectures; it does **not** claim Apple Developer ID signing, notarization, auto-updates, or native Mac acceptance. The release notes disclose these limits and possible Gatekeeper warnings. Do not call this a supported Mac release until the native acceptance pass in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md) is complete.
 
